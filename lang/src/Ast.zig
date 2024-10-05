@@ -944,6 +944,7 @@ test "parse" {
     // const source = "a.b(1)(2,3 + 2,4)";
     // const source = "1 * (2 + 3) + 4";
     const source = "3 + if (true == false or true) 2 + 2 else if (2) 3 + 3 else 4 + 4";
+    // const source = "3 + if (true == false or true) 2 + 2 else if (2) 3 + 3 else 4 + 4";
     var errors = try ErrorManager.init(test_allocator);
     defer errors.deinit();
     var ast = try Ast.parse(test_allocator, &errors, source);
