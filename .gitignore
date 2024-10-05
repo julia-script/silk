@@ -1,0 +1,6 @@
+
+zig-out/
+zig-cache/
+.zig-cache/
+.test/
+node_modules/
