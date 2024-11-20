@@ -8,6 +8,10 @@ const Lexer = @import("Lexer.zig");
 const PackedLists = @import("PackedLists.zig").new;
 const Allocator = std.mem.Allocator;
 const Array = std.ArrayListUnmanaged;
+const Ast = @import("Ast.zig");
+const Node = Ast.Node;
+const Logger = @import("IndentedWriter.zig");
+const log = Logger.new(.ast_gen);
 
 const assert = std.debug.assert;
 const AstGen = @This();
@@ -18,307 +22,13 @@ node_lists: PackedLists(Node.Index, 0) = .{},
 tokens: Array(Token) = .{},
 allocator: Allocator,
 token_index: Token.Index = 0,
+source: []const u8,
+logger: Logger = Logger.init(std.io.getStdErr().writer().any()),
 
 const AstGenError = error{
     OutOfMemory,
-};
-const Ast = struct {
-    nodes: MultiArray(Node).Slice,
-    node_lists: PackedLists(Node.Index, 0),
-    allocator: Allocator,
-    tokens: Array(Token),
-    source: []const u8,
+} || Logger.Error;
 
-    pub fn deinit(self: *Ast) void {
-        self.nodes.deinit(self.allocator);
-        self.node_lists.deinit(self.allocator);
-        self.tokens.deinit(self.allocator);
-    }
-    const RAINBOW = [7]Color{
-        tw.red_200,
-        tw.orange_200,
-        tw.yellow_200,
-        tw.green_200,
-        tw.blue_200,
-        tw.indigo_200,
-        tw.violet_200,
-    };
-    const FormatOptions = struct {
-        color: bool = true,
-        indent_size: usize = 2,
-        show_node_index: bool = false,
-    };
-    pub fn getTokenSlice(self: *Ast, token_i: Token.Index) []const u8 {
-        const token = self.tokens.items[token_i];
-        return self.source[token.start..token.end];
-    }
-    pub fn format(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, options: FormatOptions) !void {
-        try self.format_inner(writer, node, 0, options);
-    }
-    fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: usize, options: FormatOptions) !void {
-        if (node == 0 and indent > 0) return;
-        const tag = self.nodes.items(.tag)[node];
-        const data = self.nodes.items(.data)[node];
-        // _ = try writer.writeBytesNTimes("| ", indent);
-        try writeIndent(writer, indent, .{});
-        if (options.show_node_index) try tw.blue_400.brighter(-0.3).print(writer, "[{d}]", .{node});
-        try tw.blue_400.bold().print(writer, "{s}: ", .{@tagName(tag)});
-        switch (tag) {
-            .root => {
-                _ = try writer.write("\n");
-                var iter = self.node_lists.iterList(data.children_list);
-                while (iter.next()) |child| {
-                    try self.format_inner(writer, child, indent + 1, options);
-                }
-            },
-            .add,
-            .sub,
-            .mul,
-            .div,
-            .mod,
-            .pow,
-            .eq,
-            .ne,
-            .lt,
-            .lte,
-            .gt,
-            .gte,
-            .band,
-            .bor,
-            .bxor,
-            .bshl,
-            .bshr,
-            .@"or",
-            .@"and",
-            .xor,
-            => {
-                _ = try writer.write("\n");
-                try self.format_inner(writer, data.binary_expression.lhs, indent + 1, options);
-                try self.format_inner(writer, data.binary_expression.rhs, indent + 1, options);
-            },
-            .prop_access => {
-                _ = try writer.write("\n");
-                try self.format_inner(writer, data.binary_expression.lhs, indent + 1, options);
-                try self.format_inner(writer, data.binary_expression.rhs, indent + 1, options);
-            },
-            .increment, .decrement => {
-                _ = try writer.write("\n");
-                try self.format_inner(writer, data.unary_expression, indent + 1, options);
-            },
-            .if_expr => {
-                _ = try writer.write("\n");
-                try writeIndent(writer, indent + 1, .{});
-                try tw.gray_400.print(writer, "[condition]:\n", .{});
-                try self.format_inner(writer, data.if_expression.condition, indent + 2, options);
-                try writeIndent(writer, indent + 1, .{});
-                try tw.gray_400.print(writer, "[then]:\n", .{});
-                try self.format_inner(writer, data.if_expression.then_branch, indent + 2, options);
-                if (data.if_expression.else_branch != 0) {
-                    try writeIndent(writer, indent + 1, .{});
-                    try tw.gray_400.print(writer, "[else]:\n", .{});
-                    try self.format_inner(writer, data.if_expression.else_branch, indent + 2, options);
-                }
-            },
-            .ret => {
-                _ = try writer.write("\n");
-                try self.format_inner(writer, data.ret_expression, indent + 1, options);
-            },
-            .fn_call => {
-                _ = try writer.write("\n");
-                try writeIndent(writer, indent + 1, .{});
-                try tw.gray_400.print(writer, "[callee]:\n", .{});
-                try self.format_inner(writer, data.fn_call.callee, indent + 2, options);
-                // _ = try writer.write("\n");
-                try writeIndent(writer, indent + 1, .{});
-                var iter = self.node_lists.iterList(data.fn_call.args_list);
-                var i: usize = 0;
-                while (iter.next()) |arg| {
-                    if (i == 0) try tw.gray_400.print(writer, "[args]:\n", .{});
-                    try self.format_inner(writer, arg, indent + 2, options);
-                    i += 1;
-                }
-            },
-            .group => {
-                _ = try writer.write("\n");
-                try self.format_inner(writer, data.group, indent + 1, options);
-            },
-            .identifier => {
-                try tw.yellow_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.literal)});
-            },
-            .number_literal => {
-                try tw.green_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.literal)});
-            },
-            .true_literal, .false_literal => {
-                try tw.pink_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.literal)});
-            },
-            .string_literal => {
-                try tw.blue_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.literal)});
-            },
-
-            else => {
-                _ = try writer.write("\n");
-            },
-        }
-    }
-
-    pub fn writeIndent(writer: std.io.AnyWriter, indent: usize, options: struct {
-        rainbow: bool = true,
-        size: usize = 2,
-    }) !void {
-        if (options.rainbow) {
-            for (0..indent) |color| {
-                try RAINBOW[color % RAINBOW.len].brighter(-0.3).write(writer, "┆");
-                try writer.writeByteNTimes(' ', options.size - 1);
-            }
-        } else {
-            for (0..indent) |_| {
-                _ = try writer.write("┆");
-                try writer.writeByteNTimes(' ', options.size - 1);
-            }
-        }
-    }
-};
-
-const Node = struct {
-    tag: Tag,
-    start_token: Token.Index,
-    end_token: Token.Index,
-    data: Data,
-    pub const Index = u32;
-
-    pub const NONE: Index = 0;
-
-    const NodeListsIndex = u32;
-    const BinaryExpression = struct {
-        lhs: Index,
-        rhs: Index,
-    };
-    const UnaryExpression = struct {
-        operand: Index,
-    };
-    const Data = union {
-        binary_expression: BinaryExpression,
-        unary_expression: Index,
-        literal: Token.Index,
-        children_list: NodeListsIndex,
-        if_expression: struct {
-            condition: Index,
-            then_branch: Index,
-            else_branch: Index,
-        },
-        ret_expression: Index,
-        increment_expression: Index,
-        decrement_expression: Index,
-        fn_def: struct {
-            name: Index,
-            proto: Index,
-            body: Index,
-        },
-        group: Index,
-        fn_proto: struct {
-            params_list: NodeListsIndex,
-            ret_ty: Index,
-        },
-        fn_param: struct {
-            name: Index,
-            ty: Index,
-        },
-        fn_call: struct {
-            callee: Index,
-            args_list: NodeListsIndex,
-        },
-    };
-    const Tag = enum {
-        root,
-        // Binary operators
-        // - Math
-        add,
-        sub,
-        mul,
-        div,
-        mod,
-        pow,
-
-        // - Comparison
-        eq,
-        ne,
-        lt,
-        gt,
-        lte,
-        gte,
-
-        // - Logical
-        @"and",
-        @"or",
-        xor,
-
-        // - Property access
-        prop_access, // a.b
-
-        // Bitwise operators
-        band,
-        bor,
-        bxor,
-        bshl,
-        bshr,
-
-        // Unary operators
-        bnot,
-        neg,
-        not,
-        // Postfix unary operators
-        increment,
-        decrement,
-
-        @"pub",
-        @"extern",
-
-        // Literals
-        number_literal,
-        string_literal,
-        char_literal,
-        hex_literal,
-        true_literal,
-        false_literal,
-        identifier,
-
-        // fn
-        fn_def,
-        fn_proto,
-        fn_param,
-        fn_call,
-
-        // Statements
-        expr,
-        group,
-        if_expr,
-        ret,
-    };
-};
-
-pub fn parse(allocator: Allocator, errors: *ErrorManager, source: []const u8) AstGenError!Ast {
-    var ast_gen = AstGen{
-        .allocator = allocator,
-        .errors = errors,
-        .tokens = .{},
-        .node_lists = .{},
-        .nodes = .{},
-    };
-    var lexer = Lexer.init(source);
-
-    while (lexer.next()) |token| {
-        try ast_gen.tokens.append(ast_gen.allocator, token);
-    }
-
-    try ast_gen.parseRoot();
-    return Ast{
-        .nodes = ast_gen.nodes.slice(),
-        .node_lists = ast_gen.node_lists,
-        .tokens = ast_gen.tokens,
-        .allocator = allocator,
-        .source = source,
-    };
-}
 fn pushNode(self: *AstGen, node: Node) AstGenError!Node.Index {
     const index = try self.nodes.addOne(self.allocator);
     self.nodes.set(index, node);
@@ -354,27 +64,42 @@ pub fn tokenIs(self: *AstGen, tag: Token.Tag) bool {
     return self.tokens.items[self.token_index].tag == tag;
 }
 
-pub fn getTokenSlice(self: *AstGen, token_i: Token.Index) []const u8 {
-    const token = self.tokens.items[token_i];
-    return self.source[token.start..token.end];
-}
 pub fn getNode(self: *AstGen, index: Node.Index) Node {
     return self.nodes.get(index);
 }
 
-fn parseRoot(self: *AstGen) AstGenError!void {
+pub fn debugToken(self: *AstGen, index: Token.Index) void {
+    std.debug.print("{s} [{s}] \n", .{
+        @tagName(self.tokens.items[index].tag),
+        self.source[self.tokens.items[index].start..self.tokens.items[index].end],
+    });
+    // while (index < self.tokens.items.len) {
+    //     std.debug.print("{s} ", .{@tagName(self.tokens.items[index].tag)});
+    //     index += 1;
+    // }
+    // std.debug.print("\n", .{});
+}
+pub fn parseRoot(self: *AstGen) AstGenError!void {
+    try self.loggerOpen("parseRoot");
+    defer self.logger.close();
     const index = try self.reserveNodeIndex();
     var children = self.node_lists.new(self.allocator);
     while (self.token_index < self.tokens.items.len) {
         const index_before = self.token_index;
         const node = try self.parseExpression();
+        // const node_tag = self.getNode(node).tag;
+        // assert(
+        //     node_tag == .@"export" or
+        //         node_tag == .fn_decl or
+        //         node_tag == .const_decl or
+        //         node_tag == .var_decl,
+        // );
         const index_after = self.token_index;
         assert(index_after > index_before);
         if (node == 0) break;
         try children.append(node);
     }
     const children_index = try children.commit();
-    std.debug.print("root children: {d}\n", .{children_index});
     self.setNode(index, .{
         .tag = .root,
         .start_token = 0,
@@ -384,10 +109,18 @@ fn parseRoot(self: *AstGen) AstGenError!void {
         },
     });
 }
+
 pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
+    try self.loggerOpen("parseExpression");
+    defer self.logger.close();
     const lhs = try self.parseUnary();
     if (lhs == 0) return 0;
-    return self.parseBinaryRhs(0, lhs);
+    const expr = try self.parseBinaryRhs(0, lhs);
+
+    if (self.tokenIs(.semicolon)) {
+        self.consumeToken();
+    }
+    return expr;
 }
 fn parseUnary(self: *AstGen) AstGenError!Node.Index {
     const token = self.peekToken() orelse return 0;
@@ -418,7 +151,7 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
     switch (op_token.tag) {
         .keyword_return => {
             return try self.pushNode(.{
-                .tag = .ret,
+                .tag = .ret_expression,
                 .data = .{ .ret_expression = try self.parseExpression() },
                 .start_token = start_token,
                 .end_token = self.token_index,
@@ -467,7 +200,20 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
         // else => {},
     }
 }
+pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
+    const token = self.peekToken() orelse return 0;
+    assert(token.tag == .identifier);
+    defer self.consumeToken();
+    return try self.pushNode(.{
+        .tag = .identifier,
+        .data = .{ .literal = self.token_index },
+        .start_token = self.token_index,
+        .end_token = self.token_index,
+    });
+}
 pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
+    try self.loggerOpen("parsePrimary");
+    defer self.logger.close();
     if (self.peekToken()) |token| {
         switch (token.tag) {
             .eof => {
@@ -476,7 +222,6 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             },
             inline .string_literal,
             .number_literal,
-            .identifier,
             .keyword_true,
             .keyword_false,
             => |tag| {
@@ -485,7 +230,6 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .tag = switch (tag) {
                         .string_literal => .string_literal,
                         .number_literal => .number_literal,
-                        .identifier => .identifier,
                         .keyword_false => .false_literal,
                         .keyword_true => .true_literal,
                         else => unreachable,
@@ -495,13 +239,87 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .end_token = self.token_index,
                 });
             },
+            .identifier => return try self.parseIdentifier(),
+            inline .keyword_number,
+            .keyword_boolean,
+            .keyword_string,
+            .keyword_void,
+            .keyword_i32,
+            .keyword_i64,
+            .keyword_f32,
+            .keyword_f64,
+            => |tag| {
+                defer self.consumeToken();
+                return try self.pushNode(.{
+                    .tag = switch (tag) {
+                        .keyword_number => .ty_number,
+                        .keyword_boolean => .ty_boolean,
+                        .keyword_string => .ty_string,
+                        .keyword_void => .ty_void,
+                        .keyword_i32 => .ty_i32,
+                        .keyword_i64 => .ty_i64,
+                        .keyword_f32 => .ty_f32,
+                        .keyword_f64 => .ty_f64,
+                        else => unreachable,
+                    },
+                    .data = .{ .literal = self.token_index },
+                    .start_token = self.token_index,
+                    .end_token = self.token_index,
+                });
+            },
+            .keyword_return => {
+                const start_token = self.token_index;
+                self.consumeToken();
+                const expr = try self.parseExpression();
+
+                return try self.pushNode(.{
+                    .tag = .ret_expression,
+                    .data = .{ .ret_expression = expr },
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
+            },
+            .l_brace => {
+                return try self.parseBlock();
+            },
+            .keyword_fn => {
+                return try self.parseFnDecl();
+            },
+            // => {
+            //     return try self.parseDeclaration();
+            // },
+            inline .keyword_export,
+            .keyword_const,
+            .keyword_var,
+            .keyword_extern,
+            .keyword_pub,
+            => |tag| {
+                const start_token = self.token_index;
+                self.consumeToken();
+                const expr = try self.parseExpression();
+                return try self.pushNode(.{
+                    .tag = switch (tag) {
+                        .keyword_export => .@"export",
+                        .keyword_extern => .@"extern",
+                        .keyword_pub => .@"pub",
+                        .keyword_const => .const_decl,
+                        .keyword_var => .var_decl,
+                        else => unreachable,
+                    },
+                    .data = .{ .unary_expression = expr },
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
+            },
             .l_parenthesis => {
                 return try self.parseGroup();
             },
             .keyword_if => {
                 return try self.parseIfExpression();
             },
-
+            .keyword_while => {
+                return try self.parseWhileLoop();
+            },
             else => {
                 std.debug.print("unexpected {s}", .{@tagName(token.tag)});
             },
@@ -519,6 +337,9 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
 
 fn getTokenPrecedence(tag: Token.Tag) i8 {
     return switch (tag) {
+        .equal => 0,
+        .colon => 0,
+
         // logical
         .keyword_or => 1,
         .keyword_and => 2,
@@ -574,6 +395,13 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
                 lhs = _lhs;
                 continue;
             },
+            .colon => {
+                self.consumeToken();
+                const rhs = try self.parseTy();
+                if (rhs == 0) return lhs;
+                lhs = try self.makeBinaryExpression(token, lhs, rhs);
+                continue;
+            },
             else => {},
         }
 
@@ -595,14 +423,6 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
             if (rhs == 0) return lhs;
         }
 
-        // if (token.tag == .l_parenthesis) {
-        //     lhs = try self.parseFnCall(lhs) orelse return null;
-        //     std.debug.print("tok: {s}, {s}\n", .{
-        //         @tagName(token.tag),
-        //         @tagName(self.nodes.items[lhs].data),
-        //     });
-        //     continue;
-        // }
         lhs = try self.makeBinaryExpression(bin_op, lhs, rhs);
         if (lhs == 0) return lhs;
     }
@@ -632,6 +452,8 @@ pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index,
             .dot => .prop_access,
             .keyword_or => .@"or",
             .keyword_and => .@"and",
+            .equal => .assign,
+            .colon => .ty_assign,
             else => unreachable,
         },
         .data = .{ .binary_expression = .{
@@ -763,7 +585,6 @@ pub fn parseGroup(self: *AstGen) AstGenError!Node.Index {
     return 0;
 }
 pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
-    std.debug.print("[{d}] parseIfExpression: {s}\n", .{ self.token_index, @tagName(self.peekToken().?.tag) });
     const start_token = self.token_index;
     assert(self.tokenIs(.keyword_if));
     self.consumeToken();
@@ -833,19 +654,318 @@ pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index 
         .end_token = self.token_index,
     });
 }
-pub fn parseFnDef(self: *AstGen) AstGenError!Node.Index {
-    _ = self; // autofix
-    @panic("unimplemented");
+
+pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
+    try self.loggerOpen("parseFnDecl");
+    defer self.logger.close();
+    const start_token = self.token_index;
+    if (!self.tokenIs(.keyword_fn)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.keyword_fn),
+        });
+        return 0;
+    }
+    const proto = try self.parseFnProto();
+    if (proto == 0) {
+        return 0;
+    }
+
+    const body = if (self.tokenIs(.l_brace))
+        try self.parseBlock()
+    else
+        0;
+    if (body == 0) {
+        return proto;
+    }
+    return try self.pushNode(.{
+        .tag = .fn_decl,
+        .data = .{ .fn_decl = .{
+            .proto = proto,
+            .body = body,
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
 }
 pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
-    _ = self; // autofix
-    @panic("unimplemented");
+    assert(self.tokenIs(.keyword_fn));
+    self.consumeToken();
+    if (!self.tokenIs(.identifier)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.identifier),
+        });
+        return 0;
+    }
+    const start_token = self.token_index;
+    const name = try self.parseIdentifier();
+    assert(name != 0);
+
+    if (!self.tokenIs(.l_parenthesis)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.l_parenthesis),
+        });
+        return name;
+    } else {
+        self.consumeToken();
+    }
+    var params = self.node_lists.new(self.allocator);
+    while (true) {
+        if (self.tokenIs(.r_parenthesis)) {
+            break;
+        }
+
+        const param = try self.parseFnParam();
+        if (param == 0) {
+            break;
+        }
+        try params.append(param);
+        if (self.tokenIs(.comma)) {
+            self.consumeToken();
+            continue;
+        }
+
+        break;
+    }
+    if (self.tokenIs(.r_parenthesis)) {
+        self.consumeToken();
+    } else {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.r_parenthesis),
+        });
+    }
+    if (self.tokenIs(.colon)) {
+        self.consumeToken();
+    } else {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.colon),
+        });
+    }
+    const ret_ty = try self.parseTy();
+    return try self.pushNode(.{
+        .tag = .fn_proto,
+        .data = .{ .fn_proto = .{
+            .name = name,
+            .params_list = @intCast(try params.commit()),
+            .ret_ty = ret_ty,
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
 }
 pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
-    _ = self; // autofix
+    if (!self.tokenIs(.identifier)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.identifier),
+        });
+        return 0;
+    }
+    const index = try self.reserveNodeIndex();
+    const start_token = self.token_index;
+    const name = try self.parseIdentifier();
+    var data: Node.Data.FnParam = .{
+        .name = name,
+        .ty = 0,
+    };
+
+    // if (!self.isToken())
+
+    if (!self.tokenIs(.colon)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.colon),
+        });
+        self.setNode(index, .{
+            .tag = .fn_param,
+            .data = .{
+                .fn_param = data,
+            },
+            .start_token = start_token,
+            .end_token = self.token_index,
+        });
+        return index;
+    }
+    self.consumeToken();
+
+    data.ty = try self.parseTy();
+    self.setNode(index, .{
+        .tag = .fn_param,
+        .data = .{ .fn_param = data },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
+    return index;
+}
+pub fn parseTy(self: *AstGen) AstGenError!Node.Index {
+    try self.loggerOpen("parseTy");
+    defer self.logger.close();
+    return try self.parseTyInner(0);
+}
+pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
+    try self.loggerOpen("parseTyInner");
+    defer self.logger.close();
+    var depth = depth_arg;
+    const token = self.peekToken() orelse return 0;
+    switch (token.tag) {
+        .keyword_boolean,
+        .keyword_number,
+        .keyword_string,
+        .keyword_void,
+        => {
+            return try self.parsePrimary();
+        },
+
+        .identifier => {
+            const start_token = self.token_index;
+            const name = try self.parsePrimary();
+
+            if (name == 0) {
+                return 0;
+            }
+
+            if (self.tokenIs(.l_angle_bracket)) {
+                self.consumeToken();
+                var args = self.node_lists.new(self.allocator);
+                while (true) {
+                    const ty = try self.parseTyInner(depth + 1);
+
+                    if (ty == 0) break;
+                    try args.append(ty);
+                    if (self.tokenIs(.comma)) {
+                        self.consumeToken();
+                        continue;
+                    }
+                    break;
+                }
+
+                if (self.tokenIs(.r_angle_bracket)) {
+                    self.consumeToken();
+                } else if (self.tokenIs(.double_r_angle_bracket)) {
+                    if (depth % 2 == 0) self.consumeToken();
+                    depth += 2;
+                } else {
+                    try self.errors.addError(.{
+                        .tag = .expected_token,
+                        .start = start_token,
+                        .end = self.token_index,
+                        .payload = @intFromEnum(Token.Tag.r_angle_bracket),
+                    });
+                }
+                return try self.pushNode(.{
+                    .tag = .ty_generic,
+                    .data = .{
+                        .ty_generic = .{
+                            .name = name,
+                            .args_list = @intCast(try args.commit()),
+                        },
+                    },
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
+                // self.consumeToken();
+                // return try self.pushNode(.{
+                //     .tag = .generic_ty,
+                //     .data = .{
+                //         .generic_ty = .{
+                //             .name = name,
+                //             // .args_list = @intCast(try args.commit()),
+                //         },
+                //     },
+                //     .start_token = start_token,
+                //     .end_token = self.token_index,
+                // });
+            }
+            return name;
+        },
+        else => {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = @intFromEnum(Token.Tag.identifier),
+            });
+
+            return 0;
+            // self.setNode(index, .{
+            //     .tag = .fn_param,
+            //     .data = data,
+            //     .start_token = start_token,
+            //     .end_token = self.token_index,
+            // });
+        },
+    }
+
     @panic("unimplemented");
 }
+pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
+    try self.loggerOpen("parseBlock");
+    defer self.logger.close();
+    const start_token = self.token_index;
+    assert(self.tokenIs(.l_brace));
+    self.consumeToken();
+    var nodes = self.node_lists.new(self.allocator);
+    while (!self.tokenIs(.r_brace)) {
+        const index = self.token_index;
+        const node = try self.parseExpression();
+        assert(index != self.token_index);
+        if (node == 0) {
+            break;
+        }
+        try nodes.append(node);
+        if (!self.tokenIs(.semicolon)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = @intFromEnum(Token.Tag.semicolon),
+            });
+        } else {
+            self.consumeToken();
+        }
+        if (!self.tokenIs(.r_brace)) {
+            continue;
+        }
+        break;
+    }
+    if (!self.tokenIs(.r_brace)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.r_brace),
+        });
+    } else {
+        self.consumeToken();
+    }
+    return try self.pushNode(.{
+        .tag = .block,
+        .data = .{ .children_list = @intCast(try nodes.commit()) },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
+}
 pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
+    try self.loggerOpen("parseFnCall");
+    defer self.logger.close();
     var args = self.node_lists.new(self.allocator);
     self.consumeToken();
     const index = try self.reserveNodeIndex();
@@ -882,21 +1002,56 @@ pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
     return index;
 }
 
-test "parse" {
-    const test_allocator = std.testing.allocator;
-    // const source = "1 + 2 * 3";
-    // const source = "a * (if (1) 2 else 3) + 4 * a.b()";
-    const source = "3 + if (true == false or true) 2 + 2 else if (2) 3 + 3 else 4 + 4";
-    var errors = try ErrorManager.init(test_allocator);
-    defer errors.deinit();
-    var ast = try parse(test_allocator, &errors, source);
-    defer ast.deinit();
+pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
+    try self.loggerOpen("parseWhileLoop");
+    defer self.logger.close();
+    const start_token = self.token_index;
+    assert(self.tokenIs(.keyword_while));
+    self.consumeToken();
 
-    try ast.format(std.io.getStdOut().writer().any(), 0, .{});
-    // var ast = try Ast.parse(test_allocator, &errors, source);
-    // defer ast.deinit();
-    // std.debug.print("{any}\n", .{ast.nodes.items});
-    // std.debug.print("\n\n", .{});
-    // try ast.print(std.io.getStdOut().writer().any(), 0, .{});
-    // std.debug.print("\n\n", .{});
+    const condition: Node.Index = try self.parseExpression();
+
+    if (condition == 0) {
+        try self.errors.addError(.{
+            .tag = .expected_expression,
+            .start = self.token_index,
+            .end = self.token_index,
+        });
+        return 0;
+    }
+    if (self.getNode(condition).tag != .group) {
+        try self.errors.addError(.{
+            .tag = .expression_not_parenthesized,
+            .start = self.getNode(condition).start_token,
+            .end = self.getNode(condition).end_token,
+        });
+    }
+
+    const body = try self.parseExpression();
+    if (body == 0) {
+        try self.errors.addError(.{
+            .tag = .expected_expression,
+            .start = self.token_index,
+            .end = self.token_index,
+        });
+        return 0;
+    }
+
+    return try self.pushNode(.{
+        .tag = .while_loop,
+        .data = .{ .while_loop = .{
+            .condition = condition,
+            .body = body,
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
+}
+
+pub fn loggerOpen(self: *AstGen, label: []const u8) AstGenError!void {
+    try self.logger.open("#token({d}:.{s}) {s}", .{
+        self.token_index,
+        if (self.peekToken()) |t| @tagName(t.tag) else "eof",
+        label,
+    });
 }

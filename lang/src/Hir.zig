@@ -1,0 +1,376 @@
+const std = @import("std");
+const Array = std.ArrayListUnmanaged;
+const PackedLists = @import("PackedLists.zig").new;
+const ErrorManager = @import("ErrorManager.zig");
+const Allocator = std.mem.Allocator;
+const Ast = @import("Ast.zig");
+
+const shared = @import("shared.zig");
+const InternedStrings = @import("InternedStrings.zig");
+const InternedSlice = InternedStrings.InternedSlice;
+const assert = std.debug.assert;
+const Self = @This();
+// pub const IrLists = PackedLists(u32, std.math.maxInt(u32));
+pub const Lists = PackedLists(u32, std.math.maxInt(u32));
+
+// All arrays of indexes, just aliases to make usage intention clearer
+// pub const TypeLists = IrLists;
+// pub const ValueLists = IrLists;
+// pub const DefLists = IrLists;
+
+ast: *Ast,
+allocator: std.mem.Allocator,
+lists: Lists = .{},
+insts: Array(Inst) = .{},
+
+// inst: Array(Inst) = .{},
+// types: Array(Type) = .{},
+// values: Array(Value) = .{},
+// defs: Array(Def) = .{},
+
+pub fn init(allocator: Allocator, ast: *Ast) !Self {
+    return .{
+        .allocator = allocator,
+        .ast = ast,
+    };
+}
+pub fn deinit(self: *Self) void {
+    self.lists.deinit(self.allocator);
+    self.insts.deinit(self.allocator);
+}
+const Formater = struct {
+    writer: std.io.AnyWriter,
+    level: usize,
+    value: *Self,
+    pub fn indent(self: *@This()) !void {
+        // std.debug.print("{}|", .{self.level});
+        try self.writer.writeByteNTimes(' ', self.level * 2);
+    }
+    pub fn printNode(self: *@This(), node: Ast.Node.Index) !void {
+        const token = self.value.ast.getNodeStartToken(node);
+        try self.writer.print("{s}", .{self.value.ast.getTokenSlice(token)});
+    }
+    pub fn openBrace(self: *@This()) !void {
+        try self.writer.writeAll("{");
+    }
+    pub fn closeBrace(self: *@This()) !void {
+        try self.writer.writeAll("}");
+    }
+    pub fn breakLine(self: *@This()) !void {
+        try self.writer.writeAll("\n");
+    }
+};
+pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fmt.FormatOptions, inst_index: Inst.Index, indent: usize) !void {
+    const inst: Inst = value.insts.items[inst_index];
+    var fmt = Formater{
+        .writer = writer,
+        .level = indent,
+        .value = value,
+    };
+    // std.debug.print("indent: {}\n", .{indent});
+    switch (inst) {
+        .mod_decl => |mod_decl| {
+            try fmt.indent();
+            try writer.writeAll("module {\n");
+            var declarations_iter = value.lists.iterList(mod_decl.declarations);
+            while (declarations_iter.next()) |declaration_index| {
+                try formatInstruction(value, writer, options, declaration_index, indent + 1);
+            }
+            try fmt.indent();
+            try writer.writeAll("}\n");
+        },
+        .fn_decl => |fn_decl| {
+            try fmt.indent();
+            try writer.writeAll("fn (");
+
+            // fmt.level += 1;
+            // try fmt.printNode(fn_decl.name_node);
+            // try fmt.openBrace();
+            try writer.writeAll(" ");
+            try fmt.breakLine();
+
+            var params_iter = value.lists.iterList(fn_decl.params);
+
+            while (params_iter.next()) |param_index| {
+                try formatInstruction(value, writer, options, param_index, fmt.level + 1);
+            }
+
+            try fmt.indent();
+            try writer.writeAll(")\n");
+            try fmt.indent();
+
+            try writer.writeAll("ret:\n");
+            try formatInstruction(value, writer, options, fn_decl.return_type, fmt.level + 1);
+
+            if (fn_decl.init) |in| {
+                try fmt.indent();
+                try writer.writeAll("init: {\n");
+                try formatInstruction(value, writer, options, in, fmt.level + 1);
+                try fmt.indent();
+                try writer.writeAll("}\n");
+            }
+        },
+        .param_decl => |param_decl| {
+            try fmt.indent();
+            try writer.print("%{d} = param @", .{inst_index});
+            try fmt.printNode(param_decl.name_node);
+            try fmt.breakLine();
+            try formatInstruction(value, writer, options, param_decl.ty, indent + 1);
+        },
+        .inline_block, .block => |block| {
+            try fmt.indent();
+            try writer.print("{s} {{\n", .{@tagName(inst)});
+            var instructions_iter = value.lists.iterList(block.instructions);
+            while (instructions_iter.next()) |instruction_index| {
+                try formatInstruction(value, writer, options, instruction_index, indent + 1);
+            }
+            try fmt.indent();
+            try writer.writeAll("}\n");
+        },
+        .comptime_number => |comptime_number| {
+            try fmt.indent();
+            const token = value.ast.getNodeStartToken(comptime_number);
+            try writer.print("%{d} = comp.number {s}\n", .{ inst_index, value.ast.getTokenSlice(token) });
+        },
+        .add,
+        .sub,
+        .mul,
+        .div,
+        .gt,
+        .lt,
+        .gte,
+        .lte,
+        .eq,
+        .neq,
+        .as,
+        => |bin| {
+            try fmt.indent();
+            try writer.print("%{d} = {s} %{d} %{d}\n", .{ inst_index, @tagName(inst), bin.lhs, bin.rhs });
+        },
+        .local_decl => |local_decl| {
+            try fmt.indent();
+            try writer.print("%{d} = local @", .{
+                inst_index,
+            });
+            try fmt.printNode(local_decl.name_node);
+            try writer.print(" %{?d}", .{local_decl.init});
+            try fmt.breakLine();
+        },
+        .decl_ref => |decl_ref| {
+            try fmt.indent();
+            try writer.print("%{d} = ref @", .{inst_index});
+            try fmt.printNode(decl_ref);
+            try fmt.breakLine();
+        },
+        .ret, .param_get, .global_get => |ret| {
+            try fmt.indent();
+            try writer.print("%{d} = {s} %{d}\n", .{ inst_index, @tagName(inst), ret.operand });
+        },
+        .if_expr => |if_expr| {
+            try fmt.indent();
+            try writer.print("if %{d} ", .{if_expr.cond});
+            try fmt.openBrace();
+            try fmt.breakLine();
+            try formatInstruction(value, writer, options, if_expr.then_body, indent + 1);
+            if (if_expr.else_body) |else_body| {
+                try fmt.indent();
+                try writer.writeAll("} else {\n");
+                try formatInstruction(value, writer, options, else_body, indent + 1);
+            }
+            try fmt.indent();
+            try writer.writeAll("}");
+            try fmt.breakLine();
+        },
+        .global_decl => |global_decl| {
+            try fmt.indent();
+
+            try writer.print("%{d} = define global @", .{inst_index});
+            try fmt.printNode(global_decl.name_node);
+            try writer.writeAll(" {\n");
+            // if (global_decl.init) |init_index| {
+            // std.debug.print("init: {} {}\n", .{ inst_index, init_index });
+            try formatInstruction(value, writer, options, global_decl.init, indent + 1);
+            // } else {}
+            try fmt.indent();
+            try writer.writeAll("}\n");
+        },
+        .undefined_value => {
+            try fmt.indent();
+            try writer.print("%{d} = undefined\n", .{inst_index});
+        },
+        .ty_number => |ty_number| {
+            _ = ty_number; // autofix
+            try fmt.indent();
+            try writer.print("%{d} = type(number)\n", .{
+                inst_index,
+            });
+        },
+
+        else => {
+            try fmt.indent();
+            try writer.print("{s}\n", .{@tagName(inst)});
+        },
+    }
+}
+pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: std.io.AnyWriter) !void {
+    _ = fmt; // autofix
+
+    try formatInstruction(
+        @constCast(&value),
+        writer,
+        options,
+        Inst.RootIndex,
+        0,
+    );
+}
+pub const Value = struct {
+    // tag: Tag,
+    // data: Data,
+    data: union(enum) {
+        comptime_number: InternedSlice,
+    },
+    pub const Index = enum(u32) {
+        true,
+        false,
+        null,
+
+        _,
+        pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
+
+        pub fn asInt(self: Index) u32 {
+            return @intCast(@intFromEnum(self));
+        }
+
+        pub fn asTypeIndex(self: u32) @This().Index {
+            return @enumFromInt(self);
+        }
+
+        pub fn toTypeIndex(index: u32) Index {
+            return @enumFromInt(
+                @as(u32, @intCast(index + INDEX_START)),
+            );
+        }
+
+        pub fn toInt(self: Index) ?u32 {
+            const index = @intFromEnum(self);
+            if (index < INDEX_START) return null;
+            return @intCast(index - INDEX_START);
+        }
+    };
+};
+
+// std.zig.Zir.Header
+
+pub const Inst = union(enum) {
+    fn_decl: FnDecl,
+    mod_decl: Module,
+    param_decl: Param,
+    param_get: UnaryOp,
+    global_get: UnaryOp,
+    global_decl: GlobalDecl,
+    block: Block,
+    inline_block: Block,
+    local_decl: LocalDecl,
+    decl_ref: Ast.Node.Index,
+
+    comptime_number: Ast.Node.Index,
+    ty_number: Ast.Node.Index,
+    ty_boolean: Ast.Node.Index,
+    undefined_value: ?Ast.Node.Index,
+
+    as: BinaryOp,
+
+    add: BinaryOp,
+    sub: BinaryOp,
+    mul: BinaryOp,
+    div: BinaryOp,
+
+    gt: BinaryOp,
+    lt: BinaryOp,
+    gte: BinaryOp,
+    lte: BinaryOp,
+    eq: BinaryOp,
+    neq: BinaryOp,
+
+    ret: UnaryOp,
+    if_expr: IfExpr,
+
+    pub const Index = u32;
+    pub const RootIndex = 0;
+    pub const Enum = std.meta.Tag(@This());
+    pub const List = usize;
+    pub const IfExpr = struct {
+        cond: Index,
+        then_body: Index,
+        else_body: ?Index,
+    };
+    pub const UnaryOp = struct {
+        operand: Index,
+    };
+    pub const BinaryOp = struct {
+        lhs: Index,
+        rhs: Index,
+    };
+    pub const FnDecl = struct {
+        // name: InternedSlice,
+        name_node: ?Ast.Node.Index,
+        return_type: Inst.Index,
+        params: List,
+        init: ?Inst.Index,
+
+        // @"extern": bool,
+        // visibility: shared.Visibility,
+        // exported: bool,
+        // mutable: bool,
+    };
+    pub const LocalDecl = struct {
+        name_node: Ast.Node.Index,
+        ty_node: ?Ast.Node.Index,
+        init: ?Inst.Index,
+        mutable: bool,
+    };
+    pub const Block = struct {
+        name_node: ?Ast.Node.Index,
+        instructions: List,
+    };
+    pub const GlobalDecl = struct {
+        name_node: Ast.Node.Index,
+        @"extern": bool,
+        is_fn: bool,
+        visibility: shared.Visibility,
+        type: ?Inst.Index,
+        exported: bool,
+        mutable: bool,
+        init: Inst.Index,
+    };
+    pub const Module = struct {
+        name_node: ?Ast.Node.Index,
+        declarations: List,
+    };
+    pub const Param = struct {
+        name_node: Ast.Node.Index,
+        // ty_node: Ast.Node.Index,
+        ty: Inst.Index,
+    };
+};
+
+pub const Definition = union(enum) {
+    fn_definition: FnDefinition,
+
+    pub const Index = u32;
+    pub const List = usize;
+
+    const FnDefinition = struct {
+        name: InternedSlice,
+        visibility: Visibility,
+        exported: bool,
+        mutable: bool,
+        params: Inst.List,
+        return_type: Inst.Index,
+        init: ?Inst.Index = null,
+    };
+    pub const Visibility = enum {
+        @"pub",
+        private,
+    };
+};

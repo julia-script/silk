@@ -1,5 +1,6 @@
 const std = @import("std");
 const Lexer = @This();
+const patience = @import("patience_diff.zig");
 
 pub const Token = struct {
     tag: Tag,
@@ -132,6 +133,12 @@ pub const Token = struct {
         keyword_boolean,
         keyword_pub,
         keyword_extern,
+        keyword_number,
+        keyword_string,
+        keyword_i32,
+        keyword_i64,
+        keyword_f32,
+        keyword_f64,
     };
 };
 
@@ -516,181 +523,217 @@ fn assertLex(str: []const u8, expected: []const Token) !void {
         try std.testing.expectEqual(expected_token, actual_token);
     }
 }
-fn assertLexParts(str: []const u8, expected: []const []const u8) !void {
-    var lexer = Lexer.init(str);
-    for (expected, 0..) |expected_part, i| {
-        const actual_token = lexer.next().?;
-        if (std.mem.eql(u8, expected_part, lexer.source[actual_token.start..actual_token.end])) {
+fn assertLexParts(str: []const u8, expected: []const struct { []const u8, Token.Tag }) !void {
+    var expected_str = std.ArrayList(u8).init(testing_allocator);
+    var expected_writer = expected_str.writer();
+    defer expected_str.deinit();
+    for (expected) |expected_part| {
+        const expected_s, const expected_tag = expected_part;
+        if (expected_tag == .eof) {
+            try expected_writer.print("[{s}]\t\n", .{@tagName(expected_tag)});
             continue;
         }
-
-        std.debug.print("===========expected===========\n", .{});
-
-        for (expected, 0..) |part, mistake_index| {
-            if (mistake_index == i) {
-                std.debug.print("\x1b[1;31m\"{s}\"\x1b[0m\n", .{part});
-            } else {
-                std.debug.print("\"{s}\"\n", .{part});
-            }
-        }
-
-        std.debug.print("===========actual===========\n", .{});
-        lexer.cursor = 0;
-        while (lexer.next()) |token| {
-            std.debug.print("\"{s}\"\n", .{lexer.source[token.start..token.end]});
-        }
-        return error.TestExpectedEqual;
+        try expected_writer.print("[{s}]:\t\"{s}\"\n", .{ @tagName(expected_tag), expected_s });
     }
+    var actual_str = std.ArrayList(u8).init(testing_allocator);
+    var actual_writer = actual_str.writer();
+    defer actual_str.deinit();
+    var lexer = Lexer.init(str);
+    while (lexer.next()) |token| {
+        if (token.tag == .eof) {
+            try actual_writer.print("[{s}]\t\n", .{@tagName(token.tag)});
+            continue;
+        }
+        try actual_writer.print("[{s}]:\t\"{s}\"\n", .{ @tagName(token.tag), lexer.source[token.start..token.end] });
+    }
+    if (std.mem.eql(u8, expected_str.items, actual_str.items)) return;
+    std.debug.print("Strings are not equal\n\n", .{});
+    var diff = try patience.diff(std.testing.allocator, expected_str.items, actual_str.items);
+    defer diff.deinit();
+    try diff.format(std.io.getStdErr().writer().any(), .{});
+    return error.TestExpectedEqual;
 }
 test "Lexer" {
     try assertLexParts("add(1, sub($a))", &.{
-        "add",
-        "(",
-        "1",
-        ",",
-        "sub",
-        "(",
-        "$a",
-        ")",
+        .{ "add", Token.Tag.identifier },
+        .{ "(", Token.Tag.l_parenthesis },
+        .{ "1", Token.Tag.number_literal },
+        .{ ",", Token.Tag.comma },
+        .{ "sub", Token.Tag.identifier },
+        .{ "(", Token.Tag.l_parenthesis },
+        .{ "$a", Token.Tag.identifier },
+        .{ ")", Token.Tag.r_parenthesis },
+        .{ ")", Token.Tag.r_parenthesis },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("add($1.4)", &.{
-        "add",
-        "(",
-        "$",
-        "1.4",
-        ")",
+        .{ "add", Token.Tag.identifier },
+        .{ "(", Token.Tag.l_parenthesis },
+        .{ "$", Token.Tag.identifier },
+        .{ "1.4", Token.Tag.number_literal },
+        .{ ")", Token.Tag.r_parenthesis },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("math.add(1, 2)", &.{
-        "math",
-        ".",
-        "add",
-        "(",
-        "1",
-        ",",
-        "2",
-        ")",
+        .{ "math", Token.Tag.identifier },
+        .{ ".", Token.Tag.dot },
+        .{ "add", Token.Tag.identifier },
+        .{ "(", Token.Tag.l_parenthesis },
+        .{ "1", Token.Tag.number_literal },
+        .{ ",", Token.Tag.comma },
+        .{ "2", Token.Tag.number_literal },
+        .{ ")", Token.Tag.r_parenthesis },
+        .{ "", Token.Tag.eof },
     });
+
     // binary operators
 
     try assertLexParts("1 + 2", &.{
-        "1",
-        "+",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "+", Token.Tag.plus },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 - 2", &.{
-        "1",
-        "-",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "-", Token.Tag.minus },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 * 2", &.{
-        "1",
-        "*",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "*", Token.Tag.star },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
+
+    try assertLexParts("1 - 2", &.{
+        .{ "1", Token.Tag.number_literal },
+        .{ "-", Token.Tag.minus },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
+    });
+
     try assertLexParts("1 / 2", &.{
-        "1",
-        "/",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "/", Token.Tag.slash },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 % 2", &.{
-        "1",
-        "%",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "%", Token.Tag.percent },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 ** 2", &.{
-        "1",
-        "**",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "**", Token.Tag.double_star },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 == 2", &.{
-        "1",
-        "==",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "==", Token.Tag.double_equal },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 != 2", &.{
-        "1",
-        "!=",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "!=", Token.Tag.bang_equal },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 > 2", &.{
-        "1",
-        ">",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ ">", Token.Tag.r_angle_bracket },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 < 2", &.{
-        "1",
-        "<",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "<", Token.Tag.l_angle_bracket },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 >= 2", &.{
-        "1",
-        ">=",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ ">=", Token.Tag.r_angle_bracket_equal },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 <= 2", &.{
-        "1",
-        "<=",
-        "2",
-    });
-    try assertLexParts("1 > 2", &.{
-        "1",
-        ">",
-        "2",
-    });
-    try assertLexParts("1 < 2", &.{
-        "1",
-        "<",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "<=", Token.Tag.l_angle_bracket_equal },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("1 & 2", &.{
-        "1",
-        "&",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "&", Token.Tag.ampersand },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("1 | 2", &.{
-        "1",
-        "|",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "|", Token.Tag.pipe },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("1 ^ 2", &.{
-        "1",
-        "^",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "^", Token.Tag.caret },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
 
     // Unary operators
     try assertLexParts("~2", &.{
-        "~",
-        "2",
+        .{ "~", Token.Tag.tilde },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("!2", &.{
-        "!",
-        "2",
+        .{ "!", Token.Tag.bang },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
 
     try assertLexParts("-a", &.{
-        "-",
-        "a",
+        .{ "-", Token.Tag.minus },
+        .{ "a", Token.Tag.identifier },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("+a", &.{
-        "+",
-        "a",
+        .{ "+", Token.Tag.plus },
+        .{ "a", Token.Tag.identifier },
+        .{ "", Token.Tag.eof },
     });
     // shift operators
     try assertLexParts("1 << 2", &.{
-        "1",
-        "<<",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ "<<", Token.Tag.double_l_angle_bracket },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
     });
     try assertLexParts("1 >> 2", &.{
-        "1",
-        ">>",
-        "2",
+        .{ "1", Token.Tag.number_literal },
+        .{ ">>", Token.Tag.double_r_angle_bracket },
+        .{ "2", Token.Tag.number_literal },
+        .{ "", Token.Tag.eof },
+    });
+    try assertLexParts("const c = 1;", &.{
+        .{ "const", Token.Tag.keyword_const },
+        .{ "c", Token.Tag.identifier },
+        .{ "=", Token.Tag.equal },
+        .{ "1", Token.Tag.number_literal },
+        .{ ";", Token.Tag.semicolon },
+        .{ "", Token.Tag.eof },
     });
 }

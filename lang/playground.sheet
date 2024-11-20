@@ -1,0 +1,28 @@
+
+export fn fib(n: i32): i32 {
+
+    while (n > 0) {
+
+      n = n - 1;
+    }
+    return n;
+
+}
+
+
+// export fn fib(n: i32): i32 {
+//   var a = 0;
+//   var b = 1;
+//   if (n > 0) {
+//     while (n > 0) {
+//       var t = a + b;
+//       a = b;
+//       b = t;
+//       n = n - 1;
+//     }
+//     return b
+//   }
+//   return a
+// }
+
+

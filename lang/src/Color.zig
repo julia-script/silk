@@ -124,14 +124,46 @@ fn csiOpen(self: Color, writer: anytype) !void {
 fn csiClose(writer: anytype) !void {
     _ = try writer.write("\x1b[0m");
 }
-pub fn write(self: Color, writer: anytype, s: []const u8) !void {
+pub fn write(self: Color, writer: anytype, s: []const u8, options: FormatColorOptions) !void {
+    if (!options.color) {
+        _ = try writer.write(s);
+        return;
+    }
     try csiOpen(self, writer);
     _ = try writer.write(s);
     try csiClose(writer);
 }
+pub fn writeChar(self: Color, writer: anytype, b: anytype) !void {
+    switch (@TypeOf(b)) {
+        u8 => {
+            try csiOpen(self, writer);
+            try writer.writeByte(b);
+            try csiClose(writer);
+        },
+        u21 => {
+            var buf: [4]u8 = undefined;
+            const len = try std.unicode.utf8Encode(b, buf[0..]);
+            try self.write(writer, buf[0..len]);
+        },
+        else => @panic("unsupported type"),
+    }
+}
 // return "\x1b[38;2;{d};{d};{d}m{s}\x1b[0m";
+pub const FormatColorOptions = struct {
+    color: bool = true,
+};
 
-pub fn print(self: Color, writer: anytype, comptime format: []const u8, args: anytype) !void {
+pub fn print(
+    self: Color,
+    writer: anytype,
+    comptime format: []const u8,
+    args: anytype,
+    format_color_options: FormatColorOptions,
+) !void {
+    if (!format_color_options.color) {
+        try writer.print(format, args);
+        return;
+    }
     try csiOpen(self, writer);
     try writer.print(format, args);
     try csiClose(writer);
@@ -147,7 +179,7 @@ pub fn print(self: Color, writer: anytype, comptime format: []const u8, args: an
 // }
 
 test "color" {
-    try Color.tw.amber_400.write(std.io.getStdOut().writer(), "hi");
+    // try Color.tw.amber_400.write(std.io.getStdErr().writer(), "hi");
     // try expectEqualColor(hex(0x4CBBFC, 1).blend(hex(0xEEEE22, 1), .multiply), hex(0x47AF22, 1));
     // std.debug.print("{}{s}{s}\n", .{ Color.tw.amber_100.csi(), "hi", CSI.reset });
     // std.debug.print("{x}\n", .{

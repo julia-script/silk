@@ -18,9 +18,21 @@ const Error = struct {
         unexpected_node,
         expected_node,
 
+        expected_type,
+        unexpected_type,
+
         expected_expression,
 
         expression_not_parenthesized,
+
+        expected_const_or_var,
+
+        expected_explicit_type,
+
+        expected_init_value,
+        expected_identifier,
+
+        duplicate_definition,
     };
 };
 errors: Array(Error),

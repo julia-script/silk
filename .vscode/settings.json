@@ -1,0 +1,15 @@
+{
+  "files.associations": {
+    "xinclude.h": "c",
+    "xtypes.h": "c",
+    "__config": "cpp",
+    "complex": "cpp",
+    "ios": "cpp",
+    "iosfwd": "cpp",
+    "istream": "cpp",
+    "locale": "cpp",
+    "ostream": "cpp",
+    "print": "cpp",
+    "*.def": "cpp"
+  }
+}

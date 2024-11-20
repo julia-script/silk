@@ -6,9 +6,10 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
     return struct {
         list: Array(T) = .{},
 
+        pub const Index = usize;
         const Self = @This();
 
-        const List = struct {
+        pub const List = struct {
             list: Array(T),
             parent: *Self,
             allocator: Allocator,
@@ -49,7 +50,7 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
             }
         };
 
-        const ListIter = struct {
+        pub const ListIter = struct {
             index: usize = 0,
             slice: []const T,
             pub fn next(self: *ListIter) ?T {
@@ -82,6 +83,16 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
                 .allocator = allocator,
             };
         }
+        pub fn commitSlice(self: *Self, allocator: Allocator, slice_: []const T) !usize {
+            var list = self.new(allocator);
+            try list.appendSlice(slice_);
+            return try list.commit();
+        }
+        // pub fn fromSlice(slice: []const T) Self {
+        //     return .{
+        //         .list = .{ .items = slice },
+        //     };
+        // }
         pub fn iterList(self: *Self, index: usize) ListIter {
             return .{
                 .slice = self.slice()[index..],
@@ -197,7 +208,25 @@ test "packed list single item" {
     try new_list.append(16);
     const index = try new_list.commit();
 
-    std.debug.print("{d}\n", .{index});
     try expectEqualSlices(i32, &.{16}, packed_list.slice()[index..]);
     try expectEqual(index, 1);
+}
+
+test "packed lists sentinel" {
+    const T = struct {
+        value: i32,
+        tag: Tag,
+        const Tag = enum {
+            a,
+            b,
+        };
+    };
+
+    try expectEqual(T{
+        .value = 2,
+        .tag = .a,
+    }, T{
+        .value = 2,
+        .tag = .a,
+    });
 }

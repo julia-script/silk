@@ -2,12 +2,16 @@
 //! you are making an executable, the convention is to delete this file and
 //! start with main.zig instead.
 const std = @import("std");
-const testing = std.testing;
 
-export fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
-
-test "basic add functionality" {
-    try testing.expect(add(3, 7) == 10);
+test {
+    _ = @import("Lexer.zig");
+    _ = @import("Ast.zig");
+    _ = @import("AstGen.zig");
+    _ = @import("Hir.zig");
+    _ = @import("HirBuilder.zig");
+    _ = @import("Mir.zig");
+    _ = @import("MirBuilder.zig");
+    // _ = @import("WasmWriter.zig");
+    _ = @import("./backend/wasm/WasmBuilder.zig");
+    _ = @import("Compilation.zig");
 }
