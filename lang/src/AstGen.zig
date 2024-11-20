@@ -30,6 +30,7 @@ const AstGenError = error{
 } || Logger.Error;
 
 fn pushNode(self: *AstGen, node: Node) AstGenError!Node.Index {
+    try self.logger.printLnIndented(comptime "[PUSH_NODE]: {s}", .{@tagName(node.tag)});
     const index = try self.nodes.addOne(self.allocator);
     self.nodes.set(index, node);
     return @intCast(index);
@@ -39,6 +40,7 @@ fn reserveNodeIndex(self: *AstGen) AstGenError!Node.Index {
     return @intCast(index);
 }
 fn setNode(self: *AstGen, index: Node.Index, node: Node) void {
+    self.logger.printLnIndented(comptime "[SET_NODE]: {s}", .{@tagName(node.tag)}) catch {};
     self.nodes.set(index, node);
 }
 
@@ -320,8 +322,13 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .keyword_while => {
                 return try self.parseWhileLoop();
             },
+            .comment => {
+                self.consumeToken();
+                // TODO: add it to ast
+                return try self.parsePrimary();
+            },
             else => {
-                std.debug.print("unexpected {s}", .{@tagName(token.tag)});
+                self.logger.fail("unexpected {s}", .{@tagName(token.tag)});
             },
         }
     }
@@ -429,6 +436,8 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
     return lhs;
 }
 pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index, rhs: Node.Index) !Node.Index {
+    try self.loggerOpen("makeBinaryExpression");
+    defer self.logger.close();
     const start_token = self.nodes.get(lhs).start_token;
     const end_token = self.nodes.get(rhs).end_token;
     return try self.pushNode(.{
@@ -641,6 +650,8 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
+    try self.loggerOpen("parsePostfixUnary");
+    defer self.logger.close();
     const token = self.peekToken() orelse return lhs;
     self.consumeToken();
     return try self.pushNode(.{
@@ -830,6 +841,10 @@ pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
         .keyword_number,
         .keyword_string,
         .keyword_void,
+        .keyword_i32,
+        .keyword_i64,
+        .keyword_f32,
+        .keyword_f64,
         => {
             return try self.parsePrimary();
         },

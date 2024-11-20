@@ -79,6 +79,21 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.indent();
             try writer.writeAll("}\n");
         },
+        .local => |local| {
+            try fmt.indent();
+            try writer.print("%{d} = local type(%{}) '", .{ inst_index, local.type });
+
+            try fmt.printNode(local.name_node);
+            try writer.print("'\n", .{});
+        },
+        .local_set => |local_set| {
+            try fmt.indent();
+            try writer.print("%{d} = local(%{d}).set %{d}\n", .{ inst_index, local_set.lhs, local_set.rhs });
+        },
+        .typeof => |typeof| {
+            try fmt.indent();
+            try writer.print("%{d} = typeof %{d}\n", .{ inst_index, typeof.operand });
+        },
         .fn_decl => |fn_decl| {
             try fmt.indent();
             try writer.writeAll("fn (");
@@ -147,15 +162,15 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.indent();
             try writer.print("%{d} = {s} %{d} %{d}\n", .{ inst_index, @tagName(inst), bin.lhs, bin.rhs });
         },
-        .local_decl => |local_decl| {
-            try fmt.indent();
-            try writer.print("%{d} = local @", .{
-                inst_index,
-            });
-            try fmt.printNode(local_decl.name_node);
-            try writer.print(" %{?d}", .{local_decl.init});
-            try fmt.breakLine();
-        },
+        // .local_decl => |local_decl| {
+        //     try fmt.indent();
+        //     try writer.print("%{d} = local @", .{
+        //         inst_index,
+        //     });
+        //     try fmt.printNode(local_decl.name_node);
+        //     try writer.print(" %{?d}", .{local_decl.init});
+        //     try fmt.breakLine();
+        // },
         .decl_ref => |decl_ref| {
             try fmt.indent();
             try writer.print("%{d} = ref @", .{inst_index});
@@ -205,7 +220,53 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
                 inst_index,
             });
         },
-
+        .ty_i32 => |ty_i32| {
+            _ = ty_i32; // autofix
+            try fmt.indent();
+            try writer.print("%{d} = type(i32)\n", .{
+                inst_index,
+            });
+        },
+        .ty_i64 => |ty_i64| {
+            _ = ty_i64; // autofix
+            try fmt.indent();
+            try writer.print("%{d} = type(i64)\n", .{
+                inst_index,
+            });
+        },
+        .ty_f32 => |ty_f32| {
+            _ = ty_f32; // autofix
+            try fmt.indent();
+            try writer.print("%{d} = type(f32)\n", .{
+                inst_index,
+            });
+        },
+        .ty_f64 => |ty_f64| {
+            _ = ty_f64; // autofix
+            try fmt.indent();
+            try writer.print("%{d} = type(f64)\n", .{
+                inst_index,
+            });
+        },
+        .loop => |loop| {
+            try fmt.indent();
+            try writer.print("%{d} = loop\n", .{inst_index});
+            try formatInstruction(value, writer, options, loop.body, indent + 1);
+        },
+        .br => |br| {
+            try fmt.indent();
+            try writer.print("%{d} = break %{d}\n", .{ inst_index, br.operand });
+        },
+        .assign => |assign| {
+            try fmt.indent();
+            try writer.print("%{d} = assign %{d} = %{d}\n", .{ inst_index, assign.lhs, assign.rhs });
+        },
+        .debug_var => |debug_var| {
+            try fmt.indent();
+            try writer.print("%{d} = debug_var '", .{inst_index});
+            try fmt.printNode(debug_var.name_node);
+            try writer.print("' %{d}\n", .{debug_var.instruction});
+        },
         else => {
             try fmt.indent();
             try writer.print("{s}\n", .{@tagName(inst)});
@@ -270,8 +331,11 @@ pub const Inst = union(enum) {
     global_decl: GlobalDecl,
     block: Block,
     inline_block: Block,
-    local_decl: LocalDecl,
+    local: Local,
+    local_set: BinaryOp,
     decl_ref: Ast.Node.Index,
+    loop: Loop,
+    assign: BinaryOp,
 
     comptime_number: Ast.Node.Index,
     ty_number: Ast.Node.Index,
@@ -279,7 +343,6 @@ pub const Inst = union(enum) {
     undefined_value: ?Ast.Node.Index,
 
     as: BinaryOp,
-
     add: BinaryOp,
     sub: BinaryOp,
     mul: BinaryOp,
@@ -292,9 +355,22 @@ pub const Inst = union(enum) {
     eq: BinaryOp,
     neq: BinaryOp,
 
+    typeof: UnaryOp,
     ret: UnaryOp,
     if_expr: IfExpr,
+    br: UnaryOp,
 
+    ty_i32: Ast.Node.Index,
+    ty_i64: Ast.Node.Index,
+    ty_f32: Ast.Node.Index,
+    ty_f64: Ast.Node.Index,
+    debug_var: DebugVar,
+
+    pub const Local = struct {
+        name_node: Ast.Node.Index,
+        instruction: Index,
+        type: Inst.Index,
+    };
     pub const Index = u32;
     pub const RootIndex = 0;
     pub const Enum = std.meta.Tag(@This());
@@ -303,6 +379,9 @@ pub const Inst = union(enum) {
         cond: Index,
         then_body: Index,
         else_body: ?Index,
+    };
+    pub const Loop = struct {
+        body: Index,
     };
     pub const UnaryOp = struct {
         operand: Index,
@@ -322,6 +401,10 @@ pub const Inst = union(enum) {
         // visibility: shared.Visibility,
         // exported: bool,
         // mutable: bool,
+    };
+    pub const DebugVar = struct {
+        name_node: Ast.Node.Index,
+        instruction: Index,
     };
     pub const LocalDecl = struct {
         name_node: Ast.Node.Index,

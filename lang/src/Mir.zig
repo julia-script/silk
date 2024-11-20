@@ -90,11 +90,14 @@ pub const Instruction = struct {
         instruction: Instruction.Index,
         value: Value.Index,
         type: Type.Index,
+
         if_expr: struct {
             cond: Instruction.Index,
             then_body: Type.Index,
             else_body: ?Type.Index,
         },
+        loop: struct { body: Type.Index },
+
         scoped: struct {
             name: InternedSlice,
             scope_index: Type.Index,
@@ -124,6 +127,8 @@ pub const Instruction = struct {
         block,
 
         if_expr,
+        loop,
+        br,
 
         pub fn fromString(comptime str: []const u8) Op {
             return comptime std.meta.stringToEnum(Op, str) orelse @compileError("instruction op not found: " ++ str);
@@ -221,6 +226,7 @@ pub const Inst = union(enum) {
 
 pub const Type = union(enum) {
     @"fn": Fn,
+    while_loop: WhileLoop,
     optional: Optional,
     module: Module,
 
@@ -246,13 +252,19 @@ pub const Type = union(enum) {
         number,
         string,
         void,
+        i32,
+        i64,
+        f32,
+        f64,
 
         type_number,
         type_string,
         type_boolean,
         type_void,
-        type_f64,
+        type_i32,
+        type_i64,
         type_f32,
+        type_f64,
 
         _,
         pub inline fn hash(self: Index) []const u8 {
@@ -330,6 +342,10 @@ pub const Type = union(enum) {
         name: ?InternedSlice,
         instruction_start: Instruction.Index,
         instruction_count: u32,
+    };
+    pub const WhileLoop = struct {
+        condition: Instruction.Index,
+        body: Type.Index,
     };
 };
 pub const Value = union(enum) {
@@ -441,14 +457,23 @@ pub fn formatInstruction(self: *Self, writer: *IndentedWriter, inst_index: Instr
         },
         .if_expr => {
             try writer.print("if #{d}\n", .{inst.data.if_expr.cond});
+            writer.indent();
             try formatType(self, writer, inst.data.if_expr.then_body);
+            writer.unindent();
             if (inst.data.if_expr.else_body) |else_body| {
-                try writer.writeAll(" else ");
+                try writer.writeIndent();
+                try writer.writeAll("else\n");
+                writer.indent();
                 try formatType(self, writer, else_body);
+                writer.unindent();
             }
         },
         .block => {
             try formatType(self, writer, inst.type);
+        },
+        .loop => {
+            try writer.writeAll("loop\n");
+            try formatType(self, writer, inst.data.loop.body);
         },
         else => {
             try writer.print("{s};\n", .{@tagName(inst.op)});
@@ -526,6 +551,7 @@ pub fn formatType(self: *Self, writer: *IndentedWriter, type_index: Type.Index) 
                 try writer.writeAll(": ");
                 try formatType(self, writer, param.type);
             },
+
             else => {
                 try writer.writeAll(@tagName(ty));
             },

@@ -257,7 +257,11 @@ const TypeWip = struct {
             .global_decl => try self.resolveDecl(),
             .fn_decl => try self.resolveFnDecl(),
             .ty_number => .number,
-            .block, .if_expr => try self.resolveBlockDecl(),
+            .inline_block, .block, .if_expr => try self.resolveBlockDecl(),
+            .ty_i32 => .i32,
+            .ty_i64 => .i64,
+            .ty_f32 => .f32,
+            .ty_f64 => .f64,
             else => {
                 std.debug.panic("unimplemented type_inst: {s}", .{@tagName(type_inst)});
             },
@@ -569,9 +573,12 @@ pub const FnWip = struct {
 pub fn getFloatTypePrecedence(ty: Mir.Type.Index) u8 {
     switch (ty) {
         .number => return 0,
-        .type_f32 => return 2,
-        .type_f64 => return 3,
-        else => unreachable,
+        .f32 => return 2,
+        .f64 => return 3,
+        .i32 => return 4,
+        .i64 => return 5,
+
+        else => std.debug.panic("unimplemented getFloatTypePrecedence: {s}", .{@tagName(ty)}),
     }
 }
 
@@ -608,7 +615,7 @@ pub const BlockWip = struct {
             .block, .inline_block => |block_inst| {
                 var iter = self.builder.iterHirList(block_inst.instructions);
                 while (iter.next()) |inst_index| {
-                    try self.resolveSingleInstruction(inst_index);
+                    _ = try self.resolveSingleInstruction(inst_index);
                 }
             },
             else => unreachable,
@@ -666,7 +673,7 @@ pub const BlockWip = struct {
         if (lhs_precedence > rhs_precedence) return lhs_inst.type;
         return rhs_inst.type;
     }
-    pub fn resolveSingleInstruction(self: *BlockWip, hir_inst_index: Hir.Inst.Index) Error!void {
+    pub fn resolveSingleInstruction(self: *BlockWip, hir_inst_index: Hir.Inst.Index) Error!Mir.Instruction.Index {
         const hir_inst = self.builder.getHirInst(hir_inst_index);
         try self.builder.logger.open("#{d} BlockWip.resolveSingleInstruction (.{s})", .{ hir_inst_index, @tagName(hir_inst) });
         defer self.builder.logger.close();
@@ -686,6 +693,7 @@ pub const BlockWip = struct {
                 try self.putSymbol(hir_inst_index, .{
                     .instruction = inst,
                 });
+                return inst;
             },
             .add,
             .sub,
@@ -724,17 +732,18 @@ pub const BlockWip = struct {
                 try self.putSymbol(hir_inst_index, .{
                     .instruction = inst,
                 });
+                return inst;
             },
             .ret => |ret_inst| {
                 if (ret_inst.operand == 0) {
                     if (self.return_type == .void) {
-                        _ = try self.pushInstruction(.{
+                        const ret_inst_index = try self.pushInstruction(.{
                             .op = .ret,
                             .is_comptime = false,
                             .type = .void,
                             .data = .{ .void = {} },
                         });
-                        return;
+                        return ret_inst_index;
                     }
                     return error.MissingReturn;
                 } else {
@@ -754,7 +763,7 @@ pub const BlockWip = struct {
                         const inst_index = try self.castIfDifferent(index, self.return_type);
                         const inst = self.getInstruction(inst_index);
 
-                        _ = try self.pushInstruction(.{
+                        const ret_inst_index = try self.pushInstruction(.{
                             .op = .ret,
                             .is_comptime = inst.is_comptime,
                             .type = self.return_type,
@@ -763,6 +772,7 @@ pub const BlockWip = struct {
                         // try self.putSymbol(hir_inst_index, .{
                         //     .instruction = inst,
                         // });
+                        return ret_inst_index;
                     },
                     else => unreachable,
                 }
@@ -772,7 +782,7 @@ pub const BlockWip = struct {
                 block.return_type = self.return_type;
                 var iter = self.builder.iterHirList(block_inst.instructions);
                 while (iter.next()) |inst_index| {
-                    try self.resolveSingleInstruction(inst_index);
+                    _ = try self.resolveSingleInstruction(inst_index);
                 }
                 const committed_type = try block.commit();
                 const committed_inst = try self.pushInstruction(.{
@@ -783,12 +793,14 @@ pub const BlockWip = struct {
                 });
 
                 try self.putSymbol(hir_inst_index, .{ .instruction = committed_inst });
+                return committed_inst;
             },
             .param_get, .global_get => |unary_op| {
                 const inst_index = try self.resolveOperand(unary_op.operand);
 
                 // const inst_index = try self.castIfDifferent(param_get.operand, .number);
                 try self.putSymbol(hir_inst_index, .{ .instruction = inst_index });
+                return inst_index;
             },
             .if_expr => |if_expr| {
                 const cond_symbol = try self.findSymbol(if_expr.cond) orelse try self.parent.findSymbolRecursive(if_expr.cond) orelse {
@@ -798,42 +810,7 @@ pub const BlockWip = struct {
                 const cond_inst_index = switch (cond_symbol) {
                     .instruction => |index| index,
                     else => unreachable,
-                    // .parameter => |parameter| try self.pushInstruction(.{
-                    //     .is_comptime = false,
-                    //     .op = .param_get,
-                    //     .type = parameter.type,
-                    //     .data = .{ .scoped = .{
-                    //         .name = parameter.name,
-                    //         .scope_index = parameter.type,
-                    //         .index = parameter.index,
-                    //     } },
-                    // }),
-                    // .global => |global| try self.pushInstruction(.{
-                    //     .is_comptime = false,
-                    //     .op = .global_get,
-                    //     .type = global.resolved.type,
-                    //     .data = .{ .scoped = .{
-                    //         .name = global.resolved.name,
-                    //         .scope_index = global.resolved.scope_index,
-                    //         .index = null,
-                    //     } },
-                    // }),
                 };
-
-                // try self.resolveSingleInstruction(if_expr.then_body);
-                // var then_block = BlockWip.init(self.builder, .{ .block = self }, if_expr.then_body);
-                // then_block.return_type = self.return_type;
-                // try then_block.resolveInstructions();
-                // const then_type_index = try then_block.commit();
-                // // const then_inst = try then_block.commit();
-
-                // var else_type_index: ?Mir.Type.Index = null;
-                // if (if_expr.else_body) |else_body| {
-                //     var else_block = BlockWip.init(self.builder, .{ .block = self }, else_body);
-                //     else_block.return_type = self.return_type;
-                //     try else_block.resolveInstructions();
-                //     else_type_index = try else_block.commit();
-                // }
 
                 var scope: Scope = .{ .block = self };
                 const inst = try self.pushInstruction(.{
@@ -846,10 +823,32 @@ pub const BlockWip = struct {
                         .else_body = if (if_expr.else_body) |else_body| try scope.resolveType(else_body) else null,
                     } },
                 });
-
-                _ = inst; // autofix
-                // const cond_inst_index = try self.resolveOperand(if_expr.cond);
-                // const ty = try self.resolveOperandsType(cond_inst_index, self.return_type);
+                return inst;
+            },
+            .loop => |loop| {
+                var scope: Scope = .{ .block = self };
+                const instruction_index = try self.reserveInstructionIndex();
+                try self.putSymbol(hir_inst_index, .{ .instruction = instruction_index });
+                const body_inst_index = try scope.resolveType(loop.body);
+                self.setInstruction(instruction_index, .{
+                    .op = .loop,
+                    .is_comptime = false,
+                    .type = .void,
+                    .data = .{ .loop = .{ .body = body_inst_index } },
+                });
+                return instruction_index;
+            },
+            .br => |br| {
+                var scope: Scope = .{ .block = self };
+                const operand_symbol = try scope.findSymbolRecursive(br.operand) orelse self.builder.logger.panic("BlockWip.resolveSingleInstruction [UNRESOLVED BR] (#{d})", .{br.operand});
+                _ = operand_symbol; // autofix
+                const inst = try self.pushInstruction(.{
+                    .op = .br,
+                    .is_comptime = false,
+                    .type = .void,
+                    .data = .{ .type = .void },
+                });
+                return inst;
             },
             else => {
                 std.debug.panic("unimplemented hir_inst: {s}", .{@tagName(hir_inst)});
@@ -867,40 +866,18 @@ pub const BlockWip = struct {
             .data = .{ .type = inst.type },
         });
     }
-
-    // pub fn resolveInstructions(self: *BlockWip) Error!void {
-    //     try self.builder.logger.open("#{d} BlockWip.resolveInstructions", .{self.hir_inst});
-    //     defer self.builder.logger.close();
-    //     const inst = self.builder.getHirInst(self.hir_inst);
-    //     switch (inst) {
-    //         .block, .inline_block => |block_inst| {
-    //             try self.resolveInstructionList(block_inst.instructions);
-    //         },
-    //         else => unreachable,
-    //     }
-    //     // return try self.builder.pushInstruction(.{ .nop = .{} });
-    // }
-
-    // pub fn resolveInstructionList(self: *BlockWip, list: Hir.Inst.List) Error!void {
-    //     try self.builder.logger.open("#{d} BlockWip.resolveInstructionList", .{list});
-    //     defer self.builder.logger.close();
-
-    //     var iter = self.builder.iterHirList(list);
-    //     while (iter.next()) |inst_index| {
-    //         try self.addInstruction(inst_index);
-    //     }
-    //     // try self.resolveInstructionRecursive(&iter);
-    // }
-    // pub fn resolveInstructionRecursive(
-    //     self: *BlockWip,
-    //     iter: *Hir.Lists.ListIter,
-    // ) Error!void {
-    //     // try self.addInstruction(hir_inst_index);
-    //     const hir_inst_index = iter.next() orelse return;
-    //     const inst = self.builder.getHirInst(hir_inst_index);
-    //     try self.builder.logger.printLnIndented("#{d} BlockWip.resolveInstructionRecursive (.{s})", .{ hir_inst_index, @tagName(inst) });
-    //     try self.resolveInstructionRecursive(iter);
-    // }
+    pub fn reserveInstructionIndex(self: *BlockWip) Error!Mir.Instruction.Index {
+        const index: Mir.Instruction.Index = @intCast(self.instructions_list.items.len);
+        try self.instructions_list.append(self.builder.arena.allocator(), undefined);
+        return index;
+    }
+    pub fn setInstruction(
+        self: *BlockWip,
+        index: Mir.Instruction.Index,
+        inst: Mir.Instruction,
+    ) void {
+        self.instructions_list.items[index] = inst;
+    }
     pub fn pushInstruction(
         self: *BlockWip,
         inst: Mir.Instruction,
@@ -917,7 +894,21 @@ pub const BlockWip = struct {
         return self.instructions_list.items[index];
     }
     pub fn putSymbol(self: *BlockWip, key: Symbol.Key, value: Symbol) !void {
-        try self.builder.logger.printLnIndented("#{d} BlockWip.putSymbol [#{d}]", .{ self.hir_inst, key });
+        try self.builder.logger.open("#{d} BlockWip.putSymbol [#{d}]", .{ self.hir_inst, key });
+        switch (value) {
+            .instruction => |index| {
+                const inst = self.getInstruction(index);
+                try self.builder.logger.printLnIndented("[#{d}] instruction -> '{s}'", .{ key, @tagName(inst.op) });
+            },
+            .parameter => |param| {
+                // const param_inst = self.builder.getHirInst(param.instruction);
+                try self.builder.logger.printLnIndented("[#{d}] parameter -> '{s}'", .{ key, self.builder.getSlice(param.name) });
+            },
+            .global => |global| {
+                try self.builder.logger.printLnIndented("[#{d}] global -> '{s}'", .{ key, self.builder.getSlice(global.resolved.name) });
+            },
+        }
+        defer self.builder.logger.close();
         try self.symbols_map.put(key, value);
     }
     pub fn commit(self: *BlockWip) Error!Mir.Type.Index {

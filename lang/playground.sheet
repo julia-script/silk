@@ -1,12 +1,8 @@
 
 export fn fib(n: i32): i32 {
 
-    while (n > 0) {
-
-      n = n - 1;
-    }
-    return n;
-
+    var a:i32 = 1;
+    return a + n;
 }
 
 
