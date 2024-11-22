@@ -64,6 +64,7 @@ const Scope = struct {
     instructions: Hir.Lists.List,
 
     symbols_table: std.StringHashMapUnmanaged(Hir.Inst.Index) = .{},
+
     const Kind = enum {
         module,
         block,
@@ -167,6 +168,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             const name_node = declaration.name;
             const ty_node = declaration.ty;
             const value_node = declaration.value;
+
             const local_inst = try scope.pushInstruction(.{
                 .local = .{
                     .name_node = name_node,
@@ -185,10 +187,12 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 }
                 break :blk try scope.pushInstruction(.{ .undefined_value = null });
             };
+
             if (ty_node != 0) {
                 const ty_inst = try self.genInstruction(scope, ty_node);
                 value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst } });
             }
+
             return try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
             // }
             // if (nav.acceptData(.assign)) |assign_data| {
@@ -299,6 +303,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 },
                 .global_decl => {
                     return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
+                },
+                .local => {
+                    return try scope.pushInstruction(.{ .local_get = .{ .operand = inst_index } });
                 },
                 else => {},
             }

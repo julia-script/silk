@@ -177,7 +177,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.printNode(decl_ref);
             try fmt.breakLine();
         },
-        .ret, .param_get, .global_get => |ret| {
+        .ret, .param_get, .local_get, .global_get => |ret| {
             try fmt.indent();
             try writer.print("%{d} = {s} %{d}\n", .{ inst_index, @tagName(inst), ret.operand });
         },
@@ -329,6 +329,7 @@ pub const Inst = union(enum) {
     param_get: UnaryOp,
     global_get: UnaryOp,
     global_decl: GlobalDecl,
+    local_get: UnaryOp,
     block: Block,
     inline_block: Block,
     local: Local,
