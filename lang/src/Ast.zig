@@ -47,6 +47,11 @@ pub const Node = struct {
             then_branch: Index,
             else_branch: Index,
         },
+        declaration: struct {
+            name: Token.Index,
+            ty: Index,
+            value: Index,
+        },
         ret_expression: Index,
         increment_expression: Index,
         decrement_expression: Index,
@@ -311,9 +316,26 @@ fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: 
             try self.format_inner(writer, data.binary_expression.lhs, indent + 1, options);
             try self.format_inner(writer, data.binary_expression.rhs, indent + 1, options);
         },
-        .@"extern", .@"pub", .@"export", .const_decl, .var_decl => {
+        .@"extern",
+        .@"pub",
+        .@"export",
+        => {
             _ = try writer.write("\n");
             try self.format_inner(writer, data.unary_expression, indent + 1, options);
+        },
+        .const_decl, .var_decl => {
+            _ = try writer.write("\n");
+            try self.format_inner(writer, data.declaration.name, indent + 1, options);
+            if (data.declaration.ty != 0) {
+                try format_utils.writeIndent(writer, indent + 1, indentOptions);
+                try tw.gray_400.write(writer, "[type]:\n", color_options);
+                try self.format_inner(writer, data.declaration.ty, indent + 2, options);
+            }
+            if (data.declaration.value != 0) {
+                try format_utils.writeIndent(writer, indent + 1, indentOptions);
+                try tw.gray_400.write(writer, "[init]:\n", color_options);
+                try self.format_inner(writer, data.declaration.value, indent + 2, options);
+            }
         },
         .increment, .decrement => {
             _ = try writer.write("\n");

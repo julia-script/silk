@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const Array = std.ArrayListUnmanaged;
 const Ast = @import("Ast.zig");
 const Node = Ast.Node;
-const Logger = @import("IndentedWriter.zig");
+const Logger = @import("Logger.zig");
 const log = Logger.new(.ast_gen);
 
 const assert = std.debug.assert;
@@ -23,7 +23,7 @@ tokens: Array(Token) = .{},
 allocator: Allocator,
 token_index: Token.Index = 0,
 source: []const u8,
-logger: Logger = Logger.init(std.io.getStdErr().writer().any()),
+logger: Logger = Logger.init(std.io.getStdErr().writer().any(), "AstGen"),
 
 const AstGenError = error{
     OutOfMemory,
@@ -82,7 +82,7 @@ pub fn debugToken(self: *AstGen, index: Token.Index) void {
     // std.debug.print("\n", .{});
 }
 pub fn parseRoot(self: *AstGen) AstGenError!void {
-    try self.loggerOpen("parseRoot");
+    self.loggerOpen("parseRoot");
     defer self.logger.close();
     const index = try self.reserveNodeIndex();
     var children = self.node_lists.new(self.allocator);
@@ -113,7 +113,7 @@ pub fn parseRoot(self: *AstGen) AstGenError!void {
 }
 
 pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
-    try self.loggerOpen("parseExpression");
+    self.loggerOpen("parseExpression");
     defer self.logger.close();
     const lhs = try self.parseUnary();
     if (lhs == 0) return 0;
@@ -214,7 +214,7 @@ pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
-    try self.loggerOpen("parsePrimary");
+    self.loggerOpen("parsePrimary");
     defer self.logger.close();
     if (self.peekToken()) |token| {
         switch (token.tag) {
@@ -291,8 +291,8 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             //     return try self.parseDeclaration();
             // },
             inline .keyword_export,
-            .keyword_const,
-            .keyword_var,
+            // .keyword_const,
+            // .keyword_var,
             .keyword_extern,
             .keyword_pub,
             => |tag| {
@@ -304,11 +304,42 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                         .keyword_export => .@"export",
                         .keyword_extern => .@"extern",
                         .keyword_pub => .@"pub",
+                        // .keyword_const => .const_decl,
+                        // .keyword_var => .var_decl,
+                        else => unreachable,
+                    },
+                    .data = .{ .unary_expression = expr },
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
+            },
+            inline .keyword_const,
+            .keyword_var,
+            => |tag| {
+                const start_token = self.token_index;
+                self.consumeToken();
+                const name = try self.parseIdentifier();
+                const ty: Node.Index = blk: {
+                    if (self.tokenIs(.colon)) {
+                        self.consumeToken();
+                        break :blk try self.parseTy();
+                    }
+                    break :blk 0;
+                };
+                const value = blk: {
+                    if (self.tokenIs(.equal)) {
+                        self.consumeToken();
+                        break :blk try self.parseExpression();
+                    }
+                    break :blk 0;
+                };
+                return try self.pushNode(.{
+                    .tag = switch (tag) {
                         .keyword_const => .const_decl,
                         .keyword_var => .var_decl,
                         else => unreachable,
                     },
-                    .data = .{ .unary_expression = expr },
+                    .data = .{ .declaration = .{ .name = name, .ty = ty, .value = value } },
                     .start_token = start_token,
                     .end_token = self.token_index,
                 });
@@ -436,7 +467,7 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
     return lhs;
 }
 pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index, rhs: Node.Index) !Node.Index {
-    try self.loggerOpen("makeBinaryExpression");
+    self.loggerOpen("makeBinaryExpression");
     defer self.logger.close();
     const start_token = self.nodes.get(lhs).start_token;
     const end_token = self.nodes.get(rhs).end_token;
@@ -650,7 +681,7 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
-    try self.loggerOpen("parsePostfixUnary");
+    self.loggerOpen("parsePostfixUnary");
     defer self.logger.close();
     const token = self.peekToken() orelse return lhs;
     self.consumeToken();
@@ -667,7 +698,7 @@ pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index 
 }
 
 pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
-    try self.loggerOpen("parseFnDecl");
+    self.loggerOpen("parseFnDecl");
     defer self.logger.close();
     const start_token = self.token_index;
     if (!self.tokenIs(.keyword_fn)) {
@@ -827,12 +858,12 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
     return index;
 }
 pub fn parseTy(self: *AstGen) AstGenError!Node.Index {
-    try self.loggerOpen("parseTy");
+    self.loggerOpen("parseTy");
     defer self.logger.close();
     return try self.parseTyInner(0);
 }
 pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
-    try self.loggerOpen("parseTyInner");
+    self.loggerOpen("parseTyInner");
     defer self.logger.close();
     var depth = depth_arg;
     const token = self.peekToken() orelse return 0;
@@ -932,7 +963,7 @@ pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
     @panic("unimplemented");
 }
 pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
-    try self.loggerOpen("parseBlock");
+    self.loggerOpen("parseBlock");
     defer self.logger.close();
     const start_token = self.token_index;
     assert(self.tokenIs(.l_brace));
@@ -979,7 +1010,7 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
-    try self.loggerOpen("parseFnCall");
+    self.loggerOpen("parseFnCall");
     defer self.logger.close();
     var args = self.node_lists.new(self.allocator);
     self.consumeToken();
@@ -1018,7 +1049,7 @@ pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
 }
 
 pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
-    try self.loggerOpen("parseWhileLoop");
+    self.loggerOpen("parseWhileLoop");
     defer self.logger.close();
     const start_token = self.token_index;
     assert(self.tokenIs(.keyword_while));
@@ -1063,8 +1094,8 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
     });
 }
 
-pub fn loggerOpen(self: *AstGen, label: []const u8) AstGenError!void {
-    try self.logger.open("#token({d}:.{s}) {s}", .{
+pub fn loggerOpen(self: *AstGen, label: []const u8) void {
+    self.logger.open("#token({d}:.{s}) {s}", .{
         self.token_index,
         if (self.peekToken()) |t| @tagName(t.tag) else "eof",
         label,

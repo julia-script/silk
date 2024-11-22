@@ -1,57 +1,121 @@
 const std = @import("std");
 const Self = @This();
 const format_utils = @import("format_utils.zig");
+const Color = @import("Color.zig");
+const tw = Color.tw;
+const config = @import("options");
+
 // logger: type,
 
+writer: std.io.AnyWriter,
+scope: []const u8,
+enabled: bool,
 ind: usize = 0,
-pub fn init(comptime scope: @Type(.enum_literal)) Self {
-    _ = scope; // autofix
-
-    // return std.log.scoped(.{ .scope = scope });
+pub fn init(writer: std.io.AnyWriter, scope: []const u8) Self {
+    var enabled = false;
+    for (config.log_scopes) |s| {
+        if (std.mem.eql(u8, s, scope)) {
+            enabled = true;
+            break;
+        }
+    }
     return Self{
-        // .logger = std.log.scoped(scope),
+        .writer = writer,
+        .scope = scope,
+        .enabled = enabled,
     };
 }
-fn indent(self: *Self) void {
+pub fn writeIndent(self: *Self) !void {
+    if (!self.enabled) return;
+    try format_utils.writeIndent(self.writer, self.ind, .{});
+}
+pub fn indent(self: *Self) void {
+    if (!self.enabled) return;
     self.ind += 1;
 }
-fn unindent(self: *Self) void {
+pub fn unindent(self: *Self) void {
+    if (!self.enabled) return;
     self.ind -= 1;
 }
-pub fn writeIndent(self: *Self) void {
-    format_utils.writeIndent(std.io.getStdErr().writer().any(), self.ind, .{
-        .indent_guides = true,
-    }) catch unreachable;
-    // for (0..self.ind) |_| {
-    //     // std.debug.print("  ", .{});
-    //     // std.debug.print("  ", .{});
-
-    // }
+pub fn writeAll(self: *Self, str: []const u8) !void {
+    if (!self.enabled) return;
+    try self.writer.writeAll(str);
 }
-pub fn ln(self: *Self, comptime format: []const u8, args: anytype) void {
-    self.writeIndent();
-    // self.logger.info(format, args);
-    std.debug.print(format ++ "\n", args);
+pub fn writeAllIndented(self: *Self, str: []const u8) !void {
+    if (!self.enabled) return;
+    try self.writeIndent();
+    try self.writer.writeAll(str);
+}
+
+pub fn print(self: *Self, comptime format: []const u8, args: anytype) !void {
+    try self.writer.print(format, args);
+}
+
+pub fn printIndented(self: *Self, comptime format: []const u8, args: anytype) !void {
+    if (!self.enabled) return;
+    try self.writeIndent();
+    try self.writer.print(format, args);
+}
+
+pub fn printLn(self: *Self, comptime format: []const u8, args: anytype) !void {
+    if (!self.enabled) return;
+    try self.writer.print(format ++ "\n", args);
+}
+pub fn printLnIndented(self: *Self, comptime format: []const u8, args: anytype) !void {
+    if (!self.enabled) return;
+    try self.writeIndent();
+    try self.writer.print(format ++ "\n", args);
+}
+
+pub fn log(self: *Self, comptime format: []const u8, args: anytype, color: Color) void {
+    if (!self.enabled) return;
+    self.indent();
+    self.writeIndent() catch @panic("writeIndent failed");
+    color.print(self.writer, format ++ "\n", args, .{}) catch @panic("writeAll failed");
+    self.unindent();
 }
 pub fn open(self: *Self, comptime format: []const u8, args: anytype) void {
-    self.writeIndent();
-    std.debug.print(format ++ " {{\n", args);
-    // self.logger.info(format ++ "{\n", args);
+    if (!self.enabled) return;
+    self.writeIndent() catch {};
+    self.writer.print(format ++ " {{\n", args) catch @panic("writeAll failed");
     self.indent();
 }
 
-pub fn openInline(self: *Self) void {
-    std.debug.print(" {{\n", .{});
+pub fn openInline(self: *Self) !void {
+    if (!self.enabled) return;
+    try self.writer.print(" {{\n", .{});
     self.indent();
 }
+
 pub fn close(self: *Self) void {
+    if (!self.enabled) return;
     self.unindent();
-    self.writeIndent();
-    std.debug.print("}}\n", .{});
+    self.writeIndent() catch @panic("writeIndent failed");
+    self.writer.print("}}\n", .{}) catch @panic("writeAll failed");
+}
+pub fn fail(self: *Self, comptime format: []const u8, args: anytype) void {
+    self.writeIndent() catch @panic("writeIndent failed");
+
+    tw.red_500.bold().write(self.writer, "[Error] ", .{}) catch @panic("writeAll failed");
+    self.writer.print(format ++ "\n", args) catch @panic("writeAll failed");
+}
+pub fn panic(self: *Self, comptime format: []const u8, args: anytype) noreturn {
+    self.fail(format, args);
+    @panic("Logger.panic");
+}
+pub fn todo(self: *Self, comptime format: []const u8, args: anytype) noreturn {
+    self.writeIndent() catch @panic("writeIndent failed");
+
+    tw.yellow_400.bold().write(self.writer, "[TODO] ", .{}) catch @panic("writeAll failed");
+    self.writer.print(format ++ "\n", args) catch @panic("writeAll failed");
+    @panic("Logger.todo");
 }
 
-pub fn indented(self: *Self, comptime format: []const u8, args: anytype) void {
+pub fn indented(self: *Self, comptime format: []const u8, args: anytype) !void {
+    if (!self.enabled) return;
     self.indent();
-    self.ln(format, args);
+    try self.printLn(format, args);
     self.unindent();
 }
+
+pub const Error = std.io.AnyWriter.Error;

@@ -47,14 +47,17 @@ pub const Source = struct {
     pub fn compile(self: *Source, compilation: *Self) !void {
         const allocator = compilation.arena.allocator();
         self.ast = try Ast.parse(allocator, &compilation.errors, self.source);
+        std.debug.print("AST:\n", .{});
         try self.ast.?.format(
             std.io.getStdErr().writer().any(),
             0,
             .{},
         );
         self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
+        std.debug.print("HIR:\n", .{});
         std.debug.print("{any}\n", .{self.hir});
         self.mir = try MirBuilder.gen(allocator, &self.hir.?, &compilation.errors);
+        std.debug.print("MIR:\n", .{});
         std.debug.print("{any}\n", .{self.mir});
     }
 };

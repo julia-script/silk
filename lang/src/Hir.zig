@@ -81,7 +81,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         },
         .local => |local| {
             try fmt.indent();
-            try writer.print("%{d} = local type(%{}) '", .{ inst_index, local.type });
+            try writer.print("%{d} = local '", .{inst_index});
 
             try fmt.printNode(local.name_node);
             try writer.print("'\n", .{});
@@ -368,8 +368,9 @@ pub const Inst = union(enum) {
 
     pub const Local = struct {
         name_node: Ast.Node.Index,
-        instruction: Index,
-        type: Inst.Index,
+        // init: Inst.Index,
+        // instruction: Index,
+        // type: Inst.Index,
     };
     pub const Index = u32;
     pub const RootIndex = 0;

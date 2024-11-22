@@ -8,13 +8,11 @@ const PackedLists = @import("PackedLists.zig");
 const shared = @import("shared.zig");
 pub const Lists = PackedLists.new(u32, std.math.maxInt(u32));
 pub const ChildList = Lists.List;
-const IndentedWriter = @import("IndentedWriter.zig");
+const Logger = @import("Logger.zig");
 
 lists: Lists = .{},
 strings: InternedStrings,
-instructions_dep: Array(Inst) = .{},
 instructions: Array(Instruction) = .{},
-definitions: Array(Definition) = .{},
 types: Array(Type) = .{},
 values: Array(Value) = .{},
 allocator: Allocator,
@@ -35,57 +33,18 @@ pub fn deinit(self: *Self) void {
     self.values.deinit(self.allocator);
     self.definitions.deinit(self.allocator);
 }
-pub const Definition = union(enum) {
-    // global_fn: GlobalFn,
-
-    param: struct {
-        name: InternedSlice,
-        type: Type.Index,
-    },
-
-    global_decl: GlobalDecl,
-
-    module: struct {
-        name: ?InternedSlice,
-        member_defs: Definition.List,
-    },
-
-    block: struct {
-        instructions_dep: List,
-        result_type: Type.Index,
-    },
-
-    inline_block: struct {
-        instructions_dep: List,
-        result_type: Type.Index,
-    },
-
-    pub const GlobalDecl = struct {
-        name: InternedSlice,
-        type: Type.Index,
-        body: ?Definition.Index,
-        // init_inst: ?Inst.Index,
-
-        visibility: shared.Visibility,
-        exported: bool,
-        @"extern": bool,
-    };
-
-    pub const Index = u32;
-    pub const List = usize;
-    pub const RootIndex: Index = 0;
-};
 
 pub const Instruction = struct {
-    is_comptime: bool,
     op: Op,
     data: Data,
     type: Type.Index,
+    value: Value.Index,
 
     pub const Index = u32;
+    pub const List = usize;
 
-    pub const Data = union {
-        void: void,
+    pub const Data = union(enum) {
+        // void: void,
         binOp: BinOp,
         instruction: Instruction.Index,
         value: Value.Index,
@@ -96,11 +55,11 @@ pub const Instruction = struct {
             then_body: Type.Index,
             else_body: ?Type.Index,
         },
-        loop: struct { body: Type.Index },
+        // loop: struct { body: Type.Index },
 
         scoped: struct {
             name: InternedSlice,
-            scope_index: Type.Index,
+            // scope_index: Type.Index,
             index: ?u32,
         },
 
@@ -110,20 +69,67 @@ pub const Instruction = struct {
         };
     };
 
-    // op:
+    pub fn format(
+        self: @This(),
+        comptime _: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: std.io.AnyWriter,
+    ) !void { // op:
+        _ = options; // autofix
+        try writer.print("{s} ", .{@tagName(self.op)});
+        try writer.print(" {any}", .{self.type});
+        try writer.print(" {any}", .{self.value});
+        switch (self.data) {
+            .binOp => |bin_op| {
+                try writer.print(" lhs: #{d} rhs: #{d}", .{ bin_op.lhs, bin_op.rhs });
+            },
+            .instruction => |instruction| {
+                try writer.print(" inst: #{d}", .{instruction});
+            },
+            .value => |value| {
+                try writer.print(" value: #{any}", .{value});
+            },
+            .type => |type_index| {
+                try writer.print(" type: {any}", .{type_index});
+            },
+            .if_expr => |if_expr| {
+                try writer.print(" cond: #{d} then: #{any}", .{ if_expr.cond, if_expr.then_body });
+                if (if_expr.else_body) |else_body| {
+                    try writer.print(" else: #{any}", .{else_body});
+                }
+            },
+            .scoped => |scoped| {
+                _ = scoped; // autofix
+                try writer.print(" scoped", .{});
+            },
+
+            // else => {},
+        }
+    }
     pub const Op = enum {
+        type,
         constant,
         param_get,
+        param_set,
+
         local_get,
+        local_set,
+
         global_get,
+        global_set,
+
+        local,
         ret,
         as,
+
         add,
         sub,
         mul,
         div,
         gt,
         lt,
+        eq,
+        neq,
         block,
 
         if_expr,
@@ -134,95 +140,104 @@ pub const Instruction = struct {
             return comptime std.meta.stringToEnum(Op, str) orelse @compileError("instruction op not found: " ++ str);
         }
     };
+    pub fn accept(self: Instruction, op: Op) bool {
+        return self.op == op;
+    }
+    pub fn acceptEither(self: Instruction, comptime ops: []const Op) bool {
+        inline for (ops) |op| {
+            if (self.accept(op)) return true;
+        }
+        return false;
+    }
 };
-pub const Inst = union(enum) {
-    constant: struct {
-        type: Type.Index,
-        value: Value.Index,
-    },
-    add: BinOp,
+// pub const Inst = union(enum) {
+//     constant: struct {
+//         type: Type.Index,
+//         value: Value.Index,
+//     },
+//     add: BinOp,
 
-    get_param: NamedType,
-    get_global: NamedType,
-    ret: TypedInst,
+//     get_param: NamedType,
+//     get_global: NamedType,
+//     ret: TypedInst,
 
-    pub const NamedType = struct {
-        type: Type.Index,
-        name: InternedSlice,
-    };
-    pub const NamedInst = struct {
-        inst: Inst.Index,
-        name: InternedSlice,
-    };
-    pub const TypedInst = struct {
-        inst: Inst.Index,
-        type: Type.Index,
-    };
-    pub const Index = enum(u32) {
-        unknown,
-        _,
-        pub const INDEX_START: u32 = std.meta.tags(Index).len;
+//     pub const NamedType = struct {
+//         type: Type.Index,
+//         name: InternedSlice,
+//     };
+//     pub const NamedInst = struct {
+//         inst: Inst.Index,
+//         name: InternedSlice,
+//     };
+//     pub const TypedInst = struct {
+//         inst: Inst.Index,
+//         type: Type.Index,
+//     };
+//     pub const Index = enum(u32) {
+//         unknown,
+//         _,
+//         pub const INDEX_START: u32 = std.meta.tags(Index).len;
 
-        pub fn asInt(self: Index) u32 {
-            return @intCast(@intFromEnum(self));
-        }
+//         pub fn asInt(self: Index) u32 {
+//             return @intCast(@intFromEnum(self));
+//         }
 
-        pub fn asTypeIndex(self: u32) Index {
-            return @enumFromInt(self);
-        }
+//         pub fn asTypeIndex(self: u32) Index {
+//             return @enumFromInt(self);
+//         }
 
-        pub fn toTypeIndex(index: u32) Index {
-            return @enumFromInt(
-                @as(u32, @intCast(index + INDEX_START)),
-            );
-        }
+//         pub fn toTypeIndex(index: u32) Index {
+//             return @enumFromInt(
+//                 @as(u32, @intCast(index + INDEX_START)),
+//             );
+//         }
 
-        pub fn toInt(self: Index) ?u32 {
-            const index = @intFromEnum(self);
-            if (index < INDEX_START) return null;
-            return @intCast(index - INDEX_START);
-        }
-    };
-    pub const List = usize;
-    pub const BinOp = struct {
-        type: Type.Index,
-        lhs: Inst.Index,
-        rhs: Inst.Index,
-    };
-    // pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
-    // pub const Index = enum(u32) {
-    //     _,
-    //     pub inline fn hash(self: Index) []const u8 {
-    //         return std.mem.asBytes(&self);
-    //     }
-    //     pub fn asInt(self: Index) u32 {
-    //         return @intCast(@intFromEnum(self));
-    //     }
+//         pub fn toInt(self: Index) ?u32 {
+//             const index = @intFromEnum(self);
+//             if (index < INDEX_START) return null;
+//             return @intCast(index - INDEX_START);
+//         }
+//     };
+//     pub const List = usize;
+//     pub const BinOp = struct {
+//         type: Type.Index,
+//         lhs: Inst.Index,
+//         rhs: Inst.Index,
+//     };
+//     // pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
+//     // pub const Index = enum(u32) {
+//     //     _,
+//     //     pub inline fn hash(self: Index) []const u8 {
+//     //         return std.mem.asBytes(&self);
+//     //     }
+//     //     pub fn asInt(self: Index) u32 {
+//     //         return @intCast(@intFromEnum(self));
+//     //     }
 
-    //     pub fn asTypeIndex(self: u32) @This().Index {
-    //         return @enumFromInt(self);
-    //     }
+//     //     pub fn asTypeIndex(self: u32) @This().Index {
+//     //         return @enumFromInt(self);
+//     //     }
 
-    //     pub fn toTypeIndex(index: u32) Index {
-    //         return @enumFromInt(
-    //             @as(u32, @intCast(index + INDEX_START)),
-    //         );
-    //     }
+//     //     pub fn toTypeIndex(index: u32) Index {
+//     //         return @enumFromInt(
+//     //             @as(u32, @intCast(index + INDEX_START)),
+//     //         );
+//     //     }
 
-    //     pub fn toInt(self: Index) ?u32 {
-    //         const index = @intFromEnum(self);
-    //         if (index < INDEX_START) return null;
-    //         return @intCast(index - INDEX_START);
-    //     }
-    //     pub fn fromInt(index: u32) Index {
-    //         return @enumFromInt(index + INDEX_START);
-    //     }
-    // };
-    // global_decl: struct {
-    //     name: InternedSlice,
-    //     init: ?u32,
-    // },
-};
+//     //     pub fn toInt(self: Index) ?u32 {
+//     //         const index = @intFromEnum(self);
+//     //         if (index < INDEX_START) return null;
+//     //         return @intCast(index - INDEX_START);
+//     //     }
+//     //     pub fn fromInt(index: u32) Index {
+//     //         return @enumFromInt(index + INDEX_START);
+//     //     }
+//     // };
+//     // global_decl: struct {
+//     //     name: InternedSlice,
+//     //     init: ?u32,
+//     // },
+// };
 
 pub const Type = union(enum) {
     @"fn": Fn,
@@ -231,7 +246,7 @@ pub const Type = union(enum) {
     module: Module,
 
     // these are not types by themselves but partials of other types
-    decl: Module.Decl,
+    global: Module.Decl,
     param: Fn.Param,
     block: Block,
 
@@ -256,6 +271,7 @@ pub const Type = union(enum) {
         i64,
         f32,
         f64,
+        type,
 
         type_number,
         type_string,
@@ -340,8 +356,7 @@ pub const Type = union(enum) {
     };
     pub const Block = struct {
         name: ?InternedSlice,
-        instruction_start: Instruction.Index,
-        instruction_count: u32,
+        instructions: Instruction.List,
     };
     pub const WhileLoop = struct {
         condition: Instruction.Index,
@@ -358,15 +373,22 @@ pub const Value = union(enum) {
     pub const List = usize;
     pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
     pub const Index = enum(u32) {
+        runtime,
         true,
         false,
         none,
         undefined,
 
-        // type_number,
+        type_number,
         // type_string,
         // type_boolean,
         // type_void,
+        type_f32,
+        type_f64,
+        type_i32,
+        type_i64,
+        type_boolean,
+
         _,
         pub inline fn hash(self: Index) []const u8 {
             return std.mem.asBytes(&self);
@@ -394,13 +416,15 @@ pub const Value = union(enum) {
             return @enumFromInt(index + INDEX_START);
         }
     };
+    pub fn accept(self: Value, tag: std.meta.Tag(Value)) bool {
+        return std.meta.activeTag(self) == tag;
+    }
     pub const Fn = struct {
         type: Type.Index,
-        instructions_dep: Inst.List,
+        instructions: Instruction.List,
     };
 };
-const Logger = @import("Logger.zig");
-pub fn formatValue(self: *Self, writer: *IndentedWriter, value_index: Value.Index) std.io.AnyWriter.Error!void {
+pub fn formatValue(self: *Self, writer: *Logger, value_index: Value.Index) std.io.AnyWriter.Error!void {
     if (value_index.toInt()) |index| {
         const value: Value = self.values.items[index];
         switch (value) {
@@ -418,8 +442,9 @@ pub fn formatValue(self: *Self, writer: *IndentedWriter, value_index: Value.Inde
         try writer.writeAllIndented(@tagName(value_index));
     }
 }
-pub fn formatInstruction(self: *Self, writer: *IndentedWriter, inst_index: Instruction.Index) std.io.AnyWriter.Error!void {
+pub fn formatInstruction(self: *Self, writer: *Logger, inst_index: Instruction.Index) std.io.AnyWriter.Error!void {
     const inst: Instruction = self.instructions.items[inst_index];
+    // try writer.printIndented("#{d} = .{s} {any}", .{ inst_index, @tagName(inst.op), inst.data });
     try writer.printIndented("#{d} = ", .{
         inst_index,
     });
@@ -437,11 +462,20 @@ pub fn formatInstruction(self: *Self, writer: *IndentedWriter, inst_index: Instr
             try writer.writeAll(" ");
             try formatType(self, writer, inst.type);
             try writer.writeAll(" '");
-            try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
+            try formatType(self, writer, inst.data.type);
+            // try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
             try writer.writeAll("';\n");
         },
-        .add => {
-            try writer.writeAll("add ");
+        .add,
+        .sub,
+        .mul,
+        .div,
+        .gt,
+        .lt,
+        .eq,
+        => {
+            try writer.writeAll(@tagName(inst.op));
+            try writer.writeAll(" ");
             try formatType(self, writer, inst.type);
             try writer.writeAll(" ");
             try writer.print("#{?d} #{?d};\n", .{ inst.data.binOp.lhs, inst.data.binOp.rhs });
@@ -473,15 +507,38 @@ pub fn formatInstruction(self: *Self, writer: *IndentedWriter, inst_index: Instr
         },
         .loop => {
             try writer.writeAll("loop\n");
-            try formatType(self, writer, inst.data.loop.body);
+            try formatType(self, writer, inst.data.type);
         },
+        .as => {
+            try writer.print("#{d} as ", .{inst.data.binOp.lhs});
+            try formatType(self, writer, inst.type);
+            try writer.writeAll(";\n");
+        },
+        .local => {
+            try writer.writeAll("local ");
+            try formatType(self, writer, inst.type);
+            try writer.writeAll(" '");
+            try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
+            try writer.writeAll("';\n");
+        },
+        .local_set => {
+            try writer.writeAll("local_set ");
+            try formatType(self, writer, inst.type);
+            try writer.print(" #{d} = #{d};\n", .{ inst.data.binOp.lhs, inst.data.binOp.rhs });
+        },
+        .type => {
+            try writer.writeAll("type ");
+            try formatType(self, writer, inst.data.type);
+            try writer.writeAll(";\n");
+        },
+
         else => {
             try writer.print("{s};\n", .{@tagName(inst.op)});
         },
     }
     // try writer.writeAll("\n");
 }
-pub fn formatType(self: *Self, writer: *IndentedWriter, type_index: Type.Index) !void {
+pub fn formatType(self: *Self, writer: *Logger, type_index: Type.Index) !void {
     if (type_index.toInt()) |index| {
         const ty: Type = self.types.items[index];
         switch (ty) {
@@ -513,17 +570,16 @@ pub fn formatType(self: *Self, writer: *IndentedWriter, type_index: Type.Index) 
                 // }
             },
             .block => |block| {
-                try writer.open("block", .{});
+                writer.open("block", .{});
                 defer writer.close();
-                // var iter = self.lists.iterList(block.instructions);
+                var iter = self.lists.iterList(block.instructions);
 
-                var i: u32 = block.instruction_start;
-                while (i < block.instruction_start + block.instruction_count) : (i += 1) {
-                    try formatInstruction(self, writer, i);
+                while (iter.next()) |inst_index| {
+                    try formatInstruction(self, writer, inst_index);
                 }
             },
             .module => |mod| {
-                try writer.open("module", .{});
+                writer.open("module", .{});
                 defer writer.close();
                 var iter = self.lists.iterList(mod.decls);
 
@@ -540,11 +596,11 @@ pub fn formatType(self: *Self, writer: *IndentedWriter, type_index: Type.Index) 
                     try writer.writeAll("\n");
                 }
             },
-            .decl => |decl| {
+            .global => |global| {
                 try writer.writeAll("@");
-                try writer.writeAll(self.strings.getSlice(decl.name));
+                try writer.writeAll(self.strings.getSlice(global.name));
                 try writer.writeAll(": ");
-                try formatType(self, writer, decl.type);
+                try formatType(self, writer, global.type);
             },
             .param => |param| {
                 try writer.writeAll(self.strings.getSlice(param.name));
@@ -567,7 +623,7 @@ pub fn format(self_: Self, comptime fmt: []const u8, options: std.fmt.FormatOpti
 
     var self: *Self = @constCast(&self_);
     // const root_type = self.types.items[0];
-    var indented_writer = IndentedWriter.init(writer);
+    var indented_writer = Logger.init(writer, "Mir");
     // try indented_writer.open("root_module", .{});
     try self.formatType(&indented_writer, Type.RootIndex);
 

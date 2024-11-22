@@ -52,12 +52,12 @@ pub fn translateModule(self: *Self, type_index: Mir.Type.Index) !void {
 }
 pub fn translateDecl(self: *Self, decl_index: Mir.Type.Index) !void {
     const decl = self.getType(decl_index) orelse return error.DeclNotFound;
-    const ty = self.getType(decl.decl.type) orelse return error.TypeNotFound;
+    const ty = self.getType(decl.global.type) orelse return error.TypeNotFound;
     switch (ty) {
         .@"fn" => |function| {
             _ = function; // autofix
             // try self.translateFunction(function);
-            try self.translateFunction(decl.decl.type);
+            try self.translateFunction(decl.global.type);
         },
         else => {
             @panic("unimplemented");
@@ -97,12 +97,12 @@ pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
     // const inst_start = self.mir.instructions.items.len;
     _ = try self.builder.pushFunction(func_wip);
 }
+
 pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmBuilder.Function) !void {
     const block_ty = self.getType(block_index) orelse return error.TypeNotFound;
-    var i = block_ty.block.instruction_start;
-    const inst_end = i + block_ty.block.instruction_count;
-    while (i < inst_end) : (i += 1) {
-        const inst = self.mir.instructions.items[i];
+    var iter = self.iterList(block_ty.block.instructions);
+    while (iter.next()) |inst_index| {
+        const inst = self.mir.instructions.items[inst_index];
         switch (inst.op) {
             .constant => {
                 if (self.getValue(inst.data.value)) |value| {
