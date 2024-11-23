@@ -1,17 +1,19 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "test",
-      "type": "shell",
-      "command": "zig",
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "test",
+			"type": "shell",
 
-      "args": [
-        "test",
-        "-femit-bin=.test/${fileBasenameNoExtension}-test",
-        "--test-no-exec",
-        "${relativeFile}"
-      ]
-    }
-  ]
+			"command": "zig",
+
+			"args": [
+				"build",
+				"debug",
+				"--build-file",
+				"lang/build.zig",
+				"-Dtest-filter=${fileBasenameNoExtension}"
+			]
+		}
+	]
 }
