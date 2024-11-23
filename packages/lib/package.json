@@ -1,0 +1,16 @@
+{
+	"name": "lang",
+	"module": "index.ts",
+	"type": "module",
+	"scripts": {
+		"dev": "watchexec --exts zig --clear=clear 'bun run build && bun run wasm:dump'",
+		"build": "zig build wasm -p dist",
+		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.0.0"
+	}
+}

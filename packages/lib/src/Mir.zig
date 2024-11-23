@@ -27,11 +27,9 @@ pub fn init(allocator: Allocator) !Self {
 pub fn deinit(self: *Self) void {
     self.strings.deinit();
     self.lists.deinit(self.allocator);
-    self.instructions_dep.deinit(self.allocator);
     self.instructions.deinit(self.allocator);
     self.types.deinit(self.allocator);
     self.values.deinit(self.allocator);
-    self.definitions.deinit(self.allocator);
 }
 
 pub const Instruction = struct {
