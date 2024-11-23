@@ -292,23 +292,9 @@ const TypeWip = struct {
             switch (entry.value_ptr.state) {
                 .idle => {
                     const index = try module.resolveGlobal(entry.key_ptr.*);
-                    // const decl_type = try self.builder.pushType(.{
-                    //     .global = .{
-                    //         .name = entry.value_ptr.name,
-                    //         .type = index,
-                    //         .init = null,
-                    //     },
-                    // });
                     try decls.append(index.asInt());
                 },
                 .resolved => |resolved| {
-                    // const decl_type = try self.builder.pushType(.{
-                    //     .global = .{
-                    //         .name = entry.value_ptr.name,
-                    //         .type = resolved,
-                    //         .init = null,
-                    //     },
-                    // });
                     try decls.append(resolved.asInt());
                 },
                 else => unreachable,
@@ -337,13 +323,21 @@ const TypeWip = struct {
         const return_type = try self.scope.resolveType(fn_inst.return_type);
         self.builder.logger.close();
 
+        const fn_name = try self.builder.internNodeSlice(fn_inst.name_node);
         var fn_wip = FnWip.init(
             self.builder,
             self.scope,
             self.hir_inst,
+            fn_name,
             return_type,
         );
 
+        var body_wip: ?*BlockWip = null;
+        if (fn_inst.init) |init_inst| {
+            fn_wip.body = BlockWip.init(self.builder, .{ .@"fn" = &fn_wip }, init_inst);
+            fn_wip.body.?.return_type = return_type;
+            body_wip = &fn_wip.body.?;
+        }
         var iter_params = self.builder.iterHirList(fn_inst.params);
 
         while (iter_params.next()) |param_index| {
@@ -354,13 +348,35 @@ const TypeWip = struct {
             const param_type = try self.scope.resolveType(param_inst.ty);
             const name = try self.builder.internNodeSlice(param_inst.name_node);
 
-            try fn_wip.pushParameter(
-                name,
-                param_type,
-                param_index,
-            );
+            const index = try self.builder.pushType(.{ .param = .{
+                .type = param_type,
+                .name = name,
+            } });
+            try fn_wip.params.put(self.builder.arena.allocator(), param_index, index);
+            if (body_wip) |body| {
+                try body.pushInstruction(param_index, .{
+                    .op = .param,
+                    .type = param_type,
+                    .value = .runtime,
+                    .data = .{ .scoped = .{
+                        .name = name,
+                        .index = 0,
+                    } },
+                });
+            }
         }
-        try fn_wip.resolveBody();
+        if (body_wip) |body| {
+            try body.resolve();
+        }
+
+        //     try fn_wip.pushParameter(
+        //         name,
+        //         param_type,
+        //         param_index,
+        //     );
+        // }
+        // try fn_wip.resolveBody();
+        // for
 
         return try fn_wip.commit();
     }
@@ -555,6 +571,7 @@ const Symbol = union(enum) {
 };
 pub const FnWip = struct {
     id: usize,
+    name: InternedSlice,
     parent: Scope,
     builder: *Self,
     hir_inst: Hir.Inst.Index,
@@ -562,13 +579,14 @@ pub const FnWip = struct {
     body: ?BlockWip = null,
     params: std.AutoArrayHashMapUnmanaged(Hir.Inst.Index, Mir.Type.Index) = .{},
 
-    pub fn init(builder: *Self, parent: Scope, hir_inst: Hir.Inst.Index, return_type: Mir.Type.Index) FnWip {
+    pub fn init(builder: *Self, parent: Scope, hir_inst: Hir.Inst.Index, name: InternedSlice, return_type: Mir.Type.Index) FnWip {
         Scope.i += 1;
         return .{
             .id = Scope.i,
             .parent = parent,
             .builder = builder,
             .hir_inst = hir_inst,
+            .name = name,
             .return_type = return_type,
         };
     }
@@ -593,6 +611,15 @@ pub const FnWip = struct {
         const body_inst = self.builder.getHirInst(self.hir_inst).fn_decl.init;
         if (body_inst) |body_inst_index| {
             var block = BlockWip.init(self.builder, .{ .@"fn" = self }, body_inst_index);
+            // var iter = self.params.iterator();
+            // while (iter.next()) |entry| {
+            //     try block.pushInstruction(entry.key_ptr.*, .{
+            //         .op = .param,
+            //         .type = entry.value_ptr.*,
+            //         .value = .runtime,
+            //         .data = .{ .type = entry.value_ptr.* },
+            //     });
+            // }
             block.return_type = self.return_type;
             try block.resolve();
             self.body = block;
@@ -614,6 +641,7 @@ pub const FnWip = struct {
         }
         return try self.builder.pushType(.{
             .@"fn" = .{
+                .name = self.name,
                 .params = try params.commit(),
                 .return_type = self.return_type,
                 .body = if (self.body) |*body| try body.commit() else null,
@@ -673,8 +701,114 @@ pub const BlockWip = struct {
         }
     }
     pub fn deadCodeElimination(self: *BlockWip) Error!void {
-        self.builder.logger.open("#{d} BlockWip.deadCodeElimination", .{self.hir_inst});
-        defer self.builder.logger.close();
+        var logger = self.builder.logger;
+        logger.open("#{d} BlockWip.deadCodeElimination", .{self.hir_inst});
+        defer logger.close();
+        const allocator = self.builder.arena.allocator();
+        var instructions = std.AutoArrayHashMap(u32, *Mir.Instruction).init(allocator);
+        var worklist = std.AutoArrayHashMap(u32, void).init(allocator);
+        // var locals_cfg = std.AutoArrayHashMap(u32, std.ArrayList(u32)).init(allocator);
+        // logger.log("scope count: {d}", .{self.children_scopes.count() + 1}, tw.emerald_400);
+
+        var scopes = std.ArrayList(*BlockWip).init(allocator);
+        try scopes.append(self);
+        while (scopes.popOrNull()) |scope| {
+            var iter = scope.instructions.iterator();
+            while (iter.next()) |entry| {
+                const id = entry.key_ptr.*;
+                const inst = &entry.value_ptr[1];
+                try instructions.put(id, inst);
+                // logger.log("#{d}: !{d} {s}", .{ id, inst.liveness, @tagName(inst.op) }, tw.emerald_300);
+                if (inst.liveness > 0) {
+                    try worklist.put(id, {});
+                }
+            }
+            for (scope.children_scopes.values()) |*child| {
+                try scopes.append(child);
+            }
+        }
+        {
+            // Dump
+            logger.log("instructions size: {d}", .{instructions.count()}, tw.emerald_400);
+            var instructions_iter = instructions.iterator();
+            while (instructions_iter.next()) |entry| {
+                const id = entry.key_ptr.*;
+                const inst = entry.value_ptr.*;
+                logger.log("#{d}: !{d} {s}", .{ id, inst.liveness, @tagName(inst.op) }, tw.emerald_300);
+            }
+        }
+
+        while (worklist.popOrNull()) |kv| {
+            const inst = instructions.get(kv.key) orelse self.builder.logger.panic("BlockWip.deadCodeElimination [UNRESOLVED INSTRUCTION] (#{d})", .{kv.key});
+            logger.log("checking #{d}: !{d} {s} data .{s}", .{ kv.key, inst.liveness, @tagName(inst.op), @tagName(inst.data) }, tw.emerald_400);
+            switch (inst.data) {
+                .instruction => |instruction| {
+                    try self.increaseLiveness(&worklist, &instructions, instruction);
+                    // try worklist.put(instruction, {});
+                },
+                .binOp => |bin_op| {
+                    try self.increaseLiveness(&worklist, &instructions, bin_op.lhs);
+                    try self.increaseLiveness(&worklist, &instructions, bin_op.rhs);
+                    // try worklist.put(bin_op.lhs, {});
+                    // try worklist.put(bin_op.rhs, {});
+                },
+                .if_expr => |if_expr| {
+                    try self.increaseLiveness(&worklist, &instructions, if_expr.cond);
+                    // try worklist.put(if_expr.cond, {});
+                },
+
+                // .param_get => {
+                //     inst.liveness -= 1;
+                // },
+                else => {},
+            }
+            switch (inst.op) {
+                .local, .param => {
+                    logger.log("local found #{d}: {s}", .{
+                        kv.key,
+                        @tagName(inst.op),
+                    }, tw.emerald_300);
+                    var instructions_iter = instructions.iterator();
+                    logger.log("instructions size: {d}", .{instructions.count()}, tw.emerald_400);
+                    while (instructions_iter.next()) |entry| {
+                        logger.log("checking for local #{d}", .{entry.key_ptr.*}, tw.pink_400);
+                        const inst_ptr_ = entry.value_ptr.*;
+                        const id_ = entry.key_ptr.*;
+                        switch (inst_ptr_.op) {
+                            .local_set, .param_set, .as => {
+                                if (inst_ptr_.data.binOp.lhs == kv.key or inst_ptr_.data.binOp.rhs == kv.key) {
+                                    const to_add = id_;
+                                    logger.log("local_set found #{d}: !{d} {s}", .{ to_add, inst_ptr_.liveness, @tagName(inst_ptr_.op) }, tw.emerald_300);
+                                    logger.log("adding #{d} to worklist", .{to_add}, tw.emerald_300);
+                                    try self.increaseLiveness(&worklist, &instructions, to_add);
+                                    // try worklist.put(to_add, {});
+                                }
+                                // try worklist.put(inst.data.instruction, {});
+                            },
+                            else => {},
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    pub fn isOperandLocal(inst_index: u32, instructions_map: *std.AutoArrayHashMap(u32, *Mir.Instruction)) bool {
+        const inst = instructions_map.get(inst_index) orelse return false;
+        return switch (inst.op) {
+            .param, .local => true,
+            else => false,
+        };
+    }
+    pub inline fn increaseLiveness(self: *BlockWip, worklist: *std.AutoArrayHashMap(u32, void), instructions_map: *std.AutoArrayHashMap(u32, *Mir.Instruction), id: u32) !void {
+        self.builder.logger.log("increasing liveness of #{d}", .{id}, tw.orange_400);
+        const inst = instructions_map.get(id) orelse unreachable;
+        if (inst.liveness == 0) {
+            try worklist.put(id, {});
+        }
+
+        inst.liveness += 1;
     }
 
     pub fn remapInstructions(self: *BlockWip, instructions_remap: *std.AutoArrayHashMapUnmanaged(u32, u32)) Error!Mir.Type.Index {
@@ -737,11 +871,98 @@ pub const BlockWip = struct {
         });
     }
 
+    const RemapContext = struct {
+        instructions_remap: std.AutoArrayHashMap(u32, u32),
+        locals_count: u32,
+        // root: *BlockWip,
+        pub fn init(allocator: std.mem.Allocator) RemapContext {
+            return .{
+                .instructions_remap = std.AutoArrayHashMap(u32, u32).init(allocator),
+                .locals_count = 0,
+            };
+        }
+        pub fn deinit(self: *RemapContext) void {
+            self.instructions_remap.deinit();
+        }
+
+        pub fn remap(self: *RemapContext, scope: *BlockWip) Error!Mir.Type.Index {
+            scope.builder.logger.open("#{d} BlockWip.remapInstructions, total: {d}", .{ scope.hir_inst, scope.instructions.count() });
+            defer scope.builder.logger.close();
+
+            var iter = scope.instructions.iterator();
+            var instructions = scope.builder.newList();
+
+            while (iter.next()) |entry| {
+                const current_id = entry.key_ptr.*;
+                const new_id = try scope.builder.reserveInstructionIndex();
+                try instructions.append(new_id);
+                try self.instructions_remap.put(current_id, new_id);
+
+                var inst: Mir.Instruction = entry.value_ptr[1];
+
+                scope.builder.logger.log("commiting {s} #{d} to #{d}", .{ @tagName(inst.data), current_id, new_id }, tw.yellow_400);
+
+                switch (inst.data) {
+                    .instruction => |instruction| {
+                        inst.data.instruction = self.instructions_remap.get(instruction) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED INSTRUCTION] (#{d})", .{instruction});
+                    },
+                    .if_expr => |if_expr| {
+                        inst.data.if_expr.cond = self.instructions_remap.get(if_expr.cond) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED INSTRUCTION] (#{d})", .{if_expr.cond});
+
+                        const if_inst = scope.builder.getHirInst(current_id);
+                        const then_scope = scope.children_scopes.getPtr(if_inst.if_expr.then_body) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED THEN BODY] (#{d})", .{if_inst.if_expr.then_body});
+                        inst.data.if_expr.then_body = try self.remap(then_scope);
+
+                        if (if_inst.if_expr.else_body) |else_body| {
+                            const else_scope = scope.children_scopes.getPtr(else_body) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED ELSE BODY] (#{d})", .{else_body});
+                            inst.data.if_expr.else_body = try self.remap(else_scope);
+                        }
+                    },
+                    .type => {
+                        if (inst.op == .loop) {
+                            const loop_inst = scope.builder.getHirInst(current_id);
+
+                            const loop_scope = scope.children_scopes.getPtr(loop_inst.loop.body) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED LOOP BODY] (#{d})", .{loop_inst.loop.body});
+                            inst.data.type = try self.remap(loop_scope);
+                        }
+                    },
+                    .binOp => |bin_op| {
+                        inst.data.binOp.lhs = self.instructions_remap.get(bin_op.lhs) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED INSTRUCTION] (#{d})", .{bin_op.lhs});
+                        inst.data.binOp.rhs = self.instructions_remap.get(bin_op.rhs) orelse scope.builder.logger.panic("BlockWip.commit [UNRESOLVED INSTRUCTION] (#{d})", .{bin_op.rhs});
+                    },
+                    else => {},
+                }
+                switch (inst.op) {
+                    .local, .param => {
+                        inst.data.scoped.index = self.locals_count;
+                        self.locals_count += 1;
+                    },
+                    else => {},
+                }
+                // self.builder.logger.log("remapped #{d} = {}", .{ new_id, inst }, tw.violet_400);
+                scope.builder.setInstruction(new_id, inst);
+            }
+            return try scope.builder.pushType(.{
+                .block = .{
+                    .locals = self.locals_count,
+                    // .locals = try self.locals.commit(),
+                    .name = null, // TODO
+                    .instructions = try instructions.commit(),
+                },
+            });
+        }
+    };
     pub fn commit(self: *BlockWip) Error!Mir.Type.Index {
         self.builder.logger.open("#{d} BlockWip.commit", .{self.hir_inst});
         defer self.builder.logger.close();
-        var instructions_remap: std.AutoArrayHashMapUnmanaged(u32, u32) = .{};
-        return try self.remapInstructions(&instructions_remap);
+        // try self.deadCodeElimination();
+
+        var remap_ctx = RemapContext.init(self.builder.arena.allocator());
+        defer remap_ctx.deinit();
+        return try remap_ctx.remap(self);
+
+        // var instructions_remap: std.AutoArrayHashMapUnmanaged(u32, u32) = .{};
+        // return try self.remapInstructions(&instructions_remap);
     }
     pub fn resolve(self: *BlockWip) Error!void {
         self.builder.logger.open("#{d} BlockWip.resolve", .{self.hir_inst});
@@ -856,7 +1077,7 @@ pub const BlockWip = struct {
                     .type = .unknown,
                     .data = .{ .scoped = .{
                         .name = try self.builder.internNodeSlice(local.name_node),
-                        .index = null,
+                        .index = 0,
                     } },
                 });
                 // try self.locals.put(self.builder.arena.allocator(), id, local.name_node);
@@ -888,17 +1109,19 @@ pub const BlockWip = struct {
                 });
             },
             .param_get => |param_get| {
-                const param_index = try self.parent.getParam(param_get.operand);
-                const param: Mir.Type = self.builder.getType(param_index) orelse self.builder.logger.panic("BlockWip.resolveInstruction [UNRESOLVED PARAM at #{d}] ({any})", .{
-                    param_get.operand,
-                    param_index,
-                });
+                // const param_index = try self.parent.getParam(param_get.operand);
+                const param_inst = try self.getInstruction(param_get.operand);
+                // const param_index = param_inst.data.type;
+                // const param: Mir.Type = self.builder.getType(param_index) orelse self.builder.logger.panic("BlockWip.resolveInstruction [UNRESOLVED PARAM at #{d}] ({any})", .{
+                //     param_get.operand,
+                //     param_index,
+                // });
 
                 try self.pushInstruction(id, .{
                     .value = .runtime, // TODO: resolve comptime params
                     .op = .param_get,
-                    .type = param.param.type,
-                    .data = .{ .type = param_index },
+                    .type = param_inst.type,
+                    .data = .{ .instruction = param_get.operand },
                 });
             },
             .local_get => |local_get| {
@@ -968,15 +1191,17 @@ pub const BlockWip = struct {
                     .op = .br,
                     .type = .void, // TODO: resolve typed blocks in the future
                     .data = .{ .instruction = br.operand },
+                    .liveness = 1,
                 });
             },
             .ret => |ret| {
-                const operand_inst = try self.getInstruction(ret.operand);
+                const operand_inst = if (ret.operand == 0) null else try self.getInstruction(ret.operand);
                 try self.pushInstruction(id, .{
                     .value = .runtime, // TODO: resolve comptime ret
                     .op = .ret,
-                    .type = operand_inst.type,
-                    .data = .{ .instruction = ret.operand },
+                    .type = if (operand_inst) |inst| inst.type else .void,
+                    .data = if (operand_inst != null) .{ .instruction = ret.operand } else .{ .void = {} },
+                    .liveness = 1,
                 });
             },
             .assign => |assign| {
@@ -1025,9 +1250,15 @@ pub const BlockWip = struct {
         self.builder.logger.log("BlockWip.tryFolding: {s}", .{@tagName(instruction.op)}, tw.cyan_400);
         switch (instruction.op) {
             .add, .sub, .mul, .div => |tag| {
-                const lhs_inst = try self.getInstruction(instruction.data.binOp.lhs);
-                const rhs_inst = try self.getInstruction(instruction.data.binOp.rhs);
-                if (lhs_inst.value == .runtime or rhs_inst.value == .runtime) return instruction;
+                const lhs_inst = try self.getInstructionPtr(instruction.data.binOp.lhs);
+                const rhs_inst = try self.getInstructionPtr(instruction.data.binOp.rhs);
+
+                if (lhs_inst.type == .number) lhs_inst.type = rhs_inst.type;
+                if (rhs_inst.type == .number) rhs_inst.type = lhs_inst.type;
+                var inst = instruction;
+                inst.type = lhs_inst.type;
+
+                if (lhs_inst.value == .runtime or rhs_inst.value == .runtime) return inst;
                 const lhs_value = self.builder.getValue(lhs_inst.data.value) orelse return instruction;
                 const rhs_value = self.builder.getValue(rhs_inst.data.value) orelse return instruction;
 
@@ -1041,17 +1272,28 @@ pub const BlockWip = struct {
                             else => unreachable,
                         },
                     });
-                    // self.removeInstruction(instruction.data.binOp.rhs);
-                    // self.removeInstruction(instruction.data.binOp.lhs);
+
+                    self.removeInstruction(instruction.data.binOp.rhs);
+                    self.removeInstruction(instruction.data.binOp.lhs);
                     return .{
                         .value = value,
-                        .type = lhs_inst.type,
+                        .type = inst.type,
                         .op = .constant,
                         .data = .{
                             .value = value,
                         },
                     };
                 }
+                return inst;
+            },
+            .gt, .lt, .eq, .neq => {
+                const lhs_inst = try self.getInstructionPtr(instruction.data.binOp.lhs);
+                const rhs_inst = try self.getInstructionPtr(instruction.data.binOp.rhs);
+                if (lhs_inst.type == .number) lhs_inst.type = rhs_inst.type;
+                if (rhs_inst.type == .number) rhs_inst.type = lhs_inst.type;
+                var inst = instruction;
+                inst.type = lhs_inst.type;
+                return inst;
             },
             .type => {
 
@@ -1067,8 +1309,8 @@ pub const BlockWip = struct {
                 if (lhs_inst.type == rhs_inst.type) return instruction;
 
                 //TODO: check if casting is allowec
-                // self.removeInstruction(instruction.data.binOp.lhs);
-                // self.removeInstruction(instruction.data.binOp.rhs);
+                self.removeInstruction(instruction.data.binOp.lhs);
+                self.removeInstruction(instruction.data.binOp.rhs);
                 return .{
                     .value = lhs_inst.value, // TODO: resolve comptime as
                     .op = lhs_inst.op,
@@ -1112,7 +1354,7 @@ pub fn resolveValue(self: *Self, value_inst: Hir.Inst.Index) Error!Mir.Value.Ind
 }
 test "MirBuilder" {
     const test_allocator = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("./playground.sheet", .{});
+    const file = try std.fs.cwd().openFile("./playground.zig", .{});
     defer file.close();
     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
     defer test_allocator.free(source);

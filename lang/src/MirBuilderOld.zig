@@ -737,7 +737,7 @@ pub fn deinit(self: *Self) void {
 
 test "MirBuilder" {
     const test_allocator = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("./playground.sheet", .{});
+    const file = try std.fs.cwd().openFile("./playground.zig", .{});
     defer file.close();
     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
     defer test_allocator.free(source);

@@ -4,7 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const options = b.addOptions();
-    options.addOption([]const []const u8, "log_scopes", &.{ "MirBuilder", "Mir" });
+    options.addOption([]const []const u8, "log_scopes", &.{
+        "MirBuilder",
+        "Mir",
+        // "Compilation",
+    });
     // options.addOption(bool, "have_libfoo", enable_foo);
     const test_filter = b.option(
         []const u8,

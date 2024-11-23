@@ -394,7 +394,7 @@ pub const Inst = union(enum) {
     };
     pub const FnDecl = struct {
         // name: InternedSlice,
-        name_node: ?Ast.Node.Index,
+        name_node: Ast.Node.Index,
         return_type: Inst.Index,
         params: List,
         init: ?Inst.Index,

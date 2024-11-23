@@ -96,6 +96,9 @@ const Scope = struct {
     }
 
     pub fn pushSymbol(self: *Scope, name: []const u8, index: Hir.Inst.Index) !void {
+        const inst = self.builder.hir.insts.items[index];
+        const tag = std.meta.activeTag(inst);
+        assert.fmt(tag == .local or tag == .param_decl or tag == .global_decl, "expected local, param_decl or global_decl instruction, got {s}", .{@tagName(tag)});
         self.builder.logger.open("pushSymbol \"{s}\" {d}", .{ name, index });
         defer self.builder.logger.close();
         if (self.symbols_table.contains(name)) {
@@ -134,36 +137,36 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
     switch (nav.tag) {
         .root => unreachable,
         .block => {
-            const inst = try self.genBlockInstruction(scope, node_index);
+            const inst = try self.genBlockInstruction(scope, node_index, null);
             try scope.instructions.append(inst);
             return inst;
         },
-        .const_decl => {
-            const declaration = nav.data.declaration;
-            const name_node = declaration.name;
-            const value_node = declaration.value;
-            const ty_node = declaration.ty;
-            // nav.move(nav.data.declaration.name);
-            var inst: Hir.Inst.Index = blk: {
-                if (value_node != 0) {
-                    break :blk try self.genInstruction(scope, value_node);
-                }
-                break :blk try scope.pushInstruction(.{ .undefined_value = null });
-            };
-            if (ty_node != 0) {
-                const ty_inst = try self.genInstruction(scope, ty_node);
-                inst = try scope.pushInstruction(.{ .as = .{ .lhs = inst, .rhs = ty_inst } });
-            }
-            _ = try scope.pushInstruction(.{ .debug_var = .{ .name_node = name_node, .instruction = inst } });
-            nav.move(name_node);
-            try scope.pushSymbol(nav.getNodeSlice(), inst);
-            return inst;
-            // if (nav.is(.ty_assign) or nav.is(.identifier)) {
-            //     return self.logger.todo("Error for uninitialized constant", .{});
-            // }
-            // return self.logger.todo("Error for dangling 'const' keyword, or 'expected identifier' or something", .{});
-        },
-        .var_decl => {
+        // .const_decl => {
+        //     const declaration = nav.data.declaration;
+        //     const name_node = declaration.name;
+        //     const value_node = declaration.value;
+        //     const ty_node = declaration.ty;
+        //     // nav.move(nav.data.declaration.name);
+        //     var inst: Hir.Inst.Index = blk: {
+        //         if (value_node != 0) {
+        //             break :blk try self.genInstruction(scope, value_node);
+        //         }
+        //         break :blk try scope.pushInstruction(.{ .undefined_value = null });
+        //     };
+        //     if (ty_node != 0) {
+        //         const ty_inst = try self.genInstruction(scope, ty_node);
+        //         inst = try scope.pushInstruction(.{ .as = .{ .lhs = inst, .rhs = ty_inst } });
+        //     }
+        //     _ = try scope.pushInstruction(.{ .debug_var = .{ .name_node = name_node, .instruction = inst } });
+        //     nav.move(name_node);
+        //     try scope.pushSymbol(nav.getNodeSlice(), inst);
+        //     return inst;
+        //     // if (nav.is(.ty_assign) or nav.is(.identifier)) {
+        //     //     return self.logger.todo("Error for uninitialized constant", .{});
+        //     // }
+        //     // return self.logger.todo("Error for dangling 'const' keyword, or 'expected identifier' or something", .{});
+        // },
+        .var_decl, .const_decl => {
             const declaration = nav.data.declaration;
             const name_node = declaration.name;
             const ty_node = declaration.ty;
@@ -175,6 +178,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 },
             });
             nav.move(nav.data.declaration.name);
+
             try scope.pushSymbol(nav.getNodeSlice(), local_inst);
             // if (nav.data.declaration.ty != 0) {
             //     const ty_inst = try self.genInstruction(scope, nav.data.declaration.ty);
@@ -193,7 +197,8 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst } });
             }
 
-            return try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
+            _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
+            return local_inst;
             // }
             // if (nav.acceptData(.assign)) |assign_data| {
             //     // var inst = try self.genInstruction(scope, assign_data.binary_expression.rhs);
@@ -279,10 +284,17 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
 
         .assign => {
-            const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
-            const rhs_inst = try self.genInstruction(scope, nav.data.binary_expression.rhs);
+            const bin_expr = nav.data.binary_expression;
+            // const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
+            // nav.move(nav.data.binary_expression.lhs);
+            nav.move(bin_expr.lhs);
+            const slice = nav.getNodeSlice();
+            std.debug.print("slice: {s}\n", .{slice});
+            const lhs_local = scope.resolveSymbolRecursively(slice) orelse return error.SymbolNotFound;
+            // const lhs_interned = try scope.builder.strings.intern(nav.getNodeSlice());
+            const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
 
-            return try scope.pushInstruction(.{ .assign = .{ .lhs = lhs_inst, .rhs = rhs_inst } });
+            return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_local, .rhs = rhs_inst } });
         },
         inline .add,
         .sub,
@@ -316,9 +328,11 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return try scope.pushInstruction(.{ .comptime_number = nav.node });
         },
         .ret_expression => {
-            const operand_inst = try self.genInstruction(scope, nav.data.ret_expression);
-            // try scope.instructions.append(operand_inst);
-            return try scope.pushInstruction(.{ .ret = .{ .operand = operand_inst } });
+            return try scope.pushInstruction(.{
+                .ret = .{
+                    .operand = if (nav.data.ret_expression == 0) 0 else try self.genInstruction(scope, nav.data.ret_expression),
+                },
+            });
         },
         .if_expr => {
             const data = nav.data.if_expression;
@@ -329,7 +343,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             };
             // const cond_inst = try self.genInstruction(scope, data.condition);
             // try scope.instructions.append(cond_inst);
-            const body_inst = try self.genBlockInstruction(scope, data.then_branch);
+            const body_inst = try self.genBlockInstruction(scope, data.then_branch, null);
 
             var if_expr = Hir.Inst.IfExpr{
                 .cond = cond_inst,
@@ -337,7 +351,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 .else_body = null,
             };
             if (data.else_branch > 0) {
-                const else_body_inst = try self.genBlockInstruction(scope, data.else_branch);
+                const else_body_inst = try self.genBlockInstruction(scope, data.else_branch, null);
                 if_expr.else_body = else_body_inst;
             }
             return try scope.pushInstruction(.{ .if_expr = if_expr });
@@ -361,7 +375,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             // const init_inst = if
             const init_inst = blk: {
                 if (body == 0) break :blk null;
-                const inst = try self.genScopedBlockInstruction(&fn_scope, body);
+                const inst = try self.genScopedBlockInstruction(&fn_scope, body, null);
                 try scope.instructions.append(inst);
                 break :blk inst;
             };
@@ -390,17 +404,17 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             var loop_scope = Scope.init(self, scope, .block, "while_loop");
             const cond_inst = try self.genInstruction(&loop_scope, nav.data.while_loop.condition);
 
-            const break_instruction = try self.pushInstruction(.{ .br = .{ .operand = loop_index } });
-            var else_list = self.newList();
-            try else_list.append(break_instruction);
-            const else_block = try self.pushInstruction(.{ .inline_block = .{
-                .name_node = null,
-                .instructions = try else_list.commit(),
-            } });
+            // const break_instruction = try self.pushInstruction(.{ .br = .{ .operand = loop_index } });
+            // var else_list = self.newList();
+            // try else_list.append(break_instruction);
+            // const else_block = try self.pushInstruction(.{ .inline_block = .{
+            //     .name_node = null,
+            //     .instructions = try else_list.commit(),
+            // } });
             _ = try loop_scope.pushInstruction(.{ .if_expr = .{
                 .cond = cond_inst,
-                .then_body = try self.genBlockInstruction(&loop_scope, nav.data.while_loop.body),
-                .else_body = else_block,
+                .then_body = try self.genBlockInstruction(&loop_scope, nav.data.while_loop.body, loop_index),
+                .else_body = null,
             } });
             self.setInstruction(loop_index, .{
                 .loop = .{
@@ -421,7 +435,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
     }
     self.logger.panic("unimplemented genInstruction: {s}", .{@tagName(nav.tag)});
 }
-pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
+pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index, break_index: ?Hir.Inst.Index) !Hir.Inst.Index {
     self.logger.open("#{d} genScopedBlockInstruction", .{node_index});
     defer self.logger.close();
     const nav = Ast.Navigator.init(self.hir.ast, node_index);
@@ -432,6 +446,10 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
     }
     for (scope.instructions.list.items) |inst_index| {
         try self.logger.printLnIndented("instruction: {d}", .{inst_index});
+    }
+    if (break_index) |break_inst| {
+        const br_inst = try scope.builder.pushInstruction(.{ .br = .{ .operand = break_inst } });
+        try scope.instructions.append(br_inst);
     }
     const instructions = try scope.commit();
     assert.fmt(scope.parent != null, "blocks should always have a parent scope", .{});
@@ -444,14 +462,14 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
 
     return index;
 }
-pub fn genBlockInstruction(self: *Self, parent_scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
+pub fn genBlockInstruction(self: *Self, parent_scope: *Scope, node_index: Ast.Node.Index, break_index: ?Hir.Inst.Index) !Hir.Inst.Index {
     self.logger.open("#{d} genBlockInstruction", .{node_index});
     defer self.logger.close();
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     nav.assertTag(.block);
     var scope = Scope.init(self, parent_scope, .block, "block");
 
-    const inst = try self.genScopedBlockInstruction(&scope, node_index);
+    const inst = try self.genScopedBlockInstruction(&scope, node_index, break_index);
     // try parent_scope.instructions.append(inst);
     return inst;
 }
@@ -709,7 +727,7 @@ pub fn genFnParams(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.
 }
 test "HirBuilder" {
     const test_allocator = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("./playground.sheet", .{});
+    const file = try std.fs.cwd().openFile("./playground.zig", .{});
     defer file.close();
     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
     defer test_allocator.free(source);

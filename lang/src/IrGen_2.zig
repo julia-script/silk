@@ -373,7 +373,7 @@ pub fn genFnWip(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Scope.F
 }
 test "irgen" {
     const test_allocator = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("./playground.sheet", .{});
+    const file = try std.fs.cwd().openFile("./playground.zig", .{});
     defer file.close();
     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
     defer test_allocator.free(source);

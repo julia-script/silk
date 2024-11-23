@@ -47,12 +47,12 @@ pub const Source = struct {
     pub fn compile(self: *Source, compilation: *Self) !void {
         const allocator = compilation.arena.allocator();
         self.ast = try Ast.parse(allocator, &compilation.errors, self.source);
-        std.debug.print("AST:\n", .{});
-        try self.ast.?.format(
-            std.io.getStdErr().writer().any(),
-            0,
-            .{},
-        );
+        // std.debug.print("AST:\n", .{});
+        // try self.ast.?.format(
+        //     std.io.getStdErr().writer().any(),
+        //     0,
+        //     .{},
+        // );
         self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
         std.debug.print("HIR:\n", .{});
         std.debug.print("{any}\n", .{self.hir});
@@ -127,7 +127,7 @@ pub fn addSourceFromFilePath(self: *Self, path: []const u8) !void {
 
 test "Compilation" {
     const test_allocator = std.testing.allocator;
-    var compilation = try Self.init(test_allocator, "./playground.sheet");
+    var compilation = try Self.init(test_allocator, "./playground.zig");
     defer compilation.deinit();
 
     var source_iter = compilation.sources.valueIterator();

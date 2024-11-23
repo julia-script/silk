@@ -67,27 +67,18 @@ pub fn translateDecl(self: *Self, decl_index: Mir.Type.Index) !void {
 pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
     const ty: Mir.Type = self.getType(function_index) orelse return error.FunctionNotFound;
 
-    var iter_params = self.iterList(ty.@"fn".params);
+    // var iter_params = self.iterList(ty.@"fn".params);
     var func_wip = self.builder.makeFunction();
-
-    while (iter_params.next()) |param| {
-        const param_ty = self.getType(Mir.Type.Index.asTypeIndex(param)) orelse return error.TypeNotFound;
-        switch (param_ty.param.type) {
-            .number => {
-                _ = try func_wip.pushParam(.f64);
-            },
-            else => {
-                @panic("unimplemented");
-            },
-        }
-    }
+    const name = self.mir.strings.getSlice(ty.@"fn".name);
+    func_wip.name = name;
+    func_wip.@"export" = true; //export all for now
     if (ty.@"fn".return_type != .void) {
         switch (ty.@"fn".return_type) {
-            .number => {
-                _ = try func_wip.pushResult(.f64);
+            .i32 => {
+                _ = try func_wip.pushResult(.i32);
             },
             else => {
-                @panic("unimplemented");
+                std.debug.panic("unimplemented return type: {s}", .{@tagName(ty.@"fn".return_type)});
             },
         }
     }
@@ -101,14 +92,40 @@ pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
 pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmBuilder.Function) !void {
     const block_ty = self.getType(block_index) orelse return error.TypeNotFound;
     var iter = self.iterList(block_ty.block.instructions);
+
     while (iter.next()) |inst_index| {
         const inst = self.mir.instructions.items[inst_index];
         switch (inst.op) {
+            .param => {
+                //             _ = try func_wip.pushParam(.i32);
+                _ = try func.pushParam(switch (inst.type) {
+                    .i32 => .i32,
+                    .f64 => .f64,
+                    else => {
+                        std.debug.panic("unimplemented param type: {s}", .{@tagName(inst.type)});
+                    },
+                });
+            },
+            .local => {
+                _ = try func.pushLocal(switch (inst.type) {
+                    .i32 => .i32,
+                    .f64 => .f64,
+                    else => {
+                        std.debug.panic("unimplemented local type: {s}", .{@tagName(inst.type)});
+                    },
+                });
+            },
             .constant => {
                 if (self.getValue(inst.data.value)) |value| {
                     switch (value) {
                         .float => |float| {
-                            _ = try func.pushInstruction(.{ .f64_const = float });
+                            _ = try func.pushInstruction(switch (inst.type) {
+                                .f32 => .{ .f32_const = @floatCast(float) },
+                                .f64 => .{ .f64_const = float },
+                                .i32 => .{ .i32_const = @intFromFloat(float) },
+                                .i64 => .{ .i64_const = @intFromFloat(float) },
+                                else => unreachable,
+                            });
                         },
                         else => {
                             @panic("unimplemented");
@@ -119,31 +136,58 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
                 }
             },
             .param_get => {
-                _ = try func.pushInstruction(.{ .local_get = inst.data.scoped.index.? });
+                const param_inst = self.mir.instructions.items[inst.data.instruction];
+                _ = try func.pushInstruction(.{
+                    .local_get = param_inst.data.scoped.index,
+                });
+            },
+            .local_get => {
+                const local_inst = self.mir.instructions.items[inst.data.instruction];
+                _ = try func.pushInstruction(.{ .local_get = local_inst.data.scoped.index });
             },
             // .global_get => {
             // _ = try func.pushInstruction(.{ .global_get = inst.data.scoped.index.? });
             // },
-            .add => {
+            inline .add,
+            .sub,
+            .mul,
+            .div,
+            .gt,
+            .lt,
+            .eq,
+            .neq,
+            => |tag| {
                 switch (inst.type) {
-                    .number => {
-                        _ = try func.pushInstruction(.{ .f64_add = {} });
+                    inline .i32, .f64, .i64, .f32 => |type_tag| {
+                        const key = @tagName(type_tag) ++ "_" ++ @tagName(tag);
+                        _ = try func.pushInstruction(@unionInit(
+                            WasmBuilder.Instruction,
+                            switch (tag) {
+                                .lt, .gt => switch (type_tag) {
+                                    .i32, .i64 => key ++ "_s",
+                                    // .f32, .f64 => @tagName(tag),
+                                    else => key,
+                                },
+                                else => key,
+                            },
+                            {},
+                        ));
                     },
                     else => {
-                        @panic("unimplemented");
+                        std.debug.panic("unimplemented type: {s}", .{@tagName(inst.type)});
                     },
                 }
             },
-            .gt => {
-                switch (inst.type) {
-                    .number => {
-                        _ = try func.pushInstruction(.{ .f64_gt = {} });
-                    },
-                    else => {
-                        std.debug.panic("unimplemented gt type: {s}", .{@tagName(inst.type)});
-                    },
-                }
-            },
+            // .gt => {
+            //     switch (inst.type) {
+            //         .number => {
+            //             _ = try func.pushInstruction(.{ .f64_gt = {} });
+            //         },
+            //         else => {
+            //             std.debug.panic("unimplemented gt type: {s}", .{@tagName(inst.type)});
+            //         },
+            //     }
+            // },
             .ret => {
                 _ = try func.pushInstruction(.{ .@"return" = {} });
             },
@@ -156,8 +200,32 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
                 }
                 _ = try func.pushInstruction(.{ .end = {} });
             },
+            .local_set => {
+                const local_inst = self.mir.instructions.items[inst.data.binOp.lhs];
+
+                // std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
+                //     inst.data.binOp.lhs,
+                //     @tagName(local_inst.op),
+                //     @tagName(local_inst.data),
+                // });
+                // switch (local_inst.op) {
+                _ = try func.pushInstruction(.{ .local_set = local_inst.data.scoped.index });
+            },
+
+            .loop => {
+                _ = try func.pushInstruction(.{ .loop = .empty });
+                try self.translateBlockInto(inst.data.type, func);
+                _ = try func.pushInstruction(.{ .end = {} });
+            },
+            .br => {
+                _ = try func.pushInstruction(.{ .br = 1 });
+            },
             else => {
-                std.debug.panic("Unimplemented instruction: {s}", .{@tagName(inst.op)});
+                std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
+                    inst_index,
+                    @tagName(inst.op),
+                    @tagName(inst.data),
+                });
             },
         }
     }

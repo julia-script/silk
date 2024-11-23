@@ -33,23 +33,57 @@ pub const Type = enum(u8) {
     }
 };
 
-const Instruction = union(enum) {
+pub const Instruction = union(enum) {
     @"return": void,
     local_get: u32,
     local_set: u32,
     global_get: u32,
     end: void,
 
+    // Arithmetic Operations
     i32_add: void,
     i64_add: void,
     f32_add: void,
     f64_add: void,
 
+    i32_sub: void,
+    i64_sub: void,
+    f32_sub: void,
+    f64_sub: void,
+
+    i32_mul: void,
+    i64_mul: void,
+    f32_mul: void,
+    f64_mul: void,
+
+    i32_div: void,
+    i64_div: void,
+    f32_div: void,
+    f64_div: void,
+
+    // Comparison Operations
+    i32_eq: void,
+    i32_neq: void,
+    i32_lt_s: void,
+    i32_lt_u: void,
     i32_gt_s: void,
     i32_gt_u: void,
+
+    i64_eq: void,
+    i64_neq: void,
+    i64_lt_s: void,
+    i64_lt_u: void,
     i64_gt_s: void,
     i64_gt_u: void,
+
+    f32_eq: void,
+    f32_neq: void,
+    f32_lt: void,
     f32_gt: void,
+
+    f64_eq: void,
+    f64_neq: void,
+    f64_lt: void,
     f64_gt: void,
 
     i32_const: i32,
@@ -59,6 +93,9 @@ const Instruction = union(enum) {
 
     @"if": Type,
     @"else": void,
+    br: u32,
+
+    loop: Type,
 
     // Memory instructions
 
@@ -83,17 +120,51 @@ const Instruction = union(enum) {
                 try section.write(index);
             },
 
-            .i32_add => try section.writeByte(0x6a),
-            .i64_add => try section.writeByte(0x7c),
-            .f32_add => try section.writeByte(0x92),
-            .f64_add => try section.writeByte(0xA0),
+            // Arithmetic Operations
+            .i32_add => try section.writeByte(0x6A), // i32.add
+            .i64_add => try section.writeByte(0x7C), // i64.add
+            .f32_add => try section.writeByte(0x92), // f32.add
+            .f64_add => try section.writeByte(0xA0), // f64.add
 
-            .i32_gt_s => try section.writeByte(0x4a),
-            .i32_gt_u => try section.writeByte(0x4b),
-            .i64_gt_s => try section.writeByte(0x55),
-            .i64_gt_u => try section.writeByte(0x56),
-            .f32_gt => try section.writeByte(0x5e),
-            .f64_gt => try section.writeByte(0x64),
+            .i32_sub => try section.writeByte(0x6B), // i32.sub
+            .i64_sub => try section.writeByte(0x7D), // i64.sub
+            .f32_sub => try section.writeByte(0x93), // f32.sub
+            .f64_sub => try section.writeByte(0xA1), // f64.sub
+
+            .i32_mul => try section.writeByte(0x6C), // i32.mul
+            .i64_mul => try section.writeByte(0x7E), // i64.mul
+            .f32_mul => try section.writeByte(0x94), // f32.mul
+            .f64_mul => try section.writeByte(0xA2), // f64.mul
+
+            .i32_div => try section.writeByte(0x6D), // i32.div_s
+            .i64_div => try section.writeByte(0x7F), // i64.div_s
+            .f32_div => try section.writeByte(0x95), // f32.div
+            .f64_div => try section.writeByte(0xA3), // f64.div
+
+            // Comparison Operations
+            .i32_eq => try section.writeByte(0x46), // i32.eq
+            .i32_neq => try section.writeByte(0x47), // i32.ne
+            .i32_lt_s => try section.writeByte(0x48), // i32.lt_s
+            .i32_lt_u => try section.writeByte(0x49), // i32.lt_u
+            .i32_gt_s => try section.writeByte(0x4A), // i32.gt_s
+            .i32_gt_u => try section.writeByte(0x4B), // i32.gt_u
+
+            .i64_eq => try section.writeByte(0x51), // i64.eq
+            .i64_neq => try section.writeByte(0x52), // i64.ne
+            .i64_lt_s => try section.writeByte(0x53), // i64.lt_s
+            .i64_lt_u => try section.writeByte(0x54), // i64.lt_u
+            .i64_gt_s => try section.writeByte(0x55), // i64.gt_s
+            .i64_gt_u => try section.writeByte(0x56), // i64.gt_u
+
+            .f32_eq => try section.writeByte(0x5B), // f32.eq
+            .f32_neq => try section.writeByte(0x5C), // f32.ne
+            .f32_lt => try section.writeByte(0x5D), // f32.lt
+            .f32_gt => try section.writeByte(0x5E), // f32.gt
+
+            .f64_eq => try section.writeByte(0x61), // f64.eq
+            .f64_neq => try section.writeByte(0x62), // f64.ne
+            .f64_lt => try section.writeByte(0x63), // f64.lt
+            .f64_gt => try section.writeByte(0x64), // f64.gt
 
             .i32_const => |value| {
                 try section.writeByte(0x41);
@@ -118,6 +189,14 @@ const Instruction = union(enum) {
             },
             .@"else" => try section.writeByte(0x05),
             .end => try section.writeByte(0x0b),
+            .loop => |ty| {
+                try section.writeByte(0x03);
+                try section.write(ty);
+            },
+            .br => |index| {
+                try section.writeByte(0x0c);
+                try section.write(index);
+            },
         }
     }
 };
@@ -137,6 +216,7 @@ pub const Function = struct {
     instructions: Array(Instruction),
     module: *Module,
     locals: Array(Local),
+    @"export": bool = false,
 
     pub fn init(module: *Module) Function {
         return .{
@@ -291,6 +371,33 @@ pub const Module = struct {
             try functions_section.toBytes(writer);
         }
 
+        // Export section
+        // 07                 ; Section ID for Export Section
+        // 01                 ; Section size (1 bytes)
+        // 01                 ; Export count (1 export)
+        // 00                 ; Function index (0)
+        var export_count: usize = 0;
+        for (self.functions.items) |function| {
+            if (function.@"export") {
+                export_count += 1;
+            }
+        }
+        if (export_count > 0) {
+            var export_section = Section.init(self.allocator, self, .@"export");
+            defer export_section.deinit();
+            try export_section.write(export_count);
+
+            for (self.functions.items, 0..) |function, i| {
+                if (function.@"export") {
+                    try export_section.write(function.name.len);
+                    try export_section.writeDirect(function.name);
+                    try export_section.write(0);
+                    try export_section.write(i);
+                }
+            }
+            try export_section.toBytes(writer);
+        }
+
         // Start section
         // 08                 ; Section ID for Start Section
         // 01                 ; Section size (1 bytes)
@@ -333,7 +440,7 @@ pub const Module = struct {
                 try function_body_section.write(function.locals.items.len);
 
                 for (function.locals.items) |local| {
-                    try function_body_section.write(local.count);
+                    try function_body_section.writeByte(1);
                     try function_body_section.write(local.type);
                 }
 
@@ -498,6 +605,9 @@ pub const Section = struct {
     }
     pub fn writeByte(self: *Section, value: u8) !void {
         try self.bytes.append(self.allocator, value);
+    }
+    pub fn writeDirect(self: *Section, value: []const u8) !void {
+        try self.bytes.appendSlice(self.allocator, value);
     }
     pub fn write(self: *Section, value: anytype) !void {
         const T = @TypeOf(value);
