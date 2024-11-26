@@ -310,7 +310,10 @@ pub const Module = struct {
         return Function.init(self);
     }
     pub fn toBytes(self: *Module, writer: std.io.AnyWriter) !void {
+        // Magic number
         try writeAllVarUInt32(writer, &.{ 0x00, 0x61, 0x73, 0x6d });
+
+        // Version
         try writeAllVarUInt32(writer, &.{ 0x01, 0x00, 0x00, 0x00 });
 
         // Write the Type Section
@@ -716,15 +719,10 @@ test "wasm" {
     var section = Section.init(std.testing.allocator, &module, .custom);
     defer section.deinit();
     // try section.writeSlice(u32, &.{ 1, 2, 3, 254 });
-    section.dump();
+
     try module.toWat(std.io.getStdErr().writer().any());
     var sec = Section.init(std.testing.allocator, &module, .custom);
     defer sec.deinit();
-
-    // const add = Instruction{ .f64_add = {} };
-    var b = try std.BoundedArray(u8, 1024).init(0);
-    try std.leb.writeUleb128(b.writer().any(), 0xA0);
-    std.debug.print("{x}\n", .{b.slice()});
 
     // try add.writeInto(&sec);
 }

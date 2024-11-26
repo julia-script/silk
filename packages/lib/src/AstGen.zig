@@ -11,6 +11,8 @@ const Array = std.ArrayListUnmanaged;
 const Ast = @import("Ast.zig");
 const Node = Ast.Node;
 const Logger = @import("Logger.zig");
+const builtin = @import("builtin");
+const host = @import("host.zig");
 const log = Logger.new(.ast_gen);
 
 const assert = std.debug.assert;
@@ -23,14 +25,14 @@ tokens: Array(Token) = .{},
 allocator: Allocator,
 token_index: Token.Index = 0,
 source: []const u8,
-logger: Logger = Logger.init(std.io.getStdErr().writer().any(), "AstGen"),
+logger: Logger = Logger.init(host.getStdErrWriter(), "AstGen"),
 
 const AstGenError = error{
     OutOfMemory,
 } || Logger.Error;
 
 fn pushNode(self: *AstGen, node: Node) AstGenError!Node.Index {
-    try self.logger.printLnIndented(comptime "[PUSH_NODE]: {s}", .{@tagName(node.tag)});
+    try self.logger.printLnIndented(comptime "[PUSH_NODE]: {s}", .{@tagName(node.data)});
     const index = try self.nodes.addOne(self.allocator);
     self.nodes.set(index, node);
     return @intCast(index);
@@ -40,7 +42,7 @@ fn reserveNodeIndex(self: *AstGen) AstGenError!Node.Index {
     return @intCast(index);
 }
 fn setNode(self: *AstGen, index: Node.Index, node: Node) void {
-    self.logger.printLnIndented(comptime "[SET_NODE]: {s}", .{@tagName(node.tag)}) catch {};
+    self.logger.printLnIndented(comptime "[SET_NODE]: {s}", .{@tagName(node.data)}) catch {};
     self.nodes.set(index, node);
 }
 
@@ -70,16 +72,8 @@ pub fn getNode(self: *AstGen, index: Node.Index) Node {
     return self.nodes.get(index);
 }
 
-pub fn debugToken(self: *AstGen, index: Token.Index) void {
-    std.debug.print("{s} [{s}] \n", .{
-        @tagName(self.tokens.items[index].tag),
-        self.source[self.tokens.items[index].start..self.tokens.items[index].end],
-    });
-    // while (index < self.tokens.items.len) {
-    //     std.debug.print("{s} ", .{@tagName(self.tokens.items[index].tag)});
-    //     index += 1;
-    // }
-    // std.debug.print("\n", .{});
+pub fn nodeIs(self: *AstGen, index: Node.Index, tag: Node.Tag) bool {
+    return std.meta.activeTag(self.getNode(index).data) == tag;
 }
 pub fn parseRoot(self: *AstGen) AstGenError!void {
     self.loggerOpen("parseRoot");
@@ -103,11 +97,12 @@ pub fn parseRoot(self: *AstGen) AstGenError!void {
     }
     const children_index = try children.commit();
     self.setNode(index, .{
-        .tag = .root,
         .start_token = 0,
         .end_token = @intCast(self.tokens.items.len),
         .data = .{
-            .children_list = @intCast(children_index),
+            .root = .{
+                .list = @intCast(children_index),
+            },
         },
     });
 }
@@ -153,25 +148,33 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
     switch (op_token.tag) {
         .keyword_return => {
             return try self.pushNode(.{
-                .tag = .ret_expression,
-                .data = .{ .ret_expression = try self.parseExpression() },
+                .data = .{ .ret_expression = .{ .node = try self.parseExpression() } },
                 .start_token = start_token,
                 .end_token = self.token_index,
             });
         },
-        else => {
+        inline .minus, .bang, .tilde => |token_tag| {
+            const tag = comptime switch (token_tag) {
+                .minus => .neg,
+                .bang => .not,
+                .tilde => .bnot,
+                else => unreachable,
+            };
+            const node_index = try self.parseUnary();
+            const data: Node.Data = @unionInit(Node.Data, @tagName(tag), .{ .node = node_index });
             return try self.pushNode(.{
-                .tag = switch (op_token.tag) {
-                    .minus => .neg,
-                    .bang => .not,
-                    .tilde => .bnot,
-                    else => return 0,
-                },
-                .data = .{ .unary_expression = try self.parseUnary() },
+                // .tag = switch (op_token.tag) {
+                //     .minus => .neg,
+                //     .bang => .not,
+                //     .tilde => .bnot,
+                //     else => return 0,
+                // },
+                .data = data,
                 .start_token = start_token,
                 .end_token = self.token_index,
             });
         },
+        else => unreachable,
         // .minus => {
         //     return try self.pushNode(.{
         //         .data = .{ .neg = .{
@@ -207,8 +210,7 @@ pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
     assert(token.tag == .identifier);
     defer self.consumeToken();
     return try self.pushNode(.{
-        .tag = .identifier,
-        .data = .{ .literal = self.token_index },
+        .data = .{ .identifier = .{ .token = self.token_index } },
         .start_token = self.token_index,
         .end_token = self.token_index,
     });
@@ -226,57 +228,71 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .number_literal,
             .keyword_true,
             .keyword_false,
-            => |tag| {
-                defer self.consumeToken();
-                return try self.pushNode(.{
-                    .tag = switch (tag) {
-                        .string_literal => .string_literal,
-                        .number_literal => .number_literal,
-                        .keyword_false => .false_literal,
-                        .keyword_true => .true_literal,
-                        else => unreachable,
-                    },
-                    .data = .{ .literal = self.token_index },
-                    .start_token = self.token_index,
-                    .end_token = self.token_index,
-                });
-            },
-            .identifier => return try self.parseIdentifier(),
-            inline .keyword_number,
+
+            .keyword_number,
             .keyword_boolean,
             .keyword_string,
             .keyword_void,
             .keyword_i32,
             .keyword_i64,
             .keyword_f32,
-            .keyword_f64,
-            => |tag| {
+            => |token_tag| {
+                const tag = comptime switch (token_tag) {
+                    .string_literal => .string_literal,
+                    .number_literal => .number_literal,
+                    .keyword_false => .false_literal,
+                    .keyword_true => .true_literal,
+                    .keyword_number => .ty_number,
+                    .keyword_boolean => .ty_boolean,
+                    .keyword_string => .ty_string,
+                    .keyword_void => .ty_void,
+                    .keyword_i32 => .ty_i32,
+                    .keyword_i64 => .ty_i64,
+                    .keyword_f32 => .ty_f32,
+                    else => unreachable,
+                };
                 defer self.consumeToken();
                 return try self.pushNode(.{
-                    .tag = switch (tag) {
-                        .keyword_number => .ty_number,
-                        .keyword_boolean => .ty_boolean,
-                        .keyword_string => .ty_string,
-                        .keyword_void => .ty_void,
-                        .keyword_i32 => .ty_i32,
-                        .keyword_i64 => .ty_i64,
-                        .keyword_f32 => .ty_f32,
-                        .keyword_f64 => .ty_f64,
-                        else => unreachable,
-                    },
-                    .data = .{ .literal = self.token_index },
+                    .data = @unionInit(Node.Data, @tagName(tag), .{ .token = self.token_index }),
                     .start_token = self.token_index,
                     .end_token = self.token_index,
                 });
             },
+            .identifier => return try self.parseIdentifier(),
+            // inline .keyword_number,
+            // .keyword_boolean,
+            // .keyword_string,
+            // .keyword_void,
+            // .keyword_i32,
+            // .keyword_i64,
+            // .keyword_f32,
+            // .keyword_f64,
+            // => |tag| {
+            //     defer self.consumeToken();
+            //     return try self.pushNode(.{
+            //         .tag = switch (tag) {
+            //             .keyword_number => .ty_number,
+            //             .keyword_boolean => .ty_boolean,
+            //             .keyword_string => .ty_string,
+            //             .keyword_void => .ty_void,
+            //             .keyword_i32 => .ty_i32,
+            //             .keyword_i64 => .ty_i64,
+            //             .keyword_f32 => .ty_f32,
+            //             .keyword_f64 => .ty_f64,
+            //             else => unreachable,
+            //         },
+            //         .data = .{ .literal = self.token_index },
+            //         .start_token = self.token_index,
+            //         .end_token = self.token_index,
+            //     });
+            // },
             .keyword_return => {
                 const start_token = self.token_index;
                 self.consumeToken();
                 const expr = try self.parseExpression();
 
                 return try self.pushNode(.{
-                    .tag = .ret_expression,
-                    .data = .{ .ret_expression = expr },
+                    .data = .{ .ret_expression = .{ .node = expr } },
                     .start_token = start_token,
                     .end_token = self.token_index,
                 });
@@ -291,31 +307,28 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             //     return try self.parseDeclaration();
             // },
             inline .keyword_export,
-            // .keyword_const,
-            // .keyword_var,
             .keyword_extern,
             .keyword_pub,
-            => |tag| {
+            => |token_tag| {
                 const start_token = self.token_index;
+                const tag = comptime switch (token_tag) {
+                    .keyword_export => .@"export",
+                    .keyword_extern => .@"extern",
+                    .keyword_pub => .@"pub",
+                    else => unreachable,
+                };
+
                 self.consumeToken();
                 const expr = try self.parseExpression();
                 return try self.pushNode(.{
-                    .tag = switch (tag) {
-                        .keyword_export => .@"export",
-                        .keyword_extern => .@"extern",
-                        .keyword_pub => .@"pub",
-                        // .keyword_const => .const_decl,
-                        // .keyword_var => .var_decl,
-                        else => unreachable,
-                    },
-                    .data = .{ .unary_expression = expr },
+                    .data = @unionInit(Node.Data, @tagName(tag), .{ .node = expr }),
                     .start_token = start_token,
                     .end_token = self.token_index,
                 });
             },
             inline .keyword_const,
             .keyword_var,
-            => |tag| {
+            => |token_tag| {
                 const start_token = self.token_index;
                 self.consumeToken();
                 const name = try self.parseIdentifier();
@@ -333,13 +346,18 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     }
                     break :blk 0;
                 };
+                const tag = comptime switch (token_tag) {
+                    .keyword_const => .const_decl,
+                    .keyword_var => .var_decl,
+                    else => unreachable,
+                };
                 return try self.pushNode(.{
-                    .tag = switch (tag) {
-                        .keyword_const => .const_decl,
-                        .keyword_var => .var_decl,
-                        else => unreachable,
-                    },
-                    .data = .{ .declaration = .{ .name = name, .ty = ty, .value = value } },
+                    .data = @unionInit(
+                        Node.Data,
+                        @tagName(tag),
+                        .{ .name = name, .type = ty, .value = value },
+                    ),
+
                     .start_token = start_token,
                     .end_token = self.token_index,
                 });
@@ -466,40 +484,66 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
     }
     return lhs;
 }
+
 pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index, rhs: Node.Index) !Node.Index {
     self.loggerOpen("makeBinaryExpression");
     defer self.logger.close();
     const start_token = self.nodes.get(lhs).start_token;
     const end_token = self.nodes.get(rhs).end_token;
+
+    // const tag: Node.Tag = switch (bin_op_token.tag) {
+    // inline .plus => .add,
+    // inline .minus => .sub,
+    // inline .star => .mul,
+    // inline .slash => .div,
+    // inline .percent => .mod,
+    // inline .double_star => .pow,
+    // inline .double_equal => .eq,
+    // inline .bang_equal => .ne,
+    // inline .l_angle_bracket => .lt,
+    // inline .l_angle_bracket_equal => .lte,
+    // inline .r_angle_bracket => .gt,
+    // inline .r_angle_bracket_equal => .gte,
+    // inline .double_l_angle_bracket => .bshl,
+    // inline .double_r_angle_bracket => .bshr,
+    // inline .ampersand => .band,
+    // inline .pipe => .bor,
+    // inline .dot => .prop_access,
+    // inline .keyword_or => .@"or",
+    // inline .keyword_and => .@"and",
+    // inline .equal => .assign,
+    // inline .colon => .ty_assign,
+    //     inline else => unreachable,
+    // };
     return try self.pushNode(.{
-        .tag = switch (bin_op_token.tag) {
-            .plus => .add,
-            .minus => .sub,
-            .star => .mul,
-            .slash => .div,
-            .percent => .mod,
-            .double_star => .pow,
-            .double_equal => .eq,
-            .bang_equal => .ne,
-            .l_angle_bracket => .lt,
-            .l_angle_bracket_equal => .lte,
-            .r_angle_bracket => .gt,
-            .r_angle_bracket_equal => .gte,
-            .double_l_angle_bracket => .bshl,
-            .double_r_angle_bracket => .bshr,
-            .ampersand => .band,
-            .pipe => .bor,
-            .dot => .prop_access,
-            .keyword_or => .@"or",
-            .keyword_and => .@"and",
-            .equal => .assign,
-            .colon => .ty_assign,
+        // .data = @unionInit(Node.Data, @tagName(tag), .{
+        //     .lhs = lhs,
+        //     .rhs = rhs,
+        // }),
+        .data = switch (bin_op_token.tag) {
+            .plus => .{ .add = .{ .lhs = lhs, .rhs = rhs } },
+            .minus => .{ .sub = .{ .lhs = lhs, .rhs = rhs } },
+            .star => .{ .mul = .{ .lhs = lhs, .rhs = rhs } },
+            .slash => .{ .div = .{ .lhs = lhs, .rhs = rhs } },
+            .percent => .{ .mod = .{ .lhs = lhs, .rhs = rhs } },
+            .double_star => .{ .pow = .{ .lhs = lhs, .rhs = rhs } },
+            .double_equal => .{ .eq = .{ .lhs = lhs, .rhs = rhs } },
+            .bang_equal => .{ .ne = .{ .lhs = lhs, .rhs = rhs } },
+            .l_angle_bracket => .{ .lt = .{ .lhs = lhs, .rhs = rhs } },
+            .l_angle_bracket_equal => .{ .lte = .{ .lhs = lhs, .rhs = rhs } },
+            .r_angle_bracket => .{ .gt = .{ .lhs = lhs, .rhs = rhs } },
+            .r_angle_bracket_equal => .{ .gte = .{ .lhs = lhs, .rhs = rhs } },
+            .double_l_angle_bracket => .{ .bshl = .{ .lhs = lhs, .rhs = rhs } },
+            .double_r_angle_bracket => .{ .bshr = .{ .lhs = lhs, .rhs = rhs } },
+            .ampersand => .{ .band = .{ .lhs = lhs, .rhs = rhs } },
+            .pipe => .{ .bor = .{ .lhs = lhs, .rhs = rhs } },
+            .dot => .{ .prop_access = .{ .lhs = lhs, .rhs = rhs } },
+            .keyword_or => .{ .@"or" = .{ .lhs = lhs, .rhs = rhs } },
+            .keyword_and => .{ .@"and" = .{ .lhs = lhs, .rhs = rhs } },
+            .equal => .{ .assign = .{ .lhs = lhs, .rhs = rhs } },
+            .colon => .{ .ty_assign = .{ .lhs = lhs, .rhs = rhs } },
             else => unreachable,
         },
-        .data = .{ .binary_expression = .{
-            .lhs = lhs,
-            .rhs = rhs,
-        } },
         .start_token = start_token,
         .end_token = end_token,
     });
@@ -596,8 +640,7 @@ pub fn parseGroup(self: *AstGen) AstGenError!Node.Index {
     const expr = try self.parseExpression();
     if (expr != 0) {
         const index = try self.pushNode(.{
-            .tag = .group,
-            .data = .{ .group = expr },
+            .data = .{ .group = .{ .node = expr } },
             .start_token = start_token,
             .end_token = self.token_index,
         });
@@ -638,7 +681,7 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
         });
         return 0;
     }
-    if (self.getNode(condition).tag != .group) {
+    if (!self.nodeIs(condition, .group)) {
         try self.errors.addError(.{
             .tag = .expression_not_parenthesized,
             .start = self.getNode(condition).start_token,
@@ -670,8 +713,7 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
         break :blk 0;
     };
     return try self.pushNode(.{
-        .tag = .if_expr,
-        .data = .{ .if_expression = .{
+        .data = .{ .if_expr = .{
             .condition = condition,
             .then_branch = then_expr,
             .else_branch = else_expr,
@@ -680,18 +722,40 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
         .end_token = self.token_index,
     });
 }
+
+pub inline fn mapTag(tag: Token.Tag, comptime options: []const struct { Token.Tag, Node.Tag }) Node.Tag {
+    inline for (options) |option| {
+        if (option[0] == tag) return comptime option[1];
+    }
+    unreachable;
+}
+pub inline fn mapTagName(tag: Token.Tag, comptime options: []const struct { Token.Tag, Node.Tag }) []const u8 {
+    inline for (options) |option| {
+        if (option[0] == tag) return comptime @tagName(option[1]);
+    }
+    unreachable;
+}
 pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
     self.loggerOpen("parsePostfixUnary");
     defer self.logger.close();
     const token = self.peekToken() orelse return lhs;
     self.consumeToken();
+
+    // const tag: Node.Tag = switch (token.tag) {
+    //     inline .double_plus => .increment,
+    //     inline .double_minus => .decrement,
+    //     inline else => unreachable,
+    // };
+    // const tag = mapTagName(token.tag, &.{
+    //     .{ .double_plus, .increment },
+    //     .{ .double_minus, .decrement },
+    // });
     return try self.pushNode(.{
-        .tag = switch (token.tag) {
-            .double_plus => .increment,
-            .double_minus => .decrement,
+        .data = switch (token.tag) {
+            .double_plus => .{ .increment = .{ .node = lhs } },
+            .double_minus => .{ .decrement = .{ .node = lhs } },
             else => unreachable,
         },
-        .data = .{ .unary_expression = lhs },
         .start_token = self.getNode(lhs).start_token,
         .end_token = self.token_index,
     });
@@ -723,7 +787,6 @@ pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
         return proto;
     }
     return try self.pushNode(.{
-        .tag = .fn_decl,
         .data = .{ .fn_decl = .{
             .proto = proto,
             .body = body,
@@ -799,11 +862,10 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
     }
     const ret_ty = try self.parseTy();
     return try self.pushNode(.{
-        .tag = .fn_proto,
         .data = .{ .fn_proto = .{
             .name = name,
             .params_list = @intCast(try params.commit()),
-            .ret_ty = ret_ty,
+            .ret_type = ret_ty,
         } },
         .start_token = start_token,
         .end_token = self.token_index,
@@ -837,7 +899,6 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
             .payload = @intFromEnum(Token.Tag.colon),
         });
         self.setNode(index, .{
-            .tag = .fn_param,
             .data = .{
                 .fn_param = data,
             },
@@ -850,7 +911,6 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
 
     data.ty = try self.parseTy();
     self.setNode(index, .{
-        .tag = .fn_param,
         .data = .{ .fn_param = data },
         .start_token = start_token,
         .end_token = self.token_index,
@@ -917,7 +977,6 @@ pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
                     });
                 }
                 return try self.pushNode(.{
-                    .tag = .ty_generic,
                     .data = .{
                         .ty_generic = .{
                             .name = name,
@@ -1003,8 +1062,7 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
         self.consumeToken();
     }
     return try self.pushNode(.{
-        .tag = .block,
-        .data = .{ .children_list = @intCast(try nodes.commit()) },
+        .data = .{ .block = .{ .list = @intCast(try nodes.commit()) } },
         .start_token = start_token,
         .end_token = self.token_index,
     });
@@ -1036,7 +1094,6 @@ pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
         }
     }
     self.setNode(index, .{
-        .tag = .fn_call,
         .data = .{ .fn_call = .{
             .callee = callee,
             .args_list = @intCast(try args.commit()),
@@ -1065,7 +1122,7 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
         });
         return 0;
     }
-    if (self.getNode(condition).tag != .group) {
+    if (!self.nodeIs(condition, .group)) {
         try self.errors.addError(.{
             .tag = .expression_not_parenthesized,
             .start = self.getNode(condition).start_token,
@@ -1084,7 +1141,6 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
     }
 
     return try self.pushNode(.{
-        .tag = .while_loop,
         .data = .{ .while_loop = .{
             .condition = condition,
             .body = body,

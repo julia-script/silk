@@ -72,7 +72,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         .mod_decl => |mod_decl| {
             try fmt.indent();
             try writer.writeAll("module {\n");
-            var declarations_iter = value.lists.iterList(mod_decl.declarations);
+            var declarations_iter = value.lists.iterList(mod_decl.declarations_list);
             while (declarations_iter.next()) |declaration_index| {
                 try formatInstruction(value, writer, options, declaration_index, indent + 1);
             }
@@ -135,7 +135,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         .inline_block, .block => |block| {
             try fmt.indent();
             try writer.print("{s} {{\n", .{@tagName(inst)});
-            var instructions_iter = value.lists.iterList(block.instructions);
+            var instructions_iter = value.lists.iterList(block.instructions_list);
             while (instructions_iter.next()) |instruction_index| {
                 try formatInstruction(value, writer, options, instruction_index, indent + 1);
             }
@@ -416,7 +416,7 @@ pub const Inst = union(enum) {
     };
     pub const Block = struct {
         name_node: ?Ast.Node.Index,
-        instructions: List,
+        instructions_list: List,
     };
     pub const GlobalDecl = struct {
         name_node: Ast.Node.Index,
@@ -430,7 +430,7 @@ pub const Inst = union(enum) {
     };
     pub const Module = struct {
         name_node: ?Ast.Node.Index,
-        declarations: List,
+        declarations_list: List,
     };
     pub const Param = struct {
         name_node: Ast.Node.Index,
@@ -450,7 +450,7 @@ pub const Definition = union(enum) {
         visibility: Visibility,
         exported: bool,
         mutable: bool,
-        params: Inst.List,
+        params_list: List,
         return_type: Inst.Index,
         init: ?Inst.Index = null,
     };

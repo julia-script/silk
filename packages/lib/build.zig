@@ -13,9 +13,9 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
 
     options.addOption([]const []const u8, "log_scopes", &.{
-        "MirBuilder",
-        "Mir",
-        "Compilation",
+        // "MirBuilder",
+        // "Mir",
+        // "Compilation",
     });
 
     const test_filter = b.option(
@@ -66,6 +66,7 @@ pub fn build(b: *std.Build) void {
         },
         .unwind_tables = true,
     });
+    wasm_exe.root_module.addOptions("options", options);
 
     wasm_exe.entry = .disabled;
     wasm_exe.export_table = true;

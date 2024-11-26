@@ -1,0 +1,24 @@
+{
+	"name": "@lang/grammar",
+	"module": "index.ts",
+	"type": "module",
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.0.0"
+	},
+	"scripts": {
+		"prepare": "lezer-generator src/lang.grammar -o ./src/gen/parser.ts --typeScript",
+		"dev:grammar": "watchexec -w src -e grammar \"bun run prepare\"",
+		"dev:tsc": "tsc --watch",
+		"dev": "bun run dev:grammar & bun run dev:tsc",
+		"build": "bun prepare && tsc"
+	},
+	"dependencies": {
+		"@codemirror/text": "^0.19.6",
+		"@lezer/generator": "^1.7.1",
+		"@lezer/lr": "^1.4.2",
+		"@uiw/codemirror-themes": "^4.23.6"
+	}
+}

@@ -1,16 +1,18 @@
 {
-	"name": "lang",
+	"name": "@lang/lib",
 	"module": "index.ts",
-	"type": "module",
-	"scripts": {
-		"dev": "watchexec --exts zig --clear=clear 'bun run build && bun run wasm:dump'",
-		"build": "zig build wasm -p dist",
-		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm"
-	},
 	"devDependencies": {
+		"@biomejs/biome": "1.9.4",
 		"@types/bun": "latest"
 	},
 	"peerDependencies": {
 		"typescript": "^5.0.0"
-	}
+	},
+	"scripts": {
+		"dev": "watchexec --exts zig --clear=clear 'bun run build'",
+		"build": "zig build wasm -p dist -freference-trace=10",
+		"build:ts": "tsc",
+		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm"
+	},
+	"type": "module"
 }

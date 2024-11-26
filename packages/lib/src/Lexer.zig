@@ -547,7 +547,6 @@ fn assertLexParts(str: []const u8, expected: []const struct { []const u8, Token.
         try actual_writer.print("[{s}]:\t\"{s}\"\n", .{ @tagName(token.tag), lexer.source[token.start..token.end] });
     }
     if (std.mem.eql(u8, expected_str.items, actual_str.items)) return;
-    std.debug.print("Strings are not equal\n\n", .{});
     var diff = try patience.diff(std.testing.allocator, expected_str.items, actual_str.items);
     defer diff.deinit();
     try diff.format(std.io.getStdErr().writer().any(), .{});

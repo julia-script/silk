@@ -11,6 +11,8 @@ const Color = @import("Color.zig");
 const tw = Color.tw;
 const Allocator = std.mem.Allocator;
 const Self = @This();
+const serializer = @import("serializer.zig");
+const host = @import("host.zig");
 
 errors: *ErrorManager,
 hir: *Hir,
@@ -26,7 +28,7 @@ pub fn deinit(self: *Self) void {
 pub fn gen(allocator: Allocator, hir: *Hir, errors: *ErrorManager) !Mir {
     var mir = try Mir.init(allocator);
     var builder = Self{
-        .logger = Logger.init(std.io.getStdErr().writer().any(), "MirBuilder"),
+        .logger = Logger.init(host.getStdErrWriter(), "MirBuilder"),
         .errors = errors,
         .hir = hir,
         .mir = &mir,
@@ -186,7 +188,7 @@ pub const ModuleWip = struct {
         defer self.builder.logger.close();
 
         const inst = self.builder.getHirInst(self.hir_inst);
-        var iter_decl_inst = self.builder.iterHirList(inst.mod_decl.declarations);
+        var iter_decl_inst = self.builder.iterHirList(inst.mod_decl.declarations_list);
         while (iter_decl_inst.next()) |decl_inst_index| {
             const decl_inst: Hir.Inst = self.builder.getHirInst(decl_inst_index);
             const name = try self.builder.internNodeSlice(decl_inst.global_decl.name_node);
@@ -970,7 +972,7 @@ pub const BlockWip = struct {
         const inst = self.builder.getHirInst(self.hir_inst);
         switch (inst) {
             .block, .inline_block => |block_inst| {
-                var iter = self.builder.iterHirList(block_inst.instructions);
+                var iter = self.builder.iterHirList(block_inst.instructions_list);
                 while (iter.next()) |inst_index| {
                     // _ = try self.resolveSingleInstruction(inst_index);
                     try self.resolveInstruction(inst_index);
@@ -1374,5 +1376,17 @@ test "MirBuilder" {
     var mir = try Self.gen(test_allocator, &hir, &errors);
 
     defer mir.deinit();
+
     std.debug.print("Mir:\n{}\n", .{mir});
+    try serializer.writeJSON(
+        []const Mir.Instruction,
+        std.io.getStdErr().writer().any(),
+        mir.instructions.items,
+        .{
+            .lists = &mir.lists,
+            .interned = &mir.strings,
+        },
+    );
+
+    try serializer.writeTsType(Mir.Instruction, "Instruction", std.io.getStdErr().writer().any());
 }

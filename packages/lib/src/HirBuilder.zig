@@ -7,12 +7,14 @@ const InternedSlice = @import("InternedStrings.zig").InternedSlice;
 const assert = @import("assert.zig");
 const shared = @import("shared.zig");
 const Logger = @import("Logger.zig");
+const serializer = @import("serializer.zig");
+const host = @import("host.zig");
 
 hir: *Hir,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 error_manager: *ErrorManager,
-logger: Logger = Logger.init(std.io.getStdErr().writer().any(), "HirBuilder"),
+logger: Logger = Logger.init(host.getStdErrWriter(), "HirBuilder"),
 
 pub fn gen(allocator: std.mem.Allocator, ast: *Ast, error_manager: *ErrorManager) !Hir {
     var hir = try Hir.init(allocator, ast);
@@ -129,47 +131,32 @@ const HirBuilderError = error{
     SymbolNotFound,
 } || std.io.AnyWriter.Error;
 
+pub fn genBinaryExpression(self: *Self, comptime tag: Ast.Node.Tag, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
+    const nav = Ast.Navigator.init(self.hir.ast, node_index);
+    const data = @field(nav.data.*, @tagName(tag));
+    const lhs_inst = try self.genInstruction(scope, data.lhs);
+    const rhs_inst = try self.genInstruction(scope, data.rhs);
+    const bin: Hir.Inst.BinaryOp = .{ .lhs = lhs_inst, .rhs = rhs_inst };
+    var inst = comptime @unionInit(Hir.Inst, @tagName(tag), undefined);
+    @field(inst, @tagName(tag)) = bin;
+    return try scope.pushInstruction(inst);
+}
 pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     self.logger.open("#{d} genInstruction .{s}", .{ node_index, @tagName(nav.tag) });
     defer self.logger.close();
 
-    switch (nav.tag) {
+    switch (nav.data.*) {
         .root => unreachable,
         .block => {
             const inst = try self.genBlockInstruction(scope, node_index, null);
             try scope.instructions.append(inst);
             return inst;
         },
-        // .const_decl => {
-        //     const declaration = nav.data.declaration;
-        //     const name_node = declaration.name;
-        //     const value_node = declaration.value;
-        //     const ty_node = declaration.ty;
-        //     // nav.move(nav.data.declaration.name);
-        //     var inst: Hir.Inst.Index = blk: {
-        //         if (value_node != 0) {
-        //             break :blk try self.genInstruction(scope, value_node);
-        //         }
-        //         break :blk try scope.pushInstruction(.{ .undefined_value = null });
-        //     };
-        //     if (ty_node != 0) {
-        //         const ty_inst = try self.genInstruction(scope, ty_node);
-        //         inst = try scope.pushInstruction(.{ .as = .{ .lhs = inst, .rhs = ty_inst } });
-        //     }
-        //     _ = try scope.pushInstruction(.{ .debug_var = .{ .name_node = name_node, .instruction = inst } });
-        //     nav.move(name_node);
-        //     try scope.pushSymbol(nav.getNodeSlice(), inst);
-        //     return inst;
-        //     // if (nav.is(.ty_assign) or nav.is(.identifier)) {
-        //     //     return self.logger.todo("Error for uninitialized constant", .{});
-        //     // }
-        //     // return self.logger.todo("Error for dangling 'const' keyword, or 'expected identifier' or something", .{});
-        // },
-        .var_decl, .const_decl => {
-            const declaration = nav.data.declaration;
+        .var_decl, .const_decl => |declaration| {
+            // const declaration = nav.data.declaration;
             const name_node = declaration.name;
-            const ty_node = declaration.ty;
+            const ty_node = declaration.type;
             const value_node = declaration.value;
 
             const local_inst = try scope.pushInstruction(.{
@@ -177,7 +164,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     .name_node = name_node,
                 },
             });
-            nav.move(nav.data.declaration.name);
+            nav.move(declaration.name);
 
             try scope.pushSymbol(nav.getNodeSlice(), local_inst);
             // if (nav.data.declaration.ty != 0) {
@@ -199,113 +186,26 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
 
             _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
             return local_inst;
-            // }
-            // if (nav.acceptData(.assign)) |assign_data| {
-            //     // var inst = try self.genInstruction(scope, assign_data.binary_expression.rhs);
-            //     nav.move(assign_data.binary_expression.lhs);
-            //     const local_inst = try scope.pushInstruction(.{
-            //         .local = .{
-            //             .name_node = nav.node,
-            //             // .instruction = init_inst,
-            //             // .type = typeof_inst,
-            //         },
-            //     });
-            //     const init_inst = try self.genInstruction(scope, assign_data.binary_expression.rhs);
-            //     const type_inst: Hir.Inst.Index = blk: {
-            //         if (nav.acceptData(.ty_assign)) |ty_assign_data| {
-            //             const inst = try self.genInstruction(scope, ty_assign_data.binary_expression.rhs);
-            //             // inst = try scope.pushInstruction(.{ .as = .{ .lhs = inst, .rhs = type_inst } });
-            //             nav.move(ty_assign_data.binary_expression.lhs);
-            //             break :blk inst;
-            //         }
-
-            //         break :blk try scope.pushInstruction(.{ .typeof = .{ .operand = init_inst } });
-            //     };
-            //     const casted = try scope.pushInstruction(.{
-            //         .as = .{ .lhs = local_inst, .rhs = type_inst },
-            //     });
-            //     const local_set = try scope.pushInstruction(.{
-            //         .local_set = .{
-            //             .lhs = casted,
-            //             .rhs = init_inst,
-            //         },
-            //     });
-            //     _ = local_set; // autofix
-            //     try scope.pushSymbol(nav.getNodeSlice(), casted);
-
-            //     return casted;
-            // }
-            // if (nav.is(.ty_assign) or nav.is(.identifier)) {
-            //     return self.logger.todo("Error for uninitialized constant", .{});
-            // }
-            // return self.logger.todo("Error for dangling 'const' keyword, or 'expected identifier' or something", .{});
         },
-        // .var_decl, .const_decl => {
-        // var local_decl = Hir.Inst.DebugVar{
-        //     .name_node = undefined,
-        //     .instruction = undefined,
-        // };
-        // nav.move(nav.data.unary_expression);
-        // var init = blk: {
-        //     if (nav.acceptData(.assign)) |assign_data| {
-        //         nav.move(assign_data.binary_expression.lhs);
-
-        //         const init_inst = try self.genInstruction(scope, assign_data.binary_expression.rhs);
-        //         // try scope.instructions.append(init_inst);
-        //         break :blk init_inst;
-        //     }
-        //     break :blk try scope.pushInstruction(.{
-        //         .undefined_value = null,
-        //     });
-        // };
-        // if (nav.acceptData(.ty_assign)) |ty_assign_data| {
-        //     // Has explicit type
-        //     nav.move(ty_assign_data.binary_expression.lhs);
-        //     const ty_inst = try self.genInstruction(scope, ty_assign_data.binary_expression.rhs);
-        //     // try scope.pushInstruction(ty_inst);
-        //     // const cast_inst
-        //     local_decl.ty_node = ty_assign_data.binary_expression.rhs;
-        //     const cast_inst = try scope.pushInstruction(.{ .as = .{ .lhs = init, .rhs = ty_inst } });
-        //     init = cast_inst;
-        // }
-        // local_decl.init = init;
-        // try scope.pushSymbol(nav.getNodeSlice(), init);
-        // nav.assertTag(.identifier);
-        // local_decl.name_node = nav.node;
-        // //
-        // const inst = try scope.pushInstruction(.{ .local_decl = local_decl });
-        // return inst;
-        // },
-        .ty_assign => {
-            const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
-            const rhs_inst = try self.genInstruction(scope, nav.data.binary_expression.rhs);
+        .ty_assign => |bin_expr| {
+            const lhs_inst = try self.genInstruction(scope, bin_expr.lhs);
+            const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
 
             return try scope.pushInstruction(.{ .as = .{ .lhs = lhs_inst, .rhs = rhs_inst } });
         },
 
-        .assign => {
-            const bin_expr = nav.data.binary_expression;
+        .assign => |bin_expr| {
             // const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
             // nav.move(nav.data.binary_expression.lhs);
             nav.move(bin_expr.lhs);
             const slice = nav.getNodeSlice();
-            std.debug.print("slice: {s}\n", .{slice});
             const lhs_local = scope.resolveSymbolRecursively(slice) orelse return error.SymbolNotFound;
             // const lhs_interned = try scope.builder.strings.intern(nav.getNodeSlice());
             const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
 
             return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_local, .rhs = rhs_inst } });
         },
-        inline .add,
-        .sub,
-        .mul,
-        .div,
-        => |tag| {
-            const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
-            const rhs_inst = try self.genInstruction(scope, nav.data.binary_expression.rhs);
 
-            return try scope.pushInstruction(@unionInit(Hir.Inst, @tagName(tag), .{ .lhs = lhs_inst, .rhs = rhs_inst }));
-        },
         .identifier => {
             const inst_index = scope.resolveSymbolRecursively(nav.getNodeSlice()) orelse return error.SymbolNotFound;
             const inst: Hir.Inst = scope.builder.hir.insts.items[inst_index];
@@ -327,18 +227,17 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         .number_literal => {
             return try scope.pushInstruction(.{ .comptime_number = nav.node });
         },
-        .ret_expression => {
+        .ret_expression => |ret_expr| {
             return try scope.pushInstruction(.{
                 .ret = .{
-                    .operand = if (nav.data.ret_expression == 0) 0 else try self.genInstruction(scope, nav.data.ret_expression),
+                    .operand = if (ret_expr.node == 0) 0 else try self.genInstruction(scope, ret_expr.node),
                 },
             });
         },
-        .if_expr => {
-            const data = nav.data.if_expression;
+        .if_expr => |data| {
             nav.move(data.condition);
             const cond_inst = blk: {
-                if (nav.acceptData(.group)) |group_data| break :blk try self.genInstruction(scope, group_data.group);
+                if (nav.is(.group)) break :blk try self.genInstruction(scope, nav.data.group.node);
                 break :blk try self.genInstruction(scope, data.condition);
             };
             // const cond_inst = try self.genInstruction(scope, data.condition);
@@ -356,22 +255,14 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             }
             return try scope.pushInstruction(.{ .if_expr = if_expr });
         },
-        .gt => {
-            const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
-            const rhs_inst = try self.genInstruction(scope, nav.data.binary_expression.rhs);
-            // try scope.instructions.append(lhs_inst);
-            // try scope.instructions.append(rhs_inst);
-            return try scope.pushInstruction(.{ .gt = .{ .lhs = lhs_inst, .rhs = rhs_inst } });
-        },
-        .fn_decl => {
-            const data = nav.data.fn_decl;
+        .fn_decl => |data| {
             const proto = data.proto;
             // var proto_scope = Scope.init(self, scope);
             const proto_data = nav.forkTo(proto).data.fn_proto;
             const body = data.body;
             var fn_scope = Scope.init(self, scope, .block, "fn_decl");
             const params = try self.genFnParams(&fn_scope, proto);
-            const return_type = try self.genInstruction(scope, proto_data.ret_ty);
+            const return_type = try self.genInstruction(scope, proto_data.ret_type);
             // const init_inst = if
             const init_inst = blk: {
                 if (body == 0) break :blk null;
@@ -390,15 +281,12 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 },
             });
         },
-        inline .ty_number,
-        .ty_boolean,
-        .ty_i32,
-        .ty_i64,
-        .ty_f32,
-        .ty_f64,
-        => |tag| {
-            return try scope.pushInstruction(@unionInit(Hir.Inst, @tagName(tag), nav.node));
-        },
+        .ty_number => return try scope.pushInstruction(.{ .ty_number = nav.node }),
+        .ty_boolean => return try scope.pushInstruction(.{ .ty_boolean = nav.node }),
+        .ty_i32 => return try scope.pushInstruction(.{ .ty_i32 = nav.node }),
+        .ty_i64 => return try scope.pushInstruction(.{ .ty_i64 = nav.node }),
+        .ty_f32 => return try scope.pushInstruction(.{ .ty_f32 = nav.node }),
+        .ty_f64 => return try scope.pushInstruction(.{ .ty_f64 = nav.node }),
         .while_loop => {
             const loop_index = try scope.reserveInstruction();
             var loop_scope = Scope.init(self, scope, .block, "while_loop");
@@ -421,7 +309,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     .body = try self.pushInstruction(.{
                         .block = .{
                             .name_node = null,
-                            .instructions = try loop_scope.commit(),
+                            .instructions_list = try loop_scope.commit(),
                         },
                     }),
                 },
@@ -429,9 +317,14 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return loop_index;
         },
         .group => {
-            return try self.genInstruction(scope, nav.data.group);
+            return try self.genInstruction(scope, nav.data.group.node);
         },
-        else => {},
+        else => {
+            switch (nav.tag) {
+                inline .add, .sub, .mul, .div, .gt, .lt, .gte, .lte => |tag| return try self.genBinaryExpression(tag, scope, nav.node),
+                else => {},
+            }
+        },
     }
     self.logger.panic("unimplemented genInstruction: {s}", .{@tagName(nav.tag)});
 }
@@ -439,7 +332,7 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
     self.logger.open("#{d} genScopedBlockInstruction", .{node_index});
     defer self.logger.close();
     const nav = Ast.Navigator.init(self.hir.ast, node_index);
-    var statements_iter = self.hir.ast.node_lists.iterList(nav.data.children_list);
+    var statements_iter = self.hir.ast.node_lists.iterList(nav.data.block.list);
     while (statements_iter.next()) |child| {
         _ = try self.genInstruction(scope, child);
         // try scope.instructions.append(inst_index);
@@ -456,7 +349,7 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
     const index = try scope.builder.pushInstruction(.{
         .block = .{
             .name_node = null,
-            .instructions = instructions,
+            .instructions_list = instructions,
         },
     });
 
@@ -484,11 +377,10 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
     const index = try self.reserveInstruction();
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     nav.assertTag(.root);
-    const data = nav.data.children_list;
     var defs = std.ArrayList(WipDef).init(self.arena.allocator());
     defer defs.deinit();
     var decl_list = self.newList();
-    var iter = self.hir.ast.node_lists.iterList(data);
+    var iter = self.hir.ast.node_lists.iterList(nav.data.root.list);
     while (iter.next()) |child| {
         const wip = try self.genDef(scope, child);
         try decl_list.append(wip.inst);
@@ -552,7 +444,7 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
     self.setInstruction(index, .{
         .mod_decl = .{
             .name_node = null,
-            .declarations = try decl_list.commit(),
+            .declarations_list = try decl_list.commit(),
         },
     });
     return index;
@@ -578,7 +470,12 @@ pub fn genInlineBlock(self: *Self, parent_scope: *Scope, ty_node: ?Ast.Node.Inde
     _ = init_inst; // autofix
 
     const index = try scope.commit();
-    return .{ .ty_inst = ty_inst, .index = try parent_scope.pushInstruction(.{ .inline_block = .{ .name_node = null, .instructions = index } }) };
+    return .{
+        .ty_inst = ty_inst,
+        .index = try parent_scope.pushInstruction(.{
+            .inline_block = .{ .name_node = null, .instructions_list = index },
+        }),
+    };
     // const index = try self.reserveInstruction();
 }
 pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
@@ -586,31 +483,31 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
     defer self.logger.close();
     var ast = Ast.Navigator.init(self.hir.ast, node_index);
     const visibility: shared.Visibility = visibility: {
-        if (ast.acceptData(.@"pub")) |data| {
-            ast.move(data.unary_expression);
+        if (ast.is(.@"pub")) {
+            ast.move(ast.data.@"pub".node);
             break :visibility .public;
         }
         break :visibility .private;
     };
 
     const is_extern: bool = is_extern: {
-        if (ast.acceptData(.@"extern")) |data| {
-            ast.move(data.unary_expression);
+        if (ast.is(.@"extern")) {
+            ast.move(ast.data.@"extern".node);
             break :is_extern true;
         }
         break :is_extern false;
     };
 
     const is_export: bool = is_export: {
-        if (ast.acceptData(.@"export")) |data| {
-            ast.move(data.unary_expression);
+        if (ast.is(.@"export")) {
+            ast.move(ast.data.@"export".node);
             break :is_export true;
         }
         break :is_export false;
     };
-    if (ast.acceptData(.fn_decl)) |data| {
+    if (ast.is(.fn_decl)) {
         const init_node = ast.node;
-        const proto = data.fn_decl.proto;
+        const proto = ast.data.fn_decl.proto;
         const proto_data = ast.forkTo(proto).data.fn_proto;
 
         // const init_inst = try self.genInstruction(scope, ast.node);
@@ -650,33 +547,20 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
         .init = undefined,
         .type = null,
     };
-    // ast.move(ast.data.unary_expression);
-    // var init: ?Ast.Node.Index = null;
-    // var ty: ?Ast.Node.Index = null;
-    // var identifier_node: Ast.Node.Index = 0;
-    // if (ast.acceptData(.assign)) |data| {
-    // ast.move(data.binary_expression.lhs);
-
-    // const inst = try self.genInstruction(scope, data.binary_expression.rhs);
-
-    // global_decl.init = inst;
-    // init = data.binary_expression.rhs;
-    // }
-    // if (ast.acceptData(.ty_assign)) |data| {
-    // ast.move(data.binary_expression.lhs);
-    // global_decl.type = try self.genInstruction(scope, data.binary_expression.rhs);
-    // ty = data.binary_expression.rhs;
-    // }
-    // ast.assertTag(.identifier);
-    global_decl.name_node = ast.data.declaration.name;
+    const decl = switch (ast.tag) {
+        .const_decl => ast.data.const_decl,
+        .var_decl => ast.data.var_decl,
+        else => unreachable,
+    };
+    global_decl.name_node = decl.name;
     const inst = try scope.pushInstruction(.{ .global_decl = global_decl });
-    var name = ast.forkTo(ast.data.declaration.name);
+    var name = ast.forkTo(decl.name);
 
     try scope.pushSymbol(name.getNodeSlice(), inst);
     return .{
         .inst = inst,
-        .init_node = if (ast.data.declaration.value != 0) ast.data.declaration.value else null,
-        .ty_node = if (ast.data.declaration.ty != 0) ast.data.declaration.ty else null,
+        .init_node = if (decl.value != 0) decl.value else null,
+        .ty_node = if (decl.type != 0) decl.type else null,
     };
 }
 pub fn pushInstruction(self: *Self, instruction: Hir.Inst) !Hir.Inst.Index {
@@ -731,7 +615,7 @@ test "HirBuilder" {
     defer file.close();
     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
     defer test_allocator.free(source);
-    std.debug.print("source:\n\n{s}\n", .{source});
+    // std.debug.print("source:\n\n{s}\n", .{source});
 
     var errors = try ErrorManager.init(test_allocator);
     defer errors.deinit();
@@ -742,6 +626,9 @@ test "HirBuilder" {
 
     var hir = try Self.gen(test_allocator, &ast, &errors);
     defer hir.deinit();
+    try serializer.writeJSON([]Hir.Inst, std.io.getStdErr().writer().any(), hir.insts.items, .{
+        .lists = &hir.lists,
+    });
 
-    std.debug.print("Hir:\n{}\n", .{hir});
+    // std.debug.print("Hir:\n{}\n", .{hir});
 }
