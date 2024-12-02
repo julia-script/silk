@@ -98,9 +98,7 @@ pub fn createFile(self: *Self, path: []const u8) !std.fs.File {
     std.debug.print("{s}\n", .{final_path});
     const cwd = std.fs.cwd();
     try cwd.makePath(out_dir);
-    // _ = try cwd.statFile(final_path )
-    // if (cwd.stat(final_path)) |err| {
-    // }
+
     return try cwd.createFile(final_path, .{});
 }
 pub fn deinit(self: *Self) void {
@@ -113,6 +111,7 @@ pub fn getRootSource(self: *Self) !*Source {
 pub fn addSourceFromFilePath(self: *Self, path: []const u8) !void {
     const allocator = self.arena.allocator();
     const file_path = try allocator.dupe(u8, path);
+
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     const name = std.fs.path.basename(file_path);

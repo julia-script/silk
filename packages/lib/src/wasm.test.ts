@@ -1,3 +1,4 @@
+import { inspect } from "bun";
 import { HostString, instantiate } from "./wasm";
 import { describe, it, expect } from "bun:test";
 const source = `
@@ -32,6 +33,23 @@ describe("instantiate", () => {
 		const compileResult = await writer.promise;
 
 		// console.log(JSON.parse(result));
-		console.log(JSON.parse(compileResult));
+		const fs = lang.createFs();
+		// fs.makeDir("./a/b/c");
+		fs.makeFile("./test.txt");
+		const tree = fs.getFileTree();
+		console.log(inspect(tree, { depth: 10, colors: true }));
+		// const fsPointer = lang.createFs();
+		// const treePointer = lang.getFileTree(fsPointer);
+		// const view = new DataView(lang.memory.buffer);
+		// const treeLength = view.getUint32(treePointer, true);
+		// const treeBuf = new Uint8Array(
+		// 	lang.memory.buffer,
+		// 	treePointer + 4,
+		// 	treeLength,
+		// );
+		// const tree_str = new TextDecoder().decode(treeBuf);
+		// lang.free(treePointer, treeLength + 4);
+		// console.log(tree_str);
+		// lang.destroyFs(fsPointer);
 	});
 });

@@ -80,4 +80,36 @@ pub fn build(b: *std.Build) void {
 
         b.step("wasm", "Install wasm"),
     });
+
+    const wasi_name = "lang-wasi";
+    const wasi_exe = b.addExecutable(.{
+        .name = wasi_name,
+        .root_source_file = b.path("src/main-wasi.zig"),
+        .target = b.resolveTargetQuery(.{
+            .cpu_arch = .wasm32,
+            .os_tag = .wasi,
+        }),
+        .optimize = optimize: {
+            // Wasm does not support debug info
+            if (optimize == .Debug) {
+                break :optimize .ReleaseSmall;
+            }
+            break :optimize optimize;
+        },
+        .unwind_tables = true,
+    });
+    wasi_exe.root_module.addOptions("options", options);
+
+    wasi_exe.entry = .default;
+    // wasi_exe.export_table = true;
+    wasi_exe.rdynamic = true;
+    // wasi_exe.import_memory = true;
+
+    const install_wasi = b.addInstallArtifact(wasi_exe, .{});
+
+    queue(.{
+        &install_wasi.step,
+
+        b.step("wasi", "Install wasi"),
+    });
 }

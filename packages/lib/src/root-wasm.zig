@@ -10,7 +10,7 @@ const HirBuilder = @import("HirBuilder.zig");
 const MirBuilder = @import("MirBuilder.zig");
 const Hir = @import("Hir.zig");
 const Mir = @import("Mir.zig");
-
+const Fs = @import("Fs.zig").VirtualFs;
 pub fn throw(message: []const u8) noreturn {
     host.throw(message.ptr, message.len);
 }
@@ -188,5 +188,75 @@ export fn compile(writer_id: usize, pointer: [*]const u8) void {
 
     _compile(writer.writer().any(), source) catch |err| {
         @panic(@errorName(err));
+    };
+}
+
+export fn createFs() *Fs {
+    const fs = host.allocator.create(Fs) catch {
+        @panic("failed to create fs");
+    };
+    fs.* = Fs.init(host.allocator, "") catch {
+        @panic("failed to create fs");
+    };
+    return fs;
+}
+// export fn getFileTree(fs: *Fs) ![]const u8 {
+//     var string = std.ArrayList(u8).init(host.allocator);
+//     const writer = string.writer();
+//     try writer.writeAll("{");
+//     var root = Fs.FsFile.init(fs, "/");
+//     try writeFileTree(writer, &root);
+//     try writer.writeAll("}");
+//     return string.toOwnedSlice();
+// }
+fn _getFileTree(fs: *Fs) ![]const u8 {
+    var string = std.ArrayList(u8).init(host.allocator);
+    const writer = string.writer().any();
+    try writer.writeByteNTimes(0, 4);
+    try fs.serialize(writer);
+    var slice = try string.toOwnedSlice();
+    std.mem.copyForwards(u8, slice[0..4], std.mem.asBytes(&(slice.len - 4)));
+    return slice;
+}
+
+export fn getFileTree(fs: *Fs) [*]const u8 {
+    const slice: []const u8 = _getFileTree(fs) catch {
+        @panic("failed to get file tree");
+    };
+    return slice.ptr;
+}
+
+export fn destroyFs(fs: *Fs) void {
+    fs.deinit();
+    host.allocator.destroy(fs);
+}
+
+export fn makeFile(fs: *Fs, pointer: [*]const u8) u64 {
+    const host_string = getSlice(pointer);
+    const fs_path = fs.makeFile(host_string) catch {
+        @panic("failed to create file");
+    };
+    _ = fs_path; // autofix
+    return 0; // fs_path.hash();
+}
+
+export fn makeDir(fs: *Fs, pointer: [*]const u8) u64 {
+    const host_string = getSlice(pointer);
+    var fs_path = fs.makeDir(host_string) catch {
+        @panic("failed to create dir");
+    };
+    return fs_path.hash();
+}
+
+export fn deleteFile(fs: *Fs, pointer: [*]const u8) void {
+    const host_string = getSlice(pointer);
+    fs.deleteFile(host_string) catch {
+        @panic("failed to delete file");
+    };
+}
+
+export fn deleteDir(fs: *Fs, path: [*]const u8, length: usize) void {
+    fs.deleteDir(path[0..length]) catch {
+        @panic("failed to delete dir");
     };
 }

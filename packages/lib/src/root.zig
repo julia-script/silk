@@ -15,4 +15,6 @@ test {
     _ = @import("./backend/wasm/WasmBuilder.zig");
     _ = @import("Compilation.zig");
     _ = @import("serializer.zig");
+    _ = @import("Os.zig");
+    _ = @import("Fs.zig");
 }

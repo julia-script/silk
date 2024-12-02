@@ -9,9 +9,28 @@ type Export = {
 	free: (pointer: number, length: number) => void;
 	generateAst: (pointer: number, length: number) => void;
 	compile: (writerId: number, pointer: number) => void;
+	getFileTree: (fsPointer: number) => number;
+	createFs: () => number;
+	destroyFs: (fsPointer: number) => void;
+	makeFile: (fsPointer: number, pointer: number) => number;
+	makeDir: (fsPointer: number, pointer: number) => number;
+	deleteFile: (fsPointer: number, pointer: number) => void;
+	deleteDir: (fsPointer: number, pointer: number) => void;
 };
 const U32_SIZE = 4;
 
+type FsDir = {
+	path: string;
+	kind: "dir";
+	hash: number;
+	children: FsEntry[];
+};
+type FsFile = {
+	path: string;
+	kind: "file";
+	hash: number;
+};
+type FsEntry = FsDir | FsFile;
 export class HostString {
 	pointer: number;
 	length: number;
@@ -39,6 +58,85 @@ export class HostString {
 
 	dispose() {
 		this.instance.free(this.pointer, this.length + U32_SIZE);
+	}
+	[Symbol.dispose]() {
+		this.dispose();
+	}
+}
+class Fs {
+	pointer: number;
+	constructor(private exports: Export) {
+		this.pointer = exports.createFs();
+	}
+	getFileTree() {
+		const treePointer = this.exports.getFileTree(this.pointer);
+		const treeLength = new DataView(this.exports.memory.buffer).getUint32(
+			treePointer,
+			true,
+		);
+		const treeBuf = new Uint8Array(
+			this.exports.memory.buffer,
+			treePointer + 4,
+			treeLength,
+		);
+		const decoded = decode(treeBuf);
+		this.exports.free(treePointer, treeLength + 4);
+
+		return JSON.parse(decoded) as FsDir;
+	}
+
+	makeFile(path: string) {
+		const hostString = new HostString(
+			{
+				memory: this.exports.memory,
+				alloc: this.exports.alloc,
+				free: this.exports.free,
+			},
+			path,
+		);
+		const hash = this.exports.makeFile(this.pointer, hostString.pointer);
+		hostString.dispose();
+		return hash;
+	}
+	makeDir(path: string) {
+		const hostString = new HostString(
+			{
+				memory: this.exports.memory,
+				alloc: this.exports.alloc,
+				free: this.exports.free,
+			},
+			path,
+		);
+		const hash = this.exports.makeDir(this.pointer, hostString.pointer);
+		hostString.dispose();
+		return hash;
+	}
+	deleteFile(path: string) {
+		const hostString = new HostString(
+			{
+				memory: this.exports.memory,
+				alloc: this.exports.alloc,
+				free: this.exports.free,
+			},
+			path,
+		);
+		this.exports.deleteFile(this.pointer, hostString.pointer);
+		hostString.dispose();
+	}
+	deleteDir(path: string) {
+		const hostString = new HostString(
+			{
+				memory: this.exports.memory,
+				alloc: this.exports.alloc,
+				free: this.exports.free,
+			},
+			path,
+		);
+		this.exports.deleteDir(this.pointer, hostString.pointer);
+		hostString.dispose();
+	}
+	dispose() {
+		this.exports.destroyFs(this.pointer);
 	}
 	[Symbol.dispose]() {
 		this.dispose();
@@ -138,5 +236,10 @@ export const instantiate = async (
 		memory,
 		createReader: ReaderManager.create,
 		createString: (value: string) => new HostString(exports, value),
+		createFs: () =>
+			new Fs({
+				...exports,
+				memory,
+			}),
 	};
 };

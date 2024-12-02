@@ -57,6 +57,9 @@ pub fn writeJSON(T: type, writer: std.io.AnyWriter, data: T, options: anytype) !
                 try writer.print("{d}", .{@intFromEnum(data) - e.fields.len});
             }
         },
+        .void => {
+            try writer.writeAll("{}");
+        },
         .pointer => |slice| {
             switch (slice.size) {
                 .Slice => {
@@ -89,20 +92,31 @@ pub fn writeJSON(T: type, writer: std.io.AnyWriter, data: T, options: anytype) !
         },
     }
 }
-pub fn writeTsType(T: type, type_name: []const u8, writer: std.io.AnyWriter) !void {
+pub fn writeTsType(T: type, type_name: []const u8, writer: std.io.AnyWriter, write_enums: bool) !void {
     try writer.print("export type {s} = ", .{type_name});
     try writeTsTypeInner(T, writer, 0);
     try writer.writeAll(";\n\n");
-    var buf: [1024]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(buf[0..]);
-    var hashmap = std.StringHashMap(void).init(fba.allocator());
-    try writeEnumsRecursive(T, &hashmap, writer);
+    if (write_enums) {
+        var buf: [1024]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(buf[0..]);
+        var hashmap = std.StringHashMap(void).init(fba.allocator());
+        try writeEnumsRecursive(T, &hashmap, writer);
+    }
 }
 pub fn writeTypeName(T: type, writer: std.io.AnyWriter) !void {
     const type_name = @typeName(T);
-    for (type_name) |c| {
+    var i: usize = 0;
+    while (i < type_name.len) : (i += 1) {
+        const c = type_name[i];
+        if (c >= 'a' and c <= 'z') {
+            i += 1;
+            while (i < type_name.len and type_name[i] != '.') : (i += 1) {}
+            continue;
+        }
         if (c != '.') {
-            try writer.writeByte(c);
+            while (i < type_name.len and type_name[i] != '.') : (i += 1) {
+                try writer.writeByte(type_name[i]);
+            }
         }
     }
 }
@@ -214,6 +228,9 @@ pub fn writeTsTypeInner(T: type, writer: std.io.AnyWriter, indent: usize) !void 
         },
         .float => {
             try writer.writeAll("number");
+        },
+        .void => {
+            try writer.writeAll("Object");
         },
         .optional => |opt| {
             try writer.writeAll("null | ");

@@ -25,6 +25,7 @@ pub fn compile(compilation: *Compilation) !void {
     try self.builder.dumpBytes();
     try self.builder.toBytes(file.writer().any());
 }
+
 pub fn translateMir(self: *Self) !void {
     try self.translateModule(Mir.Type.RootIndex);
 }
@@ -107,7 +108,7 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
                 });
             },
             .local => {
-                _ = try func.pushLocal(switch (inst.type) {
+                try func.pushLocal(switch (inst.type) {
                     .i32 => .i32,
                     .f64 => .f64,
                     else => {

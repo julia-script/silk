@@ -199,6 +199,58 @@ pub const Instruction = union(enum) {
             },
         }
     }
+    pub fn toWat(self: Instruction, writer: *WatWriter) !void {
+        switch (self) {
+            .local_get => |index| try writer.print("local.get {d}", .{index}),
+            .local_set => |index| try writer.print("local.set {d}", .{index}),
+            .global_get => |index| try writer.print("global.get {d}", .{index}),
+            .i32_const => |value| try writer.print("i32.const {d}", .{value}),
+            .i64_const => |value| try writer.print("i64.const {d}", .{value}),
+            .f32_const => |value| try writer.print("f32.const {d}", .{value}),
+            .f64_const => |value| try writer.print("f64.const {d}", .{value}),
+            .@"if" => unreachable,
+            .@"else" => unreachable,
+            .end => unreachable,
+            .loop => unreachable,
+            .br => unreachable,
+            .i32_add => try writer.write("i32.add"),
+            .i64_add => try writer.write("i64.add"),
+            .f32_add => try writer.write("f32.add"),
+            .f64_add => try writer.write("f64.add"),
+            .i32_sub => try writer.write("i32.sub"),
+            .i64_sub => try writer.write("i64.sub"),
+            .f32_sub => try writer.write("f32.sub"),
+            .f64_sub => try writer.write("f64.sub"),
+            .i32_mul => try writer.write("i32.mul"),
+            .i64_mul => try writer.write("i64.mul"),
+            .f32_mul => try writer.write("f32.mul"),
+            .f64_mul => try writer.write("f64.mul"),
+            .i32_div => try writer.write("i32.div_s"),
+            .i64_div => try writer.write("i64.div_s"),
+            .f32_div => try writer.write("f32.div"),
+            .f64_div => try writer.write("f64.div"),
+            .i32_eq => try writer.write("i32.eq"),
+            .i32_neq => try writer.write("i32.ne"),
+            .i32_lt_s => try writer.write("i32.lt_s"),
+            .i32_lt_u => try writer.write("i32.lt_u"),
+            .i32_gt_s => try writer.write("i32.gt_s"),
+            .i32_gt_u => try writer.write("i32.gt_u"),
+            .i64_eq => try writer.write("i64.eq"),
+            .i64_neq => try writer.write("i64.ne"),
+            .i64_lt_s => try writer.write("i64.lt_s"),
+            .i64_lt_u => try writer.write("i64.lt_u"),
+            .i64_gt_s => try writer.write("i64.gt_s"),
+            .i64_gt_u => try writer.write("i64.gt_u"),
+
+            .f32_eq => try writer.write("f32.eq"),
+            .f32_neq => try writer.write("f32.ne"),
+            .f32_lt => try writer.write("f32.lt"),
+            .f32_gt => try writer.write("f32.gt"),
+
+            .f64_eq => try writer.write("f64.eq"),
+            else => try writer.print("UNIMPLEMENTED: {s}", .{@tagName(self)}),
+        }
+    }
 };
 const Local = struct {
     count: u32,
@@ -238,11 +290,18 @@ pub const Function = struct {
     pub fn pushResult(self: *Function, result: Type) !void {
         try self.results.append(result);
     }
-    pub fn pushLocal(self: *Function, value_type: Type) !u32 {
-        const local_count: u32 = @intCast(self.locals.items.len + self.params.items.len);
+    pub fn pushLocal(self: *Function, value_type: Type) !void {
+        const prev = self.locals.items.len;
+        if (self.locals.items.len > 0) {
+            const last = self.locals.items[prev - 1];
+            if (last.type == value_type) {
+                self.locals.items[prev - 1].count += 1;
+                return;
+            }
+        }
+        const local_count: u32 = 1;
         const local = Local{ .count = local_count, .type = value_type };
         try self.locals.append(local);
-        return local_count;
     }
     pub fn getFunctionType(self: Function) FunctionType {
         return .{ .params = self.params.items, .results = self.results.items };
@@ -443,7 +502,7 @@ pub const Module = struct {
                 try function_body_section.write(function.locals.items.len);
 
                 for (function.locals.items) |local| {
-                    try function_body_section.writeByte(1);
+                    try function_body_section.write(local.count);
                     try function_body_section.write(local.type);
                 }
 
@@ -465,20 +524,76 @@ pub const Module = struct {
         try wat_writer.open("module");
         // Type section
         for (self.function_types.values(), 0..) |entry, i| {
-            _ = i; // autofix
+            const entry_fn: FunctionType = entry[1];
             try wat_writer.writeIndent();
-            try wat_writer.openInline("type");
-            try wat_writer.openInline("func");
-
-            const func_type: FunctionType = entry[1];
-            _ = func_type; // autofix
-
-            try wat_writer.closeInline(); // func
-            try wat_writer.closeInline(); // type
-            try wat_writer.breakLine();
+            try wat_writer.print("(type (;{d};) ", .{i});
+            try wat_writer.write("(func");
+            if (entry_fn.params.len > 0 or entry_fn.results.len > 0) {
+                for (entry_fn.params) |param| {
+                    try wat_writer.print(" (param {s})", .{@tagName(param)});
+                }
+                for (entry_fn.results) |result| {
+                    try wat_writer.print(" (result {s})", .{@tagName(result)});
+                }
+            } else {
+                try wat_writer.write(")");
+            }
+            try wat_writer.write(")\n");
         }
 
         // Function section
+        // for (self.functions.items, 0..) |function, i| {
+        for (self.functions.items, 0..) |function, i| {
+            const index = self.function_types.get(function.getFunctionType().hash()) orelse {
+                @panic("Function type not found");
+            };
+            try wat_writer.writeIndent();
+            try wat_writer.print("(func (;{d};) ", .{i});
+            // try wat_writer.write(function.name);
+            try wat_writer.print("(type {d})", .{index[0]});
+            for (function.params.items) |param| {
+                try wat_writer.print(" (param {s})", .{@tagName(param)});
+            }
+            for (function.results.items) |result| {
+                try wat_writer.print(" (result {s})", .{@tagName(result)});
+            }
+            wat_writer.indent += 1;
+            try wat_writer.breakLine();
+            try wat_writer.writeIndent();
+            if (function.locals.items.len > 0) {
+                try wat_writer.write("(locals");
+                for (function.locals.items) |local| {
+                    for (0..local.count) |_| {
+                        try wat_writer.print(" {s}", .{@tagName(local.type)});
+                    }
+                }
+                try wat_writer.write(")\n");
+            }
+            for (function.instructions.items) |instruction| {
+                switch (instruction) {
+                    .@"if" => {
+                        try wat_writer.writeIndent();
+                        try wat_writer.write("if");
+                        try wat_writer.breakLine();
+                        wat_writer.indent += 1;
+                    },
+                    .end => {
+                        wat_writer.indent -= 1;
+                        try wat_writer.writeIndent();
+                        try wat_writer.write("end");
+                        try wat_writer.breakLine();
+                    },
+                    else => {
+                        try wat_writer.writeIndent();
+                        try instruction.toWat(&wat_writer);
+                        try wat_writer.breakLine();
+                    },
+                }
+            }
+            wat_writer.indent -= 1;
+            try wat_writer.writeIndent();
+            try wat_writer.write(")\n");
+        }
 
         // Code section
 
@@ -533,6 +648,12 @@ const WatWriter = struct {
         self.indent -= 1;
         try self.writeIndent();
         try self.writer.writeAll(")");
+    }
+    pub fn write(self: *WatWriter, str: []const u8) !void {
+        try self.writer.writeAll(str);
+    }
+    pub fn print(self: *WatWriter, comptime format: []const u8, args: anytype) !void {
+        try self.writer.print(format, args);
     }
 };
 // fn writeVarUInt32(writer: std.io.AnyWriter, value: u32) !void {
@@ -687,20 +808,14 @@ test "wasm" {
     try func_a.pushParam(.i32);
     try func_a.pushResult(.i32);
 
-    const local_0 = try func_a.pushLocal(.i32);
-    const local_1 = try func_a.pushLocal(.i32);
+    try func_a.pushLocal(.i32);
+    try func_a.pushLocal(.i32);
 
-    try func_a.pushInstruction(.{ .local_get = local_0 });
-    try func_a.pushInstruction(.{ .local_get = local_1 });
+    try func_a.pushInstruction(.{ .local_get = 0 });
+    try func_a.pushInstruction(.{ .local_get = 1 });
     try func_a.pushInstruction(.{ .i32_add = {} });
     const func_a_index = try module.pushFunction(func_a);
     _ = func_a_index; // autofix
-
-    const func_b = module.makeFunction();
-    // try func_b.pushParam(.i32);
-    // try func_b.pushParam(.i32);
-    // try func_b.pushResult(.i32);
-    module.start = try module.pushFunction(func_b);
 
     try module.toBytes(buf.writer().any());
 
