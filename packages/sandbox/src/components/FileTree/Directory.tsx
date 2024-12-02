@@ -9,8 +9,11 @@ import { Suspense } from "react";
 import { DirectoryList } from "./DirectoryList";
 import { FileTreeButton } from "./FileTreeButton";
 import { useDirectoryList } from "./useDirectoryList";
-export const Directory = ({ dirPath }: { dirPath: string }) => {
-	const [collapsed, setCollapsed] = useState(true);
+export const Directory = ({
+	dirPath,
+	startOpen = false,
+}: { dirPath: string; startOpen?: boolean }) => {
+	const [collapsed, setCollapsed] = useState(!startOpen);
 	const name = path.basename(dirPath);
 	// Prefetch the directory list
 	useDirectoryList({ dirPath });

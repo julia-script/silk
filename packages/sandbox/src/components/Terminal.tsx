@@ -7,6 +7,7 @@ import type { WebContainer } from "@webcontainer/api";
 import { memoize } from "lodash";
 import { use, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWebContainer } from "./WebContainer";
+import { ResizablePanel } from "./ui/resizable";
 
 class Shell extends EventTarget {
 	term = new XTermJs({
@@ -15,6 +16,7 @@ class Shell extends EventTarget {
 	// fitAddon = new FitAddon();
 	subscribers = new Set<() => void>();
 	startPromise: Promise<void> | null = null;
+	fitAddon: FitAddon | null = null;
 	constructor(private container: WebContainer) {
 		super();
 		// this.term.loadAddon(this.fitAddon);
@@ -23,9 +25,9 @@ class Shell extends EventTarget {
 	private start = async (terminalRef: HTMLDivElement) => {
 		if (typeof window === "undefined") return;
 		const { FitAddon } = await import("@xterm/addon-fit");
-		const fitAddon = new FitAddon();
+		this.fitAddon = new FitAddon();
 		this.term.open(terminalRef);
-		this.term.loadAddon(fitAddon);
+		this.term.loadAddon(this.fitAddon);
 		const shellProcess = await this.container.spawn("jsh", {
 			terminal: {
 				cols: this.term.cols,
@@ -52,7 +54,10 @@ class Shell extends EventTarget {
 				},
 			}),
 		);
-		// fitAddon.fit();
+		this.fitAddon?.fit();
+	};
+	fit = () => {
+		this.fitAddon?.fit();
 	};
 	open = async (terminalRef: HTMLDivElement) => {
 		if (this.startPromise) return this.startPromise;
@@ -75,7 +80,7 @@ class Shell extends EventTarget {
 	};
 }
 
-export const Terminal = () => {
+export const Terminal = ({ height }: { height?: number }) => {
 	const { container } = useWebContainer();
 	const [shell] = useState(() => new Shell(container));
 	useSyncExternalStore(shell.subscribe, shell.getSnapshot, shell.getSnapshot);
@@ -92,11 +97,17 @@ export const Terminal = () => {
 	}, [shell]);
 
 	return (
-		<div>
+		<ResizablePanel
+			defaultSize={30}
+			onResize={(size) => {
+				shell.fit();
+			}}
+		>
 			<div
-				className="h-full w-full relative overflow-hidden"
+				className="h-full w-full relative overflow-hidden grow"
+				style={{ height }}
 				ref={terminalRef}
 			/>
-		</div>
+		</ResizablePanel>
 	);
 };

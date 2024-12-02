@@ -40,6 +40,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Terminal } from "../Terminal";
 export const EditorsView = () => {
 	const rootView = useEditorStore((state) => state.rootView);
 	const buffers = useEditorStore((state) => state.buffers);
@@ -67,7 +68,13 @@ export const EditorsView = () => {
 				</ResizablePanel>
 				<ResizableHandle />
 				<ResizablePanel defaultSize={90}>
-					{store.isHydrated && rootView && <Panel id={rootView} />}
+					<ResizablePanelGroup direction="vertical">
+						<ResizablePanel defaultSize={70}>
+							{store.isHydrated && rootView && <Panel id={rootView} />}
+						</ResizablePanel>
+						<ResizableHandle />
+						<Terminal />
+					</ResizablePanelGroup>
 				</ResizablePanel>
 			</ResizablePanelGroup>
 		</div>
