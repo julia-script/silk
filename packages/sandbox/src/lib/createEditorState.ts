@@ -3,7 +3,6 @@ import { EditorState } from "@codemirror/state";
 import { langLanguage } from "@lang/grammar/dist/language";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { basicSetup } from "codemirror";
-import { Command } from "lucide-react";
 
 export const createEditorState = ({
 	initialValue,
