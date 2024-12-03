@@ -10,7 +10,8 @@
 	},
 	"scripts": {
 		"dev": "watchexec --exts zig --clear=clear 'bun run build'",
-		"build": "zig build wasm -p dist -freference-trace=10",
+		"build": "zig build wasm -p dist -freference-trace=10 && zig build wasi -p dist -freference-trace=10",
+		"build:wasi": "zig build wasi -p dist",
 		"build:ts": "tsc",
 		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm",
 		"gen:types": "zig run ./generate_types.zig"

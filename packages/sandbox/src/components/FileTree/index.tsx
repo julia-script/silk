@@ -14,7 +14,7 @@ export const FileTree = () => {
 	return (
 		<div className="">
 			<Suspense fallback={<div className="text-xs">Loading file tree...</div>}>
-				<Directory dirPath="./src" startOpen={true} />
+				<Directory dirPath="./project" startOpen={true} />
 			</Suspense>
 		</div>
 	);

@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import "./xterm.css";
+
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
@@ -70,3 +72,4 @@ body {
     @apply bg-background text-foreground;
   }
 }
+

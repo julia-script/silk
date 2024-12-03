@@ -6,7 +6,7 @@ import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { Command, Edit } from "lucide-react";
 import { memoize } from "lodash";
-import { useEffect, useSyncExternalStore } from "react";
+import { cache, useEffect, useSyncExternalStore } from "react";
 import { useWebContainer } from "../WebContainer";
 import { decode } from "@webassemblyjs/wasm-parser";
 import { print } from "@webassemblyjs/wast-printer";
@@ -98,84 +98,123 @@ const createState = ({
 		// ],
 	});
 };
+
+type State = {
+	saved: boolean;
+	fileExists: boolean;
+	ready: boolean;
+} & (
+	| {
+			state: Uint8Array;
+			type: "bytes";
+			textRepresentation?: EditorState;
+			ready: boolean;
+	  }
+	| {
+			state: EditorState;
+			type: "editor";
+			ready: boolean;
+	  }
+	| {
+			type: "unknown";
+			ready: boolean;
+			state: null;
+	  }
+);
 export class DocumentState {
-	state: EditorState;
+	state: State = {
+		type: "unknown",
+		state: null,
+		saved: false,
+		ready: false,
+		fileExists: false,
+	};
 	subscribers: Set<(event: "update" | "save") => void> = new Set();
-	saved = true;
-	ready = false;
 	constructor(
 		public container: WebContainer,
 		public path: string,
 	) {
-		this.state = createState({
-			content: "",
-		});
 		this.emit("update");
 
+		let promise: Promise<void>;
 		const isWasm = this.path.endsWith(".wasm");
 		if (isWasm) {
-			this.container.fs.readFile(this.path).then((bytes) => {
-				this.state = createState({
-					content: wasmToWat(bytes),
-					language: wastLanguage,
-					readonly: true,
-				});
+			promise = this.container.fs.readFile(this.path).then((bytes) => {
+				this.state = {
+					state: bytes,
+					type: "bytes",
+					ready: true,
+					saved: true,
+					textRepresentation: createState({
+						content: wasmToWat(bytes),
+						readonly: true,
+						language: wastLanguage,
+					}),
+					fileExists: true,
+				};
 				this.emit("update");
 			});
 		} else {
-			this.container.fs.readFile(this.path, "utf-8").then((content) => {
-				this.state = createState({
-					content,
-					onSave: async (e) => {
-						await this.container.fs.writeFile(
-							this.path,
-							e.state.doc.toString(),
-						);
-						this.saved = true;
-						this.emit("save");
-					},
-					onViewUpdate: (e) => {
-						this.state = e.state;
-						if (!e.docChanged) return;
-						this.saved = false;
-						this.emit("update");
-					},
-					language: langLanguage,
+			promise = this.container.fs
+				.readFile(this.path, "utf-8")
+				.then((content) => {
+					this.state = {
+						saved: true,
+						fileExists: true,
+						type: "editor",
+						ready: true,
+						state: createState({
+							content,
+							onSave: async (e) => {
+								await this.container.fs.writeFile(
+									this.path,
+									e.state.doc.toString(),
+								);
+
+								this.emit("save");
+							},
+							onViewUpdate: (e) => {
+								this.state.state = e.state;
+								if (!e.docChanged) return;
+								this.state = {
+									...this.state,
+									saved: false,
+								} as State;
+								this.emit("update");
+							},
+							language: langLanguage,
+						}),
+					};
+					this.emit("update");
 				});
-				this.ready = true;
-				this.emit("update");
-			});
 		}
+		promise.catch((e) => {
+			if (e instanceof Error) {
+				if (e.message.includes("ENOENT")) {
+					this.state = {
+						type: "unknown",
+						fileExists: false,
+						ready: true,
+						saved: false,
+						state: null,
+					};
+					this.emit("update");
+					return;
+				}
+			}
+			throw e;
+		});
 	}
 	static init = (container: WebContainer, path: string) => {
 		return new DocumentState(container, path);
 	};
 	emit = (event: "update" | "save") => {
-		this._state = undefined;
 		for (const callback of this.subscribers) {
 			callback(event);
 		}
 	};
-
-	_state:
-		| {
-				state: EditorState;
-				saved: boolean;
-				ready: boolean;
-		  }
-		| undefined;
-	getState = () => {
-		if (this._state) return this._state;
-		this._state = {
-			state: this.state,
-			saved: this.saved,
-			ready: this.ready,
-		};
-		return this._state as {
-			state: EditorState;
-			saved: boolean;
-			ready: boolean;
-		};
+	getState = (): State => {
+		return this.state;
 	};
 
 	subscribe = (callback: (event: "update" | "save") => void) => {

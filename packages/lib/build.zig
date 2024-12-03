@@ -17,6 +17,8 @@ pub fn build(b: *std.Build) void {
         // "Mir",
         // "Compilation",
     });
+    const cmd_dep = b.dependency("zig-cmd", .{});
+    const cmd_module = cmd_dep.module("cmd");
 
     const test_filter = b.option(
         []const u8,
@@ -30,8 +32,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    b.installArtifact(lib);
+    lib.root_module.addImport("cmd", cmd_module);
     lib.root_module.addOptions("options", options);
+    b.installArtifact(lib);
 
     const lib_unit_tests = b.addTest(.{
         .name = "test",
@@ -40,6 +43,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .filter = test_filter,
     });
+    lib_unit_tests.root_module.addImport("cmd", cmd_module);
     b.installArtifact(lib_unit_tests);
     lib_unit_tests.root_module.addOptions("options", options);
 
@@ -66,6 +70,7 @@ pub fn build(b: *std.Build) void {
         },
         .unwind_tables = true,
     });
+    wasm_exe.root_module.addImport("cmd", cmd_module);
     wasm_exe.root_module.addOptions("options", options);
 
     wasm_exe.entry = .disabled;
@@ -99,6 +104,7 @@ pub fn build(b: *std.Build) void {
         .unwind_tables = true,
     });
     wasi_exe.root_module.addOptions("options", options);
+    wasi_exe.root_module.addImport("cmd", cmd_module);
 
     wasi_exe.entry = .default;
     // wasi_exe.export_table = true;

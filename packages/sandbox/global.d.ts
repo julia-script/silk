@@ -1,4 +1,4 @@
 declare module "*.wasm" {
-	const value: Buffer;
+	const value: Uint8Array;
 	export default value;
 }

@@ -27,7 +27,11 @@ const getFile = memoize(
 export const HexView = ({ filePath }: { filePath: string }) => {
 	const { container } = useWebContainer();
 	const [columns, setColumns] = useState(16);
-	const bytes = use(getFile(container, filePath));
+	const documentState = useDocumentState(filePath);
+	if (documentState.type !== "bytes") {
+		throw new Error("File is not a byte array");
+	}
+	const bytes = documentState.state;
 	const [rowsPerPage, setRowsPerPage] = useState(16);
 	const [page, setPage] = useState(0);
 
@@ -119,13 +123,14 @@ export const HexView = ({ filePath }: { filePath: string }) => {
 
 const WatView = ({ path }: { path: string }) => {
 	const editorState = useDocumentState(path);
+	if (editorState.type !== "bytes" || !editorState.textRepresentation) {
+		return null;
+	}
 	return (
-		// <div className=" overflow-auto flex flex-col h-full grow">
 		<CodeMirror
-			editorState={editorState.state}
+			editorState={editorState.textRepresentation}
 			className="h-full overflow-auto min-h-96"
 		/>
-		// </div>
 	);
 };
 

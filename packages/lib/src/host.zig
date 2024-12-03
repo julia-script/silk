@@ -1,18 +1,19 @@
 const builtin = @import("builtin");
 const std = @import("std");
-const OsWriter = @import("root-wasm.zig").OsWriter;
 const Env = enum {
     wasm,
     system,
 };
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-pub usingnamespace if (builtin.target.isWasm()) struct {
-    var stderr_writer = OsWriter.init(0);
+pub usingnamespace if (builtin.target.isWasm() and builtin.target.os.tag == .freestanding) struct {
+    // const OsWriter = @import("root-wasm.zig").OsWriter;
+    // var stderr_writer = OsWriter.init(0);
     pub extern fn throw(pointer: [*]const u8, length: usize) noreturn;
     pub extern fn write(message: [*]const u8, length: usize) void;
     pub const env = Env.wasm;
     pub fn getStdErrWriter() std.io.AnyWriter {
-        return stderr_writer.writer().any();
+        @panic("getStdErrWriter not implemented for wasm");
+        // return stderr_writer.writer().any();
     }
     pub const allocator = general_purpose_allocator.allocator();
 } else struct {

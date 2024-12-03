@@ -1,5 +1,5 @@
 "use client";
-import langWasm from "@lang/lib/zig-out/bin/lang-wasi.wasm";
+import langWasm from "@lang/lib/dist/bin/lang-wasi.wasm";
 import {
 	type DirectoryNode,
 	type FileNode,
@@ -7,17 +7,36 @@ import {
 	WebContainer,
 } from "@webcontainer/api";
 import { memoize } from "lodash-es";
-import { createContext, use, useContext, useEffect, useState } from "react";
+import { createContext, use } from "react";
+
 const createContainer = memoize(async () => {
 	if (typeof window === "undefined") {
 		return new WebContainer();
 	}
-	const term = await WebContainer.boot(files);
-	await term.mount(files);
+	const term = await WebContainer.boot({
+		workdirName: "silk",
+	});
+	await term.mount(files, {
+		// mountPoint: "",
+	});
+	console.log(term.path);
+	// await term.spawn("source", ["~/.jshrc"], {});
+	// await term.spawn("chmod +x ~/silk/bin/silk", {});
+	// mv /home/silk/.jshrc ~/
+	// const res = await term.spawn("mv", ["/home/silk/.jshrc", "~/"], {
+	// 	output: true,
+	// });
+	// console.log(await res.output.getReader().read());
 	return term;
 });
-const source = `
-export fn fib(n: i32): i32 {
+
+const executable = `#!/usr/bin/env node
+const { spawnSync } = require("node:child_process");
+spawnSync("wasm", ["~/silk/bin/silk.wasm", "--", ...process.argv.slice(2)], {
+	stdio: "inherit",
+});
+`;
+const source = `export fn fib(n: i32): i32 {
   var a:i32 = 0;
   var b:i32 = 1;
   if (n > 0) {
@@ -33,6 +52,9 @@ export fn fib(n: i32): i32 {
 }
 `;
 
+const bash = `#!/bin/bash
+wasm ./main.wasm -- $@
+`;
 const dir = (dir: FileSystemTree): DirectoryNode => ({
 	directory: dir,
 });
@@ -58,16 +80,41 @@ const file = (contents: string | Uint8Array): FileNode => ({
 // 	},
 // };
 const files: FileSystemTree = {
-	src: dir({
-		"main.slk": file(source),
-		"main.wasm": file(langWasm),
-		abc: dir({
-			"def.ts": file("Hello, world!"),
-			"ghi.ts": file("Hello, Universe"),
-			jkl: dir({}),
-			mnopq: dir({}),
+	bin: dir({
+		// silk: file(executable),
+		silk: file(bash),
+		"silk.wasm": file(langWasm),
+	}),
+	// home: dir({
+	// }),
+	".jshrc": file(`alias silk="wasm ~/silk/bin/silk.wasm --mapdir ./:./ --"`),
+	// src: dir({
+	// "package.json": file(
+	// 	JSON.stringify(
+	// 		{
+	// 			name: "sandbox",
+	// 			version: "0.0.1",
+	// 			dependencies: {},
+	// 			bin: {
+	// 				zilk: "wasm ./silk --",
+	// 			},
+	// 		},
+	// 		null,
+	// 		2,
+	// 	),
+	// ),
+	project: dir({
+		src: dir({
+			"main.slk": file(source),
 		}),
 	}),
+	// abc: dir({
+	// 	"def.ts": file("Hello, world!"),
+	// 	"ghi.ts": file("Hello, Universe"),
+	// 	jkl: dir({}),
+	// 	mnopq: dir({}),
+	// }),
+	// }),
 };
 
 type WebContainerContextProps = {

@@ -137,13 +137,15 @@ const FileTabButton = ({
 	const buffer = store.buffers[bufferId];
 	if (buffer.type !== "file") throw new Error("Not a file buffer");
 	const editorState = useDocumentState(buffer.file);
+
 	return (
 		<Tab
 			key={bufferId}
 			id={bufferId}
 			active={view.focusedTab === bufferId}
 			className={cn("group relative", {
-				italic: !editorState.saved,
+				italic: !editorState.saved && editorState.ready,
+				"line-through": !editorState.fileExists && editorState.ready,
 			})}
 			onClick={() => {
 				console.log("clicked", bufferId);
@@ -182,6 +184,7 @@ const BufferView = ({ id }: { id: string }) => {
 	const buffer = store.buffers[id];
 
 	if (buffer.type !== "file") return <div>No buffer</div>;
+	const editorState = useDocumentState(buffer.file);
 	return (
 		<div className="text-white flex flex-col grow overflow-hidden">
 			<Divider />
@@ -189,7 +192,7 @@ const BufferView = ({ id }: { id: string }) => {
 			<Divider />
 
 			<Suspense fallback={<div>Loading...</div>}>
-				{buffer.file.endsWith(".wasm") ? (
+				{editorState.type === "bytes" ? (
 					<HexView filePath={buffer.file} />
 				) : (
 					<CodeView filePath={buffer.file} />
@@ -226,6 +229,9 @@ const Breadcrumbs = ({ filePath }: { filePath: Uuid }) => {
 };
 const CodeView = ({ filePath }: { filePath: Uuid }) => {
 	const editorState = useDocumentState(filePath);
+	if (editorState.type !== "editor") {
+		return null;
+	}
 
 	return (
 		<>

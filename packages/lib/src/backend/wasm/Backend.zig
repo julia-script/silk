@@ -22,7 +22,7 @@ pub fn compile(compilation: *Compilation) !void {
     try self.translateMir();
     const file = try compilation.createFile("out.wasm");
     defer file.close();
-    try self.builder.dumpBytes();
+    // try self.builder.dumpBytes();
     try self.builder.toBytes(file.writer().any());
 }
 
