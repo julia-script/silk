@@ -8,7 +8,9 @@ const PackedLists = @import("PackedLists.zig");
 const shared = @import("shared.zig");
 pub const Lists = PackedLists.new(u32, std.math.maxInt(u32));
 pub const ChildList = Lists.List;
+const MirBuilder = @import("MirBuilder2.zig");
 const Logger = @import("Logger.zig");
+const tw = Logger.tw;
 
 lists: Lists = .{},
 strings: InternedStrings,
@@ -56,7 +58,7 @@ pub const Instruction = struct {
             then_body: Type.Index,
             else_body: ?Type.Index,
         },
-        // loop: struct { body: Type.Index },
+        loop: struct { body: Type.Index },
 
         scoped: struct {
             name: InternedSlice,
@@ -93,43 +95,43 @@ pub const Instruction = struct {
         }
     }
 
-    pub fn format(
-        self: @This(),
-        comptime _: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: std.io.AnyWriter,
-    ) !void { // op:
-        _ = options; // autofix
-        try writer.print("{s} ", .{@tagName(self.op)});
-        try writer.print(" {any}", .{self.type});
-        try writer.print(" {any}", .{self.value});
-        switch (self.data) {
-            .bin_op => |bin_op| {
-                try writer.print(" lhs: #{d} rhs: #{d}", .{ bin_op.lhs, bin_op.rhs });
-            },
-            .instruction => |instruction| {
-                try writer.print(" inst: #{d}", .{instruction});
-            },
-            // .value => |value| {
-            //     try writer.print(" value: #{any}", .{value});
-            // },
-            .type => |type_index| {
-                try writer.print(" type: {any}", .{type_index});
-            },
-            .if_expr => |if_expr| {
-                try writer.print(" cond: #{d} then: #{any}", .{ if_expr.cond, if_expr.then_body });
-                if (if_expr.else_body) |else_body| {
-                    try writer.print(" else: #{any}", .{else_body});
-                }
-            },
-            .scoped => |scoped| {
-                _ = scoped; // autofix
-                try writer.print(" scoped", .{});
-            },
+    // pub fn format(
+    //     self: @This(),
+    //     comptime _: []const u8,
+    //     options: std.fmt.FormatOptions,
+    //     writer: std.io.AnyWriter,
+    // ) !void { // op:
+    //     _ = options; // autofix
+    //     try writer.print("{s} ", .{@tagName(self.op)});
+    //     try writer.print(" {any}", .{self.type});
+    //     try writer.print(" {any}", .{self.value});
+    //     switch (self.data) {
+    //         .bin_op => |bin_op| {
+    //             try writer.print(" lhs: #{d} rhs: #{d}", .{ bin_op.lhs, bin_op.rhs });
+    //         },
+    //         .instruction => |instruction| {
+    //             try writer.print(" inst: #{d}", .{instruction});
+    //         },
+    //         // .value => |value| {
+    //         //     try writer.print(" value: #{any}", .{value});
+    //         // },
+    //         .type => |type_index| {
+    //             try writer.print(" type: {any}", .{type_index});
+    //         },
+    //         .if_expr => |if_expr| {
+    //             try writer.print(" cond: #{d} then: #{any}", .{ if_expr.cond, if_expr.then_body });
+    //             if (if_expr.else_body) |else_body| {
+    //                 try writer.print(" else: #{any}", .{else_body});
+    //             }
+    //         },
+    //         .scoped => |scoped| {
+    //             _ = scoped; // autofix
+    //             try writer.print(" scoped", .{});
+    //         },
 
-            else => {},
-        }
-    }
+    //         else => {},
+    //     }
+    // }
     pub const Op = enum {
         type,
         constant,
@@ -398,6 +400,7 @@ pub const Type = union(enum) {
         name: InternedSlice,
         params: Type.List,
         return_type: Type.Index,
+        init_block: ?Type.Index,
         pub const Param = struct {
             name: InternedSlice,
             type: Type.Index,
@@ -415,7 +418,7 @@ pub const Type = union(enum) {
         child: Type.Index,
     };
     pub const Block = struct {
-        locals: usize,
+        locals_count: usize,
         name: ?InternedSlice,
         instructions: Instruction.List,
     };
@@ -504,132 +507,199 @@ pub const Value = union(enum) {
 };
 pub fn formatValue(self: *Self, writer: *Logger, value_index: Value.Index) std.io.AnyWriter.Error!void {
     if (value_index.toInt()) |index| {
-        const value: Value = self.values.items[index];
-        switch (value) {
-            .type => |type_index| {
-                try formatType(self, writer, type_index);
-            },
-            .float => |float| {
-                try writer.print("{d}", .{float});
-            },
-
-            else => {},
-        }
-        // try writer.writeAll(value.fmt(self));
+        try writer.print("[{}]", .{self.values.items[index]});
     } else {
-        try writer.writeAllIndented(@tagName(value_index));
+        try writer.print("[{s}]", .{@tagName(value_index)});
     }
 }
 pub fn formatInstruction(self: *Self, writer: *Logger, inst_index: Instruction.Index) std.io.AnyWriter.Error!void {
-    const inst: Instruction = self.instructions.items[inst_index];
-    // try writer.printIndented("#{d} = .{s} {any}", .{ inst_index, @tagName(inst.op), inst.data });
-    try writer.printIndented("#{d}:!{d} = ", .{
-        inst_index,
-        inst.liveness,
-    });
-    switch (inst.op) {
-        .constant => {
-            try writer.writeAll("const.");
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(" ");
-            try formatValue(self, writer, inst.data.value);
-            try writer.writeAll(";\n");
+    const instruction: Instruction = self.instructions.items[inst_index];
+    const tag_name = @tagName(instruction.data);
+    const data: Instruction.Data = instruction.data;
+    try writer.writeIndent();
+    try writer.print("{s: <4}", .{tag_name[0..@min(tag_name.len, 4)]});
+    try writer.print("[{d: >3}]", .{inst_index});
+    try writer.print("{s: <3}", .{if (instruction.liveness == 0) "!" else ""});
+    try writer.print("{s}", .{@tagName(instruction.op)});
+    switch (data) {
+        .scoped => |scoped| {
+            // try self.dumpType(writer, instruction.type, depth + 1);
+            try writer.print("('{s}', index = {d})", .{ self.strings.getSlice(scoped.name), scoped.index });
         },
-        .global_get => {
-            // try writer.print("{s} ", .{@tagName(inst)});
-            try writer.writeAll(@tagName(inst.op));
-            try writer.writeAll(" ");
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(" '");
-            try formatType(self, writer, inst.data.type);
-            // try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
-            try writer.writeAll("';\n");
+        .bin_op => |bin_op| {
+            try writer.print("(%{d}, %{d})", .{ bin_op.lhs, bin_op.rhs });
         },
+        .instruction => |instruction_index| {
+            try writer.print("(#{d})", .{instruction_index});
+        },
+        // .value => |value| {
+        //     _ = value; // autofix
+        //     // try self.dumpValue(writer, value, depth + 1);
 
-        .add,
-        .sub,
-        .mul,
-        .div,
-        .gt,
-        .lt,
-        .eq,
-        => {
-            try writer.writeAll(@tagName(inst.op));
-            try writer.writeAll(" ");
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(" ");
-            try writer.print("#{?d} #{?d};\n", .{ inst.data.binOp.lhs, inst.data.binOp.rhs });
+        // },
+        .type => |type_index| {
+            try self.formatType(writer, type_index);
         },
-        .ret => {
-            try writer.print("{s} ", .{@tagName(inst.op)});
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(" ");
-            switch (inst.type) {
-                .void => {},
-                else => try writer.print("#{?d};", .{inst.data.instruction}),
+        .void => {},
+        .call => |call| {
+            var iter = self.lists.iterList(call.args_list);
+            try writer.print("(#{?d}) with (", .{call.callee.toInt()});
+            var first = true;
+            while (iter.next()) |arg_id| {
+                if (!first) {
+                    try writer.writeAll(", ");
+                }
+                first = false;
+                try writer.print("#{d}", .{arg_id});
             }
-            try writer.writeAll("\n");
+            try writer.writeAll(")");
         },
-        .if_expr => {
-            try writer.print("if #{d}\n", .{inst.data.if_expr.cond});
+        .if_expr => |if_expr| {
+            try writer.print(" condition #{d} then:\n", .{if_expr.cond});
             writer.indent();
-            try formatType(self, writer, inst.data.if_expr.then_body);
+            try self.formatType(writer, if_expr.then_body);
             writer.unindent();
-            if (inst.data.if_expr.else_body) |else_body| {
+            if (if_expr.else_body) |else_body| {
                 try writer.writeIndent();
-                try writer.writeAll("else\n");
+                try writer.writeAll("else:\n");
                 writer.indent();
-                try formatType(self, writer, else_body);
+                try self.formatType(writer, else_body);
                 writer.unindent();
             }
+            return;
         },
-        .block => {
-            try formatType(self, writer, inst.type);
+        .loop => |loop| {
+            try writer.writeAll("\n");
+            try self.formatType(writer, loop.body);
+            return;
         },
-        .loop => {
-            try writer.writeAll("loop\n");
-            try formatType(self, writer, inst.data.type);
-        },
-        .as => {
-            try writer.print("#{d} as ", .{inst.data.binOp.lhs});
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(";\n");
-        },
-        .param => {
-            try writer.writeAll("param(");
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(")");
-            // try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
-            try writer.writeAll(";\n");
-        },
-        .param_get, .local_get => {
-            try writer.writeAll(@tagName(inst.op));
-            try writer.writeAll(" ");
-            try formatType(self, writer, inst.type);
-            try writer.print(" #{d};\n", .{inst.data.instruction});
-        },
-        .local => {
-            try writer.writeAll("local ");
-            try formatType(self, writer, inst.type);
-            try writer.writeAll(" '");
-            try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
-            try writer.writeAll("';\n");
-        },
-        .local_set => {
-            try writer.writeAll("local_set ");
-            try formatType(self, writer, inst.type);
-            try writer.print(" #{d} = #{d};\n", .{ inst.data.binOp.lhs, inst.data.binOp.rhs });
-        },
-        .type => {
-            try writer.writeAll("type ");
-            try formatType(self, writer, inst.data.type);
-            try writer.writeAll(";\n");
-        },
-
         else => {
-            try writer.print("{s};\n", .{@tagName(inst.op)});
+            try writer.writeAll("(TODO)");
         },
     }
+
+    try writer.writeAll(": ");
+
+    try self.formatType(writer, instruction.type);
+    try writer.writeAll(" -> ");
+
+    try self.formatValue(writer, instruction.value);
+    // if (self.getValue(instruction.value)) |value| {
+    //     try writer.print("[{}]", .{value});
+    // } else {
+    //     try writer.print("[{s}]", .{@tagName(instruction.value)});
+    // }
+    // try tw.gray_500.csiClose(writer);
+    // try writer.writeAll("|\n");
+    // try writer.printIndented("#{d} = .{s} {any}", .{ inst_index, @tagName(inst.op), inst.data });
+    // try writer.printIndented("#{d}:!{d} = ", .{
+    //     inst_index,
+    //     inst.liveness,
+    // });
+    // switch (inst.op) {
+    //     .constant => {
+    //         try writer.writeAll("const.");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(" ");
+    //         try formatValue(self, writer, inst.value);
+    //         try writer.writeAll(";\n");
+    //     },
+    //     .global_get => {
+    //         // try writer.print("{s} ", .{@tagName(inst)});
+    //         try writer.writeAll(@tagName(inst.op));
+    //         try writer.writeAll(" ");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(" '");
+    //         try formatType(self, writer, inst.data.type);
+
+    //         // try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
+    //         try writer.writeAll("';\n");
+    //     },
+
+    //     .add,
+    //     .sub,
+    //     .mul,
+    //     .div,
+    //     .gt,
+    //     .lt,
+    //     .eq,
+    //     => {
+    //         try writer.writeAll(@tagName(inst.op));
+    //         try writer.writeAll(" ");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(" ");
+    //         try writer.print("#{?d} #{?d};\n", .{ inst.data.bin_op.lhs, inst.data.bin_op.rhs });
+    //     },
+    //     .ret => {
+    //         try writer.print("{s} ", .{@tagName(inst.op)});
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(" ");
+    //         switch (inst.type) {
+    //             .void => {},
+    //             else => try writer.print("#{?d};", .{inst.data.instruction}),
+    //         }
+    //         try writer.writeAll("\n");
+    //     },
+    //     .if_expr => {
+    //         try writer.print("if #{d}\n", .{inst.data.if_expr.cond});
+    //         writer.indent();
+    //         try formatType(self, writer, inst.data.if_expr.then_body);
+    //         writer.unindent();
+    //         if (inst.data.if_expr.else_body) |else_body| {
+    //             try writer.writeIndent();
+    //             try writer.writeAll("else\n");
+    //             writer.indent();
+    //             try formatType(self, writer, else_body);
+    //             writer.unindent();
+    //         }
+    //     },
+    //     .block => {
+    //         try formatType(self, writer, inst.type);
+    //     },
+    //     .loop => {
+    //         try writer.writeAll("loop\n");
+    //         try formatType(self, writer, inst.data.type);
+    //     },
+    //     .as => {
+    //         try writer.print("#{d} as ", .{inst.data.bin_op.lhs});
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(";\n");
+    //     },
+    //     .param => {
+    //         try writer.writeAll("param(");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(")");
+    //         // try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
+    //         try writer.writeAll(";\n");
+    //     },
+    //     .param_get, .local_get => {
+    //         try writer.writeAll(@tagName(inst.op));
+    //         try writer.writeAll(" ");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.print(" #{d};\n", .{inst.data.instruction});
+    //     },
+    //     .local => {
+    //         try writer.writeAll("local ");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.writeAll(" '");
+    //         try writer.writeAll(self.strings.getSlice(inst.data.scoped.name));
+    //         try writer.writeAll("';\n");
+    //     },
+    //     .local_set => {
+    //         try writer.writeAll("local_set ");
+    //         try formatType(self, writer, inst.type);
+    //         try writer.print(" #{d} = #{d};\n", .{ inst.data.bin_op.lhs, inst.data.bin_op.rhs });
+    //     },
+    //     .type => {
+    //         try writer.writeAll("type ");
+    //         try formatType(self, writer, inst.data.type);
+    //         try writer.writeAll(";\n");
+    //     },
+
+    //     else => {
+    //         try writer.print("{s};\n", .{@tagName(inst.op)});
+    //     },
+    // }
     // try writer.writeAll("\n");
 }
 pub fn formatType(self: *Self, writer: *Logger, type_index: Type.Index) !void {
@@ -650,7 +720,7 @@ pub fn formatType(self: *Self, writer: *Logger, type_index: Type.Index) !void {
                 try writer.writeAll(") -> ");
                 try formatType(self, writer, fn_ty.return_type);
 
-                if (fn_ty.body) |body_index| {
+                if (fn_ty.init_block) |body_index| {
                     try writer.writeAll("\n");
                     // try writer.writeAllIndented("body:\n");
                     try formatType(self, writer, body_index);
@@ -666,12 +736,16 @@ pub fn formatType(self: *Self, writer: *Logger, type_index: Type.Index) !void {
 
             .block => |block| {
                 writer.open("block", .{});
-                defer writer.close();
+                // defer writer.close();
                 var iter = self.lists.iterList(block.instructions);
 
                 while (iter.next()) |inst_index| {
                     try formatInstruction(self, writer, inst_index);
+                    try writer.writeAll("\n");
                 }
+                writer.unindent();
+                try writer.writeIndent();
+                try writer.writeAll("}");
             },
             .module => |mod| {
                 writer.open("module", .{});
@@ -696,6 +770,9 @@ pub fn formatType(self: *Self, writer: *Logger, type_index: Type.Index) !void {
                 try writer.writeAll(self.strings.getSlice(global.name));
                 try writer.writeAll(": ");
                 try formatType(self, writer, global.type);
+                if (global.init) |init_type| {
+                    try formatType(self, writer, init_type);
+                }
             },
             .param => |param| {
                 try writer.writeAll(self.strings.getSlice(param.name));

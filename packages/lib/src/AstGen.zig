@@ -236,6 +236,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .keyword_i32,
             .keyword_i64,
             .keyword_f32,
+            .keyword_f64,
             => |token_tag| {
                 const tag = comptime switch (token_tag) {
                     .string_literal => .string_literal,
@@ -249,6 +250,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .keyword_i32 => .ty_i32,
                     .keyword_i64 => .ty_i64,
                     .keyword_f32 => .ty_f32,
+                    .keyword_f64 => .ty_f64,
                     else => unreachable,
                 };
                 defer self.consumeToken();
@@ -377,7 +379,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 return try self.parsePrimary();
             },
             else => {
-                self.logger.fail("unexpected {s}", .{@tagName(token.tag)});
+                self.logger.panic("unexpected {s}", .{@tagName(token.tag)});
             },
         }
     }

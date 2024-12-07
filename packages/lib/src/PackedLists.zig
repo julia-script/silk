@@ -52,7 +52,7 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
 
         pub const ListIter = struct {
             index: usize = 0,
-            slice: []const T,
+            slice: []T,
             pub fn next(self: *ListIter) ?T {
                 if (self.index >= self.slice.len) {
                     return null;
@@ -64,13 +64,23 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
                 self.index += 1;
                 return item;
             }
+            pub inline fn nextPtr(self: *ListIter) ?*const T {
+                if (self.index >= self.slice.len) {
+                    return null;
+                }
+                // const item = @constCast(&self.slice[self.index]);
+                if (self.slice[self.index] == sentinel) {
+                    return null;
+                }
+                return &self.slice[self.index];
+            }
         };
         pub fn initCapacity(allocator: std.mem.Allocator, capacity: usize) !Self {
             return .{
                 .list = try Array(T).initCapacity(allocator, capacity),
             };
         }
-        pub fn slice(self: *Self) []const T {
+        pub fn slice(self: *Self) []T {
             return self.list.items[0..self.list.items.len];
         }
         pub fn deinit(self: *Self, allocator: Allocator) void {

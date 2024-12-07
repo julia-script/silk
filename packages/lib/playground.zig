@@ -1,6 +1,7 @@
 export fn fib(n: i32, z:i32): i32 {
   var a:i32 = 0;
   var b:i32 = 1;
+    // fib(a, b);
   if (n > 0) {
     while (n > 0) {
       n = n - 1;
@@ -15,9 +16,6 @@ export fn fib(n: i32, z:i32): i32 {
 
 // const a:i32 = 1;
 
-// export fn rec(n: i32): i32 {
-//   if (n > 10) {
-//     return n;
-//   }
-//   return rec(n + 1);
+// export fn rec(n: f64): f64 {
+//  return n + 2 / 3 * 4;
 // }

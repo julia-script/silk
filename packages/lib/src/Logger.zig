@@ -114,8 +114,11 @@ pub fn fail(self: *Self, comptime format: []const u8, args: anytype) void {
     if (builtin.target.isWasm()) return;
     self.writeIndent() catch @panic("writeIndent failed");
 
-    tw.red_500.bold().write(self.writer, "[Error] ", .{}) catch @panic("writeAll failed");
-    self.writer.print(format ++ "\n", args) catch @panic("writeAll failed");
+    const red = tw.red_500.bold();
+    red.print(self.writer, "{s:=^60}\n\n", .{"[Error]"}, .{}) catch @panic("writeAll failed");
+
+    self.writer.print("    " ++ format, args) catch @panic("writeAll failed");
+    red.print(self.writer, "\n\n{s:=^60}\n", .{""}, .{}) catch @panic("writeAll failed");
 }
 pub fn panic(self: *Self, comptime format: []const u8, args: anytype) noreturn {
     self.fail(format, args);
