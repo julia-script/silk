@@ -164,7 +164,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 ty_inst = try self.genInstruction(scope, ty_node);
                 // value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = local_inst, .rhs = ty_inst } });
             }
-            const value_inst: Hir.Inst.Index = blk: {
+            var value_inst: Hir.Inst.Index = blk: {
                 if (value_node != 0) {
                     break :blk try self.genInstruction(scope, value_node);
                 }
@@ -187,6 +187,8 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             });
 
             nav.move(declaration.name);
+            value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst.? } });
+
             _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
 
             try scope.pushSymbol(nav.getNodeSlice(), local_inst);

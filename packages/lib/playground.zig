@@ -1,4 +1,4 @@
-export fn fib(n: i32, z:i32): i32 {
+export fn fib(n: i32): i32 {
   var a:i32 = 0;
   var b:i32 = 1;
     // fib(a, b);

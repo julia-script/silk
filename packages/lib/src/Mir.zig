@@ -9,6 +9,8 @@ const shared = @import("shared.zig");
 pub const Lists = PackedLists.new(u32, std.math.maxInt(u32));
 pub const ChildList = Lists.List;
 const MirBuilder = @import("MirBuilder2.zig");
+const Hir = @import("Hir.zig");
+const ErrorManager = @import("ErrorManager.zig");
 const Logger = @import("Logger.zig");
 const tw = Logger.tw;
 
@@ -34,6 +36,9 @@ pub fn deinit(self: *Self) void {
     self.values.deinit(self.allocator);
 }
 
+pub fn build(allocator: std.mem.Allocator, hir: *Hir, errors: *ErrorManager) !Self {
+    return try MirBuilder.build(allocator, hir, errors);
+}
 pub const Instruction = struct {
     op: Op,
     data: Data,

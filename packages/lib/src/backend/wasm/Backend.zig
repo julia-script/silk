@@ -86,7 +86,7 @@ pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
             },
         }
     }
-    if (ty.@"fn".body) |body_index| {
+    if (ty.@"fn".init_block) |body_index| {
         try self.translateBlockInto(body_index, &func_wip);
     }
     // const inst_start = self.mir.instructions.items.len;
@@ -101,18 +101,25 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
         const inst = self.mir.instructions.items[inst_index];
         switch (inst.op) {
             .param => {
+                // const param_type = self.getType(inst.data.param_declaration.type) orelse return error.TypeNotFound;
+                const ty = self.getType(inst.type) orelse return error.TypeNotFound;
                 //             _ = try func_wip.pushParam(.i32);
-                _ = try func.pushParam(switch (inst.type) {
+                // std.debug.print("param: {s}\n", .{@tagName(inst.type)});
+                _ = try func.pushParam(switch (ty.param.type) {
                     .i32 => .i32,
+                    .i64 => .i64,
+                    .f32 => .f32,
                     .f64 => .f64,
-                    else => {
-                        std.debug.panic("unimplemented param type: {s}", .{@tagName(inst.type)});
+                    else => |t| {
+                        std.debug.panic("unimplemented param type: {}", .{t});
                     },
                 });
             },
             .local => {
                 try func.pushLocal(switch (inst.type) {
                     .i32 => .i32,
+                    .i64 => .i64,
+                    .f32 => .f32,
                     .f64 => .f64,
                     else => {
                         std.debug.panic("unimplemented local type: {s}", .{@tagName(inst.type)});
@@ -120,7 +127,7 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
                 });
             },
             .constant => {
-                if (self.getValue(inst.data.value)) |value| {
+                if (self.getValue(inst.value)) |value| {
                     switch (value) {
                         .float => |float| {
                             _ = try func.pushInstruction(switch (inst.type) {
@@ -131,6 +138,19 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
                                 else => unreachable,
                             });
                         },
+                        .integer => |integer| {
+                            _ = try func.pushInstruction(switch (inst.type) {
+                                .f64 => .{ .f64_const = @floatFromInt(integer) },
+                                .f32 => .{ .f32_const = @floatFromInt(integer) },
+                                .i32 => .{ .i32_const = @intCast(integer) },
+                                .i64 => .{ .i64_const = integer },
+
+                                else => {
+                                    std.debug.panic("unimplemented integer type: {s}", .{@tagName(inst.type)});
+                                },
+                            });
+                        },
+
                         else => {
                             @panic("unimplemented");
                         },
@@ -161,7 +181,9 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
             .eq,
             .ne,
             => |tag| {
-                switch (inst.type) {
+                const lhs_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
+                // const rhs_inst = self.mir.instructions.items[inst.data.bin_op.rhs];
+                switch (lhs_inst.type) {
                     inline .i32, .f64, .i64, .f32 => |type_tag| {
                         const key = @tagName(type_tag) ++ "_" ++ @tagName(tag);
                         _ = try func.pushInstruction(@unionInit(
@@ -205,7 +227,7 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
                 _ = try func.pushInstruction(.{ .end = {} });
             },
             .local_set => {
-                const local_inst = self.mir.instructions.items[inst.data.binOp.lhs];
+                const local_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
 
                 // std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
                 //     inst.data.binOp.lhs,
@@ -218,7 +240,7 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
 
             .loop => {
                 _ = try func.pushInstruction(.{ .loop = .empty });
-                try self.translateBlockInto(inst.data.type, func);
+                try self.translateBlockInto(inst.data.loop.body, func);
                 _ = try func.pushInstruction(.{ .end = {} });
             },
             .br => {

@@ -261,7 +261,7 @@ pub const ModuleWip = struct {
                 const fn_inst = self.builder.getHirInst(global.wip.fn_decl.hir_inst).fn_decl;
                 // const return_type = try TypeWip.resolveUnreferenced(self.builder, scope, global.wip.fn_decl.return_type);
 
-                var iter_params = self.builder.iterHirList(fn_inst.params);
+                var iter_params = self.builder.iterHirList(fn_inst.params_list);
 
                 while (iter_params.next()) |param_index| {
                     self.builder.logger.open("#{d} resolve param", .{param_index});
@@ -511,7 +511,7 @@ const TypeWip = struct {
             return_type,
         );
 
-        var iter_params = self.builder.iterHirList(fn_inst.params);
+        var iter_params = self.builder.iterHirList(fn_inst.params_list);
 
         while (iter_params.next()) |param_index| {
             self.builder.logger.open("#{d} resolve param", .{param_index});

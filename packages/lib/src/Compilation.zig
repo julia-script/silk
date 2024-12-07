@@ -5,7 +5,7 @@ const Ast = @import("Ast.zig");
 const Hir = @import("Hir.zig");
 const AstBuilder = @import("AstGen.zig");
 const HirBuilder = @import("HirBuilder.zig");
-const MirBuilder = @import("MirBuilder.zig");
+const MirBuilder = @import("MirBuilder2.zig");
 const WasmBackend = @import("backend/wasm/Backend.zig");
 const dir = @import("./dir.zig");
 
@@ -60,7 +60,7 @@ pub const Source = struct {
         self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
         std.debug.print("HIR:\n", .{});
         std.debug.print("{any}\n", .{self.hir});
-        self.mir = try MirBuilder.gen(allocator, &self.hir.?, &compilation.errors);
+        self.mir = try Mir.build(allocator, &self.hir.?, &compilation.errors);
         std.debug.print("MIR:\n", .{});
         std.debug.print("{any}\n", .{self.mir});
     }

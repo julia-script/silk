@@ -63,26 +63,26 @@ pub const Instruction = union(enum) {
 
     // Comparison Operations
     i32_eq: void,
-    i32_neq: void,
+    i32_ne: void,
     i32_lt_s: void,
     i32_lt_u: void,
     i32_gt_s: void,
     i32_gt_u: void,
 
     i64_eq: void,
-    i64_neq: void,
+    i64_ne: void,
     i64_lt_s: void,
     i64_lt_u: void,
     i64_gt_s: void,
     i64_gt_u: void,
 
     f32_eq: void,
-    f32_neq: void,
+    f32_ne: void,
     f32_lt: void,
     f32_gt: void,
 
     f64_eq: void,
-    f64_neq: void,
+    f64_ne: void,
     f64_lt: void,
     f64_gt: void,
 
@@ -143,26 +143,26 @@ pub const Instruction = union(enum) {
 
             // Comparison Operations
             .i32_eq => try section.writeByte(0x46), // i32.eq
-            .i32_neq => try section.writeByte(0x47), // i32.ne
+            .i32_ne => try section.writeByte(0x47), // i32.ne
             .i32_lt_s => try section.writeByte(0x48), // i32.lt_s
             .i32_lt_u => try section.writeByte(0x49), // i32.lt_u
             .i32_gt_s => try section.writeByte(0x4A), // i32.gt_s
             .i32_gt_u => try section.writeByte(0x4B), // i32.gt_u
 
             .i64_eq => try section.writeByte(0x51), // i64.eq
-            .i64_neq => try section.writeByte(0x52), // i64.ne
+            .i64_ne => try section.writeByte(0x52), // i64.ne
             .i64_lt_s => try section.writeByte(0x53), // i64.lt_s
             .i64_lt_u => try section.writeByte(0x54), // i64.lt_u
             .i64_gt_s => try section.writeByte(0x55), // i64.gt_s
             .i64_gt_u => try section.writeByte(0x56), // i64.gt_u
 
             .f32_eq => try section.writeByte(0x5B), // f32.eq
-            .f32_neq => try section.writeByte(0x5C), // f32.ne
+            .f32_ne => try section.writeByte(0x5C), // f32.ne
             .f32_lt => try section.writeByte(0x5D), // f32.lt
             .f32_gt => try section.writeByte(0x5E), // f32.gt
 
             .f64_eq => try section.writeByte(0x61), // f64.eq
-            .f64_neq => try section.writeByte(0x62), // f64.ne
+            .f64_ne => try section.writeByte(0x62), // f64.ne
             .f64_lt => try section.writeByte(0x63), // f64.lt
             .f64_gt => try section.writeByte(0x64), // f64.gt
 
@@ -230,20 +230,20 @@ pub const Instruction = union(enum) {
             .f32_div => try writer.write("f32.div"),
             .f64_div => try writer.write("f64.div"),
             .i32_eq => try writer.write("i32.eq"),
-            .i32_neq => try writer.write("i32.ne"),
+            .i32_ne => try writer.write("i32.ne"),
             .i32_lt_s => try writer.write("i32.lt_s"),
             .i32_lt_u => try writer.write("i32.lt_u"),
             .i32_gt_s => try writer.write("i32.gt_s"),
             .i32_gt_u => try writer.write("i32.gt_u"),
             .i64_eq => try writer.write("i64.eq"),
-            .i64_neq => try writer.write("i64.ne"),
+            .i64_ne => try writer.write("i64.ne"),
             .i64_lt_s => try writer.write("i64.lt_s"),
             .i64_lt_u => try writer.write("i64.lt_u"),
             .i64_gt_s => try writer.write("i64.gt_s"),
             .i64_gt_u => try writer.write("i64.gt_u"),
 
             .f32_eq => try writer.write("f32.eq"),
-            .f32_neq => try writer.write("f32.ne"),
+            .f32_ne => try writer.write("f32.ne"),
             .f32_lt => try writer.write("f32.lt"),
             .f32_gt => try writer.write("f32.gt"),
 
