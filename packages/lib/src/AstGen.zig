@@ -501,9 +501,9 @@ pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index,
     // inline .double_equal => .eq,
     // inline .bang_equal => .ne,
     // inline .l_angle_bracket => .lt,
-    // inline .l_angle_bracket_equal => .lte,
+    // inline .l_angle_bracket_equal => .le,
     // inline .r_angle_bracket => .gt,
-    // inline .r_angle_bracket_equal => .gte,
+    // inline .r_angle_bracket_equal => .ge,
     // inline .double_l_angle_bracket => .bshl,
     // inline .double_r_angle_bracket => .bshr,
     // inline .ampersand => .band,
@@ -530,9 +530,9 @@ pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index,
             .double_equal => .{ .eq = .{ .lhs = lhs, .rhs = rhs } },
             .bang_equal => .{ .ne = .{ .lhs = lhs, .rhs = rhs } },
             .l_angle_bracket => .{ .lt = .{ .lhs = lhs, .rhs = rhs } },
-            .l_angle_bracket_equal => .{ .lte = .{ .lhs = lhs, .rhs = rhs } },
+            .l_angle_bracket_equal => .{ .le = .{ .lhs = lhs, .rhs = rhs } },
             .r_angle_bracket => .{ .gt = .{ .lhs = lhs, .rhs = rhs } },
-            .r_angle_bracket_equal => .{ .gte = .{ .lhs = lhs, .rhs = rhs } },
+            .r_angle_bracket_equal => .{ .ge = .{ .lhs = lhs, .rhs = rhs } },
             .double_l_angle_bracket => .{ .bshl = .{ .lhs = lhs, .rhs = rhs } },
             .double_r_angle_bracket => .{ .bshr = .{ .lhs = lhs, .rhs = rhs } },
             .ampersand => .{ .band = .{ .lhs = lhs, .rhs = rhs } },
@@ -585,7 +585,7 @@ pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index,
     //             .lhs = lhs,
     //             .rhs = rhs,
     //         } },
-    //         .l_angle_bracket_equal => .{ .lte = .{
+    //         .l_angle_bracket_equal => .{ .le = .{
     //             .lhs = lhs,
     //             .rhs = rhs,
     //         } },
@@ -593,7 +593,7 @@ pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index,
     //             .lhs = lhs,
     //             .rhs = rhs,
     //         } },
-    //         .r_angle_bracket_equal => .{ .gte = .{
+    //         .r_angle_bracket_equal => .{ .ge = .{
     //             .lhs = lhs,
     //             .rhs = rhs,
     //         } },
@@ -886,7 +886,7 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
     const name = try self.parseIdentifier();
     var data: Node.Data.FnParam = .{
         .name = name,
-        .ty = 0,
+        .type = 0,
     };
 
     // if (!self.isToken())
@@ -909,7 +909,7 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
     }
     self.consumeToken();
 
-    data.ty = try self.parseTy();
+    data.type = try self.parseTy();
     self.setNode(index, .{
         .data = .{ .fn_param = data },
         .start_token = start_token,

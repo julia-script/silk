@@ -2,7 +2,7 @@ const std = @import("std");
 const Color = @import("Color.zig");
 const tw = Color.tw;
 
-const RAINBOW = [7]Color{
+pub const RAINBOW = [7]Color{
     tw.red_200,
     tw.orange_200,
     tw.yellow_200,
@@ -11,6 +11,9 @@ const RAINBOW = [7]Color{
     tw.indigo_200,
     tw.violet_200,
 };
+pub fn pickColor(index: usize) Color {
+    return RAINBOW[index % RAINBOW.len];
+}
 
 pub const IndentOptions = struct {
     rainbow: bool = true,

@@ -10,9 +10,13 @@
 	},
 	"scripts": {
 		"dev": "watchexec --exts zig --clear=clear 'bun run build'",
-		"build": "zig build wasm -p dist -freference-trace=10 && zig build wasi -p dist -freference-trace=10",
-		"build:wasi": "zig build wasi -p dist",
+		"build": "bun run build:wasm && bun run build:wasi",
+		"dev:wasm": "watchexec --exts zig --clear=clear 'bun run build:wasm'",
+		"dev:wasi": "watchexec --exts zig --clear=clear 'bun run build:wasi'",
+		"build:wasm": "zig build wasm -p dist -freference-trace=10",
+		"build:wasi": "zig build wasi -p dist -freference-trace=10",
 		"build:ts": "tsc",
+		"dev:ts": "tsc --watch",
 		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm",
 		"gen:types": "zig run ./generate_types.zig"
 	},

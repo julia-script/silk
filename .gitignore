@@ -4,5 +4,6 @@ zig-cache/
 .zig-cache/
 .test/
 node_modules/
-tmp-*
+tmp*
+.tmp*
 + .turbo

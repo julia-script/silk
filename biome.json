@@ -19,6 +19,13 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
+			"style": {
+				"noParameterAssign": "off"
+			},
+			"a11y": {
+				"useKeyWithClickEvents": "off",
+				"useSemanticElements": "off"
+			},
 			"recommended": true,
 			"complexity": {
 				"noStaticOnlyClass": "off"

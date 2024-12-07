@@ -36,8 +36,13 @@ pub fn gen(allocator: Allocator, hir: *Hir, errors: *ErrorManager) !Mir {
         .arena = std.heap.ArenaAllocator.init(allocator),
     };
     defer builder.deinit();
-    var scope: Scope = .{ .root = .{ .builder = &builder } };
-    _ = try scope.resolveType(Hir.Inst.RootIndex);
+    // var scope: Scope = .{ .root = .{ .builder = &builder } };
+    var root_type_wip = try TypeWip.init(
+        &builder,
+        .{ .root = .{ .builder = &builder } },
+        Hir.Inst.RootIndex,
+    );
+    _ = try root_type_wip.resolve();
 
     // try builder.genModule(Hir.Inst.RootIndex);
 
@@ -136,7 +141,7 @@ pub fn genModule(self: *Self, hir_inst: Hir.Inst.Index) !void {
     try module.collectSymbols();
     var symbols_iter = module.symbols_table.iterator();
     while (symbols_iter.next()) |entry| {
-        const index = try module.resolveGlobal(entry.key_ptr.*);
+        const index = try module.resolveGlobalType(entry.key_ptr.*);
         _ = index; // autofix
     }
 
@@ -155,13 +160,21 @@ pub const ModuleWip = struct {
     index: Mir.Type.Index,
     // symbols_map: Symbol.Map,
     globals: std.AutoArrayHashMapUnmanaged(u32, Global) = .{},
+    const Wip = union(enum) {
+        fn_decl: FnWip,
+        mod_decl: ModuleWip,
+    };
     const Global = struct {
         name: InternedSlice,
         state: State,
-        pub const State = union(enum) {
-            idle: void,
-            resolving: void,
-            resolved: Mir.Type.Index,
+        hir_inst: Hir.Inst.Index,
+        wip: Wip,
+
+        pub const State = enum {
+            idle,
+            resolving,
+            resolved_type,
+            resolved,
         };
     };
 
@@ -179,10 +192,10 @@ pub const ModuleWip = struct {
             // .symbols_map = Symbol.Map.init(builder.arena.allocator()),
         };
     }
-    pub fn findSymbol(self: *ModuleWip, key: Symbol.Key) !?Symbol {
-        _ = try self.resolveGlobal(key);
-        return self.symbols_map.get(key);
-    }
+    // pub fn findSymbol(self: *ModuleWip, key: Symbol.Key) !?Symbol {
+    //     _ = try self.resolveGlobalType(key);
+    //     return self.symbols_map.get(key);
+    // }
     pub fn collectSymbols(self: *ModuleWip) Error!void {
         self.builder.logger.open("#{d} ModuleWip.collectSymbols", .{self.hir_inst});
         defer self.builder.logger.close();
@@ -196,20 +209,31 @@ pub const ModuleWip = struct {
                 "#{d} collected .{s} \"{s}\"",
                 .{ decl_inst_index, @tagName(decl_inst), self.builder.getSlice(name) },
             );
+            if (!decl_inst.global_decl.is_fn) @panic("not supported");
+            const mod_scope: Scope = .{ .module = self };
             try self.globals.put(
                 self.builder.arena.allocator(),
                 decl_inst_index,
                 .{
                     .name = name,
-                    .state = .{
-                        .idle = {},
+                    .hir_inst = decl_inst_index,
+                    // .type_wip = try TypeWip.init(self.builder, .{ .module = self }, decl_inst_index),
+                    .wip = .{
+                        .fn_decl = try FnWip.init(
+                            self.builder,
+                            mod_scope,
+                            decl_inst_index,
+                            name,
+                            .unknown,
+                        ),
                     },
+                    .state = .idle,
                 },
             );
         }
     }
-    pub fn resolveGlobal(self: *ModuleWip, key: u32) Error!Mir.Type.Index {
-        self.builder.logger.open("#{d} ModuleWip.resolveGlobal", .{key});
+    pub fn resolveGlobalType(self: *ModuleWip, key: u32) Error!Mir.Type.Index {
+        self.builder.logger.open("#{d} ModuleWip.resolveGlobalType", .{key});
         defer self.builder.logger.close();
 
         // const key: Symbol.Key = .{ .name = name };
@@ -224,25 +248,55 @@ pub const ModuleWip = struct {
         // );
         const resolved_type = switch (global.state) {
             .idle => blk: {
-                try self.builder.logger.printLnIndented("#{d} ModuleWip.resolveGlobal idle", .{key});
+                try self.builder.logger.printLnIndented("#{d} ModuleWip.resolveGlobalType idle", .{key});
                 const scope: Scope = .{ .module = self };
-                const resolved = try scope.resolveType(key);
-                const global_type = try self.builder.pushType(.{
-                    .global = .{
-                        .name = global.name,
-                        .type = resolved,
-                        .init = null,
-                    },
-                });
-                global.state = .{ .resolved = global_type };
+                // const resolved = try scope.resolveType(key);
+                global.state = .resolving;
+                const type_inst = self.builder.getHirInst(self.hir_inst);
+                _ = type_inst; // autofix
+
+                // const resolved = switch (type_inst) {
+
+                var fn_wip = &global.wip.fn_decl;
+                const fn_inst = self.builder.getHirInst(global.wip.fn_decl.hir_inst).fn_decl;
+                // const return_type = try TypeWip.resolveUnreferenced(self.builder, scope, global.wip.fn_decl.return_type);
+
+                var iter_params = self.builder.iterHirList(fn_inst.params);
+
+                while (iter_params.next()) |param_index| {
+                    self.builder.logger.open("#{d} resolve param", .{param_index});
+                    defer self.builder.logger.close();
+
+                    const param_inst = self.builder.getHirInst(param_index).param_decl;
+                    const param_type = try TypeWip.resolveUnreferenced(self.builder, scope, param_inst.ty);
+                    const name = try self.builder.internNodeSlice(param_inst.name_node);
+
+                    const index = try self.builder.pushType(.{ .param = .{
+                        .type = param_type,
+                        .name = name,
+                    } });
+                    try fn_wip.params.put(self.builder.arena.allocator(), param_index, index);
+                }
+                // return try fn_wip.commitType();
+
+                // fn_wip.type_index;
+                // self.builder.setType(global.type_wip.index, .{
+                //     .global = .{
+                //         .name = global.name,
+                //         .type = try fn_wip.commitType(),
+                //         .init = null,
+                //     },
+                // });
+                const index = try fn_wip.commitType();
+                global.state = .resolved_type;
 
                 // try self.globals.put(self.builder.arena.allocator(), key, global) catch unreachable;
-                break :blk global_type;
+                break :blk index;
             },
-            .resolving => return error.CircularDependency,
-            .resolved => |resolved| resolved,
+            .resolved_type, .resolving => return error.CircularDependency,
+            .resolved => global.wip.fn_decl.type_index,
         };
-        // try self.builder.logger.printLnIndented("#{d} ModuleWip.resolveGlobal resolved: {d}", .{ symbol.hir_inst, resolved_type });
+        // try self.builder.logger.printLnIndented("#{d} ModuleWip.resolveGlobalType resolved: {d}", .{ symbol.hir_inst, resolved_type });
         return resolved_type;
     }
 };
@@ -251,13 +305,22 @@ const TypeWip = struct {
     builder: *Self,
     hir_inst: Hir.Inst.Index,
     scope: Scope,
+    index: Mir.Type.Index,
     // state: State = .idle,
-    pub fn init(builder: *Self, scope: Scope, hir_inst: Hir.Inst.Index) TypeWip {
+    pub fn init(builder: *Self, scope: Scope, hir_inst: Hir.Inst.Index) Error!TypeWip {
         return .{
             .builder = builder,
             .hir_inst = hir_inst,
             .scope = scope,
+            .index = try builder.reserveTypeIndex(),
         };
+    }
+    pub fn getType(self: *TypeWip) Mir.Type {
+        return self.builder.getType(self.index).?;
+    }
+    pub fn resolveUnreferenced(builder: *Self, scope: Scope, hir_inst: Hir.Inst.Index) Error!Mir.Type.Index {
+        var wip = try TypeWip.init(builder, scope, hir_inst);
+        return try wip.resolve();
     }
     pub fn resolve(self: *TypeWip) Error!Mir.Type.Index {
         self.builder.logger.open("#{d} TypeWip.resolve", .{self.hir_inst});
@@ -278,7 +341,11 @@ const TypeWip = struct {
                 std.debug.panic("unimplemented type_inst: {s}", .{@tagName(type_inst)});
             },
         };
-        try self.builder.logger.printLnIndented("#{d} TypeWip.resolve resolved to: '{s}'", .{ self.hir_inst, if (self.builder.getType(resolved)) |res| @tagName(res) else @tagName(resolved) });
+        self.builder.logger.log(
+            "#{d} TypeWip.resolve resolved to: '{s}'",
+            .{ self.hir_inst, if (self.builder.getType(resolved)) |res| @tagName(res) else @tagName(resolved) },
+            tw.green_400,
+        );
         return resolved;
     }
     pub fn resolveModule(self: *TypeWip) Error!Mir.Type.Index {
@@ -293,11 +360,12 @@ const TypeWip = struct {
         while (globals_iter.next()) |entry| {
             switch (entry.value_ptr.state) {
                 .idle => {
-                    const index = try module.resolveGlobal(entry.key_ptr.*);
+                    const index = try module.resolveGlobalType(entry.key_ptr.*);
                     try decls.append(index.asInt());
+                    // @panic("stop");
                 },
-                .resolved => |resolved| {
-                    try decls.append(resolved.asInt());
+                .resolved_type, .resolved => {
+                    try decls.append(entry.value_ptr.wip.fn_decl.type_index.asInt());
                 },
                 else => unreachable,
             }
@@ -305,7 +373,113 @@ const TypeWip = struct {
         self.builder.setType(module.index, .{ .module = .{
             .decls = try decls.commit(),
         } });
+        globals_iter.reset();
+        while (globals_iter.next()) |entry| {
+            switch (entry.value_ptr.state) {
+                .resolving, .idle => unreachable,
+                .resolved_type => {
+                    @panic("unimplemented");
+                    // const global_type = entry.value_ptr.wip.fn_decl.type_index.getType();
+                    // const resolved_type = self.builder.getType(global_type.global.type) orelse {
+                    //     entry.value_ptr.state = .resolved;
+                    //     continue;
+                    // };
+                    // switch (resolved_type) {
+                    //     .@"fn" => {
+                    //         // try entry.value_ptr.wip.fn_decl.type_index.resolveInit();
+                    //     },
+                    //     else => std.debug.panic("unimplemented resolved_type: {s}", .{@tagName(resolved_type)}),
+                    // }
+
+                    // entry.value_ptr.state = .resolved;
+                },
+                .resolved => {},
+            }
+        }
         return module.index;
+    }
+    pub fn resolveInit(self: *TypeWip) Error!void {
+        self.builder.logger.open("#{d} TypeWip.resolveInit", .{self.hir_inst});
+        defer self.builder.logger.close();
+
+        const fn_inst_index = self.builder.getHirInst(self.hir_inst).global_decl.init;
+
+        const fn_inst = self.builder.getHirInst(fn_inst_index);
+        const init_inst = fn_inst.fn_decl.init orelse return;
+        _ = init_inst; // autofix
+
+        // var block_wip = BlockWip.init(self.builder, .{ .@"fn" = self }, init_inst);
+        // try block_wip.resolve();
+        // self.builder.setType(self.index, .{ .@"fn" = .{
+        //     .body = try block_wip.commit(),
+        // } });
+
+        // var iter_params = self.builder.iterHirList(fn_inst.params);
+
+        // const global_type = self.getType();
+        // const resolved_type = self.builder.getType(global_type.global.type) orelse unreachable;
+
+        // var param_types_iter = self.builder.mir.lists.iterList(resolved_type.@"fn".params);
+        // while (iter_params.next()) |param_index| {
+        //     const param_type = param_types_iter.next() orelse unreachable;
+        //     const param_type_index = Mir.Type.Index.fromInt(param_type);
+        //     const param_type_type = self.builder.getType(param_type_index) orelse unreachable;
+        //     try block_wip.pushInstruction(param_index, .{
+        //         .op = .param,
+        //         .type = param_type_index,
+        //         .value = .runtime,
+        //         .data = .{
+        //             .scoped = .{
+        //                 .name = param_type_type.param.name,
+        //                 .index = 0,
+        //             },
+        //         },
+        //     });
+        // }
+
+        // if (init_inst) |init_hir_inst| {
+
+        // var body_wip: ?*BlockWip = null;
+        // _ = body_wip; // autofix
+
+        // if (fn_inst.init) |init_inst| {
+        //     fn_wip.body = BlockWip.init(self.builder, .{ .@"fn" = &fn_wip }, init_inst);
+        //     fn_wip.body.?.return_type = return_type;
+        //     body_wip = &fn_wip.body.?;
+        // }
+        // var iter_params = self.builder.iterHirList(fn_inst.params);
+
+        // while (iter_params.next()) |param_index| {
+        //     self.builder.logger.open("#{d} resolve param", .{param_index});
+        //     defer self.builder.logger.close();
+
+        //     const param_inst = self.builder.getHirInst(param_index).param_decl;
+        //     const param_type = try self.scope.resolveType(param_inst.ty);
+        //     const name = try self.builder.internNodeSlice(param_inst.name_node);
+
+        //     const index = try self.builder.pushType(.{ .param = .{
+        //         .type = param_type,
+        //         .name = name,
+        //     } });
+        //     try fn_wip.params.put(self.builder.arena.allocator(), param_index, index);
+        //     if (body_wip) |body| {
+        //         try body.pushInstruction(param_index, .{
+        //             .op = .param,
+        //             .type = param_type,
+        //             .value = .runtime,
+        //             .data = .{ .scoped = .{
+        //                 .name = name,
+        //                 .index = 0,
+        //             } },
+        //         });
+        //     }
+        // }
+        // if (body_wip) |body| {
+        //     try body.resolve();
+        // }
+        // }
+
+        // @panic("stop");
     }
     pub fn resolveDecl(self: *TypeWip) Error!Mir.Type.Index {
         self.builder.logger.open("#{d} TypeWip.resolveDecl", .{self.hir_inst});
@@ -313,7 +487,9 @@ const TypeWip = struct {
         const decl_inst = self.builder.getHirInst(self.hir_inst);
         const type_index = decl_inst.global_decl.type.?;
         // decl_inst.global_decl.
-        return try self.scope.resolveType(type_index);
+        // return try self.scope.resolveType(type_index);
+        // return try self.builder.getType(type_index);
+        return try TypeWip.resolveUnreferenced(self.builder, self.scope, type_index);
     }
     pub fn resolveFnDecl(self: *TypeWip) Error!Mir.Type.Index {
         self.builder.logger.open("#{d} TypeWip.resolveFnDecl", .{self.hir_inst});
@@ -322,11 +498,12 @@ const TypeWip = struct {
         const fn_inst = self.builder.getHirInst(self.hir_inst).fn_decl;
 
         self.builder.logger.open("#{d} resolve return type", .{fn_inst.return_type});
-        const return_type = try self.scope.resolveType(fn_inst.return_type);
+        // const return_type = try self.scope.resolveType(fn_inst.return_type);
         self.builder.logger.close();
 
+        const return_type = try TypeWip.resolveUnreferenced(self.builder, self.scope, fn_inst.return_type);
         const fn_name = try self.builder.internNodeSlice(fn_inst.name_node);
-        var fn_wip = FnWip.init(
+        var fn_wip = try FnWip.init(
             self.builder,
             self.scope,
             self.hir_inst,
@@ -334,12 +511,6 @@ const TypeWip = struct {
             return_type,
         );
 
-        var body_wip: ?*BlockWip = null;
-        if (fn_inst.init) |init_inst| {
-            fn_wip.body = BlockWip.init(self.builder, .{ .@"fn" = &fn_wip }, init_inst);
-            fn_wip.body.?.return_type = return_type;
-            body_wip = &fn_wip.body.?;
-        }
         var iter_params = self.builder.iterHirList(fn_inst.params);
 
         while (iter_params.next()) |param_index| {
@@ -347,7 +518,7 @@ const TypeWip = struct {
             defer self.builder.logger.close();
 
             const param_inst = self.builder.getHirInst(param_index).param_decl;
-            const param_type = try self.scope.resolveType(param_inst.ty);
+            const param_type = try TypeWip.resolveUnreferenced(self.builder, self.scope, param_inst.ty);
             const name = try self.builder.internNodeSlice(param_inst.name_node);
 
             const index = try self.builder.pushType(.{ .param = .{
@@ -355,32 +526,8 @@ const TypeWip = struct {
                 .name = name,
             } });
             try fn_wip.params.put(self.builder.arena.allocator(), param_index, index);
-            if (body_wip) |body| {
-                try body.pushInstruction(param_index, .{
-                    .op = .param,
-                    .type = param_type,
-                    .value = .runtime,
-                    .data = .{ .scoped = .{
-                        .name = name,
-                        .index = 0,
-                    } },
-                });
-            }
         }
-        if (body_wip) |body| {
-            try body.resolve();
-        }
-
-        //     try fn_wip.pushParameter(
-        //         name,
-        //         param_type,
-        //         param_index,
-        //     );
-        // }
-        // try fn_wip.resolveBody();
-        // for
-
-        return try fn_wip.commit();
+        return try fn_wip.commitType();
     }
     pub fn resolveBlockDecl(self: *TypeWip) Error!Mir.Type.Index {
         self.builder.logger.open("#{d} TypeWip.resolveBlockDecl", .{self.hir_inst});
@@ -407,14 +554,14 @@ const Scope = union(enum) {
             .block => self.block.builder,
         };
     }
-    pub fn resolveType(self: Scope, inst_index: Hir.Inst.Index) !Mir.Type.Index {
-        var builder = self.getBuilder();
-        builder.logger.open("#{d} Scope.resolveType", .{inst_index});
-        defer builder.logger.close();
+    // pub fn resolveType(self: Scope, inst_index: Hir.Inst.Index) !Mir.Type.Index {
+    //     var builder = self.getBuilder();
+    //     builder.logger.open("#{d} Scope.resolveType", .{inst_index});
+    //     defer builder.logger.close();
 
-        var type_wip = TypeWip.init(builder, self, inst_index);
-        return try type_wip.resolve();
-    }
+    //     var type_wip = TypeWip.init(builder, self, inst_index);
+    //     return try type_wip.resolve();
+    // }
     // pub fn findSymbolType(self: Scope, key: Local.Key) Error!?Mir.Type.Index {
     //     switch (self) {
     //         .@"fn" => |fn_wip| {
@@ -426,7 +573,7 @@ const Scope = union(enum) {
     //         .module => |module_wip| {
     //             switch (key) {
     //                 .named => |name| {
-    //                     const index = module_wip.resolveGlobal(name) catch |err| switch (err) {
+    //                     const index = module_wip.resolveGlobalType(name) catch |err| switch (err) {
     //                         error.SymbolNotFound => return null,
     //                         else => return err,
     //                     };
@@ -461,26 +608,26 @@ const Scope = union(enum) {
             .root => null,
         };
     }
-    pub fn findSymbol(self: Scope, key: Symbol.Key) !?Symbol {
-        try self.getBuilder().logger.printLnIndented("Scope.findSymbol .{s} #{d}", .{ @tagName(self), key });
-        return switch (self) {
-            .@"fn" => |fn_wip| try fn_wip.findSymbol(key),
-            .block => |block_wip| try block_wip.findSymbol(key),
-            .module => |module_wip| try module_wip.findSymbol(key),
-            .root => {
-                try self.getBuilder().logger.log("Could not find symbol #{d}", .{key}, tw.red_400);
-                return null;
-            },
-        };
-    }
-    pub fn findSymbolRecursive(self: Scope, key: Symbol.Key) !?Symbol {
-        const hir_inst = self.getBuilder().getHirInst(key);
-        try self.getBuilder().logger.log("Scope.findSymbolRecursive scope({s}) hir({d}:{s}) ", .{ @tagName(self), key, @tagName(hir_inst) }, tw.cyan_400);
+    // pub fn findSymbol(self: Scope, key: Symbol.Key) !?Symbol {
+    //     try self.getBuilder().logger.printLnIndented("Scope.findSymbol .{s} #{d}", .{ @tagName(self), key });
+    //     return switch (self) {
+    //         .@"fn" => |fn_wip| try fn_wip.findSymbol(key),
+    //         .block => |block_wip| try block_wip.findSymbol(key),
+    //         .module => |module_wip| try module_wip.findSymbol(key),
+    //         .root => {
+    //             try self.getBuilder().logger.log("Could not find symbol #{d}", .{key}, tw.red_400);
+    //             return null;
+    //         },
+    //     };
+    // }
+    // pub fn findSymbolRecursive(self: Scope, key: Symbol.Key) !?Symbol {
+    //     const hir_inst = self.getBuilder().getHirInst(key);
+    //     try self.getBuilder().logger.log("Scope.findSymbolRecursive scope({s}) hir({d}:{s}) ", .{ @tagName(self), key, @tagName(hir_inst) }, tw.cyan_400);
 
-        if (try self.findSymbol(key)) |symbol| return symbol;
-        if (self.getParent()) |parent| return try parent.findSymbolRecursive(key);
-        return null;
-    }
+    //     if (try self.findSymbol(key)) |symbol| return symbol;
+    //     if (self.getParent()) |parent| return try parent.findSymbolRecursive(key);
+    //     return null;
+    // }
     pub fn dumpInner(self: *Scope, logger: *Logger) Error!void {
         switch (self) {
             .@"fn" => |fn_wip| {
@@ -508,7 +655,7 @@ const Scope = union(enum) {
         self.getBuilder().logger.log("S({d}.{s}) Scope.getGlobal #{d}", .{ self.getId(), @tagName(self.*), key }, tw.green_400);
         // TODO: resolve recursively once we have multiple modules in nested scopes
         switch (self.*) {
-            .module => |module| return try module.resolveGlobal(key),
+            .module => |module| return try module.resolveGlobalType(key),
             else => return if (self.getParent()) |parent| try @constCast(&parent).getGlobal(key) else return error.GlobalNotFound,
         }
     }
@@ -548,54 +695,56 @@ const Local = struct {
     };
 };
 
-const Symbol = union(enum) {
-    local: struct {
-        type: Mir.Type.Index,
-        name: InternedSlice,
-        index: u32,
-    },
-    instruction: Mir.Instruction.Index,
-    global: Global,
-    pub const Global = union(enum) {
-        idle: struct {
-            name: InternedSlice,
-            inst: Hir.Inst.Index,
-        },
-        resolving: void,
-        resolved: struct {
-            scope_index: Mir.Type.Index,
-            name: InternedSlice,
-            type: Mir.Type.Index,
-        },
-    };
-    pub const Key = Hir.Inst.Index;
-    pub const Map = std.AutoHashMap(Key, Symbol);
-};
+// const Symbol = union(enum) {
+//     local: struct {
+//         type: Mir.Type.Index,
+//         name: InternedSlice,
+//         index: u32,
+//     },
+//     instruction: Mir.Instruction.Index,
+//     global: Global,
+//     pub const Global = union(enum) {
+//         idle: struct {
+//             name: InternedSlice,
+//             inst: Hir.Inst.Index,
+//         },
+//         resolving: void,
+//         resolved: struct {
+//             scope_index: Mir.Type.Index,
+//             name: InternedSlice,
+//             type: Mir.Type.Index,
+//         },
+//     };
+//     pub const Key = Hir.Inst.Index;
+//     pub const Map = std.AutoHashMap(Key, Symbol);
+// };
 pub const FnWip = struct {
     id: usize,
     name: InternedSlice,
     parent: Scope,
     builder: *Self,
     hir_inst: Hir.Inst.Index,
+    type_index: Mir.Type.Index,
     return_type: Mir.Type.Index,
-    body: ?BlockWip = null,
+    // body: ?BlockWip = null,
     params: std.AutoArrayHashMapUnmanaged(Hir.Inst.Index, Mir.Type.Index) = .{},
 
-    pub fn init(builder: *Self, parent: Scope, hir_inst: Hir.Inst.Index, name: InternedSlice, return_type: Mir.Type.Index) FnWip {
+    pub fn init(builder: *Self, parent: Scope, hir_inst: Hir.Inst.Index, name: InternedSlice, return_type: Mir.Type.Index) !FnWip {
         Scope.i += 1;
         return .{
             .id = Scope.i,
             .parent = parent,
             .builder = builder,
             .hir_inst = hir_inst,
+            .type_index = try builder.reserveTypeIndex(),
             .name = name,
             .return_type = return_type,
         };
     }
 
-    pub fn findSymbol(self: *FnWip, key: Symbol.Key) !?Symbol {
-        return self.symbols_map.get(key);
-    }
+    // pub fn findSymbol(self: *FnWip, key: Symbol.Key) !?Symbol {
+    //     return self.symbols_map.get(key);
+    // }
     pub fn pushParameter(self: *FnWip, name: InternedSlice, ty: Mir.Type.Index, hir_inst: Hir.Inst.Index) !void {
         const index = try self.builder.pushType(.{ .param = .{
             .type = ty,
@@ -636,19 +785,25 @@ pub const FnWip = struct {
             self.builder.logger.log("#{d}: {s}", .{ entry.key_ptr.*, entry.value_ptr.*.fmt(self.builder.mir) }, tw.pink_400);
         }
     }
-    pub fn commit(self: *FnWip) Error!Mir.Type.Index {
+    pub fn commitType(self: *FnWip) Error!Mir.Type.Index {
         var params: Mir.ChildList = self.builder.newList();
         for (self.params.values()) |ty| {
             try params.append(ty.asInt());
         }
-        return try self.builder.pushType(.{
+        self.builder.setType(self.type_index, .{
             .@"fn" = .{
                 .name = self.name,
                 .params = try params.commit(),
                 .return_type = self.return_type,
-                .body = if (self.body) |*body| try body.commit() else null,
+                // .body = if (self.body) |*body| try body.commit() else null,
+                .body = null,
             },
         });
+        return self.type_index;
+    }
+    pub fn commit(self: *FnWip) Error!void {
+        _ = self; // autofix
+        // _ = try self.commitType();
     }
 };
 pub fn getFloatTypePrecedence(ty: Mir.Type.Index) u8 {
@@ -971,8 +1126,11 @@ pub const BlockWip = struct {
         defer self.builder.logger.close();
         const inst = self.builder.getHirInst(self.hir_inst);
         switch (inst) {
-            .block, .inline_block => |block_inst| {
+            .block,
+            .inline_block,
+            => |block_inst| {
                 var iter = self.builder.iterHirList(block_inst.instructions_list);
+
                 while (iter.next()) |inst_index| {
                     // _ = try self.resolveSingleInstruction(inst_index);
                     try self.resolveInstruction(inst_index);
@@ -1136,7 +1294,7 @@ pub const BlockWip = struct {
                     .data = .{ .instruction = local_get.operand },
                 });
             },
-            inline .add, .sub, .mul, .div, .gt, .lt, .eq, .neq => |bin_op| {
+            inline .add, .sub, .mul, .div, .gt, .lt, .eq, .ne => |bin_op| {
                 const op: Mir.Instruction.Op = switch (std.meta.activeTag(hir_inst)) {
                     inline .add,
                     .sub,
@@ -1145,7 +1303,7 @@ pub const BlockWip = struct {
                     .gt,
                     .lt,
                     .eq,
-                    .neq,
+                    .ne,
                     => |tag| Mir.Instruction.Op.fromString(@tagName(tag)),
                     else => unreachable,
                 };
@@ -1288,7 +1446,7 @@ pub const BlockWip = struct {
                 }
                 return inst;
             },
-            .gt, .lt, .eq, .neq => {
+            .gt, .lt, .eq, .ne => {
                 const lhs_inst = try self.getInstructionPtr(instruction.data.binOp.lhs);
                 const rhs_inst = try self.getInstructionPtr(instruction.data.binOp.rhs);
                 if (lhs_inst.type == .number) lhs_inst.type = rhs_inst.type;

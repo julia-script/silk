@@ -37,16 +37,17 @@ pub const Instruction = struct {
     data: Data,
     type: Type.Index,
     value: Value.Index,
-    liveness: u32 = 0,
+    liveness: u32 = 1,
 
     pub const Index = u32;
     pub const List = usize;
 
     pub const Data = union(enum) {
+        wip: usize,
         // void: void,
-        binOp: BinOp,
+        bin_op: BinOp,
         instruction: Instruction.Index,
-        value: Value.Index,
+        // value: Value.Index,
         type: Type.Index,
         void: void,
 
@@ -61,18 +62,36 @@ pub const Instruction = struct {
             name: InternedSlice,
             // scope_index: Type.Index,
             index: u32,
+            mutable: bool,
         },
-        local: struct {
-            name: InternedSlice,
-            type: Type.Index,
-            index: u32 = 0,
+        call: struct {
+            callee: Type.Index,
+            args_list: List,
         },
+        // local: struct {
+        //     name: InternedSlice,
+        //     type: Type.Index,
+        //     index: u32 = 0,
+        // },
 
         pub const BinOp = struct {
             lhs: Instruction.Index,
             rhs: Instruction.Index,
         };
     };
+    pub fn getValue(self: Instruction) Value.Index {
+        switch (self.data) {
+            .scoped => |scoped| {
+                if (scoped.mutable) {
+                    return .runtime;
+                }
+                return self.value;
+            },
+            else => {
+                return self.value;
+            },
+        }
+    }
 
     pub fn format(
         self: @This(),
@@ -85,15 +104,15 @@ pub const Instruction = struct {
         try writer.print(" {any}", .{self.type});
         try writer.print(" {any}", .{self.value});
         switch (self.data) {
-            .binOp => |bin_op| {
+            .bin_op => |bin_op| {
                 try writer.print(" lhs: #{d} rhs: #{d}", .{ bin_op.lhs, bin_op.rhs });
             },
             .instruction => |instruction| {
                 try writer.print(" inst: #{d}", .{instruction});
             },
-            .value => |value| {
-                try writer.print(" value: #{any}", .{value});
-            },
+            // .value => |value| {
+            //     try writer.print(" value: #{any}", .{value});
+            // },
             .type => |type_index| {
                 try writer.print(" type: {any}", .{type_index});
             },
@@ -108,7 +127,7 @@ pub const Instruction = struct {
                 try writer.print(" scoped", .{});
             },
 
-            // else => {},
+            else => {},
         }
     }
     pub const Op = enum {
@@ -133,15 +152,20 @@ pub const Instruction = struct {
         sub,
         mul,
         div,
+
         gt,
+        ge,
         lt,
+        le,
         eq,
-        neq,
+        ne,
+
         block,
 
         if_expr,
         loop,
         br,
+        call,
 
         pub fn fromString(comptime str: []const u8) Op {
             return comptime std.meta.stringToEnum(Op, str) orelse @compileError("instruction op not found: " ++ str);
@@ -248,7 +272,6 @@ pub const Instruction = struct {
 
 pub const Type = union(enum) {
     @"fn": Fn,
-    while_loop: WhileLoop,
     optional: Optional,
     module: Module,
 
@@ -278,18 +301,20 @@ pub const Type = union(enum) {
         void,
         i32,
         i64,
+        i128,
+
         f32,
         f64,
         type,
 
-        type_number,
-        type_string,
-        type_boolean,
-        type_void,
-        type_i32,
-        type_i64,
-        type_f32,
-        type_f64,
+        // type_number,
+        // type_string,
+        // type_boolean,
+        // type_void,
+        // type_i32,
+        // type_i64,
+        // type_f32,
+        // type_f64,
 
         _,
         pub inline fn hash(self: Index) []const u8 {
@@ -318,6 +343,32 @@ pub const Type = union(enum) {
             return @enumFromInt(index + INDEX_START);
         }
 
+        pub fn toValueIndex(self: Index) Value.Index {
+            switch (self) {
+                .i32 => return .type_i32,
+                .i64 => return .type_i64,
+                .f32 => return .type_f32,
+                .f64 => return .type_f64,
+                .boolean => return .type_boolean,
+                .number => return .type_number,
+                .unknown => return .runtime,
+                else => {
+                    std.debug.panic("not implemented: toValueIndex: {s}", .{@tagName(self)});
+                },
+            }
+        }
+        pub fn isNumeric(self: Index) bool {
+            switch (self) {
+                .i32,
+                .i64,
+                .i128,
+                .f32,
+                .f64,
+                .number,
+                => return true,
+                else => return false,
+            }
+        }
         pub const Formatter = struct {
             mir: *Self,
             index: Index,
@@ -347,7 +398,6 @@ pub const Type = union(enum) {
         name: InternedSlice,
         params: Type.List,
         return_type: Type.Index,
-        body: ?Type.Index,
         pub const Param = struct {
             name: InternedSlice,
             type: Type.Index,
@@ -358,7 +408,7 @@ pub const Type = union(enum) {
         pub const Decl = struct {
             name: InternedSlice,
             type: Type.Index,
-            init: ?Value.Index,
+            init: ?Type.Index,
         };
     };
     pub const Optional = struct {
@@ -369,10 +419,6 @@ pub const Type = union(enum) {
         name: ?InternedSlice,
         instructions: Instruction.List,
     };
-    pub const WhileLoop = struct {
-        condition: Instruction.Index,
-        body: Type.Index,
-    };
 };
 pub const Value = union(enum) {
     type: Type.Index,
@@ -380,7 +426,8 @@ pub const Value = union(enum) {
     @"fn": Fn,
 
     float: f64,
-
+    integer: i64,
+    big_integer: i128,
     pub const List = usize;
     pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
     pub const Index = enum(u32) {
@@ -389,6 +436,7 @@ pub const Value = union(enum) {
         false,
         none,
         undefined,
+        void,
 
         type_number,
         // type_string,
@@ -426,13 +474,32 @@ pub const Value = union(enum) {
         pub fn fromInt(index: u32) Index {
             return @enumFromInt(index + INDEX_START);
         }
+        pub fn toType(self: Index) Type.Index {
+            switch (self) {
+                .type_number => return .number,
+                .type_f32 => return .f32,
+                .type_f64 => return .f64,
+                .type_i32 => return .i32,
+                .type_i64 => return .i64,
+                .type_boolean => return .boolean,
+                .runtime => return .unknown,
+                else => {
+                    std.debug.panic("not implemented: toType: {s}", .{@tagName(self)});
+                },
+            }
+        }
     };
+    pub fn isNumeric(self: Value) bool {
+        switch (self) {
+            .integer, .float, .big_integer => return true,
+            else => return false,
+        }
+    }
     pub fn accept(self: Value, tag: std.meta.Tag(Value)) bool {
         return std.meta.activeTag(self) == tag;
     }
     pub const Fn = struct {
         type: Type.Index,
-        instructions: Instruction.List,
     };
 };
 pub fn formatValue(self: *Self, writer: *Logger, value_index: Value.Index) std.io.AnyWriter.Error!void {

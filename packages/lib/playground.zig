@@ -1,5 +1,4 @@
-
-export fn fib(n: i32): i32 {
+export fn fib(n: i32, z:i32): i32 {
   var a:i32 = 0;
   var b:i32 = 1;
   if (n > 0) {
@@ -14,4 +13,11 @@ export fn fib(n: i32): i32 {
   return a
 }
 
+// const a:i32 = 1;
 
+// export fn rec(n: i32): i32 {
+//   if (n > 10) {
+//     return n;
+//   }
+//   return rec(n + 1);
+// }

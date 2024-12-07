@@ -81,7 +81,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         },
         .local => |local| {
             try fmt.indent();
-            try writer.print("%{d} = local '", .{inst_index});
+            try writer.print("%{d} = local %{} '", .{ inst_index, local.type });
 
             try fmt.printNode(local.name_node);
             try writer.print("'\n", .{});
@@ -104,7 +104,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try writer.writeAll(" ");
             try fmt.breakLine();
 
-            var params_iter = value.lists.iterList(fn_decl.params);
+            var params_iter = value.lists.iterList(fn_decl.params_list);
 
             while (params_iter.next()) |param_index| {
                 try formatInstruction(value, writer, options, param_index, fmt.level + 1);
@@ -116,14 +116,6 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
 
             try writer.writeAll("ret:\n");
             try formatInstruction(value, writer, options, fn_decl.return_type, fmt.level + 1);
-
-            if (fn_decl.init) |in| {
-                try fmt.indent();
-                try writer.writeAll("init: {\n");
-                try formatInstruction(value, writer, options, in, fmt.level + 1);
-                try fmt.indent();
-                try writer.writeAll("}\n");
-            }
         },
         .param_decl => |param_decl| {
             try fmt.indent();
@@ -134,7 +126,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         },
         .inline_block, .block => |block| {
             try fmt.indent();
-            try writer.print("{s} {{\n", .{@tagName(inst)});
+            try writer.print("%{d} {s} {{\n", .{ inst_index, @tagName(inst) });
             var instructions_iter = value.lists.iterList(block.instructions_list);
             while (instructions_iter.next()) |instruction_index| {
                 try formatInstruction(value, writer, options, instruction_index, indent + 1);
@@ -151,12 +143,13 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         .sub,
         .mul,
         .div,
+
         .gt,
         .lt,
-        .gte,
-        .lte,
+        .ge,
+        .le,
         .eq,
-        .neq,
+        .ne,
         .as,
         => |bin| {
             try fmt.indent();
@@ -202,9 +195,14 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try writer.print("%{d} = define global @", .{inst_index});
             try fmt.printNode(global_decl.name_node);
             try writer.writeAll(" {\n");
+            if (global_decl.type) |type_index| {
+                try formatInstruction(value, writer, options, type_index, indent + 1);
+            }
             // if (global_decl.init) |init_index| {
             // std.debug.print("init: {} {}\n", .{ inst_index, init_index });
-            try formatInstruction(value, writer, options, global_decl.init, indent + 1);
+            if (global_decl.init) |init_index| {
+                try formatInstruction(value, writer, options, init_index, indent + 1);
+            }
             // } else {}
             try fmt.indent();
             try writer.writeAll("}\n");
@@ -267,6 +265,24 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.printNode(debug_var.name_node);
             try writer.print("' %{d}\n", .{debug_var.instruction});
         },
+        .fn_call => |fn_call| {
+            try fmt.indent();
+            try writer.print("%{d} = call %{d} ", .{ inst_index, fn_call.callee });
+            if (fn_call.args_list != 0) {
+                // try fmt.indent();
+                try writer.writeAll("with {\n");
+                var args_iter = value.lists.iterList(fn_call.args_list);
+                fmt.level += 1;
+                while (args_iter.next()) |arg_index| {
+                    try fmt.indent();
+                    try writer.print("%{d}\n", .{arg_index});
+                    // try formatInstruction(value, writer, options, arg_index, indent + 1);
+                }
+                fmt.level -= 1;
+                try fmt.indent();
+                try writer.writeAll("}\n");
+            }
+        },
         else => {
             try fmt.indent();
             try writer.print("{s}\n", .{@tagName(inst)});
@@ -324,6 +340,7 @@ pub const Value = struct {
 
 pub const Inst = union(enum) {
     fn_decl: FnDecl,
+    fn_call: FnCall,
     mod_decl: Module,
     param_decl: Param,
     param_get: UnaryOp,
@@ -350,11 +367,11 @@ pub const Inst = union(enum) {
     div: BinaryOp,
 
     gt: BinaryOp,
+    ge: BinaryOp,
     lt: BinaryOp,
-    gte: BinaryOp,
-    lte: BinaryOp,
+    le: BinaryOp,
     eq: BinaryOp,
-    neq: BinaryOp,
+    ne: BinaryOp,
 
     typeof: UnaryOp,
     ret: UnaryOp,
@@ -365,16 +382,22 @@ pub const Inst = union(enum) {
     ty_i64: Ast.Node.Index,
     ty_f32: Ast.Node.Index,
     ty_f64: Ast.Node.Index,
+
     debug_var: DebugVar,
 
+    pub const Tag: type = std.meta.Tag(@This());
     pub const Local = struct {
         name_node: Ast.Node.Index,
+        mutable: bool,
+        type: Inst.Index,
         // init: Inst.Index,
-        // instruction: Index,
-        // type: Inst.Index,
+    };
+    pub const FnCall = struct {
+        callee: Index,
+        args_list: List,
     };
     pub const Index = u32;
-    pub const RootIndex = 0;
+    pub const RootIndex: Index = 0;
     pub const Enum = std.meta.Tag(@This());
     pub const List = usize;
     pub const IfExpr = struct {
@@ -396,8 +419,7 @@ pub const Inst = union(enum) {
         // name: InternedSlice,
         name_node: Ast.Node.Index,
         return_type: Inst.Index,
-        params: List,
-        init: ?Inst.Index,
+        params_list: List,
 
         // @"extern": bool,
         // visibility: shared.Visibility,
@@ -426,7 +448,7 @@ pub const Inst = union(enum) {
         type: ?Inst.Index,
         exported: bool,
         mutable: bool,
-        init: Inst.Index,
+        init: ?Inst.Index,
     };
     pub const Module = struct {
         name_node: ?Ast.Node.Index,

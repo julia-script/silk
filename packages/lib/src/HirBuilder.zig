@@ -9,6 +9,7 @@ const shared = @import("shared.zig");
 const Logger = @import("Logger.zig");
 const serializer = @import("serializer.zig");
 const host = @import("host.zig");
+const tw = @import("tw.zig");
 
 hir: *Hir,
 allocator: std.mem.Allocator,
@@ -158,34 +159,68 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             const name_node = declaration.name;
             const ty_node = declaration.type;
             const value_node = declaration.value;
-
-            const local_inst = try scope.pushInstruction(.{
-                .local = .{
-                    .name_node = name_node,
-                },
-            });
-            nav.move(declaration.name);
-
-            try scope.pushSymbol(nav.getNodeSlice(), local_inst);
-            // if (nav.data.declaration.ty != 0) {
-            //     const ty_inst = try self.genInstruction(scope, nav.data.declaration.ty);
-            //     try scope.pushInstruction(.{ .as = .{ .lhs = local_inst, .rhs = ty_inst } });
-            // }
-
-            var value_inst: Hir.Inst.Index = blk: {
+            var ty_inst: ?Hir.Inst.Index = null;
+            if (ty_node != 0) {
+                ty_inst = try self.genInstruction(scope, ty_node);
+                // value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = local_inst, .rhs = ty_inst } });
+            }
+            const value_inst: Hir.Inst.Index = blk: {
                 if (value_node != 0) {
                     break :blk try self.genInstruction(scope, value_node);
                 }
                 break :blk try scope.pushInstruction(.{ .undefined_value = null });
             };
-
-            if (ty_node != 0) {
-                const ty_inst = try self.genInstruction(scope, ty_node);
-                value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst } });
+            if (ty_inst == null) {
+                ty_inst = try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst } });
             }
 
+            const local_inst = try scope.pushInstruction(.{
+                .local = .{
+                    .name_node = name_node,
+                    .mutable = switch (nav.data.*) {
+                        .var_decl => true,
+                        .const_decl => false,
+                        else => unreachable,
+                    },
+                    .type = ty_inst.?,
+                },
+            });
+
+            nav.move(declaration.name);
             _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
+
+            try scope.pushSymbol(nav.getNodeSlice(), local_inst);
             return local_inst;
+
+            // nav.move(declaration.name);
+            // const name_slice = nav.getNodeSlice();
+            // switch (nav.data.*) {
+            //     .var_decl => {
+            //         const local_inst = try scope.pushInstruction(.{
+            //             .local = .{
+            //                 .name_node = name_node,
+            //                 .mutable = true,
+            //                 .init = value_inst,
+            //                 .type = ty_inst.?,
+            //             },
+            //         });
+            //         _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
+            //         try scope.pushSymbol(name_slice, local_inst);
+            //         return local_inst;
+            //     },
+            //     else => {
+            //         const local_inst = try scope.pushInstruction(.{
+            //             .local = .{
+            //                 .name_node = name_node,
+            //                 .mutable = false,
+            //                 .init = value_inst,
+            //                 .type = ty_inst.?,
+            //             },
+            //         });
+            //         try scope.pushSymbol(name_slice, local_inst);
+            //         return local_inst;
+            //     },
+            // }
         },
         .ty_assign => |bin_expr| {
             const lhs_inst = try self.genInstruction(scope, bin_expr.lhs);
@@ -255,32 +290,6 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             }
             return try scope.pushInstruction(.{ .if_expr = if_expr });
         },
-        .fn_decl => |data| {
-            const proto = data.proto;
-            // var proto_scope = Scope.init(self, scope);
-            const proto_data = nav.forkTo(proto).data.fn_proto;
-            const body = data.body;
-            var fn_scope = Scope.init(self, scope, .block, "fn_decl");
-            const params = try self.genFnParams(&fn_scope, proto);
-            const return_type = try self.genInstruction(scope, proto_data.ret_type);
-            // const init_inst = if
-            const init_inst = blk: {
-                if (body == 0) break :blk null;
-                const inst = try self.genScopedBlockInstruction(&fn_scope, body, null);
-                try scope.instructions.append(inst);
-                break :blk inst;
-            };
-            // try scope.instructions.append(params);
-
-            return try scope.pushInstruction(.{
-                .fn_decl = .{
-                    .name_node = proto_data.name,
-                    .params = params,
-                    .return_type = return_type,
-                    .init = init_inst,
-                },
-            });
-        },
         .ty_number => return try scope.pushInstruction(.{ .ty_number = nav.node }),
         .ty_boolean => return try scope.pushInstruction(.{ .ty_boolean = nav.node }),
         .ty_i32 => return try scope.pushInstruction(.{ .ty_i32 = nav.node }),
@@ -319,9 +328,31 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         .group => {
             return try self.genInstruction(scope, nav.data.group.node);
         },
+        .fn_call => {
+            const callee = try self.genInstruction(scope, nav.data.fn_call.callee);
+            var args_iter = self.hir.ast.node_lists.iterList(nav.data.fn_call.args_list);
+            const args_list: Hir.Inst.List = blk: {
+                if (nav.data.fn_call.args_list == 0) break :blk 0;
+                var list = self.newList();
+                while (args_iter.next()) |arg| {
+                    try list.append(try self.genInstruction(scope, arg));
+                }
+                break :blk try list.commit();
+            };
+            const index = try scope.pushInstruction(.{ .fn_call = .{
+                .callee = callee,
+                .args_list = args_list,
+            } });
+
+            return index;
+        },
+
+        .fn_decl => {
+            self.logger.todo("Error message: functions are only allowed at the module level", .{});
+        },
         else => {
             switch (nav.tag) {
-                inline .add, .sub, .mul, .div, .gt, .lt, .gte, .lte => |tag| return try self.genBinaryExpression(tag, scope, nav.node),
+                inline .add, .sub, .mul, .div, .gt, .lt, .ge, .le, .eq, .ne => |tag| return try self.genBinaryExpression(tag, scope, nav.node),
                 else => {},
             }
         },
@@ -331,11 +362,16 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
 pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index, break_index: ?Hir.Inst.Index) !Hir.Inst.Index {
     self.logger.open("#{d} genScopedBlockInstruction", .{node_index});
     defer self.logger.close();
-    const nav = Ast.Navigator.init(self.hir.ast, node_index);
-    var statements_iter = self.hir.ast.node_lists.iterList(nav.data.block.list);
-    while (statements_iter.next()) |child| {
-        _ = try self.genInstruction(scope, child);
-        // try scope.instructions.append(inst_index);
+    var nav = Ast.Navigator.init(self.hir.ast, node_index);
+    const is_inline_block = !nav.is(.block);
+    if (!is_inline_block) {
+        var statements_iter = self.hir.ast.node_lists.iterList(nav.data.block.list);
+        while (statements_iter.next()) |child| {
+            _ = try self.genInstruction(scope, child);
+            // try scope.instructions.append(inst_index);
+        }
+    } else {
+        _ = try self.genInstruction(scope, node_index);
     }
     for (scope.instructions.list.items) |inst_index| {
         try self.logger.printLnIndented("instruction: {d}", .{inst_index});
@@ -346,20 +382,26 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
     }
     const instructions = try scope.commit();
     assert.fmt(scope.parent != null, "blocks should always have a parent scope", .{});
-    const index = try scope.builder.pushInstruction(.{
+    if (is_inline_block) {
+        return try scope.builder.pushInstruction(.{
+            .inline_block = .{
+                .name_node = null,
+                .instructions_list = instructions,
+            },
+        });
+    }
+    return try scope.builder.pushInstruction(.{
         .block = .{
             .name_node = null,
             .instructions_list = instructions,
         },
     });
-
-    return index;
 }
 pub fn genBlockInstruction(self: *Self, parent_scope: *Scope, node_index: Ast.Node.Index, break_index: ?Hir.Inst.Index) !Hir.Inst.Index {
     self.logger.open("#{d} genBlockInstruction", .{node_index});
     defer self.logger.close();
-    var nav = Ast.Navigator.init(self.hir.ast, node_index);
-    nav.assertTag(.block);
+    // var nav = Ast.Navigator.init(self.hir.ast, node_index);
+    // nav.assertTag(.block);
     var scope = Scope.init(self, parent_scope, .block, "block");
 
     const inst = try self.genScopedBlockInstruction(&scope, node_index, break_index);
@@ -392,34 +434,23 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
         switch (inst.*) {
             .global_decl => {
                 if (inst.global_decl.is_fn) {
-                    if (def.init_node) |node| {
-                        const init_inst = try self.genInstruction(scope, node);
-                        self.hir.insts.items[def.inst].global_decl.init = init_inst;
-                        self.hir.insts.items[def.inst].global_decl.type = init_inst;
-                    }
+                    // self.hir.insts.items[def.inst].global_decl.type = if (def.ty_node) |ty_node| try self.genInstruction(scope, ty_node) else null;
+                    // self.hir.insts.items[def.inst].global_decl.init = if (def.init_node) |init_node| try self.genInstruction(scope, init_node) else null;
+                    // if (def.init_node) |node| {
+                    //     const type_inst_index = try self.genInstruction(scope, node);
+                    //     self.hir.insts.items[def.inst].global_decl.type = type_inst_index;
+                    //     const type_inst = self.hir.insts.items[type_inst_index];
+                    //     self.hir.insts.items[def.inst].global_decl.init = type_inst.fn_decl.init;
+                    // }
+                    const fn_decl_inst = try self.genFnDeclInstruction(
+                        scope,
+                        def.ty_node orelse unreachable,
+                    );
+                    self.hir.insts.items[def.inst].global_decl.init = fn_decl_inst.init;
+                    self.hir.insts.items[def.inst].global_decl.type = fn_decl_inst.index;
                     continue;
                 }
-                // std.debug.print("ty_inst: {}\n", .{ty_inst});
-                // if (def.init_node) |node| self.hir.insts.items[def.inst].global_decl.init = try self.genInstruction(scope, node);
-                // const ty_inst = if (def.ty_node) |node| try self.genInstruction(scope, node) else null;
-                // const init_inst = if (def.init_node) |node| try self.genInstruction(scope, node) else null;
-                // if (def.ty_node) |node| {
-                //     const ty_inst_index = try self.genInstruction(scope, node);
-                //     const ty_inst = self.hir.insts.items[ty_inst_index];
-                //     switch (ty_inst) {
-                //         .block => {
-                //             // self.hir.insts.items[def.inst].global_decl.type = .{ .type_number = node };
-                //         },
-                //         else => {
-                //             // if (init_inst) |init_inst_index| {
 
-                //             //     // self.hir.insts.items[init_inst_index].global_decl.type = ty_inst_index;
-                //             // }
-                //         },
-                //     }
-
-                //     // self.hir.insts.items[def.inst].global_decl.type = try self.genInstruction(scope, node);
-                // }
                 const inline_block = try self.genInlineBlock(scope, def.ty_node, def.init_node);
                 self.hir.insts.items[def.inst].global_decl.init = inline_block.index;
                 self.hir.insts.items[def.inst].global_decl.type = inline_block.ty_inst;
@@ -450,6 +481,39 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
     return index;
 }
 
+pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !struct {
+    index: Hir.Inst.Index,
+    init: ?Hir.Inst.Index,
+} {
+    var nav = Ast.Navigator.init(self.hir.ast, node_index);
+    const fn_decl = nav.data.fn_decl;
+    const proto = fn_decl.proto;
+    // var proto_scope = Scope.init(self, scope);
+    const proto_data = nav.getDataOf(proto).fn_proto;
+    const body = fn_decl.body;
+    var fn_scope = Scope.init(self, scope, .block, "fn_decl");
+    const params = try self.genFnParams(&fn_scope, proto);
+    const return_type = try self.genInstruction(scope, proto_data.ret_type);
+    // const init_inst = if
+    const init_inst = blk: {
+        if (body == 0) break :blk null;
+        const inst = try self.genScopedBlockInstruction(&fn_scope, body, null);
+        try scope.instructions.append(inst);
+        break :blk inst;
+    };
+    // try scope.instructions.append(params);
+
+    return .{
+        .index = try scope.pushInstruction(.{
+            .fn_decl = .{
+                .name_node = proto_data.name,
+                .params_list = params,
+                .return_type = return_type,
+            },
+        }),
+        .init = init_inst,
+    };
+}
 pub fn genInlineBlock(self: *Self, parent_scope: *Scope, ty_node: ?Ast.Node.Index, init_node: ?Ast.Node.Index) !struct {
     ty_inst: ?Hir.Inst.Index,
     index: Hir.Inst.Index,
@@ -506,8 +570,9 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
         break :is_export false;
     };
     if (ast.is(.fn_decl)) {
-        const init_node = ast.node;
-        const proto = ast.data.fn_decl.proto;
+        const fn_decl_node = ast.node;
+        const fn_decl = ast.data.fn_decl;
+        const proto = fn_decl.proto;
         const proto_data = ast.forkTo(proto).data.fn_proto;
 
         // const init_inst = try self.genInstruction(scope, ast.node);
@@ -520,18 +585,16 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
                 .@"extern" = is_extern,
                 .is_fn = true,
 
-                .init = undefined,
+                .init = null,
                 .type = null,
-                // .init = init_inst,////TODO
-                // .type = init_inst,
             },
         });
         ast.move(proto_data.name);
         try scope.pushSymbol(ast.getNodeSlice(), inst);
         return .{
             .inst = inst,
-            .init_node = init_node,
-            .ty_node = init_node,
+            .init_node = fn_decl.body,
+            .ty_node = fn_decl_node,
         };
     }
 
@@ -565,6 +628,11 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
 }
 pub fn pushInstruction(self: *Self, instruction: Hir.Inst) !Hir.Inst.Index {
     const index: Hir.Inst.Index = @intCast(self.hir.insts.items.len);
+    self.logger.log(
+        "pushInstruction: #{d} {s}",
+        .{ index, @tagName(instruction) },
+        tw.yellow_400,
+    );
     try self.hir.insts.append(self.hir.allocator, instruction);
     return index;
 }
@@ -585,7 +653,7 @@ pub fn genFnParams(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.
     while (iter.next()) |child| {
         var nav_param = Ast.Navigator.init(self.hir.ast, child);
         // const name_inst = try scope.pushInstruction(.{ .decl_param =  });
-        const ty = try self.genInstruction(scope.parent.?, nav_param.data.fn_param.ty);
+        const ty = try self.genInstruction(scope.parent.?, nav_param.data.fn_param.type);
         const inst_index = try self.pushInstruction(
             .{
                 .param_decl = .{

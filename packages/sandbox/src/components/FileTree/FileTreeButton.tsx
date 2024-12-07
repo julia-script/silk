@@ -24,23 +24,25 @@ export const FileTreeButton = ({
 }>) => {
 	const Icon = icon;
 	return (
-		<Button
-			variant="ghost"
+		<div
+			role="button"
+			tabIndex={0}
 			className={cn(
 				"flex gap-1 w-full justify-start py-1 px-1 text-xs font-normal m-0 h-auto hover:bg-neutral-200/5",
+				"items-center",
 				active && "font-bold",
 			)}
 			onClick={onClick}
 		>
 			{collapsable ? (
 				<ChevronRight
-					className={cn("size-1 shrink-0 transition-transform", {
+					className={cn("size-1 shrink-0 transition-transform size-3", {
 						"transform rotate-90": !collapsed,
 					})}
 				/>
 			) : null}
-			{Icon && <Icon className="text-white opacity-50" />}
+			{Icon && <Icon className="text-white opacity-50 size-3" />}
 			{children}
-		</Button>
+		</div>
 	);
 };

@@ -13,8 +13,10 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
 
     options.addOption([]const []const u8, "log_scopes", &.{
-        // "MirBuilder",
-        // "Mir",
+        // "HirBuilder",
+        // "Ast",
+        "MirBuilder",
+        "Mir",
         // "Compilation",
     });
     const cmd_dep = b.dependency("zig-cmd", .{});
@@ -52,6 +54,11 @@ pub fn build(b: *std.Build) void {
         &b.addRunArtifact(lib_unit_tests).step,
         b.step("test", "Run unit tests"),
     });
+    queue(.{
+        &lib.step,
+        &b.addInstallArtifact(lib_unit_tests, .{}).step,
+        b.step("testdebug", "Install debug test"),
+    });
 
     const wasm_name = "lang";
     const wasm_exe = b.addExecutable(.{
@@ -70,6 +77,7 @@ pub fn build(b: *std.Build) void {
         },
         .unwind_tables = true,
     });
+
     wasm_exe.root_module.addImport("cmd", cmd_module);
     wasm_exe.root_module.addOptions("options", options);
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createEditorState } from "./createEditorState";
 import type { WebContainer } from "@webcontainer/api";
-import { omit, set, uniqueId, without } from "lodash";
+import { merge, omit, replace, set, uniqueId, without } from "lodash";
 import { devtools, persist } from "zustand/middleware";
 import type { EditorState } from "@codemirror/state";
 import {
@@ -11,17 +11,28 @@ import {
 } from "@/components/EditorsView/resize";
 import { useWebContainer } from "@/components/WebContainer";
 
-export type Buf =
+export type AnonymousBuf =
 	| {
-			id: Uuid;
 			type: "file";
 			file: string;
 	  }
 	| {
 			type: "empty";
-			id: Uuid;
+	  }
+	| {
+			type: "inspect";
+			file: string;
 	  };
 
+type Buf = {
+	id: Uuid;
+} & AnonymousBuf;
+export const genBufId = (buf: AnonymousBuf) => {
+	if ("file" in buf) {
+		return `${buf.type}:${buf.file}`;
+	}
+	return buf.type;
+};
 export type Uuid = string;
 type TabsView = {
 	id: Uuid;
@@ -41,6 +52,11 @@ export type SplitView = {
 	splitType: "vertical" | "horizontal";
 };
 export type View = TabsView | SplitView;
+export type BufferHighlight = {
+	start: number;
+	end: number;
+	type: "highlight";
+};
 interface EditorStore {
 	isHydrated: boolean;
 	buffers: Record<string, Buf>;
@@ -50,26 +66,38 @@ interface EditorStore {
 	focusedView: Uuid;
 	openBuffers: string[];
 	focusedBuffer: Uuid;
+	bufferHighlights: Record<Uuid, BufferHighlight[]>;
 
 	openFile: (path: string, tabId?: Uuid) => void;
 	closeFile: (path: string, tabId?: Uuid) => void;
-	setFocusedFile: (view: Uuid, file: string | null) => void;
+	setFocusedBuffer: (view: Uuid, file: string | null) => void;
 	// setOpenBuffers: (buffers: string[]) => void;
 	// updateView: (view: View) => void;
 	updateViews: (views: Record<Uuid, View>) => void;
+	splitView: (
+		viewId: Uuid,
+		direction: "top" | "left" | "right" | "bottom",
+		focusedBuffer: Uuid,
+	) => void;
 	updateBuffer: (buffer: Buf) => void;
 
+	openBuffer: (buffer: AnonymousBuf, tabId?: Uuid) => void;
 	// splitView: (
 	// 	view: View,
 	// 	direction: "top" | "left" | "right" | "bottom",
 	// 	mainSize?: number,
 	// ) => void;
 	// closeView: (view: Uuid) => void;
+	updateBufferHighlights: (
+		bufferId: Uuid,
+		highlights: BufferHighlight[],
+	) => void;
 }
 
 const bufferId = () => uniqueId("buf-");
-const viewId = () => uniqueId("view-");
-const initialViewId = viewId();
+const getViewId = () => uniqueId("view-");
+const initialRootViewId = getViewId();
+const initialTabViewId = getViewId();
 const initialBufferId = bufferId();
 
 export const editorStateMap = new Map<
@@ -94,9 +122,7 @@ export const getEditorState = (
 			initialValue: content,
 			onViewUpdate(update) {
 				if (!update.docChanged) return;
-				// console.log("onViewUpdate", update);
 				onDocChanged?.(update.state);
-				// setEditorState(path, update.state, false);
 			},
 		});
 		const result = { state, saved: true };
@@ -129,16 +155,54 @@ export const useEditorStore = create<EditorStore>()(
 				openBuffers: [] as string[],
 				focusedBuffer: initialBufferId,
 				views: {
-					[initialViewId]: {
-						id: initialViewId,
+					[initialRootViewId]: {
+						id: initialRootViewId,
+						type: "split",
+						splits: [{ id: initialTabViewId, size: 1 }],
+						splitType: "vertical",
+					},
+					[initialTabViewId]: {
+						id: initialTabViewId,
 						type: "tabs",
 						tabs: [],
 						focusedTab: null,
 					},
 				} as Record<string, View>,
-				focusedView: initialViewId,
-				rootView: initialViewId,
+				focusedView: initialTabViewId,
+				rootView: initialRootViewId,
+				bufferHighlights: {} as Record<Uuid, BufferHighlight[]>,
+				openBuffer: (buffer, _tabId) =>
+					set((state) => {
+						const tabId = _tabId ?? state.focusedView;
+						const tabView = state.views[tabId];
 
+						if (tabView.type !== "tabs") {
+							throw new Error("View is not a tabs view");
+						}
+						const tabs = [...tabView.tabs];
+						const id = genBufId(buffer);
+						if (!tabs.includes(id)) {
+							tabs.push(id);
+						}
+						// const tabs = [...tabView.tabs];
+						return {
+							buffers: {
+								...state.buffers,
+								[id]: {
+									id,
+									...buffer,
+								} as Buf,
+							},
+							views: {
+								...state.views,
+								[tabId]: {
+									...tabView,
+									tabs,
+									focusedTab: id,
+								},
+							},
+						};
+					}),
 				openFile: (path, _tabId) =>
 					set((state) => {
 						const tabId = _tabId ?? state.focusedView;
@@ -208,7 +272,7 @@ export const useEditorStore = create<EditorStore>()(
 								: state.buffers,
 						};
 					}),
-				setFocusedFile: (view, file) =>
+				setFocusedBuffer: (view, bufferId) =>
 					set((state) => {
 						const tabView = state.views[view];
 						if (!tabView || tabView.type !== "tabs") {
@@ -219,7 +283,7 @@ export const useEditorStore = create<EditorStore>()(
 								...state.views,
 								[view]: {
 									...tabView,
-									focusedTab: file,
+									focusedTab: bufferId,
 								},
 							},
 							// buffers: {
@@ -236,6 +300,94 @@ export const useEditorStore = create<EditorStore>()(
 					set((state) => ({
 						buffers: { ...state.buffers, [buffer.id]: buffer },
 					})),
+				updateBufferHighlights: (bufferId, highlights) =>
+					set((state) => ({
+						bufferHighlights: {
+							...state.bufferHighlights,
+							[bufferId]: highlights,
+						},
+					})),
+				splitView: (viewId, direction, focusedBuffer) =>
+					set((state) => {
+						const view = state.views[viewId];
+						if (view.type === "split") {
+							throw new Error(`View '${viewId}' is already a split view`);
+						}
+						const views = { ...state.views };
+						const newTabView: TabsView = {
+							id: getViewId(),
+							type: "tabs",
+							tabs: [focusedBuffer],
+							focusedTab: focusedBuffer,
+						};
+						let parentSplit = Object.values(state.views).find(
+							(v) =>
+								v.type === "split" && v.splits.some((s) => s.id === viewId),
+						) as SplitView | null;
+						if (!parentSplit) {
+							throw new Error(
+								`Couldn't find parent split view for '${viewId}'`,
+							);
+						}
+						parentSplit = {
+							...parentSplit,
+						};
+						const newSplitAxis = getAxis(direction);
+
+						if (newSplitAxis !== parentSplit.splitType) {
+							// if the parent split view is not on the same axis of the new split, we need to create a new split view to use as parent
+							// if parent has only one or less splits, we can just reorient it
+							if (parentSplit.splits.length <= 1) {
+								parentSplit.splitType = newSplitAxis;
+							} else {
+								const newParentSplit: SplitView = {
+									id: getViewId(),
+									type: "split",
+									splits: [{ id: viewId, size: 1 }],
+									splitType: newSplitAxis,
+								};
+								views[parentSplit.id] = {
+									...parentSplit,
+									splits: parentSplit.splits.map((s) =>
+										s.id === viewId
+											? {
+													...s,
+													id: newParentSplit.id,
+												}
+											: s,
+									),
+								};
+
+								views[newParentSplit.id] = newParentSplit;
+								parentSplit = newParentSplit;
+							}
+						}
+
+						const newSplitWidth = 1 / (parentSplit.splits.length + 1);
+						const adjustedParentSplits = parentSplit.splits.map((s) => ({
+							...s,
+							size: s.size - newSplitWidth / parentSplit.splits.length,
+						}));
+						if (direction === "left" || direction === "top")
+							adjustedParentSplits.push({
+								id: newTabView.id,
+								size: newSplitWidth,
+							});
+						else
+							adjustedParentSplits.unshift({
+								id: newTabView.id,
+								size: newSplitWidth,
+							});
+						parentSplit.splits = adjustedParentSplits;
+
+						views[parentSplit.id] = parentSplit;
+						views[newTabView.id] = newTabView;
+
+						return {
+							...state,
+							views,
+						};
+					}),
 			}),
 			{
 				name: "Editor Store",
@@ -258,3 +410,12 @@ export const useEditorStore = create<EditorStore>()(
 		},
 	),
 );
+const isSameAxis = (
+	a: "vertical" | "horizontal",
+	b: "left" | "right" | "top" | "bottom",
+) => {
+	return a === getAxis(b);
+};
+
+const getAxis = (direction: "left" | "right" | "top" | "bottom") =>
+	direction === "left" || direction === "right" ? "vertical" : "horizontal";

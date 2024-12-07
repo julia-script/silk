@@ -1,16 +1,15 @@
 const std = @import("std");
 const serializer = @import("serializer.zig");
 const host = @import("host.zig");
-const Compilation = @import("Compilation.zig");
+// const Compilation = @import("Compilation.zig");
 const Lexer = @import("Lexer.zig");
 const AstGen = @import("AstGen.zig");
 const Ast = @import("Ast.zig");
 const ErrorManager = @import("ErrorManager.zig");
 const HirBuilder = @import("HirBuilder.zig");
-const MirBuilder = @import("MirBuilder.zig");
+// const MirBuilder = @import("MirBuilder.zig");
 const Hir = @import("Hir.zig");
-const Mir = @import("Mir.zig");
-const Fs = @import("Fs.zig").VirtualFs;
+// const Mir = @import("Mir.zig");
 pub fn throw(message: []const u8) noreturn {
     host.throw(message.ptr, message.len);
 }
@@ -70,6 +69,15 @@ pub fn getSlice(pointer: [*]const u8) []const u8 {
 
     return pointer[4 .. length + 4];
 }
+pub fn makeSlicePointer(slice: []const u8) [*]const u8 {
+    const len_bytes = std.mem.asBytes(&slice.len);
+    const buf = host.allocator.alloc(u8, slice.len + 4) catch {
+        @panic("failed to allocate memory");
+    };
+    std.mem.copyForwards(u8, buf[0..len_bytes.len], len_bytes);
+    std.mem.copyForwards(u8, buf[len_bytes.len..], slice);
+    return buf.ptr;
+}
 
 // export fn lex(pointer: [*]const u8) void {
 
@@ -100,14 +108,91 @@ fn wasmDestroy(ptr: anytype) void {
     host.allocator.destroy(ptr);
 }
 
-export fn lex(writer_id: usize, pointer: [*]const u8) void {
-    var writer = OsWriter.init(writer_id);
-    defer writer.deinit();
-    const source = getSlice(pointer);
-    lexSource(writer.writer().any(), source) catch |err| {
+fn _lex(source: []const u8) ![]const u8 {
+    var lexer = Lexer.init(source);
+    var output = std.ArrayList(u8).init(host.allocator);
+    const writer = output.writer().any();
+    defer output.deinit();
+    try writer.writeAll("[");
+    var i: usize = 0;
+    while (lexer.next()) |token| {
+        if (i > 0) try writer.writeAll(",");
+        try serializer.writeJSON(Lexer.Token, writer, token, .{});
+        i += 1;
+    }
+    try writer.writeAll("]");
+    return output.toOwnedSlice();
+}
+test "_lex" {
+    // const source = "fn main() { return 1; }";
+    // const result = try _lex(source);
+    // std.debug.print("{s}\n", .{result});
+}
+export fn lex(source: [*]const u8) [*]const u8 {
+    const source_slice = getSlice(source);
+    const result = _lex(source_slice) catch |err| {
         @panic(@errorName(err));
     };
+    return makeSlicePointer(result);
 }
+fn _parseAst(source: []const u8) ![]const u8 {
+    var errors = try ErrorManager.init(host.allocator);
+    defer errors.deinit();
+    const ast = Ast.parse(host.allocator, &errors, source) catch |err| {
+        @panic(@errorName(err));
+    };
+    var output = std.ArrayList(u8).init(host.allocator);
+    const writer = output.writer().any();
+    try writer.writeAll("{\n  \"nodes\":[\n");
+    for (0..ast.nodes.len) |i| {
+        if (i > 0) try writer.writeAll(",\n");
+        try serializer.writeJSON(Ast.Node, writer, ast.nodes.get(i), .{
+            .lists = @constCast(&ast.node_lists),
+        });
+    }
+    try writer.writeAll("\n ]\n}");
+    return output.toOwnedSlice();
+}
+
+export fn parseAst(source: [*]const u8) [*]const u8 {
+    const source_slice = getSlice(source);
+    const result = _parseAst(source_slice) catch |err| {
+        @panic(@errorName(err));
+    };
+    return makeSlicePointer(result);
+}
+fn _parseHir(source: []const u8) ![]const u8 {
+    var errors = try ErrorManager.init(host.allocator);
+    defer errors.deinit();
+    var ast = try Ast.parse(host.allocator, &errors, source);
+    defer ast.deinit();
+    var hir = try HirBuilder.gen(host.allocator, &ast, &errors);
+    defer hir.deinit();
+    var output = std.ArrayList(u8).init(host.allocator);
+
+    const writer = output.writer().any();
+    try writer.writeAll("{\n  \"instructions\":\n");
+    try serializer.writeJSON([]const Hir.Inst, writer, hir.insts.items, .{
+        .lists = @constCast(&hir.lists),
+    });
+    try writer.writeAll("\n}");
+    return output.toOwnedSlice();
+}
+export fn parseHir(source: [*]const u8) [*]const u8 {
+    const source_slice = getSlice(source);
+    const result = _parseHir(source_slice) catch |err| {
+        @panic(@errorName(err));
+    };
+    return makeSlicePointer(result);
+}
+// export fn lex(writer_id: usize, pointer: [*]const u8) void {
+//     var writer = OsWriter.init(writer_id);
+//     defer writer.deinit();
+//     const source = getSlice(pointer);
+//     lexSource(writer.writer().any(), source) catch |err| {
+//         @panic(@errorName(err));
+//     };
+// }
 // fn _generateAst(writer: std.io.AnyWriter, source: []const u8) !void {
 //     var errors = try ErrorManager.init(host.allocator);
 //     defer errors.deinit();
@@ -124,139 +209,69 @@ export fn lex(writer_id: usize, pointer: [*]const u8) void {
 //     };
 // }
 
-fn _compile(writer: std.io.AnyWriter, source: []const u8) !void {
-    var errors = try ErrorManager.init(host.allocator);
-    defer errors.deinit();
-    try writer.writeAll("{");
-    try writer.writeAll("\"nodes\":");
-    var ast = Ast.parse(host.allocator, &errors, source) catch |err| {
-        try writer.print("{{ \"error\":\"{s}\" }}", .{@errorName(err)});
-        try writer.writeAll("}");
-        return;
-    };
-    defer ast.deinit();
-    try writer.writeAll("[");
-    for (0..ast.nodes.len) |i| {
-        if (i > 0) try writer.writeAll(",");
-        try serializer.writeJSON(Ast.Node, writer, ast.nodes.get(i), .{
-            .lists = &ast.node_lists,
-        });
-    }
-    try writer.writeAll("]");
-    try writer.writeAll(",\"hir\":");
-
-    var hir = HirBuilder.gen(host.allocator, &ast, &errors) catch |err| {
-        try writer.print("{{ \"error\":\"{s}\" }}", .{@errorName(err)});
-        try writer.writeAll("}");
-        return;
-    };
-    defer hir.deinit();
-
-    try serializer.writeJSON([]const Hir.Inst, writer, hir.insts.items, .{
-        .lists = &hir.lists,
-    });
-
-    try writer.writeAll(",\"mir_instructions\":");
-    var mir = MirBuilder.gen(host.allocator, &hir, &errors) catch |err| {
-        try writer.print("{{ \"error\":\"{s}\" }}", .{@errorName(err)});
-        try writer.writeAll("}");
-        return;
-    };
-    defer mir.deinit();
-    try serializer.writeJSON([]const Mir.Instruction, writer, mir.instructions.items, .{
-        .lists = &mir.lists,
-        .interned = &mir.strings,
-    });
-    try writer.writeAll(",\"mir_values\":");
-    try serializer.writeJSON([]const Mir.Value, writer, mir.values.items, .{
-        .lists = &mir.lists,
-        .interned = &mir.strings,
-    });
-    try writer.writeAll(",\"mir_types\":");
-    try serializer.writeJSON([]const Mir.Type, writer, mir.types.items, .{
-        .lists = &mir.lists,
-        .interned = &mir.strings,
-    });
-
-    try writer.writeAll("}");
-}
-
-export fn compile(writer_id: usize, pointer: [*]const u8) void {
-    var writer = OsWriter.init(writer_id);
-    defer writer.deinit();
-    const source = getSlice(pointer);
-
-    _compile(writer.writer().any(), source) catch |err| {
-        @panic(@errorName(err));
-    };
-}
-
-export fn createFs() *Fs {
-    const fs = host.allocator.create(Fs) catch {
-        @panic("failed to create fs");
-    };
-    fs.* = Fs.init(host.allocator, "") catch {
-        @panic("failed to create fs");
-    };
-    return fs;
-}
-// export fn getFileTree(fs: *Fs) ![]const u8 {
-//     var string = std.ArrayList(u8).init(host.allocator);
-//     const writer = string.writer();
+// fn _compile(writer: std.io.AnyWriter, source: []const u8) !void {
+//     var errors = try ErrorManager.init(host.allocator);
+//     defer errors.deinit();
 //     try writer.writeAll("{");
-//     var root = Fs.FsFile.init(fs, "/");
-//     try writeFileTree(writer, &root);
+//     try writer.writeAll("\"nodes\":");
+//     var ast = Ast.parse(host.allocator, &errors, source) catch |err| {
+//         try writer.print("{{ \"error\":\"{s}\" }}", .{@errorName(err)});
+//         try writer.writeAll("}");
+//         return;
+//     };
+//     defer ast.deinit();
+//     try writer.writeAll("[");
+//     for (0..ast.nodes.len) |i| {
+//         if (i > 0) try writer.writeAll(",");
+//         try serializer.writeJSON(Ast.Node, writer, ast.nodes.get(i), .{
+//             .lists = &ast.node_lists,
+//         });
+//     }
+//     try writer.writeAll("]");
+//     try writer.writeAll(",\"hir\":");
+
+//     var hir = HirBuilder.gen(host.allocator, &ast, &errors) catch |err| {
+//         try writer.print("{{ \"error\":\"{s}\" }}", .{@errorName(err)});
+//         try writer.writeAll("}");
+//         return;
+//     };
+//     defer hir.deinit();
+
+//     try serializer.writeJSON([]const Hir.Inst, writer, hir.insts.items, .{
+//         .lists = &hir.lists,
+//     });
+
+//     try writer.writeAll(",\"mir_instructions\":");
+//     var mir = MirBuilder.gen(host.allocator, &hir, &errors) catch |err| {
+//         try writer.print("{{ \"error\":\"{s}\" }}", .{@errorName(err)});
+//         try writer.writeAll("}");
+//         return;
+//     };
+//     defer mir.deinit();
+//     try serializer.writeJSON([]const Mir.Instruction, writer, mir.instructions.items, .{
+//         .lists = &mir.lists,
+//         .interned = &mir.strings,
+//     });
+//     try writer.writeAll(",\"mir_values\":");
+//     try serializer.writeJSON([]const Mir.Value, writer, mir.values.items, .{
+//         .lists = &mir.lists,
+//         .interned = &mir.strings,
+//     });
+//     try writer.writeAll(",\"mir_types\":");
+//     try serializer.writeJSON([]const Mir.Type, writer, mir.types.items, .{
+//         .lists = &mir.lists,
+//         .interned = &mir.strings,
+//     });
+
 //     try writer.writeAll("}");
-//     return string.toOwnedSlice();
 // }
-fn _getFileTree(fs: *Fs) ![]const u8 {
-    var string = std.ArrayList(u8).init(host.allocator);
-    const writer = string.writer().any();
-    try writer.writeByteNTimes(0, 4);
-    try fs.serialize(writer);
-    var slice = try string.toOwnedSlice();
-    std.mem.copyForwards(u8, slice[0..4], std.mem.asBytes(&(slice.len - 4)));
-    return slice;
-}
 
-export fn getFileTree(fs: *Fs) [*]const u8 {
-    const slice: []const u8 = _getFileTree(fs) catch {
-        @panic("failed to get file tree");
-    };
-    return slice.ptr;
-}
+// // export fn compile(writer_id: usize, pointer: [*]const u8) void {
+// //     var writer = OsWriter.init(writer_id);
+// //     defer writer.deinit();
+// //     const source = getSlice(pointer);
 
-export fn destroyFs(fs: *Fs) void {
-    fs.deinit();
-    host.allocator.destroy(fs);
-}
-
-export fn makeFile(fs: *Fs, pointer: [*]const u8) u64 {
-    const host_string = getSlice(pointer);
-    const fs_path = fs.makeFile(host_string) catch {
-        @panic("failed to create file");
-    };
-    _ = fs_path; // autofix
-    return 0; // fs_path.hash();
-}
-
-export fn makeDir(fs: *Fs, pointer: [*]const u8) u64 {
-    const host_string = getSlice(pointer);
-    var fs_path = fs.makeDir(host_string) catch {
-        @panic("failed to create dir");
-    };
-    return fs_path.hash();
-}
-
-export fn deleteFile(fs: *Fs, pointer: [*]const u8) void {
-    const host_string = getSlice(pointer);
-    fs.deleteFile(host_string) catch {
-        @panic("failed to delete file");
-    };
-}
-
-export fn deleteDir(fs: *Fs, path: [*]const u8, length: usize) void {
-    fs.deleteDir(path[0..length]) catch {
-        @panic("failed to delete dir");
-    };
-}
+// //     _compile(writer.writer().any(), source) catch |err| {
+// //         @panic(@errorName(err));
+// //     };
+// // }

@@ -4,6 +4,7 @@ const WasmBuilder = @import("./WasmBuilder.zig");
 
 const Compilation = @import("../../Compilation.zig");
 const Self = @This();
+const dir = @import("../../dir.zig");
 
 compilation: *Compilation,
 mir: *Mir,
@@ -18,11 +19,13 @@ pub fn compile(compilation: *Compilation) !void {
         .builder = try WasmBuilder.Module.init(arena.allocator()),
     };
 
-    // var mir = root_source.mir orelse return error.RootSourceNotCompiled;
     try self.translateMir();
-    const file = try compilation.createFile("out.wasm");
+    var output_dir = try compilation.openOutputDir("bin", true);
+    defer output_dir.close();
+    var buf: [std.fs.max_name_bytes]u8 = undefined;
+    const file_name = dir.concat(buf[0..], .{ compilation.name, ".wasm" });
+    var file = try output_dir.createFile(file_name, .{});
     defer file.close();
-    // try self.builder.dumpBytes();
     try self.builder.toBytes(file.writer().any());
 }
 
@@ -156,7 +159,7 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
             .gt,
             .lt,
             .eq,
-            .neq,
+            .ne,
             => |tag| {
                 switch (inst.type) {
                     inline .i32, .f64, .i64, .f32 => |type_tag| {

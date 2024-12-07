@@ -5,15 +5,24 @@ const Env = enum {
     system,
 };
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-pub usingnamespace if (builtin.target.isWasm() and builtin.target.os.tag == .freestanding) struct {
+pub usingnamespace if (builtin.target.isWasm() and builtin.target.os.tag != .wasi) struct {
     // const OsWriter = @import("root-wasm.zig").OsWriter;
     // var stderr_writer = OsWriter.init(0);
     pub extern fn throw(pointer: [*]const u8, length: usize) noreturn;
     pub extern fn write(message: [*]const u8, length: usize) void;
+    fn dummyWrite(context: void, bytes: []const u8) error{}!usize {
+        _ = context; // autofix
+        _ = bytes; // autofix
+        // return bytes.len;
+        return 0;
+    }
     pub const env = Env.wasm;
     pub fn getStdErrWriter() std.io.AnyWriter {
-        @panic("getStdErrWriter not implemented for wasm");
-        // return stderr_writer.writer().any();
+        const dummy_writer = std.io.Writer(void, error{}, dummyWrite){
+            .context = {},
+        };
+        return dummy_writer.any();
+        // return std.io.getStdErr().writer().any();
     }
     pub const allocator = general_purpose_allocator.allocator();
 } else struct {

@@ -7,10 +7,14 @@ const AstBuilder = @import("AstGen.zig");
 const HirBuilder = @import("HirBuilder.zig");
 const MirBuilder = @import("MirBuilder.zig");
 const WasmBackend = @import("backend/wasm/Backend.zig");
+const dir = @import("./dir.zig");
 
 errors: ErrorManager,
 sources: std.StringHashMapUnmanaged(Source),
 root: []const u8,
+name: []const u8,
+
+output_dir: []const u8,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 target: Target,
@@ -47,34 +51,41 @@ pub const Source = struct {
     pub fn compile(self: *Source, compilation: *Self) !void {
         const allocator = compilation.arena.allocator();
         self.ast = try Ast.parse(allocator, &compilation.errors, self.source);
-        // std.debug.print("AST:\n", .{});
-        // try self.ast.?.format(
-        //     std.io.getStdErr().writer().any(),
-        //     0,
-        //     .{},
-        // );
+        std.debug.print("AST:\n", .{});
+        try self.ast.?.format(
+            std.io.getStdErr().writer().any(),
+            0,
+            .{},
+        );
         self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
-        // // std.debug.print("HIR:\n", .{});
-        // // std.debug.print("{any}\n", .{self.hir});
+        std.debug.print("HIR:\n", .{});
+        std.debug.print("{any}\n", .{self.hir});
         self.mir = try MirBuilder.gen(allocator, &self.hir.?, &compilation.errors);
-        // std.debug.print("MIR:\n", .{});
-        // std.debug.print("{any}\n", .{self.mir});
+        std.debug.print("MIR:\n", .{});
+        std.debug.print("{any}\n", .{self.mir});
     }
 };
 
 const Self = @This();
 
-pub fn init(allocator: std.mem.Allocator, root: []const u8) !Self {
+const CompilationInitializeOptions = struct {
+    root: []const u8,
+    output_dir: ?[]const u8 = null,
+    name: ?[]const u8 = null,
+};
+pub fn init(allocator: std.mem.Allocator, options: CompilationInitializeOptions) !Self {
     var self = Self{
         .errors = try ErrorManager.init(allocator),
         .sources = .{},
         .allocator = allocator,
         .arena = std.heap.ArenaAllocator.init(allocator),
+        .output_dir = options.output_dir orelse "./out",
         .root = undefined,
         .target = Target{ .arch = .wasm, .os = .wasm, .env = .wasm },
+        .name = options.name orelse std.fs.path.stem(options.root),
     };
 
-    try self.addSourceFromFilePath(root);
+    try self.addSourceFromFilePath(options.root);
     self.root = @constCast(&self.sources.valueIterator()).next().?.name;
 
     return self;
@@ -88,20 +99,18 @@ pub fn compile(self: *Self) !void {
     }
 }
 
-pub fn createFile(self: *Self, path: []const u8) !std.fs.File {
-    _ = self; // autofix
-    const out_dir = "out";
-    var fba_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&fba_buffer);
-
-    const final_path = try std.fs.path.join(fba.allocator(), &.{ out_dir, path });
-
-    std.debug.print("{s}\n", .{final_path});
-    const cwd = std.fs.cwd();
-    try cwd.makePath(out_dir);
-
-    return try cwd.createFile(final_path, .{});
+pub inline fn getOutputDirPath(self: *Self, sub_dir: []const u8) ![]const u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    return try dir.bufJoin(buf[0..], &(.{ self.output_dir, sub_dir }));
 }
+pub inline fn openOutputDir(self: *Self, sub_dir: []const u8, comptime ensure_dir: bool) !std.fs.Dir {
+    const dir_path = try self.getOutputDirPath(sub_dir);
+    if (ensure_dir) {
+        try dir.ensureDir(dir_path);
+    }
+    return try dir.openDir(dir_path, .{});
+}
+
 pub fn deinit(self: *Self) void {
     self.arena.deinit();
     self.errors.deinit();
@@ -125,15 +134,24 @@ pub fn addSourceFromFilePath(self: *Self, path: []const u8) !void {
     });
 }
 
+test "Compilation2" {
+    // const test_allocator = std.testing.allocator;
+    // var compilation = try Self.init(test_allocator, .{ .root = "./playground.zig", .output_dir = "./.tmp" });
+    // defer compilation.deinit();
+    // var output_dir = try compilation.openOutputDir("bin/bash", true);
+    // defer output_dir.close();
+    // const file_a = try output_dir.createFile("hello.txt", .{});
+    // defer file_a.close();
+}
 test "Compilation" {
     const test_allocator = std.testing.allocator;
-    var compilation = try Self.init(test_allocator, "./playground.zig");
+    var compilation = try Self.init(test_allocator, .{ .root = "./playground.zig", .output_dir = "./.tmp" });
     defer compilation.deinit();
 
-    var source_iter = compilation.sources.valueIterator();
-    while (source_iter.next()) |s| {
-        s.dump();
-    }
+    // var source_iter = compilation.sources.valueIterator();
+    // while (source_iter.next()) |s| {
+    //     s.dump();
+    // }
     try compilation.compile();
     // var errors =
     // var mir = try MirBuilder.gen(test_allocator, &ast, &errors);

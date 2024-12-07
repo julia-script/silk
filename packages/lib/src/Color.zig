@@ -105,7 +105,7 @@ pub inline fn hex(comptime h: u32, a: f64) Color {
     }
 }
 
-fn csiOpen(self: Color, writer: anytype) !void {
+pub fn csiOpen(self: Color, writer: anytype) !void {
     _ = try writer.write("\x1b[");
     if (self.style_bold) {
         _ = try writer.write("1;");
@@ -121,7 +121,8 @@ fn csiOpen(self: Color, writer: anytype) !void {
     });
     _ = try writer.write("m");
 }
-fn csiClose(writer: anytype) !void {
+pub fn csiClose(self: Color, writer: anytype) !void {
+    _ = self; // autofix
     _ = try writer.write("\x1b[0m");
 }
 pub fn write(self: Color, writer: anytype, s: []const u8, options: FormatColorOptions) !void {
@@ -131,7 +132,7 @@ pub fn write(self: Color, writer: anytype, s: []const u8, options: FormatColorOp
     }
     try csiOpen(self, writer);
     _ = try writer.write(s);
-    try csiClose(writer);
+    try csiClose(self, writer);
 }
 pub fn writeChar(self: Color, writer: anytype, b: anytype) !void {
     switch (@TypeOf(b)) {
@@ -166,5 +167,5 @@ pub fn print(
     }
     try csiOpen(self, writer);
     try writer.print(format, args);
-    try csiClose(writer);
+    try csiClose(self, writer);
 }

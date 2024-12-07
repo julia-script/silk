@@ -76,13 +76,17 @@ pub fn printLnIndented(self: *Self, comptime format: []const u8, args: anytype) 
     try self.writer.print(format ++ "\n", args);
 }
 
-pub fn log(self: *Self, comptime format: []const u8, args: anytype, color: Color) void {
+pub fn log(self: *Self, comptime format: []const u8, args: anytype, color: ?Color) void {
     if (builtin.target.isWasm()) return;
     if (!self.enabled) return;
-    self.indent();
+    // self.indent();
     self.writeIndent() catch @panic("writeIndent failed");
-    color.print(self.writer, format ++ "\n", args, .{}) catch @panic("writeAll failed");
-    self.unindent();
+    if (color) |c| {
+        c.print(self.writer, format ++ "\n", args, .{}) catch @panic("writeAll failed");
+    } else {
+        self.writer.print(format ++ "\n", args) catch @panic("writeAll failed");
+    }
+    // self.unindent();
 }
 pub fn open(self: *Self, comptime format: []const u8, args: anytype) void {
     if (builtin.target.isWasm()) return;
@@ -118,7 +122,7 @@ pub fn panic(self: *Self, comptime format: []const u8, args: anytype) noreturn {
     @panic("Logger.panic");
 }
 pub fn todo(self: *Self, comptime format: []const u8, args: anytype) noreturn {
-    if (builtin.target.isWasm()) return;
+    if (builtin.target.isWasm()) @panic("Logger.todo");
     self.writeIndent() catch @panic("writeIndent failed");
 
     tw.yellow_400.bold().write(self.writer, "[TODO] ", .{}) catch @panic("writeAll failed");

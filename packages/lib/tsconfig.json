@@ -27,6 +27,6 @@
 		"noPropertyAccessFromIndexSignature": false,
 		"outDir": "dist"
 	},
-	"include": ["src/**/*.ts"],
+	"include": ["src/ts/index.ts"],
 	"exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

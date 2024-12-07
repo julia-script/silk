@@ -44,6 +44,7 @@ export const parserWithMetadata = parser.configure({
 });
 // console.log(parserWithMetadata.parse("function foo() { return 1; }"));
 export const langLanguage = LRLanguage.define({
+	name: "silk",
 	parser: parserWithMetadata,
 	languageData: {
 		commentTokens: { line: "//" },

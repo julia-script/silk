@@ -1,21 +1,29 @@
 import type { WebContainer } from "@webcontainer/api";
-import { vscodeDark } from "@uiw/codemirror-theme-vscode";
-import { EditorState } from "@codemirror/state";
+// import { vscodeDark } from "@uiw/codemirror-theme-vscode";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { EditorState, type Extension } from "@codemirror/state";
 import { langLanguage } from "@lang/grammar/dist/language";
-import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
+import {
+	Decoration,
+	EditorView,
+	keymap,
+	type ViewUpdate,
+} from "@codemirror/view";
 import { basicSetup } from "codemirror";
-import { Command, Edit } from "lucide-react";
-import { memoize } from "lodash";
-import { cache, useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { useWebContainer } from "../WebContainer";
 import { decode } from "@webassemblyjs/wasm-parser";
 import { print } from "@webassemblyjs/wast-printer";
 import type { LRLanguage } from "@codemirror/language";
 import { wastLanguage } from "@codemirror/lang-wast";
+import { StateField, StateEffect } from "@codemirror/state";
+import { markField } from "../code-mirror/marks";
+
 const wasmToWat = (bytes: Uint8Array) => {
 	const module = decode(bytes, { isDebug: false });
 	return print(module) as string;
 };
+
 const createState = ({
 	content,
 	onSave,
@@ -29,10 +37,11 @@ const createState = ({
 	readonly?: boolean;
 	language?: LRLanguage;
 }) => {
-	const extensions = [vscodeDark, basicSetup];
+	const extensions: Extension[] = [basicSetup, markField];
 	if (language) {
 		extensions.push(language);
 	}
+	extensions.push(oneDark);
 	if (readonly) {
 		extensions.push(EditorState.readOnly.of(true));
 	}
@@ -70,32 +79,6 @@ const createState = ({
 	return EditorState.create({
 		doc: content,
 		extensions,
-		// extensions: [
-		// 	vscodeDark,
-		// 	basicSetup,
-		// 	langLanguage,
-		// 	keymap.of([
-		// 		{
-		// 			key: "Cmd-s",
-		// 			stopPropagation: true,
-		// 			run: (e) => {
-		// 				onSave?.(e);
-		// 				return true;
-		// 			},
-		// 		},
-		// 		{
-		// 			key: "Ctrl-s",
-		// 			stopPropagation: true,
-		// 			run: (e) => {
-		// 				onSave?.(e);
-		// 				return true;
-		// 			},
-		// 		},
-		// 	]),
-		// 	EditorView.updateListener.of((update) => {
-		// 		onViewUpdate?.(update);
-		// 	}),
-		// ],
 	});
 };
 
@@ -140,7 +123,7 @@ export class DocumentState {
 		const isWasm = this.path.endsWith(".wasm");
 		if (isWasm) {
 			promise = this.container.fs.readFile(this.path).then((bytes) => {
-				this.state = {
+				this.updateState({
 					state: bytes,
 					type: "bytes",
 					ready: true,
@@ -151,60 +134,61 @@ export class DocumentState {
 						language: wastLanguage,
 					}),
 					fileExists: true,
-				};
-				this.emit("update");
+				});
 			});
 		} else {
 			promise = this.container.fs
 				.readFile(this.path, "utf-8")
 				.then((content) => {
-					this.state = {
+					this.updateState({
 						saved: true,
 						fileExists: true,
 						type: "editor",
 						ready: true,
 						state: createState({
 							content,
+							language: langLanguage,
 							onSave: async (e) => {
 								await this.container.fs.writeFile(
 									this.path,
 									e.state.doc.toString(),
 								);
-
-								this.emit("save");
+								this.updateState({
+									...this.state,
+									saved: true,
+								});
 							},
 							onViewUpdate: (e) => {
-								this.state.state = e.state;
-								if (!e.docChanged) return;
-								this.state = {
+								this.updateState({
 									...this.state,
-									saved: false,
-								} as State;
-								this.emit("update");
+									state: e.state,
+									saved: this.state.saved === false ? false : !e.docChanged,
+								} as State);
 							},
-							language: langLanguage,
 						}),
-					};
-					this.emit("update");
+					});
 				});
 		}
 		promise.catch((e) => {
 			if (e instanceof Error) {
 				if (e.message.includes("ENOENT")) {
-					this.state = {
+					this.updateState({
 						type: "unknown",
 						fileExists: false,
 						ready: true,
 						saved: false,
 						state: null,
-					};
-					this.emit("update");
+					});
 					return;
 				}
 			}
 			throw e;
 		});
 	}
+	updateState = (state: State) => {
+		this.state = state;
+		this.emit("update");
+	};
 	static init = (container: WebContainer, path: string) => {
 		return new DocumentState(container, path);
 	};
@@ -224,6 +208,7 @@ export class DocumentState {
 			this.subscribers.delete(callback);
 		};
 	};
+
 	dispose = () => {
 		// DocumentState.getDocumentState.cache.delete(this.container);
 		DocumentState.cache.get(this.container)?.delete(this.path);
@@ -257,9 +242,6 @@ export class DocumentState {
 export const useDocumentState = (path: string) => {
 	const { container } = useWebContainer();
 	const documentState = DocumentState.getDocumentState(container, path);
-	useEffect(() => {
-		console.log("documentState", documentState);
-	}, [documentState]);
 
 	return useSyncExternalStore(
 		documentState.subscribe,

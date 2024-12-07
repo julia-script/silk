@@ -4,7 +4,7 @@ import path from "path";
 import { Button } from "@/components/ui/button";
 import { useEditorStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { File } from "lucide-react";
+import { File, Inspect } from "lucide-react";
 import { useWebContainer } from "../WebContainer";
 import { Directory } from "./Directory";
 import { FileTreeButton } from "./FileTreeButton";
@@ -21,7 +21,7 @@ export const Entry = ({
 	}
 
 	const fileName = path.basename(entryPath);
-	const { focusedBuffer, openFile, buffers } = useEditorStore();
+	const { focusedBuffer, openBuffer, buffers } = useEditorStore();
 	const { container } = useWebContainer();
 	const isOpen = entryPath in buffers;
 	const buf = buffers[entryPath];
@@ -38,13 +38,30 @@ export const Entry = ({
 			onClick={async () => {
 				// if (!isOpen) {
 				// const content = await container.fs.readFile(entryPath, "utf-8");
-				openFile(entryPath);
+				openBuffer({
+					type: "file",
+					file: entryPath,
+				});
 				// }
 				// setFocusedBuffer(entryPath);
 			}}
 			icon={File}
 		>
 			{fileName}
+			{fileName.endsWith(".slk") && (
+				<button
+					type="button"
+					className="ml-auto px-2"
+					onClick={() => {
+						openBuffer({
+							type: "inspect",
+							file: entryPath,
+						});
+					}}
+				>
+					<Inspect className="text-white opacity-50 size-3" />
+				</button>
+			)}
 		</FileTreeButton>
 	);
 };

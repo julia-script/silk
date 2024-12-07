@@ -276,7 +276,6 @@ export const TabRow = ({
 	className,
 	...props
 }: { id: string } & ComponentProps<"div">) => {
-	console.log("tabrow", id);
 	const childrenArray = React.Children.toArray(children);
 	return (
 		<TabRowContext.Provider value={{ id }}>
