@@ -39,6 +39,8 @@ pub const Instruction = union(enum) {
     local_set: u32,
     global_get: u32,
     end: void,
+    call: u32,
+    drop: void,
 
     // Arithmetic Operations
     i32_add: void,
@@ -119,6 +121,11 @@ pub const Instruction = union(enum) {
                 try section.writeByte(0x23);
                 try section.write(index);
             },
+            .call => |callee| {
+                try section.writeByte(0x10);
+                try section.write(callee);
+            },
+            .drop => try section.writeByte(0x1A),
 
             // Arithmetic Operations
             .i32_add => try section.writeByte(0x6A), // i32.add

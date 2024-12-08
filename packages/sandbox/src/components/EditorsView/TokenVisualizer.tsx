@@ -43,6 +43,7 @@ export const TokenVisualizer: React.FC<TokenVisualizerProps> = ({
 						const isSelected = selectedToken === index;
 						return (
 							<TokenComponent
+								index={index}
 								className={cn({
 									"ring-1 ring-pink-500": isSelected,
 								})}
@@ -69,11 +70,13 @@ export const TokenVisualizer: React.FC<TokenVisualizerProps> = ({
 };
 
 interface TokenProps {
+	index: number;
 	token: Token;
 }
 
 export const TokenComponent = ({
 	token,
+	index,
 	className,
 	...props
 }: ComponentProps<"button"> & TokenProps) => {
@@ -92,7 +95,7 @@ export const TokenComponent = ({
 			title={`${token.tag} (${token.start}-${token.end})`}
 			{...props}
 		>
-			{token.tag} ({token.start}-{token.end})
+			[{index}] {token.tag} ({token.start}-{token.end})
 		</button>
 	);
 };

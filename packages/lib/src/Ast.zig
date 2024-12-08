@@ -369,6 +369,13 @@ fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: 
         .{node},
         color_options,
     );
+    try tw.blue_400.brighter(-0.3)
+        .print(
+        writer,
+        "[{d}-{d}]",
+        .{ self.getNodeStartToken(node), self.getNodeEndToken(node) },
+        color_options,
+    );
     try tw.blue_400.bold().print(
         writer,
         "{s}: ",

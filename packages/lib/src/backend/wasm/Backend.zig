@@ -9,6 +9,8 @@ const dir = @import("../../dir.zig");
 compilation: *Compilation,
 mir: *Mir,
 builder: WasmBuilder.Module,
+
+declaration_map: std.AutoArrayHashMap(Mir.Type.Index, u32),
 pub fn compile(compilation: *Compilation) !void {
     var arena = std.heap.ArenaAllocator.init(compilation.allocator);
     defer arena.deinit();
@@ -17,6 +19,7 @@ pub fn compile(compilation: *Compilation) !void {
         .compilation = compilation,
         .mir = &(root_source.mir orelse return error.RootSourceNotCompiled),
         .builder = try WasmBuilder.Module.init(arena.allocator()),
+        .declaration_map = std.AutoArrayHashMap(Mir.Type.Index, u32).init(arena.allocator()),
     };
 
     try self.translateMir();
@@ -70,6 +73,7 @@ pub fn translateDecl(self: *Self, decl_index: Mir.Type.Index) !void {
 }
 pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
     const ty: Mir.Type = self.getType(function_index) orelse return error.FunctionNotFound;
+    try self.declaration_map.put(function_index, @intCast(self.builder.function_types.count()));
 
     // var iter_params = self.iterList(ty.@"fn".params);
     var func_wip = self.builder.makeFunction();
@@ -80,6 +84,9 @@ pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
         switch (ty.@"fn".return_type) {
             .i32 => {
                 _ = try func_wip.pushResult(.i32);
+            },
+            .f64 => {
+                _ = try func_wip.pushResult(.f64);
             },
             else => {
                 std.debug.panic("unimplemented return type: {s}", .{@tagName(ty.@"fn".return_type)});
@@ -245,6 +252,12 @@ pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmB
             },
             .br => {
                 _ = try func.pushInstruction(.{ .br = 1 });
+            },
+            .call => {
+                const callee = self.declaration_map.get(inst.data.call.callee) orelse unreachable;
+                _ = try func.pushInstruction(.{
+                    .call = callee,
+                });
             },
             else => {
                 std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{

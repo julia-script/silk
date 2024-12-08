@@ -43,6 +43,7 @@ import { HexView } from "./HexView";
 import { Tab, TabRow } from "./Tabs";
 import { TokenVisualizer } from "./TokenVisualizer";
 
+import { InspectView } from "./InspectView";
 import { DocumentState, useDocumentState } from "./editorStateManager";
 const invertDirection = (direction: "horizontal" | "vertical") => {
 	return direction === "horizontal" ? "vertical" : "horizontal";
@@ -326,174 +327,174 @@ const CodeView = ({ filePath }: { filePath: Uuid }) => {
 	);
 };
 
-export default function InspectView({ id }: { id: string }) {
-	const store = useEditorStore();
-	const buffer = store.buffers[id];
-	const silk = useSilkTools();
-	const [activeTab, setActiveTab] = useState<"ast" | "tokens">("ast");
+// export default function InspectView({ id }: { id: string }) {
+// 	const store = useEditorStore();
+// 	const buffer = store.buffers[id];
+// 	const silk = useSilkTools();
+// 	const [activeTab, setActiveTab] = useState<"ast" | "tokens">("ast");
 
-	if (buffer.type !== "inspect") throw new Error("Not an inspect buffer");
+// 	if (buffer.type !== "inspect") throw new Error("Not an inspect buffer");
 
-	const editorState = useDocumentState(buffer.file);
-	const docString = useMemo(() => {
-		if (editorState.type !== "editor") return "not an editor";
-		return editorState.state.doc.toString();
-	}, [editorState]);
+// 	const editorState = useDocumentState(buffer.file);
+// 	const docString = useMemo(() => {
+// 		if (editorState.type !== "editor") return "not an editor";
+// 		return editorState.state.doc.toString();
+// 	}, [editorState]);
 
-	const lexed = useMemo(() => {
-		return silk.lex(docString);
-	}, [docString, silk]);
+// 	const lexed = useMemo(() => {
+// 		return silk.lex(docString);
+// 	}, [docString, silk]);
 
-	const ast = useMemo(() => {
-		return silk.parseAst(docString);
-	}, [docString, silk]);
+// 	const ast = useMemo(() => {
+// 		return silk.parseAst(docString);
+// 	}, [docString, silk]);
 
-	const hir = useMemo(() => {
-		return silk.parseHir(docString);
-	}, [docString, silk]);
+// 	const hir = useMemo(() => {
+// 		return silk.parseHir(docString);
+// 	}, [docString, silk]);
 
-	console.log(hir);
+// 	console.log(hir);
 
-	const updateHighlights = (start: number, end: number) => {
-		store.updateBufferHighlights(
-			genBufId({
-				type: "file",
-				file: buffer.file,
-			}),
-			[{ start, end, type: "highlight" }],
-		);
-	};
+// 	const updateHighlights = (start: number, end: number) => {
+// 		store.updateBufferHighlights(
+// 			genBufId({
+// 				type: "file",
+// 				file: buffer.file,
+// 			}),
+// 			[{ start, end, type: "highlight" }],
+// 		);
+// 	};
 
-	return (
-		<Tabs
-			value={activeTab}
-			onValueChange={(value) => setActiveTab(value as "ast" | "tokens" | "hir")}
-		>
-			<TabsList>
-				<TabsTrigger value="tokens">Tokens</TabsTrigger>
-				<TabsTrigger value="ast">AST</TabsTrigger>
-				<TabsTrigger value="hir">HIR</TabsTrigger>
-			</TabsList>
-			<TabsContent value="ast">
-				<GenericNode
-					index={0}
-					getChildren={(node) => {
-						const astNode = ast.nodes[node];
-						const children: [string, unknown][] = [];
-						const data = astNode.data;
-						const tag = Object.keys(data)[0] as keyof typeof data;
-						for (const [key, value] of Object.entries(data[tag])) {
-							if (key.endsWith("list")) {
-								const list = value as number[];
-								children.push(
-									...list.map(
-										(v, i) => [`${key}[${i}]`, v] as [string, number],
-									),
-								);
-								continue;
-							}
-							switch (key) {
-								case "list": {
-									break;
-								}
-								case "token":
-									children.push([key, `%${value}`]);
-									continue;
+// 	return (
+// 		<Tabs
+// 			value={activeTab}
+// 			onValueChange={(value) => setActiveTab(value as "ast" | "tokens" | "hir")}
+// 		>
+// 			<TabsList>
+// 				<TabsTrigger value="tokens">Tokens</TabsTrigger>
+// 				<TabsTrigger value="ast">AST</TabsTrigger>
+// 				<TabsTrigger value="hir">HIR</TabsTrigger>
+// 			</TabsList>
+// 			<TabsContent value="ast">
+// 				<GenericNode
+// 					index={0}
+// 					getChildren={(node) => {
+// 						const astNode = ast.nodes[node];
+// 						const children: [string, unknown][] = [];
+// 						const data = astNode.data;
+// 						const tag = Object.keys(data)[0] as keyof typeof data;
+// 						for (const [key, value] of Object.entries(data[tag])) {
+// 							if (key.endsWith("list")) {
+// 								const list = value as number[];
+// 								children.push(
+// 									...list.map(
+// 										(v, i) => [`${key}[${i}]`, v] as [string, number],
+// 									),
+// 								);
+// 								continue;
+// 							}
+// 							switch (key) {
+// 								case "list": {
+// 									break;
+// 								}
+// 								case "token":
+// 									children.push([key, `%${value}`]);
+// 									continue;
 
-								default:
-									children.push([key, value as number]);
-									break;
-							}
-						}
+// 								default:
+// 									children.push([key, value as number]);
+// 									break;
+// 							}
+// 						}
 
-						return children;
-					}}
-					getLabel={(node) => {
-						const astNode = ast.nodes[node];
-						const data = astNode.data;
-						const tag = Object.keys(data)[0] as keyof typeof data;
-						return `${tag}: ${astNode.start_token}-${astNode.end_token} #${node}`;
-					}}
-					onNodeClick={(index) => {
-						const node = ast.nodes[index];
-						const data = node.data;
-						const startToken = lexed[node.start_token];
-						const endToken = lexed[node.end_token];
-						updateHighlights(startToken.start, endToken.end);
-					}}
-					onNodeHoverEnter={() => {}}
-					onNodeHoverLeave={() => {}}
-				/>
-			</TabsContent>
-			<TabsContent value="tokens">
-				<TokenVisualizer
-					tokens={lexed}
-					onSelectionUpdate={(tokens) => {
-						console.log("token selected", tokens);
-						store.updateBufferHighlights(
-							genBufId({
-								type: "file",
-								file: buffer.file,
-							}),
-							tokens.map((token) => ({
-								start: token.start,
-								end: token.end,
-								type: "highlight",
-							})),
-						);
-					}}
-				/>
-			</TabsContent>
-			<TabsContent value="hir">
-				<GenericNode
-					index={0}
-					getChildren={(node) => {
-						const hirInst = hir.instructions[node];
-						const children: [string, unknown][] = [];
-						const tag = Object.keys(hirInst)[0] as keyof typeof hirInst;
+// 						return children;
+// 					}}
+// 					getLabel={(node) => {
+// 						const astNode = ast.nodes[node];
+// 						const data = astNode.data;
+// 						const tag = Object.keys(data)[0] as keyof typeof data;
+// 						return `${tag}: ${astNode.start_token}-${astNode.end_token} #${node}`;
+// 					}}
+// 					onNodeClick={(index) => {
+// 						const node = ast.nodes[index];
+// 						const data = node.data;
+// 						const startToken = lexed[node.start_token];
+// 						const endToken = lexed[node.end_token];
+// 						updateHighlights(startToken.start, endToken.end);
+// 					}}
+// 					onNodeHoverEnter={() => {}}
+// 					onNodeHoverLeave={() => {}}
+// 				/>
+// 			</TabsContent>
+// 			<TabsContent value="tokens">
+// 				<TokenVisualizer
+// 					tokens={lexed}
+// 					onSelectionUpdate={(tokens) => {
+// 						console.log("token selected", tokens);
+// 						store.updateBufferHighlights(
+// 							genBufId({
+// 								type: "file",
+// 								file: buffer.file,
+// 							}),
+// 							tokens.map((token) => ({
+// 								start: token.start,
+// 								end: token.end,
+// 								type: "highlight",
+// 							})),
+// 						);
+// 					}}
+// 				/>
+// 			</TabsContent>
+// 			<TabsContent value="hir">
+// 				<GenericNode
+// 					index={0}
+// 					getChildren={(node) => {
+// 						const hirInst = hir.instructions[node];
+// 						const children: [string, unknown][] = [];
+// 						const tag = Object.keys(hirInst)[0] as keyof typeof hirInst;
 
-						for (const [key, value] of Object.entries(hirInst[tag])) {
-							if (key.endsWith("_list")) {
-								const list = value as number[];
-								children.push(
-									...list.map(
-										(v, i) => [`${key}[${i}]`, v] as [string, number],
-									),
-								);
-							} else if (
-								key.endsWith("_node") ||
-								key.startsWith("ty_") ||
-								key.endsWith("literal") ||
-								key === "identifier"
-							) {
-								if (typeof value === "number") {
-									children.push([key, `#${value}`]);
-								} else {
-									children.push([key, value]);
-								}
-							} else if (typeof value === "number") {
-								children.push([key, value as number]);
-							}
-						}
+// 						for (const [key, value] of Object.entries(hirInst[tag])) {
+// 							if (key.endsWith("_list")) {
+// 								const list = value as number[];
+// 								children.push(
+// 									...list.map(
+// 										(v, i) => [`${key}[${i}]`, v] as [string, number],
+// 									),
+// 								);
+// 							} else if (
+// 								key.endsWith("_node") ||
+// 								key.startsWith("ty_") ||
+// 								key.endsWith("literal") ||
+// 								key === "identifier"
+// 							) {
+// 								if (typeof value === "number") {
+// 									children.push([key, `#${value}`]);
+// 								} else {
+// 									children.push([key, value]);
+// 								}
+// 							} else if (typeof value === "number") {
+// 								children.push([key, value as number]);
+// 							}
+// 						}
 
-						return children;
-					}}
-					getLabel={(node) => {
-						const hirInst = hir.instructions[node];
-						const tag = Object.keys(hirInst)[0] as keyof typeof hirInst;
-						return `${tag} #${node}`;
-					}}
-					onNodeClick={(index) => {
-						// const node = ast.nodes[index];
-						// const data = node.data;
-						// const startToken = lexed[node.start_token];
-						// const endToken = lexed[node.end_token];
-						// updateHighlights(startToken.start, endToken.end);
-					}}
-					onNodeHoverEnter={() => {}}
-					onNodeHoverLeave={() => {}}
-				/>
-			</TabsContent>
-		</Tabs>
-	);
-}
+// 						return children;
+// 					}}
+// 					getLabel={(node) => {
+// 						const hirInst = hir.instructions[node];
+// 						const tag = Object.keys(hirInst)[0] as keyof typeof hirInst;
+// 						return `${tag} #${node}`;
+// 					}}
+// 					onNodeClick={(index) => {
+// 						// const node = ast.nodes[index];
+// 						// const data = node.data;
+// 						// const startToken = lexed[node.start_token];
+// 						// const endToken = lexed[node.end_token];
+// 						// updateHighlights(startToken.start, endToken.end);
+// 					}}
+// 					onNodeHoverEnter={() => {}}
+// 					onNodeHoverLeave={() => {}}
+// 				/>
+// 			</TabsContent>
+// 		</Tabs>
+// 	);
+// }

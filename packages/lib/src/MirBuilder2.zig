@@ -996,6 +996,14 @@ const Wip = struct {
         });
     }
     pub fn resolveReturnInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
+        if (node.operand == 0) {
+            return try self.pushInstruction(hir_inst_index, .{
+                .op = .ret,
+                .type = .void,
+                .value = .void,
+                .data = .void,
+            });
+        }
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
 
@@ -1003,7 +1011,9 @@ const Wip = struct {
             .op = .ret,
             .type = instruction.type,
             .value = instruction.getValue(),
-            .data = .{ .instruction = instruction_id },
+            .data = .{
+                .instruction = instruction_id,
+            },
         });
     }
 
@@ -1659,16 +1669,16 @@ const InstructionSet = struct {
         if (instruction.liveness == 0) {
             return;
         }
-        if (instruction.value != .runtime and instruction.op != .loop and instruction.op != .if_expr and instruction.value != .void) {
-            _ = try self.push(instruction_id, .{
-                .op = .constant,
-                .type = instruction.type,
-                .value = instruction.value,
-                .data = .{ .void = {} },
-            });
+        // if (instruction.value != .runtime and instruction.op != .loop and instruction.op != .if_expr and instruction.value != .void) {
+        //     _ = try self.push(instruction_id, .{
+        //         .op = .constant,
+        //         .type = instruction.type,
+        //         .value = instruction.value,
+        //         .data = .{ .void = {} },
+        //     });
 
-            return;
-        }
+        //     return;
+        // }
 
         // switch (instruction.op) {
         //     .br => {

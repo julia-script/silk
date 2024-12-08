@@ -53,6 +53,13 @@ pub fn nextToken(self: *AstGen) ?Token {
     self.token_index += 1;
     return token;
 }
+pub fn accept(self: *AstGen, tag: Token.Tag) bool {
+    if (self.tokenIs(tag)) {
+        self.consumeToken();
+        return true;
+    }
+    return false;
+}
 
 pub fn consumeToken(self: *AstGen) void {
     self.token_index += 1;
@@ -114,12 +121,12 @@ pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
     if (lhs == 0) return 0;
     const expr = try self.parseBinaryRhs(0, lhs);
 
-    if (self.tokenIs(.semicolon)) {
-        self.consumeToken();
-    }
+    // if (self.accept(.semicolon)) {}
     return expr;
 }
 fn parseUnary(self: *AstGen) AstGenError!Node.Index {
+    self.loggerOpen("parseUnary");
+    defer self.logger.close();
     const token = self.peekToken() orelse return 0;
     // If the current token is not an operator, it must be a primary expr.
     switch (token.tag) {
@@ -135,6 +142,7 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
         .bang,
         .keyword_or,
         .keyword_and,
+        // .keyword_return,
         => {},
         else => {
             return try self.parsePrimary();
@@ -148,7 +156,11 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
     switch (op_token.tag) {
         .keyword_return => {
             return try self.pushNode(.{
-                .data = .{ .ret_expression = .{ .node = try self.parseExpression() } },
+                .data = .{
+                    .ret_expression = .{
+                        .node = try self.parseExpression(),
+                    },
+                },
                 .start_token = start_token,
                 .end_token = self.token_index,
             });
@@ -290,13 +302,20 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             // },
             .keyword_return => {
                 const start_token = self.token_index;
+                var end_token = self.token_index;
                 self.consumeToken();
-                const expr = try self.parseExpression();
 
+                const expr = try self.parseExpression();
+                // std.debug.panic("expr: {d}", .{expr});
+                if (expr != 0) end_token = self.token_index - 1;
                 return try self.pushNode(.{
-                    .data = .{ .ret_expression = .{ .node = expr } },
+                    .data = .{
+                        .ret_expression = .{
+                            .node = expr,
+                        },
+                    },
                     .start_token = start_token,
-                    .end_token = self.token_index,
+                    .end_token = end_token,
                 });
             },
             .l_brace => {
@@ -361,7 +380,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     ),
 
                     .start_token = start_token,
-                    .end_token = self.token_index,
+                    .end_token = self.token_index - 1,
                 });
             },
             .l_parenthesis => {
@@ -379,7 +398,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 return try self.parsePrimary();
             },
             else => {
-                self.logger.panic("unexpected {s}", .{@tagName(token.tag)});
+                // self.logger.panic("unexpected {s}", .{@tagName(token.tag)});
             },
         }
     }
@@ -721,7 +740,7 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
             .else_branch = else_expr,
         } },
         .start_token = start_token,
-        .end_token = self.token_index,
+        .end_token = self.token_index - 1,
     });
 }
 
@@ -813,7 +832,7 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
     const name = try self.parseIdentifier();
     assert(name != 0);
 
-    if (!self.tokenIs(.l_parenthesis)) {
+    if (self.accept(.l_parenthesis)) {} else {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,
@@ -821,8 +840,6 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             .payload = @intFromEnum(Token.Tag.l_parenthesis),
         });
         return name;
-    } else {
-        self.consumeToken();
     }
     var params = self.node_lists.new(self.allocator);
     while (true) {
@@ -835,16 +852,13 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             break;
         }
         try params.append(param);
-        if (self.tokenIs(.comma)) {
-            self.consumeToken();
+        if (self.accept(.comma)) {
             continue;
         }
 
         break;
     }
-    if (self.tokenIs(.r_parenthesis)) {
-        self.consumeToken();
-    } else {
+    if (self.accept(.r_parenthesis)) {} else {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,
@@ -852,9 +866,7 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             .payload = @intFromEnum(Token.Tag.r_parenthesis),
         });
     }
-    if (self.tokenIs(.colon)) {
-        self.consumeToken();
-    } else {
+    if (self.accept(.colon)) {} else {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,
@@ -870,7 +882,7 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             .ret_type = ret_ty,
         } },
         .start_token = start_token,
-        .end_token = self.token_index,
+        .end_token = self.token_index - 1,
     });
 }
 pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
@@ -893,7 +905,7 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
 
     // if (!self.isToken())
 
-    if (!self.tokenIs(.colon)) {
+    if (!self.accept(.colon)) {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,
@@ -909,13 +921,13 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
         });
         return index;
     }
-    self.consumeToken();
+    // self.consumeToken();
 
     data.type = try self.parseTy();
     self.setNode(index, .{
         .data = .{ .fn_param = data },
         .start_token = start_token,
-        .end_token = self.token_index,
+        .end_token = self.token_index - 1,
     });
     return index;
 }
@@ -1053,20 +1065,19 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
         }
         break;
     }
-    if (!self.tokenIs(.r_brace)) {
+    if (!self.accept(.r_brace)) {} else {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,
             .end = self.token_index,
             .payload = @intFromEnum(Token.Tag.r_brace),
         });
-    } else {
-        self.consumeToken();
     }
+    // self.consumeToken();
     return try self.pushNode(.{
         .data = .{ .block = .{ .list = @intCast(try nodes.commit()) } },
         .start_token = start_token,
-        .end_token = self.token_index,
+        .end_token = self.token_index - 1,
     });
 }
 pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
