@@ -351,6 +351,8 @@ pub const Inst = union(enum) {
     inline_block: Block,
     local: Local,
     local_set: BinaryOp,
+    param_set: BinaryOp,
+    global_set: BinaryOp,
     decl_ref: Ast.Node.Index,
     loop: Loop,
     assign: BinaryOp,
@@ -378,10 +380,24 @@ pub const Inst = union(enum) {
     if_expr: IfExpr,
     br: UnaryOp,
 
+    ty_i8: Ast.Node.Index,
+    ty_i16: Ast.Node.Index,
     ty_i32: Ast.Node.Index,
     ty_i64: Ast.Node.Index,
+    ty_i128: Ast.Node.Index,
+    ty_i256: Ast.Node.Index,
+
+    ty_u8: Ast.Node.Index,
+    ty_u16: Ast.Node.Index,
+    ty_u32: Ast.Node.Index,
+    ty_u64: Ast.Node.Index,
+    ty_u128: Ast.Node.Index,
+    ty_u256: Ast.Node.Index,
+    ty_usize: Ast.Node.Index,
+
     ty_f32: Ast.Node.Index,
     ty_f64: Ast.Node.Index,
+    ty_void: Ast.Node.Index,
 
     debug_var: DebugVar,
 

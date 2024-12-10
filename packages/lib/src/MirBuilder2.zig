@@ -92,6 +92,13 @@ pub const Builder = struct {
         try self.mir.instructions.append(self.mir.allocator, instruction);
         return index;
     }
+    pub fn reserveInstructionIndex(self: *Builder) Mir.Instruction.Index {
+        const index: Mir.Instruction.Index = @intCast(self.mir.instructions.items.len);
+        return index;
+    }
+    pub fn setInstruction(self: *Builder, index: Mir.Instruction.Index, instruction: Mir.Instruction) void {
+        self.mir.instructions.items[@intCast(index)] = instruction;
+    }
     pub fn reserveTypeIndex(self: *Builder) !Mir.Type.Index {
         return try self.makeType(undefined);
     }
@@ -105,6 +112,19 @@ pub const Builder = struct {
         return null;
     }
 
+    pub fn reserveGlobalIndex(self: *Builder) !Mir.Global.Index {
+        const index: Mir.Global.Index = @intCast(self.mir.globals.items.len);
+        try self.mir.globals.append(self.mir.allocator, undefined);
+        return index;
+    }
+    pub fn setGlobal(self: *Builder, index: Mir.Global.Index, global: Mir.Global) void {
+        self.mir.globals.items[index] = global;
+    }
+    pub fn pushGlobal(self: *Builder, global: Mir.Global) !Mir.Global.Index {
+        const index: Mir.Global.Index = @intCast(self.mir.globals.items.len);
+        try self.mir.globals.append(self.mir.allocator, global);
+        return index;
+    }
     pub fn getValue(self: *Builder, index: Mir.Value.Index) ?Mir.Value {
         if (index.toInt()) |int| {
             return self.mir.values.items[@intCast(int)];
@@ -180,12 +200,11 @@ const Wip = struct {
         module,
         global_declaration,
         param_declaration,
-        if_expression,
-        loop_expression,
         type,
     };
     pub const Data = union(Kind) {
         fn_decl: struct {
+            global: Mir.Global.Index,
             name: InternedSlice,
             params: Array(Wip.Index),
             return_type: Wip.Index,
@@ -197,6 +216,7 @@ const Wip = struct {
             declarations: Array(Wip.Index),
         },
         global_declaration: struct {
+            global: Mir.Global.Index,
             name: InternedSlice,
             type: Wip.Index,
             init_block: ?Wip.Index,
@@ -205,20 +225,15 @@ const Wip = struct {
             name: InternedSlice,
             type: Wip.Index,
         },
-        if_expression: struct {
-            condition: InstructionId,
-            then_branch: Wip.Index,
-            else_branch: ?Wip.Index,
-        },
-        loop_expression: struct {
-            body: Wip.Index,
-        },
+
         type: void,
         pub const Block = struct {
             name: ?InternedSlice,
             owner: Wip.Index,
-            break_type: ?Wip.Index,
+            value: Mir.Value.Index = .void,
+            break_type: ?Mir.Type.Index = null,
             instructions: Array(InstructionId) = .{},
+            is_inline: bool = false,
         };
     };
     pub fn init(index: Wip.Index, builder: *Builder, hir_index: Hir.Inst.Index, parent: Wip.Index, data: Data) !Wip {
@@ -229,7 +244,7 @@ const Wip = struct {
             .parent = parent,
             .data = data,
             .type_mode = switch (std.meta.activeTag(data)) {
-                .if_expression, .loop_expression, .block => .inferred,
+                .block => .inferred,
                 else => .explicit,
             },
         };
@@ -303,6 +318,10 @@ const Wip = struct {
                     .instruction_index = instruction_index,
                 });
                 try self.builder.getWip(self.index).data.block.instructions.append(allocator, instruction_index);
+                if (block.is_inline) {
+                    block.value = instruction.value;
+                    block.break_type = instruction.type;
+                }
                 // try block.instructions.append(allocator, instruction_index);
 
                 return @intCast(instruction_index);
@@ -343,6 +362,7 @@ const Wip = struct {
                     .fn_decl => {
                         const fn_decl_wip_index = try builder.makeWip(decl_hir_index, self.index, .{
                             .fn_decl = .{
+                                .global = try builder.reserveGlobalIndex(),
                                 .name = name,
                                 .params = .{},
                                 .return_type = 0,
@@ -394,6 +414,7 @@ const Wip = struct {
                     else => {
                         const global_declaration_wip_index: Wip.Index = try builder.makeWip(decl_hir_index, self.index, .{
                             .global_declaration = .{
+                                .global = try builder.reserveGlobalIndex(),
                                 .name = name,
                                 .type = 0,
                                 .init_block = null,
@@ -410,6 +431,10 @@ const Wip = struct {
                                     .owner = global_declaration_wip_index,
                                     .instructions = .{},
                                     .break_type = null,
+                                    .is_inline = switch (self.builder.getHirInst(init_hir_index)) {
+                                        .inline_block => true,
+                                        else => false,
+                                    },
                                 },
                             });
                         }
@@ -456,8 +481,6 @@ const Wip = struct {
             .global_declaration => try self.resolveGlobalDeclarationType(),
 
             .block,
-            .if_expression,
-            .loop_expression,
             => unreachable,
             // else => {
             //     return self.builder.logger.panic("unimplemented resolveType: {s}", .{@tagName(std.meta.activeTag(self.data))});
@@ -513,7 +536,6 @@ const Wip = struct {
                 .name = fn_decl.name,
                 .params = try params_types.commit(),
                 .return_type = return_type_index,
-                .init_block = null, // Resolve this later when resolving instructions
             },
         });
         return type_index;
@@ -522,11 +544,30 @@ const Wip = struct {
     }
     fn resolveSimpleType(self: *Wip) !Mir.Type.Index {
         const type_inst = self.builder.getHirInst(self.hir_index);
-        const type_index = switch (type_inst) {
-            .ty_i32 => Mir.Type.Index.i32,
-            .ty_i64 => Mir.Type.Index.i64,
-            .ty_f32 => Mir.Type.Index.f32,
-            .ty_f64 => Mir.Type.Index.f64,
+        const type_index = switch (std.meta.activeTag(type_inst)) {
+            inline .ty_i8,
+            .ty_i16,
+            .ty_i32,
+            .ty_i64,
+            .ty_i128,
+            .ty_i256,
+            .ty_u8,
+            .ty_u16,
+            .ty_u32,
+            .ty_u64,
+            .ty_u128,
+            .ty_u256,
+            .ty_usize,
+            .ty_f32,
+            .ty_f64,
+            .ty_void,
+            => |tag| {
+                const tag_name = comptime @tagName(tag)[3..];
+                return std.meta.stringToEnum(Mir.Type.Index, tag_name) orelse {
+                    return self.builder.logger.panic("not implemented: resolveSimpleType: {s}", .{tag_name});
+                };
+                // return try self.builder.makeType(.{ .type_number = .{ .tag = tag } });
+            },
             else => {
                 self.builder.logger.panic("not implemented: resolveSimpleType: {s}", .{@tagName(std.meta.activeTag(type_inst))});
             },
@@ -552,16 +593,16 @@ const Wip = struct {
     fn resolveGlobalDeclarationType(self: *Wip) !Mir.Type.Index {
         self.stage = .resolving_type;
         const global_decl = self.data.global_declaration;
-        const type_type_index = try self.builder.getWip(global_decl.type).resolveType();
+        const type_index = try self.builder.getWip(global_decl.type).resolveType();
 
-        const type_index = try self.builder.makeType(.{
-            .global = .{
-                .name = global_decl.name,
-                .type = type_type_index,
-                .init = null, // Resolve this later when resolving instructions
+        // const type_index = try self.builder.makeType(.{
+        //     .global = .{
+        //         .name = global_decl.name,
+        //         .type = type_type_index,
+        //         .init = null, // Resolve this later when resolving instructions
 
-            },
-        });
+        //     },
+        // });
         self.type_index = type_index;
         self.stage = .type_resolved;
         return type_index;
@@ -629,6 +670,7 @@ const Wip = struct {
             .module => try self.resolveModuleInitializer(),
             .fn_decl => try self.resolveFnDeclInitializer(),
             .block => try self.resolveBlockInitializer(),
+            .global_declaration => try self.resolveGlobalDeclarationInitializer(),
             else => {
                 return self.builder.logger.panic("unimplemented: resolveInitializer: {s}", .{@tagName(std.meta.activeTag(self.data))});
             },
@@ -672,15 +714,11 @@ const Wip = struct {
                     );
                 }
             },
-            .loop_expression => {},
-            .if_expression => {},
             .block => {},
+            .global_declaration => {},
 
             .module => {
                 self.builder.logger.todo("error message for blocks at the module level", .{});
-            },
-            .global_declaration => {
-                self.builder.logger.panic("Unimplemented: resolveBlockInitializer: global_declaration", .{});
             },
             .param_declaration => {
                 self.builder.logger.todo("error message for blocks at the param_declaration level (maybe in the future?)", .{});
@@ -699,10 +737,23 @@ const Wip = struct {
         }, null);
         self.stage = .resolved;
     }
+    pub fn resolveGlobalDeclarationInitializer(self: *Wip) Error!void {
+        self.builder.logger.open("resolveGlobalDeclarationInitializer: {s}", .{self.format()});
+        defer self.builder.logger.close();
+        self.stage = .resolving_instructions;
+        defer self.stage = .resolved;
+        const init_block_wip_index = self.data.global_declaration.init_block orelse {
+            self.stage = .resolved;
+            return;
+        };
+        const init_block_wip = self.builder.getWip(init_block_wip_index);
+        try init_block_wip.resolveInitializer();
+    }
     pub fn resolveBlockInstructions(self: *Wip) Error!void {
         self.builder.logger.open("resolveBlockInstructions: {s}", .{self.format()});
         defer self.builder.logger.close();
-        const block_hir_inst = switch (self.builder.getHirInst(self.hir_index)) {
+        const block_inst = self.builder.getHirInst(self.hir_index);
+        const block_hir_inst = switch (block_inst) {
             .block, .inline_block => |hir_inst| hir_inst,
             else => unreachable,
         };
@@ -710,6 +761,14 @@ const Wip = struct {
         while (iter_instructions.next()) |hir_inst| {
             _ = try self.resolveInstruction(hir_inst);
         }
+
+        // switch (block_inst) {
+        //     .block => {},
+        //     .inline_block => {
+        //         self.pushInstruction(hir_inst: Hir.Inst.Index, instruction: Mir.Instruction)
+        //     },
+        //     else => unreachable,
+        // }
     }
     pub fn resolveParamInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, name: InternedSlice, type_index: Mir.Type.Index) Error!InstructionId {
         return try self.pushInstruction(hir_inst_index, .{
@@ -730,10 +789,28 @@ const Wip = struct {
         switch (hir_inst) {
             .local => |local| return try self.resolveLocalInstruction(hir_inst_index, local),
             .comptime_number => return try self.resolveConstantInstruction(hir_inst_index, hir_inst.comptime_number),
-            .ty_f64, .ty_f32, .ty_i64, .ty_i32, .ty_boolean => return try self.resolveTypeLiteralInstruction(hir_inst_index),
+
+            .ty_i8,
+            .ty_i16,
+            .ty_i32,
+            .ty_i64,
+            .ty_i128,
+            .ty_i256,
+            .ty_u8,
+            .ty_u16,
+            .ty_u32,
+            .ty_u64,
+            .ty_u128,
+            .ty_u256,
+            .ty_usize,
+            .ty_f64,
+            .ty_f32,
+            .ty_boolean,
+            => return try self.resolveTypeLiteralInstruction(hir_inst_index),
             .gt, .ge, .lt, .le, .eq, .ne => |bin_op| return try self.resolveComparisonInstruction(hir_inst_index, bin_op),
             .as => |bin_op| return try self.resolveAsInstruction(hir_inst_index, bin_op),
             .param_get => |node| return try self.resolveParamGetInstruction(hir_inst_index, node),
+            .param_set => |node| return try self.resolveParamSetInstruction(hir_inst_index, node),
             .add, .sub, .mul, .div => |bin_op| return try self.resolveArithmeticInstruction(hir_inst_index, bin_op),
             .ret => |node| return try self.resolveReturnInstruction(hir_inst_index, node),
             .local_set => |bin_op| return try self.resolveLocalSetInstruction(hir_inst_index, bin_op),
@@ -743,6 +820,7 @@ const Wip = struct {
             .loop => |node| return try self.resolveLoopExpressionInstruction(hir_inst_index, node),
             .br => |node| return try self.resolveBreakInstruction(hir_inst_index, node),
             .global_get => |node| return try self.resolveGlobalGetInstruction(hir_inst_index, node),
+            .global_set => |node| return try self.resolveGlobalSetInstruction(hir_inst_index, node),
             .fn_call => |node| return try self.resolveFnCallInstruction(hir_inst_index, node),
             else => {
                 return self.builder.logger.panic("not implemented: resolveInstruction: {s}", .{@tagName(std.meta.activeTag(hir_inst))});
@@ -811,12 +889,32 @@ const Wip = struct {
         return try self.pushInstruction(hir_inst_index, .{
             .op = .constant,
             .type = .type,
-            .value = switch (hir_inst) {
-                .ty_f64 => .type_f64,
-                .ty_f32 => .type_f32,
-                .ty_i64 => .type_i64,
-                .ty_i32 => .type_i32,
-                .ty_boolean => .type_boolean,
+            .value = switch (std.meta.activeTag(hir_inst)) {
+                inline .ty_i8,
+                .ty_i16,
+                .ty_i32,
+                .ty_i64,
+                .ty_i128,
+                .ty_i256,
+                .ty_u8,
+                .ty_u16,
+                .ty_u32,
+                .ty_u64,
+                .ty_u128,
+                .ty_u256,
+                .ty_usize,
+                .ty_f64,
+                .ty_f32,
+                .ty_boolean,
+                => |tag| std.meta.stringToEnum(Mir.Value.Index, "type_" ++ (comptime @tagName(tag)[3..])) orelse {
+                    return self.builder.logger.panic("not implemented: resolveTypeLiteralInstruction: {s}", .{@tagName(tag)});
+                },
+                // .ty_f64 => .type_f64,
+                // .ty_f64 => .type_f64,
+                // .ty_f32 => .type_f32,
+                // .ty_i64 => .type_i64,
+                // .ty_i32 => .type_i32,
+                // .ty_boolean => .type_boolean,
                 else => unreachable,
             },
 
@@ -826,6 +924,7 @@ const Wip = struct {
     pub fn resolveAsInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
         const instruction = try self.getInstructionId(bin_op.lhs);
         const type_instruction = try self.getInstructionByHirInst(bin_op.rhs);
+        type_instruction.liveness = 0;
         return try self.castInstruction(hir_inst_index, instruction, type_instruction.value.toType());
     }
     pub fn resolveParamGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, param_get: Hir.Inst.UnaryOp) Error!InstructionId {
@@ -1029,7 +1128,7 @@ const Wip = struct {
         switch (instruction.type) {
             .number => {
                 switch (type_index) {
-                    .i64, .i32, .f64, .f32 => {
+                    .i8, .i16, .i32, .i64, .i128, .i256, .u8, .u16, .u32, .u64, .u128, .u256, .usize => {
                         return try self.castInstruction(hir_inst_index, id, type_index);
                     },
                     else => {},
@@ -1149,6 +1248,56 @@ const Wip = struct {
             .liveness = 1,
         });
     }
+    pub fn resolveParamSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
+        const local_id = try self.getInstructionId(bin_op.lhs);
+        const value_id = try self.getInstructionId(bin_op.rhs);
+        const local_instruction = try self.getInstruction(local_id);
+        const value_instruction = try self.getInstruction(value_id);
+        // var liveness: u32 = 1;
+        const value = value_instruction.getValue();
+        if (value != .runtime and local_instruction.getValue() != .runtime) {
+            local_instruction.value = value;
+        }
+
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .param_set,
+            .type = value_instruction.type,
+            .value = value,
+            .data = .{ .bin_op = .{
+                .lhs = local_id,
+                .rhs = value_id,
+            } },
+            .liveness = 1,
+        });
+    }
+    pub fn resolveGlobalSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
+        const global_wip_index = self.getGlobal(bin_op.lhs) orelse self.builder.logger.todo("error for global not found: {d}", .{bin_op.lhs});
+
+        const global_wip = self.builder.getWip(global_wip_index);
+        const value_id = try self.getInstructionId(bin_op.rhs);
+        // const global_instruction = try self.getInstruction(global_id);
+        const value_instruction = try self.getInstruction(value_id);
+        // var liveness: u32 = 1;
+        const value = value_instruction.getValue();
+        // if (value != .runtime and global_wip.getValue() != .runtime) {
+        //     global_wip.value = value;
+        // }
+
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .global_set,
+            .type = value_instruction.type,
+            .value = value,
+            .data = .{ .global_set = .{
+                .global = switch (global_wip.data) {
+                    .fn_decl => |fn_decl| fn_decl.global,
+                    .global_declaration => |global_declaration| global_declaration.global,
+                    else => unreachable,
+                },
+                .value = value_id,
+            } },
+            .liveness = 1,
+        });
+    }
     pub fn resolveLocalGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
@@ -1164,29 +1313,60 @@ const Wip = struct {
         const global_wip = self.builder.getWip(global_wip_id);
         const global_type = try global_wip.resolveType();
         self.builder.logger.log("..global_get: {}", .{global_type}, null);
-        if (self.builder.getType(global_type)) |ty| {
-            switch (ty.*) {
-                .@"fn" => {
-                    const value = try self.builder.pushValue(.{ .@"fn" = .{
-                        .type = global_type,
-                    } });
-                    return try self.pushInstruction(hir_inst_index, .{
-                        .op = .global_get,
-                        .type = global_type,
-                        .value = value,
-                        .data = .{ .wip = global_wip_id },
-                    });
-                },
-                else => {},
-            }
+        switch (global_wip.data) {
+            .global_declaration => {
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .global_get,
+                    .type = global_type,
+                    .value = .runtime,
+                    .data = .{ .global_get = .{
+                        .global = global_wip.data.global_declaration.global,
+                    } },
+                });
+            },
+            .fn_decl => {
+                const value = try self.builder.pushValue(.{ .@"fn" = .{
+                    .type = global_type,
+                } });
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .global_get,
+                    .type = global_type,
+                    .value = value,
+                    .data = .{ .global_get = .{
+                        .global = global_wip.data.fn_decl.global,
+                    } },
+                });
+            },
+            else => unreachable,
         }
-        return try self.pushInstruction(hir_inst_index, .{
-            .op = .global_get,
-            .type = global_type,
-            .value = .runtime, // TODO: resolve comptime global values
-            .data = .{ .void = {} },
-        });
+        // if (self.builder.getType(global_type)) |ty| {
+        //     switch (ty.*) {
+        //         .@"fn" => {
+        //             const value = try self.builder.pushValue(.{ .@"fn" = .{
+        //                 .type = global_type,
+        //             } });
+        //             return try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .global_get,
+        //                 .type = global_type,
+        //                 .value = value,
+        //                 .data = .{ .global_get = .{
+        //                     .global = global_wip.data.fn_decl.global,
+        //                 } },
+        //             });
+        //         },
+        //         .global => {},
+        //         else => {},
+        //     }
+        // }
+
+        // return try self.pushInstruction(hir_inst_index, .{
+        //     .op = .global_get,
+        //     .type = global_type,
+        //     .value = .runtime, // TODO: resolve comptime global values
+        //     .data = .{ .void = {} },
+        // });
     }
+
     pub fn resolveTypeOfInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
@@ -1200,12 +1380,17 @@ const Wip = struct {
     }
     pub fn resolveBreakInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
         const operand_id = try self.getInstructionId(node.operand);
-        // const operand = try self.getInstruction(operand_id);
+        const operand = try self.getInstruction(operand_id);
+        const value = operand.getValue();
+        _ = value; // autofix
+        // if (value != .runtime) {
+        //     operand.liveness = 0;
+        // }
 
         return try self.pushInstruction(hir_inst_index, .{
             .op = .br,
-            .type = .void,
-            .value = .void,
+            .type = operand.type,
+            .value = operand.getValue(),
             .data = .{ .instruction = operand_id },
         });
     }
@@ -1214,77 +1399,64 @@ const Wip = struct {
         const owner = self.data.block.owner;
 
         const condition_id = try self.getInstructionId(node.cond);
-        var if_expr_wip = try self.builder.makeAndGetWip(hir_inst_index, self.index, .{
-            .if_expression = .{
-                .condition = condition_id,
-                .then_branch = undefined,
-                .else_branch = null,
-            },
-        });
+
         // defer if_expr_wip.update();
-        var then_branch = try self.builder.makeAndGetWip(node.then_body, if_expr_wip.index, .{
+        var then_branch = try self.builder.makeAndGetWip(node.then_body, self.index, .{
             .block = .{
                 .owner = owner,
                 .name = null,
                 .break_type = null,
             },
         });
-        // defer then_branch.update();
 
-        if_expr_wip.stage = .resolving_instructions;
-        defer if_expr_wip.stage = .resolved;
-        // then_branch.stage = .resolving_instructions;
-        if_expr_wip.data.if_expression.then_branch = then_branch.index;
-
+        try then_branch.resolveInitializer();
         var else_branch: ?*Wip = null;
         if (node.else_body) |else_body| {
-            else_branch = try self.builder.makeAndGetWip(else_body, if_expr_wip.index, .{
+            else_branch = try self.builder.makeAndGetWip(else_body, self.index, .{
                 .block = .{
                     .owner = owner,
                     .name = null,
                     .break_type = null,
                 },
             });
-            if_expr_wip.data.if_expression.else_branch = else_branch.?.index;
-            else_branch.?.stage = .resolving_instructions;
+            try else_branch.?.resolveInitializer();
         }
 
-        const if_expr_instruction_id = try self.pushInstruction(hir_inst_index, .{
-            .op = .if_expr,
-            .type = .unknown,
-            .value = .runtime,
-            .data = .{ .wip = if_expr_wip.index },
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .branch,
+            .type = .void,
+            .value = .void,
+            .data = .{ .branch = .{
+                .condition = condition_id,
+                .then_instructions_list = then_branch.index,
+                .else_instructions_list = if (else_branch) |else_branch_wip| else_branch_wip.index else null,
+            } },
         });
-        try then_branch.resolveInitializer();
-        if (else_branch) |else_branch_wip| {
-            try else_branch_wip.resolveInitializer();
-        }
-
-        return if_expr_instruction_id;
     }
     pub fn resolveLoopExpressionInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Loop) Error!InstructionId {
         const owner = self.data.block.owner;
 
-        const loop_wip = try self.builder.makeAndGetWip(hir_inst_index, self.index, .{
-            .loop_expression = .{
-                .body = undefined,
-            },
-        });
+        // const loop_wip = try self.builder.makeAndGetWip(hir_inst_index, self.index, .{
+        //     .loop_expression = .{
+        //         .body = undefined,
+        //     },
+        // });
 
-        loop_wip.stage = .resolving_instructions;
-        const body_wip = try self.builder.makeAndGetWip(node.body, loop_wip.index, .{
+        // loop_wip.stage = .resolving_instructions;
+        var body_wip = try self.builder.makeAndGetWip(node.body, self.index, .{
             .block = .{
                 .owner = owner,
                 .name = null,
                 .break_type = null,
             },
         });
-        loop_wip.data.loop_expression.body = body_wip.index;
         const loop_instruction_id = try self.pushInstruction(hir_inst_index, .{
             .op = .loop,
             .type = .void,
             .value = .void,
-            .data = .{ .wip = loop_wip.index },
+            .data = .{ .loop = .{
+                .instructions_list = body_wip.index,
+            } },
         });
         try body_wip.resolveInitializer();
 
@@ -1330,9 +1502,10 @@ const Wip = struct {
             .param_declaration => try self.commitParamDecl(),
             .type => try self.commitType(),
             .block => try self.commitBlock(),
-            else => {
-                self.builder.logger.panic("Not implemented: {s}", .{@tagName(self.data)});
-            },
+            .global_declaration => try self.commitGlobalDeclaration(),
+            // else => {
+            //     self.builder.logger.panic("Not implemented: {s}", .{@tagName(self.data)});
+            // },
         }
         self.stage = .committed;
     }
@@ -1368,26 +1541,34 @@ const Wip = struct {
         var return_type_wip = self.builder.getWip(self.data.fn_decl.return_type);
         try return_type_wip.commit();
 
+        var init_instructions: ?Mir.Instruction.List = null;
         // assert(activeTag(fn_type.*) == .@"fn");
         if (self.data.fn_decl.init_block) |init_block| {
-            var init_block_wip = self.builder.getWip(init_block);
-            try init_block_wip.commit();
+            const init_block_wip = self.builder.getWip(init_block);
             const fn_type = self.builder.getType(self.type_index) orelse unreachable;
+            init_instructions = try InstructionSet.generate(init_block_wip);
             const ty: Mir.Type.Fn = fn_type.@"fn";
             try self.setType(.{ .@"fn" = .{
                 .name = ty.name,
                 .params = ty.params,
                 .return_type = ty.return_type,
-                .init_block = init_block_wip.type_index,
             } });
         }
+
+        self.builder.setGlobal(self.data.fn_decl.global, .{
+            .name = self.data.fn_decl.name,
+            .type = self.type_index,
+            .value = .runtime,
+            .init = init_instructions,
+        });
     }
 
     pub fn commitBlock(self: *Wip) Error!void {
         self.builder.logger.log("commit block: {s}", .{self.format()}, null);
         assert(self.stage == .resolved);
         assert(activeTag(self.data) == .block);
-        try InstructionSet.generate(self);
+        @panic("TODO");
+        // const instructions = try InstructionSet.generate(self);
 
         // for (self.data.block.instructions.items) |instruction_id| {
         //     const instruction = try self.getInstruction(instruction_id);
@@ -1423,6 +1604,29 @@ const Wip = struct {
         }
         self.type_index = try self.builder.makeType(type_);
     }
+    pub fn commitGlobalDeclaration(self: *Wip) Error!void {
+        self.builder.logger.log("commit global_declaration: {s}", .{self.format()}, null);
+        assert(self.stage == .resolved);
+        if (self.data.global_declaration.init_block) |init_block| {
+            const init_block_wip = self.builder.getWip(init_block);
+            // const init_instructions = try InstructionSet.generate(init_block_wip);
+            const value = init_block_wip.data.block.value;
+
+            self.builder.setGlobal(self.data.global_declaration.global, .{
+                .name = self.data.global_declaration.name,
+                .type = self.type_index,
+                .value = init_block_wip.data.block.value,
+                .init = if (value == .runtime) try InstructionSet.generate(init_block_wip) else null,
+            });
+            return;
+        }
+        self.builder.setGlobal(self.data.global_declaration.global, .{
+            .name = self.data.global_declaration.name,
+            .type = self.type_index,
+            .value = .undefined,
+            .init = null,
+        });
+    }
     pub fn dump(self: *Wip, writer: std.io.AnyWriter, index: Wip.Index) !void {
         try writer.print("Wips({d}):\n", .{self.builder.wips.len});
         var iter = self.builder.wips.iterator();
@@ -1442,6 +1646,7 @@ const Wip = struct {
             .fn_decl => wip.data.fn_decl.name,
             .global_declaration => wip.data.global_declaration.name,
             .param_declaration => wip.data.param_declaration.name,
+
             else => null,
         };
         try fmt.writeIndent(writer, depth, .{});
@@ -1495,6 +1700,14 @@ const Wip = struct {
                 try writer.writeAll("}\n");
                 try fmt.writeIndent(writer, depth + 1, .{});
                 try writer.writeAll("\n");
+
+                if (wip.data.global_declaration.init_block) |init_block_index| {
+                    try fmt.writeIndent(writer, depth + 1, .{});
+                    try writer.writeAll("init: {\n");
+                    try self.dumpInner(writer, init_block_index, depth + 2);
+                    try fmt.writeIndent(writer, depth + 1, .{});
+                    try writer.writeAll("}\n");
+                }
             },
             .param_declaration => {
                 try fmt.writeIndent(writer, depth + 1, .{});
@@ -1510,23 +1723,26 @@ const Wip = struct {
                     try wip.dumpInstruction(writer, instruction, depth + 1);
                 }
             },
-            .if_expression => {
-                try fmt.writeIndent(writer, depth, .{});
-                try writer.print("condition: %{d}\n", .{wip.data.if_expression.condition});
-                try fmt.writeIndent(writer, depth, .{});
-                try writer.writeAll("then:\n");
-                try self.dumpInner(writer, wip.data.if_expression.then_branch, depth + 1);
-                if (wip.data.if_expression.else_branch) |else_branch| {
-                    try fmt.writeIndent(writer, depth, .{});
-                    try writer.writeAll("else:\n");
-                    try self.dumpInner(writer, else_branch, depth + 1);
-                }
-            },
-            .loop_expression => {
-                try fmt.writeIndent(writer, depth, .{});
-                try writer.writeAll("body:\n");
-                try self.dumpInner(writer, wip.data.loop_expression.body, depth + 1);
-            },
+
+            // .loop_expression => {
+            //     try fmt.writeIndent(writer, depth, .{});
+            //     try writer.writeAll("body:\n");
+            //     try self.dumpInner(writer, wip.data.loop_expression.body, depth + 1);
+            // },
+            // .branch => {
+            //     try fmt.writeIndent(writer, depth, .{});
+
+            //     try writer.writeAll("condition: %{d}\n", .{instru condition});
+            //     try fmt.writeIndent(writer, depth, .{});
+            //     try writer.writeAll("then:\n");
+            //     try self.dumpInner(writer, wip.data.branch.then_instructions_list, depth + 1);
+            //     if (wip.data.branch.else_instructions_list) |else_instructions_list| {
+            //         try fmt.writeIndent(writer, depth, .{});
+            //         try writer.writeAll("else:\n");
+            //         try self.dumpInner(writer, else_instructions_list, depth + 1);
+            //     }
+            // },
+
             else => {},
         }
     }
@@ -1534,18 +1750,46 @@ const Wip = struct {
     fn dumpInstruction(self: *Wip, writer: std.io.AnyWriter, id: InstructionId, depth: usize) !void {
         const instruction = try self.getInstruction(id);
         const data: Mir.Instruction.Data = instruction.data;
-        if (std.meta.activeTag(data) == .wip and instruction.op != .global_get) {
-            var wip = self.builder.getWip(data.wip);
-            try wip.dumpInner(writer, data.wip, depth + 1);
-            return;
-        }
-
-        try fmt.writeIndent(writer, depth, .{});
-        // try fmt.formatInstruction(self.builder, writer, .{}, instruction, depth);
-        const tag_name = @tagName(instruction.data);
+        // if (std.meta.activeTag(data) == .wip and instruction.op != .global_get) {
+        //     var wip = self.builder.getWip(data.wip);
+        //     try wip.dumpInner(writer, data.wip, depth + 1);
+        //     return;
+        // }
         if (instruction.liveness == 0) {
             try tw.gray_500.csiOpen(writer);
         }
+        defer {
+            if (instruction.liveness == 0) {
+                tw.gray_500.csiClose(writer) catch unreachable;
+            }
+        }
+
+        try fmt.writeIndent(writer, depth, .{});
+        switch (instruction.data) {
+            .loop => |loop| {
+                try writer.print("[{d}]loop{s}\n", .{ id, if (instruction.liveness == 0) "!" else "" });
+                try self.dumpInner(writer, loop.instructions_list, depth + 1);
+                return;
+            },
+            .branch => |branch| {
+                try writer.print("[{d}]if{s} (#{d}) then:\n", .{ id, if (instruction.liveness == 0) "!" else "", branch.condition });
+                // try fmt.writeIndent(writer, depth, .{});
+
+                // try writer.writeAll("then:\n");
+                try self.dumpInner(writer, branch.then_instructions_list, depth + 1);
+                if (branch.else_instructions_list) |else_instructions_list| {
+                    try fmt.writeIndent(writer, depth, .{});
+                    try writer.writeAll("else:\n");
+
+                    try self.dumpInner(writer, else_instructions_list, depth + 1);
+                }
+                return;
+            },
+            else => {},
+        }
+        // try fmt.formatInstruction(self.builder, writer, .{}, instruction, depth);
+        const tag_name = @tagName(instruction.data);
+
         try writer.print("{s: <4}", .{tag_name[0..@min(tag_name.len, 4)]});
         try writer.print("[{d: >3}]", .{id});
         try writer.print("{s: <3}", .{if (instruction.liveness == 0) "!" else ""});
@@ -1562,10 +1806,20 @@ const Wip = struct {
             .instruction => |instruction_index| {
                 try writer.print("(#{d})", .{instruction_index});
             },
-            // .value => |value| {
-            //     _ = value; // autofix
-            //     // try self.dumpValue(writer, value, depth + 1);
 
+            // .branch => |branch| {
+            //     try writer.print("(#{d}) then:\n", .{branch.condition});
+            //     // try fmt.writeIndent(writer, depth, .{});
+
+            //     // try writer.writeAll("then:\n");
+            //     try self.dumpInner(writer, branch.then_instructions_list, depth + 1);
+            //     if (branch.else_instructions_list) |else_instructions_list| {
+            //         try fmt.writeIndent(writer, depth, .{});
+            //         try writer.writeAll("else:\n");
+
+            //         try self.dumpInner(writer, else_instructions_list, depth + 1);
+            //     }
+            //     return;
             // },
             .type => |type_index| {
                 try self.dumpType(writer, type_index, depth + 1);
@@ -1586,6 +1840,14 @@ const Wip = struct {
                 }
                 try writer.writeAll(")");
             },
+            .global_set => |global_set| {
+                try writer.print("(#{d}, #{d})", .{ global_set.global, global_set.value });
+            },
+            // .loop => |loop| {
+            //     try writer.print("(#{d})\n", .{loop.instructions_list});
+            //     try self.dumpInner(writer, loop.instructions_list, depth + 1);
+            //     return;
+            // },
             // .wip => |wip_index| {
             //     var wip = self.builder.getWip(wip_index);
             //     try wip.dumpInner(writer, wip_index, depth + 1);
@@ -1606,7 +1868,7 @@ const Wip = struct {
             try writer.print("[{s}]", .{@tagName(instruction.value)});
         }
         try tw.gray_500.csiClose(writer);
-        try writer.writeAll("|\n");
+        try writer.writeAll("\n");
     }
     pub inline fn format(self: *Wip) []const u8 {
         const color = fmt.pickColor(self.index);
@@ -1614,10 +1876,15 @@ const Wip = struct {
         var buf_writer = std.io.fixedBufferStream(&buf);
         const writer = buf_writer.writer();
         // try writer.print("#{d} {s}
+        const name = switch (self.data) {
+            .block => if (self.data.block.is_inline) "inline_block" else "block",
+
+            else => @tagName(self.data),
+        };
         color.print(
             writer,
             "#{d} {s} [{s}] {x}",
-            .{ self.index, @tagName(self.data), @tagName(self.stage), @intFromPtr(self) },
+            .{ self.index, name, @tagName(self.stage), @intFromPtr(self) },
             .{},
         ) catch unreachable;
         switch (self.data) {
@@ -1643,12 +1910,12 @@ const InstructionSet = struct {
     map: std.AutoHashMapUnmanaged(InstructionId, Mir.Instruction.Index),
     local_count: u32 = 0,
 
-    pub fn push(self: *InstructionSet, instruction_id: InstructionId, instruction: Mir.Instruction) !void {
+    pub fn push(self: *InstructionSet, instruction_id: InstructionId, instruction: Mir.Instruction) !Mir.Instruction.Index {
         const index = try self.builder.pushInstruction(instruction);
         try self.instructions.append(index);
         self.builder.logger.log("{d} -> {d}: {s}", .{ instruction_id, index, @tagName(instruction.op) }, null);
         try self.map.put(self.builder.arena.allocator(), instruction_id, index);
-        // return index;
+        return index;
     }
     // pub fn pushConstant(self: *InstructionSet, ty: Mir.Type, value: Mir.Value) !Mir.Instruction.Index {
     //     return try self.builder.pushInstruction(.{
@@ -1693,7 +1960,7 @@ const InstructionSet = struct {
         // }
         switch (instruction.data) {
             .scoped => |scoped| {
-                try self.push(instruction_id, .{
+                _ = try self.push(instruction_id, .{
                     .op = instruction.op,
                     .type = instruction.type,
                     .value = instruction.value,
@@ -1710,7 +1977,7 @@ const InstructionSet = struct {
             .bin_op => |bin_op| {
                 const lhs = self.getIndex(bin_op.lhs);
                 const rhs = self.getIndex(bin_op.rhs);
-                try self.push(instruction_id, .{
+                _ = try self.push(instruction_id, .{
                     .op = instruction.op,
                     .type = instruction.type,
                     .value = instruction.value,
@@ -1722,8 +1989,18 @@ const InstructionSet = struct {
                     },
                 });
             },
+            .global_set => |global_set| {
+                _ = global_set; // autofix
+                // const global_wip = self.builder.getWip(global_set.global);
+                // const value_id = self.getIndex(global_set.value);
+                _ = try self.push(instruction_id, instruction.*);
+            },
+            .global_get => |global_get| {
+                _ = global_get; // autofix
+                _ = try self.push(instruction_id, instruction.*);
+            },
             .instruction => |operand_id| {
-                try self.push(instruction_id, .{
+                _ = try self.push(instruction_id, .{
                     .op = instruction.op,
                     .type = instruction.type,
                     .value = instruction.value,
@@ -1732,49 +2009,34 @@ const InstructionSet = struct {
                     },
                 });
             },
-            .wip => |wip_id| {
-                switch (instruction.op) {
-                    .if_expr => {
-                        try self.generateFromChildWip(wip_id);
-                        const wip = self.builder.getWip(wip_id);
-                        try self.push(instruction_id, .{
-                            .op = instruction.op,
-                            .type = instruction.type,
-                            .value = instruction.value,
-                            .data = .{
-                                .if_expr = .{
-                                    .cond = self.getIndex(wip.data.if_expression.condition),
-                                    .then_body = self.builder.getWip(wip.data.if_expression.then_branch).type_index,
-                                    .else_body = if (wip.data.if_expression.else_branch) |else_branch| self.builder.getWip(else_branch).type_index else null,
-                                },
-                            },
-                        });
-                    },
-                    .loop => {
-                        const wip = self.builder.getWip(wip_id);
-                        const block_wip = self.builder.getWip(wip.data.loop_expression.body);
-                        try block_wip.setType(.{ .block = .{
-                            .locals_count = 0,
-                            .instructions = 0,
-                            .name = block_wip.data.block.name,
-                        } });
-                        try self.push(instruction_id, .{
-                            .op = instruction.op,
-                            .type = instruction.type,
-                            .value = instruction.value,
-                            .data = .{
-                                .loop = .{
-                                    .body = block_wip.type_index,
-                                },
-                            },
-                        });
-                        try self.generateFromChildWip(wip_id);
-                    },
-                    else => {
-                        self.builder.logger.panic("instruction.op not supported: {s}", .{@tagName(instruction.op)});
-                    },
-                }
-            },
+
+            // .wip => |wip_id| {
+            //     switch (instruction.op) {
+            //         .loop => {
+            //             const wip = self.builder.getWip(wip_id);
+            //             const block_wip = self.builder.getWip(wip.data.loop_expression.body);
+            //             try block_wip.setType(.{ .block = .{
+            //                 .locals_count = 0,
+            //                 .instructions = 0,
+            //                 .name = block_wip.data.block.name,
+            //             } });
+            //             try self.push(instruction_id, .{
+            //                 .op = instruction.op,
+            //                 .type = instruction.type,
+            //                 .value = instruction.value,
+            //                 .data = .{
+            //                     .loop = .{
+            //                         .body = block_wip.type_index,
+            //                     },
+            //                 },
+            //             });
+            //             try self.generateFromChildWip(wip_id);
+            //         },
+            //         else => {
+            //             self.builder.logger.panic("instruction.op not supported: {s}", .{@tagName(instruction.op)});
+            //         },
+            //     }
+            // },
             .call => |call| {
                 var iter = self.builder.mir.lists.iterList(call.args_list);
                 var i: usize = 0;
@@ -1782,7 +2044,7 @@ const InstructionSet = struct {
                     iter.slice[i] = self.getIndex(arg_id);
                     i += 1;
                 }
-                try self.push(instruction_id, .{
+                _ = try self.push(instruction_id, .{
                     .op = instruction.op,
                     .type = instruction.type,
                     .value = instruction.value,
@@ -1795,69 +2057,161 @@ const InstructionSet = struct {
                 });
             },
             .void => {
-                try self.push(instruction_id, .{
+                _ = try self.push(instruction_id, .{
                     .op = instruction.op,
                     .type = instruction.type,
                     .value = instruction.value,
                     .data = .{ .void = {} },
                 });
             },
-            .type, .if_expr, .loop => unreachable,
-            // else => {
-            //     self.builder.logger.panic("instruction.data not supported: {s}", .{@tagName(instruction.data)});
-            // },
+            .type, .if_expr => unreachable,
+            .branch => {
+                const branch = instruction.data.branch;
+                _ = try self.push(instruction_id, .{
+                    .op = instruction.op,
+                    .type = instruction.type,
+                    .value = instruction.value,
+                    .data = .{ .branch = .{
+                        .condition = self.getIndex(branch.condition),
+                        .then_instructions_list = try self.genInstructionsFromChildWip(branch.then_instructions_list),
+                        .else_instructions_list = if (branch.else_instructions_list) |else_instructions_list| try self.genInstructionsFromChildWip(else_instructions_list) else null,
+                    } },
+                });
+                // const then_wip = self.builder.getWip(branch.then_instructions_list);
+                // try self.generateFromChildWip(branch.then_instructions_list);
+                // // const else_wip = if (branch.els e_instructions_list) |else_instructions_list| self.builder.getWip(else_instructions_list) else null;
+                // if (else_wip) |else_wip| {
+                //     try self.generateFromChildWip(else_wip.index);
+                // }
+                // try self.push(instruction_id, .{
+                //     .op = instruction.op,
+                //     .type = instruction.type,
+                //     .value = instruction.value,
+                //     .data = .{ .branch = branch },
+                // });
+            },
+            .loop => {
+                const loop = instruction.data.loop;
+                const inst = try self.push(instruction_id, instruction.*);
+                self.builder.setInstruction(inst, .{
+                    .op = instruction.op,
+                    .type = instruction.type,
+                    .value = instruction.value,
+                    .data = .{
+                        .loop = .{
+                            .instructions_list = try self.genInstructionsFromChildWip(loop.instructions_list),
+                        },
+                    },
+                });
+            },
+
+            else => {
+                self.builder.logger.panic("instruction.data not supported: {s}", .{@tagName(instruction.data)});
+            },
         }
 
         // const index = try self.instructions.push(instruction_id);
         // try self.map.put(instruction_id, index);
     }
-    pub fn generateFromChildWip(self: *InstructionSet, wip_id: Wip.Index) Wip.Error!void {
+    // pub fn generateFromChildWip(self: *InstructionSet, wip_id: Wip.Index) Wip.Error!void {
+    //     const current = self.block_wip;
+    //     const instructions = self.instructions;
+    //     defer self.block_wip = current;
+    //     defer self.instructions = instructions;
+
+    //     const wip = self.builder.getWip(wip_id);
+    //     switch (wip.data) {
+    //         .block => {
+    //             self.block_wip = wip;
+    //             self.instructions = wip.builder.newList();
+    //             const block = wip.data.block;
+
+    //             for (block.instructions.items) |instruction_id| {
+    //                 try self.maybePush(instruction_id);
+    //             }
+
+    //             try wip.setType(.{
+    //                 .block = .{
+    //                     .locals_count = 0,
+    //                     .instructions = try self.instructions.commit(),
+    //                     .name = block.name,
+    //                 },
+    //             });
+    //         },
+    //         else => {
+    //             self.builder.logger.panic("wip.data not supported: {s}", .{@tagName(wip.data)});
+    //         },
+    //     }
+    //     // pub fn makeChild(self: *InstructionSet, wip_id: Wip.Index) !*InstructionSet {
+    //     //     const wip = self.builder.getWip(wip_id);
+    //     //     return &InstructionSet{
+    //     //         .builder = self.builder,
+    //     //         .block_wip = wip,
+    //     //     };
+    //     // }
+    // }
+    pub fn genInstructions(self: *InstructionSet) Wip.Error!Mir.Instruction.List {
+        // const current = self.block_wip;
+        // const instructions = self.instructions;
+        // defer self.block_wip = current;
+        // defer self.instructions = instructions;
+
+        // const wip = self.builder.getWip(wip_id);
+        // self.block_wip = wip;
+        // self.instructions = wip.builder.newList();
+        const block = self.block_wip.data.block;
+
+        for (block.instructions.items) |instruction_id| {
+            try self.maybePush(instruction_id);
+        }
+        return try self.instructions.commit();
+    }
+    pub fn genInstructionsFromChildWip(self: *InstructionSet, wip_id: Wip.Index) Wip.Error!Mir.Instruction.List {
         const current = self.block_wip;
         const instructions = self.instructions;
         defer self.block_wip = current;
         defer self.instructions = instructions;
 
         const wip = self.builder.getWip(wip_id);
-        switch (wip.data) {
-            .if_expression => |if_expression| {
-                try self.generateFromChildWip(if_expression.then_branch);
-                if (if_expression.else_branch) |else_branch| {
-                    try self.generateFromChildWip(else_branch);
-                }
-            },
-            .block => {
-                self.block_wip = wip;
-                self.instructions = wip.builder.newList();
-                const block = wip.data.block;
-
-                for (block.instructions.items) |instruction_id| {
-                    try self.maybePush(instruction_id);
-                }
-
-                try wip.setType(.{
-                    .block = .{
-                        .locals_count = 0,
-                        .instructions = try self.instructions.commit(),
-                        .name = block.name,
-                    },
-                });
-            },
-            .loop_expression => {
-                try self.generateFromChildWip(wip.data.loop_expression.body);
-            },
-            else => {
-                self.builder.logger.panic("wip.data not supported: {s}", .{@tagName(wip.data)});
-            },
-        }
-        // pub fn makeChild(self: *InstructionSet, wip_id: Wip.Index) !*InstructionSet {
-        //     const wip = self.builder.getWip(wip_id);
-        //     return &InstructionSet{
-        //         .builder = self.builder,
-        //         .block_wip = wip,
-        //     };
-        // }
+        self.block_wip = wip;
+        self.instructions = wip.builder.newList();
+        return try self.genInstructions();
     }
-    pub fn generate(block_wip: *Wip) Wip.Error!void {
+    pub fn generateBlockInstruction(block_wip: *Wip) Wip.Error!Mir.Instruction.Index {
+        var set = InstructionSet{
+            .builder = block_wip.builder,
+            .block_wip = block_wip,
+            .instructions = block_wip.builder.newList(),
+            .map = .{},
+        };
+        const block_inst = block_wip.builder.reserveInstructionIndex();
+        block_wip.builder.setInstruction(block_inst, .{
+            .op = .block,
+            .type = .void,
+            .value = .void,
+            .data = .{
+                .block = .{
+                    .instructions_list = try set.genInstructions(),
+                    // .name = block_wip.data.block.name,
+                },
+            },
+        });
+        return block_inst;
+
+        // try set.push(undefined, .{
+        //     .op = .block,
+        //     .type = .void,
+        //     .value = .void,
+        //     .data = .{
+        //         .block = .{
+        //             .instructions = try set.genInstructionsFromChildWip(block_wip.index),
+        //             .name = block_wip.data.block.name,
+        //         },
+        //     },
+        // });
+        // try self.maybePush(instruction_id);
+    }
+    pub fn generate(block_wip: *Wip) Wip.Error!Mir.Instruction.List {
         var set = InstructionSet{
             .builder = block_wip.builder,
             .block_wip = block_wip,
@@ -1865,30 +2219,32 @@ const InstructionSet = struct {
             .map = .{},
         };
 
-        switch (block_wip.data) {
-            .block => {
-                const block = block_wip.data.block;
-                for (block.instructions.items) |instruction_id| {
-                    try set.maybePush(instruction_id);
-                }
+        return try set.genInstructions();
 
-                try block_wip.setType(.{
-                    .block = .{
-                        .locals_count = 0,
-                        .instructions = try set.instructions.commit(),
-                        .name = block_wip.data.block.name,
-                    },
-                });
-            },
-            // .if_expression => {
-            //     const if_expression = block_wip.data.if_expression;
+        // switch (block_wip.data) {
+        //     .block => {
+        //         const block = block_wip.data.block;
+        //         for (block.instructions.items) |instruction_id| {
+        //             try set.maybePush(instruction_id);
+        //         }
 
-            //     // try InstructionSet.generate(block_wip.data.if_expression.then_branch.?);
-            // },
-            else => {
-                block_wip.builder.logger.panic("block_wip.data not supported: {s}", .{@tagName(block_wip.data)});
-            },
-        }
+        //         try block_wip.setType(.{
+        //             .block = .{
+        //                 .locals_count = 0,
+        //                 .instructions = try set.instructions.commit(),
+        //                 .name = block_wip.data.block.name,
+        //             },
+        //         });
+        //     },
+        //     // .if_expression => {
+        //     //     const if_expression = block_wip.data.if_expression;
+
+        //     //     // try InstructionSet.generate(block_wip.data.if_expression.then_branch.?);
+        //     // },
+        //     else => {
+        //         block_wip.builder.logger.panic("block_wip.data not supported: {s}", .{@tagName(block_wip.data)});
+        //     },
+        // }
     }
 };
 pub fn build(allocator: std.mem.Allocator, hir: *Hir, errors: *ErrorManager) !Mir {

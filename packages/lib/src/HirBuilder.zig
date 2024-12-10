@@ -236,11 +236,25 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             // nav.move(nav.data.binary_expression.lhs);
             nav.move(bin_expr.lhs);
             const slice = nav.getNodeSlice();
-            const lhs_local = scope.resolveSymbolRecursively(slice) orelse return error.SymbolNotFound;
+            const lhs_index = scope.resolveSymbolRecursively(slice) orelse return error.SymbolNotFound;
             // const lhs_interned = try scope.builder.strings.intern(nav.getNodeSlice());
             const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
 
-            return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_local, .rhs = rhs_inst } });
+            const lhs_inst = self.hir.insts.items[lhs_index];
+            switch (lhs_inst) {
+                .param_decl => {
+                    return try scope.pushInstruction(.{ .param_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
+                },
+                .local => {
+                    return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
+                },
+                .global_decl => {
+                    return try scope.pushInstruction(.{ .global_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
+                },
+                else => unreachable,
+            }
+
+            // return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
         },
 
         .identifier => {
@@ -292,12 +306,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             }
             return try scope.pushInstruction(.{ .if_expr = if_expr });
         },
-        .ty_number => return try scope.pushInstruction(.{ .ty_number = nav.node }),
-        .ty_boolean => return try scope.pushInstruction(.{ .ty_boolean = nav.node }),
-        .ty_i32 => return try scope.pushInstruction(.{ .ty_i32 = nav.node }),
-        .ty_i64 => return try scope.pushInstruction(.{ .ty_i64 = nav.node }),
-        .ty_f32 => return try scope.pushInstruction(.{ .ty_f32 = nav.node }),
-        .ty_f64 => return try scope.pushInstruction(.{ .ty_f64 = nav.node }),
+
         .while_loop => {
             const loop_index = try scope.reserveInstruction();
             var loop_scope = Scope.init(self, scope, .block, "while_loop");
@@ -354,7 +363,51 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
         else => {
             switch (nav.tag) {
-                inline .add, .sub, .mul, .div, .gt, .lt, .ge, .le, .eq, .ne => |tag| return try self.genBinaryExpression(tag, scope, nav.node),
+                //                 .ty_number => return try scope.pushInstruction(.{ .ty_number = nav.node }),
+                // .ty_boolean => return try scope.pushInstruction(.{ .ty_boolean = nav.node }),
+                // .ty_i8 => return try scope.pushInstruction(.{ .ty_i8 = nav.node }),
+                // .ty_i16 => return try scope.pushInstruction(.{ .ty_i16 = nav.node }),
+                // .ty_i32 => return try scope.pushInstruction(.{ .ty_i32 = nav.node }),
+                // .ty_i64 => return try scope.pushInstruction(.{ .ty_i64 = nav.node }),
+                // .ty_f32 => return try scope.pushInstruction(.{ .ty_f32 = nav.node }),
+                // .ty_f64 => return try scope.pushInstruction(.{ .ty_f64 = nav.node }),
+                // .ty_void => return try scope.pushInstruction(.{ .ty_void = nav.node }),
+                // .ty_usize => return try scope.pushInstruction(.{ .ty_usize = nav.node }),
+                inline .ty_i8,
+                .ty_i16,
+                .ty_i32,
+                .ty_i64,
+                .ty_i128,
+                .ty_i256,
+
+                .ty_u8,
+                .ty_u16,
+                .ty_u32,
+                .ty_u64,
+                .ty_u128,
+                .ty_u256,
+
+                .ty_usize,
+
+                .ty_f32,
+                .ty_f64,
+                .ty_void,
+                => |tag| {
+                    const tag_name = comptime @tagName(tag);
+                    const data = @unionInit(Hir.Inst, tag_name, nav.node);
+                    return try scope.pushInstruction(data);
+                },
+                inline .add,
+                .sub,
+                .mul,
+                .div,
+                .gt,
+                .lt,
+                .ge,
+                .le,
+                .eq,
+                .ne,
+                => |tag| return try self.genBinaryExpression(tag, scope, nav.node),
                 else => {},
             }
         },
@@ -535,11 +588,19 @@ pub fn genInlineBlock(self: *Self, parent_scope: *Scope, ty_node: ?Ast.Node.Inde
     };
     _ = init_inst; // autofix
 
+    // const br_inst = try scope.pushInstruction(.{
+    //     .br = .{
+    //         .operand = init_inst,
+    //     },
+    // });
     const index = try scope.commit();
     return .{
         .ty_inst = ty_inst,
         .index = try parent_scope.pushInstruction(.{
-            .inline_block = .{ .name_node = null, .instructions_list = index },
+            .inline_block = .{
+                .name_node = null,
+                .instructions_list = index,
+            },
         }),
     };
     // const index = try self.reserveInstruction();
@@ -700,5 +761,5 @@ test "HirBuilder" {
         .lists = &hir.lists,
     });
 
-    // std.debug.print("Hir:\n{}\n", .{hir});
+    std.debug.print("Hir:\n{}\n", .{hir});
 }

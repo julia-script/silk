@@ -57,12 +57,12 @@ pub const Source = struct {
             0,
             .{},
         );
-        // self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
-        // std.debug.print("HIR:\n", .{});
-        // std.debug.print("{any}\n", .{self.hir});
-        // self.mir = try Mir.build(allocator, &self.hir.?, &compilation.errors);
-        // std.debug.print("MIR:\n", .{});
-        // std.debug.print("{any}\n", .{self.mir});
+        self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
+        std.debug.print("HIR:\n", .{});
+        std.debug.print("{any}\n", .{self.hir});
+        self.mir = try Mir.build(allocator, &self.hir.?, &compilation.errors);
+        std.debug.print("MIR:\n", .{});
+        std.debug.print("{any}\n", .{self.mir});
     }
 };
 

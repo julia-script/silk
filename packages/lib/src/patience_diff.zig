@@ -59,6 +59,9 @@ pub fn addToResults(self: *Patience, a_index: isize, b_index: isize) !void {
         } });
         return;
     }
+    if (a_index == b_index) {
+        return;
+    }
     try self.operations.append(.{ .move = .{
         .line = self.b_lines.items[@intCast(b_index)],
         .a_index = @intCast(a_index),

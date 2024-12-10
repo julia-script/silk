@@ -135,10 +135,50 @@ pub const Token = struct {
         keyword_extern,
         keyword_number,
         keyword_string,
+
+        keyword_i8,
+        keyword_i16,
         keyword_i32,
         keyword_i64,
+        keyword_i128,
+        keyword_i256,
+
+        keyword_u8,
+        keyword_u16,
+        keyword_u32,
+        keyword_u64,
+        keyword_u128,
+        keyword_u256,
+        keyword_usize,
         keyword_f32,
         keyword_f64,
+        pub fn isTypeIdentifierLike(self: Tag) bool {
+            switch (self) {
+                .identifier,
+
+                .keyword_i8,
+                .keyword_i16,
+                .keyword_i32,
+                .keyword_i64,
+                .keyword_i128,
+                .keyword_i256,
+
+                .keyword_u8,
+                .keyword_u16,
+                .keyword_u32,
+                .keyword_u64,
+                .keyword_u128,
+                .keyword_u256,
+
+                .keyword_f32,
+                .keyword_f64,
+                => return true,
+                else => return false,
+            }
+        }
+        pub fn toInt(self: Tag) u32 {
+            return @intFromEnum(self);
+        }
     };
 };
 
@@ -154,6 +194,7 @@ pub fn init(source: []const u8) Lexer {
 }
 
 pub fn keywordOrIdentifier(self: *Lexer, start: usize, end: usize) Token {
+    @setEvalBranchQuota(2000);
     const keyword_start = "keyword_";
     inline for (std.meta.fields(Token.Tag)) |field| {
         const keyword = comptime blk: {
@@ -341,13 +382,13 @@ pub fn lex(self: *Lexer) Token {
                         .end = cursor + 2,
                     };
                 }
-                if (startsWith(src[cursor..], ">>")) {
-                    return .{
-                        .tag = .double_r_angle_bracket,
-                        .start = cursor,
-                        .end = cursor + 2,
-                    };
-                }
+                // if (startsWith(src[cursor..], ">>")) {
+                //     return .{
+                //         .tag = .double_r_angle_bracket,
+                //         .start = cursor,
+                //         .end = cursor + 2,
+                //     };
+                // }
 
                 return .{ .tag = .r_angle_bracket, .start = cursor, .end = cursor + 1 };
             },
@@ -359,13 +400,13 @@ pub fn lex(self: *Lexer) Token {
                         .end = cursor + 2,
                     };
                 }
-                if (startsWith(src[cursor..], "<<")) {
-                    return .{
-                        .tag = .double_l_angle_bracket,
-                        .start = cursor,
-                        .end = cursor + 2,
-                    };
-                }
+                // if (startsWith(src[cursor..], "<<")) {
+                //     return .{
+                //         .tag = .double_l_angle_bracket,
+                //         .start = cursor,
+                //         .end = cursor + 2,
+                //     };
+                // }
                 return .{ .tag = .l_angle_bracket, .start = cursor, .end = cursor + 1 };
             },
             '|' => {
@@ -480,7 +521,7 @@ pub fn lex(self: *Lexer) Token {
                 cursor += 1;
                 if (self.charAt(start) == '$') {
                     if (self.charAt(cursor)) |c_| {
-                        if (c_ >= '0' and c_ <= '9' or c_ == '-' or c_ == '+') {
+                        if (c_ >= '0' and c_ <= '9' or c_ == '-' or c_ == '+' or c_ == '_') {
                             return self.keywordOrIdentifier(start, cursor);
                         }
                     }

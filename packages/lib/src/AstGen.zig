@@ -32,7 +32,7 @@ const AstGenError = error{
 } || Logger.Error;
 
 fn pushNode(self: *AstGen, node: Node) AstGenError!Node.Index {
-    self.logger.log(comptime "[PUSH_NODE]: {s}", .{@tagName(node.data)}, null);
+    self.logger.log(comptime "[PUSH_NODE]: {d} {s}", .{ self.nodes.len, @tagName(node.data) }, null);
     for (self.tokens.items[node.start_token..node.end_token]) |token| {
         self.logger.log(comptime " - tok .{s}", .{@tagName(token.tag)}, null);
     }
@@ -78,7 +78,19 @@ pub fn tokenIs(self: *AstGen, tag: Token.Tag) bool {
     if (self.token_index >= self.tokens.items.len) return false;
     return self.tokens.items[self.token_index].tag == tag;
 }
+pub fn nextTokensAre(self: *AstGen, a: Token.Tag, b: Token.Tag) bool {
+    if (self.tokenIs(a)) {
+        const b_index = self.token_index + 1;
+        if (b_index >= self.tokens.items.len) return false;
+        return self.tokens.items[b_index].tag == b;
+    }
+    return false;
+}
 
+pub fn tokenOffsetIs(self: *AstGen, offset: usize, tag: Token.Tag) bool {
+    if (self.token_index + offset >= self.tokens.items.len) return false;
+    return self.tokens.items[self.token_index + offset].tag == tag;
+}
 pub fn getNode(self: *AstGen, index: Node.Index) Node {
     return self.nodes.get(index);
 }
@@ -104,7 +116,7 @@ pub fn parseRoot(self: *AstGen) AstGenError!void {
     const children_index = try children.commit();
     self.setNode(index, .{
         .start_token = 0,
-        .end_token = @intCast(self.tokens.items.len),
+        .end_token = @intCast(self.tokens.items.len - 1),
         .data = .{
             .root = .{
                 .list = @intCast(children_index),
@@ -116,8 +128,60 @@ pub fn parseRoot(self: *AstGen) AstGenError!void {
 pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
     self.loggerOpen("parseExpression");
     defer self.logger.close();
-    const lhs = try self.parseUnary();
+    self.logger.log("parse LHS", .{}, null);
+    var lhs = try self.parseUnary();
     if (lhs == 0) return 0;
+
+    while (self.tokenIs(.dot)) {
+        self.logger.log("parse prop access", .{}, null);
+        const token = self.peekToken() orelse return 0;
+        self.consumeToken();
+        lhs = try self.makeBinaryExpression(token, lhs, try self.parsePrimary());
+        if (lhs == 0) return 0;
+    }
+
+    while (self.tokenIs(.l_parenthesis)) {
+        self.logger.log("parse fn call", .{}, null);
+        self.consumeToken();
+        var args_list = self.node_lists.new(self.allocator);
+        const first_expr = try self.parseExpression();
+        if (first_expr != 0) {
+            try args_list.append(first_expr);
+        }
+        while (self.tokenIs(.comma)) {
+            self.consumeToken();
+            const expr = try self.parseExpression();
+            if (expr == 0) break;
+            try args_list.append(expr);
+        }
+        const args_list_index = try args_list.commit();
+        if (!self.accept(.r_parenthesis)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = Token.Tag.r_parenthesis.toInt(),
+            });
+        }
+        const lhs_start = self.nodes.get(lhs).start_token;
+        lhs = try self.pushNode(.{
+            .data = .{
+                .fn_call = .{
+                    .callee = lhs,
+                    .args_list = @intCast(args_list_index),
+                },
+            },
+            .start_token = lhs_start,
+            .end_token = self.token_index - 1,
+        });
+    }
+    while (self.tokenIs(.l_brace)) {
+        //     self.logger.log("parse type init", .{}, null);
+        lhs = try self.parseTypeInit(lhs);
+    }
+    // while
+
+    self.logger.log("parse RHS", .{}, null);
     const expr = try self.parseBinaryRhs(0, lhs);
 
     // if (self.accept(.semicolon)) {}
@@ -153,17 +217,17 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
 
     const start_token = self.token_index;
     switch (op_token.tag) {
-        .keyword_return => {
-            return try self.pushNode(.{
-                .data = .{
-                    .ret_expression = .{
-                        .node = try self.parseExpression(),
-                    },
-                },
-                .start_token = start_token,
-                .end_token = self.token_index,
-            });
-        },
+        // .keyword_return => {
+        //     return try self.pushNode(.{
+        //         .data = .{
+        //             .ret_expression = .{
+        //                 .node = try self.parseExpression(),
+        //             },
+        //         },
+        //         .start_token = start_token,
+        //         .end_token = self.token_index,
+        //     });
+        // },
         inline .minus, .bang, .tilde => |token_tag| {
             const tag = comptime switch (token_tag) {
                 .minus => .neg,
@@ -227,6 +291,7 @@ pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
         .end_token = self.token_index,
     });
 }
+
 pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
     self.loggerOpen("parsePrimary");
     defer self.logger.close();
@@ -240,17 +305,30 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .number_literal,
             .keyword_true,
             .keyword_false,
-
             .keyword_number,
             .keyword_boolean,
             .keyword_string,
             .keyword_void,
+
+            .keyword_i8,
+            .keyword_i16,
             .keyword_i32,
             .keyword_i64,
+            .keyword_i128,
+            .keyword_i256,
+
+            .keyword_u8,
+            .keyword_u16,
+            .keyword_u32,
+            .keyword_u64,
+            .keyword_u128,
+            .keyword_u256,
+
             .keyword_f32,
             .keyword_f64,
+            .keyword_usize,
             => |token_tag| {
-                const tag = comptime switch (token_tag) {
+                const tag: Node.Tag = comptime switch (token_tag) {
                     .string_literal => .string_literal,
                     .number_literal => .number_literal,
                     .keyword_false => .false_literal,
@@ -259,10 +337,25 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .keyword_boolean => .ty_boolean,
                     .keyword_string => .ty_string,
                     .keyword_void => .ty_void,
+
+                    .keyword_i8 => .ty_i8,
+                    .keyword_i16 => .ty_i16,
                     .keyword_i32 => .ty_i32,
                     .keyword_i64 => .ty_i64,
+                    .keyword_i128 => .ty_i128,
+                    .keyword_i256 => .ty_i256,
+
+                    .keyword_u8 => .ty_u8,
+                    .keyword_u16 => .ty_u16,
+                    .keyword_u32 => .ty_u32,
+                    .keyword_u64 => .ty_u64,
+                    .keyword_u128 => .ty_u128,
+                    .keyword_u256 => .ty_u256,
+                    .keyword_usize => .ty_usize,
+
                     .keyword_f32 => .ty_f32,
                     .keyword_f64 => .ty_f64,
+
                     else => unreachable,
                 };
                 defer self.consumeToken();
@@ -272,11 +365,31 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .end_token = self.token_index,
                 });
             },
-            .identifier => {
-                return try self.parseIdentifier();
-            },
+            .identifier => return try self.parseIdentifier(),
             .l_bracket => {
-                return try self.parseArrayInit();
+                const start_token = self.token_index;
+                self.consumeToken();
+                const size_expr = try self.parseExpression();
+                if (!self.accept(.r_bracket)) {
+                    try self.errors.addError(.{
+                        .tag = .expected_token,
+                        .start = self.token_index,
+                        .end = self.token_index,
+                        .payload = Token.Tag.r_bracket.toInt(),
+                    });
+                }
+                const ty = try self.parsePrimary();
+                if (ty == 0) return 0;
+                return try self.pushNode(.{
+                    .data = .{
+                        .ty_array = .{
+                            .size_expr = size_expr,
+                            .ty = ty,
+                        },
+                    },
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
             },
             .keyword_return => {
                 const start_token = self.token_index;
@@ -332,9 +445,8 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 self.consumeToken();
                 const name = try self.parseIdentifier();
                 const ty: Node.Index = blk: {
-                    if (self.tokenIs(.colon)) {
-                        self.consumeToken();
-                        break :blk try self.parseTy();
+                    if (self.accept(.colon)) {
+                        break :blk try self.parsePrimary();
                     }
                     break :blk 0;
                 };
@@ -389,11 +501,20 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
     // self.consumeToken();
     return 0;
 }
+// pub fn parseExpressionList(self: *AstGen) AstGenError!Node.Index {
+//     const start_token = self.token_index;
+//     const expr = try self.parseExpression();
+//     return try self.pushNode(.{
+//         .data = .{ .group = .{ .node = expr } },
+//         .start_token = start_token,
+//         .end_token = self.token_index,
+//     });
+// }
 
 fn getTokenPrecedence(tag: Token.Tag) i8 {
     return switch (tag) {
         .equal => 0,
-        .colon => 0,
+        // .colon => 0,
 
         // logical
         .keyword_or => 1,
@@ -426,7 +547,7 @@ fn getTokenPrecedence(tag: Token.Tag) i8 {
         // unary
         .bang => 12,
         .tilde => 12,
-        .dot => 12,
+        // .dot => 12,
 
         // .l_parenthesis => 13,
         else => -1,
@@ -437,28 +558,40 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
     while (true) {
         const token = self.peekToken() orelse return lhs;
 
-        switch (token.tag) {
-            .double_plus, .double_minus => {
-                const _lhs = try self.parsePostfixUnary(lhs);
-                if (_lhs == 0) return _lhs;
-                lhs = _lhs;
-                continue;
-            },
-            .l_parenthesis => {
-                const _lhs = try self.parseFnCall(lhs);
-                if (_lhs == 0) return _lhs;
-                lhs = _lhs;
-                continue;
-            },
-            .colon => {
+        var tag = token.tag;
+        if (tag == .l_angle_bracket) {
+            if (self.tokens.items[self.token_index + 1].tag == .l_angle_bracket) {
+                tag = .double_l_angle_bracket;
                 self.consumeToken();
-                const rhs = try self.parseTy();
-                if (rhs == 0) return lhs;
-                lhs = try self.makeBinaryExpression(token, lhs, rhs);
-                continue;
-            },
-            else => {},
+            }
+        } else if (tag == .r_angle_bracket) {
+            if (self.tokens.items[self.token_index + 1].tag == .r_angle_bracket) {
+                tag = .double_r_angle_bracket;
+                self.consumeToken();
+            }
         }
+        // switch (token.tag) {
+        //     .double_plus, .double_minus => {
+        //         const _lhs = try self.parsePostfixUnary(lhs);
+        //         if (_lhs == 0) return _lhs;
+        //         lhs = _lhs;
+        //         continue;
+        //     },
+        //     .l_parenthesis => {
+        //         const _lhs = try self.parseFnCall(lhs);
+        //         if (_lhs == 0) return _lhs;
+        //         lhs = _lhs;
+        //         continue;
+        //     },
+        //     .colon => {
+        //         self.consumeToken();
+        //         const rhs = try self.parseExpression();
+        //         if (rhs == 0) return lhs;
+        //         lhs = try self.makeBinaryExpression(token, lhs, rhs);
+        //         continue;
+        //     },
+        //     else => {},
+        // }
 
         const tok_prec = getTokenPrecedence(token.tag);
 
@@ -650,7 +783,7 @@ pub fn parseGroup(self: *AstGen) AstGenError!Node.Index {
                 .tag = .expected_token,
                 .start = self.token_index,
                 .end = self.token_index,
-                .payload = @intFromEnum(Token.Tag.r_parenthesis),
+                .payload = Token.Tag.r_parenthesis.toInt(),
             });
         }
         return index;
@@ -666,62 +799,6 @@ pub fn parseGroup(self: *AstGen) AstGenError!Node.Index {
 
     return 0;
 }
-pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
-    const start_token = self.token_index;
-    assert(self.tokenIs(.keyword_if));
-    self.consumeToken();
-
-    const condition: Node.Index = try self.parseExpression();
-    if (condition == 0) {
-        try self.errors.addError(.{
-            .tag = .expected_expression,
-            .start = self.token_index,
-            .end = self.token_index,
-        });
-        return 0;
-    }
-    if (!self.nodeIs(condition, .group)) {
-        try self.errors.addError(.{
-            .tag = .expression_not_parenthesized,
-            .start = self.getNode(condition).start_token,
-            .end = self.getNode(condition).end_token,
-        });
-    }
-    const then_expr = try self.parseExpression();
-    if (then_expr == 0) {
-        try self.errors.addError(.{
-            .tag = .expected_expression,
-            .start = self.token_index,
-            .end = self.token_index,
-        });
-        return 0;
-    }
-    const else_expr = blk: {
-        if (self.tokenIs(.keyword_else)) {
-            self.consumeToken();
-            const expr = try self.parseExpression();
-            if (expr == 0) {
-                try self.errors.addError(.{
-                    .tag = .expected_expression,
-                    .start = self.token_index,
-                    .end = self.token_index,
-                });
-            }
-            break :blk expr;
-        }
-        break :blk 0;
-    };
-    return try self.pushNode(.{
-        .data = .{ .if_expr = .{
-            .condition = condition,
-            .then_branch = then_expr,
-            .else_branch = else_expr,
-        } },
-        .start_token = start_token,
-        .end_token = self.token_index - 1,
-    });
-}
-
 pub inline fn mapTag(tag: Token.Tag, comptime options: []const struct { Token.Tag, Node.Tag }) Node.Tag {
     inline for (options) |option| {
         if (option[0] == tag) return comptime option[1];
@@ -795,6 +872,8 @@ pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
+    self.loggerOpen("parseFnProto");
+    defer self.logger.close();
     assert(self.tokenIs(.keyword_fn));
     self.consumeToken();
     if (!self.tokenIs(.identifier)) {
@@ -833,7 +912,6 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
         if (self.accept(.comma)) {
             continue;
         }
-
         break;
     }
     if (self.accept(.r_parenthesis)) {} else {
@@ -852,7 +930,8 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             .payload = @intFromEnum(Token.Tag.colon),
         });
     }
-    const ret_ty = try self.parseTy();
+    const ret_ty = try self.parsePrimary();
+
     return try self.pushNode(.{
         .data = .{ .fn_proto = .{
             .name = name,
@@ -901,7 +980,7 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
     }
     // self.consumeToken();
 
-    data.type = try self.parseTy();
+    data.type = try self.parseExpression();
     self.setNode(index, .{
         .data = .{ .fn_param = data },
         .start_token = start_token,
@@ -909,11 +988,11 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
     });
     return index;
 }
-pub fn parseTy(self: *AstGen) AstGenError!Node.Index {
-    self.loggerOpen("parseTy");
-    defer self.logger.close();
-    return try self.parseTyInner(0);
-}
+// pub fn parseTy(self: *AstGen) AstGenError!Node.Index {
+//     self.loggerOpen("parseTy");
+//     defer self.logger.close();
+//     return try self.parseTyInner(0);
+// }
 pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
     self.loggerOpen("parseTyInner");
     defer self.logger.close();
@@ -1043,12 +1122,14 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
     var nodes = self.node_lists.new(self.allocator);
     while (!self.tokenIs(.r_brace)) {
         const index = self.token_index;
+        _ = index; // autofix
         const node = try self.parseExpression();
-        assert(index != self.token_index);
+        // assert(index != self.token_index);
         if (node == 0) {
             break;
         }
         try nodes.append(node);
+        self.logger.log("push statement {d}", .{node}, null);
         if (!self.tokenIs(.semicolon)) {
             try self.errors.addError(.{
                 .tag = .expected_token,
@@ -1116,69 +1197,136 @@ pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
 
     return index;
 }
-pub fn parseTypeInit(self: *AstGen) AstGenError!Node.Index {
-    if (self.tokenIs(.l_brace)) {}
+pub fn parseTypeInit(self: *AstGen, ty: Node.Index) AstGenError!Node.Index {
+    self.loggerOpen("parseTypeInit");
+    defer self.logger.close();
+    self.consumeToken();
+    const start_token = self.nodes.items(.start_token)[ty];
+    if (!self.nextTokensAre(.identifier, .colon)) {
+        // array init
+        var items = self.node_lists.new(self.allocator);
+        while (true) {
+            const expr = try self.parseExpression();
+            if (expr == 0) break;
+            try items.append(expr);
+            if (self.accept(.comma)) continue;
+            break;
+        }
+        if (!self.accept(.r_bracket)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = Token.Tag.r_bracket.toInt(),
+            });
+        }
+        return try self.pushNode(.{
+            .data = .{
+                .array_init = .{
+                    .type = ty,
+                    .items_list = @intCast(try items.commit()),
+                },
+            },
+            .start_token = start_token,
+            .end_token = self.token_index,
+        });
+    }
+    var initializers = self.node_lists.new(self.allocator);
+    while (!self.tokenIs(.r_brace)) {
+        // if (!self.accept(.identifier)) break;
+        const field_start_token = self.token_index;
+
+        const name = try self.parseIdentifier();
+
+        // try initializers.append(name);
+        if (!self.accept(.colon)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = @intFromEnum(Token.Tag.colon),
+            });
+        }
+        const expr = try self.parseExpression();
+        // try initializers.append(expr);
+
+        const field_init = try self.pushNode(.{
+            .data = .{ .field_init = .{ .name = name, .value = expr } },
+            .start_token = field_start_token,
+            .end_token = self.token_index - 1,
+        });
+
+        try initializers.append(field_init);
+
+        if (!self.accept(.comma) and !self.tokenIs(.r_brace)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = @intFromEnum(Token.Tag.comma),
+            });
+        }
+    }
+
+    if (!self.tokenIs(.r_brace)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = @intFromEnum(Token.Tag.r_brace),
+        });
+    }
+    return try self.pushNode(.{
+        .data = .{ .type_init = .{
+            .type = ty,
+            .field_init_list = @intCast(try initializers.commit()),
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
+
     // return id;
 }
 // const a = [] i32;
 pub fn parseArrayInit(self: *AstGen) AstGenError!Node.Index {
     const start_token = self.token_index;
     self.consumeToken();
-    const first_expr = try self.parseExpression();
+    const first_expression = try self.parseExpression();
 
-    if (first_expr != 0 and self.accept(.r_bracket)) {
-        const ty = try self.parseTy();
-        if (ty == 0) {
-            var list = self.node_lists.new(self.allocator);
-            try list.append(first_expr);
-            const list_index = try list.commit();
-            return try self.pushNode(.{
+    array_init: {
+        if (self.accept(.r_bracket)) {
+            // It could be the end of an one item array initialization OR a fixed size type declaration
+            const following_token = self.peekToken() orelse break :array_init;
+
+            // if (following_token.tag == .l_bracket) {
+            //     // Probably multidimensional array type
+            // }
+            const maybe_multidimension_array_type = following_token.tag == .l_bracket;
+            const maybe_type_identifier = following_token.tag.isTypeIdentifierLike();
+
+            if (!maybe_type_identifier and !maybe_multidimension_array_type) break :array_init;
+
+            // Probably a type identifier
+            const ty = try self.parsePrimary();
+
+            const array_ty_init = try self.pushNode(.{
+                .data = .{ .ty_array = .{
+                    .size_expr = first_expression,
+                    .ty = ty,
+                } },
                 .start_token = start_token,
                 .end_token = self.token_index,
-                .data = .{
-                    .list_literal = .{
-                        .list = @intCast(list_index),
-                        .ty = 0,
-                    },
-                },
             });
+            return array_ty_init;
         }
-        if (!self.accept(.l_brace)) {
-            try self.errors.addError(.{
-                .tag = .expected_token,
-                .start = self.token_index,
-                .end = self.token_index,
-                .payload = @intFromEnum(Token.Tag.l_brace),
-            });
-        }
-        const init_expr = try self.parseExpression();
-        if (!self.accept(.r_brace)) {
-            try self.errors.addError(.{
-                .tag = .expected_token,
-                .start = self.token_index,
-                .end = self.token_index,
-                .payload = @intFromEnum(Token.Tag.r_brace),
-            });
-        }
-        return try self.pushNode(.{
-            .start_token = start_token,
-            .end_token = self.token_index,
-            .data = .{
-                .array_value_init = .{
-                    .size_expr = first_expr,
-                    .init_expr = init_expr,
-                    .type = ty,
-                },
-            },
-        });
     }
-    var list = self.node_lists.new(self.allocator);
-    try list.append(first_expr);
+    var args_list = self.node_lists.new(self.allocator);
+    try args_list.append(first_expression);
     if (self.accept(.comma)) {
         while (true) {
             const expr = try self.parseExpression();
             if (expr == 0) break;
-            try list.append(expr);
+            try args_list.append(expr);
             if (self.accept(.comma)) continue;
             break;
         }
@@ -1192,17 +1340,97 @@ pub fn parseArrayInit(self: *AstGen) AstGenError!Node.Index {
             .payload = @intFromEnum(Token.Tag.r_bracket),
         });
     }
-    const list_index = try list.commit();
 
     return try self.pushNode(.{
         .data = .{
-            .list_literal = .{
-                .list = @intCast(list_index),
-                .ty = 0,
-            },
+            .array_init = .{ .list = @intCast(try args_list.commit()) },
         },
         .start_token = start_token,
         .end_token = self.token_index,
+    });
+}
+
+pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
+    self.loggerOpen("parseIfExpression");
+    defer self.logger.close();
+    const start_token = self.token_index;
+    assert(self.tokenIs(.keyword_if));
+    self.consumeToken();
+
+    if (!self.accept(.l_parenthesis)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.l_parenthesis.toInt(),
+        });
+        return 0;
+    }
+    const condition: Node.Index = try self.parseExpression();
+    if (!self.accept(.r_parenthesis)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.r_parenthesis.toInt(),
+        });
+        return 0;
+    }
+    if (condition == 0) {
+        try self.errors.addError(.{
+            .tag = .expected_expression,
+            .start = self.token_index,
+            .end = self.token_index,
+        });
+        return 0;
+    }
+    const then_expr = if (self.tokenIs(.l_brace))
+        try self.parseBlock()
+    else
+        try self.parseExpression();
+
+    if (then_expr == 0) {
+        try self.errors.addError(.{
+            .tag = .expected_expression,
+            .start = self.token_index,
+            .end = self.token_index,
+        });
+        return 0;
+    }
+    const else_expr = blk: {
+        if (self.accept(.keyword_else)) {
+            if (self.tokenIs(.l_brace)) {
+                const expr = try self.parseBlock();
+                if (expr == 0) {
+                    try self.errors.addError(.{
+                        .tag = .expected_expression,
+                        .start = self.token_index,
+                        .end = self.token_index,
+                    });
+                }
+                break :blk expr;
+            } else {
+                const expr = try self.parseExpression();
+                if (expr == 0) {
+                    try self.errors.addError(.{
+                        .tag = .expected_expression,
+                        .start = self.token_index,
+                        .end = self.token_index,
+                    });
+                }
+                break :blk expr;
+            }
+        }
+        break :blk 0;
+    };
+    return try self.pushNode(.{
+        .data = .{ .if_expr = .{
+            .condition = condition,
+            .then_branch = then_expr,
+            .else_branch = else_expr,
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index - 1,
     });
 }
 
@@ -1213,8 +1441,25 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
     assert(self.tokenIs(.keyword_while));
     self.consumeToken();
 
+    if (!self.accept(.l_parenthesis)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.l_parenthesis.toInt(),
+        });
+        return 0;
+    }
     const condition: Node.Index = try self.parseExpression();
-
+    if (!self.accept(.r_parenthesis)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.r_parenthesis.toInt(),
+        });
+        return 0;
+    }
     if (condition == 0) {
         try self.errors.addError(.{
             .tag = .expected_expression,
@@ -1223,16 +1468,12 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
         });
         return 0;
     }
-    if (!self.nodeIs(condition, .group)) {
-        try self.errors.addError(.{
-            .tag = .expression_not_parenthesized,
-            .start = self.getNode(condition).start_token,
-            .end = self.getNode(condition).end_token,
-        });
-    }
+    const then_expr = if (self.tokenIs(.l_brace))
+        try self.parseBlock()
+    else
+        try self.parseExpression();
 
-    const body = try self.parseExpression();
-    if (body == 0) {
+    if (then_expr == 0) {
         try self.errors.addError(.{
             .tag = .expected_expression,
             .start = self.token_index,
@@ -1240,21 +1481,75 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
         });
         return 0;
     }
-
     return try self.pushNode(.{
         .data = .{ .while_loop = .{
             .condition = condition,
-            .body = body,
+            .body = then_expr,
         } },
         .start_token = start_token,
-        .end_token = self.token_index,
+        .end_token = self.token_index - 1,
     });
 }
+// pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
+//     self.loggerOpen("parseWhileLoop");
+//     defer self.logger.close();
+//     const start_token = self.token_index;
+//     assert(self.tokenIs(.keyword_while));
+//     self.consumeToken();
 
+//     const condition: Node.Index = try self.parsePrimary();
+
+//     if (condition == 0) {
+//         try self.errors.addError(.{
+//             .tag = .expected_expression,
+//             .start = self.token_index,
+//             .end = self.token_index,
+//         });
+//         return 0;
+//     }
+//     if (!self.nodeIs(condition, .group)) {
+//         try self.errors.addError(.{
+//             .tag = .expression_not_parenthesized,
+//             .start = self.getNode(condition).start_token,
+//             .end = self.getNode(condition).end_token,
+//         });
+//     }
+
+//     const body = try self.parseExpression();
+//     if (body == 0) {
+//         try self.errors.addError(.{
+//             .tag = .expected_expression,
+//             .start = self.token_index,
+//             .end = self.token_index,
+//         });
+//         return 0;
+//     }
+
+//     return try self.pushNode(.{
+//         .data = .{ .while_loop = .{
+//             .condition = condition,
+//             .body = body,
+//         } },
+//         .start_token = start_token,
+//         .end_token = self.token_index,
+//     });
+// }
+
+const fmt = @import("./format_utils.zig");
 pub fn loggerOpen(self: *AstGen, label: []const u8) void {
-    self.logger.open("#token({d}:.{s}) {s}", .{
-        self.token_index,
-        if (self.peekToken()) |t| @tagName(t.tag) else "eof",
-        label,
-    });
+    self.logger.writeIndent() catch {};
+
+    const token = self.peekToken() orelse @panic("no token");
+    self.logger.print("#token({d}):", .{self.token_index}) catch {};
+    const color = fmt.pickColor(@intFromEnum(token.tag));
+    color.print(self.logger.writer, ".{s}", .{@tagName(token.tag)}, .{}) catch {};
+    self.logger.print(" {s} {{\n", .{label}) catch {};
+    self.logger.indent();
+    // self.logger.print("\n", .{}, null) catch {};
+    // self.logger.log("#token({d}:)", .{ self.token_index }, null);
+    // self.logger.open("#token({d}:.{s}) {s}", .{
+    //     self.token_index,
+    //     if (self.peekToken()) |t| @tagName(t.tag) else "eof",
+    //     label,
+    // });
 }

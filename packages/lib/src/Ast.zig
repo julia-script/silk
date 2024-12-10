@@ -102,10 +102,13 @@ pub const Node = struct {
             size_expr: Index,
             ty: Index,
         },
-        array_value_init: struct {
-            size_expr: Index,
-            init_expr: Index,
+        array_init: struct {
             type: Index,
+            items_list: NodeListsIndex,
+        },
+        ty_array: struct {
+            size_expr: Index,
+            ty: Index,
         },
 
         const_decl: Declaration,
@@ -136,9 +139,31 @@ pub const Node = struct {
         ret_expression: NodeIndex,
         block: ChildList,
         while_loop: WhileLoop,
+        type_init: struct {
+            type: Index,
+            field_init_list: NodeListsIndex,
+        },
 
+        field_init: struct {
+            name: Index,
+            value: Index,
+        },
+
+        ty_i8: TokenIndex,
+        ty_i16: TokenIndex,
         ty_i32: TokenIndex,
         ty_i64: TokenIndex,
+        ty_i128: TokenIndex,
+        ty_i256: TokenIndex,
+
+        ty_u8: TokenIndex,
+        ty_u16: TokenIndex,
+        ty_u32: TokenIndex,
+        ty_u64: TokenIndex,
+        ty_u128: TokenIndex,
+        ty_u256: TokenIndex,
+        ty_usize: TokenIndex,
+
         ty_f32: TokenIndex,
         ty_f64: TokenIndex,
 
@@ -270,7 +295,8 @@ pub const Node = struct {
 
         ty_generic,
         ty_list,
-        array_value_init,
+        array_init,
+        ty_array,
         const_decl,
         var_decl,
 
@@ -287,9 +313,24 @@ pub const Node = struct {
         ret_expression,
         block,
         while_loop,
+        type_init,
+        field_init,
 
+        ty_i8,
+        ty_i16,
         ty_i32,
         ty_i64,
+        ty_i128,
+        ty_i256,
+
+        ty_u8,
+        ty_u16,
+        ty_u32,
+        ty_u64,
+        ty_u128,
+        ty_u256,
+        ty_usize,
+
         ty_f32,
         ty_f64,
     };
@@ -323,6 +364,13 @@ pub fn parse(allocator: Allocator, errors: *ErrorManager, source: []const u8) !A
         .source = source,
     };
 }
+pub fn getNodeSlice(self: *Ast, node_i: Node.Index) []const u8 {
+    const start_token_index = self.nodes.items(.start_token)[node_i];
+    const end_token_index = self.nodes.items(.end_token)[node_i];
+    const start_token = self.tokens.items[start_token_index];
+    const end_token = self.tokens.items[@min(end_token_index, self.tokens.items.len - 1)];
+    return self.source[start_token.start..end_token.end];
+}
 pub fn deinit(self: *Ast) void {
     self.nodes.deinit(self.allocator);
     self.node_lists.deinit(self.allocator);
@@ -340,9 +388,14 @@ const RAINBOW = [7]Color{
 const FormatOptions = struct {
     color: bool = true,
     indent_size: usize = 2,
-    show_node_index: bool = false,
+    show_node_index: bool = true,
+    show_slice: bool = true,
+    show_token_range: bool = true,
 };
 pub fn getTokenSlice(self: *Ast, token_i: Token.Index) []const u8 {
+    if (token_i >= self.tokens.items.len) {
+        return "";
+    }
     const token = self.tokens.items[token_i];
     return self.source[token.start..token.end];
 }
@@ -366,7 +419,9 @@ pub fn nodeIs(self: *Ast, node_i: Node.Index, tag: Node.Tag) bool {
 }
 
 pub fn format(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, options: FormatOptions) !void {
-    try self.format_inner(writer, node, 0, options);
+    _ = options; // autofix
+    try self.formatNode(writer, node, 0, .{});
+    // try self.format_inner(writer, node, 0, options);
 }
 
 fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: usize, options: FormatOptions) !void {
@@ -617,7 +672,7 @@ fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: 
                 try self.format_inner(writer, item, indent + 2, options);
             }
         },
-        .array_value_init => |init| {
+        .array_init => |init| {
             _ = try writer.write("\n");
             try format_utils.writeIndent(writer, indent + 1, indentOptions);
             try tw.gray_400.write(writer, "[size]:\n", color_options);
@@ -658,6 +713,129 @@ fn writeIndent(writer: std.io.AnyWriter, indent: usize, options: struct {
             try writer.writeByteNTimes(' ', options.size - 1);
         }
     }
+}
+const fmt = @import("./format_utils.zig");
+pub fn formatNodeSlice(
+    self: *Ast,
+    writer: std.io.AnyWriter,
+    node_index: Node.Index,
+) !void {
+    const slice = self.getNodeSlice(node_index);
+    if (slice.len < 15) {
+        for (slice) |c| {
+            switch (c) {
+                '\n' => {},
+                else => try writer.writeByte(c),
+            }
+        }
+        return;
+    }
+    // const start_token = self.nodes.items(.start_token)[node_index];
+    // const end_token = self.nodes.items(.end_token)[node_index];
+    // const start_slice = self.getTokenSlice(start_token);
+    // const end_slice = self.getTokenSlice(end_token);
+    // try writer.print("{s}...{s}", .{ start_slice, end_slice });
+    const start = slice[0..7];
+    const end = slice[slice.len - 7 ..];
+    for (start) |c| {
+        switch (c) {
+            '\n' => {},
+            else => try writer.writeByte(c),
+        }
+    }
+    try writer.print("...", .{});
+    for (end) |c| {
+        switch (c) {
+            '\n' => {},
+            else => try writer.writeByte(c),
+        }
+    }
+}
+pub fn formatNode(
+    self: *Ast,
+    writer: std.io.AnyWriter,
+    node_index: Node.Index,
+    depth: usize,
+    options: FormatOptions,
+) !void {
+    const indent_options = fmt.IndentOptions{
+        .rainbow = options.color,
+        .size = options.indent_size,
+        .indent_guide_char = ' ',
+        .indent_guides = false,
+    };
+    const node = self.nodes.get(node_index);
+    if (node_index == 0 and depth != 0) {
+        try fmt.writeIndent(writer, depth, indent_options);
+        try writer.writeAll("NONE\n");
+        return;
+    }
+
+    try fmt.writeIndent(writer, depth, indent_options);
+
+    if (options.show_token_range)
+        try writer.print("[{d}-{d}]", .{ node.start_token, node.end_token });
+
+    try writer.print(
+        ".{s}",
+        .{
+            // node.start_token,
+            // node.end_token,
+            @tagName(std.meta.activeTag(node.data)),
+        },
+    );
+    if (options.show_slice) {
+        try writer.print(" `", .{});
+        try formatNodeSlice(self, writer, node_index);
+        try writer.print("`", .{});
+    }
+    try writer.print("\n", .{});
+
+    switch (node.data) {
+        inline else => |data| {
+            const T = @TypeOf(data);
+            const fields = comptime std.meta.fields(T);
+            inline for (fields) |field| {
+                try fmt.writeIndent(writer, depth + 1, indent_options);
+                const value = @field(data, field.name);
+
+                try writer.print("[{s}]:", .{field.name});
+                if (std.mem.endsWith(u8, field.name, "list")) {
+                    try writer.print("\n", .{});
+                    var iter = self.node_lists.iterList(value);
+                    while (iter.next()) |child| {
+                        try self.formatNode(writer, child, depth + 2, options);
+                    }
+                    // try fmt.writeIndent(writer, depth + 1, indent_options);
+                    // try writer.writeAll("\n");
+                    // try writer.print("}}\n", .{});
+                } else if (std.mem.eql(u8, field.name, "token")) {
+                    const token = self.tokens.items[value];
+                    try writer.print(".{s} '{s}'\n", .{ @tagName(token.tag), self.getTokenSlice(value) });
+                } else {
+                    try writer.print("\n", .{});
+                    try self.formatNode(writer, value, depth + 2, options);
+                    // try writer.print("{s}\n", .{value});
+                }
+
+                // try writer.print("\n", .{});
+            }
+            // try writer.print("{s}: {s}\n", .{ @tagName(std.meta.activeTag(data)), data });
+        },
+        // .block, .root, .expr => |children_list| {
+        //     var iter = self.node_lists.iterList(children_list.list);
+        //     while (iter.next()) |child| {
+        //         try self.formatNode(writer, child, depth + 1);
+        //     }
+        // },
+    }
+    // try fmt.writeIndent(writer, depth, indent_options);
+    // try writer.print("\n", .{});
+    // inline for (fields) |field| {
+    //     try writer.writeAll(field.name);
+    //     try writer.writeAll(": \n");
+    //     // try self.formatNode(writer, node.data.get(field.name), depth + 1);
+    // }
 }
 
 fn assertMatchTree(allocator: Allocator, source: []const u8, expected: []const u8) !void {
@@ -753,26 +931,459 @@ pub const Navigator = struct {
     }
 };
 
-test "writeJSON" {
+const Patience = @import("./patience_diff.zig");
+fn testAst(source: []const u8, node_index: Node.Index, expected: []const u8) !void {
+    var stderr_writer = std.io.getStdErr().writer().any();
     const test_allocator = std.testing.allocator;
     var errors = try ErrorManager.init(test_allocator);
     defer errors.deinit();
-    const source =
-        \\pub const a:Option<int, Option<boolean>> = b * 1;
-        \\pub const a:Option<int, Option<boolean>> = b * 1
-    ;
-    const stderr = std.io.getStdErr().writer();
-    var ast = try parse(test_allocator, &errors, source);
+    try stderr_writer.writeAll("\n");
+    try stderr_writer.writeAll("=" ** 50);
+    try stderr_writer.writeAll("\n");
+    try stderr_writer.writeAll(source);
+    try stderr_writer.writeAll("\n");
+    var ast = try Ast.parse(test_allocator, &errors, source);
     defer ast.deinit();
-    const writer = stderr.any();
-    try writer.writeAll("[\n");
-    for (0..ast.nodes.len) |i| {
-        if (i != 0) try writer.writeAll(",\n");
-        try serializer.writeJSON(Node, writer, ast.nodes.get(i), .{
-            .lists = &ast.node_lists,
+
+    var arr = std.ArrayList(u8).init(std.testing.allocator);
+    defer arr.deinit();
+    const writer = arr.writer().any();
+    try ast.formatNode(writer, node_index, 0, .{
+        .color = false,
+        .indent_size = 2,
+        .show_node_index = false,
+        .show_slice = false,
+        .show_token_range = false,
+    });
+
+    // std.debug.print("{s}\n", .{arr.items});
+    var res = try Patience.diff(
+        std.testing.allocator,
+        expected,
+        arr.items,
+    );
+    defer res.deinit();
+    if (res.operations.len > 0) {
+        try stderr_writer.writeAll("\\\\");
+        for (arr.items) |c| {
+            try stderr_writer.writeByte(c);
+            if (c == '\n') {
+                try stderr_writer.writeAll("\\\\");
+            }
+        }
+        try stderr_writer.writeAll("\n");
+        try res.format(stderr_writer, .{
+            .color = true,
         });
+        return error.TestFailed;
     }
-    try writer.writeAll("\n]");
-    try writer.writeAll("\n");
-    try serializer.writeTsType(Node, "Node", writer);
+    // defer res.deinit();
+    // try std.testing.expectEqualStrings(expected, arr.items);
+}
+// test "Ast" {
+//     const test_allocator = std.testing.allocator;
+//     const file = try std.fs.cwd().openFile("./playground.zig", .{});
+//     defer file.close();
+//     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
+//     defer test_allocator.free(source);
+
+//     var errors = try ErrorManager.init(test_allocator);
+//     defer errors.deinit();
+//     var ast = try Ast.parse(test_allocator, &errors, source);
+//     defer ast.deinit();
+
+//     const writer = std.io.getStdErr().writer().any();
+//     try ast.formatNode(writer, 0, 0, .{});
+
+// }
+
+test "Ast" {
+    // const test_allocator = std.testing.allocator;
+
+    try testAst(
+        \\fn main() void {
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_void
+        \\              [token]:.keyword_void 'void'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\
+    );
+
+    try testAst(
+        \\fn main(a: i32, b: f32) void {
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\            .fn_param
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\            .fn_param
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'b'
+        \\              [type]:
+        \\                .ty_f32
+        \\                  [token]:.keyword_f32 'f32'
+        \\          [ret_type]:
+        \\            .ty_void
+        \\              [token]:.keyword_void 'void'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\
+    );
+
+    try testAst(
+        \\fn main() i32 {
+        \\  return 1 + 2
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .ret_expression
+        \\              [node]:
+        \\                .add
+        \\                  [lhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                  [rhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\
+    );
+
+    try testAst(
+        \\fn main() i32 {
+        \\  if (1 > 2) {
+        \\    return 1
+        \\  }
+        \\  return 2
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .if_expr
+        \\              [condition]:
+        \\                .gt
+        \\                  [lhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                  [rhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\              [then_branch]:
+        \\                .block
+        \\                  [list]:
+        \\                    .ret_expression
+        \\                      [node]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '1'
+        \\              [else_branch]:
+        \\                NONE
+        \\            .ret_expression
+        \\              [node]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '2'
+        \\
+    );
+    try testAst(
+        \\fn main() i32 {
+        \\  if (1 > 2) return 1
+        \\  return 2
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .if_expr
+        \\              [condition]:
+        \\                .gt
+        \\                  [lhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                  [rhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\              [then_branch]:
+        \\                .ret_expression
+        \\                  [node]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\              [else_branch]:
+        \\                NONE
+        \\            .ret_expression
+        \\              [node]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '2'
+        \\
+    );
+    try testAst(
+        \\fn main() i32 {
+        \\  while (1 > 2) {
+        \\    return 1
+        \\  }
+        \\  return 2
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .while_loop
+        \\              [condition]:
+        \\                .gt
+        \\                  [lhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                  [rhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\              [body]:
+        \\                .block
+        \\                  [list]:
+        \\                    .ret_expression
+        \\                      [node]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '1'
+        \\            .ret_expression
+        \\              [node]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '2'
+        \\
+    );
+
+    try testAst(
+        \\fn main() []i32 {}
+    , 3,
+        \\.ty_array
+        \\  [size_expr]:
+        \\    NONE
+        \\  [ty]:
+        \\    .ty_i32
+        \\      [token]:.keyword_i32 'i32'
+        \\
+    );
+    try testAst(
+        \\fn main(a: [123]i32) void {}
+    , 6,
+        \\.ty_array
+        \\  [size_expr]:
+        \\    .number_literal
+        \\      [token]:.number_literal '123'
+        \\  [ty]:
+        \\    .ty_i32
+        \\      [token]:.keyword_i32 'i32'
+        \\
+    );
+
+    try testAst(
+        \\fn main() void {
+        \\  const a: [123]i32 = _{1, 2, 3};
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_void
+        \\              [token]:.keyword_void 'void'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .const_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                .ty_array
+        \\                  [size_expr]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '123'
+        \\                  [ty]:
+        \\                    .ty_i32
+        \\                      [token]:.keyword_i32 'i32'
+        \\              [value]:
+        \\                .array_init
+        \\                  [type]:
+        \\                    .identifier
+        \\                      [token]:.identifier '_'
+        \\                  [items_list]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '3'
+        \\
+    );
+    try testAst(
+        \\fn main() void {
+        \\  const a = [123]i32{1, 2, 3};
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_void
+        \\              [token]:.keyword_void 'void'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .const_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                NONE
+        \\              [value]:
+        \\                .array_init
+        \\                  [type]:
+        \\                    .ty_array
+        \\                      [size_expr]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '123'
+        \\                      [ty]:
+        \\                        .ty_i32
+        \\                          [token]:.keyword_i32 'i32'
+        \\                  [items_list]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '3'
+        \\
+    );
+    // try testAst(
+    //     \\fn main() void {
+    //     \\  const a = [_]i32{0 ~ 20};
+    //     \\}
+    // , 0,
+    //     \\.root
+    //     \\  [list]:
+    //     \\    .fn_decl
+    //     \\      [proto]:
+    //     \\        .fn_proto
+    //     \\          [name]:
+    //     \\            .identifier
+    //     \\              [token]:.identifier 'main'
+    //     \\          [params_list]:
+    //     \\          [ret_type]:
+    //     \\            .ty_void
+    //     \\              [token]:.keyword_void 'void'
+    //     \\      [body]:
+    //     \\        .block
+    //     \\          [list]:
+    //     \\            .const_decl
+    //     \\              [name]:
+    //     \\                .identifier
+    //     \\                  [token]:.identifier 'a'
+    //     \\              [type]:
+    //     \\                NONE
+    //     \\              [value]:
+    //     \\                .array_init
+    //     \\                  [type]:
+    //     \\                    .ty_array
+    //     \\                      [size_expr]:
+    //     \\                        .number_literal
+    //     \\                          [token]:.number_literal '123'
+    //     \\                      [ty]:
+    //     \\                        .ty_i32
+    //     \\                          [token]:.keyword_i32 'i32'
+    //     \\                  [items_list]:
+    //     \\                    .number_literal
+    //     \\                      [token]:.number_literal '1'
+    //     \\                    .number_literal
+    //     \\                      [token]:.number_literal '2'
+    //     \\                    .number_literal
+    //     \\                      [token]:.number_literal '3'
+    //     \\
+    // );
 }
