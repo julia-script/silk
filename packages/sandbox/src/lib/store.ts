@@ -10,6 +10,7 @@ import {
 	type Size,
 } from "@/components/EditorsView/resize";
 import { useWebContainer } from "@/components/WebContainer";
+import { useCallback } from "react";
 
 export type AnonymousBuf =
 	| {
@@ -56,6 +57,7 @@ export type BufferHighlight = {
 	start: number;
 	end: number;
 	type: "highlight";
+	className: string;
 };
 interface EditorStore {
 	isHydrated: boolean;
@@ -419,3 +421,16 @@ const isSameAxis = (
 
 const getAxis = (direction: "left" | "right" | "top" | "bottom") =>
 	direction === "left" || direction === "right" ? "vertical" : "horizontal";
+
+export const useHighlights = () => {
+	const { bufferHighlights, updateBufferHighlights } = useEditorStore();
+	return {
+		highlights: bufferHighlights,
+		update: useCallback(
+			(file: string, highlights: BufferHighlight[]) => {
+				updateBufferHighlights(genBufId({ type: "file", file }), highlights);
+			},
+			[updateBufferHighlights],
+		),
+	};
+};

@@ -1,29 +1,15 @@
 "use client";
 import type { BufferHighlight } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { defaultKeymap } from "@codemirror/commands";
 import { syntaxHighlighting } from "@codemirror/language";
 import { HighlightStyle } from "@codemirror/language";
-import { type EditorState, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, type ViewUpdate } from "@codemirror/view";
-import { langLanguage, parserWithMetadata } from "@lang/grammar/dist/language";
+import type { EditorState } from "@codemirror/state";
+import type { ViewUpdate } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { useMutation } from "@tanstack/react-query";
 // import { parser } from "@lang/grammar/dist/parser";
-import {
-	defaultSettingsVscodeDark,
-	vscodeDark,
-} from "@uiw/codemirror-theme-vscode";
-import { EditorView, basicSetup } from "codemirror";
-import {
-	type ComponentProps,
-	experimental_useEffectEvent,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { EditorView } from "codemirror";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
 // import "@codemirror/themes";
-import { ayuLight } from "thememirror";
 import { updateMarks } from "./marks";
 
 type CodeMirrorProps = {

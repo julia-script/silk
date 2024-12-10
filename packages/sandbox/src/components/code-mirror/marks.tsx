@@ -1,4 +1,5 @@
 import type { BufferHighlight } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration } from "@codemirror/view";
 import { EditorView } from "codemirror";
@@ -17,17 +18,25 @@ export const markField = StateField.define({
 		for (const effect of tr.effects) {
 			if (effect.is(updateMarks)) {
 				value = Decoration.set(
-					effect.value.map((h) => highlightMap[h.type].range(h.start, h.end)),
+					effect.value.map((h) =>
+						getHighlightMark(h.className).range(h.start, h.end),
+					),
 				);
 			}
 		}
-		console.log("updating mark value", value);
 		return value;
 	},
 	// Indicate that this field provides a set of decorations
 	provide: (f) => EditorView.decorations.from(f),
 });
 
+const getHighlightMark = (className: string) =>
+	Decoration.mark({
+		attributes: {
+			class: cn(" ring-pink-500 rounded-[2px]", className),
+			style: "outline: solid 1px var(--tw-ring-color);outline-offset: 2px",
+		},
+	});
 const highlightMap: Record<BufferHighlight["type"], Decoration> = {
 	highlight: Decoration.mark({
 		attributes: {

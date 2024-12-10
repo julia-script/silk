@@ -45,18 +45,10 @@ export function InspectView({ id }: { id: string }) {
 				fallbackRender={({ error }) => <div>{error.message}</div>}
 			>
 				<TabsContent value="tokens">
-					<TokenView
-						docString={docString}
-						onHighlight={(highlights) => {
-							store.updateBufferHighlights(
-								genBufId({ type: "file", file: buffer.file }),
-								highlights,
-							);
-						}}
-					/>
+					<TokenView docString={docString} filePath={buffer.file} />
 				</TabsContent>
 				<TabsContent value="ast">
-					<AstView docString={docString} onHighlight={updateHighlights} />
+					<AstView docString={docString} filePath={buffer.file} />
 				</TabsContent>
 				<TabsContent value="hir">
 					<HirView docString={docString} />

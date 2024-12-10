@@ -19,6 +19,9 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
+			"suspicious": {
+				"noArrayIndexKey": "off"
+			},
 			"style": {
 				"noParameterAssign": "off"
 			},

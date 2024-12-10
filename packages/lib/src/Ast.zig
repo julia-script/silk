@@ -83,6 +83,10 @@ pub const Node = struct {
         number_literal: TokenIndex,
         string_literal: TokenIndex,
         true_literal: TokenIndex,
+        list_literal: struct {
+            list: NodeListsIndex,
+            ty: Index,
+        },
 
         ty_boolean: TokenIndex,
         ty_number: TokenIndex,
@@ -94,6 +98,16 @@ pub const Node = struct {
             name: Index,
             args_list: NodeListsIndex,
         },
+        ty_list: struct {
+            size_expr: Index,
+            ty: Index,
+        },
+        array_value_init: struct {
+            size_expr: Index,
+            init_expr: Index,
+            type: Index,
+        },
+
         const_decl: Declaration,
         var_decl: Declaration,
 
@@ -127,6 +141,7 @@ pub const Node = struct {
         ty_i64: TokenIndex,
         ty_f32: TokenIndex,
         ty_f64: TokenIndex,
+
         const TokenIndex = struct {
             token: Token.Index,
         };
@@ -245,6 +260,7 @@ pub const Node = struct {
         number_literal,
         string_literal,
         true_literal,
+        list_literal,
 
         ty_boolean,
         ty_number,
@@ -253,7 +269,8 @@ pub const Node = struct {
         ty_void,
 
         ty_generic,
-
+        ty_list,
+        array_value_init,
         const_decl,
         var_decl,
 
@@ -503,15 +520,6 @@ fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: 
         => |tok| {
             try tw.yellow_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(tok.token)}, color_options);
         },
-        // .number_literal => {
-        //     try tw.green_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.number_literal.token)}, color_options);
-        // },
-        // .true_literal, .false_literal => {
-        //     try tw.pink_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.boolean_literal.token)}, color_options);
-        // },
-        // .string_literal => {
-        //     try tw.blue_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.string_literal.token)}, color_options);
-        // },
         .ty_generic => |gen| {
             // try tw.cyan_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.ty_generic.name)});
             _ = try writer.write("\n");
@@ -525,6 +533,13 @@ fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: 
                 }
                 try self.format_inner(writer, arg, indent + 2, options);
             }
+        },
+
+        .ty_list => |list| {
+            try tw.gray_400.write(writer, "[size]:\n", color_options);
+            try self.format_inner(writer, list.size_expr, indent + 2, options);
+            try tw.gray_400.write(writer, "[type]:\n", color_options);
+            try self.format_inner(writer, list.ty, indent + 2, options);
         },
 
         .fn_decl => |decl| {
@@ -594,6 +609,25 @@ fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: 
             try format_utils.writeIndent(writer, indent + 1, indentOptions);
             try tw.gray_400.write(writer, "[body]:\n", color_options);
             try self.format_inner(writer, loop.body, indent + 2, options);
+        },
+        .list_literal => |list| {
+            try tw.gray_400.write(writer, "[list]:\n", color_options);
+            var iter = self.node_lists.iterList(list.list);
+            while (iter.next()) |item| {
+                try self.format_inner(writer, item, indent + 2, options);
+            }
+        },
+        .array_value_init => |init| {
+            _ = try writer.write("\n");
+            try format_utils.writeIndent(writer, indent + 1, indentOptions);
+            try tw.gray_400.write(writer, "[size]:\n", color_options);
+            try self.format_inner(writer, init.size_expr, indent + 2, options);
+            try format_utils.writeIndent(writer, indent + 1, indentOptions);
+            try tw.gray_400.write(writer, "[init]:\n", color_options);
+            try self.format_inner(writer, init.init_expr, indent + 2, options);
+            try format_utils.writeIndent(writer, indent + 1, indentOptions);
+            try tw.gray_400.write(writer, "[type]:\n", color_options);
+            try self.format_inner(writer, init.type, indent + 2, options);
         },
 
         // .ty_i32,
