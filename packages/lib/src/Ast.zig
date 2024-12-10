@@ -56,6 +56,7 @@ pub const Node = struct {
         xor: BinaryExpression,
 
         prop_access: BinaryExpression,
+        array_prop_access: BinaryExpression,
 
         band: BinaryExpression,
         bor: BinaryExpression,
@@ -255,6 +256,7 @@ pub const Node = struct {
 
         // - Property access
         prop_access, // a.b
+        array_prop_access, // a[b]
 
         // Bitwise operators
         band,
@@ -1341,49 +1343,38 @@ test "Ast" {
         \\                      [token]:.number_literal '3'
         \\
     );
-    // try testAst(
-    //     \\fn main() void {
-    //     \\  const a = [_]i32{0 ~ 20};
-    //     \\}
-    // , 0,
-    //     \\.root
-    //     \\  [list]:
-    //     \\    .fn_decl
-    //     \\      [proto]:
-    //     \\        .fn_proto
-    //     \\          [name]:
-    //     \\            .identifier
-    //     \\              [token]:.identifier 'main'
-    //     \\          [params_list]:
-    //     \\          [ret_type]:
-    //     \\            .ty_void
-    //     \\              [token]:.keyword_void 'void'
-    //     \\      [body]:
-    //     \\        .block
-    //     \\          [list]:
-    //     \\            .const_decl
-    //     \\              [name]:
-    //     \\                .identifier
-    //     \\                  [token]:.identifier 'a'
-    //     \\              [type]:
-    //     \\                NONE
-    //     \\              [value]:
-    //     \\                .array_init
-    //     \\                  [type]:
-    //     \\                    .ty_array
-    //     \\                      [size_expr]:
-    //     \\                        .number_literal
-    //     \\                          [token]:.number_literal '123'
-    //     \\                      [ty]:
-    //     \\                        .ty_i32
-    //     \\                          [token]:.keyword_i32 'i32'
-    //     \\                  [items_list]:
-    //     \\                    .number_literal
-    //     \\                      [token]:.number_literal '1'
-    //     \\                    .number_literal
-    //     \\                      [token]:.number_literal '2'
-    //     \\                    .number_literal
-    //     \\                      [token]:.number_literal '3'
-    //     \\
-    // );
+    try testAst(
+        \\fn main() void {
+        \\   array[0] = 123
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_void
+        \\              [token]:.keyword_void 'void'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .assign
+        \\              [lhs]:
+        \\                .array_prop_access
+        \\                  [lhs]:
+        \\                    .identifier
+        \\                      [token]:.identifier 'array'
+        \\                  [rhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '0'
+        \\              [rhs]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '123'
+        \\
+    );
 }

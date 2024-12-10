@@ -9,6 +9,9 @@ fn __stack_free(size: u32) void {
   __stack_pointer = __stack_pointer + size;
 }
 
+// fn __stack_alloc_i32_array(size: i32) i32 {
+//   return __stack_alloc((1 + size) * 4);
+// }
 fn sum() i32 {
   var array = [_]i32 {1, 2, 3};
   var i: i32 = 0;
