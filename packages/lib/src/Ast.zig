@@ -109,7 +109,7 @@ pub const Node = struct {
         },
         ty_array: struct {
             size_expr: Index,
-            ty: Index,
+            type: Index,
         },
 
         const_decl: Declaration,
@@ -1234,7 +1234,7 @@ test "Ast" {
         \\.ty_array
         \\  [size_expr]:
         \\    NONE
-        \\  [ty]:
+        \\  [type]:
         \\    .ty_i32
         \\      [token]:.keyword_i32 'i32'
         \\
@@ -1246,7 +1246,7 @@ test "Ast" {
         \\  [size_expr]:
         \\    .number_literal
         \\      [token]:.number_literal '123'
-        \\  [ty]:
+        \\  [type]:
         \\    .ty_i32
         \\      [token]:.keyword_i32 'i32'
         \\
@@ -1281,7 +1281,7 @@ test "Ast" {
         \\                  [size_expr]:
         \\                    .number_literal
         \\                      [token]:.number_literal '123'
-        \\                  [ty]:
+        \\                  [type]:
         \\                    .ty_i32
         \\                      [token]:.keyword_i32 'i32'
         \\              [value]:
@@ -1331,7 +1331,7 @@ test "Ast" {
         \\                      [size_expr]:
         \\                        .number_literal
         \\                          [token]:.number_literal '123'
-        \\                      [ty]:
+        \\                      [type]:
         \\                        .ty_i32
         \\                          [token]:.keyword_i32 'i32'
         \\                  [items_list]:
@@ -1375,6 +1375,135 @@ test "Ast" {
         \\              [rhs]:
         \\                .number_literal
         \\                  [token]:.number_literal '123'
+        \\
+    );
+
+    try testAst(
+        \\fn main() void {
+        \\  const a = [1]i32{1}
+        \\  a[0] = 2
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'main'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_void
+        \\              [token]:.keyword_void 'void'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .const_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                NONE
+        \\              [value]:
+        \\                .array_init
+        \\                  [type]:
+        \\                    .ty_array
+        \\                      [size_expr]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '1'
+        \\                      [type]:
+        \\                        .ty_i32
+        \\                          [token]:.keyword_i32 'i32'
+        \\                  [items_list]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\            .assign
+        \\              [lhs]:
+        \\                .array_prop_access
+        \\                  [lhs]:
+        \\                    .identifier
+        \\                      [token]:.identifier 'a'
+        \\                  [rhs]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '0'
+        \\              [rhs]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '2'
+        \\
+    );
+    try testAst(
+        \\fn sum() i32 {
+        \\  const a = [3]i32{1, 2, 3}
+        \\  var i: i32 = 0
+        \\  var sum: i32 = 0
+        \\  while (i < a.len) {
+        \\    sum = sum + a[i]
+        \\    i = i + 1
+        \\  }
+        \\  return sum
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .prop_access
+        \\      [lhs]:
+        \\        .fn_decl
+        \\          [proto]:
+        \\            .fn_proto
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'sum'
+        \\              [params_list]:
+        \\              [ret_type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\          [body]:
+        \\            .block
+        \\              [list]:
+        \\                .const_decl
+        \\                  [name]:
+        \\                    .identifier
+        \\                      [token]:.identifier 'a'
+        \\                  [type]:
+        \\                    NONE
+        \\                  [value]:
+        \\                    .array_init
+        \\                      [type]:
+        \\                        .ty_array
+        \\                          [size_expr]:
+        \\                            .number_literal
+        \\                              [token]:.number_literal '3'
+        \\                          [type]:
+        \\                            .ty_i32
+        \\                              [token]:.keyword_i32 'i32'
+        \\                      [items_list]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '1'
+        \\                        .number_literal
+        \\                          [token]:.number_literal '2'
+        \\                        .number_literal
+        \\                          [token]:.number_literal '3'
+        \\                .var_decl
+        \\                  [name]:
+        \\                    .identifier
+        \\                      [token]:.identifier 'i'
+        \\                  [type]:
+        \\                    .ty_i32
+        \\                      [token]:.keyword_i32 'i32'
+        \\                  [value]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '0'
+        \\                .var_decl
+        \\                  [name]:
+        \\                    .identifier
+        \\                      [token]:.identifier 'sum'
+        \\                  [type]:
+        \\                    .ty_i32
+        \\                      [token]:.keyword_i32 'i32'
+        \\                  [value]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '0'
         \\
     );
 }

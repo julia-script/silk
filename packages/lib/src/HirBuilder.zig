@@ -159,40 +159,86 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             const name_node = declaration.name;
             const ty_node = declaration.type;
             const value_node = declaration.value;
-            var ty_inst: ?Hir.Inst.Index = null;
-            if (ty_node != 0) {
-                ty_inst = try self.genInstruction(scope, ty_node);
-                // value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = local_inst, .rhs = ty_inst } });
-            }
-            var value_inst: Hir.Inst.Index = blk: {
+            const name_slice = self.hir.ast.getNodeSlice(name_node);
+            // var ty_inst: ?Hir.Inst.Index = null;
+            const mutable = switch (nav.data.*) {
+                .var_decl => true,
+                .const_decl => false,
+                else => unreachable,
+            };
+
+            const value_inst: Hir.Inst.Index = blk: {
                 if (value_node != 0) {
                     break :blk try self.genInstruction(scope, value_node);
                 }
                 break :blk try scope.pushInstruction(.{ .undefined_value = null });
             };
-            if (ty_inst == null) {
-                ty_inst = try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst } });
-            }
+            if (ty_node != 0) {
+                // const ty_inst = try self.genInstruction(scope, ty_node);
+                // const local_inst = try scope.pushInstruction(.{
+                //     .local = .{
+                //         .name_node = name_node,
+                //         .mutable = mutable,
+                //         .type = ty_inst,
+                //     },
+                // });
+                // try scope.pushSymbol(name_slice, local_inst);
+                // const cast_value_inst = try scope.pushInstruction(.{
+                //     .as = .{ .lhs = value_inst, .rhs = ty_inst },
+                // });
 
+                // _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = cast_value_inst } });
+                // return local_inst;
+            }
+            const ty_inst = if (ty_node == 0) try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst } }) else try self.genInstruction(scope, ty_node);
             const local_inst = try scope.pushInstruction(.{
                 .local = .{
                     .name_node = name_node,
-                    .mutable = switch (nav.data.*) {
-                        .var_decl => true,
-                        .const_decl => false,
-                        else => unreachable,
-                    },
-                    .type = ty_inst.?,
+                    .mutable = mutable,
+                    .type = ty_inst,
                 },
             });
-
-            nav.move(declaration.name);
-            value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst.? } });
-
-            _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
-
-            try scope.pushSymbol(nav.getNodeSlice(), local_inst);
+            _ = try scope.pushInstruction(.{
+                .local_set = .{
+                    .lhs = local_inst,
+                    .rhs = value_inst,
+                },
+            });
+            try scope.pushSymbol(name_slice, local_inst);
             return local_inst;
+            // if (ty_inst == null) {
+            //     ty_inst = try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst } });
+            //     const local_inst = try scope.pushInstruction(.{
+            //         .local = .{
+            //             .name_node = name_node,
+            //             .mutable = switch (nav.data.*) {
+            //                 .var_decl => true,
+            //                 .const_decl => false,
+            //                 else => unreachable,
+            //             },
+            //             .type = ty_inst.?,
+            //         },
+            //     });
+            // }
+
+            // const local_inst = try scope.pushInstruction(.{
+            //     .local = .{
+            //         .name_node = name_node,
+            //         .mutable = switch (nav.data.*) {
+            //             .var_decl => true,
+            //             .const_decl => false,
+            //             else => unreachable,
+            //         },
+            //         .type = ty_inst.?,
+            //     },
+            // });
+
+            // value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst.? } });
+
+            // _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
+
+            // try scope.pushSymbol(nav.getNodeSlice(), local_inst);
+            // return local_inst;
 
             // nav.move(declaration.name);
             // const name_slice = nav.getNodeSlice();
@@ -232,26 +278,31 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
 
         .assign => |bin_expr| {
-            // const lhs_inst = try self.genInstruction(scope, nav.data.binary_expression.lhs);
-            // nav.move(nav.data.binary_expression.lhs);
             nav.move(bin_expr.lhs);
             const slice = nav.getNodeSlice();
-            const lhs_index = scope.resolveSymbolRecursively(slice) orelse return error.SymbolNotFound;
-            // const lhs_interned = try scope.builder.strings.intern(nav.getNodeSlice());
-            const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
+            _ = slice; // autofix
+            // const lhs_index = scope.resolveSymbolRecursively(slice) orelse return error.SymbolNotFound;
+            const lhs_inst_index = try self.genInstruction(scope, bin_expr.lhs);
+            const lhs_inst = self.hir.insts.items[lhs_inst_index];
+            const rhs_inst_index = try self.genInstruction(scope, bin_expr.rhs);
 
-            const lhs_inst = self.hir.insts.items[lhs_index];
+            // const lhs_inst = self.hir.insts.items[lhs_index];
             switch (lhs_inst) {
                 .param_decl => {
-                    return try scope.pushInstruction(.{ .param_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
+                    return try scope.pushInstruction(.{ .param_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
                 },
                 .local => {
-                    return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
+                    return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
                 },
                 .global_decl => {
-                    return try scope.pushInstruction(.{ .global_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
+                    return try scope.pushInstruction(.{ .global_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
                 },
-                else => unreachable,
+                .get_element_pointer => {
+                    return try scope.pushInstruction(.{ .store = .{ .pointer = lhs_inst_index, .value = rhs_inst_index } });
+                },
+                else => {
+                    unreachable;
+                },
             }
 
             // return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_index, .rhs = rhs_inst } });
@@ -339,6 +390,43 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         .group => {
             return try self.genInstruction(scope, nav.data.group.node);
         },
+        .array_init => |array_init| {
+            var iter = self.hir.ast.node_lists.iterList(array_init.items_list);
+            var count: u32 = 0;
+            const type_inst = try self.genInstruction(scope, array_init.type);
+            const inst_index = try scope.reserveInstruction();
+
+            while (iter.next()) |item| {
+                const item_inst = try self.genInstruction(scope, item);
+                const index_inst = try scope.pushInstruction(.{ .constant_int = .{
+                    .value = count,
+                } });
+                const pointer_inst = try scope.pushInstruction(.{ .get_element_pointer = .{
+                    .pointer = inst_index,
+                    .index = index_inst,
+                } });
+                _ = try scope.pushInstruction(.{ .store = .{
+                    .pointer = pointer_inst,
+                    .value = item_inst,
+                } });
+                count += 1;
+            }
+
+            self.setInstruction(inst_index, .{
+                .alloc = .{
+                    .type = type_inst,
+                },
+            });
+            return inst_index;
+        },
+        .array_prop_access => {
+            const array_inst = try self.genInstruction(scope, nav.data.array_prop_access.lhs);
+            const index_inst = try self.genInstruction(scope, nav.data.array_prop_access.rhs);
+            return try scope.pushInstruction(.{ .get_element_pointer = .{
+                .pointer = array_inst,
+                .index = index_inst,
+            } });
+        },
         .fn_call => {
             const callee = try self.genInstruction(scope, nav.data.fn_call.callee);
             var args_iter = self.hir.ast.node_lists.iterList(nav.data.fn_call.args_list);
@@ -361,6 +449,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         .fn_decl => {
             self.logger.todo("Error message: functions are only allowed at the module level", .{});
         },
+
         else => {
             switch (nav.tag) {
                 //                 .ty_number => return try scope.pushInstruction(.{ .ty_number = nav.node }),
@@ -396,6 +485,18 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     const tag_name = comptime @tagName(tag);
                     const data = @unionInit(Hir.Inst, tag_name, nav.node);
                     return try scope.pushInstruction(data);
+                },
+
+                .ty_array => {
+                    const type_inst = try self.genInstruction(scope, nav.data.ty_array.type);
+                    const size_inst = try self.genInstruction(scope, nav.data.ty_array.size_expr);
+
+                    return try scope.pushInstruction(.{
+                        .ty_array = .{
+                            .type = type_inst,
+                            .size = size_inst,
+                        },
+                    });
                 },
                 inline .add,
                 .sub,

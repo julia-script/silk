@@ -1,26 +1,27 @@
-const __memory_base: i32 = 1024
-var __stack_pointer: i32 = 1024
-fn __stack_alloc(size: usize) i32 {
-    __stack_pointer = __stack_pointer - size;
-    return __stack_pointer;
-}
+// const __memory_base: i32 = 1024
+// var __stack_pointer: i32 = 1024
+// fn __stack_alloc(size: usize) i32 {
+//     __stack_pointer = __stack_pointer - size;
+//     return __stack_pointer;
+// }
 
-fn __stack_free(size: u32) void {
-  __stack_pointer = __stack_pointer + size;
-}
+// fn __stack_free(size: u32) void {
+//   __stack_pointer = __stack_pointer + size;
+// }
 
 // fn __stack_alloc_i32_array(size: i32) i32 {
 //   return __stack_alloc((1 + size) * 4);
 // }
 fn sum() i32 {
-  var array = [_]i32 {1, 2, 3};
-  var i: i32 = 0;
-  var sum: i32 = 0;
-  while (i < array.len) {
-    sum = sum + array[i];
-    i = i + 1;
-  }
-  return sum;
+    // const arr = [1]i32 {1}
+    // arr[0] = 2
+    // var i: i32 = 0;
+    // var sum: i32 = 0;
+    while (i < array.len) {
+        //   sum = sum + array[i];
+        //   i = i + 1;
+    }
+    // return sum;
 }
 // export fn fib(n: i32): i32 {
 //   var a:i32 = 0;

@@ -111,6 +111,11 @@ pub const Builder = struct {
         }
         return null;
     }
+    pub fn pushType(self: *Builder, type_: Mir.Type) !Mir.Type.Index {
+        const index = Mir.Type.Index.fromInt(@intCast(self.mir.types.items.len));
+        try self.mir.types.append(self.mir.allocator, type_);
+        return index;
+    }
 
     pub fn reserveGlobalIndex(self: *Builder) !Mir.Global.Index {
         const index: Mir.Global.Index = @intCast(self.mir.globals.items.len);
@@ -149,8 +154,8 @@ pub const Builder = struct {
         root_wip.type_index = try root_wip.resolveType();
 
         try root_wip.resolveInitializer();
-        try root_wip.commit();
         try self.getWip(0).dump(std.io.getStdErr().writer().any(), 0);
+        try root_wip.commit();
     }
 };
 
@@ -286,9 +291,18 @@ const Wip = struct {
         };
         return id.instruction_index;
     }
+
     pub fn getInstructionByHirInst(self: *Wip, hir_inst: Hir.Inst.Index) !*Mir.Instruction {
         const id = try self.getInstructionId(hir_inst);
         return self.getInstruction(id);
+    }
+    pub fn getInstructionIdAsType(self: *Wip, hir_inst: Hir.Inst.Index, expected_type: Mir.Type.Index) !InstructionId {
+        const id = try self.getInstructionId(hir_inst);
+        return try self.tryCastInstruction(hir_inst, id, expected_type);
+        // const instruction = try self.getInstruction(id);
+        // if (instruction.type != expected_type) {
+        // }
+        // return id;
     }
     pub fn putGlobal(self: *Wip, inst_index: Hir.Inst.Index, index: Wip.Index) !void {
         const result = try self.scope.globals.getOrPut(self.builder.arena.allocator(), inst_index);
@@ -322,6 +336,7 @@ const Wip = struct {
                     block.value = instruction.value;
                     block.break_type = instruction.type;
                 }
+                self.dumpInstruction(std.io.getStdErr().writer().any(), instruction_index, self.builder.logger.ind) catch {};
                 // try block.instructions.append(allocator, instruction_index);
 
                 return @intCast(instruction_index);
@@ -635,6 +650,10 @@ const Wip = struct {
                     try writer.writeAll("):");
                     try self.dumpType(writer, ty.@"fn".return_type, depth + 1);
                 },
+                .array => |data| {
+                    try writer.print("[{d}]", .{data.size});
+                    try self.dumpType(writer, data.type, depth + 1);
+                },
                 else => |data| {
                     _ = data; // autofix
                     try writer.print("type_{s}({d})", .{ @tagName(ty.*), index.toInt().? });
@@ -806,7 +825,9 @@ const Wip = struct {
             .ty_f64,
             .ty_f32,
             .ty_boolean,
+            .ty_array,
             => return try self.resolveTypeLiteralInstruction(hir_inst_index),
+            // .ty_array => |ty_array| return try self.resolveArrayTypeInstruction(hir_inst_index, ty_array),
             .gt, .ge, .lt, .le, .eq, .ne => |bin_op| return try self.resolveComparisonInstruction(hir_inst_index, bin_op),
             .as => |bin_op| return try self.resolveAsInstruction(hir_inst_index, bin_op),
             .param_get => |node| return try self.resolveParamGetInstruction(hir_inst_index, node),
@@ -822,20 +843,43 @@ const Wip = struct {
             .global_get => |node| return try self.resolveGlobalGetInstruction(hir_inst_index, node),
             .global_set => |node| return try self.resolveGlobalSetInstruction(hir_inst_index, node),
             .fn_call => |node| return try self.resolveFnCallInstruction(hir_inst_index, node),
+            .alloc => |node| return try self.resolveAllocInstruction(hir_inst_index, node),
+            .get_element_pointer => |node| return try self.resolveGetElementPointerInstruction(hir_inst_index, node),
+            .store => |node| return try self.resolveStoreInstruction(hir_inst_index, node),
+            .constant_int => |node| return try self.resolveConstantIntInstruction(hir_inst_index, node),
+
             else => {
                 return self.builder.logger.panic("not implemented: resolveInstruction: {s}", .{@tagName(std.meta.activeTag(hir_inst))});
             },
         }
     }
+    pub fn resolveConstantIntInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Constant) Error!InstructionId {
+        const value_index = try self.builder.pushValue(.{ .integer = node.value });
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .constant,
+            .type = .usize,
+            .value = value_index,
+            .data = .{
+                .value = value_index,
+            },
+        });
+    }
+    pub fn markDead(self: *Wip, inst_index: InstructionId) !void {
+        const inst = try self.getInstruction(inst_index);
+        self.builder.logger.log("marking dead: {d}", .{inst_index}, null);
+        inst.liveness = 0;
+    }
 
     pub fn resolveLocalInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, local: Hir.Inst.Local) Error!InstructionId {
-        const type_inst = try self.getInstructionByHirInst(local.type);
+        const type_inst_id = try self.getInstructionId(local.type);
+        const type_inst = try self.getInstruction(type_inst_id);
         // const value_inst = try self.getInstructionByHirInst(local.init);
-        type_inst.liveness = 0;
+        try self.markDead(type_inst_id);
         // value_inst.liveness = 0;
         return try self.pushInstruction(hir_inst_index, .{
             .op = .local,
-            .type = type_inst.getValue().toType(),
+            // .type = type_inst.getValue().toType(),
+            .type = self.getValueAsType(type_inst.getValue()),
             .value = if (local.mutable) .runtime else .undefined,
             .data = .{
                 .scoped = .{
@@ -871,11 +915,14 @@ const Wip = struct {
                     }
                 };
 
+                const value_index = try self.builder.pushValue(value);
                 return try self.pushInstruction(hir_inst_index, .{
                     .op = .constant,
                     .type = .number,
-                    .value = try self.builder.pushValue(value),
-                    .data = .void,
+                    .value = value_index,
+                    .data = .{
+                        .value = value_index,
+                    },
                 });
             },
             else => {
@@ -886,45 +933,85 @@ const Wip = struct {
     }
     pub fn resolveTypeLiteralInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index) Error!InstructionId {
         const hir_inst = self.builder.getHirInst(hir_inst_index);
-        return try self.pushInstruction(hir_inst_index, .{
-            .op = .constant,
-            .type = .type,
-            .value = switch (std.meta.activeTag(hir_inst)) {
-                inline .ty_i8,
-                .ty_i16,
-                .ty_i32,
-                .ty_i64,
-                .ty_i128,
-                .ty_i256,
-                .ty_u8,
-                .ty_u16,
-                .ty_u32,
-                .ty_u64,
-                .ty_u128,
-                .ty_u256,
-                .ty_usize,
-                .ty_f64,
-                .ty_f32,
-                .ty_boolean,
-                => |tag| std.meta.stringToEnum(Mir.Value.Index, "type_" ++ (comptime @tagName(tag)[3..])) orelse {
-                    return self.builder.logger.panic("not implemented: resolveTypeLiteralInstruction: {s}", .{@tagName(tag)});
-                },
-                // .ty_f64 => .type_f64,
-                // .ty_f64 => .type_f64,
-                // .ty_f32 => .type_f32,
-                // .ty_i64 => .type_i64,
-                // .ty_i32 => .type_i32,
-                // .ty_boolean => .type_boolean,
-                else => unreachable,
+        const ty = switch (std.meta.activeTag(hir_inst)) {
+            inline .ty_i8,
+            .ty_i16,
+            .ty_i32,
+            .ty_i64,
+            .ty_i128,
+            .ty_i256,
+            .ty_u8,
+            .ty_u16,
+            .ty_u32,
+            .ty_u64,
+            .ty_u128,
+            .ty_u256,
+            .ty_usize,
+            .ty_f64,
+            .ty_f32,
+            .ty_boolean,
+            => |tag| std.meta.stringToEnum(Mir.Type.Index, (comptime @tagName(tag)[3..])) orelse {
+                return self.builder.logger.panic("not implemented: resolveTypeLiteralInstruction: {s}", .{@tagName(tag)});
             },
+            .ty_array => ty: {
+                const ty_array = hir_inst.ty_array;
+                const type_inst_id = try self.getInstructionId(ty_array.type);
+                const type_inst = try self.getInstruction(type_inst_id);
+                const size_inst_id = try self.getInstructionId(ty_array.size);
+                const size_inst = try self.getInstruction(size_inst_id);
+                const size = size_inst.getValue();
+                const size_value = self.builder.getValue(size) orelse self.builder.logger.todo("Error: size_value is not a number", .{});
+                const size_int = getNumberValueAs(u32, size_value);
+                const type_value_index = type_inst.getValue();
+                // std.debug.panic("type_inst {d} {}\n", .{ ty_array.type, size_value });
 
-            .data = .void,
+                const type_value = self.builder.getValue(type_value_index);
+                try self.markDead(type_inst_id);
+                try self.markDead(size_inst_id);
+
+                const type_index = try self.builder.pushType(.{ .array = .{
+                    .type = if (type_value) |v| v.type else type_value_index.toType(),
+                    .size = size_int,
+                } });
+                break :ty type_index;
+                // break :ty try self.builder.pushValue(.{ .type = type_index });
+            },
+            // .ty_f64 => .type_f64,
+            // .ty_f64 => .type_f64,
+            // .ty_f32 => .type_f32,
+            // .ty_i64 => .type_i64,
+            // .ty_i32 => .type_i32,
+            // .ty_boolean => .type_boolean,
+            else => unreachable,
+        };
+
+        const type_value = try self.getTypeAsValue(ty);
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .type,
+            .type = .type,
+            .value = type_value,
+            .data = .{
+                .type = ty,
+            },
         });
+    }
+    pub fn resolveArrayTypeInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, ty_array: Hir.Inst.TyArray) Error!InstructionId {
+        _ = self; // autofix
+        _ = hir_inst_index; // autofix
+        _ = ty_array; // autofix
+        // return try self.pushInstruction(hir_inst_index, .{
+        //     .op = .type,
+        //     .type = ty_array.type,
+        //     .value = .runtime,
+        //     .data = .void,
+        // });
+
     }
     pub fn resolveAsInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
         const instruction = try self.getInstructionId(bin_op.lhs);
-        const type_instruction = try self.getInstructionByHirInst(bin_op.rhs);
-        type_instruction.liveness = 0;
+        const type_instruction_id = try self.getInstructionId(bin_op.rhs);
+        const type_instruction = try self.getInstruction(type_instruction_id);
+        try self.markDead(type_instruction_id);
         return try self.castInstruction(hir_inst_index, instruction, type_instruction.value.toType());
     }
     pub fn resolveParamGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, param_get: Hir.Inst.UnaryOp) Error!InstructionId {
@@ -990,8 +1077,8 @@ const Wip = struct {
             return .runtime;
         }
         const comparison_result = doComparison(op, lhs_value, rhs_value);
-        lhs_instruction.liveness = 0;
-        rhs_instruction.liveness = 0;
+        try self.markDead(lhs_id);
+        try self.markDead(rhs_id);
         if (comparison_result) {
             return .true;
         } else {
@@ -1140,13 +1227,18 @@ const Wip = struct {
     }
     pub fn castInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, id: InstructionId, type_index: Mir.Type.Index) Error!InstructionId {
         const inst = try self.getInstruction(id);
-        inst.liveness = 0;
+        if (inst.value != .runtime) {
+            try self.markDead(id);
+        }
         // TODO: check for ilegal casts
         return try self.pushInstruction(hir_inst_index, .{
-            .op = inst.op,
+            .op = .as,
             .type = type_index,
             .value = inst.value,
-            .data = inst.data,
+            .data = .{ .cast = .{
+                .instruction = id,
+                .type = type_index,
+            } },
         });
     }
 
@@ -1162,18 +1254,18 @@ const Wip = struct {
         const rhs_value = self.builder.getValue(rhs_value_index) orelse return .runtime;
 
         if (isOneNumberOfType(.float, lhs_value, rhs_value) or type_index == .f64 or type_index == .f32 or (type_index == .number and op == .div)) {
-            lhs_inst.liveness = 0;
-            rhs_inst.liveness = 0;
+            try self.markDead(lhs_id);
+            try self.markDead(rhs_id);
             return try self.builder.pushValue(.{ .float = doComptimeMath(f64, op, lhs_value, rhs_value) });
         } else if (isOneNumberOfType(.big_integer, lhs_value, rhs_value) or type_index == .i128) {
-            lhs_inst.liveness = 0;
-            rhs_inst.liveness = 0;
+            try self.markDead(lhs_id);
+            try self.markDead(rhs_id);
             return try self.builder.pushValue(.{
                 .big_integer = doComptimeMath(i128, op, lhs_value, rhs_value),
             });
         } else {
-            lhs_inst.liveness = 0;
-            rhs_inst.liveness = 0;
+            try self.markDead(lhs_id);
+            try self.markDead(rhs_id);
             return try self.builder.pushValue(.{
                 .integer = doComptimeMath(i64, op, lhs_value, rhs_value),
             });
@@ -1239,13 +1331,12 @@ const Wip = struct {
 
         return try self.pushInstruction(hir_inst_index, .{
             .op = .local_set,
-            .type = value_instruction.type,
-            .value = value,
+            .type = .void,
+            .value = .void,
             .data = .{ .bin_op = .{
                 .lhs = local_id,
                 .rhs = value_id,
             } },
-            .liveness = 1,
         });
     }
     pub fn resolveParamSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
@@ -1267,7 +1358,6 @@ const Wip = struct {
                 .lhs = local_id,
                 .rhs = value_id,
             } },
-            .liveness = 1,
         });
     }
     pub fn resolveGlobalSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
@@ -1366,16 +1456,30 @@ const Wip = struct {
         //     .data = .{ .void = {} },
         // });
     }
+    pub fn getTypeAsValue(self: *Wip, type_index: Mir.Type.Index) !Mir.Value.Index {
+        if (self.builder.getType(type_index)) |_| {
+            return self.builder.pushValue(.{
+                .type = type_index,
+            });
+        }
+        return type_index.toValueIndex();
+    }
 
+    pub fn getValueAsType(self: *Wip, value: Mir.Value.Index) Mir.Type.Index {
+        if (self.builder.getValue(value)) |v| {
+            return v.type;
+        }
+        return value.toType();
+    }
     pub fn resolveTypeOfInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
         return try self.pushInstruction(hir_inst_index, .{
-            .op = .type,
+            .op = .typeof,
             .type = .type,
-            .value = instruction.type.toValueIndex(),
+            .value = try self.getTypeAsValue(instruction.type),
             // .value = .runtime,
-            .data = .{ .void = {} },
+            .data = .{ .instruction = instruction_id },
         });
     }
     pub fn resolveBreakInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
@@ -1478,7 +1582,7 @@ const Wip = struct {
             .@"fn" => |fn_type| fn_type.return_type,
             else => self.builder.logger.todo("not a function: {any}", .{callee_type}),
         };
-        callee_instruction.liveness = 0;
+        try self.markDead(callee_id);
         // const callee_type = callee_instruction.type;
         // TODO: check if callable and if params match
         return try self.pushInstruction(hir_inst_index, .{
@@ -1491,6 +1595,83 @@ const Wip = struct {
                     .args_list = try list.commit(),
                 },
             },
+        });
+    }
+    pub fn resolveAllocInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Alloc) Error!InstructionId {
+        // const size_id = try self.getInstructionId(node.size);
+        // const size_instruction = try self.getInstruction(size_id);
+        // const size = size_instruction.getValue();
+        const type_value_id = try self.getInstructionId(node.type);
+        const type_value = try self.getInstruction(type_value_id);
+
+        const alloc_type = if (self.builder.getValue(type_value.value)) |value| value.type else type_value.value.toType();
+        try self.markDead(type_value_id);
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .alloc,
+            .type = try self.builder.pushType(.{
+                .pointer = .{ .child = alloc_type },
+            }),
+            .value = .runtime,
+            .data = .{ .type = alloc_type },
+        });
+    }
+    pub fn resolveGetElementPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetElementPointer) Error!InstructionId {
+        const pointer_id = try self.getInstructionId(node.pointer);
+        const pointer_instruction = try self.getInstruction(pointer_id);
+        const index_id = try self.getInstructionIdAsType(node.index, .usize);
+
+        const array_pointer_type = self.builder.getType(pointer_instruction.type) orelse self.builder.logger.todo("error for pointer type not found: {d}", .{pointer_instruction.type});
+        const array_type = self.builder.getType(array_pointer_type.pointer.child) orelse self.builder.logger.todo("error for index type not found: {d}", .{array_pointer_type.pointer.child});
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .get_element_pointer,
+            .type = try self.builder.pushType(.{ .pointer = .{ .child = array_type.array.type } }),
+            .value = .runtime,
+            .data = .{ .get_element_pointer = .{
+                .pointer = pointer_id,
+                .index = index_id,
+            } },
+        });
+    }
+    pub fn getArrayElementType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
+        const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
+        switch (type_value.*) {
+            .pointer => |pointer| {
+                return self.getArrayElementType(pointer.child);
+            },
+            .array => |array| {
+                return array.type;
+            },
+            else => {
+                return error.TypeMismatch;
+            },
+        }
+    }
+    pub fn getPointerChildType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
+        const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
+        switch (type_value.*) {
+            .pointer => |pointer| {
+                return pointer.child;
+            },
+            else => {
+                return error.TypeMismatch;
+            },
+        }
+    }
+    pub fn resolveStoreInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Store) Error!InstructionId {
+        const pointer_id = try self.getInstructionId(node.pointer);
+        const pointer_instruction = try self.getInstruction(pointer_id);
+        const expected_type = self.getPointerChildType(pointer_instruction.type) catch {
+            self.builder.logger.panic("expected type not found: {d}", .{pointer_instruction.type});
+        };
+        const value_id = try self.getInstructionIdAsType(node.value, expected_type);
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .store,
+            .type = .void,
+            .value = .void,
+            .data = .{ .store = .{
+                .pointer = pointer_id,
+                .value = value_id,
+            } },
         });
     }
 
@@ -1748,127 +1929,138 @@ const Wip = struct {
     }
 
     fn dumpInstruction(self: *Wip, writer: std.io.AnyWriter, id: InstructionId, depth: usize) !void {
-        const instruction = try self.getInstruction(id);
-        const data: Mir.Instruction.Data = instruction.data;
-        // if (std.meta.activeTag(data) == .wip and instruction.op != .global_get) {
-        //     var wip = self.builder.getWip(data.wip);
-        //     try wip.dumpInner(writer, data.wip, depth + 1);
-        //     return;
+        const owner_wip = self.builder.getWip(self.data.block.owner);
+
+        try Mir.formatInst(.{
+            .instructions = owner_wip.instructions.items,
+            .types = self.builder.mir.types.items,
+            .values = self.builder.mir.values.items,
+            .lists = &self.builder.mir.lists,
+
+            .writer = writer,
+            .strings = &self.builder.mir.strings,
+        }, id, depth);
+        // const instruction = try self.getInstruction(id);
+        // const data: Mir.Instruction.Data = instruction.data;
+        // // if (std.meta.activeTag(data) == .wip and instruction.op != .global_get) {
+        // //     var wip = self.builder.getWip(data.wip);
+        // //     try wip.dumpInner(writer, data.wip, depth + 1);
+        // //     return;
+        // // }
+        // if (instruction.liveness == 0) {
+        //     try tw.gray_500.csiOpen(writer);
         // }
-        if (instruction.liveness == 0) {
-            try tw.gray_500.csiOpen(writer);
-        }
-        defer {
-            if (instruction.liveness == 0) {
-                tw.gray_500.csiClose(writer) catch unreachable;
-            }
-        }
+        // defer {
+        //     if (instruction.liveness == 0) {
+        //         tw.gray_500.csiClose(writer) catch unreachable;
+        //     }
+        // }
 
-        try fmt.writeIndent(writer, depth, .{});
-        switch (instruction.data) {
-            .loop => |loop| {
-                try writer.print("[{d}]loop{s}\n", .{ id, if (instruction.liveness == 0) "!" else "" });
-                try self.dumpInner(writer, loop.instructions_list, depth + 1);
-                return;
-            },
-            .branch => |branch| {
-                try writer.print("[{d}]if{s} (#{d}) then:\n", .{ id, if (instruction.liveness == 0) "!" else "", branch.condition });
-                // try fmt.writeIndent(writer, depth, .{});
+        // try fmt.writeIndent(writer, depth, .{});
+        // switch (instruction.data) {
+        //     .loop => |loop| {
+        //         try writer.print("[{d}]loop{s}\n", .{ id, if (instruction.liveness == 0) "!" else "" });
+        //         try self.dumpInner(writer, loop.instructions_list, depth + 1);
+        //         return;
+        //     },
+        //     .branch => |branch| {
+        //         try writer.print("[{d}]if{s} (#{d}) then:\n", .{ id, if (instruction.liveness == 0) "!" else "", branch.condition });
+        //         // try fmt.writeIndent(writer, depth, .{});
 
-                // try writer.writeAll("then:\n");
-                try self.dumpInner(writer, branch.then_instructions_list, depth + 1);
-                if (branch.else_instructions_list) |else_instructions_list| {
-                    try fmt.writeIndent(writer, depth, .{});
-                    try writer.writeAll("else:\n");
+        //         // try writer.writeAll("then:\n");
+        //         try self.dumpInner(writer, branch.then_instructions_list, depth + 1);
+        //         if (branch.else_instructions_list) |else_instructions_list| {
+        //             try fmt.writeIndent(writer, depth, .{});
+        //             try writer.writeAll("else:\n");
 
-                    try self.dumpInner(writer, else_instructions_list, depth + 1);
-                }
-                return;
-            },
-            else => {},
-        }
-        // try fmt.formatInstruction(self.builder, writer, .{}, instruction, depth);
-        const tag_name = @tagName(instruction.data);
+        //             try self.dumpInner(writer, else_instructions_list, depth + 1);
+        //         }
+        //         return;
+        //     },
+        //     else => {},
+        // }
+        // // try fmt.formatInstruction(self.builder, writer, .{}, instruction, depth);
+        // const tag_name = @tagName(instruction.data);
 
-        try writer.print("{s: <4}", .{tag_name[0..@min(tag_name.len, 4)]});
-        try writer.print("[{d: >3}]", .{id});
-        try writer.print("{s: <3}", .{if (instruction.liveness == 0) "!" else ""});
-        try writer.print("{s}", .{@tagName(instruction.op)});
+        // try writer.print("{s: <4}", .{tag_name[0..@min(tag_name.len, 4)]});
+        // try writer.print("[{d: >3}]", .{id});
+        // try writer.print("{s: <3}", .{if (instruction.liveness == 0) "!" else ""});
+        // try writer.print("{s}", .{@tagName(instruction.op)});
 
-        switch (data) {
-            .scoped => |scoped| {
-                // try self.dumpType(writer, instruction.type, depth + 1);
-                try writer.print("('{s}', index = {d})", .{ self.builder.getSlice(scoped.name), scoped.index });
-            },
-            .bin_op => |bin_op| {
-                try writer.print("(%{d}, %{d})", .{ bin_op.lhs, bin_op.rhs });
-            },
-            .instruction => |instruction_index| {
-                try writer.print("(#{d})", .{instruction_index});
-            },
+        // switch (data) {
+        //     .scoped => |scoped| {
+        //         // try self.dumpType(writer, instruction.type, depth + 1);
+        //         try writer.print("('{s}', index = {d})", .{ self.builder.getSlice(scoped.name), scoped.index });
+        //     },
+        //     .bin_op => |bin_op| {
+        //         try writer.print("(%{d}, %{d})", .{ bin_op.lhs, bin_op.rhs });
+        //     },
+        //     .instruction => |instruction_index| {
+        //         try writer.print("(#{d})", .{instruction_index});
+        //     },
 
-            // .branch => |branch| {
-            //     try writer.print("(#{d}) then:\n", .{branch.condition});
-            //     // try fmt.writeIndent(writer, depth, .{});
+        //     // .branch => |branch| {
+        //     //     try writer.print("(#{d}) then:\n", .{branch.condition});
+        //     //     // try fmt.writeIndent(writer, depth, .{});
 
-            //     // try writer.writeAll("then:\n");
-            //     try self.dumpInner(writer, branch.then_instructions_list, depth + 1);
-            //     if (branch.else_instructions_list) |else_instructions_list| {
-            //         try fmt.writeIndent(writer, depth, .{});
-            //         try writer.writeAll("else:\n");
+        //     //     // try writer.writeAll("then:\n");
+        //     //     try self.dumpInner(writer, branch.then_instructions_list, depth + 1);
+        //     //     if (branch.else_instructions_list) |else_instructions_list| {
+        //     //         try fmt.writeIndent(writer, depth, .{});
+        //     //         try writer.writeAll("else:\n");
 
-            //         try self.dumpInner(writer, else_instructions_list, depth + 1);
-            //     }
-            //     return;
-            // },
-            .type => |type_index| {
-                try self.dumpType(writer, type_index, depth + 1);
-            },
-            // .void => {
+        //     //         try self.dumpInner(writer, else_instructions_list, depth + 1);
+        //     //     }
+        //     //     return;
+        //     // },
+        //     .type => |type_index| {
+        //         try writer.print(" ", .{});
+        //         try self.dumpType(writer, type_index, depth + 1);
+        //     },
+        //     .call => |call| {
+        //         var iter = self.builder.mir.lists.iterList(call.args_list);
+        //         try writer.print("(#{?d}) with (", .{call.callee.toInt()});
+        //         var first = true;
+        //         while (iter.next()) |arg_id| {
+        //             if (!first) {
+        //                 try writer.writeAll(", ");
+        //             }
+        //             first = false;
+        //             try writer.print("#{d}", .{arg_id});
+        //         }
+        //         try writer.writeAll(")");
+        //     },
+        //     .global_set => |global_set| {
+        //         try writer.print("(#{d}, #{d})", .{ global_set.global, global_set.value });
+        //     },
+        //     .void => {},
+        //     .store => |store| {
+        //         try writer.print("(#{d}, #{d})", .{ store.pointer, store.value });
+        //     },
+        //     .get_element_pointer => |get_element_pointer| {
+        //         try writer.print("(#{d}, #{d})", .{ get_element_pointer.pointer, get_element_pointer.index });
+        //     },
+        //     // .type => |type_index| {
+        //     //     try self.dumpType(writer, type_index, depth + 1);
+        //     // },
 
-            // },
-            .call => |call| {
-                var iter = self.builder.mir.lists.iterList(call.args_list);
-                try writer.print("(#{?d}) with (", .{call.callee.toInt()});
-                var first = true;
-                while (iter.next()) |arg_id| {
-                    if (!first) {
-                        try writer.writeAll(", ");
-                    }
-                    first = false;
-                    try writer.print("#{d}", .{arg_id});
-                }
-                try writer.writeAll(")");
-            },
-            .global_set => |global_set| {
-                try writer.print("(#{d}, #{d})", .{ global_set.global, global_set.value });
-            },
-            // .loop => |loop| {
-            //     try writer.print("(#{d})\n", .{loop.instructions_list});
-            //     try self.dumpInner(writer, loop.instructions_list, depth + 1);
-            //     return;
-            // },
-            // .wip => |wip_index| {
-            //     var wip = self.builder.getWip(wip_index);
-            //     try wip.dumpInner(writer, wip_index, depth + 1);
-            // },
-            else => {
-                try writer.writeAll("(TODO)");
-            },
-        }
+        //     else => {
+        //         try writer.writeAll("(TODO)");
+        //     },
+        // }
 
-        try writer.writeAll(": ");
+        // try writer.writeAll(": ");
 
-        try self.dumpType(writer, instruction.type, depth + 1);
-        try writer.writeAll(" -> ");
+        // try self.dumpType(writer, instruction.type, depth + 1);
+        // try writer.writeAll(" -> ");
 
-        if (self.builder.getValue(instruction.value)) |value| {
-            try writer.print("[{}]", .{value});
-        } else {
-            try writer.print("[{s}]", .{@tagName(instruction.value)});
-        }
-        try tw.gray_500.csiClose(writer);
-        try writer.writeAll("\n");
+        // if (self.builder.getValue(instruction.value)) |value| {
+        //     try writer.print("[{}]", .{value});
+        // } else {
+        //     try writer.print("[{s}]", .{@tagName(instruction.value)});
+        // }
+        // try tw.gray_500.csiClose(writer);
+        // try writer.writeAll("\n");
     }
     pub inline fn format(self: *Wip) []const u8 {
         const color = fmt.pickColor(self.index);
@@ -1936,28 +2128,7 @@ const InstructionSet = struct {
         if (instruction.liveness == 0) {
             return;
         }
-        // if (instruction.value != .runtime and instruction.op != .loop and instruction.op != .if_expr and instruction.value != .void) {
-        //     _ = try self.push(instruction_id, .{
-        //         .op = .constant,
-        //         .type = instruction.type,
-        //         .value = instruction.value,
-        //         .data = .{ .void = {} },
-        //     });
 
-        //     return;
-        // }
-
-        // switch (instruction.op) {
-        //     .br => {
-        //         try self.push(instruction_id, .{
-        //             .op = instruction.op,
-        //             .type = instruction.type,
-        //             .value = instruction.value,
-        //             .data = .{ .void = {} },
-        //         });
-        //     },
-        //     else => {},
-        // }
         switch (instruction.data) {
             .scoped => |scoped| {
                 _ = try self.push(instruction_id, .{
@@ -2064,7 +2235,7 @@ const InstructionSet = struct {
                     .data = .{ .void = {} },
                 });
             },
-            .type, .if_expr => unreachable,
+            .if_expr => unreachable,
             .branch => {
                 const branch = instruction.data.branch;
                 _ = try self.push(instruction_id, .{
@@ -2090,6 +2261,32 @@ const InstructionSet = struct {
                 //     .data = .{ .branch = branch },
                 // });
             },
+            .get_element_pointer => {
+                const get_element_pointer = instruction.data.get_element_pointer;
+                _ = try self.push(instruction_id, .{
+                    .op = instruction.op,
+                    .type = instruction.type,
+                    .value = instruction.value,
+                    .data = .{
+                        .get_element_pointer = .{
+                            .pointer = self.getIndex(get_element_pointer.pointer),
+                            .index = self.getIndex(get_element_pointer.index),
+                        },
+                    },
+                });
+            },
+            .store => {
+                const store = instruction.data.store;
+                _ = try self.push(instruction_id, .{
+                    .op = instruction.op,
+                    .type = instruction.type,
+                    .value = instruction.value,
+                    .data = .{ .store = .{
+                        .pointer = self.getIndex(store.pointer),
+                        .value = self.getIndex(store.value),
+                    } },
+                });
+            },
             .loop => {
                 const loop = instruction.data.loop;
                 const inst = try self.push(instruction_id, instruction.*);
@@ -2104,8 +2301,40 @@ const InstructionSet = struct {
                     },
                 });
             },
+            .type => |type_index| {
+                _ = type_index; // autofix
+                _ = try self.push(instruction_id, instruction.*);
+            },
+            .value => |value| {
+                _ = value; // autofix
+                _ = try self.push(instruction_id, instruction.*);
+            },
+            .cast => |cast| {
+                if (instruction.value != .runtime) {
+                    _ = try self.push(instruction_id, .{
+                        .op = .constant,
+                        .type = instruction.type,
+                        .value = instruction.value,
+                        .data = .{ .value = instruction.value },
+                    });
+                    return;
+                }
+                _ = try self.push(instruction_id, .{
+                    .op = instruction.op,
+                    .type = instruction.type,
+                    .value = instruction.value,
+                    .data = .{ .cast = .{
+                        .instruction = self.getIndex(cast.instruction),
+                        .type = cast.type,
+                    } },
+                });
+            },
 
             else => {
+                if (instruction.op == .alloc) {
+                    _ = try self.push(instruction_id, instruction.*);
+                    return;
+                }
                 self.builder.logger.panic("instruction.data not supported: {s}", .{@tagName(instruction.data)});
             },
         }

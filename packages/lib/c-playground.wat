@@ -1,4 +1,4 @@
-(module $fib.wasm
+(module $c-playground.wasm
   (type (;0;) (func (param i32)))
   (func $fib (type 0) (param i32)
     (local i32 i32 i32 i32 i32 i32 i64)

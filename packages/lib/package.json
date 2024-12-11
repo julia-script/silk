@@ -18,7 +18,8 @@
 		"build:ts": "tsc",
 		"dev:ts": "tsc --watch",
 		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm",
-		"gen:types": "zig run ./generate_types.zig"
+		"gen:types": "zig run ./generate_types.zig",
+		"c:playground": "clang --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export=fib -o ./.tmp/c-playground.wasm c-playground.c && clang --target=wasm32 -O0 -S -emit-llvm c-playground.c -o ./.tmp/c-playground.ll && wasm2wat ./.tmp/c-playground.wasm -o ./.tmp/c-playground.wat"
 	},
 	"type": "module"
 }

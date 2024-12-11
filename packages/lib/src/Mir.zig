@@ -55,7 +55,7 @@ pub const Instruction = struct {
         // void: void,
         bin_op: BinOp,
         instruction: Instruction.Index,
-        // value: Value.Index,
+        value: Value.Index,
         type: Type.Index,
         void: void,
 
@@ -97,6 +97,18 @@ pub const Instruction = struct {
         },
         global_get: struct {
             global: Global.Index,
+        },
+        store: struct {
+            pointer: Instruction.Index,
+            value: Instruction.Index,
+        },
+        get_element_pointer: struct {
+            pointer: Instruction.Index,
+            index: Instruction.Index,
+        },
+        cast: struct {
+            instruction: Instruction.Index,
+            type: Type.Index,
         },
 
         pub const BinOp = struct {
@@ -157,8 +169,12 @@ pub const Instruction = struct {
     // }
     pub const Op = enum {
         type,
+        typeof,
         constant,
         branch,
+        alloc,
+        store,
+        get_element_pointer,
 
         param,
         param_get,
@@ -212,6 +228,8 @@ pub const Type = union(enum) {
     @"fn": Fn,
     optional: Optional,
     module: Module,
+    array: TyArray,
+    pointer: Pointer,
 
     // these are not types by themselves but partials of other types
     global: Module.Decl,
@@ -284,6 +302,15 @@ pub const Type = union(enum) {
 
         pub fn toValueIndex(self: Index) Value.Index {
             switch (self) {
+                .u8 => return .type_u8,
+                .u16 => return .type_u16,
+                .u32 => return .type_u32,
+                .u64 => return .type_u64,
+                .u128 => return .type_u128,
+                .u256 => return .type_u256,
+                .usize => return .type_usize,
+                .i8 => return .type_i8,
+                .i16 => return .type_i16,
                 .i32 => return .type_i32,
                 .i64 => return .type_i64,
                 .f32 => return .type_f32,
@@ -332,6 +359,13 @@ pub const Type = union(enum) {
 
     pub const RootIndex: Index = Index.fromInt(0);
 
+    pub const Pointer = struct {
+        child: Type.Index,
+    };
+    pub const TyArray = struct {
+        type: Type.Index,
+        size: u32,
+    };
     pub const Fn = struct {
         name: InternedSlice,
         params: Type.List,
@@ -425,6 +459,9 @@ pub const Value = union(enum) {
             return @enumFromInt(index + INDEX_START);
         }
         pub fn toType(self: Index) Type.Index {
+            if (self.toInt()) |index| {
+                std.debug.panic("not implemented: toType: {d}", .{index});
+            }
             switch (self) {
                 .type_number => return .number,
                 .type_i8 => return .i8,
@@ -471,6 +508,7 @@ pub fn formatValue(self: *Self, writer: std.io.AnyWriter, value_index: Value.Ind
         try writer.print("[{s}]", .{@tagName(value_index)});
     }
 }
+
 pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_index: Instruction.Index, depth: usize) std.io.AnyWriter.Error!void {
     const instruction: Instruction = self.instructions.items[inst_index];
     const tag_name = @tagName(instruction.data);
@@ -485,7 +523,6 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_index: Inst
             // try self.dumpType(writer, instruction.type, depth + 1);
             try writer.print("('{s}', index = {d})", .{ self.strings.getSlice(scoped.name), scoped.index });
         },
-
         .bin_op => |bin_op| {
             try writer.print("(%{d}, %{d})", .{ bin_op.lhs, bin_op.rhs });
         },
@@ -541,6 +578,10 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_index: Inst
         .global_set => |global_set| {
             try writer.print("(#{d})", .{global_set.global});
         },
+
+        // .store => |store| {
+        //     try writer.print("(#{d})", .{store.pointer});
+        // },
         else => {
             try writer.writeAll("(TODO)");
         },
@@ -632,14 +673,32 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
     try writer.writeAll(": ");
 
     // try fmt.formatType(self, writer, global.type);
-    try self.formatType(writer, global.type, 0);
+    // try self.formatType(writer, global.type, 0);
+    const format_context = FormatInstContext{
+        .instructions = self.instructions.items,
+        .types = self.types.items,
+        .values = self.values.items,
+        .lists = &self.lists,
+        .writer = writer,
+        .strings = &self.strings,
+    };
+    try formatTypeShort(format_context, writer, global.type);
     try writer.writeAll(" = ");
-    try self.formatValue(writer, global.value, 0);
+    try formatValueShort(format_context, writer, global.value);
+    // try self.formatValue(writer, global.value, 0);
     try writer.writeAll("\n");
     if (global.init) |init_block| {
         var iter = self.lists.iterList(init_block);
         while (iter.next()) |inst_index| {
-            try self.formatInstruction(writer, inst_index, 1);
+            // try self.formatInstruction(writer, inst_index, 1);
+            try formatInst(FormatInstContext{
+                .instructions = self.instructions.items,
+                .types = self.types.items,
+                .values = self.values.items,
+                .lists = &self.lists,
+                .writer = writer,
+                .strings = &self.strings,
+            }, inst_index, 1);
         }
     }
 }
@@ -653,7 +712,10 @@ pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOption
     // try indented_writer.open("root_module", .{});
     // try self.formatType(&indented_writer, Type.RootIndex);
     for (0..self.globals.items.len) |global_index| {
-        try self.formatGlobal(writer, @intCast(global_index));
+        try self.formatGlobal(
+            writer,
+            @intCast(global_index),
+        );
         try writer.writeAll("\n");
     }
 
@@ -696,4 +758,235 @@ pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOption
     //     Inst.RootIndex,
     //     0,
     // );
+}
+
+const FormatInstContext = struct {
+    instructions: []const Instruction,
+    types: []const Type,
+    values: []const Value,
+    lists: *Lists,
+    writer: std.io.AnyWriter,
+    strings: *InternedStrings,
+};
+pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, type_index: Type.Index) !void {
+    if (type_index.toInt()) |index| {
+        const ty: Type = context.types[index];
+        switch (ty) {
+            .param => |param| {
+                try tw.blue_400.print(
+                    writer,
+                    "{s}<\"{s}\", ",
+                    .{ @tagName(ty), context.strings.getSlice(param.name) },
+                    .{},
+                );
+                try formatTypeShort(context, writer, param.type);
+                try tw.blue_400.write(writer, ">", .{});
+            },
+            .pointer => |pointer| {
+
+                // try writer.print("*", .{});
+                try tw.pink_400.print(writer, "*", .{}, .{});
+                try formatTypeShort(context, writer, pointer.child);
+            },
+            .array => |array| {
+                try tw.emerald_400.print(writer, "{s}<", .{@tagName(ty)}, .{});
+                try formatTypeShort(context, writer, array.type);
+                try tw.emerald_400.print(writer, ",{d}>", .{array.size}, .{});
+            },
+            .@"fn" => |fn_ty| {
+                try tw.fuchsia_200.print(writer, "{s}(", .{@tagName(ty)}, .{});
+                var iter = context.lists.iterList(fn_ty.params);
+                var i: usize = 0;
+                while (iter.next()) |param_index| {
+                    if (i > 0) try writer.writeAll(", ");
+                    const param_type = context.types[Type.Index.asTypeIndex(param_index).toInt().?];
+
+                    try writer.print("{s}: ", .{context.strings.getSlice(param_type.param.name)});
+                    try formatTypeShort(context, writer, param_type.param.type);
+                    i += 1;
+                }
+                try tw.fuchsia_200.print(writer, ")", .{}, .{});
+
+                try tw.neutral_400.print(writer, " -> ", .{}, .{});
+                try formatTypeShort(context, writer, fn_ty.return_type);
+            },
+
+            else => {
+                try tw.cyan_400.print(writer, "{s}", .{@tagName(ty)}, .{});
+            },
+        }
+    } else {
+        switch (type_index) {
+            .f32, .f64 => {
+                try tw.violet_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+            },
+            .u8, .u16, .u32, .u64, .u128, .u256, .usize => {
+                try tw.emerald_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+            },
+            .i8, .i16, .i32, .i64, .i128 => {
+                try tw.rose_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+            },
+            else => {
+                try tw.amber_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+            },
+        }
+    }
+}
+
+pub fn formatValueShort(context: FormatInstContext, writer: std.io.AnyWriter, value_index: Value.Index) !void {
+    if (value_index.toInt()) |index| {
+        const value: Value = context.values[index];
+        // try tw.neutral_400.print(writer, "{s}", .{@tagName(value)}, .{});
+        switch (value) {
+            .integer => {
+                try tw.emerald_400.print(writer, "{d} int", .{value.integer}, .{});
+            },
+            .float => {
+                try tw.violet_400.print(writer, "{d} float", .{value.float}, .{});
+            },
+            .big_integer => {
+                try tw.rose_400.print(writer, "{d} big_integer", .{value.big_integer}, .{});
+            },
+            .type => {
+                try tw.blue_400.print(writer, "type(", .{}, .{});
+                try formatTypeShort(context, writer, value.type);
+                try tw.blue_400.print(writer, ")", .{}, .{});
+            },
+
+            else => {},
+        }
+    } else {
+        // try tw.neutral_400.print(writer, "{s}", .{@tagName(value_index)}, .{});
+        switch (value_index) {
+            .runtime => {
+                try tw.neutral_400.print(writer, "[runtime]", .{}, .{});
+            },
+
+            else => {
+                try tw.amber_400.print(writer, "{s}", .{@tagName(value_index)}, .{});
+            },
+        }
+    }
+}
+// \x1b[31m
+// \x1b[0m
+fn charsWithoutEscapeSeq(str: []const u8) usize {
+    var i: usize = 0;
+    var count: usize = 0;
+    while (i < str.len) {
+        switch (str[i]) {
+            '\x1b' => {
+                while (str[i] != 'm') {
+                    i += 1;
+                }
+                i += 1;
+            },
+            else => {
+                i += 1;
+                count += 1;
+            },
+        }
+    }
+    return count;
+}
+pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, depth: usize) !void {
+    try fmt.writeIndent(context.writer, depth, .{});
+    const writer = context.writer;
+    const instruction = context.instructions[inst_index];
+    try tw.neutral_400.print(writer, "{s: >12}", .{@tagName(instruction.data)[0..@min(@tagName(instruction.data).len, 12)]}, .{});
+    var buf = try std.BoundedArray(u8, 1024).init(0);
+    const buf_writer = buf.writer().any();
+    try buf_writer.print("{s}%{d}", .{ if (instruction.liveness == 0) "!" else "", inst_index });
+    try writer.print("{s: >5}: ", .{buf.slice()});
+    buf.clear();
+    // try writer.print("{s}", .{if (instruction.liveness == 0) "!: " else ":  "});
+
+    // buf.clear();
+
+    try formatTypeShort(context, buf_writer, instruction.type);
+    // buf.writer().writeAll(" = ");
+    try buf_writer.print(" = ", .{});
+    // try writer.print(" {s} = ", .{buf.slice()});
+
+    // buf.clear();
+
+    const data: Instruction.Data = instruction.data;
+    switch (data) {
+        .scoped => |scoped| {
+            try tw.neutral_200.print(buf_writer, "local, {s}, index: {d}", .{ if (scoped.mutable) "mut" else "const", scoped.index }, .{});
+        },
+        .global_get => |global_get| {
+            try tw.neutral_200.print(buf_writer, "global_get(%{d})", .{global_get.global}, .{});
+        },
+        .global_set => |global_set| {
+            try tw.neutral_200.print(buf_writer, "global_set(%{d}, %{d})", .{ global_set.global, global_set.value }, .{});
+        },
+        .instruction => |instruction_data| {
+            try tw.neutral_200.print(buf_writer, "{s}(%{d})", .{ @tagName(instruction.op), instruction_data }, .{});
+        },
+        .bin_op => |bin_op| {
+            try tw.neutral_200.print(buf_writer, "{s}(%{d}, %{d})", .{ @tagName(instruction.op), bin_op.lhs, bin_op.rhs }, .{});
+        },
+        .store => |store| {
+            try tw.neutral_200.print(buf_writer, "store(%{d}, %{d})", .{ store.pointer, store.value }, .{});
+        },
+
+        .get_element_pointer => |get_element_pointer| {
+            try tw.neutral_200.print(buf_writer, "get_el_pointer(%{d}, %{d})", .{ get_element_pointer.pointer, get_element_pointer.index }, .{});
+        },
+        .call => |call| {
+            try tw.neutral_200.print(buf_writer, "call(%{d}, args = [", .{call.callee}, .{});
+            var iter = context.lists.iterList(call.args_list);
+
+            var first = true;
+            while (iter.next()) |arg_index| {
+                if (!first) {
+                    try buf_writer.print(", ", .{});
+                }
+                first = false;
+                try buf_writer.print("%{d}", .{arg_index});
+            }
+            try tw.neutral_200.print(buf_writer, "])", .{}, .{});
+        },
+        .type => |ty| {
+            try tw.neutral_200.print(buf_writer, "{s}(", .{@tagName(instruction.op)}, .{});
+            try formatTypeShort(context, buf_writer, ty);
+            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+        },
+        .value => |value| {
+            try tw.neutral_200.print(buf_writer, "{s}(", .{@tagName(instruction.op)}, .{});
+            try formatValueShort(context, buf_writer, value);
+            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+        },
+        .cast => |cast| {
+            try tw.neutral_200.print(buf_writer, "cast(%{d}, ", .{cast.instruction}, .{});
+            try formatTypeShort(context, buf_writer, cast.type);
+            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+        },
+        // .alloc => {
+        //     try tw.neutral_200.print(buf_writer, "alloc(", .{}, .{});
+        //     try formatTypeShort(context, buf_writer, instruction.type);
+        //     try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+        // },
+        // .un_op => |un_op| {
+        //     try tw.neutral_400.print(buf_writer, "{s}(%{d})", .{ @tagName(un_op.op), un_op.value }, .{});
+        // },
+        // .call => |call| {
+        //     try tw.neutral_400.print(buf_writer, "{s}(%{d})", .{ @tagName(call.op), call.callee }, .{});
+        // },
+        else => {
+            try tw.neutral_400.print(buf_writer, "{s}", .{@tagName(instruction.op)}, .{});
+        },
+    }
+    const slice = buf.slice();
+    const slice_len = charsWithoutEscapeSeq(slice);
+    try writer.print("{s}", .{slice});
+    try writer.writeByteNTimes(' ', if (slice_len <= 50) 50 - slice_len else 0);
+
+    buf.clear();
+    try formatValueShort(context, buf_writer, instruction.value);
+    try writer.print("; {s}", .{buf.slice()});
+    // try writer.print("{s}", .{@tagName(instruction.op)});
+
+    try writer.writeAll("\n");
 }

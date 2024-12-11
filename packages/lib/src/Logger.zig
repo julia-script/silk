@@ -2,7 +2,7 @@ const std = @import("std");
 const Self = @This();
 const format_utils = @import("format_utils.zig");
 const Color = @import("Color.zig");
-const tw = Color.tw;
+pub const tw = Color.tw;
 const config = @import("options");
 const builtin = @import("builtin");
 // logger: type,

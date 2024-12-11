@@ -117,6 +117,13 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try writer.writeAll("ret:\n");
             try formatInstruction(value, writer, options, fn_decl.return_type, fmt.level + 1);
         },
+        .constant_int => |constant_int| {
+            try fmt.indent();
+            try writer.print("%{d} = const {d}\n", .{ inst_index, constant_int.value });
+            // try fmt.printNode(const_int.name_node);
+            // try fmt.breakLine();
+            // try formatInstruction(value, writer, options, const_int, indent + 1);
+        },
         .param_decl => |param_decl| {
             try fmt.indent();
             try writer.print("%{d} = param @", .{inst_index});
@@ -283,6 +290,22 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
                 try writer.writeAll("}\n");
             }
         },
+        .ty_array => |ty_array| {
+            try fmt.indent();
+            try writer.print("%{d} = type array<%{d}, size=%{d}> \n", .{ inst_index, ty_array.type, ty_array.size });
+        },
+        .alloc => |alloc| {
+            try fmt.indent();
+            try writer.print("%{d} = alloc %{d}\n", .{ inst_index, alloc.type });
+        },
+        .store => |store| {
+            try fmt.indent();
+            try writer.print("%{d} = store %{d} = %{d}\n", .{ inst_index, store.pointer, store.value });
+        },
+        .get_element_pointer => |get_element_pointer| {
+            try fmt.indent();
+            try writer.print("%{d} = get_element_pointer(%{d}, index=%{d})\n", .{ inst_index, get_element_pointer.pointer, get_element_pointer.index });
+        },
         else => {
             try fmt.indent();
             try writer.print("{s}\n", .{@tagName(inst)});
@@ -356,6 +379,10 @@ pub const Inst = union(enum) {
     decl_ref: Ast.Node.Index,
     loop: Loop,
     assign: BinaryOp,
+    alloc: Alloc,
+    store: Store,
+    get_element_pointer: GetElementPointer,
+    constant_int: Constant,
 
     comptime_number: Ast.Node.Index,
     ty_number: Ast.Node.Index,
@@ -376,6 +403,7 @@ pub const Inst = union(enum) {
     ne: BinaryOp,
 
     typeof: UnaryOp,
+    sizeof: UnaryOp,
     ret: UnaryOp,
     if_expr: IfExpr,
     br: UnaryOp,
@@ -394,6 +422,7 @@ pub const Inst = union(enum) {
     ty_u128: Ast.Node.Index,
     ty_u256: Ast.Node.Index,
     ty_usize: Ast.Node.Index,
+    ty_array: TyArray,
 
     ty_f32: Ast.Node.Index,
     ty_f64: Ast.Node.Index,
@@ -402,6 +431,24 @@ pub const Inst = union(enum) {
     debug_var: DebugVar,
 
     pub const Tag: type = std.meta.Tag(@This());
+    pub const Alloc = struct {
+        type: Inst.Index,
+    };
+    pub const Constant = struct {
+        value: i64,
+    };
+    pub const TyArray = struct {
+        type: Inst.Index,
+        size: Inst.Index,
+    };
+    pub const Store = struct {
+        pointer: Inst.Index,
+        value: Inst.Index,
+    };
+    pub const GetElementPointer = struct {
+        pointer: Inst.Index,
+        index: Inst.Index,
+    };
     pub const Local = struct {
         name_node: Ast.Node.Index,
         mutable: bool,
