@@ -59,6 +59,10 @@ pub const Instruction = struct {
         type: Type.Index,
         void: void,
 
+        alloc: struct {
+            type: Type.Index,
+            mutable: bool,
+        },
         br: struct {
             instruction: Instruction.Index,
             value: Value.Index,
@@ -92,7 +96,7 @@ pub const Instruction = struct {
             mutable: bool,
         },
         call: struct {
-            callee: Type.Index,
+            callee: Global.Index,
             args_list: List,
         },
         global_set: struct {
@@ -1072,6 +1076,11 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
         .br => |br| {
             try tw.neutral_200.print(buf_writer, "br(%{d}, ", .{br.instruction}, .{});
             try formatValueShort(context, buf_writer, br.value);
+            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+        },
+        .alloc => |alloc| {
+            try tw.neutral_200.print(buf_writer, "{s}alloc(", .{if (alloc.mutable) "mut " else ""}, .{});
+            try formatTypeShort(context, buf_writer, alloc.type);
             try tw.neutral_200.print(buf_writer, ")", .{}, .{});
         },
         else => {

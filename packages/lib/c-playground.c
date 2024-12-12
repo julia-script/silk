@@ -21,4 +21,10 @@ struct MyStruct {
   unsigned int varUnsignedInt;
 };
 // extern void p(char* fmt, ...);
-char playground(char n) { return n + 2; }
+char playground(char n) {
+  char arr[10];
+  arr[0] = 1;
+  arr[1] = 2;
+  arr[2] = 3;
+  return arr[0] + arr[1] + arr[2];
+}

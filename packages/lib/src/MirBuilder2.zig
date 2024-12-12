@@ -357,6 +357,7 @@ pub const Wip = struct {
             self.index,
             self.data.block.owner,
         }, color);
+        self.dumpInstruction(std.io.getStdErr().writer().any(), id, self.builder.logger.ind) catch {};
     }
     pub fn pushInstruction(self: *Wip, hir_inst: Hir.Inst.Index, instruction: Mir.Instruction) !InstructionId {
         const id = try self.reserveInstruction(hir_inst);
@@ -514,6 +515,8 @@ pub const Wip = struct {
         CircularTypeReference,
         InstructionNotFound,
         GlobalAlreadyExists,
+        TypeNotFound,
+        TypeMismatch,
     } || std.fmt.ParseFloatError || std.fmt.ParseIntError || std.mem.Allocator.Error;
     pub fn resolveType(self: *Wip) Error!Mir.Type.Index {
         self.builder.logger.open("resolveType: {s}", .{self.format()});
@@ -913,7 +916,7 @@ pub const Wip = struct {
             .constant_int => |node| return try self.resolveConstantIntInstruction(hir_inst_index, node),
             .get_property_pointer => |node| return try self.resolveGetPropertyPointerInstruction(hir_inst_index, node),
             .get_property_value => |node| return try self.resolveGetPropertyValueInstruction(hir_inst_index, node),
-
+            .load => |node| return try self.resolveLoadInstruction(hir_inst_index, node),
             else => {
                 return self.builder.logger.panic("not implemented: resolveInstruction: {s}", .{@tagName(std.meta.activeTag(hir_inst))});
             },
@@ -1282,7 +1285,7 @@ pub const Wip = struct {
         switch (instruction.type) {
             .number => {
                 switch (type_index) {
-                    .i8, .i16, .i32, .i64, .i128, .i256, .u8, .u16, .u32, .u64, .u128, .u256, .usize => {
+                    .i8, .i16, .i32, .i64, .i128, .i256, .u8, .u16, .u32, .u64, .u128, .u256, .usize, .f32, .f64 => {
                         return try self.castInstruction(hir_inst_index, id, type_index);
                     },
                     else => {},
@@ -1466,6 +1469,16 @@ pub const Wip = struct {
             .data = .{ .instruction = instruction_id },
         });
     }
+    pub fn resolveLoadInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
+        const instruction_id = try self.getInstructionId(node.operand);
+        const instruction = try self.getInstruction(instruction_id);
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .load,
+            .type = try self.unwrapPointerType(instruction.type),
+            .value = instruction.getValue(),
+            .data = .{ .instruction = instruction_id },
+        });
+    }
     pub fn resolveGlobalGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
         const global_wip_id = self.getGlobal(node.operand) orelse self.builder.logger.todo("error for global not found: {d}", .{node.operand});
         const global_wip = self.builder.getWip(global_wip_id);
@@ -1641,10 +1654,13 @@ pub const Wip = struct {
     }
 
     pub fn resolveFnCallInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.FnCall) Error!InstructionId {
-        const callee_id = try self.getInstructionId(node.callee);
-        const callee_instruction = try self.getInstruction(callee_id);
+        // const callee_id = try self.getInstructionId(node.callee);
+        const callee_id = self.getGlobal(node.callee) orelse self.builder.logger.todo("error for global not found: {d}", .{node.callee});
+        const callee_wip = self.builder.getWip(callee_id);
+        // const callee_instruction = try self.getInstruction(callee_id);
         var list = self.builder.newList();
-        const callee_type = self.builder.getType(callee_instruction.type) orelse unreachable;
+        const callee_type_index = try callee_wip.resolveType();
+        const callee_type = self.builder.getType(callee_type_index) orelse unreachable;
         var iter = self.builder.iterHirInsts(node.args_list);
         while (iter.next()) |arg_id| {
             const arg_instruction_id = try self.getInstructionId(arg_id);
@@ -1655,7 +1671,7 @@ pub const Wip = struct {
             .@"fn" => |fn_type| fn_type.return_type,
             else => self.builder.logger.todo("not a function: {any}", .{callee_type}),
         };
-        try self.markDead(callee_id);
+        // try self.markDead(callee_id);
         // const callee_type = callee_instruction.type;
         // TODO: check if callable and if params match
         return try self.pushInstruction(hir_inst_index, .{
@@ -1664,7 +1680,7 @@ pub const Wip = struct {
             .value = .runtime,
             .data = .{
                 .call = .{
-                    .callee = callee_instruction.type,
+                    .callee = callee_wip.data.fn_decl.global,
                     .args_list = try list.commit(),
                 },
             },
@@ -1679,19 +1695,24 @@ pub const Wip = struct {
 
         const alloc_type = if (self.builder.getValue(type_value.value)) |value| value.type else type_value.value.toType();
         const is_array = if (self.builder.getType(alloc_type)) |ty| std.meta.activeTag(ty.*) == .array else false;
+        _ = is_array; // autofix
         try self.markDead(type_value_id);
         return try self.pushInstruction(hir_inst_index, .{
             .op = .alloc,
 
-            // .type = try self.builder.pushType(.{
-            //     .pointer = .{ .child = alloc_type },
-            // }),
-            .type = switch (is_array) {
-                true => alloc_type,
-                else => try self.builder.pushType(.{ .pointer = .{ .child = alloc_type } }),
-            },
+            .type = try self.builder.pushType(.{
+                .pointer = .{ .child = alloc_type },
+            }),
+            // .type = switch (is_array) {
+            //     true => alloc_type,
+            //     else => try self.builder.pushType(.{ .pointer = .{ .child = alloc_type } }),
+            // },
+            // .type = alloc_type,
             .value = .runtime,
-            .data = .{ .type = alloc_type },
+            .data = .{ .alloc = .{
+                .type = alloc_type,
+                .mutable = node.mutable,
+            } },
         });
     }
     pub fn resolveGetElementPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetElement) Error!InstructionId {
@@ -1699,11 +1720,14 @@ pub const Wip = struct {
         const pointer_instruction = try self.getInstruction(pointer_id);
         const index_id = try self.getInstructionIdAsType(node.index, .usize);
 
-        const array_type = self.builder.getType(pointer_instruction.type) orelse self.builder.logger.todo("error for pointer type not found: {d}", .{pointer_instruction.type});
+        const array_type_index = try self.unwrapPointerType(pointer_instruction.type); // orelse self.builder.logger.todo("error for pointer type not found: {d}", .{pointer_instruction.type});
+        const array_type = self.builder.getType(array_type_index) orelse self.builder.logger.todo("error for index type not found: {d}", .{array_type_index});
         // const array_type = self.builder.getType(array_pointer_type.pointer.child) orelse self.builder.logger.todo("error for index type not found: {d}", .{array_pointer_type.pointer.child});
         return try self.pushInstruction(hir_inst_index, .{
             .op = .get_element_pointer,
-            .type = try self.builder.pushType(.{ .pointer = .{ .child = array_type.array.type } }),
+            .type = try self.builder.pushType(.{ .pointer = .{
+                .child = array_type.array.type,
+            } }),
             .value = .runtime,
             .data = .{ .get_element_pointer = .{
                 .pointer = pointer_id,
@@ -1807,7 +1831,7 @@ pub const Wip = struct {
             },
         }
     }
-    pub fn getPointerChildType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
+    pub fn unwrapPointerType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
         const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
         switch (type_value.*) {
             .pointer => |pointer| {
@@ -1818,10 +1842,22 @@ pub const Wip = struct {
             },
         }
     }
+    pub fn maybeUnwrapPointerType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
+        const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
+        switch (type_value.*) {
+            .pointer => |pointer| {
+                return pointer.child;
+            },
+            else => {
+                return type_index;
+            },
+        }
+    }
+
     pub fn resolveStoreInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Store) Error!InstructionId {
         const pointer_id = try self.getInstructionId(node.pointer);
         const pointer_instruction = try self.getInstruction(pointer_id);
-        const expected_type = self.getPointerChildType(pointer_instruction.type) catch {
+        const expected_type = self.unwrapPointerType(pointer_instruction.type) catch {
             self.builder.logger.panic("expected type not found: {d}", .{pointer_instruction.type});
         };
         const value_id = try self.getInstructionIdAsType(node.value, expected_type);

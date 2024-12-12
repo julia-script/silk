@@ -107,7 +107,7 @@ const Scope = struct {
     pub fn pushSymbol(self: *Scope, name: []const u8, index: Hir.Inst.Index) !void {
         const inst = self.builder.hir.insts.items[index];
         const tag = std.meta.activeTag(inst);
-        assert.fmt(tag == .local or tag == .param_decl or tag == .global_decl, "expected local, param_decl or global_decl instruction, got {s}", .{@tagName(tag)});
+        assert.fmt(tag == .local or tag == .param_decl or tag == .global_decl or tag == .alloc, "expected local, param_decl or global_decl instruction, got {s}", .{@tagName(tag)});
         self.builder.logger.open("pushSymbol \"{s}\" {d}", .{ name, index });
         defer self.builder.logger.close();
         if (self.symbols_table.contains(name)) {
@@ -173,7 +173,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 else => unreachable,
             };
 
-            const value_inst: Hir.Inst.Index = blk: {
+            const value_inst_index: Hir.Inst.Index = blk: {
                 if (value_node != 0) {
                     break :blk try self.genInstruction(scope, value_node);
                 }
@@ -196,85 +196,37 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 // _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = cast_value_inst } });
                 // return local_inst;
             }
-            const ty_inst = if (ty_node == 0) try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst } }) else try self.genInstruction(scope, ty_node);
-            const local_inst = try scope.pushInstruction(.{
-                .local = .{
-                    .name_node = name_node,
-                    .mutable = mutable,
-                    .type = ty_inst,
-                },
-            });
-            _ = try scope.pushInstruction(.{
-                .local_set = .{
-                    .lhs = local_inst,
-                    .rhs = value_inst,
-                },
-            });
+            const ty_inst_index = if (ty_node == 0) try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst_index } }) else try self.genInstruction(scope, ty_node);
+            // const ty_inst = self.hir.insts.items[ty_inst_index];
+
+            const local_inst = blk: {
+                const value_inst = &self.hir.insts.items[value_inst_index];
+                switch (value_inst.*) {
+                    .alloc => {
+                        value_inst.alloc.mutable = mutable;
+                        break :blk value_inst_index;
+                    },
+                    else => {},
+                }
+                const inst = try scope.pushInstruction(.{
+                    .alloc = .{
+                        // .name_node = name_node,
+                        .mutable = mutable,
+                        .type = ty_inst_index,
+                    },
+                });
+
+                _ = try scope.pushInstruction(.{
+                    .store = .{
+                        .pointer = inst,
+                        .value = value_inst_index,
+                    },
+                });
+                break :blk inst;
+            };
+
             try scope.pushSymbol(name_slice, local_inst);
             return local_inst;
-            // if (ty_inst == null) {
-            //     ty_inst = try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst } });
-            //     const local_inst = try scope.pushInstruction(.{
-            //         .local = .{
-            //             .name_node = name_node,
-            //             .mutable = switch (nav.data.*) {
-            //                 .var_decl => true,
-            //                 .const_decl => false,
-            //                 else => unreachable,
-            //             },
-            //             .type = ty_inst.?,
-            //         },
-            //     });
-            // }
-
-            // const local_inst = try scope.pushInstruction(.{
-            //     .local = .{
-            //         .name_node = name_node,
-            //         .mutable = switch (nav.data.*) {
-            //             .var_decl => true,
-            //             .const_decl => false,
-            //             else => unreachable,
-            //         },
-            //         .type = ty_inst.?,
-            //     },
-            // });
-
-            // value_inst = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst, .rhs = ty_inst.? } });
-
-            // _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
-
-            // try scope.pushSymbol(nav.getNodeSlice(), local_inst);
-            // return local_inst;
-
-            // nav.move(declaration.name);
-            // const name_slice = nav.getNodeSlice();
-            // switch (nav.data.*) {
-            //     .var_decl => {
-            //         const local_inst = try scope.pushInstruction(.{
-            //             .local = .{
-            //                 .name_node = name_node,
-            //                 .mutable = true,
-            //                 .init = value_inst,
-            //                 .type = ty_inst.?,
-            //             },
-            //         });
-            //         _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = value_inst } });
-            //         try scope.pushSymbol(name_slice, local_inst);
-            //         return local_inst;
-            //     },
-            //     else => {
-            //         const local_inst = try scope.pushInstruction(.{
-            //             .local = .{
-            //                 .name_node = name_node,
-            //                 .mutable = false,
-            //                 .init = value_inst,
-            //                 .type = ty_inst.?,
-            //             },
-            //         });
-            //         try scope.pushSymbol(name_slice, local_inst);
-            //         return local_inst;
-            //     },
-            // }
         },
         .ty_assign => |bin_expr| {
             const lhs_inst = try self.genInstruction(scope, bin_expr.lhs);
@@ -302,8 +254,8 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 .param_decl => {
                     return try scope.pushInstruction(.{ .param_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
                 },
-                .local => {
-                    return try scope.pushInstruction(.{ .local_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
+                .alloc => {
+                    return try scope.pushInstruction(.{ .store = .{ .pointer = lhs_inst_index, .value = rhs_inst_index } });
                 },
                 .global_decl => {
                     return try scope.pushInstruction(.{ .global_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
@@ -332,6 +284,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 },
                 .local => {
                     return try scope.pushInstruction(.{ .local_get = .{ .operand = inst_index } });
+                },
+                .alloc => {
+                    return try scope.pushInstruction(.{ .load = .{ .operand = inst_index } });
                 },
                 else => {},
             }
@@ -427,6 +382,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             self.setInstruction(inst_index, .{
                 .alloc = .{
                     .type = type_inst,
+                    .mutable = false,
                 },
             });
             return inst_index;
@@ -460,7 +416,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             } });
         },
         .fn_call => {
-            const callee = try self.genInstruction(scope, nav.data.fn_call.callee);
+            // const callee = try self.genInstruction(scope, nav.data.fn_call.callee);
+            const slice = nav.getNodeSlice();
+            const callee = scope.resolveSymbolRecursively(slice) orelse self.logger.panic("Symbol not found: {s}", .{slice});
             var args_iter = self.hir.ast.node_lists.iterList(nav.data.fn_call.args_list);
             const args_list: Hir.Inst.List = blk: {
                 if (nav.data.fn_call.args_list == 0) break :blk 0;

@@ -7,11 +7,17 @@ const Compilation = @import("../../Compilation.zig");
 const Self = @This();
 const dir = @import("../../dir.zig");
 
+const DeclarationMapKey = union(enum) {
+    global: Mir.Global.Index,
+    local: Mir.Instruction.Index,
+};
+const DeclarationMap = std.AutoArrayHashMap(DeclarationMapKey, u32);
+
 compilation: *Compilation,
 mir: *Mir,
 builder: WasmBuilder.Module,
 
-declaration_map: std.AutoArrayHashMap(Mir.Type.Index, u32),
+declaration_map: DeclarationMap,
 pub fn compile(compilation: *Compilation) !void {
     var arena = std.heap.ArenaAllocator.init(compilation.allocator);
     defer arena.deinit();
@@ -20,7 +26,7 @@ pub fn compile(compilation: *Compilation) !void {
         .compilation = compilation,
         .mir = &(root_source.mir orelse return error.RootSourceNotCompiled),
         .builder = try WasmBuilder.Module.init(arena.allocator()),
-        .declaration_map = std.AutoArrayHashMap(Mir.Type.Index, u32).init(arena.allocator()),
+        .declaration_map = DeclarationMap.init(arena.allocator()),
     };
 
     try self.translateMir();
@@ -67,24 +73,26 @@ pub fn translateFunctionType(self: *Self, global_index: Mir.Global.Index) !void 
     const global = self.mir.globals.items[global_index];
     const func_type = self.getType(global.type) orelse return error.TypeNotFound;
     const name_slice = self.mir.strings.getSlice(global.name);
-    var func_wip = self.builder.makeFunction();
+    var func_wip = try self.builder.makeFunction();
+    try self.declaration_map.put(.{ .global = global_index }, @intCast(func_wip.index));
     func_wip.name = name_slice;
     func_wip.@"export" = true; //export all for now
     if (func_type.@"fn".return_type != .void) {
         const return_type = self.convertType(func_type.@"fn".return_type);
         _ = try func_wip.pushResult(return_type);
     }
-    var iter_params = self.iterList(func_type.@"fn".params);
-    while (iter_params.next()) |param_index| {
-        const param_type = self.convertType(Mir.Type.Index.asTypeIndex(param_index));
-        _ = try func_wip.pushParam(param_type);
-    }
+    // var iter_params = self.iterList(func_type.@"fn".params);
+    // while (iter_params.next()) |param_index| {
+    //     const param_type = self.convertType(Mir.Type.Index.asTypeIndex(param_index));
+    //     _ = try func_wip.pushParam(param_type);
+    // }
 
     if (global.init) |init_index| {
         try self.translateInstructions(&func_wip, init_index);
     }
-    const func_index = try self.builder.pushFunction(func_wip);
-    try self.declaration_map.put(global.type, func_index);
+    const func_index = try self.builder.putFunction(&func_wip);
+    _ = func_index; // autofix
+
 }
 pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructions_list: Mir.Lists.Index) !void {
     var iter = self.iterList(instructions_list);
@@ -93,22 +101,38 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
         switch (inst.op) {
             .param => {
                 // const param_type = self.getType(inst.type) orelse return error.TypeNotFound;
-                // _ = try wip.pushParam(self.convertType(inst.type));
+                try self.putDeclaration(
+                    .{ .local = inst_index },
+                    wip.local_count,
+                );
+                _ = try wip.pushParam(self.convertType(inst.type));
             },
-            .local => {
-                try wip.pushLocal(self.convertType(inst.type));
-                // _ = try wip.pushInstruction(.{ .local_get = inst.data.scoped.index });
-            },
+            // .local => {
+            //     try wip.pushLocal(self.convertType(inst.type));
+            //     try self.declaration_map.put(.{ .local = inst_index }, @intCast(wip.params.items.len + wip.locals.items.len - 1));
+            // },
             .constant => {
                 const value = self.getValue(inst.value) orelse return error.ValueNotFound;
                 switch (value) {
                     .integer => |integer| {
                         switch (inst.type) {
-                            .i8, .i16, .i32, .i64 => {
+                            .i8, .i16, .i32 => {
                                 _ = try wip.pushInstruction(.{ .i32_const = @intCast(integer) });
                             },
-                            .u8, .u16, .u32, .u64, .usize => {
+                            .i64 => {
+                                _ = try wip.pushInstruction(.{ .i64_const = integer });
+                            },
+                            .usize => {
+                                _ = try wip.pushInstruction(.{ .i64_const = integer });
+                            },
+                            .u8, .u16, .u32, .u64 => {
                                 @panic("unimplemented");
+                            },
+                            .f32 => {
+                                _ = try wip.pushInstruction(.{ .f32_const = @floatFromInt(integer) });
+                            },
+                            .f64 => {
+                                _ = try wip.pushInstruction(.{ .f64_const = @floatFromInt(integer) });
                             },
                             else => {
                                 std.debug.panic("unimplemented type: {s}", .{@tagName(inst.type)});
@@ -199,10 +223,55 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
                 _ = try wip.pushInstruction(.{ .br = 1 });
             },
             .call => {
-                const callee = self.declaration_map.get(inst.data.call.callee) orelse unreachable;
+                // const callee = self.declaration_map.get(inst.data.call.callee) orelse unreachable;
                 _ = try wip.pushInstruction(.{
-                    .call = callee,
+                    .call = inst.data.call.callee,
                 });
+            },
+            .alloc => {
+                // _ = try wip.pushInstruction(.{ .alloc = {} });
+                if (self.getType(inst.data.alloc.type)) |ty| {
+                    switch (ty) {
+                        .array => {
+                            // _ = try wip.pushInstruction(.{ .i32_alloc = {} });
+                            const element_type = self.convertType(ty.array.type);
+                            const element_size: i32 = switch (element_type) {
+                                .i32 => 4,
+                                .i64 => 8,
+                                .f32 => 4,
+                                .f64 => 8,
+                                else => {
+                                    std.debug.panic("unimplemented element type: {s}", .{@tagName(element_type)});
+                                },
+                            };
+                            _ = try wip.pushInstruction(.{ .global_get = 0 });
+                            _ = try wip.pushInstruction(.{ .i32_const = element_size * @as(i32, @intCast(ty.array.size)) });
+                            _ = try wip.pushInstruction(.{ .i32_sub = {} });
+                            _ = try wip.pushInstruction(.{ .global_set = 0 });
+                            continue;
+                        },
+                        else => {
+                            // std.debug.panic("unimplemented alloc type: {s}", .{@tagName(ty)});
+                        },
+                    }
+                }
+                var decl_iter = self.declaration_map.iterator();
+                while (decl_iter.next()) |decl| {
+                    std.debug.print("decl: {} {}\n", .{ decl.key_ptr.*, decl.value_ptr.* });
+                }
+                try self.putDeclaration(.{ .local = inst_index }, wip.local_count);
+                try wip.pushLocal(self.convertType(inst.data.alloc.type));
+            },
+            .store => {
+                // const local_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
+                const local_index = self.declaration_map.get(.{ .local = inst.data.store.pointer }) orelse unreachable;
+                _ = try wip.pushInstruction(.{ .local_set = local_index });
+                // _ = try wip.pushInstruction(.{ .store = {} });
+            },
+            .load => {
+                // const local_inst = self.mir.instructions.items[inst.data.instruction];
+                const local_inst = self.declaration_map.get(.{ .local = inst.data.instruction }) orelse unreachable;
+                _ = try wip.pushInstruction(.{ .local_get = local_inst });
             },
             else => {
                 std.debug.panic("unimplemented instruction: {s}", .{@tagName(inst.op)});
@@ -212,6 +281,10 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
     }
 }
 
+pub fn putDeclaration(self: *Self, key: DeclarationMapKey, value: usize) !void {
+    std.debug.print("putDeclaration: {} {}\n", .{ key, value });
+    try self.declaration_map.put(key, @intCast(value));
+}
 pub fn convertType(self: *Self, type_index: Mir.Type.Index) WasmBuilder.Type {
     if (self.getType(type_index)) |ty| {
         switch (ty) {

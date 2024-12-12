@@ -366,6 +366,7 @@ pub const Inst = union(enum) {
     global_get: UnaryOp,
     global_decl: GlobalDecl,
     local_get: UnaryOp,
+    load: UnaryOp,
     block: Block,
     inline_block: Block,
     local: Local,
@@ -431,6 +432,7 @@ pub const Inst = union(enum) {
 
     pub const Tag: type = std.meta.Tag(@This());
     pub const Alloc = struct {
+        mutable: bool,
         type: Inst.Index,
     };
     pub const Constant = struct {

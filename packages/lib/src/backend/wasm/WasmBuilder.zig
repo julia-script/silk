@@ -38,6 +38,7 @@ pub const Instruction = union(enum) {
     local_get: u32,
     local_set: u32,
     global_get: u32,
+    global_set: u32,
     end: void,
     call: u32,
     drop: void,
@@ -121,6 +122,10 @@ pub const Instruction = union(enum) {
             },
             .global_get => |index| {
                 try section.writeByte(0x23);
+                try section.write(index);
+            },
+            .global_set => |index| {
+                try section.writeByte(0x24);
                 try section.write(index);
             },
             .call => |callee| {
@@ -274,7 +279,7 @@ const Local = struct {
     }
 };
 pub const Function = struct {
-    index: usize = 0,
+    index: usize,
     name: []const u8 = "",
     params: Array(Type),
     results: Array(Type),
@@ -282,9 +287,11 @@ pub const Function = struct {
     module: *Module,
     locals: Array(Local),
     @"export": bool = false,
+    local_count: usize = 0,
 
-    pub fn init(module: *Module) Function {
+    pub fn init(module: *Module, index: usize) Function {
         return .{
+            .index = index,
             .params = Array(Type).init(module.arena.allocator()),
             .results = Array(Type).init(module.arena.allocator()),
             .instructions = Array(Instruction).init(module.arena.allocator()),
@@ -293,9 +300,11 @@ pub const Function = struct {
         };
     }
     pub fn pushParam(self: *Function, param: Type) !void {
+        self.local_count += 1;
         try self.params.append(param);
     }
     pub fn pushInstruction(self: *Function, instruction: Instruction) !void {
+        std.debug.print("pushInstruction: {}\n", .{(instruction)});
         try self.instructions.append(instruction);
         // self.hasher.update("instruction");
         // try instruction.toBytes(self.instructions.writer().any());
@@ -305,6 +314,7 @@ pub const Function = struct {
     }
     pub fn pushLocal(self: *Function, value_type: Type) !void {
         const prev = self.locals.items.len;
+        self.local_count += 1;
         if (self.locals.items.len > 0) {
             const last = self.locals.items[prev - 1];
             if (last.type == value_type) {
@@ -369,17 +379,19 @@ pub const Module = struct {
     pub fn deinit(self: *Module) void {
         self.arena.deinit();
     }
-    pub fn pushFunction(self: *Module, function: Function) !u32 {
+    pub fn putFunction(self: *Module, function: *Function) !u32 {
         const func_type = function.getFunctionType();
         const hash = func_type.hash();
         if (self.function_types.get(hash) == null) {
             try self.function_types.put(self.arena.allocator(), hash, .{ self.function_types.count(), func_type });
         }
-        try self.functions.append(self.arena.allocator(), function);
+        self.functions.items[function.index] = function.*;
         return @intCast(self.functions.items.len - 1);
     }
-    pub fn makeFunction(self: *Module) Function {
-        return Function.init(self);
+    pub fn makeFunction(self: *Module) !Function {
+        const index = self.functions.items.len;
+        try self.functions.append(self.arena.allocator(), undefined);
+        return Function.init(self, index);
     }
     pub fn toBytes(self: *Module, writer: std.io.AnyWriter) !void {
         // Magic number
