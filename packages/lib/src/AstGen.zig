@@ -131,171 +131,129 @@ pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
     self.loggerOpen("parseExpression");
     defer self.logger.close();
     self.logger.log("parse LHS", .{}, null);
-    var lhs = try self.parseUnary();
+    const lhs = try self.parseUnary();
     if (lhs == 0) return 0;
 
-    var tok = self.peekToken() orelse return lhs;
-    while (switch (tok.tag) {
-        .dot => true,
-        .l_parenthesis => true,
-        .l_brace => true,
-        .l_bracket => true,
-        else => false,
-    } and lhs != 0) {
-        switch (tok.tag) {
-            .dot => {
-                self.logger.log("parse prop access", .{}, null);
-                self.consumeToken();
-                const start_token = self.nodes.get(lhs).start_token;
-                lhs = try self.pushNode(.{
-                    .data = .{
-                        .prop_access = .{
-                            .lhs = lhs,
-                            .rhs = try self.parsePrimary(),
-                        },
-                    },
-                    .start_token = start_token,
-                    .end_token = self.token_index - 1,
-                });
-            },
-            .l_parenthesis => {
-                self.logger.log("parse fn call", .{}, null);
-                self.consumeToken();
-                var args_list = self.node_lists.new(self.allocator);
-                const first_expr = try self.parseExpression();
-                if (first_expr != 0) {
-                    try args_list.append(first_expr);
-                }
-                while (self.tokenIs(.comma)) {
-                    self.consumeToken();
-                    const expr = try self.parseExpression();
-                    if (expr == 0) break;
-                    try args_list.append(expr);
-                }
-                const args_list_index = try args_list.commit();
-                if (!self.accept(.r_parenthesis)) {
-                    try self.errors.addError(.{
-                        .tag = .expected_token,
-                        .start = self.token_index,
-                        .end = self.token_index,
-                        .payload = Token.Tag.r_parenthesis.toInt(),
-                    });
-                }
-                const lhs_start = self.nodes.get(lhs).start_token;
-                lhs = try self.pushNode(.{
-                    .data = .{
-                        .fn_call = .{
-                            .callee = lhs,
-                            .args_list = @intCast(args_list_index),
-                        },
-                    },
-                    .start_token = lhs_start,
-                    .end_token = self.token_index - 1,
-                });
-            },
-            .l_brace => {
-                // self.logger.log("parse block", .{}, null);
-                // self.consumeToken();
-                lhs = try self.parseTypeInit(lhs);
-            },
-            .l_bracket => {
-                self.logger.log("parse array like property access", .{}, null);
-
-                self.consumeToken();
-                const index = try self.parseExpression();
-                if (index == 0) {
-                    try self.errors.addError(.{
-                        .tag = .expected_expression,
-                        .start = self.token_index,
-                        .end = self.token_index,
-                    });
-                    return lhs;
-                }
-                if (!self.accept(.r_bracket)) {
-                    try self.errors.addError(.{
-                        .tag = .expected_token,
-                        .start = self.token_index,
-                        .end = self.token_index,
-                        .payload = Token.Tag.r_bracket.toInt(),
-                    });
-                }
-                const start_token = self.nodes.items(.start_token)[lhs];
-                lhs = try self.pushNode(.{
-                    .data = .{
-                        .array_prop_access = .{
-                            .lhs = lhs,
-                            .rhs = index,
-                        },
-                    },
-                    .start_token = start_token,
-                    .end_token = self.token_index - 1,
-                });
-                // if (lhs == 0) return 0;
-
-            },
-            else => unreachable,
-        }
-        if (self.peekToken()) |token| {
-            tok = token;
-        } else {
-            break;
-        }
-    }
-    // while (self.tokenIs(.dot)) {
-    //     self.logger.log("parse prop access", .{}, null);
-    //     const token = self.peekToken() orelse return 0;
-    //     self.consumeToken();
-    // //     lhs = try self.makeBinaryExpression(token, lhs, try self.parsePrimary());
-    // //     if (lhs == 0) return 0;
-    // // }
-
-    // while (self.tokenIs(.l_parenthesis)) {
-    //     self.logger.log("parse fn call", .{}, null);
-    //     self.consumeToken();
-    //     var args_list = self.node_lists.new(self.allocator);
-    //     const first_expr = try self.parseExpression();
-    //     if (first_expr != 0) {
-    //         try args_list.append(first_expr);
-    //     }
-    //     while (self.tokenIs(.comma)) {
-    //         self.consumeToken();
-    //         const expr = try self.parseExpression();
-    //         if (expr == 0) break;
-    //         try args_list.append(expr);
-    //     }
-    //     const args_list_index = try args_list.commit();
-    //     if (!self.accept(.r_parenthesis)) {
-    //         try self.errors.addError(.{
-    //             .tag = .expected_token,
-    //             .start = self.token_index,
-    //             .end = self.token_index,
-    //             .payload = Token.Tag.r_parenthesis.toInt(),
-    //         });
-    //     }
-    //     const lhs_start = self.nodes.get(lhs).start_token;
-    //     lhs = try self.pushNode(.{
-    //         .data = .{
-    //             .fn_call = .{
-    //                 .callee = lhs,
-    //                 .args_list = @intCast(args_list_index),
-    //             },
+    // var tok = self.peekToken() orelse return lhs;
+    // while (switch (tok.tag) {
+    //     .dot => true,
+    //     .l_parenthesis => true,
+    //     .l_brace => true,
+    //     .l_bracket => true,
+    //     else => false,
+    // } and lhs != 0) {
+    //     switch (tok.tag) {
+    //         .dot => {
+    //             lhs = try self.parsePropertyAccess(lhs);
     //         },
-    //         .start_token = lhs_start,
-    //         .end_token = self.token_index - 1,
-    //     });
+    //         .l_parenthesis => {
+    //             lhs = try self.parseFunctionCall(lhs);
+    //         },
+    //         .l_brace => {
+    //             lhs = try self.parseTypeInit(lhs);
+    //         },
+    //         .l_bracket => {
+    //             lhs = try self.parseArrayPropertyAccess(lhs);
+    //         },
+    //         else => unreachable,
+    //     }
+    //     if (self.peekToken()) |token| {
+    //         tok = token;
+    //     } else {
+    //         break;
+    //     }
     // }
-    // while (self.tokenIs(.l_brace)) {
-    //     //     self.logger.log("parse type init", .{}, null);
-    //     lhs = try self.parseTypeInit(lhs);
-    // }
-    // while
 
     self.logger.log("parse RHS", .{}, null);
     const expr = try self.parseBinaryRhs(0, lhs);
-
-    // if (self.accept(.semicolon)) {}
     return expr;
 }
+
+fn parsePropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
+    self.logger.log("parse prop access", .{}, null);
+    self.consumeToken();
+    const start_token = self.nodes.get(lhs).start_token;
+    return try self.pushNode(.{
+        .data = .{
+            .prop_access = .{
+                .lhs = lhs,
+                .rhs = try self.parsePrimary(),
+            },
+        },
+        .start_token = start_token,
+        .end_token = self.token_index - 1,
+    });
+}
+
+fn parseArrayPropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
+    self.logger.log("parse array like property access", .{}, null);
+    self.consumeToken();
+    const index = try self.parseExpression();
+    if (index == 0) {
+        try self.errors.addError(.{
+            .tag = .expected_expression,
+            .start = self.token_index,
+            .end = self.token_index,
+        });
+        return lhs;
+    }
+    if (!self.accept(.r_bracket)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.r_bracket.toInt(),
+        });
+    }
+    const start_token = self.nodes.items(.start_token)[lhs];
+    return try self.pushNode(.{
+        .data = .{
+            .array_prop_access = .{
+                .lhs = lhs,
+                .rhs = index,
+            },
+        },
+        .start_token = start_token,
+        .end_token = self.token_index - 1,
+    });
+}
+
+fn parseFunctionCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
+    self.logger.log("parse fn call", .{}, null);
+    self.consumeToken();
+    var args_list = self.node_lists.new(self.allocator);
+    const first_expr = try self.parseExpression();
+    if (first_expr != 0) {
+        try args_list.append(first_expr);
+    }
+    while (self.tokenIs(.comma)) {
+        self.consumeToken();
+        const expr = try self.parseExpression();
+        if (expr == 0) break;
+        try args_list.append(expr);
+    }
+    const args_list_index = try args_list.commit();
+    if (!self.accept(.r_parenthesis)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.r_parenthesis.toInt(),
+        });
+    }
+    const lhs_start = self.nodes.get(callee).start_token;
+    return try self.pushNode(.{
+        .data = .{
+            .fn_call = .{
+                .callee = callee,
+                .args_list = @intCast(args_list_index),
+            },
+        },
+        .start_token = lhs_start,
+        .end_token = self.token_index - 1,
+    });
+}
+
 fn parseUnary(self: *AstGen) AstGenError!Node.Index {
     self.loggerOpen("parseUnary");
     defer self.logger.close();
@@ -659,6 +617,12 @@ fn getTokenPrecedence(tag: Token.Tag) i8 {
         // .dot => 12,
 
         // .l_parenthesis => 13,
+
+        .l_parenthesis,
+        .l_brace,
+        => 13,
+
+        .l_bracket, .dot => 14,
         else => -1,
     };
 }
@@ -705,7 +669,31 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
         const tok_prec = getTokenPrecedence(token.tag);
 
         if (tok_prec < expression_precedence) return lhs;
+        self.logger.log("{s} tok_prec: {d} expression_precedence: {d}", .{
+            @tagName(token.tag),
+            tok_prec,
+            expression_precedence,
+        }, null);
 
+        switch (token.tag) {
+            .dot => {
+                lhs = try self.parsePropertyAccess(lhs);
+                continue;
+            },
+            .l_parenthesis => {
+                lhs = try self.parseFunctionCall(lhs);
+                continue;
+            },
+            .l_brace => {
+                lhs = try self.parseTypeInit(lhs);
+                continue;
+            },
+            .l_bracket => {
+                lhs = try self.parseArrayPropertyAccess(lhs);
+                continue;
+            },
+            else => {},
+        }
         const bin_op = self.nextToken() orelse return lhs;
 
         var rhs = try self.parseUnary();

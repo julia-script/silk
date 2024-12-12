@@ -14,12 +14,22 @@
 //   }
 //   return a;
 // }
-
+struct MyStruct {
+  char var0;
+  char var2;
+  char var3;
+  int var1;
+  char var4;
+};
 // extern void p(char* fmt, ...);
 void fib(int n) {
+  // struct MyStruct s1;
+  // s1.var2 = s1.var0;
+  // s1.var2 = sizeof(s1);
+
   int myNumbers[] = {0, 0, 0};
-  myNumbers[2] = n;
-  // int i;
+  myNumbers[2] = myNumbers[1];
+  // // int i;
 
   // for (i = 0; i < 4; i++) {
   //   p("%d\n", myNumbers[i]);

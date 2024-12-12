@@ -1000,6 +1000,7 @@ fn testAst(source: []const u8, node_index: Node.Index, expected: []const u8) !vo
 // }
 
 test "Ast" {
+
     // const test_allocator = std.testing.allocator;
 
     try testAst(
@@ -1432,6 +1433,7 @@ test "Ast" {
         \\                  [token]:.number_literal '2'
         \\
     );
+
     try testAst(
         \\fn sum() i32 {
         \\  const a = [3]i32{1, 2, 3}
@@ -1446,64 +1448,159 @@ test "Ast" {
     , 0,
         \\.root
         \\  [list]:
-        \\    .prop_access
-        \\      [lhs]:
-        \\        .fn_decl
-        \\          [proto]:
-        \\            .fn_proto
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'sum'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .const_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                NONE
+        \\              [value]:
+        \\                .array_init
+        \\                  [type]:
+        \\                    .ty_array
+        \\                      [size_expr]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '3'
+        \\                      [type]:
+        \\                        .ty_i32
+        \\                          [token]:.keyword_i32 'i32'
+        \\                  [items_list]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '3'
+        \\            .var_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'i'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\              [value]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '0'
+        \\            .var_decl
         \\              [name]:
         \\                .identifier
         \\                  [token]:.identifier 'sum'
-        \\              [params_list]:
-        \\              [ret_type]:
+        \\              [type]:
         \\                .ty_i32
         \\                  [token]:.keyword_i32 'i32'
-        \\          [body]:
-        \\            .block
-        \\              [list]:
-        \\                .const_decl
-        \\                  [name]:
-        \\                    .identifier
-        \\                      [token]:.identifier 'a'
-        \\                  [type]:
-        \\                    NONE
-        \\                  [value]:
-        \\                    .array_init
-        \\                      [type]:
-        \\                        .ty_array
-        \\                          [size_expr]:
-        \\                            .number_literal
-        \\                              [token]:.number_literal '3'
-        \\                          [type]:
-        \\                            .ty_i32
-        \\                              [token]:.keyword_i32 'i32'
-        \\                      [items_list]:
-        \\                        .number_literal
-        \\                          [token]:.number_literal '1'
-        \\                        .number_literal
-        \\                          [token]:.number_literal '2'
-        \\                        .number_literal
-        \\                          [token]:.number_literal '3'
-        \\                .var_decl
-        \\                  [name]:
+        \\              [value]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '0'
+        \\            .while_loop
+        \\              [condition]:
+        \\                .lt
+        \\                  [lhs]:
         \\                    .identifier
         \\                      [token]:.identifier 'i'
-        \\                  [type]:
-        \\                    .ty_i32
-        \\                      [token]:.keyword_i32 'i32'
-        \\                  [value]:
-        \\                    .number_literal
-        \\                      [token]:.number_literal '0'
-        \\                .var_decl
-        \\                  [name]:
-        \\                    .identifier
-        \\                      [token]:.identifier 'sum'
-        \\                  [type]:
-        \\                    .ty_i32
-        \\                      [token]:.keyword_i32 'i32'
-        \\                  [value]:
-        \\                    .number_literal
-        \\                      [token]:.number_literal '0'
+        \\                  [rhs]:
+        \\                    .prop_access
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'a'
+        \\                      [rhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'len'
+        \\              [body]:
+        \\                .block
+        \\                  [list]:
+        \\                    .assign
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'sum'
+        \\                      [rhs]:
+        \\                        .add
+        \\                          [lhs]:
+        \\                            .identifier
+        \\                              [token]:.identifier 'sum'
+        \\                          [rhs]:
+        \\                            .array_prop_access
+        \\                              [lhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'a'
+        \\                              [rhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'i'
+        \\                    .assign
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'i'
+        \\                      [rhs]:
+        \\                        .add
+        \\                          [lhs]:
+        \\                            .identifier
+        \\                              [token]:.identifier 'i'
+        \\                          [rhs]:
+        \\                            .number_literal
+        \\                              [token]:.number_literal '1'
+        \\            .ret_expression
+        \\              [node]:
+        \\                .identifier
+        \\                  [token]:.identifier 'sum'
+        \\
+    );
+    try testAst(
+        \\fn sum() i32 {
+        \\  return (a < b.c{1,2,3})
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'sum'
+        \\          [params_list]:
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .ret_expression
+        \\              [node]:
+        \\                .group
+        \\                  [node]:
+        \\                    .lt
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'a'
+        \\                      [rhs]:
+        \\                        .array_init
+        \\                          [type]:
+        \\                            .prop_access
+        \\                              [lhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'b'
+        \\                              [rhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'c'
+        \\                          [items_list]:
+        \\                            .number_literal
+        \\                              [token]:.number_literal '1'
+        \\                            .number_literal
+        \\                              [token]:.number_literal '2'
+        \\                            .number_literal
+        \\                              [token]:.number_literal '3'
         \\
     );
 }

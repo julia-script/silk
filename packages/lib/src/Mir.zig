@@ -59,6 +59,10 @@ pub const Instruction = struct {
         type: Type.Index,
         void: void,
 
+        br: struct {
+            instruction: Instruction.Index,
+            value: Value.Index,
+        },
         loop: struct {
             instructions_list: Instruction.List,
         },
@@ -102,6 +106,7 @@ pub const Instruction = struct {
             pointer: Instruction.Index,
             value: Instruction.Index,
         },
+
         get_element_pointer: struct {
             pointer: Instruction.Index,
             index: Instruction.Index,
@@ -174,6 +179,7 @@ pub const Instruction = struct {
         branch,
         alloc,
         store,
+        load,
         get_element_pointer,
 
         param,
@@ -230,6 +236,7 @@ pub const Type = union(enum) {
     module: Module,
     array: TyArray,
     pointer: Pointer,
+    slice: Slice,
 
     // these are not types by themselves but partials of other types
     global: Module.Decl,
@@ -362,6 +369,10 @@ pub const Type = union(enum) {
     pub const Pointer = struct {
         child: Type.Index,
     };
+    pub const Slice = struct {
+        child: Type.Index,
+        len: u32,
+    };
     pub const TyArray = struct {
         type: Type.Index,
         size: u32,
@@ -376,7 +387,10 @@ pub const Type = union(enum) {
         };
     };
     pub const Module = struct {
+        fields: Type.List,
         decls: Type.List,
+        alignment: u32,
+
         pub const Decl = struct {
             name: InternedSlice,
             type: Type.Index,
@@ -400,6 +414,13 @@ pub const Value = union(enum) {
     float: f64,
     integer: i64,
     big_integer: i128,
+    array: ArrayValue,
+
+    const ArrayValue = struct {
+        type: Type.Index,
+        values: Value.List,
+    };
+
     pub const List = usize;
     pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
     pub const Index = enum(u32) {
@@ -675,6 +696,7 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
     // try fmt.formatType(self, writer, global.type);
     // try self.formatType(writer, global.type, 0);
     const format_context = FormatInstContext{
+        .allocator = self.allocator,
         .instructions = self.instructions.items,
         .types = self.types.items,
         .values = self.values.items,
@@ -692,6 +714,7 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
         while (iter.next()) |inst_index| {
             // try self.formatInstruction(writer, inst_index, 1);
             try formatInst(FormatInstContext{
+                .allocator = self.allocator,
                 .instructions = self.instructions.items,
                 .types = self.types.items,
                 .values = self.values.items,
@@ -761,10 +784,12 @@ pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOption
 }
 
 const FormatInstContext = struct {
+    allocator: std.mem.Allocator,
     instructions: []const Instruction,
     types: []const Type,
     values: []const Value,
     lists: *Lists,
+    builder: ?*MirBuilder.Builder = null,
     writer: std.io.AnyWriter,
     strings: *InternedStrings,
 };
@@ -894,11 +919,12 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
     const writer = context.writer;
     const instruction = context.instructions[inst_index];
     try tw.neutral_400.print(writer, "{s: >12}", .{@tagName(instruction.data)[0..@min(@tagName(instruction.data).len, 12)]}, .{});
-    var buf = try std.BoundedArray(u8, 1024).init(0);
+    var buf = try std.ArrayList(u8).initCapacity(context.allocator, 1024);
+    defer buf.deinit();
     const buf_writer = buf.writer().any();
     try buf_writer.print("{s}%{d}", .{ if (instruction.liveness == 0) "!" else "", inst_index });
-    try writer.print("{s: >5}: ", .{buf.slice()});
-    buf.clear();
+    try writer.print("{s: >5}: ", .{buf.items});
+    buf.clearRetainingCapacity();
     // try writer.print("{s}", .{if (instruction.liveness == 0) "!: " else ":  "});
 
     // buf.clear();
@@ -910,6 +936,7 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
 
     // buf.clear();
 
+    var print_value = true;
     const data: Instruction.Data = instruction.data;
     switch (data) {
         .scoped => |scoped| {
@@ -963,30 +990,120 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
             try formatTypeShort(context, buf_writer, cast.type);
             try tw.neutral_200.print(buf_writer, ")", .{}, .{});
         },
-        // .alloc => {
-        //     try tw.neutral_200.print(buf_writer, "alloc(", .{}, .{});
-        //     try formatTypeShort(context, buf_writer, instruction.type);
-        //     try tw.neutral_200.print(buf_writer, ")", .{}, .{});
-        // },
-        // .un_op => |un_op| {
-        //     try tw.neutral_400.print(buf_writer, "{s}(%{d})", .{ @tagName(un_op.op), un_op.value }, .{});
-        // },
-        // .call => |call| {
-        //     try tw.neutral_400.print(buf_writer, "{s}(%{d})", .{ @tagName(call.op), call.callee }, .{});
-        // },
+        .branch => |branch| {
+            print_value = false;
+
+            try tw.neutral_200.print(buf_writer, "if (%{d}) then:\n\n", .{branch.condition}, .{});
+            if (context.builder != null) {
+                try formatWipInsts(context, buf_writer, branch.then_instructions_list, depth + 1);
+            } else {
+                var then_iter = context.lists.iterList(branch.then_instructions_list);
+                while (then_iter.next()) |child_inst_index| {
+                    try formatInst(.{
+                        .allocator = context.allocator,
+                        .instructions = context.instructions,
+                        .types = context.types,
+                        .values = context.values,
+                        .lists = context.lists,
+                        .builder = context.builder,
+                        .writer = buf_writer,
+                        .strings = context.strings,
+                    }, child_inst_index, depth + 1);
+                }
+            }
+
+            if (branch.else_instructions_list) |else_instructions_list| {
+                try fmt.writeIndent(buf_writer, depth, .{});
+                // try buf_writer.writeByteNTimes(' ', 26);
+                try tw.neutral_200.print(buf_writer, "else:\n", .{}, .{});
+
+                if (context.builder != null) {
+                    try formatWipInsts(context, buf_writer, else_instructions_list, depth + 1);
+                } else {
+                    var else_iter = context.lists.iterList(else_instructions_list);
+                    while (else_iter.next()) |child_inst_index| {
+                        try formatInst(.{
+                            .allocator = context.allocator,
+                            .instructions = context.instructions,
+                            .types = context.types,
+                            .values = context.values,
+                            .lists = context.lists,
+                            .builder = context.builder,
+                            .writer = buf_writer,
+                            .strings = context.strings,
+                        }, child_inst_index, depth + 1);
+                    }
+                }
+            }
+            try fmt.writeIndent(buf_writer, depth, .{});
+            // try buf_writer.writeByteNTimes(' ', 26);
+            try tw.neutral_200.print(buf_writer, "end if;\n", .{}, .{});
+        },
+        .loop => |loop| {
+            print_value = false;
+            try tw.neutral_200.print(buf_writer, "loop:\n\n", .{}, .{});
+
+            if (context.builder != null) {
+                try formatWipInsts(context, buf_writer, loop.instructions_list, depth + 1);
+            } else {
+                var iter = context.lists.iterList(loop.instructions_list);
+                while (iter.next()) |child_inst_index| {
+                    try formatInst(.{
+                        .allocator = context.allocator,
+                        .instructions = context.instructions,
+                        .types = context.types,
+                        .values = context.values,
+                        .lists = context.lists,
+                        .builder = context.builder,
+                        .writer = buf_writer,
+                        .strings = context.strings,
+                    }, child_inst_index, depth + 1);
+                }
+            }
+
+            try fmt.writeIndent(buf_writer, depth, .{});
+            // try buf_writer.writeByteNTimes(' ', 26);
+            try tw.neutral_200.print(buf_writer, "end loop;\n", .{}, .{});
+        },
+        .br => |br| {
+            try tw.neutral_200.print(buf_writer, "br(%{d}, ", .{br.instruction}, .{});
+            try formatValueShort(context, buf_writer, br.value);
+            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+        },
         else => {
             try tw.neutral_400.print(buf_writer, "{s}", .{@tagName(instruction.op)}, .{});
         },
     }
-    const slice = buf.slice();
-    const slice_len = charsWithoutEscapeSeq(slice);
+    const slice = buf.items;
     try writer.print("{s}", .{slice});
-    try writer.writeByteNTimes(' ', if (slice_len <= 50) 50 - slice_len else 0);
+    if (print_value) {
+        const slice_len = charsWithoutEscapeSeq(slice);
+        try writer.writeByteNTimes(' ', if (slice_len <= 50) 50 - slice_len else 0);
 
-    buf.clear();
-    try formatValueShort(context, buf_writer, instruction.value);
-    try writer.print("; {s}", .{buf.slice()});
-    // try writer.print("{s}", .{@tagName(instruction.op)});
+        buf.clearRetainingCapacity();
+        try formatValueShort(context, buf_writer, instruction.value);
+        try writer.print("; {s}", .{buf.items});
+        // try writer.print("{s}", .{@tagName(instruction.op)});
+    }
 
     try writer.writeAll("\n");
+}
+
+pub fn formatWipInsts(parent_context: FormatInstContext, buf_writer: std.io.AnyWriter, wip_index: MirBuilder.Wip.Index, depth: usize) Logger.Error!void {
+    const builder = parent_context.builder orelse unreachable;
+    const wip = builder.getWip(wip_index);
+    const wip_owner = builder.getWip(wip.data.block.owner);
+    const child_context = FormatInstContext{
+        .allocator = parent_context.allocator,
+        .instructions = wip_owner.instructions.items,
+        .types = parent_context.types,
+        .values = parent_context.values,
+        .lists = parent_context.lists,
+        .builder = parent_context.builder,
+        .writer = buf_writer,
+        .strings = parent_context.strings,
+    };
+    for (wip.data.block.instructions.items) |instruction_id| {
+        try formatInst(child_context, instruction_id, depth);
+    }
 }

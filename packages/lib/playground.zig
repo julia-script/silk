@@ -13,15 +13,15 @@
 //   return __stack_alloc((1 + size) * 4);
 // }
 fn sum() i32 {
-    // const arr = [1]i32 {1}
-    // arr[0] = 2
-    // var i: i32 = 0;
-    // var sum: i32 = 0;
-    while (i < array.len) {
-        //   sum = sum + array[i];
-        //   i = i + 1;
+    const arr = [1]i32 {1}
+    arr[0] = 2
+    var i: usize = 0;
+    var sum: i32 = 0;
+    while (i < arr.len) {
+          sum = sum + arr[i];
+          i = i + 1;
     }
-    // return sum;
+    return sum;
 }
 // export fn fib(n: i32): i32 {
 //   var a:i32 = 0;

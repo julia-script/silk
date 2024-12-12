@@ -13,9 +13,9 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
 
     options.addOption([]const []const u8, "log_scopes", &.{
-        // "HirBuilder",
-        "Ast",
-        "AstGen",
+        // "Ast",
+        // "AstGen",
+        "HirBuilder",
         "MirBuilder",
         "Mir",
         // "Compilation",

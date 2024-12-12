@@ -162,15 +162,7 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.indent();
             try writer.print("%{d} = {s} %{d} %{d}\n", .{ inst_index, @tagName(inst), bin.lhs, bin.rhs });
         },
-        // .local_decl => |local_decl| {
-        //     try fmt.indent();
-        //     try writer.print("%{d} = local @", .{
-        //         inst_index,
-        //     });
-        //     try fmt.printNode(local_decl.name_node);
-        //     try writer.print(" %{?d}", .{local_decl.init});
-        //     try fmt.breakLine();
-        // },
+
         .decl_ref => |decl_ref| {
             try fmt.indent();
             try writer.print("%{d} = ref @", .{inst_index});
@@ -306,6 +298,10 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.indent();
             try writer.print("%{d} = get_element_pointer(%{d}, index=%{d})\n", .{ inst_index, get_element_pointer.pointer, get_element_pointer.index });
         },
+        .get_property_pointer, .get_property_value => |get_property_value| {
+            try fmt.indent();
+            try writer.print("%{d} = {s}(%{d}, property_name='%{s}')\n", .{ inst_index, @tagName(inst), get_property_value.base, get_property_value.property_name });
+        },
         else => {
             try fmt.indent();
             try writer.print("{s}\n", .{@tagName(inst)});
@@ -381,7 +377,10 @@ pub const Inst = union(enum) {
     assign: BinaryOp,
     alloc: Alloc,
     store: Store,
-    get_element_pointer: GetElementPointer,
+    get_element_pointer: GetElement,
+    get_element_value: GetElement,
+    get_property_pointer: GetProperty,
+    get_property_value: GetProperty,
     constant_int: Constant,
 
     comptime_number: Ast.Node.Index,
@@ -445,9 +444,13 @@ pub const Inst = union(enum) {
         pointer: Inst.Index,
         value: Inst.Index,
     };
-    pub const GetElementPointer = struct {
+    pub const GetElement = struct {
         pointer: Inst.Index,
         index: Inst.Index,
+    };
+    pub const GetProperty = struct {
+        base: Inst.Index,
+        property_name: []const u8,
     };
     pub const Local = struct {
         name_node: Ast.Node.Index,
