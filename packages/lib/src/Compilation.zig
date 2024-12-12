@@ -13,7 +13,7 @@ errors: ErrorManager,
 sources: std.StringHashMapUnmanaged(Source),
 root: []const u8,
 name: []const u8,
-
+stack_memory_size: usize = 1024 * 1024,
 output_dir: []const u8,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
@@ -90,6 +90,7 @@ pub fn init(allocator: std.mem.Allocator, options: CompilationInitializeOptions)
 
     return self;
 }
+
 pub fn compile(self: *Self) !void {
     const root_source = try self.getRootSource();
 

@@ -939,6 +939,7 @@ pub const Wip = struct {
     pub fn resolveLocalInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, local: Hir.Inst.Local) Error!InstructionId {
         const type_inst_id = try self.getInstructionId(local.type);
         const type_inst = try self.getInstruction(type_inst_id);
+
         // const value_inst = try self.getInstructionByHirInst(local.init);
         try self.markDead(type_inst_id);
         // value_inst.liveness = 0;
@@ -1387,8 +1388,8 @@ pub const Wip = struct {
 
     pub fn resolveLocalSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
         const local_id = try self.getInstructionId(bin_op.lhs);
-        const value_id = try self.getInstructionId(bin_op.rhs);
         const local_instruction = try self.getInstruction(local_id);
+        const value_id = try self.getInstructionIdAsType(bin_op.rhs, local_instruction.type);
         const value_instruction = try self.getInstruction(value_id);
         // var liveness: u32 = 1;
         const value = value_instruction.getValue();

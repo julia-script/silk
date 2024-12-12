@@ -1,8 +1,9 @@
 const std = @import("std");
 const Mir = @import("../../Mir.zig");
 const WasmBuilder = @import("./WasmBuilder.zig");
-
+const InternedSlice = @import("../../InternedStrings.zig").InternedSlice;
 const Compilation = @import("../../Compilation.zig");
+
 const Self = @This();
 const dir = @import("../../dir.zig");
 
@@ -33,7 +34,103 @@ pub fn compile(compilation: *Compilation) !void {
 }
 
 pub fn translateMir(self: *Self) !void {
-    try self.translateModule(Mir.Type.RootIndex);
+    // try self.translateModule(Mir.Type.RootIndex);
+    for (0..self.mir.*.globals.items.len) |global_index| {
+        try self.translateDeclaration(@intCast(global_index));
+    }
+}
+pub fn translateDeclaration(self: *Self, global_index: Mir.Global.Index) !void {
+    const global = self.mir.globals.items[global_index];
+    if (self.getType(global.type)) |ty| {
+        switch (ty) {
+            .@"fn" => {
+                try self.translateFunctionType(global_index);
+            },
+            else => {
+                @panic("unimplemented");
+            },
+        }
+    }
+
+    // switch (global.type) {
+    //     .@"fn" => {
+    //         try self.translateFunctionType(global.type, global.name);
+    //     },
+    //     else => {
+    //         @panic("unimplemented");
+    //     },
+    // }
+    // const decl = self.mir.types.items[index];
+    // try self.translateModule(decl.global.type);
+}
+pub fn translateFunctionType(self: *Self, global_index: Mir.Global.Index) !void {
+    const global = self.mir.globals.items[global_index];
+    const func_type = self.getType(global.type) orelse return error.TypeNotFound;
+    const name_slice = self.mir.strings.getSlice(global.name);
+    var func_wip = self.builder.makeFunction();
+    func_wip.name = name_slice;
+    func_wip.@"export" = true; //export all for now
+    if (func_type.@"fn".return_type != .void) {
+        const return_type = self.convertType(func_type.@"fn".return_type);
+        _ = try func_wip.pushResult(return_type);
+    }
+    var iter_params = self.iterList(func_type.@"fn".params);
+    while (iter_params.next()) |param_index| {
+        const param_type = self.convertType(Mir.Type.Index.asTypeIndex(param_index));
+        _ = try func_wip.pushParam(param_type);
+    }
+
+    if (global.init) |init_index| {
+        try self.translateInstructions(&func_wip, init_index);
+    }
+    const func_index = try self.builder.pushFunction(func_wip);
+    try self.declaration_map.put(global.type, func_index);
+}
+pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructions_list: Mir.Lists.Index) !void {
+    var iter = self.iterList(instructions_list);
+    while (iter.next()) |inst_index| {
+        const inst = self.mir.instructions.items[inst_index];
+        switch (inst.op) {
+            .param => {
+                // const param_type = self.getType(inst.type) orelse return error.TypeNotFound;
+                _ = try wip.pushParam(self.convertType(inst.type));
+            },
+            else => {
+                std.debug.panic("unimplemented instruction: {s}", .{@tagName(inst.op)});
+            },
+        }
+        // try self.translateInstruction(wip, inst);
+    }
+}
+
+pub fn convertType(self: *Self, type_index: Mir.Type.Index) WasmBuilder.Type {
+    if (self.getType(type_index)) |ty| {
+        switch (ty) {
+            .param => |param| {
+                return self.convertType(param.type);
+            },
+            else => {
+                std.debug.panic("unimplemented type: {s}", .{@tagName(ty)});
+            },
+        }
+    }
+    switch (type_index) {
+        .i8,
+        .i16,
+        .i32,
+        => return .i32,
+        .i64 => return .i64,
+
+        .u8, .u16, .u32 => return .i32,
+        .u64, .usize => return .i64,
+
+        .f32 => return .f32,
+        .f64 => return .f64,
+
+        else => {
+            std.debug.panic("unimplemented type: {s}", .{@tagName(type_index)});
+        },
+    }
 }
 pub fn getType(self: *Self, index: Mir.Type.Index) ?Mir.Type {
     if (index.toInt()) |int| {

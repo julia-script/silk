@@ -12,30 +12,30 @@
 // fn __stack_alloc_i32_array(size: i32) i32 {
 //   return __stack_alloc((1 + size) * 4);
 // }
-fn sum_array() i32 {
-    var arr = [1]i32 {1, 2, 3}
-    var i: usize = 0;
-    var sum: i32 = 0;
-    while (i < arr.len) {
-          sum = sum + arr[i];
-          i = i + 1;
-    }
-    return sum;
-}
-// export fn fib(n: i32): i32 {
-//   var a:i32 = 0;
-//   var b:i32 = 1;
-//   if (n > 0) {
-//     while (n > 1) {
-//       var t:i32 = a + b;
-//       a = b;
-//       b = t;
-//       n = n - 1;
+// fn sum_array() i32 {
+//     var arr = [1]i32 {1, 2, 3}
+//     var i: usize = 0;
+//     var sum: i32 = 0;
+//     while (i < arr.len) {
+//           sum = sum + arr[i];
+//           i = i + 1;
 //     }
-//     return b
-//   }
-//   return a
+//     return sum;
 // }
+export fn fib(n: i32): i32 {
+  var a:i32 = 0;
+  var b:i32 = 1;
+  if (n > 0) {
+    while (n > 1) {
+      var t:i32 = a + b;
+      a = b;
+      b = t;
+      n = n - 1;
+    }
+    return b
+  }
+  return a
+}
 // fn main() void {
 //     // const slice: [5]i32 = _{1, 2, 3, 4, 5};
 //     // foo.bar.baz(){
