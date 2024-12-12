@@ -58,8 +58,10 @@ pub const Instruction = union(enum) {
     f32_mul: void,
     f64_mul: void,
 
-    i32_div: void,
-    i64_div: void,
+    i32_div_s: void,
+    i64_div_s: void,
+    i32_div_u: void,
+    i64_div_u: void,
     f32_div: void,
     f64_div: void,
 
@@ -143,8 +145,10 @@ pub const Instruction = union(enum) {
             .f32_mul => try section.writeByte(0x94), // f32.mul
             .f64_mul => try section.writeByte(0xA2), // f64.mul
 
-            .i32_div => try section.writeByte(0x6D), // i32.div_s
-            .i64_div => try section.writeByte(0x7F), // i64.div_s
+            .i32_div_s => try section.writeByte(0x6D), // i32.div_s
+            .i64_div_s => try section.writeByte(0x7F), // i64.div_s
+            .i32_div_u => try section.writeByte(0x6E), // i32.div_u
+            .i64_div_u => try section.writeByte(0x80), // i64.div_u
             .f32_div => try section.writeByte(0x95), // f32.div
             .f64_div => try section.writeByte(0xA3), // f64.div
 
@@ -232,8 +236,10 @@ pub const Instruction = union(enum) {
             .i64_mul => try writer.write("i64.mul"),
             .f32_mul => try writer.write("f32.mul"),
             .f64_mul => try writer.write("f64.mul"),
-            .i32_div => try writer.write("i32.div_s"),
-            .i64_div => try writer.write("i64.div_s"),
+            .i32_div_s => try writer.write("i32.div_s"),
+            .i64_div_s => try writer.write("i64.div_s"),
+            .i32_div_u => try writer.write("i32.div_u"),
+            .i64_div_u => try writer.write("i64.div_u"),
             .f32_div => try writer.write("f32.div"),
             .f64_div => try writer.write("f64.div"),
             .i32_eq => try writer.write("i32.eq"),

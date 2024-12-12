@@ -95,9 +95,9 @@ pub fn compile(self: *Self) !void {
     const root_source = try self.getRootSource();
 
     try root_source.compile(self);
-    // switch (self.target.arch) {
-    //     .wasm => try WasmBackend.compile(self),
-    // }
+    switch (self.target.arch) {
+        .wasm => try WasmBackend.compile(self),
+    }
 }
 
 pub inline fn getOutputDirPath(self: *Self, sub_dir: []const u8) ![]const u8 {

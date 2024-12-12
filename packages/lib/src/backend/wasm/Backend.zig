@@ -93,7 +93,116 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
         switch (inst.op) {
             .param => {
                 // const param_type = self.getType(inst.type) orelse return error.TypeNotFound;
-                _ = try wip.pushParam(self.convertType(inst.type));
+                // _ = try wip.pushParam(self.convertType(inst.type));
+            },
+            .local => {
+                try wip.pushLocal(self.convertType(inst.type));
+                // _ = try wip.pushInstruction(.{ .local_get = inst.data.scoped.index });
+            },
+            .constant => {
+                const value = self.getValue(inst.value) orelse return error.ValueNotFound;
+                switch (value) {
+                    .integer => |integer| {
+                        switch (inst.type) {
+                            .i8, .i16, .i32, .i64 => {
+                                _ = try wip.pushInstruction(.{ .i32_const = @intCast(integer) });
+                            },
+                            .u8, .u16, .u32, .u64, .usize => {
+                                @panic("unimplemented");
+                            },
+                            else => {
+                                std.debug.panic("unimplemented type: {s}", .{@tagName(inst.type)});
+                            },
+                        }
+                    },
+                    .float => |float| {
+                        switch (inst.type) {
+                            .f32 => {
+                                _ = try wip.pushInstruction(.{ .f32_const = @floatCast(float) });
+                            },
+                            .f64 => {
+                                _ = try wip.pushInstruction(.{ .f64_const = float });
+                            },
+                            else => {
+                                std.debug.panic("unimplemented type: {s}", .{@tagName(inst.type)});
+                            },
+                        }
+                    },
+                    else => {
+                        std.debug.panic("unimplemented value: {s}", .{@tagName(value)});
+                    },
+                }
+            },
+            .local_set,
+            .param_set,
+            => {
+                const local_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
+                _ = try wip.pushInstruction(.{ .local_set = local_inst.data.scoped.index });
+            },
+            .param_get,
+            .local_get,
+            => {
+                const param_inst = self.mir.instructions.items[inst.data.instruction];
+                _ = try wip.pushInstruction(.{ .local_get = param_inst.data.scoped.index });
+            },
+            inline .gt, .lt, .div => |tag| {
+                const tag_str = @tagName(tag);
+
+                const lhs_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
+                const wasm_inst = switch (lhs_inst.type) {
+                    inline .i8, .i16, .i32 => @unionInit(WasmBuilder.Instruction, "i32_" ++ tag_str ++ "_s", {}),
+                    inline .i64 => @unionInit(WasmBuilder.Instruction, "i64_" ++ tag_str ++ "_s", {}),
+                    inline .u8, .u16, .u32 => @unionInit(WasmBuilder.Instruction, "i32_" ++ tag_str ++ "_u", {}),
+                    inline .u64, .usize => @unionInit(WasmBuilder.Instruction, "i64_" ++ tag_str ++ "_u", {}),
+                    inline .f32 => @unionInit(WasmBuilder.Instruction, "f32_" ++ tag_str, {}),
+                    inline .f64 => @unionInit(WasmBuilder.Instruction, "f64_" ++ tag_str, {}),
+                    else => unreachable,
+                };
+
+                _ = try wip.pushInstruction(wasm_inst);
+            },
+            inline .add,
+            .sub,
+            .mul,
+            .eq,
+            .ne,
+            => |tag| {
+                const tag_str = @tagName(tag);
+
+                const wasm_inst = switch (inst.type) {
+                    inline .i8, .i16, .i32, .u8, .u16, .u32 => @unionInit(WasmBuilder.Instruction, "i32_" ++ tag_str, {}),
+                    inline .i64, .u64, .usize => @unionInit(WasmBuilder.Instruction, "i64_" ++ tag_str, {}),
+                    inline .f32 => @unionInit(WasmBuilder.Instruction, "f32_" ++ tag_str, {}),
+                    inline .f64 => @unionInit(WasmBuilder.Instruction, "f64_" ++ tag_str, {}),
+                    else => unreachable,
+                };
+                _ = try wip.pushInstruction(wasm_inst);
+            },
+            .branch => {
+                _ = try wip.pushInstruction(.{ .@"if" = .empty });
+                try self.translateInstructions(wip, inst.data.branch.then_instructions_list);
+                if (inst.data.branch.else_instructions_list) |else_instructions_list| {
+                    _ = try wip.pushInstruction(.{ .@"else" = {} });
+                    try self.translateInstructions(wip, else_instructions_list);
+                }
+                _ = try wip.pushInstruction(.{ .end = {} });
+            },
+            .ret => {
+                _ = try wip.pushInstruction(.{ .@"return" = {} });
+            },
+            .loop => {
+                _ = try wip.pushInstruction(.{ .loop = .empty });
+                try self.translateInstructions(wip, inst.data.loop.instructions_list);
+                _ = try wip.pushInstruction(.{ .end = {} });
+            },
+            .br => {
+                _ = try wip.pushInstruction(.{ .br = 1 });
+            },
+            .call => {
+                const callee = self.declaration_map.get(inst.data.call.callee) orelse unreachable;
+                _ = try wip.pushInstruction(.{
+                    .call = callee,
+                });
             },
             else => {
                 std.debug.panic("unimplemented instruction: {s}", .{@tagName(inst.op)});
