@@ -12,9 +12,8 @@
 // fn __stack_alloc_i32_array(size: i32) i32 {
 //   return __stack_alloc((1 + size) * 4);
 // }
-fn sum() i32 {
-    const arr = [1]i32 {1}
-    arr[0] = 2
+fn sum_array() i32 {
+    var arr = [1]i32 {1, 2, 3}
     var i: usize = 0;
     var sum: i32 = 0;
     while (i < arr.len) {

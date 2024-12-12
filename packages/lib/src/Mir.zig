@@ -860,6 +860,10 @@ pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, typ
 
 pub fn formatValueShort(context: FormatInstContext, writer: std.io.AnyWriter, value_index: Value.Index) !void {
     if (value_index.toInt()) |index| {
+        if (index >= context.values.len) {
+            try tw.red_400.print(writer, "VALUE_NOT_FOUND {d}", .{value_index}, .{});
+            return;
+        }
         const value: Value = context.values[index];
         // try tw.neutral_400.print(writer, "{s}", .{@tagName(value)}, .{});
         switch (value) {

@@ -1712,10 +1712,11 @@ pub const Wip = struct {
     }
     pub fn resolveGetElementValueInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetElement) Error!InstructionId {
         const pointer_id = try self.getInstructionId(node.pointer);
-        const pointer_instruction = try self.getInstruction(pointer_id);
         const index_id = try self.getInstructionIdAsType(node.index, .usize);
 
-        const array_type = self.builder.getType(pointer_instruction.type) orelse self.builder.logger.todo("error for pointer type not found: {d}", .{pointer_instruction.type});
+        const base_pointer_instruction = try self.getInstruction(pointer_id);
+        const load_value = base_pointer_instruction.getValue();
+        const array_type = self.builder.getType(base_pointer_instruction.type) orelse self.builder.logger.todo("error for pointer type not found: {d}", .{base_pointer_instruction.type});
         const pointer_inst = try self.pushInstruction(hir_inst_index, .{
             .op = .get_element_pointer,
             .type = try self.builder.pushType(.{ .pointer = .{ .child = array_type.array.type } }),
@@ -1728,7 +1729,7 @@ pub const Wip = struct {
         return try self.pushInstruction(hir_inst_index, .{
             .op = .load,
             .type = array_type.array.type,
-            .value = pointer_instruction.getValue(),
+            .value = load_value,
             .data = .{ .instruction = pointer_inst },
         });
     }
