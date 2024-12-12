@@ -13,6 +13,7 @@ const DeclarationMapKey = union(enum) {
 };
 const DeclarationMap = std.AutoArrayHashMap(DeclarationMapKey, u32);
 
+var STACK_POINTER_INDEX: u32 = 0;
 compilation: *Compilation,
 mir: *Mir,
 builder: WasmBuilder.Module,
@@ -40,6 +41,12 @@ pub fn compile(compilation: *Compilation) !void {
 }
 
 pub fn translateMir(self: *Self) !void {
+    var global = try self.builder.makeGlobal("__stack_pointer", .i32);
+    STACK_POINTER_INDEX = @intCast(global.index);
+
+    global.mutable = true;
+    try global.pushInstruction(.{ .i32_const = @intCast(self.compilation.stack_memory_size) });
+    try global.commit();
     // try self.translateModule(Mir.Type.RootIndex);
     for (0..self.mir.*.globals.items.len) |global_index| {
         try self.translateDeclaration(@intCast(global_index));
@@ -244,7 +251,7 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
                                     std.debug.panic("unimplemented element type: {s}", .{@tagName(element_type)});
                                 },
                             };
-                            _ = try wip.pushInstruction(.{ .global_get = 0 });
+                            _ = try wip.pushInstruction(.{ .global_get = STACK_POINTER_INDEX });
                             _ = try wip.pushInstruction(.{ .i32_const = element_size * @as(i32, @intCast(ty.array.size)) });
                             _ = try wip.pushInstruction(.{ .i32_sub = {} });
                             _ = try wip.pushInstruction(.{ .global_set = 0 });

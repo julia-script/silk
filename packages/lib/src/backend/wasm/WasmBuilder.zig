@@ -358,6 +358,32 @@ const FunctionType = struct {
         return hasher.final();
     }
 };
+
+pub const Global = struct {
+    index: usize,
+    name: []const u8 = "",
+    type: Type,
+    mutable: bool = false,
+    module: *Module,
+    instructions: Array(Instruction),
+    pub fn init(module: *Module, index: usize, name: []const u8, ty: Type) Global {
+        return .{
+            .index = index,
+            .name = name,
+            .type = ty,
+            .instructions = Array(Instruction).init(module.arena.allocator()),
+            .module = module,
+        };
+    }
+    pub fn pushInstruction(self: *Global, instruction: Instruction) !void {
+        std.debug.print("pushInstruction: {}\n", .{(instruction)});
+        try self.instructions.append(instruction);
+    }
+    pub fn commit(self: *Global) !void {
+        self.module.globals.items[self.index] = self.*;
+    }
+};
+
 const Array = std.ArrayList;
 pub const Module = struct {
     const FunctionTypeEntry = struct {
@@ -366,6 +392,7 @@ pub const Module = struct {
     };
     function_types: std.AutoArrayHashMapUnmanaged(u64, FunctionTypeEntry) = .{},
     functions: std.ArrayListUnmanaged(Function) = .{},
+    globals: std.ArrayListUnmanaged(Global) = .{},
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
     scratch: std.ArrayListUnmanaged(u8) = .{},
@@ -392,6 +419,11 @@ pub const Module = struct {
         const index = self.functions.items.len;
         try self.functions.append(self.arena.allocator(), undefined);
         return Function.init(self, index);
+    }
+    pub fn makeGlobal(self: *Module, name: []const u8, ty: Type) !Global {
+        const index = self.globals.items.len;
+        try self.globals.append(self.arena.allocator(), undefined);
+        return Global.init(self, index, name, ty);
     }
     pub fn toBytes(self: *Module, writer: std.io.AnyWriter) !void {
         // Magic number
@@ -456,6 +488,35 @@ pub const Module = struct {
             }
 
             try functions_section.toBytes(writer);
+        }
+        // Global section
+        // 06                 ; Section ID for Global Section
+        // 01                 ; Section size (1 bytes)
+        // 01                 ; Global count (1 global)
+
+        // 0x7F               ; Global type (i32)
+        // 01                 ; Mutable (true)
+        // 0x41 0x2A          ; i32.const 42 (0x41 is the opcode for i32.const, 0x2A = 42 in LEB128)
+        // 0x0B               ; end of init_expr
+
+        const globals_count = self.globals.items.len;
+        if (globals_count > 0) {
+            var globals_section = Section.init(self.allocator, self, .global);
+            defer globals_section.deinit();
+            try globals_section.write(globals_count);
+
+            for (self.globals.items) |global| {
+                // try global.type.toBytes(globals_section.writer());
+                try globals_section.write(global.type);
+
+                try globals_section.write(global.mutable);
+                // Instructions
+                for (global.instructions.items) |instruction| {
+                    try instruction.writeInto(&globals_section);
+                }
+                try Instruction.END.writeInto(&globals_section);
+            }
+            try globals_section.toBytes(writer);
         }
 
         // Export section
@@ -620,8 +681,6 @@ pub const Module = struct {
             try wat_writer.write(")\n");
         }
 
-        // Code section
-
         try wat_writer.close(); //module
     }
     pub fn dumpBytes(self: *Module) !void {
@@ -777,6 +836,9 @@ pub const Section = struct {
 
             comptime_int, u8 => {
                 try self.writeByte(value);
+            },
+            bool => {
+                try self.writeByte(if (value) 0x01 else 0x00);
             },
 
             else => {
