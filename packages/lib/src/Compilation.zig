@@ -5,7 +5,7 @@ const Ast = @import("Ast.zig");
 const Hir = @import("Hir.zig");
 const AstBuilder = @import("AstGen.zig");
 const HirBuilder = @import("HirBuilder.zig");
-const MirBuilder = @import("MirBuilder2.zig");
+const MirBuilder = @import("MirBuilder.zig");
 const WasmBackend = @import("backend/wasm/Backend.zig");
 const dir = @import("./dir.zig");
 
@@ -15,6 +15,7 @@ root: []const u8,
 name: []const u8,
 stack_memory_size: usize = std.math.pow(usize, 2, 10),
 output_dir: []const u8,
+
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 target: Target,

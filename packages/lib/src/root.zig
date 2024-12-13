@@ -11,7 +11,6 @@ test {
     _ = @import("HirBuilder.zig");
     _ = @import("Mir.zig");
     _ = @import("MirBuilder.zig");
-    _ = @import("MirBuilder2.zig");
     // _ = @import("WasmWriter.zig");
     _ = @import("./backend/wasm/WasmBuilder.zig");
     _ = @import("Compilation.zig");
