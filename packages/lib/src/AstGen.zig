@@ -432,6 +432,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .end_token = self.token_index,
                 });
             },
+
             .identifier => return try self.parseIdentifier(),
             .l_bracket => {
                 const start_token = self.token_index;
@@ -553,6 +554,9 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 self.consumeToken();
                 // TODO: add it to ast
                 return try self.parsePrimary();
+            },
+            .keyword_struct => {
+                return try self.parseStructDecl();
             },
             else => {
                 // self.logger.panic("unexpected {s}", .{@tagName(token.tag)});
@@ -1583,6 +1587,100 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
         .start_token = start_token,
         .end_token = self.token_index - 1,
     });
+}
+pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
+    self.loggerOpen("parseStructDecl");
+    defer self.logger.close();
+    const start_token = self.token_index;
+    assert(self.tokenIs(.keyword_struct));
+    self.consumeToken();
+    if (!self.accept(.l_brace)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.l_brace.toInt(),
+        });
+        return 0;
+    }
+    const index = try self.reserveNodeIndex();
+
+    var fields = self.node_lists.new(self.allocator);
+    while (!self.tokenIs(.r_brace)) {
+        if (!self.tokenIs(.identifier)) {
+            break;
+        }
+        const identifier = try self.parsePrimary();
+        const field_start_token = self.token_index;
+        if (!self.nodeIs(identifier, .identifier)) {
+            try self.errors.addError(.{
+                .tag = .expected_node,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = Node.Tag.identifier.toInt(),
+            });
+            return 0;
+        }
+        if (!self.accept(.colon)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = Token.Tag.colon.toInt(),
+            });
+        }
+        const ty = try self.parsePrimary();
+
+        const default_value = blk: {
+            if (self.accept(.equal)) {
+                break :blk try self.parseExpression();
+            }
+            break :blk 0;
+        };
+        try fields.append(try self.pushNode(.{
+            .data = .{ .struct_field = .{
+                .name = identifier,
+                .type = ty,
+                .default_value = default_value,
+            } },
+            .start_token = field_start_token,
+            .end_token = self.token_index,
+        }));
+
+        if (self.accept(.comma)) continue;
+        break;
+    }
+
+    var declarations_list = self.node_lists.new(self.allocator);
+    while (self.token_index < self.tokens.items.len) {
+        const index_before = self.token_index;
+        const node = try self.parseExpression();
+
+        const index_after = self.token_index;
+        // assert(index_after > index_before);
+        if (index_after == index_before) self.consumeToken();
+        // if (node == 0) break;
+        try declarations_list.append(node);
+        if (self.tokenIs(.r_brace)) break;
+    }
+
+    self.setNode(index, .{
+        .data = .{ .struct_decl = .{
+            .fields_list = @intCast(try fields.commit()),
+            .declarations_list = @intCast(try declarations_list.commit()),
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
+    if (!self.tokenIs(.r_brace)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.r_brace.toInt(),
+        });
+    }
+    return index;
 }
 // pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
 //     self.loggerOpen("parseWhileLoop");

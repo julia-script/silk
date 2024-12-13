@@ -168,6 +168,16 @@ pub const Node = struct {
         ty_f32: TokenIndex,
         ty_f64: TokenIndex,
 
+        struct_decl: struct {
+            fields_list: NodeListsIndex,
+            declarations_list: NodeListsIndex,
+        },
+        struct_field: struct {
+            name: Index,
+            type: Index,
+            default_value: Index,
+        },
+
         const TokenIndex = struct {
             token: Token.Index,
         };
@@ -335,6 +345,13 @@ pub const Node = struct {
 
         ty_f32,
         ty_f64,
+
+        struct_decl,
+        struct_field,
+
+        pub fn toInt(self: Tag) u32 {
+            return @intFromEnum(self);
+        }
     };
 
     pub const WhileLoop = struct {
@@ -1601,6 +1618,72 @@ test "Ast" {
         \\                              [token]:.number_literal '2'
         \\                            .number_literal
         \\                              [token]:.number_literal '3'
+        \\
+    );
+    try testAst(
+        \\const T = struct {
+        \\  a: i32,
+        \\  b: i32 = 2,
+        \\  pub fn sum() i32 {
+        \\    return a + b
+        \\  }
+        \\}
+    , 0,
+        \\.root
+        \\  [list]:
+        \\    .const_decl
+        \\      [name]:
+        \\        .identifier
+        \\          [token]:.identifier 'T'
+        \\      [type]:
+        \\        NONE
+        \\      [value]:
+        \\        .struct_decl
+        \\          [fields_list]:
+        \\            .struct_field
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\              [default_value]:
+        \\                NONE
+        \\            .struct_field
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'b'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\              [default_value]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '2'
+        \\          [declarations_list]:
+        \\            .pub
+        \\              [node]:
+        \\                .fn_decl
+        \\                  [proto]:
+        \\                    .fn_proto
+        \\                      [name]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'sum'
+        \\                      [params_list]:
+        \\                      [ret_type]:
+        \\                        .ty_i32
+        \\                          [token]:.keyword_i32 'i32'
+        \\                  [body]:
+        \\                    .block
+        \\                      [list]:
+        \\                        .ret_expression
+        \\                          [node]:
+        \\                            .add
+        \\                              [lhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'a'
+        \\                              [rhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'b'
         \\
     );
 }

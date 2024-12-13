@@ -21,12 +21,12 @@ struct MyStruct {
   int varInt;
   unsigned int varUnsignedInt;
 };
-int len(int arr[]) { return 1; }
+int len(long arr[]) { return 1; }
 // extern void p(char* fmt, ...);
 void playground() {
-  int arr[4] = {1, 2, 3, 4};
-  int arr2[4] = {1, 2, 3, 4};
-  len(arr);
+  long long arr[4] = {1, 2, 3, 4};
+  // long long arr2[4] = {1, 2, 3, 4};
+  // len(arr);
   // int i = 0;
   // int sum = 0;
   // while (i < len(arr)) {
