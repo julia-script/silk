@@ -384,7 +384,7 @@ pub const Type = union(enum) {
     };
     pub const Fn = struct {
         name: InternedSlice,
-        params: Type.List,
+        params_list: Type.List,
         return_type: Type.Index,
         pub const Param = struct {
             name: InternedSlice,
@@ -535,92 +535,92 @@ pub fn formatValue(self: *Self, writer: std.io.AnyWriter, value_index: Value.Ind
     }
 }
 
-pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_index: Instruction.Index, depth: usize) std.io.AnyWriter.Error!void {
-    const instruction: Instruction = self.instructions.items[inst_index];
-    const tag_name = @tagName(instruction.data);
-    const data: Instruction.Data = instruction.data;
-    try fmt.writeIndent(writer, depth, .{});
-    try writer.print("{s: <4}", .{tag_name[0..@min(tag_name.len, 4)]});
-    try writer.print("[{d: >3}]", .{inst_index});
-    try writer.print("{s: <3}", .{if (instruction.liveness == 0) "!" else ""});
-    try writer.print("{s}", .{@tagName(instruction.op)});
-    switch (data) {
-        .scoped => |scoped| {
-            // try self.dumpType(writer, instruction.type, depth + 1);
-            try writer.print("('{s}', index = {d})", .{ self.strings.getSlice(scoped.name), scoped.index });
-        },
-        .bin_op => |bin_op| {
-            try writer.print("(%{d}, %{d})", .{ bin_op.lhs, bin_op.rhs });
-        },
-        .instruction => |instruction_index| {
-            try writer.print("(#{d})", .{instruction_index});
-        },
+// pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_index: Instruction.Index, depth: usize) std.io.AnyWriter.Error!void {
+//     const instruction: Instruction = self.instructions.items[inst_index];
+//     const tag_name = @tagName(instruction.data);
+//     const data: Instruction.Data = instruction.data;
+//     try fmt.writeIndent(writer, depth, .{});
+//     try writer.print("{s: <4}", .{tag_name[0..@min(tag_name.len, 4)]});
+//     try writer.print("[{d: >3}]", .{inst_index});
+//     try writer.print("{s: <3}", .{if (instruction.liveness == 0) "!" else ""});
+//     try writer.print("{s}", .{@tagName(instruction.op)});
+//     switch (data) {
+//         .scoped => |scoped| {
+//             // try self.dumpType(writer, instruction.type, depth + 1);
+//             try writer.print("('{s}', index = {d})", .{ self.strings.getSlice(scoped.name), scoped.index });
+//         },
+//         .bin_op => |bin_op| {
+//             try writer.print("(%{d}, %{d})", .{ bin_op.lhs, bin_op.rhs });
+//         },
+//         .instruction => |instruction_index| {
+//             try writer.print("(#{d})", .{instruction_index});
+//         },
 
-        .type => |type_index| {
-            try self.formatType(writer, type_index, depth + 1);
-        },
-        .void => {},
-        .call => |call| {
-            var iter = self.lists.iterList(call.args_list);
-            try writer.print("(#{?d}) with (", .{call.callee.toInt()});
-            var first = true;
-            while (iter.next()) |arg_id| {
-                if (!first) {
-                    try writer.writeAll(", ");
-                }
-                first = false;
-                try writer.print("#{d}", .{arg_id});
-            }
-            try writer.writeAll(")");
-        },
-        .branch => |branch| {
-            try writer.print("(#{d}) then:\n", .{branch.condition});
-            var then_iter = self.lists.iterList(branch.then_instructions_list);
-            while (then_iter.next()) |then_inst_index| {
-                try self.formatInstruction(writer, then_inst_index, depth + 1);
-            }
-            if (branch.else_instructions_list) |else_body| {
-                try writer.writeAll(" else:\n");
-                var else_iter = self.lists.iterList(else_body);
-                while (else_iter.next()) |else_inst_index| {
-                    try self.formatInstruction(writer, else_inst_index, depth + 1);
-                }
-            }
-            return;
-        },
+//         .type => |type_index| {
+//             try self.formatType(writer, type_index, depth + 1);
+//         },
+//         .void => {},
+//         .call => |call| {
+//             var iter = self.lists.iterList(call.args_list);
+//             try writer.print("(#{?d}) with (", .{call.callee.toInt()});
+//             var first = true;
+//             while (iter.next()) |arg_id| {
+//                 if (!first) {
+//                     try writer.writeAll(", ");
+//                 }
+//                 first = false;
+//                 try writer.print("#{d}", .{arg_id});
+//             }
+//             try writer.writeAll(")");
+//         },
+//         .branch => |branch| {
+//             try writer.print("(#{d}) then:\n", .{branch.condition});
+//             var then_iter = self.lists.iterList(branch.then_instructions_list);
+//             while (then_iter.next()) |then_inst_index| {
+//                 try self.formatInstruction(writer, then_inst_index, depth + 1);
+//             }
+//             if (branch.else_instructions_list) |else_body| {
+//                 try writer.writeAll(" else:\n");
+//                 var else_iter = self.lists.iterList(else_body);
+//                 while (else_iter.next()) |else_inst_index| {
+//                     try self.formatInstruction(writer, else_inst_index, depth + 1);
+//                 }
+//             }
+//             return;
+//         },
 
-        .loop => |loop| {
-            try writer.writeAll("\n");
-            var iter = self.lists.iterList(loop.instructions_list);
-            while (iter.next()) |loop_inst_index| {
-                try self.formatInstruction(writer, loop_inst_index, depth + 1);
-                // try writer.writeAll("\n");
-            }
-            return;
-        },
-        .global_get => |global_get| {
-            try writer.print("(#{d})", .{global_get.global});
-        },
-        .global_set => |global_set| {
-            try writer.print("(#{d})", .{global_set.global});
-        },
+//         .loop => |loop| {
+//             try writer.writeAll("\n");
+//             var iter = self.lists.iterList(loop.instructions_list);
+//             while (iter.next()) |loop_inst_index| {
+//                 try self.formatInstruction(writer, loop_inst_index, depth + 1);
+//                 // try writer.writeAll("\n");
+//             }
+//             return;
+//         },
+//         .global_get => |global_get| {
+//             try writer.print("(#{d})", .{global_get.global});
+//         },
+//         .global_set => |global_set| {
+//             try writer.print("(#{d})", .{global_set.global});
+//         },
 
-        // .store => |store| {
-        //     try writer.print("(#{d})", .{store.pointer});
-        // },
-        else => {
-            try writer.writeAll("(TODO)");
-        },
-    }
+//         // .store => |store| {
+//         //     try writer.print("(#{d})", .{store.pointer});
+//         // },
+//         else => {
+//             try writer.writeAll("(TODO)");
+//         },
+//     }
 
-    try writer.writeAll(": ");
+//     try writer.writeAll(": ");
 
-    try self.formatType(writer, instruction.type, depth + 1);
-    try writer.writeAll(" -> ");
+//     try self.formatType(writer, instruction.type, depth + 1);
+//     try writer.writeAll(" -> ");
 
-    try self.formatValue(writer, instruction.value, depth + 1);
-    try writer.writeAll("\n");
-}
+//     try self.formatValue(writer, instruction.value, depth + 1);
+//     try writer.writeAll("\n");
+// }
 pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_index: Type.Index, depth: usize) !void {
     if (type_index.toInt()) |index| {
         const ty: Type = self.types.items[index];
@@ -801,6 +801,7 @@ const FormatInstContext = struct {
 pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, type_index: Type.Index) !void {
     if (type_index.toInt()) |index| {
         const ty: Type = context.types[index];
+        try writer.print("({d})", .{index});
         switch (ty) {
             .param => |param| {
                 try tw.blue_400.print(
@@ -825,7 +826,7 @@ pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, typ
             },
             .@"fn" => |fn_ty| {
                 try tw.fuchsia_200.print(writer, "{s}(", .{@tagName(ty)}, .{});
-                var iter = context.lists.iterList(fn_ty.params);
+                var iter = context.lists.iterList(fn_ty.params_list);
                 var i: usize = 0;
                 while (iter.next()) |param_index| {
                     if (i > 0) try writer.writeAll(", ");

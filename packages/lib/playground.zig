@@ -33,7 +33,7 @@
 //     fn sum_array() i32 {
 //     }
 // }
-fn sum_array() i32 {
+fn sum_array(a: i32) i32 {
     var arr :[4]i32 = [4]i32 {1, 2, 3, 4}
     var i: i32 = 0;
     var sum: i32 = 0;

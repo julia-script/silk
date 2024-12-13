@@ -27,6 +27,7 @@ pub const Builder = struct {
     arena: std.heap.ArenaAllocator,
     mir: *Mir,
     hir: *Hir,
+    interned_types: std.AutoHashMapUnmanaged(u64, Mir.Type.Index) = .{},
     logger: Logger = Logger.init(host.getStdErrWriter(), "MirBuilder"),
 
     fn getHirInst(self: *Builder, hir_index: Hir.Inst.Index) Hir.Inst {
@@ -108,14 +109,151 @@ pub const Builder = struct {
     }
     pub fn getType(self: *Builder, index: Mir.Type.Index) ?*Mir.Type {
         if (index.toInt()) |int| {
+            if (int >= self.mir.types.items.len) {
+                std.debug.panic("getType: {d} out of bounds, {any}", .{ int, index });
+            }
             return &self.mir.types.items[@intCast(int)];
         }
         return null;
     }
     pub fn pushType(self: *Builder, type_: Mir.Type) !Mir.Type.Index {
         const index = Mir.Type.Index.fromInt(@intCast(self.mir.types.items.len));
+        // _ = try self.internType(type_);
         try self.mir.types.append(self.mir.allocator, type_);
         return index;
+    }
+    const InternedResult = struct {
+        index: Mir.Type.Index,
+        hash: u64,
+    };
+    fn internTypeIndex(self: *Builder, index: Mir.Type.Index) !InternedResult {
+        if (index.toInt()) |int| {
+            return try self.internTypeInner(self.mir.types.items[@intCast(int)]);
+        }
+        return .{
+            .index = index,
+            .hash = @intFromEnum(index),
+        };
+    }
+    fn internTypeInner(self: *Builder, ty: Mir.Type) std.mem.Allocator.Error!InternedResult {
+        switch (ty) {
+            .@"fn" => |fn_type| {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update("fn");
+                hasher.update(std.mem.asBytes(&fn_type.name));
+                var params_iter = self.mir.lists.iterList(fn_type.params_list);
+                while (params_iter.next()) |param| {
+                    const interned_param = try self.internTypeIndex(Mir.Type.Index.asTypeIndex(param));
+                    hasher.update(std.mem.asBytes(&interned_param.hash));
+                }
+                const interned_return_type = try self.internTypeIndex(fn_type.return_type);
+                hasher.update(std.mem.asBytes(&interned_return_type.hash));
+
+                const hash = hasher.final();
+                const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+                if (interned.found_existing) {
+                    // const index = try self.makeType(type_.fn_type);
+                    // interned.value_ptr.* = index;
+                    return .{
+                        .index = interned.value_ptr.*,
+                        .hash = hash,
+                    };
+                }
+                const index = try self.pushType(ty);
+                interned.value_ptr.* = index;
+                return .{
+                    .index = index,
+                    .hash = hash,
+                };
+            },
+            .param => |param| {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update("param");
+                hasher.update(std.mem.asBytes(&param.name));
+                const interned_type = try self.internTypeIndex(param.type);
+                hasher.update(std.mem.asBytes(&interned_type.hash));
+
+                const hash = hasher.final();
+                const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+                if (interned.found_existing) {
+                    return .{ .index = interned.value_ptr.*, .hash = hash };
+                }
+                const index = try self.pushType(ty);
+                interned.value_ptr.* = index;
+                return .{
+                    .index = index,
+                    .hash = hash,
+                };
+            },
+            .optional => |optional| {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update("optional");
+                const interned_type = try self.internTypeIndex(optional.child);
+                hasher.update(std.mem.asBytes(&interned_type.hash));
+                const hash = hasher.final();
+
+                const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+                if (interned.found_existing) {
+                    return .{ .index = interned.value_ptr.*, .hash = hash };
+                }
+                const index = try self.pushType(ty);
+
+                interned.value_ptr.* = index;
+                return .{
+                    .index = index,
+                    .hash = hash,
+                };
+            },
+            .pointer => |pointer| {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update("pointer");
+                const interned_type = try self.internTypeIndex(pointer.child);
+                hasher.update(std.mem.asBytes(&interned_type.hash));
+                const hash = hasher.final();
+                const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+                if (interned.found_existing) {
+                    return .{ .index = interned.value_ptr.*, .hash = hash };
+                }
+                const index = try self.pushType(ty);
+                interned.value_ptr.* = index;
+                return .{
+                    .index = index,
+                    .hash = hash,
+                };
+            },
+            .array => |array| {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update("array");
+                const interned_type = try self.internTypeIndex(array.type);
+                hasher.update(std.mem.asBytes(&interned_type.hash));
+                hasher.update(std.mem.asBytes(&array.size));
+                const hash = hasher.final();
+                const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+                if (interned.found_existing) {
+                    return .{ .index = interned.value_ptr.*, .hash = hash };
+                }
+                const index = try self.pushType(ty);
+                interned.value_ptr.* = index;
+                return .{
+                    .index = index,
+                    .hash = hash,
+                };
+            },
+            // .void => {
+            //     return InternedResult{ .index = .void, .hash = 0 };
+            // },
+            else => {
+                std.debug.panic("unimplemented: internTypeInner: {s}", .{@tagName(ty)});
+            },
+        }
+    }
+    pub fn internType(self: *Builder, type_: Mir.Type) !Mir.Type.Index {
+        const interned = try self.internTypeInner(type_);
+        return interned.index;
+        // const index = self.interned_types.getOrPut(type_.hash()) catch |err| {
+        //     return try self.makeType(type_);
+        // };
+        // return index.value_ptr.*;
     }
 
     pub fn reserveGlobalIndex(self: *Builder) !Mir.Global.Index {
@@ -157,6 +295,7 @@ pub const Builder = struct {
         try root_wip.resolveInitializer();
         try self.getWip(0).dump(std.io.getStdErr().writer().any(), 0);
         try root_wip.commit();
+        self.logger.log("Types ({d})", .{self.mir.types.items.len}, null);
     }
 };
 
@@ -602,7 +741,6 @@ pub const Wip = struct {
         return type_index;
     }
     fn resolveFnDeclType(self: *Wip) !Mir.Type.Index {
-        const type_index = try self.builder.reserveTypeIndex();
         const builder = self.builder;
         const fn_decl = self.data.fn_decl;
         const return_type_wip = builder.getWip(fn_decl.return_type);
@@ -614,10 +752,11 @@ pub const Wip = struct {
             const param_type_index = try param_wip.resolveType();
             try params_types.append(param_type_index.asInt());
         }
-        builder.setType(type_index, .{
+        // const type_index = try self.builder.reserveTypeIndex();
+        const type_index = try builder.internType(.{
             .@"fn" = .{
                 .name = fn_decl.name,
-                .params = try params_types.commit(),
+                .params_list = try params_types.commit(),
                 .return_type = return_type_index,
             },
         });
@@ -1042,10 +1181,11 @@ pub const Wip = struct {
                 try self.markDead(type_inst_id);
                 try self.markDead(size_inst_id);
 
-                const type_index = try self.builder.pushType(.{ .array = .{
+                const type_index = try self.builder.internType(.{ .array = .{
                     .type = if (type_value) |v| v.type else type_value_index.toType(),
                     .size = size_int,
                 } });
+                std.debug.print("type: {?}\n", .{type_value_index});
                 break :ty type_index;
                 // break :ty try self.builder.pushValue(.{ .type = type_index });
             },
@@ -1507,7 +1647,7 @@ pub const Wip = struct {
     pub fn resolveTyPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
-        const ty = try self.builder.pushType(.{ .pointer = .{ .child = instruction.data.type } });
+        const ty = try self.builder.internType(.{ .pointer = .{ .child = instruction.data.type } });
         const type_value = try self.getTypeAsValue(ty);
         return try self.pushInstruction(hir_inst_index, .{
             .op = .type,
@@ -1737,8 +1877,7 @@ pub const Wip = struct {
         try self.markDead(type_value_id);
         return try self.pushInstruction(hir_inst_index, .{
             .op = .alloc,
-
-            .type = try self.builder.pushType(.{
+            .type = try self.builder.internType(.{
                 .pointer = .{ .child = alloc_type },
             }),
             // .type = switch (is_array) {
@@ -1768,7 +1907,7 @@ pub const Wip = struct {
 
         return try self.pushInstruction(hir_inst_index, .{
             .op = .get_element_pointer,
-            .type = try self.builder.pushType(.{ .pointer = .{
+            .type = try self.builder.internType(.{ .pointer = .{
                 .child = array_type.array.type,
             } }),
             .value = .runtime,
@@ -1790,7 +1929,7 @@ pub const Wip = struct {
         const array_type = self.builder.getType(base_pointer_instruction.type) orelse self.builder.logger.todo("error for pointer type not found: {d}", .{base_pointer_instruction.type});
         const pointer_inst = try self.pushInstruction(hir_inst_index, .{
             .op = .get_element_pointer,
-            .type = try self.builder.pushType(.{ .pointer = .{ .child = array_type.array.type } }),
+            .type = try self.builder.internType(.{ .pointer = .{ .child = array_type.array.type } }),
             .value = .runtime,
             .data = .{ .get_element_pointer = .{
                 .pointer = pointer_id,
@@ -2000,7 +2139,7 @@ pub const Wip = struct {
             const ty: Mir.Type.Fn = fn_type.@"fn";
             try self.setType(.{ .@"fn" = .{
                 .name = ty.name,
-                .params = ty.params,
+                .params_list = ty.params_list,
                 .return_type = ty.return_type,
             } });
         }
