@@ -115,6 +115,7 @@ pub const Instruction = struct {
             pointer: Instruction.Index,
             index: Instruction.Index,
         },
+
         cast: struct {
             instruction: Instruction.Index,
             type: Type.Index,

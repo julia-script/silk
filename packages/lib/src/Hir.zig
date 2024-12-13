@@ -210,39 +210,64 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.indent();
             try writer.print("%{d} = undefined\n", .{inst_index});
         },
-        .ty_number => |ty_number| {
-            _ = ty_number; // autofix
+        // .ty_number => |ty_number| {
+        //     _ = ty_number; // autofix
+        //     try fmt.indent();
+        //     try writer.print("%{d} = type(number)\n", .{
+        //         inst_index,
+        //     });
+        // },
+        // .ty_i32 => |ty_i32| {
+        //     _ = ty_i32; // autofix
+        //     try fmt.indent();
+        //     try writer.print("%{d} = type(i32)\n", .{
+        //         inst_index,
+        //     });
+        // },
+        // .ty_i64 => |ty_i64| {
+        //     _ = ty_i64; // autofix
+        //     try fmt.indent();
+        //     try writer.print("%{d} = type(i64)\n", .{
+        //         inst_index,
+        //     });
+        // },
+        // .ty_f32 => |ty_f32| {
+        //     _ = ty_f32; // autofix
+        //     try fmt.indent();
+        //     try writer.print("%{d} = type(f32)\n", .{
+        //         inst_index,
+        //     });
+        // },
+        // .ty_f64 => |ty_f64| {
+        //     _ = ty_f64; // autofix
+        //     try fmt.indent();
+        //     try writer.print("%{d} = type(f64)\n", .{
+        //         inst_index,
+        //     });
+        // },
+        .ty_i8,
+        .ty_i16,
+        .ty_i32,
+        .ty_i64,
+        .ty_i128,
+        .ty_i256,
+
+        .ty_u8,
+        .ty_u16,
+        .ty_u32,
+        .ty_u64,
+        .ty_u128,
+        .ty_u256,
+        .ty_usize,
+
+        .ty_f32,
+        .ty_f64,
+        .ty_void,
+        => {
             try fmt.indent();
-            try writer.print("%{d} = type(number)\n", .{
+            try writer.print("%{d} = {s}\n", .{
                 inst_index,
-            });
-        },
-        .ty_i32 => |ty_i32| {
-            _ = ty_i32; // autofix
-            try fmt.indent();
-            try writer.print("%{d} = type(i32)\n", .{
-                inst_index,
-            });
-        },
-        .ty_i64 => |ty_i64| {
-            _ = ty_i64; // autofix
-            try fmt.indent();
-            try writer.print("%{d} = type(i64)\n", .{
-                inst_index,
-            });
-        },
-        .ty_f32 => |ty_f32| {
-            _ = ty_f32; // autofix
-            try fmt.indent();
-            try writer.print("%{d} = type(f32)\n", .{
-                inst_index,
-            });
-        },
-        .ty_f64 => |ty_f64| {
-            _ = ty_f64; // autofix
-            try fmt.indent();
-            try writer.print("%{d} = type(f64)\n", .{
-                inst_index,
+                @tagName(inst),
             });
         },
         .loop => |loop| {
@@ -298,10 +323,23 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try fmt.indent();
             try writer.print("%{d} = get_element_pointer(%{d}, index=%{d})\n", .{ inst_index, get_element_pointer.pointer, get_element_pointer.index });
         },
+        .get_element_value => |get_element_value| {
+            try fmt.indent();
+            try writer.print("%{d} = get_element_value(%{d}, index=%{d})\n", .{ inst_index, get_element_value.pointer, get_element_value.index });
+        },
         .get_property_pointer, .get_property_value => |get_property_value| {
             try fmt.indent();
             try writer.print("%{d} = {s}(%{d}, property_name='%{s}')\n", .{ inst_index, @tagName(inst), get_property_value.base, get_property_value.property_name });
         },
+        .load => |load| {
+            try fmt.indent();
+            try writer.print("%{d} = load %{d}\n", .{ inst_index, load.operand });
+        },
+        .ty_pointer => |ty_pointer| {
+            try fmt.indent();
+            try writer.print("%{d} = type pointer<%{d}>\n", .{ inst_index, ty_pointer.operand });
+        },
+
         else => {
             try fmt.indent();
             try writer.print("{s}\n", .{@tagName(inst)});
@@ -427,6 +465,7 @@ pub const Inst = union(enum) {
     ty_f32: Ast.Node.Index,
     ty_f64: Ast.Node.Index,
     ty_void: Ast.Node.Index,
+    ty_pointer: UnaryOp,
 
     debug_var: DebugVar,
 

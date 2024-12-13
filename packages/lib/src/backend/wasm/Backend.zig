@@ -19,6 +19,7 @@ mir: *Mir,
 builder: WasmBuilder.Module,
 
 declaration_map: DeclarationMap,
+
 pub fn compile(compilation: *Compilation) !void {
     var arena = std.heap.ArenaAllocator.init(compilation.allocator);
     defer arena.deinit();
@@ -38,6 +39,18 @@ pub fn compile(compilation: *Compilation) !void {
     var file = try output_dir.createFile(file_name, .{});
     defer file.close();
     try self.builder.toBytes(file.writer().any());
+
+    var dump_buf = std.ArrayList(u8).init(self.builder.allocator);
+    defer dump_buf.deinit();
+    try self.builder.toBytes(dump_buf.writer().any());
+
+    for (dump_buf.items, 0..) |byte, i| {
+        std.debug.print("{x:02} ", .{byte});
+        if ((i + 1) % 4 == 0) {
+            std.debug.print("\n", .{});
+        }
+    }
+    std.debug.print("\n", .{});
 }
 
 pub fn translateMir(self: *Self) !void {
@@ -84,15 +97,36 @@ pub fn translateFunctionType(self: *Self, global_index: Mir.Global.Index) !void 
     try self.declaration_map.put(.{ .global = global_index }, @intCast(func_wip.index));
     func_wip.name = name_slice;
     func_wip.@"export" = true; //export all for now
+    _ = try self.builder.pushMemory(.{ .initial = 1, .maximum = null });
+
+    // const local_index = try func_wip.pushLocal(.i32);
+    // const array_size = 2;
+    // const element_size = 4;
+    // _ = try func_wip.pushResult(.i32);
+    // try func_wip.pushInstruction(.{ .global_get = STACK_POINTER_INDEX });
+    // try func_wip.pushInstruction(.{ .i32_const = element_size * array_size });
+    // try func_wip.pushInstruction(.{ .i32_sub = {} });
+    // try func_wip.pushInstruction(.{ .local_tee = local_index });
+    // try func_wip.pushInstruction(.{ .global_set = STACK_POINTER_INDEX });
+
+    // for (0..array_size) |i| {
+    //     try func_wip.pushInstruction(.{ .i32_const = @intCast(i) });
+    //     try func_wip.pushInstruction(.{ .i32_const = element_size });
+    //     try func_wip.pushInstruction(.{ .i32_mul = {} });
+    //     try func_wip.pushInstruction(.{ .local_get = local_index });
+    //     try func_wip.pushInstruction(.{ .i32_add = {} });
+    //     try func_wip.pushInstruction(.{ .i32_const = @intCast(i + 10) });
+    //     try func_wip.pushInstruction(.{ .i32_store = .{} });
+    // }
+    // try func_wip.pushInstruction(.{ .local_get = local_index });
+    // try func_wip.pushInstruction(.{ .i32_const = 4 });
+    // try func_wip.pushInstruction(.{ .i32_add = {} });
+
+    // try func_wip.pushInstruction(.{ .i32_load = .{} });
     if (func_type.@"fn".return_type != .void) {
         const return_type = self.convertType(func_type.@"fn".return_type);
         _ = try func_wip.pushResult(return_type);
     }
-    // var iter_params = self.iterList(func_type.@"fn".params);
-    // while (iter_params.next()) |param_index| {
-    //     const param_type = self.convertType(Mir.Type.Index.asTypeIndex(param_index));
-    //     _ = try func_wip.pushParam(param_type);
-    // }
 
     if (global.init) |init_index| {
         try self.translateInstructions(&func_wip, init_index);
@@ -103,8 +137,25 @@ pub fn translateFunctionType(self: *Self, global_index: Mir.Global.Index) !void 
 }
 pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructions_list: Mir.Lists.Index) !void {
     var iter = self.iterList(instructions_list);
+    var allocated_memory: i32 = 0;
     while (iter.next()) |inst_index| {
         const inst = self.mir.instructions.items[inst_index];
+        // std.debug.print("inst: {d} {s}\n", .{ inst_index, @tagName(inst.op) });
+        if (inst.op != .loop and inst.op != .branch) {
+            try Mir.formatInst(.{
+                .instructions = self.mir.instructions.items,
+
+                .strings = &self.mir.strings,
+                .values = self.mir.values.items,
+                .types = self.mir.types.items,
+                .allocator = self.mir.allocator,
+                .writer = std.io.getStdErr().writer().any(),
+                .lists = &self.mir.lists,
+            }, inst_index, 0);
+        }
+        if (inst.liveness == 0) {
+            continue;
+        }
         switch (inst.op) {
             .param => {
                 // const param_type = self.getType(inst.type) orelse return error.TypeNotFound;
@@ -130,7 +181,7 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
                                 _ = try wip.pushInstruction(.{ .i64_const = integer });
                             },
                             .usize => {
-                                _ = try wip.pushInstruction(.{ .i64_const = integer });
+                                _ = try wip.pushInstruction(.{ .i64_const = @intCast(integer) });
                             },
                             .u8, .u16, .u32, .u64 => {
                                 @panic("unimplemented");
@@ -251,10 +302,18 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
                                     std.debug.panic("unimplemented element type: {s}", .{@tagName(element_type)});
                                 },
                             };
+                            const local_index = try wip.pushLocal(.i32);
+                            try self.putDeclaration(.{ .local = inst_index }, local_index);
+
+                            const memory_size = element_size * @as(i32, @intCast(ty.array.size));
+                            allocated_memory += memory_size;
+
                             _ = try wip.pushInstruction(.{ .global_get = STACK_POINTER_INDEX });
-                            _ = try wip.pushInstruction(.{ .i32_const = element_size * @as(i32, @intCast(ty.array.size)) });
+                            _ = try wip.pushInstruction(.{ .i32_const = memory_size });
                             _ = try wip.pushInstruction(.{ .i32_sub = {} });
-                            _ = try wip.pushInstruction(.{ .global_set = 0 });
+                            _ = try wip.pushInstruction(.{ .local_tee = local_index });
+                            _ = try wip.pushInstruction(.{ .global_set = STACK_POINTER_INDEX });
+
                             continue;
                         },
                         else => {
@@ -262,23 +321,83 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
                         },
                     }
                 }
-                var decl_iter = self.declaration_map.iterator();
-                while (decl_iter.next()) |decl| {
-                    std.debug.print("decl: {} {}\n", .{ decl.key_ptr.*, decl.value_ptr.* });
-                }
-                try self.putDeclaration(.{ .local = inst_index }, wip.local_count);
-                try wip.pushLocal(self.convertType(inst.data.alloc.type));
+
+                const local_index = try wip.pushLocal(self.convertType(inst.data.alloc.type));
+                try self.putDeclaration(.{ .local = inst_index }, local_index);
             },
             .store => {
                 // const local_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
-                const local_index = self.declaration_map.get(.{ .local = inst.data.store.pointer }) orelse unreachable;
-                _ = try wip.pushInstruction(.{ .local_set = local_index });
+                const pointer_inst = self.mir.instructions.items[inst.data.store.pointer];
+                switch (pointer_inst.op) {
+                    .get_element_pointer => {
+                        try wip.pushInstruction(.{ .i32_store = .{} });
+                    },
+                    .alloc => {
+                        const local_index = self.declaration_map.get(.{ .local = inst.data.store.pointer }) orelse std.debug.panic("local not found: {d}\n", .{inst.data.store.pointer});
+                        // wip.pushInstruction(.{ .i32_store = {} });
+                        _ = try wip.pushInstruction(.{ .local_set = local_index });
+                    },
+                    else => {
+                        std.debug.panic("unimplemented store pointer: {s}", .{@tagName(pointer_inst.op)});
+                    },
+                }
+                // const inst = self.mir.instructions.items[inst_index];
                 // _ = try wip.pushInstruction(.{ .store = {} });
             },
             .load => {
-                // const local_inst = self.mir.instructions.items[inst.data.instruction];
-                const local_inst = self.declaration_map.get(.{ .local = inst.data.instruction }) orelse unreachable;
-                _ = try wip.pushInstruction(.{ .local_get = local_inst });
+                const inst_to_load = self.mir.instructions.items[inst.data.instruction];
+                // std.debug.panic("inst_to_load: {}\n", .{inst_to_load});
+                switch (inst_to_load.op) {
+                    .alloc => {
+                        const local_inst = self.declaration_map.get(.{ .local = inst.data.instruction }) orelse unreachable;
+                        try wip.pushInstruction(.{ .local_get = local_inst });
+                    },
+                    .get_element_pointer => {
+                        // const local_inst = self.declaration_map.get(.{ .local = inst.data.instruction }) orelse unreachable;
+                        const load_type = self.convertType(inst.type);
+                        switch (load_type) {
+                            .i32 => try wip.pushInstruction(.{ .i32_load = .{} }),
+                            .i64 => try wip.pushInstruction(.{ .i64_load = .{} }),
+                            .f32 => try wip.pushInstruction(.{ .f32_load = .{} }),
+                            .f64 => try wip.pushInstruction(.{ .f64_load = .{} }),
+                            else => unreachable,
+                        }
+                    },
+                    else => {
+                        std.debug.panic("unimplemented instruction: {s}", .{@tagName(inst_to_load.op)});
+                    },
+                }
+                // try self.putDeclaration(.{ .local = inst_index }, local_inst);
+            },
+            .get_element_pointer => {
+                const local_inst = self.declaration_map.get(.{ .local = inst.data.get_element_pointer.pointer }) orelse unreachable;
+                const pointer_inst = self.mir.instructions.items[inst.data.get_element_pointer.pointer];
+                const pointer_type = self.getType(pointer_inst.type) orelse unreachable;
+                const arr_type_index = pointer_type.pointer.child;
+                const arr_type = self.getType(arr_type_index) orelse unreachable;
+                const element_type = arr_type.array.type;
+                const element_size: i32 = switch (element_type) {
+                    .i32 => 4,
+                    .i64 => 8,
+                    .f32 => 4,
+                    .f64 => 8,
+                    else => {
+                        std.debug.panic("unimplemented element type: {s}", .{@tagName(element_type)});
+                    },
+                };
+                const index_inst = self.mir.instructions.items[inst.data.get_element_pointer.index];
+                _ = index_inst; // autofix
+
+                try wip.pushInstruction(.{ .i32_const = element_size });
+                try wip.pushInstruction(.{ .i32_mul = {} });
+                try wip.pushInstruction(.{ .local_get = local_inst });
+                try wip.pushInstruction(.{ .i32_add = {} });
+                // const offset =
+                // try self.putDeclaration(.{ .local = inst_index }, index);
+            },
+            .global_get => {
+                const global_inst = self.declaration_map.get(.{ .global = inst.data.global_get.global }) orelse unreachable;
+                _ = try wip.pushInstruction(.{ .global_get = global_inst });
             },
             else => {
                 std.debug.panic("unimplemented instruction: {s}", .{@tagName(inst.op)});
@@ -386,172 +505,172 @@ pub fn translateFunction(self: *Self, function_index: Mir.Type.Index) !void {
     _ = try self.builder.pushFunction(func_wip);
 }
 
-pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmBuilder.Function) !void {
-    const block_ty = self.getType(block_index) orelse return error.TypeNotFound;
-    var iter = self.iterList(block_ty.block.instructions);
+// pub fn translateBlockInto(self: *Self, block_index: Mir.Type.Index, func: *WasmBuilder.Function) !void {
+//     const block_ty = self.getType(block_index) orelse return error.TypeNotFound;
+//     var iter = self.iterList(block_ty.block.instructions);
 
-    while (iter.next()) |inst_index| {
-        const inst = self.mir.instructions.items[inst_index];
-        switch (inst.op) {
-            .param => {
-                // const param_type = self.getType(inst.data.param_declaration.type) orelse return error.TypeNotFound;
-                const ty = self.getType(inst.type) orelse return error.TypeNotFound;
-                //             _ = try func_wip.pushParam(.i32);
-                // std.debug.print("param: {s}\n", .{@tagName(inst.type)});
-                _ = try func.pushParam(switch (ty.param.type) {
-                    .i32 => .i32,
-                    .i64 => .i64,
-                    .f32 => .f32,
-                    .f64 => .f64,
-                    else => |t| {
-                        std.debug.panic("unimplemented param type: {}", .{t});
-                    },
-                });
-            },
-            .local => {
-                try func.pushLocal(switch (inst.type) {
-                    .i32 => .i32,
-                    .i64 => .i64,
-                    .f32 => .f32,
-                    .f64 => .f64,
-                    else => {
-                        std.debug.panic("unimplemented local type: {s}", .{@tagName(inst.type)});
-                    },
-                });
-            },
-            .constant => {
-                if (self.getValue(inst.value)) |value| {
-                    switch (value) {
-                        .float => |float| {
-                            _ = try func.pushInstruction(switch (inst.type) {
-                                .f32 => .{ .f32_const = @floatCast(float) },
-                                .f64 => .{ .f64_const = float },
-                                .i32 => .{ .i32_const = @intFromFloat(float) },
-                                .i64 => .{ .i64_const = @intFromFloat(float) },
-                                else => unreachable,
-                            });
-                        },
-                        .integer => |integer| {
-                            _ = try func.pushInstruction(switch (inst.type) {
-                                .f64 => .{ .f64_const = @floatFromInt(integer) },
-                                .f32 => .{ .f32_const = @floatFromInt(integer) },
-                                .i32 => .{ .i32_const = @intCast(integer) },
-                                .i64 => .{ .i64_const = integer },
+//     while (iter.next()) |inst_index| {
+//         const inst = self.mir.instructions.items[inst_index];
+//         switch (inst.op) {
+//             .param => {
+//                 // const param_type = self.getType(inst.data.param_declaration.type) orelse return error.TypeNotFound;
+//                 const ty = self.getType(inst.type) orelse return error.TypeNotFound;
+//                 //             _ = try func_wip.pushParam(.i32);
+//                 // std.debug.print("param: {s}\n", .{@tagName(inst.type)});
+//                 _ = try func.pushParam(switch (ty.param.type) {
+//                     .i32 => .i32,
+//                     .i64 => .i64,
+//                     .f32 => .f32,
+//                     .f64 => .f64,
+//                     else => |t| {
+//                         std.debug.panic("unimplemented param type: {}", .{t});
+//                     },
+//                 });
+//             },
+//             .local => {
+//                 try func.pushLocal(switch (inst.type) {
+//                     .i32 => .i32,
+//                     .i64 => .i64,
+//                     .f32 => .f32,
+//                     .f64 => .f64,
+//                     else => {
+//                         std.debug.panic("unimplemented local type: {s}", .{@tagName(inst.type)});
+//                     },
+//                 });
+//             },
+//             .constant => {
+//                 if (self.getValue(inst.value)) |value| {
+//                     switch (value) {
+//                         .float => |float| {
+//                             _ = try func.pushInstruction(switch (inst.type) {
+//                                 .f32 => .{ .f32_const = @floatCast(float) },
+//                                 .f64 => .{ .f64_const = float },
+//                                 .i32 => .{ .i32_const = @intFromFloat(float) },
+//                                 .i64 => .{ .i64_const = @intFromFloat(float) },
+//                                 else => unreachable,
+//                             });
+//                         },
+//                         .integer => |integer| {
+//                             _ = try func.pushInstruction(switch (inst.type) {
+//                                 .f64 => .{ .f64_const = @floatFromInt(integer) },
+//                                 .f32 => .{ .f32_const = @floatFromInt(integer) },
+//                                 .i32 => .{ .i32_const = @intCast(integer) },
+//                                 .i64 => .{ .i64_const = integer },
 
-                                else => {
-                                    std.debug.panic("unimplemented integer type: {s}", .{@tagName(inst.type)});
-                                },
-                            });
-                        },
+//                                 else => {
+//                                     std.debug.panic("unimplemented integer type: {s}", .{@tagName(inst.type)});
+//                                 },
+//                             });
+//                         },
 
-                        else => {
-                            @panic("unimplemented");
-                        },
-                    }
-                } else {
-                    @panic("Value not found");
-                }
-            },
-            .param_get => {
-                const param_inst = self.mir.instructions.items[inst.data.instruction];
-                _ = try func.pushInstruction(.{
-                    .local_get = param_inst.data.scoped.index,
-                });
-            },
-            .local_get => {
-                const local_inst = self.mir.instructions.items[inst.data.instruction];
-                _ = try func.pushInstruction(.{ .local_get = local_inst.data.scoped.index });
-            },
-            // .global_get => {
-            // _ = try func.pushInstruction(.{ .global_get = inst.data.scoped.index.? });
-            // },
-            inline .add,
-            .sub,
-            .mul,
-            .div,
-            .gt,
-            .lt,
-            .eq,
-            .ne,
-            => |tag| {
-                const lhs_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
-                // const rhs_inst = self.mir.instructions.items[inst.data.bin_op.rhs];
-                switch (lhs_inst.type) {
-                    inline .i32, .f64, .i64, .f32 => |type_tag| {
-                        const key = @tagName(type_tag) ++ "_" ++ @tagName(tag);
-                        _ = try func.pushInstruction(@unionInit(
-                            WasmBuilder.Instruction,
-                            switch (tag) {
-                                .lt, .gt => switch (type_tag) {
-                                    .i32, .i64 => key ++ "_s",
-                                    // .f32, .f64 => @tagName(tag),
-                                    else => key,
-                                },
-                                else => key,
-                            },
-                            {},
-                        ));
-                    },
-                    else => {
-                        std.debug.panic("unimplemented type: {s}", .{@tagName(inst.type)});
-                    },
-                }
-            },
-            // .gt => {
-            //     switch (inst.type) {
-            //         .number => {
-            //             _ = try func.pushInstruction(.{ .f64_gt = {} });
-            //         },
-            //         else => {
-            //             std.debug.panic("unimplemented gt type: {s}", .{@tagName(inst.type)});
-            //         },
-            //     }
-            // },
-            .ret => {
-                _ = try func.pushInstruction(.{ .@"return" = {} });
-            },
-            .if_expr => {
-                _ = try func.pushInstruction(.{ .@"if" = .empty });
-                try self.translateBlockInto(inst.data.if_expr.then_body, func);
-                if (inst.data.if_expr.else_body) |else_body| {
-                    _ = try func.pushInstruction(.{ .@"else" = {} });
-                    try self.translateBlockInto(else_body, func);
-                }
-                _ = try func.pushInstruction(.{ .end = {} });
-            },
-            .local_set => {
-                const local_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
+//                         else => {
+//                             @panic("unimplemented");
+//                         },
+//                     }
+//                 } else {
+//                     @panic("Value not found");
+//                 }
+//             },
+//             .param_get => {
+//                 const param_inst = self.mir.instructions.items[inst.data.instruction];
+//                 _ = try func.pushInstruction(.{
+//                     .local_get = param_inst.data.scoped.index,
+//                 });
+//             },
+//             .local_get => {
+//                 const local_inst = self.mir.instructions.items[inst.data.instruction];
+//                 _ = try func.pushInstruction(.{ .local_get = local_inst.data.scoped.index });
+//             },
+//             // .global_get => {
+//             // _ = try func.pushInstruction(.{ .global_get = inst.data.scoped.index.? });
+//             // },
+//             inline .add,
+//             .sub,
+//             .mul,
+//             .div,
+//             .gt,
+//             .lt,
+//             .eq,
+//             .ne,
+//             => |tag| {
+//                 const lhs_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
+//                 // const rhs_inst = self.mir.instructions.items[inst.data.bin_op.rhs];
+//                 switch (lhs_inst.type) {
+//                     inline .i32, .f64, .i64, .f32 => |type_tag| {
+//                         const key = @tagName(type_tag) ++ "_" ++ @tagName(tag);
+//                         _ = try func.pushInstruction(@unionInit(
+//                             WasmBuilder.Instruction,
+//                             switch (tag) {
+//                                 .lt, .gt => switch (type_tag) {
+//                                     .i32, .i64 => key ++ "_s",
+//                                     // .f32, .f64 => @tagName(tag),
+//                                     else => key,
+//                                 },
+//                                 else => key,
+//                             },
+//                             {},
+//                         ));
+//                     },
+//                     else => {
+//                         std.debug.panic("unimplemented type: {s}", .{@tagName(inst.type)});
+//                     },
+//                 }
+//             },
+//             // .gt => {
+//             //     switch (inst.type) {
+//             //         .number => {
+//             //             _ = try func.pushInstruction(.{ .f64_gt = {} });
+//             //         },
+//             //         else => {
+//             //             std.debug.panic("unimplemented gt type: {s}", .{@tagName(inst.type)});
+//             //         },
+//             //     }
+//             // },
+//             .ret => {
+//                 _ = try func.pushInstruction(.{ .@"return" = {} });
+//             },
+//             .if_expr => {
+//                 _ = try func.pushInstruction(.{ .@"if" = .empty });
+//                 try self.translateBlockInto(inst.data.if_expr.then_body, func);
+//                 if (inst.data.if_expr.else_body) |else_body| {
+//                     _ = try func.pushInstruction(.{ .@"else" = {} });
+//                     try self.translateBlockInto(else_body, func);
+//                 }
+//                 _ = try func.pushInstruction(.{ .end = {} });
+//             },
+//             .local_set => {
+//                 const local_inst = self.mir.instructions.items[inst.data.bin_op.lhs];
 
-                // std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
-                //     inst.data.binOp.lhs,
-                //     @tagName(local_inst.op),
-                //     @tagName(local_inst.data),
-                // });
-                // switch (local_inst.op) {
-                _ = try func.pushInstruction(.{ .local_set = local_inst.data.scoped.index });
-            },
+//                 // std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
+//                 //     inst.data.binOp.lhs,
+//                 //     @tagName(local_inst.op),
+//                 //     @tagName(local_inst.data),
+//                 // });
+//                 // switch (local_inst.op) {
+//                 _ = try func.pushInstruction(.{ .local_set = local_inst.data.scoped.index });
+//             },
 
-            .loop => {
-                _ = try func.pushInstruction(.{ .loop = .empty });
-                try self.translateBlockInto(inst.data.loop.body, func);
-                _ = try func.pushInstruction(.{ .end = {} });
-            },
-            .br => {
-                _ = try func.pushInstruction(.{ .br = 1 });
-            },
-            .call => {
-                const callee = self.declaration_map.get(inst.data.call.callee) orelse unreachable;
-                _ = try func.pushInstruction(.{
-                    .call = callee,
-                });
-            },
-            else => {
-                std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
-                    inst_index,
-                    @tagName(inst.op),
-                    @tagName(inst.data),
-                });
-            },
-        }
-    }
-}
+//             .loop => {
+//                 _ = try func.pushInstruction(.{ .loop = .empty });
+//                 try self.translateBlockInto(inst.data.loop.body, func);
+//                 _ = try func.pushInstruction(.{ .end = {} });
+//             },
+//             .br => {
+//                 _ = try func.pushInstruction(.{ .br = 1 });
+//             },
+//             .call => {
+//                 const callee = self.declaration_map.get(inst.data.call.callee) orelse unreachable;
+//                 _ = try func.pushInstruction(.{
+//                     .call = callee,
+//                 });
+//             },
+//             else => {
+//                 std.debug.panic("Unimplemented instruction: #{d} .{s} .{s}", .{
+//                     inst_index,
+//                     @tagName(inst.op),
+//                     @tagName(inst.data),
+//                 });
+//             },
+//         }
+//     }
+// }

@@ -37,6 +37,7 @@ pub const Instruction = union(enum) {
     @"return": void,
     local_get: u32,
     local_set: u32,
+    local_tee: u32,
     global_get: u32,
     global_set: u32,
     end: void,
@@ -102,10 +103,39 @@ pub const Instruction = union(enum) {
 
     loop: Type,
 
+    i32_store: MemOp,
+    i64_store: MemOp,
+    f32_store: MemOp,
+    f64_store: MemOp,
+    i32_store8: MemOp,
+    i32_store16: MemOp,
+    i64_store8: MemOp,
+    i64_store16: MemOp,
+    i64_store32: MemOp,
+
+    i32_load: MemOp,
+    i64_load: MemOp,
+    f32_load: MemOp,
+    f64_load: MemOp,
+    i32_load8_s: MemOp,
+    i32_load8_u: MemOp,
+    i32_load16_s: MemOp,
+    i32_load16_u: MemOp,
+    i64_load8_s: MemOp,
+    i64_load8_u: MemOp,
+    i64_load16_s: MemOp,
+    i64_load16_u: MemOp,
+    i64_load32_s: MemOp,
+    i64_load32_u: MemOp,
+
     // Memory instructions
 
     pub const BinOp = enum { add, sub, mul, div, mod };
 
+    pub const MemOp = struct {
+        offset: u8 = 0,
+        alignment: ?u8 = null,
+    };
     pub const END: Instruction = .{ .end = {} };
     pub fn writeInto(self: Instruction, section: *Section) !void {
         switch (self) {
@@ -118,6 +148,10 @@ pub const Instruction = union(enum) {
             },
             .local_set => |index| {
                 try section.writeByte(0x21);
+                try section.write(index);
+            },
+            .local_tee => |index| {
+                try section.writeByte(0x22);
                 try section.write(index);
             },
             .global_get => |index| {
@@ -213,6 +247,123 @@ pub const Instruction = union(enum) {
                 try section.writeByte(0x0c);
                 try section.write(index);
             },
+
+            .i32_store => |mem| {
+                try section.writeByte(0x36);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
+            .i64_store => |mem| {
+                try section.writeByte(0x37);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 8);
+            },
+            .f32_store => |mem| {
+                try section.writeByte(0x38);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
+            .f64_store => |mem| {
+                try section.writeByte(0x39);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 8);
+            },
+            .i32_store8 => |mem| {
+                try section.writeByte(0x3a);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 1);
+            },
+            .i32_store16 => |mem| {
+                try section.writeByte(0x3b);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 2);
+            },
+            .i64_store8 => |mem| {
+                try section.writeByte(0x3c);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 1);
+            },
+            .i64_store16 => |mem| {
+                try section.writeByte(0x3d);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 2);
+            },
+            .i64_store32 => |mem| {
+                try section.writeByte(0x3e);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
+
+            .i32_load => |mem| {
+                try section.writeByte(0x28);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
+            .i64_load => |mem| {
+                try section.writeByte(0x29);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 8);
+            },
+            .f32_load => |mem| {
+                try section.writeByte(0x2a);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
+            .f64_load => |mem| {
+                try section.writeByte(0x2b);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 8);
+            },
+            .i32_load8_s => |mem| {
+                try section.writeByte(0x2c);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 1);
+            },
+            .i32_load8_u => |mem| {
+                try section.writeByte(0x2d);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 1);
+            },
+            .i32_load16_s => |mem| {
+                try section.writeByte(0x2e);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 2);
+            },
+            .i32_load16_u => |mem| {
+                try section.writeByte(0x2f);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 2);
+            },
+            .i64_load8_s => |mem| {
+                try section.writeByte(0x30);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 1);
+            },
+            .i64_load8_u => |mem| {
+                try section.writeByte(0x31);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 1);
+            },
+            .i64_load16_s => |mem| {
+                try section.writeByte(0x32);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 2);
+            },
+            .i64_load16_u => |mem| {
+                try section.writeByte(0x33);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 2);
+            },
+            .i64_load32_s => |mem| {
+                try section.writeByte(0x34);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
+            .i64_load32_u => |mem| {
+                try section.writeByte(0x35);
+                try section.writeByte(mem.offset);
+                try section.writeByte(mem.alignment orelse 4);
+            },
         }
     }
     pub fn toWat(self: Instruction, writer: *WatWriter) !void {
@@ -266,6 +417,16 @@ pub const Instruction = union(enum) {
             .f32_gt => try writer.write("f32.gt"),
 
             .f64_eq => try writer.write("f64.eq"),
+
+            .i32_store => try writer.write("i32.store"),
+            .i64_store => try writer.write("i64.store"),
+            .f32_store => try writer.write("f32.store"),
+            .f64_store => try writer.write("f64.store"),
+            .i32_store8 => try writer.write("i32.store8"),
+            .i32_store16 => try writer.write("i32.store16"),
+            .i64_store8 => try writer.write("i64.store8"),
+            .i64_store16 => try writer.write("i64.store16"),
+            .i64_store32 => try writer.write("i64.store32"),
             else => try writer.print("UNIMPLEMENTED: {s}", .{@tagName(self)}),
         }
     }
@@ -287,7 +448,7 @@ pub const Function = struct {
     module: *Module,
     locals: Array(Local),
     @"export": bool = false,
-    local_count: usize = 0,
+    local_count: u32 = 0,
 
     pub fn init(module: *Module, index: usize) Function {
         return .{
@@ -312,19 +473,20 @@ pub const Function = struct {
     pub fn pushResult(self: *Function, result: Type) !void {
         try self.results.append(result);
     }
-    pub fn pushLocal(self: *Function, value_type: Type) !void {
+    pub fn pushLocal(self: *Function, value_type: Type) !u32 {
         const prev = self.locals.items.len;
-        self.local_count += 1;
+        defer self.local_count += 1;
         if (self.locals.items.len > 0) {
             const last = self.locals.items[prev - 1];
             if (last.type == value_type) {
                 self.locals.items[prev - 1].count += 1;
-                return;
+                return self.local_count;
             }
         }
         const local_count: u32 = 1;
         const local = Local{ .count = local_count, .type = value_type };
         try self.locals.append(local);
+        return self.local_count;
     }
     pub fn getFunctionType(self: Function) FunctionType {
         return .{ .params = self.params.items, .results = self.results.items };
@@ -383,6 +545,10 @@ pub const Global = struct {
         self.module.globals.items[self.index] = self.*;
     }
 };
+const Memory = struct {
+    initial: u32,
+    maximum: ?u32 = null,
+};
 
 const Array = std.ArrayList;
 pub const Module = struct {
@@ -393,6 +559,7 @@ pub const Module = struct {
     function_types: std.AutoArrayHashMapUnmanaged(u64, FunctionTypeEntry) = .{},
     functions: std.ArrayListUnmanaged(Function) = .{},
     globals: std.ArrayListUnmanaged(Global) = .{},
+    memories: std.ArrayListUnmanaged(Memory) = .{},
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
     scratch: std.ArrayListUnmanaged(u8) = .{},
@@ -424,6 +591,11 @@ pub const Module = struct {
         const index = self.globals.items.len;
         try self.globals.append(self.arena.allocator(), undefined);
         return Global.init(self, index, name, ty);
+    }
+    pub fn pushMemory(self: *Module, memory: Memory) !u32 {
+        const index = self.memories.items.len;
+        try self.memories.append(self.arena.allocator(), memory);
+        return @intCast(index);
     }
     pub fn toBytes(self: *Module, writer: std.io.AnyWriter) !void {
         // Magic number
@@ -489,6 +661,36 @@ pub const Module = struct {
 
             try functions_section.toBytes(writer);
         }
+
+        // Memory section
+        // 05                 ; Section ID for Memory Section
+        // 01                 ; Section size (1 bytes)
+        // 01                 ; Memory count (1 memory)
+
+        // 0x01               ; Flag (0x01 = has maximum, 0x00 = no maximum)
+        // 0x00               ; Initial size (0)
+        // 0x00               ; Maximum size (0) // only if if has maximum
+
+        const memories_count = self.memories.items.len;
+        if (memories_count > 0) {
+            var memories_section = Section.init(self.allocator, self, .memory);
+            defer memories_section.deinit();
+            try memories_section.write(memories_count);
+
+            for (self.memories.items) |memory| {
+                if (memory.maximum) |max| {
+                    try memories_section.writeByte(0x01);
+                    try memories_section.write(memory.initial);
+                    try memories_section.write(max);
+                } else {
+                    try memories_section.writeByte(0x00);
+                    try memories_section.write(memory.initial);
+                }
+            }
+            try memories_section.toBytes(writer);
+        }
+
+        // Global section
         // Global section
         // 06                 ; Section ID for Global Section
         // 01                 ; Section size (1 bytes)

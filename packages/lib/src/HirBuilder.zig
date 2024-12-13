@@ -138,11 +138,21 @@ const HirBuilderError = error{
     SymbolNotFound,
 } || std.io.AnyWriter.Error;
 
+pub fn genLoadedInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
+    const inst_index = try self.genInstruction(scope, node_index);
+    const inst = self.hir.insts.items[inst_index];
+    switch (inst) {
+        .get_element_pointer, .get_property_pointer, .alloc => {
+            return scope.pushInstruction(.{ .load = .{ .operand = inst_index } });
+        },
+        else => return inst_index,
+    }
+}
 pub fn genBinaryExpression(self: *Self, comptime tag: Ast.Node.Tag, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
     const nav = Ast.Navigator.init(self.hir.ast, node_index);
     const data = @field(nav.data.*, @tagName(tag));
-    const lhs_inst = try self.genInstruction(scope, data.lhs);
-    const rhs_inst = try self.genInstruction(scope, data.rhs);
+    const lhs_inst = try self.genLoadedInstruction(scope, data.lhs);
+    const rhs_inst = try self.genLoadedInstruction(scope, data.rhs);
     const bin: Hir.Inst.BinaryOp = .{ .lhs = lhs_inst, .rhs = rhs_inst };
     var inst = comptime @unionInit(Hir.Inst, @tagName(tag), undefined);
     @field(inst, @tagName(tag)) = bin;
@@ -196,14 +206,20 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 // _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = cast_value_inst } });
                 // return local_inst;
             }
-            const ty_inst_index = if (ty_node == 0) try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst_index } }) else try self.genInstruction(scope, ty_node);
+            const ty_inst_index = if (ty_node == 0) null else try self.genInstruction(scope, ty_node);
             // const ty_inst = self.hir.insts.items[ty_inst_index];
 
+            // try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst_index } })
             const local_inst = blk: {
                 const value_inst = &self.hir.insts.items[value_inst_index];
                 switch (value_inst.*) {
                     .alloc => {
                         value_inst.alloc.mutable = mutable;
+                        if (ty_inst_index) |index| {
+                            const ty_as_pointer_inst = try scope.pushInstruction(.{ .ty_pointer = .{ .operand = index } });
+                            _ = try scope.pushInstruction(.{ .as = .{ .lhs = value_inst_index, .rhs = ty_as_pointer_inst } });
+                        }
+
                         break :blk value_inst_index;
                     },
                     else => {},
@@ -212,7 +228,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     .alloc = .{
                         // .name_node = name_node,
                         .mutable = mutable,
-                        .type = ty_inst_index,
+                        .type = ty_inst_index orelse try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst_index } }),
                     },
                 });
 
@@ -286,7 +302,8 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     return try scope.pushInstruction(.{ .local_get = .{ .operand = inst_index } });
                 },
                 .alloc => {
-                    return try scope.pushInstruction(.{ .load = .{ .operand = inst_index } });
+                    return inst_index;
+                    // return try scope.pushInstruction(.{ .load = .{ .operand = inst_index } });
                 },
                 else => {},
             }
@@ -299,7 +316,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         .ret_expression => |ret_expr| {
             return try scope.pushInstruction(.{
                 .ret = .{
-                    .operand = if (ret_expr.node == 0) 0 else try self.genInstruction(scope, ret_expr.node),
+                    .operand = if (ret_expr.node == 0) 0 else try self.genLoadedInstruction(scope, ret_expr.node),
                 },
             });
         },
@@ -389,31 +406,31 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
         .array_prop_access => {
             const array_inst = try self.genInstruction(scope, nav.data.array_prop_access.lhs);
-            const index_inst = try self.genInstruction(scope, nav.data.array_prop_access.rhs);
-            if (self.context == .assign_lhs) {
-                return try scope.pushInstruction(.{ .get_element_pointer = .{
-                    .pointer = array_inst,
-                    .index = index_inst,
-                } });
-            }
-            return try scope.pushInstruction(.{ .get_element_value = .{
+            const index_inst = try self.genLoadedInstruction(scope, nav.data.array_prop_access.rhs);
+            // if (self.context == .assign_lhs) {
+            return try scope.pushInstruction(.{ .get_element_pointer = .{
                 .pointer = array_inst,
                 .index = index_inst,
             } });
+            // }
+            // return try scope.pushInstruction(.{ .get_element_value = .{
+            //     .pointer = array_inst,
+            //     .index = index_inst,
+            // } });
         },
         .prop_access => {
             const lhs_inst = try self.genInstruction(scope, nav.data.prop_access.lhs);
             const slice = self.hir.ast.getNodeSlice(nav.data.prop_access.rhs);
-            if (self.context == .assign_lhs) {
-                return try scope.pushInstruction(.{ .get_property_pointer = .{
-                    .base = lhs_inst,
-                    .property_name = slice,
-                } });
-            }
-            return try scope.pushInstruction(.{ .get_property_value = .{
+            // if (self.context == .assign_lhs) {
+            return try scope.pushInstruction(.{ .get_property_pointer = .{
                 .base = lhs_inst,
                 .property_name = slice,
             } });
+            // }
+            // return try scope.pushInstruction(.{ .get_property_value = .{
+            //     .base = lhs_inst,
+            //     .property_name = slice,
+            // } });
         },
         .fn_call => {
             // const callee = try self.genInstruction(scope, nav.data.fn_call.callee);

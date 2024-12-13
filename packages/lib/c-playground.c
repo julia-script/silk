@@ -14,17 +14,32 @@
 //   }
 //   return a;
 // }
+
 struct MyStruct {
   char varSignedChar;
   unsigned char varUnsignedChar;
   int varInt;
   unsigned int varUnsignedInt;
 };
+int len(int arr[]) { return 1; }
 // extern void p(char* fmt, ...);
-char playground(char n) {
-  char arr[10];
-  arr[0] = 1;
-  arr[1] = 2;
-  arr[2] = 3;
-  return arr[0] + arr[1] + arr[2];
+void playground() {
+  int arr[4] = {1, 2, 3, 4};
+  int arr2[4] = {1, 2, 3, 4};
+  len(arr);
+  // int i = 0;
+  // int sum = 0;
+  // while (i < len(arr)) {
+  //   sum = sum + arr[i];
+  //   i = i + 1;
+  // }
+  // return sum;
+  // //   var arr :[1]i32 = [1]i32 {3}
+  // var i: usize = 0;
+  // var sum: i32 = 0;
+  // while (i < arr.len) {
+  //       sum = sum + arr[i];
+  //       i = i + 1;
+  // }
+  // return sum;
 }

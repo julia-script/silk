@@ -13,10 +13,8 @@
 //   return __stack_alloc((1 + size) * 4);
 // }
 fn sum_array() i32 {
-    // var item: i32 = 3
-
-    var arr :[1]i32 = [1]i32 {3}
-    var i: usize = 0;
+    var arr :[4]i32 = [4]i32 {1, 2, 3, 4}
+    var i: i32 = 0;
     var sum: i32 = 0;
     while (i < arr.len) {
           sum = sum + arr[i];
