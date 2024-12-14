@@ -22,8 +22,14 @@ pub fn InternedLists(T: type) type {
             pub fn slice(self: *WorkingList) []const T {
                 return self.list.items;
             }
+            pub fn len(self: *WorkingList) usize {
+                return self.list.items.len;
+            }
             pub fn commit(self: *WorkingList) !Range {
                 defer self.deinit();
+                if (self.list.items.len == 0) {
+                    return Range.empty;
+                }
                 const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(self.list.items));
                 const existing = try self.parent.interned_map.getOrPut(self.parent.allocator, hash);
                 if (existing.found_existing) {
@@ -63,6 +69,9 @@ pub fn InternedLists(T: type) type {
         pub fn getSlice(self: *Self, range: Range) []const T {
             const start: usize = @intCast(range.start);
             const len: usize = @intCast(range.len);
+            if (len == 0) {
+                return &.{};
+            }
             return self.lists.items[start .. start + len];
         }
         pub fn deinit(self: *Self) void {

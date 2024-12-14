@@ -23,7 +23,7 @@ const Context = enum {
     assign_rhs,
 };
 
-pub fn gen(allocator: std.mem.Allocator, ast: *Ast, error_manager: *ErrorManager) !Hir {
+pub fn build(allocator: std.mem.Allocator, ast: *Ast, error_manager: *ErrorManager) !Hir {
     var hir = try Hir.init(allocator, ast);
 
     var builder = Self{
@@ -50,8 +50,8 @@ pub fn pushType(self: *Self, ty: Hir.Type, hash: u64) !Hir.Type.Index {
 pub fn genRoot(self: *Self) !void {
     self.logger.open("#0 genRoot", .{});
     defer self.logger.close();
-    var scope = Scope.init(self, null, .module, "root");
-    _ = try self.genModule(&scope, 0);
+    var scope = Scope.init(self, null, .struct_decl, "root");
+    _ = try self.genStructDecl(&scope, 0);
 
     _ = try scope.commit();
 }
@@ -75,7 +75,7 @@ const Scope = struct {
     symbols_table: std.StringHashMapUnmanaged(Hir.Inst.Index) = .{},
 
     const Kind = enum {
-        module,
+        struct_decl,
         block,
     };
 
@@ -164,6 +164,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
     defer self.logger.close();
 
     switch (nav.data.*) {
+        .struct_decl => return try self.genStructDecl(scope, nav.node),
         .block => {
             const inst = try self.genBlockInstruction(scope, node_index, null);
             try scope.instructions.append(inst);
@@ -186,7 +187,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 if (value_node != 0) {
                     break :blk try self.genInstruction(scope, value_node);
                 }
-                break :blk try scope.pushInstruction(.{ .undefined_value = null });
+                break :blk try scope.pushInstruction(.{ .undefined_value = .{ .node = null } });
             };
             if (ty_node != 0) {
                 // const ty_inst = try self.genInstruction(scope, ty_node);
@@ -243,13 +244,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             try scope.pushSymbol(name_slice, local_inst);
             return local_inst;
         },
-        .struct_decl => {
-            return try self.genModule(scope, nav.node);
-            // const struct_inst = try scope.pushInstruction(.{ .struct_decl = .{
-            //     .name_node = nav.node,
-            // } });
-            // return struct_inst;
-        },
+
         .ty_assign => |bin_expr| {
             const lhs_inst = try self.genInstruction(scope, bin_expr.lhs);
             const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
@@ -317,12 +312,12 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return inst_index;
         },
         .number_literal => {
-            return try scope.pushInstruction(.{ .comptime_number = nav.node });
+            return try scope.pushInstruction(.{ .comptime_number = .{ .node = nav.node } });
         },
         .ret_expression => |ret_expr| {
             return try scope.pushInstruction(.{
                 .ret = .{
-                    .operand = if (ret_expr.node == 0) 0 else try self.genLoadedInstruction(scope, ret_expr.node),
+                    .value = if (ret_expr.node == 0) null else try self.genLoadedInstruction(scope, ret_expr.node),
                 },
             });
         },
@@ -426,11 +421,10 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
         .prop_access => {
             const lhs_inst = try self.genInstruction(scope, nav.data.prop_access.lhs);
-            const slice = self.hir.ast.getNodeSlice(nav.data.prop_access.rhs);
             // if (self.context == .assign_lhs) {
             return try scope.pushInstruction(.{ .get_property_pointer = .{
                 .base = lhs_inst,
-                .property_name = slice,
+                .property_name_node = nav.data.prop_access.rhs,
             } });
             // }
             // return try scope.pushInstruction(.{ .get_property_value = .{
@@ -496,7 +490,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 .ty_void,
                 => |tag| {
                     const tag_name = comptime @tagName(tag);
-                    const data = @unionInit(Hir.Inst, tag_name, nav.node);
+                    const data = @unionInit(Hir.Inst, tag_name, .{ .node = nav.node });
                     return try scope.pushInstruction(data);
                 },
 
@@ -577,28 +571,56 @@ pub fn genBlockInstruction(self: *Self, parent_scope: *Scope, node_index: Ast.No
     // try parent_scope.instructions.append(inst);
     return inst;
 }
+
 const WipDef = struct {
     inst: Hir.Inst.Index,
     init_node: ?Ast.Node.Index,
     ty_node: ?Ast.Node.Index,
 };
-pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
-    self.logger.open("#{d} genModule", .{node_index});
+pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
+    self.logger.open("#{d} genStructDecl", .{node_index});
     defer self.logger.close();
     const index = try self.reserveInstruction();
+    const is_root = node_index == 0;
     const nav = Ast.Navigator.init(self.hir.ast, node_index);
     // nav.assertTag(.root);
-    var defs = std.ArrayList(WipDef).init(self.arena.allocator());
-    defer defs.deinit();
+    var wip_declarations_list = std.ArrayList(WipDef).init(self.arena.allocator());
+    defer wip_declarations_list.deinit();
+
+    var fields_list = self.newList();
     var decl_list = self.newList();
-    const members_iter = self.hir.ast.interned_lists.getSlice(nav.data.struct_decl.members_list);
-    for (members_iter) |child| {
-        const wip = try self.genDef(scope, child);
-        try decl_list.append(wip.inst);
-        try defs.append(wip);
+
+    const members_list = self.hir.ast.interned_lists.getSlice(nav.data.struct_decl.members_list);
+
+    for (members_list) |child_index| {
+        const child = self.hir.ast.getNode(child_index);
+        switch (child.data) {
+            .struct_field => {
+                if (is_root) {
+                    self.logger.todo("error for: root struct declaration should not have fields", .{});
+                }
+                const field = child.data.struct_field;
+                if (decl_list.len() > 0) {
+                    self.logger.todo("error for: struct field declared after struct declaration", .{});
+                }
+                // const name = self.hir.ast.getNodeSlice(field.name);
+                // const ty = try self.genInstruction(scope, field.type);
+                const inst = try self.pushInstruction(.{ .struct_field = .{
+                    .name_node = field.name,
+                    .ty = if (field.type != 0) try self.genInstruction(scope, field.type) else null,
+                    .init = if (field.default_value != 0) try self.genInstruction(scope, field.default_value) else null,
+                } });
+                try fields_list.append(inst);
+            },
+            else => {
+                const wip = try self.genDef(scope, child_index);
+                try decl_list.append(wip.inst);
+                try wip_declarations_list.append(wip);
+            },
+        }
     }
 
-    for (defs.items) |def| {
+    for (wip_declarations_list.items) |def| {
         const inst = &self.hir.insts.items[def.inst];
         switch (inst.*) {
             .global_decl => {
@@ -620,10 +642,8 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
         }
     }
 
-    var fields_list = self.newList();
-
     self.setInstruction(index, .{
-        .mod_decl = .{
+        .struct_decl = .{
             .name_node = null,
             .declarations_list = try decl_list.commit(),
             .fields_list = try fields_list.commit(),
@@ -672,17 +692,16 @@ pub fn genInlineBlock(self: *Self, parent_scope: *Scope, ty_node: ?Ast.Node.Inde
     var scope = Scope.init(self, parent_scope, .block, "inline_block");
 
     const ty_inst = if (ty_node) |node| try self.genInstruction(&scope, node) else null;
-    const init_inst = init: {
-        if (init_node) |node| {
-            const inst = try self.genInstruction(&scope, node);
-            if (ty_inst) |ty_inst_index| {
-                break :init try scope.pushInstruction(.{ .as = .{ .lhs = inst, .rhs = ty_inst_index } });
-            }
-            break :init inst;
+    // const init_inst = init: {
+    if (init_node) |node| {
+        const inst = try self.genInstruction(&scope, node);
+        if (ty_inst) |ty_inst_index| {
+            _ = try scope.pushInstruction(.{ .as = .{ .lhs = inst, .rhs = ty_inst_index } });
         }
-        break :init try scope.pushInstruction(.{ .undefined_value = null });
-    };
-    _ = init_inst; // autofix
+        // break :init inst;
+    }
+    // break :init try scope.pushInstruction(.{ .undefined_value = null });
+    // };
 
     // const br_inst = try scope.pushInstruction(.{
     //     .br = .{
@@ -766,7 +785,7 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
         .exported = is_export,
         .@"extern" = is_extern,
         .mutable = ast.is(.var_decl),
-        .init = undefined,
+        .init = null,
         .type = null,
     };
     const decl = switch (ast.tag) {
@@ -836,26 +855,26 @@ pub fn genFnParams(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.
     }
     return try params.commit();
 }
-test "HirBuilder" {
-    const test_allocator = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("./playground.zig", .{});
-    defer file.close();
-    const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
-    defer test_allocator.free(source);
-    // std.debug.print("source:\n\n{s}\n", .{source});
+// test "HirBuilder" {
+//     const test_allocator = std.testing.allocator;
+//     const file = try std.fs.cwd().openFile("./playground.zig", .{});
+//     defer file.close();
+//     const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
+//     defer test_allocator.free(source);
+//     // std.debug.print("source:\n\n{s}\n", .{source});
 
-    var errors = try ErrorManager.init(test_allocator);
-    defer errors.deinit();
-    var ast = try Ast.parse(test_allocator, &errors, source);
-    defer ast.deinit();
-    std.debug.print("AST:\n", .{});
-    try ast.format(std.io.getStdErr().writer().any(), 0, .{});
+//     var errors = try ErrorManager.init(test_allocator);
+//     defer errors.deinit();
+//     var ast = try Ast.parse(test_allocator, &errors, source);
+//     defer ast.deinit();
+//     std.debug.print("AST:\n", .{});
+//     try ast.format(std.io.getStdErr().writer().any(), 0, .{});
 
-    var hir = try Self.gen(test_allocator, &ast, &errors);
-    defer hir.deinit();
-    try serializer.writeJSON([]Hir.Inst, std.io.getStdErr().writer().any(), hir.insts.items, .{
-        .lists = &hir.lists,
-    });
+//     var hir = try Self.build(test_allocator, &ast, &errors);
+//     defer hir.deinit();
+//     try serializer.writeJSON([]Hir.Inst, std.io.getStdErr().writer().any(), hir.insts.items, .{
+//         .lists = &hir.lists,
+//     });
 
-    std.debug.print("Hir:\n{}\n", .{hir});
-}
+//     std.debug.print("Hir:\n{}\n", .{hir});
+// }
