@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 pub fn new(comptime T: type, comptime sentinel: T) type {
     return struct {
         list: Array(T) = .{},
-
         pub const Index = usize;
         const Self = @This();
 
@@ -50,6 +49,10 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
             }
         };
 
+        pub const ListRange = struct {
+            start: usize,
+            len: usize,
+        };
         pub const ListIter = struct {
             index: usize = 0,
             slice: []T,
@@ -98,6 +101,7 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
             try list.appendSlice(slice_);
             return try list.commit();
         }
+
         // pub fn fromSlice(slice: []const T) Self {
         //     return .{
         //         .list = .{ .items = slice },
@@ -113,7 +117,7 @@ pub fn new(comptime T: type, comptime sentinel: T) type {
 
 const expectEqualSlices = std.testing.expectEqualSlices;
 const expectEqual = std.testing.expectEqual;
-test "packed lists" {
+test "PackedLists" {
     const test_allocator = std.testing.allocator;
     var packed_list = try new(i32, 0).initCapacity(test_allocator, 10);
     defer packed_list.deinit(test_allocator);

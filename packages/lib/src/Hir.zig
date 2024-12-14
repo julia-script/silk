@@ -4,6 +4,7 @@ const PackedLists = @import("PackedLists.zig").new;
 const ErrorManager = @import("ErrorManager.zig");
 const Allocator = std.mem.Allocator;
 const Ast = @import("Ast.zig");
+const HirBuilder = @import("HirBuilder.zig");
 
 const shared = @import("shared.zig");
 const InternedStrings = @import("InternedStrings.zig");
@@ -11,7 +12,8 @@ const InternedSlice = InternedStrings.InternedSlice;
 const assert = std.debug.assert;
 const Self = @This();
 // pub const IrLists = PackedLists(u32, std.math.maxInt(u32));
-pub const Lists = PackedLists(u32, std.math.maxInt(u32));
+// pub const Lists = PackedLists(u32, std.math.maxInt(u32));
+pub const InternedLists = @import("interned-lists.zig").InternedLists(u32);
 
 // All arrays of indexes, just aliases to make usage intention clearer
 // pub const TypeLists = IrLists;
@@ -20,7 +22,7 @@ pub const Lists = PackedLists(u32, std.math.maxInt(u32));
 
 ast: *Ast,
 allocator: std.mem.Allocator,
-lists: Lists = .{},
+lists: InternedLists,
 insts: Array(Inst) = .{},
 
 // inst: Array(Inst) = .{},
@@ -32,10 +34,14 @@ pub fn init(allocator: Allocator, ast: *Ast) !Self {
     return .{
         .allocator = allocator,
         .ast = ast,
+        .lists = InternedLists.init(allocator),
     };
 }
+pub fn build(allocator: Allocator, ast: *Ast, errors: *ErrorManager) !Self {
+    return try HirBuilder.gen(allocator, ast, errors);
+}
 pub fn deinit(self: *Self) void {
-    self.lists.deinit(self.allocator);
+    self.lists.deinit();
     self.insts.deinit(self.allocator);
 }
 const Formater = struct {
@@ -72,8 +78,8 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         .mod_decl => |mod_decl| {
             try fmt.indent();
             try writer.writeAll("module {\n");
-            var declarations_iter = value.lists.iterList(mod_decl.declarations_list);
-            while (declarations_iter.next()) |declaration_index| {
+            const declarations_iter = value.lists.getSlice(mod_decl.declarations_list);
+            for (declarations_iter) |declaration_index| {
                 try formatInstruction(value, writer, options, declaration_index, indent + 1);
             }
             try fmt.indent();
@@ -104,9 +110,9 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
             try writer.writeAll(" ");
             try fmt.breakLine();
 
-            var params_iter = value.lists.iterList(fn_decl.params_list);
+            const params_iter = value.lists.getSlice(fn_decl.params_list);
 
-            while (params_iter.next()) |param_index| {
+            for (params_iter) |param_index| {
                 try formatInstruction(value, writer, options, param_index, fmt.level + 1);
             }
 
@@ -134,8 +140,8 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         .inline_block, .block => |block| {
             try fmt.indent();
             try writer.print("%{d} {s} {{\n", .{ inst_index, @tagName(inst) });
-            var instructions_iter = value.lists.iterList(block.instructions_list);
-            while (instructions_iter.next()) |instruction_index| {
+            const instructions_list = value.lists.getSlice(block.instructions_list);
+            for (instructions_list) |instruction_index| {
                 try formatInstruction(value, writer, options, instruction_index, indent + 1);
             }
             try fmt.indent();
@@ -292,12 +298,12 @@ pub fn formatInstruction(value: *Self, writer: std.io.AnyWriter, options: std.fm
         .fn_call => |fn_call| {
             try fmt.indent();
             try writer.print("%{d} = call %{d} ", .{ inst_index, fn_call.callee });
-            if (fn_call.args_list != 0) {
+            if (fn_call.args_list.len > 0) {
                 // try fmt.indent();
                 try writer.writeAll("with {\n");
-                var args_iter = value.lists.iterList(fn_call.args_list);
+                const args_list = value.lists.getSlice(fn_call.args_list);
                 fmt.level += 1;
-                while (args_iter.next()) |arg_index| {
+                for (args_list) |arg_index| {
                     try fmt.indent();
                     try writer.print("%{d}\n", .{arg_index});
                     // try formatInstruction(value, writer, options, arg_index, indent + 1);
@@ -506,7 +512,7 @@ pub const Inst = union(enum) {
     pub const Index = u32;
     pub const RootIndex: Index = 0;
     pub const Enum = std.meta.Tag(@This());
-    pub const List = usize;
+    pub const List = InternedLists.Range;
     pub const IfExpr = struct {
         cond: Index,
         then_body: Index,
@@ -545,7 +551,7 @@ pub const Inst = union(enum) {
     };
     pub const Block = struct {
         name_node: ?Ast.Node.Index,
-        instructions_list: List,
+        instructions_list: InternedLists.Range,
     };
     pub const GlobalDecl = struct {
         name_node: Ast.Node.Index,
@@ -589,3 +595,65 @@ pub const Definition = union(enum) {
         private,
     };
 };
+
+const Patience = @import("./patience_diff.zig");
+fn hirMatch(source: []const u8, instruction_index: Inst.Index, expected: []const u8) !void {
+    _ = instruction_index; // autofix
+    var stderr_writer = std.io.getStdErr().writer().any();
+    const test_allocator = std.testing.allocator;
+    var errors = try ErrorManager.init(test_allocator);
+    defer errors.deinit();
+    try stderr_writer.writeAll("\n");
+    try stderr_writer.writeAll("=" ** 50);
+    try stderr_writer.writeAll("\n");
+    try stderr_writer.writeAll(source);
+    try stderr_writer.writeAll("\n");
+    var ast = try Ast.parse(test_allocator, &errors, source);
+    defer ast.deinit();
+
+    var arr = std.ArrayList(u8).init(std.testing.allocator);
+    defer arr.deinit();
+    const writer = arr.writer().any();
+    var hir = try Self.build(test_allocator, &ast, &errors);
+    defer hir.deinit();
+    try writer.print("{}", .{hir});
+    // try hir.format(x, instruction_index, .{});
+
+    // try ast.formatNode(writer, node_index, 0, .{
+    //     .color = false,
+    //     .indent_size = 2,
+    //     .show_node_index = false,
+    //     .show_slice = false,
+    //     .show_token_range = false,
+    // });
+
+    // std.debug.print("{s}\n", .{arr.items});
+    var res = try Patience.diff(
+        std.testing.allocator,
+        arr.items,
+        expected,
+    );
+    defer res.deinit();
+    if (res.operations.len > 0) {
+        try stderr_writer.writeAll("\\\\");
+        for (arr.items) |c| {
+            try stderr_writer.writeByte(c);
+            if (c == '\n') {
+                try stderr_writer.writeAll("\\\\");
+            }
+        }
+        try stderr_writer.writeAll("\n");
+        try res.format(stderr_writer, .{
+            .color = true,
+        });
+        return error.TestFailed;
+    }
+}
+
+test "Hir" {
+    try hirMatch(
+        "fn main() void {}",
+        Inst.RootIndex,
+        "fn main() void {}\n",
+    );
+}

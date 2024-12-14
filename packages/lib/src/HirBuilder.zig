@@ -55,8 +55,8 @@ pub fn genRoot(self: *Self) !void {
 
     _ = try scope.commit();
 }
-pub fn newList(self: *Self) Hir.Lists.List {
-    return self.hir.lists.new(self.allocator);
+pub fn newList(self: *Self) Hir.InternedLists.WorkingList {
+    return self.hir.lists.new();
 }
 pub fn internNodeSlice(self: *Self, node_index: Ast.Node.Index) !InternedSlice {
     const tag = self.hir.ast.getNodeTag(node_index);
@@ -70,7 +70,7 @@ const Scope = struct {
     kind: Kind,
     parent: ?*Scope,
     builder: *Self,
-    instructions: Hir.Lists.List,
+    instructions: Hir.InternedLists.WorkingList,
 
     symbols_table: std.StringHashMapUnmanaged(Hir.Inst.Index) = .{},
 
@@ -89,7 +89,7 @@ const Scope = struct {
             .label = label,
         };
     }
-    pub fn commit(self: *Scope) !usize {
+    pub fn commit(self: *Scope) !Hir.InternedLists.Range {
         return try self.instructions.commit();
     }
     pub fn resolveSymbol(self: *Scope, name: []const u8) ?Hir.Inst.Index {
@@ -164,7 +164,6 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
     defer self.logger.close();
 
     switch (nav.data.*) {
-        .root => unreachable,
         .block => {
             const inst = try self.genBlockInstruction(scope, node_index, null);
             try scope.instructions.append(inst);
@@ -382,12 +381,12 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return try self.genInstruction(scope, nav.data.group.node);
         },
         .array_init => |array_init| {
-            var iter = self.hir.ast.node_lists.iterList(array_init.items_list);
+            const items_list = self.hir.ast.interned_lists.getSlice(array_init.items_list);
             var count: u32 = 0;
             const type_inst = try self.genInstruction(scope, array_init.type);
             const inst_index = try scope.reserveInstruction();
 
-            while (iter.next()) |item| {
+            for (items_list) |item| {
                 const item_inst = try self.genInstruction(scope, item);
                 const index_inst = try scope.pushInstruction(.{ .constant_int = .{
                     .value = count,
@@ -443,11 +442,11 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             // const callee = try self.genInstruction(scope, nav.data.fn_call.callee);
             const slice = nav.getNodeSlice();
             const callee = scope.resolveSymbolRecursively(slice) orelse self.logger.panic("Symbol not found: {s}", .{slice});
-            var args_iter = self.hir.ast.node_lists.iterList(nav.data.fn_call.args_list);
+            const args_iter = self.hir.ast.interned_lists.getSlice(nav.data.fn_call.args_list);
             const args_list: Hir.Inst.List = blk: {
-                if (nav.data.fn_call.args_list == 0) break :blk 0;
+                if (args_iter.len == 0) break :blk Hir.Inst.List.empty;
                 var list = self.newList();
-                while (args_iter.next()) |arg| {
+                for (args_iter) |arg| {
                     try list.append(try self.genInstruction(scope, arg));
                 }
                 break :blk try list.commit();
@@ -535,8 +534,8 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     const is_inline_block = !nav.is(.block);
     if (!is_inline_block) {
-        var statements_iter = self.hir.ast.node_lists.iterList(nav.data.block.list);
-        while (statements_iter.next()) |child| {
+        const statements_iter = self.hir.ast.interned_lists.getSlice(nav.data.block.list);
+        for (statements_iter) |child| {
             _ = try self.genInstruction(scope, child);
             // try scope.instructions.append(inst_index);
         }
@@ -592,8 +591,8 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
     var defs = std.ArrayList(WipDef).init(self.arena.allocator());
     defer defs.deinit();
     var decl_list = self.newList();
-    var iter = self.hir.ast.node_lists.iterList(nav.data.root.list);
-    while (iter.next()) |child| {
+    const members_iter = self.hir.ast.interned_lists.getSlice(nav.data.struct_decl.members_list);
+    for (members_iter) |child| {
         const wip = try self.genDef(scope, child);
         try decl_list.append(wip.inst);
         try defs.append(wip);
@@ -604,14 +603,6 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
         switch (inst.*) {
             .global_decl => {
                 if (inst.global_decl.is_fn) {
-                    // self.hir.insts.items[def.inst].global_decl.type = if (def.ty_node) |ty_node| try self.genInstruction(scope, ty_node) else null;
-                    // self.hir.insts.items[def.inst].global_decl.init = if (def.init_node) |init_node| try self.genInstruction(scope, init_node) else null;
-                    // if (def.init_node) |node| {
-                    //     const type_inst_index = try self.genInstruction(scope, node);
-                    //     self.hir.insts.items[def.inst].global_decl.type = type_inst_index;
-                    //     const type_inst = self.hir.insts.items[type_inst_index];
-                    //     self.hir.insts.items[def.inst].global_decl.init = type_inst.fn_decl.init;
-                    // }
                     const fn_decl_inst = try self.genFnDeclInstruction(
                         scope,
                         def.ty_node orelse unreachable,
@@ -627,19 +618,6 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
             },
             else => unreachable,
         }
-
-        // if (def.init_node) |node| {
-        //     // const init_inst = try self.genInstruction(scope, node);
-        //     inst.global_decl.init = try self.genInstruction(scope, node);
-        // }
-        // if (def.ty_node) |node| {
-        //     if (self.hir.ast.getNodeTag(node) == .fn_decl) { // True for fn decls
-        //         // assert.fmt(self.hir.ast.getNodeTag(node) == .fn_decl, "expected fn_decl, got {}", .{self.hir.ast.getNodeTag(node)});
-        //         inst.global_decl.type = inst.global_decl.init;
-        //         continue;
-        //     }
-        //     self.hir.insts.items[def.inst].global_decl.type = try self.genInstruction(scope, node);
-        // }
     }
 
     var fields_list = self.newList();
@@ -825,13 +803,13 @@ pub fn reserveInstruction(self: *Self) !Hir.Inst.Index {
 pub fn setInstruction(self: *Self, index: Hir.Inst.Index, instruction: Hir.Inst) void {
     self.hir.insts.items[index] = instruction;
 }
-pub fn genFnParams(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.List {
+pub fn genFnParams(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.InternedLists.Range {
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     nav.assertTag(.fn_proto);
     var params = self.newList();
-    var iter = self.hir.ast.node_lists.iterList(nav.data.fn_proto.params_list);
+    const params_iter = self.hir.ast.interned_lists.getSlice(nav.data.fn_proto.params_list);
 
-    while (iter.next()) |child| {
+    for (params_iter) |child| {
         var nav_param = Ast.Navigator.init(self.hir.ast, child);
         // const name_inst = try scope.pushInstruction(.{ .decl_param =  });
         const ty = try self.genInstruction(scope.parent.?, nav_param.data.fn_param.type);

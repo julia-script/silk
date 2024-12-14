@@ -12,9 +12,11 @@ const Ast = @This();
 const Lexer = @import("Lexer.zig");
 const format_utils = @import("format_utils.zig");
 const serializer = @import("serializer.zig");
+const InternedLists = @import("interned-lists.zig").InternedLists;
+const InternedIndexesList = InternedLists(Node.Index);
 
-nodes: MultiArray(Node).Slice,
-node_lists: PackedLists(Node.Index, 0),
+nodes: Array(Node),
+interned_lists: InternedIndexesList,
 allocator: Allocator,
 tokens: Array(Token),
 source: []const u8,
@@ -28,15 +30,13 @@ pub const Node = struct {
 
     pub const NONE: Index = 0;
 
-    const NodeListsIndex = u32;
     const BinaryExpression = struct {
         lhs: Index,
         rhs: Index,
     };
+    const ChildList = InternedIndexesList.Range;
 
     pub const Data = union(Tag) {
-        root: ChildList,
-
         add: BinaryExpression,
         div: BinaryExpression,
         mod: BinaryExpression,
@@ -85,7 +85,7 @@ pub const Node = struct {
         string_literal: TokenIndex,
         true_literal: TokenIndex,
         list_literal: struct {
-            list: NodeListsIndex,
+            list: ChildList,
             ty: Index,
         },
 
@@ -97,7 +97,7 @@ pub const Node = struct {
 
         ty_generic: struct {
             name: Index,
-            args_list: NodeListsIndex,
+            args_list: ChildList,
         },
         ty_list: struct {
             size_expr: Index,
@@ -105,7 +105,7 @@ pub const Node = struct {
         },
         array_init: struct {
             type: Index,
-            items_list: NodeListsIndex,
+            items_list: ChildList,
         },
         ty_array: struct {
             size_expr: Index,
@@ -121,16 +121,18 @@ pub const Node = struct {
         },
         fn_proto: struct {
             name: Index,
-            params_list: NodeListsIndex,
+            params_list: ChildList,
             ret_type: Index,
         },
         fn_param: FnParam,
         fn_call: struct {
             callee: Index,
-            args_list: NodeListsIndex,
+            args_list: ChildList,
         },
 
-        expr: ChildList,
+        expr: struct {
+            list: ChildList,
+        },
         group: NodeIndex,
         if_expr: struct {
             condition: Index,
@@ -138,11 +140,13 @@ pub const Node = struct {
             else_branch: Index,
         },
         ret_expression: NodeIndex,
-        block: ChildList,
+        block: struct {
+            list: ChildList,
+        },
         while_loop: WhileLoop,
         type_init: struct {
             type: Index,
-            field_init_list: NodeListsIndex,
+            field_init_list: ChildList,
         },
 
         field_init: struct {
@@ -169,7 +173,7 @@ pub const Node = struct {
         ty_f64: TokenIndex,
 
         struct_decl: struct {
-            members_list: NodeListsIndex,
+            members_list: ChildList,
             // fields_list: NodeListsIndex,
             // declarations_list: NodeListsIndex,
         },
@@ -228,9 +232,6 @@ pub const Node = struct {
         // },
         // while_loop: WhileLoop,
 
-        pub const ChildList = struct {
-            list: NodeListsIndex,
-        };
         pub const FnParam = struct {
             name: Token.Index,
             type: Index,
@@ -242,7 +243,6 @@ pub const Node = struct {
         @"export",
     };
     pub const Tag = enum {
-        root,
         // Binary operators
         // - Math
         add,
@@ -361,39 +361,29 @@ pub const Node = struct {
     };
 };
 pub fn parse(allocator: Allocator, errors: *ErrorManager, source: []const u8) !Ast {
-    var ast_gen = AstGen{
+    var ast = Ast{
         .allocator = allocator,
-        .errors = errors,
+        // .errors = errors,
         .tokens = .{},
-        .node_lists = .{},
+        .interned_lists = InternedIndexesList.init(allocator),
         .nodes = .{},
         .source = source,
     };
-    var lexer = Lexer.init(source);
+    var ast_gen = AstGen.init(&ast, errors);
 
-    while (lexer.next()) |token| {
-        try ast_gen.tokens.append(ast_gen.allocator, token);
-    }
-
-    try ast_gen.parseRoot();
-    return Ast{
-        .nodes = ast_gen.nodes.slice(),
-        .node_lists = ast_gen.node_lists,
-        .tokens = ast_gen.tokens,
-        .allocator = allocator,
-        .source = source,
-    };
+    try ast_gen.parse();
+    return ast;
 }
 pub fn getNodeSlice(self: *Ast, node_i: Node.Index) []const u8 {
-    const start_token_index = self.nodes.items(.start_token)[node_i];
-    const end_token_index = self.nodes.items(.end_token)[node_i];
+    const start_token_index = self.getNodeStartToken(node_i);
+    const end_token_index = self.getNodeEndToken(node_i);
     const start_token = self.tokens.items[start_token_index];
     const end_token = self.tokens.items[@min(end_token_index, self.tokens.items.len - 1)];
     return self.source[start_token.start..end_token.end];
 }
 pub fn deinit(self: *Ast) void {
     self.nodes.deinit(self.allocator);
-    self.node_lists.deinit(self.allocator);
+    self.interned_lists.deinit();
     self.tokens.deinit(self.allocator);
 }
 const RAINBOW = [7]Color{
@@ -419,23 +409,24 @@ pub fn getTokenSlice(self: *Ast, token_i: Token.Index) []const u8 {
     const token = self.tokens.items[token_i];
     return self.source[token.start..token.end];
 }
+pub fn getNode(self: *Ast, node_i: Node.Index) Node {
+    return self.nodes.items[node_i];
+}
 pub fn getNodeStartToken(self: *Ast, node_i: Node.Index) Token.Index {
-    return self.nodes.items(.start_token)[node_i];
+    return self.getNode(node_i).start_token;
 }
 pub fn getNodeEndToken(self: *Ast, node_i: Node.Index) Token.Index {
-    return self.nodes.items(.end_token)[node_i];
+    return self.getNode(node_i).end_token;
 }
 pub fn getNodeData(self: *Ast, node_i: Node.Index) *Node.Data {
-    return &self.nodes.items(.data)[node_i];
+    return &self.nodes.items[node_i].data;
 }
 pub fn getNodeTag(self: *Ast, node_i: Node.Index) Node.Tag {
     return std.meta.activeTag(self.getNodeData(node_i).*);
 }
-pub fn getNodeTags(self: *Ast) []const Node.Tag {
-    return self.nodes.items(.tag);
-}
+
 pub fn nodeIs(self: *Ast, node_i: Node.Index, tag: Node.Tag) bool {
-    return self.nodes.items(.tag)[node_i] == tag;
+    return self.getNodeTag(node_i) == tag;
 }
 
 pub fn format(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, options: FormatOptions) !void {
@@ -784,7 +775,7 @@ pub fn formatNode(
         .indent_guide_char = ' ',
         .indent_guides = false,
     };
-    const node = self.nodes.get(node_index);
+    const node = self.getNode(node_index);
     if (node_index == 0 and depth != 0) {
         try fmt.writeIndent(writer, depth, indent_options);
         try writer.writeAll("NONE\n");
@@ -820,10 +811,10 @@ pub fn formatNode(
                 const value = @field(data, field.name);
 
                 try writer.print("[{s}]:", .{field.name});
-                if (std.mem.endsWith(u8, field.name, "list")) {
+                if (comptime std.mem.endsWith(u8, field.name, "list")) {
                     try writer.print("\n", .{});
-                    var iter = self.node_lists.iterList(value);
-                    while (iter.next()) |child| {
+                    const children = self.interned_lists.getSlice(value);
+                    for (children) |child| {
                         try self.formatNode(writer, child, depth + 2, options);
                     }
                     // try fmt.writeIndent(writer, depth + 1, indent_options);

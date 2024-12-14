@@ -1,8 +1,9 @@
 const std = @import("std");
-const PackedLists = @import("PackedLists.zig").new;
 const InternedSlice = @import("InternedStrings.zig").InternedSlice;
+const InternedLists = @import("interned-lists.zig").InternedLists;
+const Lists = InternedLists(u32);
 pub const WriteJsonOptions = struct {
-    lists: ?*PackedLists(u32, 0) = null,
+    lists: ?*Lists = null,
 };
 pub fn writeJSON(T: type, writer: std.io.AnyWriter, data: T, options: anytype) !void {
     const type_info = @typeInfo(T);
@@ -20,11 +21,11 @@ pub fn writeJSON(T: type, writer: std.io.AnyWriter, data: T, options: anytype) !
                 try writer.print("\"{s}\": ", .{field.name});
                 if (comptime std.mem.endsWith(u8, field.name, "list")) {
                     if (@hasField(@TypeOf(options), "lists")) {
-                        const index: usize = @field(data, field.name);
-                        var iter = options.lists.iterList(index);
+                        const index: Lists.Range = @field(data, field.name);
+                        const slice = options.lists.getSlice(index);
                         try writer.writeAll("[");
                         var j: usize = 0;
-                        while (iter.next()) |child| {
+                        for (slice) |child| {
                             if (j != 0) try writer.writeAll(", ");
                             try writer.print("{d}", .{child});
                             j += 1;

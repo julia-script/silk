@@ -17,7 +17,7 @@ test {
     _ = @import("serializer.zig");
     _ = @import("dir.zig");
     _ = @import("chunked_array.zig");
-
+    _ = @import("interned-lists.zig");
     // _ = @import("Os.zig");
     // _ = @import("Fs.zig");
 }
