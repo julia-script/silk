@@ -952,7 +952,7 @@ pub const Navigator = struct {
 };
 
 const Patience = @import("./patience_diff.zig");
-fn testAst(source: []const u8, node_index: Node.Index, expected: []const u8) !void {
+fn astMatch(source: []const u8, node_index: Node.Index, expected: []const u8) !void {
     var stderr_writer = std.io.getStdErr().writer().any();
     const test_allocator = std.testing.allocator;
     var errors = try ErrorManager.init(test_allocator);
@@ -1021,7 +1021,7 @@ test "Ast" {
 
     // const test_allocator = std.testing.allocator;
 
-    try testAst(
+    try astMatch(
         \\fn main() void {
         \\}
     , 0,
@@ -1043,7 +1043,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn main(a: i32, b: f32) void {
         \\}
     , 0,
@@ -1079,7 +1079,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn main() i32 {
         \\  return 1 + 2
         \\}
@@ -1111,7 +1111,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn main() i32 {
         \\  if (1 > 2) {
         \\    return 1
@@ -1158,7 +1158,7 @@ test "Ast" {
         \\                  [token]:.number_literal '2'
         \\
     );
-    try testAst(
+    try astMatch(
         \\fn main() i32 {
         \\  if (1 > 2) return 1
         \\  return 2
@@ -1201,7 +1201,7 @@ test "Ast" {
         \\                  [token]:.number_literal '2'
         \\
     );
-    try testAst(
+    try astMatch(
         \\fn main() i32 {
         \\  while (1 > 2) {
         \\    return 1
@@ -1247,7 +1247,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn main() []i32 {}
     , 3,
         \\.ty_array
@@ -1258,7 +1258,7 @@ test "Ast" {
         \\      [token]:.keyword_i32 'i32'
         \\
     );
-    try testAst(
+    try astMatch(
         \\fn main(a: [123]i32) void {}
     , 6,
         \\.ty_array
@@ -1271,7 +1271,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn main() void {
         \\  const a: [123]i32 = _{1, 2, 3};
         \\}
@@ -1317,7 +1317,7 @@ test "Ast" {
         \\                      [token]:.number_literal '3'
         \\
     );
-    try testAst(
+    try astMatch(
         \\fn main() void {
         \\  const a = [123]i32{1, 2, 3};
         \\}
@@ -1362,7 +1362,7 @@ test "Ast" {
         \\                      [token]:.number_literal '3'
         \\
     );
-    try testAst(
+    try astMatch(
         \\fn main() void {
         \\   array[0] = 123
         \\}
@@ -1397,7 +1397,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn main() void {
         \\  const a = [1]i32{1}
         \\  a[0] = 2
@@ -1452,7 +1452,7 @@ test "Ast" {
         \\
     );
 
-    try testAst(
+    try astMatch(
         \\fn sum() i32 {
         \\  const a = [3]i32{1, 2, 3}
         \\  var i: i32 = 0
@@ -1574,7 +1574,7 @@ test "Ast" {
         \\                  [token]:.identifier 'sum'
         \\
     );
-    try testAst(
+    try astMatch(
         \\fn sum() i32 {
         \\  return (a < b.c{1,2,3})
         \\}
@@ -1621,7 +1621,7 @@ test "Ast" {
         \\                              [token]:.number_literal '3'
         \\
     );
-    try testAst(
+    try astMatch(
         \\const T = struct {
         \\  a: i32,
         \\  b: i32 = 2,
