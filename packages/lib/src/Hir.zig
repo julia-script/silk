@@ -560,6 +560,7 @@ pub const Inst = union(enum) {
     pub const Module = struct {
         name_node: ?Ast.Node.Index,
         declarations_list: List,
+        fields_list: List,
     };
     pub const Param = struct {
         name_node: Ast.Node.Index,

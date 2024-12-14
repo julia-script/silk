@@ -102,29 +102,32 @@ pub fn nodeIs(self: *AstGen, index: Node.Index, tag: Node.Tag) bool {
 }
 pub fn parseRoot(self: *AstGen) AstGenError!void {
     self.loggerOpen("parseRoot");
-    defer self.logger.close();
-    const index = try self.reserveNodeIndex();
-    var children = self.node_lists.new(self.allocator);
-    while (self.token_index < self.tokens.items.len) {
-        const index_before = self.token_index;
-        const node = try self.parseExpression();
 
-        const index_after = self.token_index;
-        // assert(index_after > index_before);
-        if (index_after == index_before) self.consumeToken();
-        if (node == 0) break;
-        try children.append(node);
-    }
-    const children_index = try children.commit();
-    self.setNode(index, .{
-        .start_token = 0,
-        .end_token = @intCast(self.tokens.items.len - 1),
-        .data = .{
-            .root = .{
-                .list = @intCast(children_index),
-            },
-        },
-    });
+    defer self.logger.close();
+    const root = try self.parseStructDecl();
+    _ = root; // autofix
+    // const index = try self.reserveNodeIndex();
+    // var children = self.node_lists.new(self.allocator);
+    // while (self.token_index < self.tokens.items.len) {
+    //     const index_before = self.token_index;
+    //     const node = try self.parseExpression();
+
+    //     const index_after = self.token_index;
+    //     // assert(index_after > index_before);
+    //     if (index_after == index_before) self.consumeToken();
+    //     if (node == 0) break;
+    //     try children.append(node);
+    // }
+    // const children_index = try children.commit();
+    // self.setNode(index, .{
+    //     .start_token = 0,
+    //     .end_token = @intCast(self.tokens.items.len - 1),
+    //     .data = .{
+    //         .root = .{
+    //             .list = @intCast(children_index),
+    //         },
+    //     },
+    // });
 }
 
 pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
@@ -1590,98 +1593,118 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
 }
 pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
     self.loggerOpen("parseStructDecl");
+    const index = try self.reserveNodeIndex();
+    const is_root = index == 0;
     defer self.logger.close();
     const start_token = self.token_index;
-    assert(self.tokenIs(.keyword_struct));
-    self.consumeToken();
-    if (!self.accept(.l_brace)) {
-        try self.errors.addError(.{
-            .tag = .expected_token,
-            .start = self.token_index,
-            .end = self.token_index,
-            .payload = Token.Tag.l_brace.toInt(),
-        });
-        return 0;
-    }
-    const index = try self.reserveNodeIndex();
-
-    var fields = self.node_lists.new(self.allocator);
-    while (!self.tokenIs(.r_brace)) {
-        if (!self.tokenIs(.identifier)) {
-            break;
-        }
-        const identifier = try self.parsePrimary();
-        const field_start_token = self.token_index;
-        if (!self.nodeIs(identifier, .identifier)) {
-            try self.errors.addError(.{
-                .tag = .expected_node,
-                .start = self.token_index,
-                .end = self.token_index,
-                .payload = Node.Tag.identifier.toInt(),
-            });
-            return 0;
-        }
-        if (!self.accept(.colon)) {
+    if (!is_root) {
+        assert(self.tokenIs(.keyword_struct));
+        self.consumeToken();
+        if (!self.accept(.l_brace)) {
             try self.errors.addError(.{
                 .tag = .expected_token,
                 .start = self.token_index,
                 .end = self.token_index,
-                .payload = Token.Tag.colon.toInt(),
+                .payload = Token.Tag.l_brace.toInt(),
             });
+            return 0;
         }
-        const ty = try self.parsePrimary();
+    }
 
-        const default_value = blk: {
-            if (self.accept(.equal)) {
-                break :blk try self.parseExpression();
+    var members_list = self.node_lists.new(self.allocator);
+    while (!self.tokenIs(.r_brace) and !self.tokenIs(.eof)) {
+        // const start_token = self.token_index;
+        if (!self.nextTokensAre(.identifier, .colon) and !self.nextTokensAre(.identifier, .equal)) {
+            const declaration = try self.parseExpression();
+            try members_list.append(declaration);
+            // try members_list.append(node);
+            // // Probably a declaration
+
+        } else {
+            const identifier = try self.parsePrimary();
+            const field_start_token = self.token_index;
+            if (!self.nodeIs(identifier, .identifier)) {
+                try self.errors.addError(.{
+                    .tag = .expected_node,
+                    .start = self.token_index,
+                    .end = self.token_index,
+                    .payload = Node.Tag.identifier.toInt(),
+                });
+                return 0;
             }
-            break :blk 0;
-        };
-        try fields.append(try self.pushNode(.{
-            .data = .{ .struct_field = .{
-                .name = identifier,
-                .type = ty,
-                .default_value = default_value,
-            } },
-            .start_token = field_start_token,
-            .end_token = self.token_index,
-        }));
+            if (!self.accept(.colon)) {
+                try self.errors.addError(.{
+                    .tag = .expected_token,
+                    .start = self.token_index,
+                    .end = self.token_index,
+                    .payload = Token.Tag.colon.toInt(),
+                });
+            }
+            const ty = try self.parsePrimary();
 
-        if (self.accept(.comma)) continue;
-        break;
+            const default_value = blk: {
+                if (self.accept(.equal)) {
+                    break :blk try self.parseExpression();
+                }
+                break :blk 0;
+            };
+            try members_list.append(try self.pushNode(.{
+                .data = .{ .struct_field = .{
+                    .name = identifier,
+                    .type = ty,
+                    .default_value = default_value,
+                } },
+                .start_token = field_start_token,
+                .end_token = self.token_index,
+            }));
+
+            if (self.accept(.comma)) continue;
+            if (self.accept(.semicolon)) {
+                try self.errors.addError(.{
+                    .tag = .expected_token,
+                    .start = self.token_index,
+                    .end = self.token_index,
+                    .payload = Token.Tag.comma.toInt(),
+                });
+                continue;
+            }
+            break;
+        }
     }
 
-    var declarations_list = self.node_lists.new(self.allocator);
-    while (self.token_index < self.tokens.items.len) {
-        const index_before = self.token_index;
-        const node = try self.parseExpression();
+    // var declarations_list = self.node_lists.new(self.allocator);
+    // while (self.token_index < self.tokens.items.len) {
+    //     const index_before = self.token_index;
+    //     const node = try self.parseExpression();
 
-        const index_after = self.token_index;
-        // assert(index_after > index_before);
-        if (index_after == index_before) self.consumeToken();
-        // if (node == 0) break;
-        try declarations_list.append(node);
-        if (self.tokenIs(.r_brace)) break;
-    }
+    //     const index_after = self.token_index;
+    //     // assert(index_after > index_before);
+    //     if (index_after == index_before) self.consumeToken();
+    //     // if (node == 0) break;
+    //     try declarations_list.append(node);
+    //     if (self.tokenIs(.r_brace)) break;
+    // }
 
     self.setNode(index, .{
         .data = .{ .struct_decl = .{
-            .fields_list = @intCast(try fields.commit()),
-            .declarations_list = @intCast(try declarations_list.commit()),
+            .members_list = @intCast(try members_list.commit()),
         } },
         .start_token = start_token,
         .end_token = self.token_index,
     });
-    if (!self.tokenIs(.r_brace)) {
-        try self.errors.addError(.{
-            .tag = .expected_token,
-            .start = self.token_index,
-            .end = self.token_index,
-            .payload = Token.Tag.r_brace.toInt(),
-        });
+    if (!is_root) {
+        if (!self.tokenIs(.r_brace)) {
+            try self.errors.addError(.{
+                .tag = .expected_token,
+                .start = self.token_index,
+                .end = self.token_index,
+                .payload = Token.Tag.r_brace.toInt(),
+            });
+        }
     }
     return index;
 }
+
 // pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
 //     self.loggerOpen("parseWhileLoop");
 //     defer self.logger.close();

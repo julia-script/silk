@@ -735,10 +735,6 @@ pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOption
     _ = options; // autofix
 
     var self: *Self = @constCast(&self_);
-    // const root_type = self.types.items[0];
-    // var indented_writer = Logger.init(writer, "Mir");
-    // try indented_writer.open("root_module", .{});
-    // try self.formatType(&indented_writer, Type.RootIndex);
     for (0..self.globals.items.len) |global_index| {
         try self.formatGlobal(
             writer,
@@ -746,46 +742,6 @@ pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOption
         );
         try writer.writeAll("\n");
     }
-
-    // try indented_writer.close();
-    // try indented_writer.open("root_module");
-    // const root_type = self.types.items[Type.RootIndex];
-    // try self.formatType(&indented_writer, root_type);
-    // try indented_writer.close();
-    // const root_def = self.definitions.items[Definition.RootIndex];
-
-    // std.debug.print("root_def: {}\n", .{root_def});
-    // logger.open("#{d} root_module", .{Definition.RootIndex});
-    // defer logger.close();
-    // var iter = self.lists.iterList(root_def.module.member_defs);
-    // while (iter.next()) |member_index| {
-    //     const member_def: Definition = self.definitions.items[member_index];
-    //     const member_name = self.strings.getSlice(member_def.global_decl.name);
-    //     logger.writeIndent();
-    //     try writer.print("#{d} member \"{s}\": ", .{ member_index, member_name });
-    //     try formatType(self, writer, member_def.global_decl.type);
-    //     // logger.openInline("#{d} member \"{s}\":", .{ member_index, member_name });
-    //     logger.openInline();
-
-    //     defer logger.close();
-
-    //     logger.writeIndent();
-
-    //     try writer.writeAll("\n");
-    //     // defer logger.close();
-    // }
-    // _ = root_def; // autofix
-    // for (self.definitions.items) |def| {
-    //     std.debug.print("def: {}\n", .{def});
-    // }
-
-    // try formatInstruction(
-    //     @constCast(&value),
-    //     writer,
-    //     options,
-    //     Inst.RootIndex,
-    //     0,
-    // );
 }
 
 const FormatInstContext = struct {

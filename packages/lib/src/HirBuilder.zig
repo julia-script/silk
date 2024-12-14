@@ -244,6 +244,13 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             try scope.pushSymbol(name_slice, local_inst);
             return local_inst;
         },
+        .struct_decl => {
+            return try self.genModule(scope, nav.node);
+            // const struct_inst = try scope.pushInstruction(.{ .struct_decl = .{
+            //     .name_node = nav.node,
+            // } });
+            // return struct_inst;
+        },
         .ty_assign => |bin_expr| {
             const lhs_inst = try self.genInstruction(scope, bin_expr.lhs);
             const rhs_inst = try self.genInstruction(scope, bin_expr.rhs);
@@ -580,8 +587,8 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
     self.logger.open("#{d} genModule", .{node_index});
     defer self.logger.close();
     const index = try self.reserveInstruction();
-    var nav = Ast.Navigator.init(self.hir.ast, node_index);
-    nav.assertTag(.root);
+    const nav = Ast.Navigator.init(self.hir.ast, node_index);
+    // nav.assertTag(.root);
     var defs = std.ArrayList(WipDef).init(self.arena.allocator());
     defer defs.deinit();
     var decl_list = self.newList();
@@ -635,10 +642,13 @@ pub fn genModule(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.In
         // }
     }
 
+    var fields_list = self.newList();
+
     self.setInstruction(index, .{
         .mod_decl = .{
             .name_node = null,
             .declarations_list = try decl_list.commit(),
+            .fields_list = try fields_list.commit(),
         },
     });
     return index;

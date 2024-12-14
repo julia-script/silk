@@ -169,8 +169,9 @@ pub const Node = struct {
         ty_f64: TokenIndex,
 
         struct_decl: struct {
-            fields_list: NodeListsIndex,
-            declarations_list: NodeListsIndex,
+            members_list: NodeListsIndex,
+            // fields_list: NodeListsIndex,
+            // declarations_list: NodeListsIndex,
         },
         struct_field: struct {
             name: Index,
@@ -978,8 +979,8 @@ fn testAst(source: []const u8, node_index: Node.Index, expected: []const u8) !vo
     // std.debug.print("{s}\n", .{arr.items});
     var res = try Patience.diff(
         std.testing.allocator,
-        expected,
         arr.items,
+        expected,
     );
     defer res.deinit();
     if (res.operations.len > 0) {
@@ -1024,8 +1025,8 @@ test "Ast" {
         \\fn main() void {
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1046,8 +1047,8 @@ test "Ast" {
         \\fn main(a: i32, b: f32) void {
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1083,8 +1084,8 @@ test "Ast" {
         \\  return 1 + 2
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1118,8 +1119,8 @@ test "Ast" {
         \\  return 2
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1163,8 +1164,8 @@ test "Ast" {
         \\  return 2
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1208,8 +1209,8 @@ test "Ast" {
         \\  return 2
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1275,8 +1276,8 @@ test "Ast" {
         \\  const a: [123]i32 = _{1, 2, 3};
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1321,8 +1322,8 @@ test "Ast" {
         \\  const a = [123]i32{1, 2, 3};
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1366,8 +1367,8 @@ test "Ast" {
         \\   array[0] = 123
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1402,8 +1403,8 @@ test "Ast" {
         \\  a[0] = 2
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1463,8 +1464,8 @@ test "Ast" {
         \\  return sum
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1578,8 +1579,8 @@ test "Ast" {
         \\  return (a < b.c{1,2,3})
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .fn_decl
         \\      [proto]:
         \\        .fn_proto
@@ -1629,8 +1630,8 @@ test "Ast" {
         \\  }
         \\}
     , 0,
-        \\.root
-        \\  [list]:
+        \\.struct_decl
+        \\  [members_list]:
         \\    .const_decl
         \\      [name]:
         \\        .identifier
@@ -1639,7 +1640,7 @@ test "Ast" {
         \\        NONE
         \\      [value]:
         \\        .struct_decl
-        \\          [fields_list]:
+        \\          [members_list]:
         \\            .struct_field
         \\              [name]:
         \\                .identifier
@@ -1659,7 +1660,6 @@ test "Ast" {
         \\              [default_value]:
         \\                .number_literal
         \\                  [token]:.number_literal '2'
-        \\          [declarations_list]:
         \\            .pub
         \\              [node]:
         \\                .fn_decl

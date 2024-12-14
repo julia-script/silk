@@ -1424,10 +1424,11 @@ pub const Wip = struct {
 
     pub fn tryCastInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, id: InstructionId, type_index: Mir.Type.Index) Error!InstructionId {
         const instruction = try self.getInstruction(id);
-        if (@intFromEnum(type_index) >= Mir.Type.INDEX_START) {
-            // TODO: check more complex types equality
-            return id;
-        }
+        // if (@intFromEnum(type_index) >= Mir.Type.INDEX_START) {
+        //     // TODO: check more complex types equality
+        //     return id;
+        // }
+
         if (instruction.type == type_index) {
             return id;
         }

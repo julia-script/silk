@@ -12,10 +12,10 @@
 // fn __stack_alloc_i32_array(size: i32) i32 {
 //   return __stack_alloc((1 + size) * 4);
 // }
-// const A = struct {
-//     a: i32,
-//     b: i32,
-// };
+const A = struct {
+    a: i32,
+    b: i32,
+};
 
 // fn B() type {
 //     const Self = struct {
