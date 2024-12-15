@@ -135,10 +135,10 @@ pub fn translateFunctionType(self: *Self, global_index: Mir.Global.Index) !void 
     _ = func_index; // autofix
 
 }
-pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructions_list: Mir.Lists.Index) !void {
-    var iter = self.iterList(instructions_list);
+pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructions_list: Mir.List) !void {
+    const slice = self.getListSlice(instructions_list);
     var allocated_memory: i32 = 0;
-    while (iter.next()) |inst_index| {
+    for (slice) |inst_index| {
         const inst = self.mir.instructions.items[inst_index];
         // std.debug.print("inst: {d} {s}\n", .{ inst_index, @tagName(inst.op) });
         if (inst.op != .loop and inst.op != .branch) {
@@ -150,7 +150,7 @@ pub fn translateInstructions(self: *Self, wip: *WasmBuilder.Function, instructio
                 .types = self.mir.types.items,
                 .allocator = self.mir.allocator,
                 .writer = std.io.getStdErr().writer().any(),
-                .lists = &self.mir.lists,
+                .lists = &self.mir.interned_lists,
             }, inst_index, 0);
         }
         if (inst.liveness == 0) {
@@ -452,13 +452,13 @@ pub fn getValue(self: *Self, index: Mir.Value.Index) ?Mir.Value {
     }
     return null;
 }
-pub fn iterList(self: *Self, index: usize) Mir.Lists.ListIter {
-    return self.mir.lists.iterList(index);
+pub fn getListSlice(self: *Self, index: Mir.List) []const Mir.Instruction.Index {
+    return self.mir.interned_lists.getSlice(index);
 }
 pub fn translateModule(self: *Self, type_index: Mir.Type.Index) !void {
     const module = self.getType(type_index) orelse return error.TypeNotFound;
-    var decl_iter = self.iterList(module.module.decls);
-    while (decl_iter.next()) |decl| {
+    const decl_iter = self.getListSlice(module.module.decls);
+    for (decl_iter) |decl| {
         try self.translateDecl(Mir.Type.Index.asTypeIndex(decl));
     }
 }

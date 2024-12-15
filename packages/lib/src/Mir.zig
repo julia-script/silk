@@ -6,15 +6,19 @@ const Self = @This();
 const Allocator = std.mem.Allocator;
 const PackedLists = @import("PackedLists.zig");
 const shared = @import("shared.zig");
-pub const Lists = PackedLists.new(u32, std.math.maxInt(u32));
-pub const ChildList = Lists.List;
+// pub const Lists = PackedLists.new(u32, std.math.maxInt(u32));
+// pub const ChildList = Lists.List;
 const MirBuilder = @import("MirBuilder.zig");
 const Hir = @import("Hir.zig");
 const ErrorManager = @import("ErrorManager.zig");
 const Logger = @import("Logger.zig");
 const tw = Logger.tw;
+const InternedLists = @import("./interned-lists.zig").InternedLists(Instruction.Index);
+pub const List = InternedLists.Range;
+pub const WorkingList = InternedLists.WorkingList;
 
-lists: Lists = .{},
+// lists: Lists = .{},
+interned_lists: InternedLists,
 strings: InternedStrings,
 globals: Array(Global) = .{},
 instructions: Array(Instruction) = .{},
@@ -25,16 +29,18 @@ allocator: Allocator,
 pub fn init(allocator: Allocator) !Self {
     return .{
         .allocator = allocator,
-
+        .interned_lists = InternedLists.init(allocator),
         .strings = try InternedStrings.init(allocator),
     };
 }
 pub fn deinit(self: *Self) void {
     self.strings.deinit();
-    self.lists.deinit(self.allocator);
+    // self.lists.deinit(self.allocator);
     self.instructions.deinit(self.allocator);
+    self.globals.deinit(self.allocator);
     self.types.deinit(self.allocator);
     self.values.deinit(self.allocator);
+    self.interned_lists.deinit();
 }
 
 pub fn build(allocator: std.mem.Allocator, hir: *Hir, errors: *ErrorManager) !Self {
@@ -48,7 +54,7 @@ pub const Instruction = struct {
     liveness: u32 = 1,
 
     pub const Index = u32;
-    pub const List = usize;
+    pub const List = InternedLists.Range;
 
     pub const Data = union(enum) {
         wip: usize,
@@ -70,23 +76,30 @@ pub const Instruction = struct {
         loop: struct {
             instructions_list: Instruction.List,
         },
+        loop_wip: struct {
+            wip: MirBuilder.Wip.Index,
+        },
         block: struct {
             instructions_list: Instruction.List,
+        },
+        block_wip: struct {
+            wip: MirBuilder.Wip.Index,
         },
         branch: struct {
             condition: Instruction.Index,
             then_instructions_list: Instruction.List,
             else_instructions_list: ?Instruction.List,
         },
+        branch_wip: struct {
+            condition: Instruction.Index,
+            then_wip: MirBuilder.Wip.Index,
+            else_wip: ?MirBuilder.Wip.Index,
+        },
+
         select: struct {
             condition: Instruction.Index,
             then_instruction: Instruction.Index,
             else_instruction: Instruction.Index,
-        },
-        if_expr: struct {
-            cond: Instruction.Index,
-            then_body: Type.Index,
-            else_body: ?Type.Index,
         },
 
         scoped: struct {
@@ -97,7 +110,7 @@ pub const Instruction = struct {
         },
         call: struct {
             callee: Global.Index,
-            args_list: List,
+            args_list: Instruction.List,
         },
         global_set: struct {
             global: Global.Index,
@@ -246,7 +259,7 @@ pub const Type = union(enum) {
     // these are not types by themselves but partials of other types
     global: Module.Decl,
     param: Fn.Param,
-    pub const List = usize;
+    pub const List = InternedLists.Range;
     pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
     pub const Index = enum(u32) {
         unknown,
@@ -426,7 +439,7 @@ pub const Value = union(enum) {
         values: Value.List,
     };
 
-    pub const List = usize;
+    pub const List = InternedLists.Range;
     pub const INDEX_START: u32 = std.meta.tags(@This().Index).len;
     pub const Index = enum(u32) {
         runtime,
@@ -705,7 +718,7 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
         .instructions = self.instructions.items,
         .types = self.types.items,
         .values = self.values.items,
-        .lists = &self.lists,
+        .lists = &self.interned_lists,
         .writer = writer,
         .strings = &self.strings,
     };
@@ -715,15 +728,15 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
     // try self.formatValue(writer, global.value, 0);
     try writer.writeAll("\n");
     if (global.init) |init_block| {
-        var iter = self.lists.iterList(init_block);
-        while (iter.next()) |inst_index| {
+        const init_block_list = self.interned_lists.getSlice(init_block);
+        for (init_block_list) |inst_index| {
             // try self.formatInstruction(writer, inst_index, 1);
             try formatInst(FormatInstContext{
                 .allocator = self.allocator,
                 .instructions = self.instructions.items,
                 .types = self.types.items,
                 .values = self.values.items,
-                .lists = &self.lists,
+                .lists = &self.interned_lists,
                 .writer = writer,
                 .strings = &self.strings,
             }, inst_index, 1);
@@ -749,7 +762,7 @@ const FormatInstContext = struct {
     instructions: []const Instruction,
     types: []const Type,
     values: []const Value,
-    lists: *Lists,
+    lists: *InternedLists,
     builder: ?*MirBuilder.Builder = null,
     writer: std.io.AnyWriter,
     strings: *InternedStrings,
@@ -782,9 +795,9 @@ pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, typ
             },
             .@"fn" => |fn_ty| {
                 try tw.fuchsia_200.print(writer, "{s}(", .{@tagName(ty)}, .{});
-                var iter = context.lists.iterList(fn_ty.params_list);
+                const params_list = context.lists.getSlice(fn_ty.params_list);
                 var i: usize = 0;
-                while (iter.next()) |param_index| {
+                for (params_list) |param_index| {
                     if (i > 0) try writer.writeAll(", ");
                     const param_type = context.types[Type.Index.asTypeIndex(param_index).toInt().?];
 
@@ -929,10 +942,10 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
         },
         .call => |call| {
             try tw.neutral_200.print(buf_writer, "call(%{d}, args = [", .{call.callee}, .{});
-            var iter = context.lists.iterList(call.args_list);
+            const args_list = context.lists.getSlice(call.args_list);
 
             var first = true;
-            while (iter.next()) |arg_index| {
+            for (args_list) |arg_index| {
                 if (!first) {
                     try buf_writer.print(", ", .{});
                 }
@@ -961,10 +974,10 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
 
             try tw.neutral_200.print(buf_writer, "if (%{d}) then:\n\n", .{branch.condition}, .{});
             if (context.builder != null) {
-                try formatWipInsts(context, buf_writer, branch.then_instructions_list, depth + 1);
+                // try formatWipInsts(context, buf_writer, branch.then_instructions_list, depth + 1);
             } else {
-                var then_iter = context.lists.iterList(branch.then_instructions_list);
-                while (then_iter.next()) |child_inst_index| {
+                const then_instructions_list = context.lists.getSlice(branch.then_instructions_list);
+                for (then_instructions_list) |child_inst_index| {
                     try formatInst(.{
                         .allocator = context.allocator,
                         .instructions = context.instructions,
@@ -984,10 +997,10 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
                 try tw.neutral_200.print(buf_writer, "else:\n", .{}, .{});
 
                 if (context.builder != null) {
-                    try formatWipInsts(context, buf_writer, else_instructions_list, depth + 1);
+                    // try formatWipInsts(context, buf_writer, else_instructions_list, depth + 1);
                 } else {
-                    var else_iter = context.lists.iterList(else_instructions_list);
-                    while (else_iter.next()) |child_inst_index| {
+                    const else_inst_list = context.lists.getSlice(else_instructions_list);
+                    for (else_inst_list) |child_inst_index| {
                         try formatInst(.{
                             .allocator = context.allocator,
                             .instructions = context.instructions,
@@ -1010,10 +1023,10 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
             try tw.neutral_200.print(buf_writer, "loop:\n\n", .{}, .{});
 
             if (context.builder != null) {
-                try formatWipInsts(context, buf_writer, loop.instructions_list, depth + 1);
+                // try formatWipInsts(context, buf_writer, loop.instructions_list, depth + 1);
             } else {
-                var iter = context.lists.iterList(loop.instructions_list);
-                while (iter.next()) |child_inst_index| {
+                const instructions_list = context.lists.getSlice(loop.instructions_list);
+                for (instructions_list) |child_inst_index| {
                     try formatInst(.{
                         .allocator = context.allocator,
                         .instructions = context.instructions,

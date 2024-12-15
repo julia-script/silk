@@ -16,8 +16,9 @@ pub fn build(b: *std.Build) void {
         // "Ast",
         // "AstGen",
         "HirBuilder",
-        "MirBuilder",
+        // "MirBuilder",
         "Mir",
+        "MirBuilder",
         // "Compilation",
     });
     const cmd_dep = b.dependency("zig-cmd", .{});

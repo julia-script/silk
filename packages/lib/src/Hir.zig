@@ -397,12 +397,78 @@ const TreeWriter = struct {
         }
     }
 };
+pub fn formatInstShort(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWriter, inst_index: Inst.Index) std.io.AnyWriter.Error!void {
+    _ = tree_writer; // autofix
+    const instruction: Inst = self.insts.items[inst_index];
+
+    try writer.print("%{} = {s} ", .{ inst_index, @tagName(instruction) });
+    switch (instruction) {
+        inline else => |data| {
+            const fields = comptime std.meta.fields(@TypeOf(data));
+            inline for (fields, 0..) |field, i| {
+                if (i > 0) {
+                    try writer.print(", ", .{});
+                }
+                try writer.print("{s}=({any})", .{
+                    field.name,
+                    @field(data, field.name),
+                });
+            }
+        },
+    }
+    try writer.print("\n", .{});
+}
 pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWriter, inst_index: Inst.Index) std.io.AnyWriter.Error!void {
     // @setEvalBranchQuota(10000);
     const instruction: Inst = self.insts.items[inst_index];
+    if (tree_writer.indents.len > 10) {
+        return;
+    }
 
     try writer.print("%{} = {s}", .{ inst_index, @tagName(instruction) });
     switch (instruction) {
+        .block, .inline_block => |data| {
+            try writer.print("\n", .{});
+            const instructions_list = self.lists.getSlice(data.instructions_list);
+            try tree_writer.pushDirLine();
+            for (instructions_list, 0..instructions_list.len) |instruction_index, i| {
+                try tree_writer.writeIndent(true, i == instructions_list.len - 1);
+                const inst = self.insts.items[instruction_index];
+                switch (inst) {
+                    .block, .inline_block, .loop, .global_decl, .struct_decl => {
+                        try formatInst(self, writer, tree_writer, instruction_index);
+                    },
+                    .if_expr => {
+                        try formatInst(self, writer, tree_writer, instruction_index);
+                    },
+                    else => {
+                        try formatInstShort(self, writer, tree_writer, instruction_index);
+                    },
+                }
+            }
+            try tree_writer.pop();
+        },
+
+        .if_expr => |if_expr| {
+            try tree_writer.pushDirLine();
+            // try tree_writer.writeIndent(true, false);
+            try writer.print(" cond (%{d})\n", .{if_expr.cond});
+            try tree_writer.writeIndent(true, if_expr.else_body == null);
+            try writer.print("then: ", .{});
+            try formatInst(self, writer, tree_writer, if_expr.then_body);
+            if (if_expr.else_body) |else_body| {
+                try tree_writer.writeIndent(true, true);
+                try writer.print("else:", .{});
+
+                try formatInst(self, writer, tree_writer, else_body);
+            }
+            try tree_writer.pop();
+            // try formatInst(self, writer, tree_writer, if_expr.then_body);
+            // try formatInst(self, writer, tree_writer, if_expr.then_body);
+            // if (if_expr.else_body) |else_body| {
+            //     try formatInst(self, writer, tree_writer, else_body);
+            // }
+        },
         inline else => |data| {
             const Data: type = @TypeOf(data);
 
@@ -443,7 +509,6 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                         },
                         InternedLists.Range => {
                             try writer.print("{d} items\n", .{field_value.len});
-
                             if (field_value.len > 0) {
                                 try tree_writer.pushDirLine();
                                 const list = self.lists.getSlice(field_value);
@@ -480,25 +545,23 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                 //     }
             }
 
-            // try fmt.writeIndent(writer, indent, options);
-            // try writer.print("}}\n", .{});
             try tree_writer.pop();
         },
     }
 }
 pub fn format(value: Self, comptime _: []const u8, options: std.fmt.FormatOptions, writer: std.io.AnyWriter) !void {
+    _ = options; // autofix
     _ = fmt; // autofix
 
     try writer.print(";; HIR: {d} instructions\n\n", .{value.insts.items.len});
-    // for (value.insts.items, 0..) |inst, i| {
-    //     std.debug.print("{d}: {}\n", .{ i, inst });
-    // }
+
+    var tree_writer = TreeWriter.init(writer);
     try formatInst(
         @constCast(&value),
         writer,
-        options,
+
+        &tree_writer,
         Inst.RootIndex,
-        0,
     );
 }
 pub const Value = struct {
@@ -581,9 +644,7 @@ pub const Inst = union(enum) {
 
     typeof: UnaryOp,
     sizeof: UnaryOp,
-    ret: struct {
-        value: ?Inst.Index,
-    },
+    ret: Return,
     if_expr: IfExpr,
     br: UnaryOp,
 
@@ -617,6 +678,9 @@ pub const Inst = union(enum) {
     debug_var: DebugVar,
 
     pub const Tag: type = std.meta.Tag(@This());
+    pub const Return = struct {
+        value: ?Inst.Index,
+    };
     pub const AstNode = struct {
         node: Ast.Node.Index,
     };
@@ -712,8 +776,8 @@ pub const Inst = union(enum) {
     };
     pub const StructDecl = struct {
         name_node: ?Ast.Node.Index,
-        declarations_list: List,
         fields_list: List,
+        declarations_list: List,
     };
     pub const StructField = struct {
         name_node: Ast.Node.Index,
@@ -778,6 +842,13 @@ fn hirMatch(source: []const u8, instruction_index: Inst.Index, expected: []const
     );
     defer res.deinit();
     if (res.operations.len > 0) {
+        try ast.formatNode(stderr_writer, 0, 0, .{
+            .color = false,
+            .indent_size = 2,
+            .show_node_index = false,
+            .show_slice = false,
+            .show_token_range = false,
+        });
         try stderr_writer.writeAll("\\\\");
         for (arr.items) |c| {
             try stderr_writer.writeByte(c);
@@ -805,59 +876,87 @@ test "Hir" {
     , Inst.RootIndex,
         \\%0 = struct_decl {
         \\ ├ name_node: NONE
-        \\ ├ declarations_list: 2 items
-        \\ │  ├ 0: %1 = global_decl {
-        \\ │  │  ├ name_node: node(#1: "foo")
-        \\ │  │  ├ extern: false
-        \\ │  │  ├ is_fn: true
-        \\ │  │  ├ visibility: "private"
-        \\ │  │  ├ exported: false
-        \\ │  │  ├ mutable: false
-        \\ │  │  ├ type: %6 = fn_decl {
-        \\ │  │  │  ├ name_node: node(#1: "foo")
-        \\ │  │  │  ├ return_type: %3 = ty_void {
-        \\ │  │  │  │  └ node: node(#2: "void")
-        \\ │  │  │  └ params_list: 0 items
-        \\ │  │  └ init: %5 = block {
-        \\ │  │     ├ name_node: NONE
-        \\ │  │     └ instructions_list: 1 items
-        \\ │  │        └ 0: %4 = ret {
-        \\ │  │           └ value: NONE
-        \\ │  └ 1: %2 = global_decl {
-        \\ │     ├ name_node: node(#7: "bar")
-        \\ │     ├ extern: false
-        \\ │     ├ is_fn: true
-        \\ │     ├ visibility: "public"
-        \\ │     ├ exported: false
-        \\ │     ├ mutable: false
-        \\ │     ├ type: %15 = fn_decl {
-        \\ │     │  ├ name_node: node(#7: "bar")
-        \\ │     │  ├ return_type: %11 = ty_i32 {
-        \\ │     │  │  └ node: node(#14: "i32")
-        \\ │     │  └ params_list: 2 items
-        \\ │     │     ├ 0: %8 = param_decl {
-        \\ │     │     │  ├ name_node: node(#9: "n")
-        \\ │     │     │  └ ty: %7 = ty_u32 {
-        \\ │     │     │     └ node: node(#10: "u32")
-        \\ │     │     └ 1: %10 = param_decl {
-        \\ │     │        ├ name_node: node(#12: "m")
-        \\ │     │        └ ty: %9 = ty_u32 {
-        \\ │     │           └ node: node(#13: "u32")
-        \\ │     └ init: %14 = block {
-        \\ │        ├ name_node: NONE
-        \\ │        └ instructions_list: 2 items
-        \\ │           ├ 0: %12 = comptime_number {
-        \\ │           │  └ node: node(#16: "2")
-        \\ │           └ 1: %13 = ret {
-        \\ │              └ value: %12 = comptime_number {
-        \\ │                 └ node: node(#16: "2")
-        \\ └ fields_list: 0 items
+        \\ ├ fields_list: 0 items
+        \\ └ declarations_list: 2 items
+        \\    ├ 0: %1 = global_decl {
+        \\    │  ├ name_node: node(#1: "foo")
+        \\    │  ├ extern: false
+        \\    │  ├ is_fn: true
+        \\    │  ├ visibility: "private"
+        \\    │  ├ exported: false
+        \\    │  ├ mutable: false
+        \\    │  ├ type: %6 = fn_decl {
+        \\    │  │  ├ name_node: node(#1: "foo")
+        \\    │  │  ├ return_type: %3 = ty_void {
+        \\    │  │  │  └ node: node(#2: "void")
+        \\    │  │  └ params_list: 0 items
+        \\    │  └ init: %5 = block
+        \\    │     └ %4 = ret value=(null)
+        \\    └ 1: %2 = global_decl {
+        \\       ├ name_node: node(#7: "bar")
+        \\       ├ extern: false
+        \\       ├ is_fn: true
+        \\       ├ visibility: "public"
+        \\       ├ exported: false
+        \\       ├ mutable: false
+        \\       ├ type: %15 = fn_decl {
+        \\       │  ├ name_node: node(#7: "bar")
+        \\       │  ├ return_type: %11 = ty_i32 {
+        \\       │  │  └ node: node(#14: "i32")
+        \\       │  └ params_list: 2 items
+        \\       │     ├ 0: %8 = param_decl {
+        \\       │     │  ├ name_node: node(#9: "n")
+        \\       │     │  └ ty: %7 = ty_u32 {
+        \\       │     │     └ node: node(#10: "u32")
+        \\       │     └ 1: %10 = param_decl {
+        \\       │        ├ name_node: node(#12: "m")
+        \\       │        └ ty: %9 = ty_u32 {
+        \\       │           └ node: node(#13: "u32")
+        \\       └ init: %14 = block
+        \\          ├ %12 = comptime_number node=(16)
+        \\          └ %13 = ret value=(12)
         \\
     );
 
     try hirMatch(
         \\const Foo = struct {
-        \\    a: u32,
+        \\    a: f32,
+        \\    b: u32 = 3,
+        \\};
+    , Inst.RootIndex,
+        \\%0 = struct_decl {
+        \\ ├ name_node: NONE
+        \\ ├ fields_list: 0 items
+        \\ └ declarations_list: 1 items
+        \\    └ 0: %1 = global_decl {
+        \\       ├ name_node: node(#1: "Foo")
+        \\       ├ extern: false
+        \\       ├ is_fn: false
+        \\       ├ visibility: "private"
+        \\       ├ exported: false
+        \\       ├ mutable: false
+        \\       ├ type: NONE
+        \\       └ init: %8 = inline_block
+        \\          └ %2 = struct_decl {
+        \\             ├ name_node: NONE
+        \\             ├ fields_list: 2 items
+        \\             │  ├ 0: %4 = struct_field {
+        \\             │  │  ├ name_node: node(#3: "a")
+        \\             │  │  ├ ty: %3 = ty_f32 {
+        \\             │  │  │  └ node: node(#4: "f32")
+        \\             │  │  └ init: NONE
+        \\             │  └ 1: %7 = struct_field {
+        \\             │     ├ name_node: node(#6: "b")
+        \\             │     ├ ty: %5 = ty_u32 {
+        \\             │     │  └ node: node(#7: "u32")
+        \\             │     └ init: %6 = comptime_number {
+        \\             │        └ node: node(#8: "3")
+        \\             └ declarations_list: 0 items
+        \\
+    );
+    try hirMatch(
+        \\const Foo = struct {
+        \\    a: f32,
         \\    b: u32 = 3,
         \\    pub fn foo() void {
         \\        return;
@@ -866,54 +965,46 @@ test "Hir" {
     , Inst.RootIndex,
         \\%0 = struct_decl {
         \\ ├ name_node: NONE
-        \\ ├ declarations_list: 1 items
-        \\ │  └ 0: %1 = global_decl {
-        \\ │     ├ name_node: node(#1: "Foo")
-        \\ │     ├ extern: false
-        \\ │     ├ is_fn: false
-        \\ │     ├ visibility: "private"
-        \\ │     ├ exported: false
-        \\ │     ├ mutable: false
-        \\ │     ├ type: NONE
-        \\ │     └ init: %13 = inline_block {
-        \\ │        ├ name_node: NONE
-        \\ │        └ instructions_list: 7 items
-        \\ │           ├ 0: %3 = ty_u32 {
-        \\ │           │  └ node: node(#4: "u32")
-        \\ │           ├ 1: %5 = ty_u32 {
-        \\ │           │  └ node: node(#7: "u32")
-        \\ │           ├ 2: %6 = comptime_number {
-        \\ │           │  └ node: node(#8: "3")
-        \\ │           ├ 3: %8 = global_decl {
-        \\ │           │  ├ name_node: node(#10: "foo")
-        \\ │           │  ├ extern: false
-        \\ │           │  ├ is_fn: true
-        \\ │           │  ├ visibility: "public"
-        \\ │           │  ├ exported: false
-        \\ │           │  ├ mutable: false
-        \\ │           │  ├ type: %12 = fn_decl {
-        \\ │           │  │  ├ name_node: node(#10: "foo")
-        \\ │           │  │  ├ return_type: %9 = ty_void {
-        \\ │           │  │  │  └ node: node(#11: "void")
-        \\ │           │  │  └ params_list: 0 items
-        \\ │           │  └ init: %11 = block {
-        \\ │           │     ├ name_node: NONE
-        \\ │           │     └ instructions_list: 1 items
-        \\ │           │        └ 0: %10 = ret {
-        \\ │           │           └ value: NONE
-        \\ │           ├ 4: %9 = ty_void {
-        \\ │           │  └ node: node(#11: "void")
-        \\ │           ├ 5: %11 = block {
-        \\ │           │  ├ name_node: NONE
-        \\ │           │  └ instructions_list: 1 items
-        \\ │           │     └ 0: %10 = ret {
-        \\ │           │        └ value: NONE
-        \\ │           └ 6: %12 = fn_decl {
-        \\ │              ├ name_node: node(#10: "foo")
-        \\ │              ├ return_type: %9 = ty_void {
-        \\ │              │  └ node: node(#11: "void")
-        \\ │              └ params_list: 0 items
-        \\ └ fields_list: 0 items
+        \\ ├ fields_list: 0 items
+        \\ └ declarations_list: 1 items
+        \\    └ 0: %1 = global_decl {
+        \\       ├ name_node: node(#1: "Foo")
+        \\       ├ extern: false
+        \\       ├ is_fn: false
+        \\       ├ visibility: "private"
+        \\       ├ exported: false
+        \\       ├ mutable: false
+        \\       ├ type: NONE
+        \\       └ init: %13 = inline_block
+        \\          └ %2 = struct_decl {
+        \\             ├ name_node: NONE
+        \\             ├ fields_list: 2 items
+        \\             │  ├ 0: %4 = struct_field {
+        \\             │  │  ├ name_node: node(#3: "a")
+        \\             │  │  ├ ty: %3 = ty_f32 {
+        \\             │  │  │  └ node: node(#4: "f32")
+        \\             │  │  └ init: NONE
+        \\             │  └ 1: %7 = struct_field {
+        \\             │     ├ name_node: node(#6: "b")
+        \\             │     ├ ty: %5 = ty_u32 {
+        \\             │     │  └ node: node(#7: "u32")
+        \\             │     └ init: %6 = comptime_number {
+        \\             │        └ node: node(#8: "3")
+        \\             └ declarations_list: 1 items
+        \\                └ 0: %8 = global_decl {
+        \\                   ├ name_node: node(#10: "foo")
+        \\                   ├ extern: false
+        \\                   ├ is_fn: true
+        \\                   ├ visibility: "public"
+        \\                   ├ exported: false
+        \\                   ├ mutable: false
+        \\                   ├ type: %12 = fn_decl {
+        \\                   │  ├ name_node: node(#10: "foo")
+        \\                   │  ├ return_type: %9 = ty_void {
+        \\                   │  │  └ node: node(#11: "void")
+        \\                   │  └ params_list: 0 items
+        \\                   └ init: %11 = block
+        \\                      └ %10 = ret value=(null)
         \\
     );
 }

@@ -33,8 +33,11 @@ pub const Builder = struct {
     fn getHirInst(self: *Builder, hir_index: Hir.Inst.Index) Hir.Inst {
         return self.hir.insts.items[hir_index];
     }
-    pub fn iterHirInsts(self: *Builder, list: Hir.Lists.Index) Hir.Lists.ListIter {
-        return self.hir.lists.iterList(list);
+    // pub fn iterHirInsts(self: *Builder, list: Mir.ChildList) Hir.Lists.ListIter {
+    //     return self.hir.lists.iterList(list);
+    // }
+    pub fn getListSlice(self: *Builder, list: Mir.List) []u32 {
+        return self.hir.lists.getSlice(list);
     }
     pub fn getSlice(self: *Builder, interned_slice: InternedSlice) []const u8 {
         return self.mir.strings.getSlice(interned_slice);
@@ -45,8 +48,8 @@ pub const Builder = struct {
             return self.logger.panic("expected hir inst tag {s}, got {s}", .{ @tagName(tag), @tagName(std.meta.activeTag(hir_inst)) });
         }
     }
-    pub fn newList(self: *Builder) Mir.ChildList {
-        return self.mir.lists.new(self.mir.allocator);
+    pub fn newList(self: *Builder) Mir.WorkingList {
+        return self.mir.interned_lists.new();
     }
     fn deinit(self: *Builder) void {
         self.arena.deinit();
@@ -141,8 +144,8 @@ pub const Builder = struct {
                 var hasher = std.hash.Wyhash.init(0);
                 hasher.update("fn");
                 hasher.update(std.mem.asBytes(&fn_type.name));
-                var params_iter = self.mir.lists.iterList(fn_type.params_list);
-                while (params_iter.next()) |param| {
+                const params_list = self.mir.interned_lists.getSlice(fn_type.params_list);
+                for (params_list) |param| {
                     const interned_param = try self.internTypeIndex(Mir.Type.Index.asTypeIndex(param));
                     hasher.update(std.mem.asBytes(&interned_param.hash));
                 }
@@ -549,12 +552,12 @@ pub const Wip = struct {
         // const self = builder.getWip(self_index);
 
         const hir_inst = self.builder.getHirInst(self.hir_index);
-        const module_decl = hir_inst.mod_decl;
+        const module_decl = hir_inst.struct_decl;
 
         const allocator = builder.arena.allocator();
-        var iter = builder.iterHirInsts(module_decl.declarations_list);
+        const hir_declarations_list = builder.getListSlice(module_decl.declarations_list);
 
-        while (iter.next()) |decl_hir_index| {
+        for (hir_declarations_list) |decl_hir_index| {
             const decl_hir_inst = builder.getHirInst(decl_hir_index);
             const global_decl = decl_hir_inst.global_decl;
             const name = try builder.internNode(global_decl.name_node);
@@ -592,8 +595,8 @@ pub const Wip = struct {
                         try self.data.module.declarations.append(allocator, fn_decl_wip_index);
                         try self.putGlobal(decl_hir_index, fn_decl_wip_index);
 
-                        var params_iter = builder.iterHirInsts(type_hir_inst.fn_decl.params_list);
-                        while (params_iter.next()) |param_hir_index| {
+                        const params_list = builder.getListSlice(type_hir_inst.fn_decl.params_list);
+                        for (params_list) |param_hir_index| {
                             const param_hir_inst = builder.getHirInst(param_hir_index);
                             const param_name = try builder.internNode(param_hir_inst.param_decl.name_node);
 
@@ -732,7 +735,7 @@ pub const Wip = struct {
 
         builder.setType(type_index, .{
             .module = .{
-                .fields = 0, // TODO
+                .fields = Mir.List.empty, // TODO
                 .decls = try declaration_types.commit(),
                 .alignment = 1,
             },
@@ -983,8 +986,8 @@ pub const Wip = struct {
             .block, .inline_block => |hir_inst| hir_inst,
             else => unreachable,
         };
-        var iter_instructions = self.builder.iterHirInsts(block_hir_inst.instructions_list);
-        while (iter_instructions.next()) |hir_inst| {
+        const instructions_list = self.builder.getListSlice(block_hir_inst.instructions_list);
+        for (instructions_list) |hir_inst| {
             _ = try self.resolveInstruction(hir_inst);
         }
 
@@ -1014,7 +1017,7 @@ pub const Wip = struct {
         const hir_inst = self.builder.getHirInst(hir_inst_index);
         switch (hir_inst) {
             .local => |local| return try self.resolveLocalInstruction(hir_inst_index, local),
-            .comptime_number => return try self.resolveConstantInstruction(hir_inst_index, hir_inst.comptime_number),
+            .comptime_number => return try self.resolveConstantInstruction(hir_inst_index, hir_inst.comptime_number.node),
 
             .ty_i8,
             .ty_i16,
@@ -1400,8 +1403,8 @@ pub const Wip = struct {
             },
         });
     }
-    pub fn resolveReturnInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        if (node.operand == 0) {
+    pub fn resolveReturnInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Return) Error!InstructionId {
+        if (node.value == null) {
             return try self.pushInstruction(hir_inst_index, .{
                 .op = .ret,
                 .type = .void,
@@ -1409,7 +1412,7 @@ pub const Wip = struct {
                 .data = .void,
             });
         }
-        const instruction_id = try self.getInstructionId(node.operand);
+        const instruction_id = try self.getInstructionId(node.value.?);
         const instruction = try self.getInstruction(instruction_id);
 
         return try self.pushInstruction(hir_inst_index, .{
@@ -1793,10 +1796,10 @@ pub const Wip = struct {
             .op = .branch,
             .type = .void,
             .value = .void,
-            .data = .{ .branch = .{
+            .data = .{ .branch_wip = .{
                 .condition = condition_id,
-                .then_instructions_list = then_branch.index,
-                .else_instructions_list = if (else_branch) |else_branch_wip| else_branch_wip.index else null,
+                .then_wip = then_branch.index,
+                .else_wip = if (else_branch) |else_branch_wip| else_branch_wip.index else null,
             } },
         });
     }
@@ -1824,8 +1827,8 @@ pub const Wip = struct {
             .op = .loop,
             .type = .void,
             .value = .void,
-            .data = .{ .loop = .{
-                .instructions_list = body_wip.index,
+            .data = .{ .loop_wip = .{
+                .wip = body_wip.index,
             } },
         });
 
@@ -1840,8 +1843,8 @@ pub const Wip = struct {
         var list = self.builder.newList();
         const callee_type_index = try callee_wip.resolveType();
         const callee_type = self.builder.getType(callee_type_index) orelse unreachable;
-        var iter = self.builder.iterHirInsts(node.args_list);
-        while (iter.next()) |arg_id| {
+        const args_list = self.builder.getListSlice(node.args_list);
+        for (args_list) |arg_id| {
             const arg_instruction_id = try self.getInstructionId(arg_id);
             try list.append(arg_instruction_id);
         }
@@ -1959,7 +1962,7 @@ pub const Wip = struct {
     pub fn resolveGetPropertyPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetProperty) Error!InstructionId {
         const base_id = try self.getInstructionId(node.base);
         const base_instruction = try self.getInstruction(base_id);
-        const property_name = node.property_name;
+        const property_name = self.builder.hir.ast.getNodeSlice(node.property_name_node);
         const base_type_index = try self.unwrapPointerType(base_instruction.type);
         const base_type = self.builder.getType(base_type_index) orelse self.builder.logger.todo("error for base type not found: {d}", .{base_type_index});
         if (std.mem.eql(u8, property_name, "len")) {
@@ -1991,7 +1994,7 @@ pub const Wip = struct {
     pub fn resolveGetPropertyValueInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetProperty) Error!InstructionId {
         const base_id = try self.getInstructionId(node.base);
         const base_instruction = try self.getInstruction(base_id);
-        const property_name = node.property_name;
+        const property_name = self.builder.hir.ast.getNodeSlice(node.property_name_node);
         // const property_pointer_id = try self.pushInstruction(hir_inst_index, .{
         //     .op = .get_property_pointer,
         //     .type = base_instruction.type,
@@ -2004,7 +2007,7 @@ pub const Wip = struct {
         const base_type = self.builder.getType(base_instruction.type) orelse self.builder.logger.todo("error for base type not found: {d}", .{base_instruction.type});
         switch (base_type.*) {
             .array => |array| {
-                if (std.mem.eql(u8, node.property_name, "len")) {
+                if (std.mem.eql(u8, property_name, "len")) {
                     const value = try self.builder.pushValue(.{ .integer = @intCast(array.size) });
                     return try self.pushInstruction(hir_inst_index, .{
                         .op = .constant,
@@ -2350,7 +2353,7 @@ pub const Wip = struct {
             .instructions = owner_wip.instructions.items,
             .types = self.builder.mir.types.items,
             .values = self.builder.mir.values.items,
-            .lists = &self.builder.mir.lists,
+            .lists = &self.builder.mir.interned_lists,
             .builder = self.builder,
             .writer = writer,
             .strings = &self.builder.mir.strings,
@@ -2513,7 +2516,7 @@ pub const Wip = struct {
 const InstructionSet = struct {
     block_wip: *Wip,
     builder: *Builder,
-    instructions: Mir.ChildList,
+    instructions: Mir.WorkingList,
     map: std.AutoHashMapUnmanaged(InstructionId, Mir.Instruction.Index),
     local_count: u32 = 0,
 
@@ -2620,11 +2623,10 @@ const InstructionSet = struct {
             },
 
             .call => |call| {
-                var iter = self.builder.mir.lists.iterList(call.args_list);
-                var i: usize = 0;
-                while (iter.next()) |arg_id| {
-                    iter.slice[i] = self.getIndex(arg_id);
-                    i += 1;
+                var args_list = self.builder.getListSlice(call.args_list);
+                // var i: usize = 0;
+                for (args_list, 0..args_list.len) |arg_id, i| {
+                    args_list[i] = self.getIndex(arg_id);
                 }
                 _ = try self.push(instruction_id, .{
                     .op = instruction.op,
@@ -2658,17 +2660,15 @@ const InstructionSet = struct {
                     },
                 }
             },
-            .if_expr => unreachable,
-            .branch => {
-                const branch = instruction.data.branch;
+            .branch_wip => |branch_wip| {
                 _ = try self.push(instruction_id, .{
                     .op = instruction.op,
                     .type = instruction.type,
                     .value = instruction.value,
                     .data = .{ .branch = .{
-                        .condition = self.getIndexAndMarkLive(branch.condition),
-                        .then_instructions_list = try self.genInstructionsFromChildWip(branch.then_instructions_list),
-                        .else_instructions_list = if (branch.else_instructions_list) |else_instructions_list| try self.genInstructionsFromChildWip(else_instructions_list) else null,
+                        .condition = self.getIndexAndMarkLive(branch_wip.condition),
+                        .then_instructions_list = try self.genInstructionsFromChildWip(branch_wip.then_wip),
+                        .else_instructions_list = if (branch_wip.else_wip) |else_wip| try self.genInstructionsFromChildWip(else_wip) else null,
                     } },
                 });
             },
@@ -2698,8 +2698,7 @@ const InstructionSet = struct {
                     } },
                 });
             },
-            .loop => {
-                const loop = instruction.data.loop;
+            .loop_wip => |loop_wip| {
                 // Push furst because inner instructions may reference it
                 const loop_instruction_id = try self.push(instruction_id, instruction.*);
                 // then update it
@@ -2709,7 +2708,7 @@ const InstructionSet = struct {
                     .value = instruction.value,
                     .data = .{
                         .loop = .{
-                            .instructions_list = try self.genInstructionsFromChildWip(loop.instructions_list),
+                            .instructions_list = try self.genInstructionsFromChildWip(loop_wip.wip),
                         },
                     },
                 });
@@ -2782,7 +2781,7 @@ const InstructionSet = struct {
         const count = self.instructions.list.items.len;
         const instructions_list = try self.instructions.commit();
         const color = fmt.pickColor(self.block_wip.index);
-        self.builder.logger.log("commited {d} instructions to list {d}, on block {d} owner {d}", .{ count, instructions_list, self.block_wip.index, self.block_wip.data.block.owner }, color);
+        self.builder.logger.log("commited {d} instructions to list {d}, on block {d} owner {d}", .{ count, instructions_list.start, self.block_wip.index, self.block_wip.data.block.owner }, color);
         return instructions_list;
     }
     pub fn genInstructionsFromChildWip(self: *InstructionSet, wip_id: Wip.Index) Wip.Error!Mir.Instruction.List {
@@ -2857,11 +2856,11 @@ test "MirBuilder2" {
     std.debug.print("AST:\n", .{});
     try ast.format(std.io.getStdErr().writer().any(), 0, .{});
 
-    var hir = try HirBuilder.gen(test_allocator, &ast, &errors);
+    var hir = try Hir.build(test_allocator, &ast, &errors);
     defer hir.deinit();
     std.debug.print("Hir:\n{}\n", .{hir});
 
-    var mir = try build(test_allocator, &hir);
+    var mir = try build(test_allocator, &hir, &errors);
     defer mir.deinit();
 
     std.debug.print("Mir:\n{}\n", .{mir});

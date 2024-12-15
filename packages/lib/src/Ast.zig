@@ -182,6 +182,7 @@ pub const Node = struct {
             type: Index,
             default_value: Index,
         },
+        comment_line: TokenIndex,
 
         const TokenIndex = struct {
             token: Token.Index,
@@ -194,6 +195,7 @@ pub const Node = struct {
             type: Index,
             value: Index,
         };
+
         // binary_expression: BinaryExpression,
         // unary_expression: Index,
         // literal: Token.Index,
@@ -349,6 +351,8 @@ pub const Node = struct {
 
         struct_decl,
         struct_field,
+
+        comment_line,
 
         pub fn toInt(self: Tag) u32 {
             return @intFromEnum(self);
@@ -1675,6 +1679,144 @@ test "Ast" {
         \\                              [rhs]:
         \\                                .identifier
         \\                                  [token]:.identifier 'b'
+        \\
+    );
+    try astMatch(
+        \\fn sum_array(a: i32) i32 {
+        \\  var arr :[4]i32 = [4]i32 {1, 2, 3, 4}
+        \\  var i: i32 = 0;
+        \\  var sum: i32 = 0;
+        \\  while (i < arr.len) {
+        \\    sum = sum + arr[i];
+        \\    i = i + 1;
+        \\  }
+        \\  return sum;
+        \\}
+        \\
+    , 0,
+        \\.struct_decl
+        \\  [members_list]:
+        \\    .fn_decl
+        \\      [proto]:
+        \\        .fn_proto
+        \\          [name]:
+        \\            .identifier
+        \\              [token]:.identifier 'sum_array'
+        \\          [params_list]:
+        \\            .fn_param
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'a'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\          [ret_type]:
+        \\            .ty_i32
+        \\              [token]:.keyword_i32 'i32'
+        \\      [body]:
+        \\        .block
+        \\          [list]:
+        \\            .var_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'arr'
+        \\              [type]:
+        \\                .ty_array
+        \\                  [size_expr]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '4'
+        \\                  [type]:
+        \\                    .ty_i32
+        \\                      [token]:.keyword_i32 'i32'
+        \\              [value]:
+        \\                .array_init
+        \\                  [type]:
+        \\                    .ty_array
+        \\                      [size_expr]:
+        \\                        .number_literal
+        \\                          [token]:.number_literal '4'
+        \\                      [type]:
+        \\                        .ty_i32
+        \\                          [token]:.keyword_i32 'i32'
+        \\                  [items_list]:
+        \\                    .number_literal
+        \\                      [token]:.number_literal '1'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '2'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '3'
+        \\                    .number_literal
+        \\                      [token]:.number_literal '4'
+        \\            .var_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'i'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\              [value]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '0'
+        \\            .var_decl
+        \\              [name]:
+        \\                .identifier
+        \\                  [token]:.identifier 'sum'
+        \\              [type]:
+        \\                .ty_i32
+        \\                  [token]:.keyword_i32 'i32'
+        \\              [value]:
+        \\                .number_literal
+        \\                  [token]:.number_literal '0'
+        \\            .while_loop
+        \\              [condition]:
+        \\                .lt
+        \\                  [lhs]:
+        \\                    .identifier
+        \\                      [token]:.identifier 'i'
+        \\                  [rhs]:
+        \\                    .prop_access
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'arr'
+        \\                      [rhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'len'
+        \\              [body]:
+        \\                .block
+        \\                  [list]:
+        \\                    .assign
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'sum'
+        \\                      [rhs]:
+        \\                        .add
+        \\                          [lhs]:
+        \\                            .identifier
+        \\                              [token]:.identifier 'sum'
+        \\                          [rhs]:
+        \\                            .array_prop_access
+        \\                              [lhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'arr'
+        \\                              [rhs]:
+        \\                                .identifier
+        \\                                  [token]:.identifier 'i'
+        \\                    .assign
+        \\                      [lhs]:
+        \\                        .identifier
+        \\                          [token]:.identifier 'i'
+        \\                      [rhs]:
+        \\                        .add
+        \\                          [lhs]:
+        \\                            .identifier
+        \\                              [token]:.identifier 'i'
+        \\                          [rhs]:
+        \\                            .number_literal
+        \\                              [token]:.number_literal '1'
+        \\            .ret_expression
+        \\              [node]:
+        \\                .identifier
+        \\                  [token]:.identifier 'sum'
         \\
     );
 }

@@ -66,6 +66,7 @@ pub fn internNodeSlice(self: *Self, node_index: Ast.Node.Index) !InternedSlice {
     return try self.hir.strings.intern(slice);
 }
 const Scope = struct {
+    index: usize,
     label: []const u8,
     kind: Kind,
     parent: ?*Scope,
@@ -79,9 +80,13 @@ const Scope = struct {
         block,
     };
 
+    pub var COUNT: usize = 0;
     pub fn init(builder: *Self, parent: ?*Scope, kind: Kind, label: []const u8) Scope {
-        // std.debug.print("[INIT_SCOPE]: {s} {{\n", .{label});
+        const index = Scope.COUNT;
+        Scope.COUNT += 1;
+        builder.logger.log("[INIT_SCOPE]: {s} {d}\n", .{ label, index }, null);
         return .{
+            .index = index,
             .builder = builder,
             .parent = parent,
             .kind = kind,
@@ -90,6 +95,14 @@ const Scope = struct {
         };
     }
     pub fn commit(self: *Scope) !Hir.InternedLists.Range {
+        self.builder.logger.log("[COMMIT SCOPE] {s} {d}\n", .{ self.label, self.index }, null);
+        if (self.kind == .struct_decl) {
+            // We can discard struct decl instruction list
+            // because all inner declarations will have their own instructions list
+            // from their own scope
+            self.instructions.deinit();
+            return Hir.InternedLists.Range.empty;
+        }
         return try self.instructions.commit();
     }
     pub fn resolveSymbol(self: *Scope, name: []const u8) ?Hir.Inst.Index {
@@ -164,7 +177,16 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
     defer self.logger.close();
 
     switch (nav.data.*) {
-        .struct_decl => return try self.genStructDecl(scope, nav.node),
+        .comment_line => {
+            return 0;
+        },
+        .struct_decl => {
+            var struct_scope = Scope.init(self, scope, .struct_decl, "root");
+            const inst = try self.genStructDecl(&struct_scope, nav.node);
+            try scope.instructions.append(inst);
+            _ = try struct_scope.commit();
+            return inst;
+        },
         .block => {
             const inst = try self.genBlockInstruction(scope, node_index, null);
             try scope.instructions.append(inst);
@@ -580,9 +602,12 @@ const WipDef = struct {
 pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
     self.logger.open("#{d} genStructDecl", .{node_index});
     defer self.logger.close();
-    const index = try self.reserveInstruction();
+    // std.debug.print("{}\n", .{self.hir.ast.nodes.items[node_index]});
+    const index = try scope.reserveInstruction();
     const is_root = node_index == 0;
     const nav = Ast.Navigator.init(self.hir.ast, node_index);
+    // if (is_root) {
+    // }
     // nav.assertTag(.root);
     var wip_declarations_list = std.ArrayList(WipDef).init(self.arena.allocator());
     defer wip_declarations_list.deinit();
@@ -595,6 +620,9 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
     for (members_list) |child_index| {
         const child = self.hir.ast.getNode(child_index);
         switch (child.data) {
+            .comment_line => {
+                continue;
+            },
             .struct_field => {
                 if (is_root) {
                     self.logger.todo("error for: root struct declaration should not have fields", .{});
@@ -613,6 +641,7 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
                 try fields_list.append(inst);
             },
             else => {
+                if (child_index == 0) std.debug.panic("root struct declaration should not have fields", .{});
                 const wip = try self.genDef(scope, child_index);
                 try decl_list.append(wip.inst);
                 try wip_declarations_list.append(wip);
@@ -656,6 +685,8 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
     index: Hir.Inst.Index,
     init: ?Hir.Inst.Index,
 } {
+    self.logger.open("#{d} genFnDeclInstruction", .{node_index});
+    defer self.logger.close();
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     const fn_decl = nav.data.fn_decl;
     const proto = fn_decl.proto;
@@ -689,6 +720,8 @@ pub fn genInlineBlock(self: *Self, parent_scope: *Scope, ty_node: ?Ast.Node.Inde
     ty_inst: ?Hir.Inst.Index,
     index: Hir.Inst.Index,
 } {
+    self.logger.open("genInlineBlock", .{});
+    defer self.logger.close();
     var scope = Scope.init(self, parent_scope, .block, "inline_block");
 
     const ty_inst = if (ty_node) |node| try self.genInstruction(&scope, node) else null;

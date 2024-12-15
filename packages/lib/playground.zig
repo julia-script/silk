@@ -12,11 +12,20 @@
 // fn __stack_alloc_i32_array(size: i32) i32 {
 //   return __stack_alloc((1 + size) * 4);
 // }
-const A = struct {
+type A = struct {
     a: i32,
     b: i32,
-};
-
+}
+fn sum_array(a: i32) i32 {
+    var arr :[4]i32 = [4]i32 {1, 2, 3, 4}
+    var i: i32 = 0;
+    var sum: i32 = 0;
+    while (i < arr.len) {
+        //   sum = sum + arr[i];
+        //   i = i + 1;
+    }
+    return sum;
+}
 // fn B() type {
 //     const Self = struct {
 //         a: i32,
@@ -33,16 +42,7 @@ const A = struct {
 //     fn sum_array() i32 {
 //     }
 // }
-fn sum_array(a: i32) i32 {
-    var arr :[4]i32 = [4]i32 {1, 2, 3, 4}
-    var i: i32 = 0;
-    var sum: i32 = 0;
-    while (i < arr.len) {
-          sum = sum + arr[i];
-          i = i + 1;
-    }
-    return sum;
-}
+
 // export fn fib(n: i32): i32 {
 //   var a:i32 = 0;
 //   var b:i32 = 1;

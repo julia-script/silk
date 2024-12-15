@@ -66,7 +66,7 @@ pub fn InternedLists(T: type) type {
                 .parent = self,
             };
         }
-        pub fn getSlice(self: *Self, range: Range) []const T {
+        pub fn getSlice(self: *Self, range: Range) []T {
             const start: usize = @intCast(range.start);
             const len: usize = @intCast(range.len);
             if (len == 0) {

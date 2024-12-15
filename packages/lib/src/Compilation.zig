@@ -58,7 +58,7 @@ pub const Source = struct {
             0,
             .{},
         );
-        self.hir = try HirBuilder.gen(allocator, &self.ast.?, &compilation.errors);
+        self.hir = try Hir.build(allocator, &self.ast.?, &compilation.errors);
         std.debug.print("HIR:\n", .{});
         std.debug.print("{any}\n", .{self.hir});
         self.mir = try Mir.build(allocator, &self.hir.?, &compilation.errors);

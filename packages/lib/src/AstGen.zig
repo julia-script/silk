@@ -568,9 +568,14 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 return try self.parseWhileLoop();
             },
             .comment => {
+                const start_token = self.token_index;
                 self.consumeToken();
                 // TODO: add it to ast
-                return try self.parsePrimary();
+                return try self.pushNode(.{
+                    .data = .{ .comment_line = .{ .token = start_token } },
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
             },
             .keyword_struct => {
                 return try self.parseStructDecl();
@@ -1630,8 +1635,9 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
         const before_parsing_token_index = self.token_index;
         if (!self.nextTokensAre(.identifier, .colon) and !self.nextTokensAre(.identifier, .equal)) {
             // Probably a declaration
-            const declaration = try self.parseExpression();
-            try members_list.append(declaration);
+            const declaration = try self.parsePrimary();
+            if (declaration != 0)
+                try members_list.append(declaration);
         } else {
             const identifier = try self.parsePrimary();
             const field_start_token = self.token_index;
@@ -1711,7 +1717,8 @@ const fmt = @import("./format_utils.zig");
 pub fn loggerOpen(self: *AstGen, label: []const u8) void {
     self.logger.writeIndent() catch {};
 
-    const token = self.peekToken() orelse @panic("no token");
+    const token = self.ast.tokens.items[@min(self.token_index, self.ast.tokens.items.len - 1)];
+
     self.logger.print("#token({d}):", .{self.token_index}) catch {};
     const color = fmt.pickColor(@intFromEnum(token.tag));
     color.print(self.logger.writer, ".{s}", .{@tagName(token.tag)}, .{}) catch {};
