@@ -1,0 +1,8 @@
+const A = struct {
+  a: i32,
+  b: i32 = 2,
+  c: i32 = 3,
+  pub fn foo(self: A) i32 {
+    return self.a + self.b;
+  }
+}

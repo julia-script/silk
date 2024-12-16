@@ -1,0 +1,4 @@
+const A = struct {
+  a: i32,
+  b: i32 = 2
+}

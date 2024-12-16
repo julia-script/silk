@@ -1,0 +1,25 @@
+;; 11 Nodes
+;; 16 Tokens
+;; 3 Interned Lists
+
+%0 = .struct_decl - tok[0..15]
+ └ members_list: 
+    └ %10 = .const_decl - tok[0..13]
+       ├ name: %1 = .identifier - tok[1..1]
+       │  └ token: .identifier 'A'
+       ├ type: NONE
+       └ value: %2 = .struct_decl - tok[3..14]
+          └ members_list: 
+             ├ %5 = .struct_field - tok[6..8]
+             │  ├ name: %3 = .identifier - tok[5..5]
+             │  │  └ token: .identifier 'a'
+             │  ├ type: %4 = .ty_i32 - tok[7..7]
+             │  │  └ token: .keyword_i32 'i32'
+             │  └ default_value: NONE
+             └ %9 = .struct_field - tok[10..14]
+                ├ name: %6 = .identifier - tok[9..9]
+                │  └ token: .identifier 'b'
+                ├ type: %7 = .ty_i32 - tok[11..11]
+                │  └ token: .keyword_i32 'i32'
+                └ default_value: %8 = .number_literal - tok[13..13]
+                   └ token: .number_literal '2'

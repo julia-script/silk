@@ -5,6 +5,7 @@ const Mir = @import("Mir.zig");
 const ErrorManager = @import("ErrorManager.zig");
 
 const CASES_DIR_PATH = "./src/tests/cases";
+const SNAPSHOTS_DIR_PATH = "./src/tests/snapshots";
 const SILK_EXTENSION = ".silk";
 test "TestCases" {
     const allocator = std.testing.allocator;
@@ -93,12 +94,24 @@ pub fn writeOutput(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const 
 
 const diff = @import("patience_diff.zig").diff;
 pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []const u8, path: []const u8, extension: []const u8) !void {
-    const expected_path = try std.mem.join(allocator, "", &.{ path, extension });
+    _ = dir; // autofix
+    const file_name = try std.mem.join(allocator, "", &.{ std.fs.path.stem(path), extension });
+    defer allocator.free(file_name);
+
+    const expected_path = try std.fs.path.join(allocator, &.{ SNAPSHOTS_DIR_PATH, std.fs.path.dirname(path) orelse "", file_name });
+    std.debug.print("expected_path: {s}\n", .{expected_path});
+    try std.fs.cwd().makePath(std.fs.path.dirname(expected_path) orelse ".");
+
     defer allocator.free(expected_path);
-    const expected_file = dir.openFile(expected_path, .{ .mode = .read_write }) catch |err| {
+    const expected_file = std.fs.cwd().openFile(expected_path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => {
-                try writeOutput(allocator, dir, path, actual, extension);
+                std.debug.print("File not found, writing to {s}\n", .{expected_path});
+                try std.fs.cwd().writeFile(.{
+                    .sub_path = expected_path,
+                    .data = actual,
+                    .flags = .{ .truncate = true },
+                });
                 return;
             },
             else => return err,
@@ -107,11 +120,13 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []co
     defer expected_file.close();
 
     const expected = try expected_file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+
     defer allocator.free(expected);
+
     if (std.mem.eql(u8, actual, expected)) return;
     var diff_result = try diff(allocator, expected, actual);
     defer diff_result.deinit();
-    try diff_result.format(std.io.getStdOut().writer().any(), .{ .color = true });
+    try diff_result.format(std.io.getStdErr().writer().any(), .{ .color = true });
 
     return error.SnapshotMismatch;
 }
