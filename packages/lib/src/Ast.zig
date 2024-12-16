@@ -14,6 +14,7 @@ const format_utils = @import("format_utils.zig");
 const serializer = @import("serializer.zig");
 const InternedLists = @import("interned-lists.zig").InternedLists;
 const InternedIndexesList = InternedLists(Node.Index);
+const TreeWriter = @import("TreeWriter.zig");
 
 nodes: Array(Node),
 interned_lists: InternedIndexesList,
@@ -37,6 +38,7 @@ pub const Node = struct {
     const ChildList = InternedIndexesList.Range;
 
     pub const Data = union(Tag) {
+        reserved: struct {},
         add: BinaryExpression,
         div: BinaryExpression,
         mod: BinaryExpression,
@@ -245,6 +247,7 @@ pub const Node = struct {
         @"export",
     };
     pub const Tag = enum {
+        reserved,
         // Binary operators
         // - Math
         add,
@@ -364,7 +367,8 @@ pub const Node = struct {
         body: Index,
     };
 };
-pub fn parse(allocator: Allocator, errors: *ErrorManager, source: []const u8) !Ast {
+
+pub fn parse(allocator: Allocator, errors: *ErrorManager, source: []const u8, options: AstGen.Options) !Ast {
     var ast = Ast{
         .allocator = allocator,
         // .errors = errors,
@@ -373,11 +377,13 @@ pub fn parse(allocator: Allocator, errors: *ErrorManager, source: []const u8) !A
         .nodes = .{},
         .source = source,
     };
-    var ast_gen = AstGen.init(&ast, errors);
-
+    var ast_gen = try AstGen.init(&ast, errors, options);
+    defer ast_gen.deinit();
     try ast_gen.parse();
+
     return ast;
 }
+
 pub fn getNodeSlice(self: *Ast, node_i: Node.Index) []const u8 {
     const start_token_index = self.getNodeStartToken(node_i);
     const end_token_index = self.getNodeEndToken(node_i);
@@ -433,285 +439,298 @@ pub fn nodeIs(self: *Ast, node_i: Node.Index, tag: Node.Tag) bool {
     return self.getNodeTag(node_i) == tag;
 }
 
-pub fn format(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, options: FormatOptions) !void {
-    _ = options; // autofix
-    try self.formatNode(writer, node, 0, .{});
+pub fn formatRoot(self: *Ast, writer: std.io.AnyWriter, root_index: Node.Index, options: FormatOptions) !void {
+    try writer.print(";; {d} Nodes\n", .{self.nodes.items.len});
+    try writer.print(";; {d} Tokens\n", .{self.tokens.items.len});
+    try writer.print(";; {d} Interned Lists\n", .{self.interned_lists.lists.items.len});
+
+    try writer.writeAll("\n");
+
+    var tree_writer = TreeWriter.init(writer);
+    try self.formatNode(writer, root_index, &tree_writer, options);
     // try self.format_inner(writer, node, 0, options);
 }
+pub fn format(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, options: FormatOptions) !void {
+    // var tree_writer = TreeWriter.init(writer);
+    // try self.formatNode(writer, node, &tree_writer, options);
+    // try self.format_inner(writer, node, 0, options);
 
-fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: usize, options: FormatOptions) !void {
-    if (node == 0 and indent > 0) return;
-    const tag: Node.Tag = self.getNodeTag(node);
-    const data: *Node.Data = self.getNodeData(node);
-    const indentOptions: format_utils.IndentOptions = .{
-        .rainbow = options.color,
-        .size = options.indent_size,
-    };
-    const color_options: Color.FormatColorOptions = .{ .color = options.color };
-    try format_utils.writeIndent(writer, indent, indentOptions);
-    if (options.show_node_index) try tw.blue_400.brighter(-0.3)
-        .print(
-        writer,
-        "[{d}]",
-        .{node},
-        color_options,
-    );
-    try tw.blue_400.brighter(-0.3)
-        .print(
-        writer,
-        "[{d}-{d}]",
-        .{ self.getNodeStartToken(node), self.getNodeEndToken(node) },
-        color_options,
-    );
-    try tw.blue_400.bold().print(
-        writer,
-        "{s}: ",
-        .{@tagName(tag)},
-        color_options,
-    );
-
-    switch (data.*) {
-        .block,
-        .root,
-        .expr,
-        => |children_list| {
-            _ = try writer.write("\n");
-            var iter = self.node_lists.iterList(children_list.list);
-            while (iter.next()) |child| {
-                try self.format_inner(writer, child, indent + 1, options);
-            }
-        },
-        .add,
-        .sub,
-        .mul,
-        .div,
-        .mod,
-        .pow,
-        .eq,
-        .ne,
-        .lt,
-        .le,
-        .gt,
-        .ge,
-        .band,
-        .bor,
-        .bxor,
-        .bshl,
-        .bshr,
-        .@"or",
-        .@"and",
-        .xor,
-        .assign,
-        .ty_assign,
-        .prop_access,
-        => |bin_op| {
-            _ = try writer.write("\n");
-            try self.format_inner(writer, bin_op.lhs, indent + 1, options);
-            try self.format_inner(writer, bin_op.rhs, indent + 1, options);
-        },
-        .@"extern",
-        .@"pub",
-        .@"export",
-        .increment,
-        .decrement,
-        .ret_expression,
-        .group,
-        .bnot,
-        .not,
-        .neg,
-        => |un| {
-            _ = try writer.write("\n");
-            try self.format_inner(writer, un.node, indent + 1, options);
-        },
-        .const_decl, .var_decl => |decl| {
-            _ = try writer.write("\n");
-            try self.format_inner(writer, decl.name, indent + 1, options);
-            if (decl.type != 0) {
-                try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                try tw.gray_400.write(writer, "[type]:\n", color_options);
-                try self.format_inner(writer, decl.type, indent + 2, options);
-            }
-            if (decl.value != 0) {
-                try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                try tw.gray_400.write(writer, "[init]:\n", color_options);
-                try self.format_inner(writer, decl.value, indent + 2, options);
-            }
-        },
-        .if_expr => |expr| {
-            _ = try writer.write("\n");
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[condition]:\n", color_options);
-            try self.format_inner(writer, expr.condition, indent + 2, options);
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[then]:\n", color_options);
-            try self.format_inner(writer, expr.then_branch, indent + 2, options);
-            if (expr.else_branch != 0) {
-                try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                try tw.gray_400.write(writer, "[else]:\n", color_options);
-                try self.format_inner(writer, expr.else_branch, indent + 2, options);
-            }
-        },
-
-        .fn_call => |call| {
-            _ = try writer.write("\n");
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[callee]:\n", color_options);
-            try self.format_inner(writer, call.callee, indent + 2, options);
-            // _ = try writer.write("\n");
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            var iter = self.node_lists.iterList(call.args_list);
-            var i: usize = 0;
-            while (iter.next()) |arg| {
-                if (i == 0) try tw.gray_400.write(writer, "[args]:\n", color_options);
-                try self.format_inner(writer, arg, indent + 2, options);
-                i += 1;
-            }
-        },
-        // .group => {
-        //     _ = try writer.write("\n");
-        //     try self.format_inner(writer, data.group.list, indent + 1, options);
-        // // },
-        .ty_boolean,
-        .ty_number,
-        .ty_string,
-        .ty_void,
-        .ty_f32,
-        .ty_f64,
-        .ty_i32,
-        .ty_i64,
-        .ty_option,
-        .number_literal,
-        .true_literal,
-        .false_literal,
-        .string_literal,
-        .identifier,
-        .char_literal,
-        .hex_literal,
-        => |tok| {
-            try tw.yellow_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(tok.token)}, color_options);
-        },
-        .ty_generic => |gen| {
-            // try tw.cyan_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.ty_generic.name)});
-            _ = try writer.write("\n");
-
-            try self.format_inner(writer, gen.name, indent + 1, options);
-            var iter = self.node_lists.iterList(gen.args_list);
-            while (iter.next()) |arg| {
-                if (iter.index == 1) {
-                    try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                    try tw.gray_400.write(writer, "[args]:\n", color_options);
-                }
-                try self.format_inner(writer, arg, indent + 2, options);
-            }
-        },
-
-        .ty_list => |list| {
-            try tw.gray_400.write(writer, "[size]:\n", color_options);
-            try self.format_inner(writer, list.size_expr, indent + 2, options);
-            try tw.gray_400.write(writer, "[type]:\n", color_options);
-            try self.format_inner(writer, list.ty, indent + 2, options);
-        },
-
-        .fn_decl => |decl| {
-            _ = try writer.write("\n");
-
-            try self.format_inner(writer, decl.proto, indent + 1, options);
-            if (decl.body != 0) {
-                try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                try tw.gray_400.write(writer, "[body]:\n", color_options);
-                try self.format_inner(writer, decl.body, indent + 2, options);
-            }
-        },
-        .fn_proto => |proto| {
-            _ = try writer.write("\n");
-            try self.format_inner(writer, proto.name, indent + 1, options);
-            if (proto.params_list != 0) {
-                var iter = self.node_lists.iterList(proto.params_list);
-                while (iter.next()) |param| {
-                    if (iter.index == 1) {
-                        try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                        try tw.gray_400.write(writer, "[params]:\n", color_options);
-                    }
-                    try self.format_inner(writer, param, indent + 2, options);
-                }
-            }
-            if (proto.ret_type != 0) {
-                try format_utils.writeIndent(writer, indent + 1, indentOptions);
-                try tw.gray_400.write(writer, "[ret]:\n", color_options);
-                try self.format_inner(writer, proto.ret_type, indent + 2, options);
-            }
-        },
-        .fn_param => |param| {
-            _ = try writer.write("\n");
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[name]:\n", color_options);
-            try self.format_inner(writer, param.name, indent + 2, options);
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[type]:\n", color_options);
-            try self.format_inner(writer, param.type, indent + 2, options);
-        },
-        // // .const_decl, .var_decl => {
-        // //     _ = try writer.write("\n");
-        // //     // if (data.var_decl.ty != 0) {
-        // //     //     try writeIndent(writer, indent + 1, .{});
-        // //     //     try tw.gray_400.print(writer, "[type]:\n", .{});
-        // //     //     try self.format_inner(writer, data.var_decl.ty, indent + 2, options);
-        // //     // }
-        // //     if (data.var_decl.value != 0) {
-        // //         try writeIndent(writer, indent + 1, .{});
-        // //         try tw.gray_400.print(writer, "[value]:\n", .{});
-        // //         try self.format_inner(writer, data.var_decl.value, indent + 2, options);
-        // //     }
-        // //     // try writeIndent(writer, indent + 1, .{});
-        // //     // try tw.gray_400.print(writer, "[name]:\n", .{});
-        // //     // try self.format_inner(writer, data.var_decl.name, indent + 2, options);
-        // //     // try writeIndent(writer, indent + 1, .{});
-        // //     // try tw.gray_400.print(writer, "[type]:\n", .{});
-        // //     // try self.format_inner(writer, data.var_decl.ty, indent + 2, options);
-        // //     // try writeIndent(writer, indent + 1, .{});
-        // //     // try tw.gray_400.print(writer, "[value]:\n", .{});
-        // // },
-        .while_loop => |loop| {
-            _ = try writer.write("\n");
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[condition]:\n", color_options);
-            try self.format_inner(writer, loop.condition, indent + 2, options);
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[body]:\n", color_options);
-            try self.format_inner(writer, loop.body, indent + 2, options);
-        },
-        .list_literal => |list| {
-            try tw.gray_400.write(writer, "[list]:\n", color_options);
-            var iter = self.node_lists.iterList(list.list);
-            while (iter.next()) |item| {
-                try self.format_inner(writer, item, indent + 2, options);
-            }
-        },
-        .array_init => |init| {
-            _ = try writer.write("\n");
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[size]:\n", color_options);
-            try self.format_inner(writer, init.size_expr, indent + 2, options);
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[init]:\n", color_options);
-            try self.format_inner(writer, init.init_expr, indent + 2, options);
-            try format_utils.writeIndent(writer, indent + 1, indentOptions);
-            try tw.gray_400.write(writer, "[type]:\n", color_options);
-            try self.format_inner(writer, init.type, indent + 2, options);
-        },
-
-        // .ty_i32,
-        // .ty_i64,
-        // .ty_f32,
-        // .ty_f64,
-        // => {
-        //     try tw.cyan_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.literal)}, color_options);
-        // },
-        // else => {
-        //     _ = try writer.write("\n");
-        // },
-    }
+    try self.formatRoot(writer, node, options);
 }
+
+// fn format_inner(self: *Ast, writer: std.io.AnyWriter, node: Node.Index, indent: usize, options: FormatOptions) !void {
+//     if (node == 0 and indent > 0) return;
+//     const tag: Node.Tag = self.getNodeTag(node);
+//     const data: *Node.Data = self.getNodeData(node);
+//     const indentOptions: format_utils.IndentOptions = .{
+//         .rainbow = options.color,
+//         .size = options.indent_size,
+//     };
+//     const color_options: Color.FormatColorOptions = .{ .color = options.color };
+//     try format_utils.writeIndent(writer, indent, indentOptions);
+//     if (options.show_node_index) try tw.blue_400.brighter(-0.3)
+//         .print(
+//         writer,
+//         "[{d}]",
+//         .{node},
+//         color_options,
+//     );
+//     try tw.blue_400.brighter(-0.3)
+//         .print(
+//         writer,
+//         "[{d}-{d}]",
+//         .{ self.getNodeStartToken(node), self.getNodeEndToken(node) },
+//         color_options,
+//     );
+//     try tw.blue_400.bold().print(
+//         writer,
+//         "{s}: ",
+//         .{@tagName(tag)},
+//         color_options,
+//     );
+
+//     switch (data.*) {
+//         .block,
+//         .root,
+//         .expr,
+//         => |children_list| {
+//             _ = try writer.write("\n");
+//             var iter = self.node_lists.iterList(children_list.list);
+//             while (iter.next()) |child| {
+//                 try self.format_inner(writer, child, indent + 1, options);
+//             }
+//         },
+//         .add,
+//         .sub,
+//         .mul,
+//         .div,
+//         .mod,
+//         .pow,
+//         .eq,
+//         .ne,
+//         .lt,
+//         .le,
+//         .gt,
+//         .ge,
+//         .band,
+//         .bor,
+//         .bxor,
+//         .bshl,
+//         .bshr,
+//         .@"or",
+//         .@"and",
+//         .xor,
+//         .assign,
+//         .ty_assign,
+//         .prop_access,
+//         => |bin_op| {
+//             _ = try writer.write("\n");
+//             try self.format_inner(writer, bin_op.lhs, indent + 1, options);
+//             try self.format_inner(writer, bin_op.rhs, indent + 1, options);
+//         },
+//         .@"extern",
+//         .@"pub",
+//         .@"export",
+//         .increment,
+//         .decrement,
+//         .ret_expression,
+//         .group,
+//         .bnot,
+//         .not,
+//         .neg,
+//         => |un| {
+//             _ = try writer.write("\n");
+//             try self.format_inner(writer, un.node, indent + 1, options);
+//         },
+//         .const_decl, .var_decl => |decl| {
+//             _ = try writer.write("\n");
+//             try self.format_inner(writer, decl.name, indent + 1, options);
+//             if (decl.type != 0) {
+//                 try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                 try tw.gray_400.write(writer, "[type]:\n", color_options);
+//                 try self.format_inner(writer, decl.type, indent + 2, options);
+//             }
+//             if (decl.value != 0) {
+//                 try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                 try tw.gray_400.write(writer, "[init]:\n", color_options);
+//                 try self.format_inner(writer, decl.value, indent + 2, options);
+//             }
+//         },
+//         .if_expr => |expr| {
+//             _ = try writer.write("\n");
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[condition]:\n", color_options);
+//             try self.format_inner(writer, expr.condition, indent + 2, options);
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[then]:\n", color_options);
+//             try self.format_inner(writer, expr.then_branch, indent + 2, options);
+//             if (expr.else_branch != 0) {
+//                 try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                 try tw.gray_400.write(writer, "[else]:\n", color_options);
+//                 try self.format_inner(writer, expr.else_branch, indent + 2, options);
+//             }
+//         },
+
+//         .fn_call => |call| {
+//             _ = try writer.write("\n");
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[callee]:\n", color_options);
+//             try self.format_inner(writer, call.callee, indent + 2, options);
+//             // _ = try writer.write("\n");
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             var iter = self.node_lists.iterList(call.args_list);
+//             var i: usize = 0;
+//             while (iter.next()) |arg| {
+//                 if (i == 0) try tw.gray_400.write(writer, "[args]:\n", color_options);
+//                 try self.format_inner(writer, arg, indent + 2, options);
+//                 i += 1;
+//             }
+//         },
+//         // .group => {
+//         //     _ = try writer.write("\n");
+//         //     try self.format_inner(writer, data.group.list, indent + 1, options);
+//         // // },
+//         .ty_boolean,
+//         .ty_number,
+//         .ty_string,
+//         .ty_void,
+//         .ty_f32,
+//         .ty_f64,
+//         .ty_i32,
+//         .ty_i64,
+//         .ty_option,
+//         .number_literal,
+//         .true_literal,
+//         .false_literal,
+//         .string_literal,
+//         .identifier,
+//         .char_literal,
+//         .hex_literal,
+//         => |tok| {
+//             try tw.yellow_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(tok.token)}, color_options);
+//         },
+//         .ty_generic => |gen| {
+//             // try tw.cyan_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.ty_generic.name)});
+//             _ = try writer.write("\n");
+
+//             try self.format_inner(writer, gen.name, indent + 1, options);
+//             var iter = self.node_lists.iterList(gen.args_list);
+//             while (iter.next()) |arg| {
+//                 if (iter.index == 1) {
+//                     try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                     try tw.gray_400.write(writer, "[args]:\n", color_options);
+//                 }
+//                 try self.format_inner(writer, arg, indent + 2, options);
+//             }
+//         },
+
+//         .ty_list => |list| {
+//             try tw.gray_400.write(writer, "[size]:\n", color_options);
+//             try self.format_inner(writer, list.size_expr, indent + 2, options);
+//             try tw.gray_400.write(writer, "[type]:\n", color_options);
+//             try self.format_inner(writer, list.ty, indent + 2, options);
+//         },
+
+//         .fn_decl => |decl| {
+//             _ = try writer.write("\n");
+
+//             try self.format_inner(writer, decl.proto, indent + 1, options);
+//             if (decl.body != 0) {
+//                 try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                 try tw.gray_400.write(writer, "[body]:\n", color_options);
+//                 try self.format_inner(writer, decl.body, indent + 2, options);
+//             }
+//         },
+//         .fn_proto => |proto| {
+//             _ = try writer.write("\n");
+//             try self.format_inner(writer, proto.name, indent + 1, options);
+//             if (proto.params_list != 0) {
+//                 var iter = self.node_lists.iterList(proto.params_list);
+//                 while (iter.next()) |param| {
+//                     if (iter.index == 1) {
+//                         try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                         try tw.gray_400.write(writer, "[params]:\n", color_options);
+//                     }
+//                     try self.format_inner(writer, param, indent + 2, options);
+//                 }
+//             }
+//             if (proto.ret_type != 0) {
+//                 try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//                 try tw.gray_400.write(writer, "[ret]:\n", color_options);
+//                 try self.format_inner(writer, proto.ret_type, indent + 2, options);
+//             }
+//         },
+//         .fn_param => |param| {
+//             _ = try writer.write("\n");
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[name]:\n", color_options);
+//             try self.format_inner(writer, param.name, indent + 2, options);
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[type]:\n", color_options);
+//             try self.format_inner(writer, param.type, indent + 2, options);
+//         },
+//         // // .const_decl, .var_decl => {
+//         // //     _ = try writer.write("\n");
+//         // //     // if (data.var_decl.ty != 0) {
+//         // //     //     try writeIndent(writer, indent + 1, .{});
+//         // //     //     try tw.gray_400.print(writer, "[type]:\n", .{});
+//         // //     //     try self.format_inner(writer, data.var_decl.ty, indent + 2, options);
+//         // //     // }
+//         // //     if (data.var_decl.value != 0) {
+//         // //         try writeIndent(writer, indent + 1, .{});
+//         // //         try tw.gray_400.print(writer, "[value]:\n", .{});
+//         // //         try self.format_inner(writer, data.var_decl.value, indent + 2, options);
+//         // //     }
+//         // //     // try writeIndent(writer, indent + 1, .{});
+//         // //     // try tw.gray_400.print(writer, "[name]:\n", .{});
+//         // //     // try self.format_inner(writer, data.var_decl.name, indent + 2, options);
+//         // //     // try writeIndent(writer, indent + 1, .{});
+//         // //     // try tw.gray_400.print(writer, "[type]:\n", .{});
+//         // //     // try self.format_inner(writer, data.var_decl.ty, indent + 2, options);
+//         // //     // try writeIndent(writer, indent + 1, .{});
+//         // //     // try tw.gray_400.print(writer, "[value]:\n", .{});
+//         // // },
+//         .while_loop => |loop| {
+//             _ = try writer.write("\n");
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[condition]:\n", color_options);
+//             try self.format_inner(writer, loop.condition, indent + 2, options);
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[body]:\n", color_options);
+//             try self.format_inner(writer, loop.body, indent + 2, options);
+//         },
+//         .list_literal => |list| {
+//             try tw.gray_400.write(writer, "[list]:\n", color_options);
+//             var iter = self.node_lists.iterList(list.list);
+//             while (iter.next()) |item| {
+//                 try self.format_inner(writer, item, indent + 2, options);
+//             }
+//         },
+//         .array_init => |init| {
+//             _ = try writer.write("\n");
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[size]:\n", color_options);
+//             try self.format_inner(writer, init.size_expr, indent + 2, options);
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[init]:\n", color_options);
+//             try self.format_inner(writer, init.init_expr, indent + 2, options);
+//             try format_utils.writeIndent(writer, indent + 1, indentOptions);
+//             try tw.gray_400.write(writer, "[type]:\n", color_options);
+//             try self.format_inner(writer, init.type, indent + 2, options);
+//         },
+
+//         // .ty_i32,
+//         // .ty_i64,
+//         // .ty_f32,
+//         // .ty_f64,
+//         // => {
+//         //     try tw.cyan_400.bold().print(writer, "{s}\n", .{self.getTokenSlice(data.literal)}, color_options);
+//         // },
+//         // else => {
+//         //     _ = try writer.write("\n");
+//         // },
+//     }
+// }
 
 fn writeIndent(writer: std.io.AnyWriter, indent: usize, options: struct {
     rainbow: bool = true,
@@ -770,27 +789,30 @@ pub fn formatNode(
     self: *Ast,
     writer: std.io.AnyWriter,
     node_index: Node.Index,
-    depth: usize,
+    tree_writer: *TreeWriter,
     options: FormatOptions,
 ) !void {
-    const indent_options = fmt.IndentOptions{
-        .rainbow = options.color,
-        .size = options.indent_size,
-        .indent_guide_char = ' ',
-        .indent_guides = false,
-    };
+    // const depth = tree_writer.indents.len;
+    // try tree_writer.writeIndent(true, false);
+    // const indent_options = fmt.IndentOptions{
+    //     .rainbow = options.color,
+    //     .size = options.indent_size,
+    //     .indent_guide_char = ' ',
+    //     .indent_guides = false,
+    // };
+    // _ = indent_options; // autofix
     const node = self.getNode(node_index);
-    if (node_index == 0 and depth != 0) {
-        try fmt.writeIndent(writer, depth, indent_options);
+    if (node_index == 0 and tree_writer.indents.len != 0) {
+        // try fmt.writeIndent(writer, depth, indent_options);
         try writer.writeAll("NONE\n");
         return;
     }
 
-    try fmt.writeIndent(writer, depth, indent_options);
+    // try fmt.writeIndent(writer, depth, indent_options);
 
-    if (options.show_token_range)
-        try writer.print("[{d}-{d}]", .{ node.start_token, node.end_token });
-
+    if (options.show_node_index) {
+        try writer.print("%{d} = ", .{node_index});
+    }
     try writer.print(
         ".{s}",
         .{
@@ -799,58 +821,49 @@ pub fn formatNode(
             @tagName(std.meta.activeTag(node.data)),
         },
     );
+    try writer.print(" - tok[{d}..{d}]", .{ node.start_token, node.end_token });
     if (options.show_slice) {
         try writer.print(" `", .{});
         try formatNodeSlice(self, writer, node_index);
         try writer.print("`", .{});
     }
-    try writer.print("\n", .{});
+    if (options.show_token_range)
+        try writer.print("\n", .{});
 
     switch (node.data) {
         inline else => |data| {
             const T = @TypeOf(data);
-            const fields = comptime std.meta.fields(T);
-            inline for (fields) |field| {
-                try fmt.writeIndent(writer, depth + 1, indent_options);
-                const value = @field(data, field.name);
 
-                try writer.print("[{s}]:", .{field.name});
+            const fields = comptime std.meta.fields(T);
+            try tree_writer.pushDirLine();
+            inline for (fields, 0..) |field, i| {
+                try tree_writer.writeIndent(true, i == fields.len - 1);
+                const value = @field(data, field.name);
+                try writer.print("{s}: ", .{field.name});
+
+                // try tree_writer.pushDirLine();
                 if (comptime std.mem.endsWith(u8, field.name, "list")) {
                     try writer.print("\n", .{});
                     const children = self.interned_lists.getSlice(value);
-                    for (children) |child| {
-                        try self.formatNode(writer, child, depth + 2, options);
+                    try tree_writer.pushDirLine();
+                    for (children, 0..) |child, j| {
+                        try tree_writer.writeIndent(true, j == children.len - 1);
+                        try self.formatNode(writer, child, tree_writer, options);
                     }
-                    // try fmt.writeIndent(writer, depth + 1, indent_options);
-                    // try writer.writeAll("\n");
-                    // try writer.print("}}\n", .{});
+                    try tree_writer.pop();
+                    // try tree_writer.writeIndent(true, j == children.len - 1);
                 } else if (std.mem.eql(u8, field.name, "token")) {
                     const token = self.tokens.items[value];
                     try writer.print(".{s} '{s}'\n", .{ @tagName(token.tag), self.getTokenSlice(value) });
                 } else {
-                    try writer.print("\n", .{});
-                    try self.formatNode(writer, value, depth + 2, options);
-                    // try writer.print("{s}\n", .{value});
+                    // try writer.print("\n", .{});
+                    try self.formatNode(writer, value, tree_writer, options);
                 }
-
-                // try writer.print("\n", .{});
+                // try tree_writer.pop();
             }
-            // try writer.print("{s}: {s}\n", .{ @tagName(std.meta.activeTag(data)), data });
+            try tree_writer.pop();
         },
-        // .block, .root, .expr => |children_list| {
-        //     var iter = self.node_lists.iterList(children_list.list);
-        //     while (iter.next()) |child| {
-        //         try self.formatNode(writer, child, depth + 1);
-        //     }
-        // },
     }
-    // try fmt.writeIndent(writer, depth, indent_options);
-    // try writer.print("\n", .{});
-    // inline for (fields) |field| {
-    //     try writer.writeAll(field.name);
-    //     try writer.writeAll(": \n");
-    //     // try self.formatNode(writer, node.data.get(field.name), depth + 1);
-    // }
 }
 
 fn assertMatchTree(allocator: Allocator, source: []const u8, expected: []const u8) !void {
@@ -957,19 +970,26 @@ fn astMatch(source: []const u8, node_index: Node.Index, expected: []const u8) !v
     try stderr_writer.writeAll("\n");
     try stderr_writer.writeAll(source);
     try stderr_writer.writeAll("\n");
-    var ast = try Ast.parse(test_allocator, &errors, source);
+    var ast = try Ast.parse(test_allocator, &errors, source, .{});
     defer ast.deinit();
 
     var arr = std.ArrayList(u8).init(std.testing.allocator);
     defer arr.deinit();
     const writer = arr.writer().any();
-    try ast.formatNode(writer, node_index, 0, .{
-        .color = false,
-        .indent_size = 2,
-        .show_node_index = false,
-        .show_slice = false,
-        .show_token_range = false,
-    });
+    var tree_writer = TreeWriter.init(writer);
+    try ast.formatNode(
+        writer,
+        node_index,
+        &tree_writer,
+        .{
+            .color = false,
+            .indent_size = 2,
+            .show_node_index = false,
+            .show_slice = false,
+            .show_token_range = false,
+            // .tree_writer = &tree_writer,
+        },
+    );
 
     // std.debug.print("{s}\n", .{arr.items});
     var res = try Patience.diff(

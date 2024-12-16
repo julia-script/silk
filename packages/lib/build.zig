@@ -10,11 +10,20 @@ pub inline fn queue(steps: anytype) void {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const enable_tracer = b.option(bool, "trace", "Enable tracer") orelse false;
+    const test_filter = b.option(
+        []const u8,
+        "test-filter",
+        "Only run tests with names matching the given substring.",
+    ) orelse "";
+
     const options = b.addOptions();
+    options.addOption(bool, "enable_tracer", enable_tracer);
 
     options.addOption([]const []const u8, "log_scopes", &.{
-        // "Ast",
-        // "AstGen",
+        "Ast",
+        "AstGen",
         "HirBuilder",
         // "MirBuilder",
         "Mir",
@@ -23,12 +32,6 @@ pub fn build(b: *std.Build) void {
     });
     const cmd_dep = b.dependency("zig-cmd", .{});
     const cmd_module = cmd_dep.module("cmd");
-
-    const test_filter = b.option(
-        []const u8,
-        "test-filter",
-        "Only run tests with names matching the given substring.",
-    ) orelse "";
 
     const lib = b.addStaticLibrary(.{
         .name = "lang",
@@ -127,5 +130,24 @@ pub fn build(b: *std.Build) void {
         &install_wasi.step,
 
         b.step("wasi", "Install wasi"),
+    });
+
+    const test_cases = b.addTest(.{
+        .name = "test-cases",
+        .root_source_file = b.path("src/tests.zig"),
+        .filter = test_filter,
+
+        .target = target,
+        .optimize = optimize,
+    });
+    // test_cases.root_module.addImport("cmd", cmd_module);
+    test_cases.root_module.addOptions("options", options);
+
+    b.installArtifact(test_cases);
+
+    queue(.{
+        &test_cases.step,
+        &b.addRunArtifact(test_cases).step,
+        b.step("test-cases", "Run test cases"),
     });
 }

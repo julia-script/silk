@@ -38,8 +38,8 @@ pub fn init(allocator: Allocator, ast: *Ast) !Self {
         .lists = InternedLists.init(allocator),
     };
 }
-pub fn build(allocator: Allocator, ast: *Ast, errors: *ErrorManager) !Self {
-    return try HirBuilder.build(allocator, ast, errors);
+pub fn build(allocator: Allocator, ast: *Ast, errors: *ErrorManager, options: HirBuilder.Options) !Self {
+    return try HirBuilder.build(allocator, ast, errors, options);
 }
 pub fn deinit(self: *Self) void {
     self.lists.deinit();
@@ -549,18 +549,16 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
         },
     }
 }
-pub fn format(value: Self, comptime _: []const u8, options: std.fmt.FormatOptions, writer: std.io.AnyWriter) !void {
-    _ = options; // autofix
-    _ = fmt; // autofix
-
-    try writer.print(";; HIR: {d} instructions\n\n", .{value.insts.items.len});
+pub fn formatRoot(self: *Self, writer: std.io.AnyWriter, inst_index: Inst.Index) std.io.AnyWriter.Error!void {
+    try writer.print(";; HIR: {d} instructions\n\n", .{self.insts.items.len});
 
     var tree_writer = TreeWriter.init(writer);
-    try formatInst(
-        @constCast(&value),
+    try formatInst(self, writer, &tree_writer, inst_index);
+}
+pub fn format(self: Self, comptime _: []const u8, _: std.fmt.FormatOptions, writer: std.io.AnyWriter) !void {
+    try formatRoot(
+        @constCast(&self),
         writer,
-
-        &tree_writer,
         Inst.RootIndex,
     );
 }
@@ -823,13 +821,17 @@ fn hirMatch(source: []const u8, instruction_index: Inst.Index, expected: []const
     try stderr_writer.writeAll("\n");
     try stderr_writer.writeAll(source);
     try stderr_writer.writeAll("\n");
-    var ast = try Ast.parse(test_allocator, &errors, source);
+    var ast = try Ast.parse(test_allocator, &errors, source, .{});
     defer ast.deinit();
 
     var arr = std.ArrayList(u8).init(std.testing.allocator);
     defer arr.deinit();
     const writer = arr.writer().any();
-    var hir = try Self.build(test_allocator, &ast, &errors);
+    var hir = try Self.build(test_allocator, &ast, &errors, .{
+        .trace_dir = "./.tmp/trace",
+        .trace_name = "hir-test",
+        .unique_trace_name = true,
+    });
     defer hir.deinit();
     // try writer.print("{}", .{hir});
     var tree_writer = TreeWriter.init(writer);
@@ -842,7 +844,7 @@ fn hirMatch(source: []const u8, instruction_index: Inst.Index, expected: []const
     );
     defer res.deinit();
     if (res.operations.len > 0) {
-        try ast.formatNode(stderr_writer, 0, 0, .{
+        try ast.formatRoot(stderr_writer, 0, .{
             .color = false,
             .indent_size = 2,
             .show_node_index = false,
@@ -896,7 +898,7 @@ test "Hir" {
         \\       ├ name_node: node(#7: "bar")
         \\       ├ extern: false
         \\       ├ is_fn: true
-        \\       ├ visibility: "public"
+        \\       ├ visibility: "private"
         \\       ├ exported: false
         \\       ├ mutable: false
         \\       ├ type: %15 = fn_decl {

@@ -7,3 +7,5 @@ node_modules/
 tmp*
 .tmp*
 + .turbo
+**/trace.json
+**/trace-*

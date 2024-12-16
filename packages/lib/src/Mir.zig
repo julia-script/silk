@@ -16,6 +16,8 @@ const tw = Logger.tw;
 const InternedLists = @import("./interned-lists.zig").InternedLists(Instruction.Index);
 pub const List = InternedLists.Range;
 pub const WorkingList = InternedLists.WorkingList;
+const Color = @import("./Color.zig");
+const TreeWriter = @import("./TreeWriter.zig");
 
 // lists: Lists = .{},
 interned_lists: InternedLists,
@@ -43,8 +45,8 @@ pub fn deinit(self: *Self) void {
     self.interned_lists.deinit();
 }
 
-pub fn build(allocator: std.mem.Allocator, hir: *Hir, errors: *ErrorManager) !Self {
-    return try MirBuilder.build(allocator, hir, errors);
+pub fn build(allocator: std.mem.Allocator, hir: *Hir, errors: *ErrorManager, options: MirBuilder.Options) !Self {
+    return try MirBuilder.build(allocator, hir, errors, options);
 }
 pub const Instruction = struct {
     op: Op,
@@ -704,7 +706,11 @@ pub const Global = struct {
 };
 
 const fmt = @import("./format_utils.zig");
-pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.Index) !void {
+const FormatOptions = struct {
+    color: bool = true,
+};
+
+pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.Index, options: FormatOptions, tree_writer: *TreeWriter) !void {
     const global: Global = self.globals.items[global_index];
 
     try writer.print("[{d}] @", .{global_index});
@@ -722,15 +728,20 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
         .writer = writer,
         .strings = &self.strings,
     };
-    try formatTypeShort(format_context, writer, global.type);
+    try formatTypeShort(format_context, writer, global.type, options);
     try writer.writeAll(" = ");
-    try formatValueShort(format_context, writer, global.value);
+    try formatValueShort(format_context, writer, global.value, options);
     // try self.formatValue(writer, global.value, 0);
     try writer.writeAll("\n");
+
+    try tree_writer.pushDirLine();
     if (global.init) |init_block| {
         const init_block_list = self.interned_lists.getSlice(init_block);
-        for (init_block_list) |inst_index| {
+
+        for (init_block_list, 0..) |inst_index, i| {
+            try tree_writer.writeIndent(true, i == init_block_list.len - 1);
             // try self.formatInstruction(writer, inst_index, 1);
+
             try formatInst(FormatInstContext{
                 .allocator = self.allocator,
                 .instructions = self.instructions.items,
@@ -739,8 +750,26 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
                 .lists = &self.interned_lists,
                 .writer = writer,
                 .strings = &self.strings,
-            }, inst_index, 1);
+            }, inst_index, tree_writer, options);
         }
+    }
+    try tree_writer.pop();
+}
+pub fn formatMir(self: *Self, writer: std.io.AnyWriter, options: FormatOptions) !void {
+    try writer.writeAll(";; MIR\n");
+    try writer.print(";; {d} instructions\n", .{self.instructions.items.len});
+    try writer.print(";; {d} types\n", .{self.types.items.len});
+    try writer.print(";; {d} values\n", .{self.values.items.len});
+    try writer.print(";; {d} lists\n", .{self.interned_lists.interned_map.count()});
+    try writer.print("\n", .{});
+    try writer.print("Globals ({d}):\n", .{self.globals.items.len});
+    var tree_writer = TreeWriter.init(writer);
+    for (0..self.globals.items.len) |global_index| {
+        try tree_writer.pushDirLine();
+        try tree_writer.writeIndent(true, global_index == self.globals.items.len - 1);
+        try self.formatGlobal(writer, @intCast(global_index), options, &tree_writer);
+        try tree_writer.pop();
+        try writer.writeAll("\n");
     }
 }
 pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOptions, writer: std.io.AnyWriter) !void {
@@ -748,13 +777,7 @@ pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOption
     _ = options; // autofix
 
     var self: *Self = @constCast(&self_);
-    for (0..self.globals.items.len) |global_index| {
-        try self.formatGlobal(
-            writer,
-            @intCast(global_index),
-        );
-        try writer.writeAll("\n");
-    }
+    try self.formatMir(writer, FormatOptions{ .color = true });
 }
 
 const FormatInstContext = struct {
@@ -767,7 +790,8 @@ const FormatInstContext = struct {
     writer: std.io.AnyWriter,
     strings: *InternedStrings,
 };
-pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, type_index: Type.Index) !void {
+pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, type_index: Type.Index, options: FormatOptions) !void {
+    const color_options = @import("./Color.zig").FormatColorOptions{ .color = options.color };
     if (type_index.toInt()) |index| {
         const ty: Type = context.types[index];
         try writer.print("({d})", .{index});
@@ -777,24 +801,24 @@ pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, typ
                     writer,
                     "{s}<\"{s}\", ",
                     .{ @tagName(ty), context.strings.getSlice(param.name) },
-                    .{},
+                    color_options,
                 );
-                try formatTypeShort(context, writer, param.type);
-                try tw.blue_400.write(writer, ">", .{});
+                try formatTypeShort(context, writer, param.type, options);
+                try tw.blue_400.write(writer, ">", color_options);
             },
             .pointer => |pointer| {
 
                 // try writer.print("*", .{});
-                try tw.pink_400.print(writer, "*", .{}, .{});
-                try formatTypeShort(context, writer, pointer.child);
+                try tw.pink_400.print(writer, "*", .{}, color_options);
+                try formatTypeShort(context, writer, pointer.child, options);
             },
             .array => |array| {
-                try tw.emerald_400.print(writer, "{s}<", .{@tagName(ty)}, .{});
-                try formatTypeShort(context, writer, array.type);
-                try tw.emerald_400.print(writer, ",{d}>", .{array.size}, .{});
+                try tw.emerald_400.print(writer, "{s}<", .{@tagName(ty)}, color_options);
+                try formatTypeShort(context, writer, array.type, options);
+                try tw.emerald_400.print(writer, ",{d}>", .{array.size}, color_options);
             },
             .@"fn" => |fn_ty| {
-                try tw.fuchsia_200.print(writer, "{s}(", .{@tagName(ty)}, .{});
+                try tw.fuchsia_200.print(writer, "{s}(", .{@tagName(ty)}, color_options);
                 const params_list = context.lists.getSlice(fn_ty.params_list);
                 var i: usize = 0;
                 for (params_list) |param_index| {
@@ -802,59 +826,60 @@ pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, typ
                     const param_type = context.types[Type.Index.asTypeIndex(param_index).toInt().?];
 
                     try writer.print("{s}: ", .{context.strings.getSlice(param_type.param.name)});
-                    try formatTypeShort(context, writer, param_type.param.type);
+                    try formatTypeShort(context, writer, param_type.param.type, options);
                     i += 1;
                 }
-                try tw.fuchsia_200.print(writer, ")", .{}, .{});
+                try tw.fuchsia_200.print(writer, ")", .{}, color_options);
 
-                try tw.neutral_400.print(writer, " -> ", .{}, .{});
-                try formatTypeShort(context, writer, fn_ty.return_type);
+                try tw.neutral_400.print(writer, " -> ", .{}, color_options);
+                try formatTypeShort(context, writer, fn_ty.return_type, options);
             },
 
             else => {
-                try tw.cyan_400.print(writer, "{s}", .{@tagName(ty)}, .{});
+                try tw.cyan_400.print(writer, "{s}", .{@tagName(ty)}, color_options);
             },
         }
     } else {
         switch (type_index) {
             .f32, .f64 => {
-                try tw.violet_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+                try tw.violet_400.print(writer, "{s}", .{@tagName(type_index)}, color_options);
             },
             .u8, .u16, .u32, .u64, .u128, .u256, .usize => {
-                try tw.emerald_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+                try tw.emerald_400.print(writer, "{s}", .{@tagName(type_index)}, color_options);
             },
             .i8, .i16, .i32, .i64, .i128 => {
-                try tw.rose_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+                try tw.rose_400.print(writer, "{s}", .{@tagName(type_index)}, color_options);
             },
             else => {
-                try tw.amber_400.print(writer, "{s}", .{@tagName(type_index)}, .{});
+                try tw.amber_400.print(writer, "{s}", .{@tagName(type_index)}, color_options);
             },
         }
     }
 }
 
-pub fn formatValueShort(context: FormatInstContext, writer: std.io.AnyWriter, value_index: Value.Index) !void {
+pub fn formatValueShort(context: FormatInstContext, writer: std.io.AnyWriter, value_index: Value.Index, options: FormatOptions) !void {
+    const color_options = @import("./Color.zig").FormatColorOptions{ .color = options.color };
     if (value_index.toInt()) |index| {
         if (index >= context.values.len) {
-            try tw.red_400.print(writer, "VALUE_NOT_FOUND {d}", .{value_index}, .{});
+            try tw.red_400.print(writer, "VALUE_NOT_FOUND {d}", .{value_index}, color_options);
             return;
         }
         const value: Value = context.values[index];
         // try tw.neutral_400.print(writer, "{s}", .{@tagName(value)}, .{});
         switch (value) {
             .integer => {
-                try tw.emerald_400.print(writer, "{d} int", .{value.integer}, .{});
+                try tw.emerald_400.print(writer, "{d} int", .{value.integer}, color_options);
             },
             .float => {
-                try tw.violet_400.print(writer, "{d} float", .{value.float}, .{});
+                try tw.violet_400.print(writer, "{d} float", .{value.float}, color_options);
             },
             .big_integer => {
-                try tw.rose_400.print(writer, "{d} big_integer", .{value.big_integer}, .{});
+                try tw.rose_400.print(writer, "{d} big_integer", .{value.big_integer}, color_options);
             },
             .type => {
-                try tw.blue_400.print(writer, "type(", .{}, .{});
-                try formatTypeShort(context, writer, value.type);
-                try tw.blue_400.print(writer, ")", .{}, .{});
+                try tw.blue_400.print(writer, "type(", .{}, color_options);
+                try formatTypeShort(context, writer, value.type, options);
+                try tw.blue_400.print(writer, ")", .{}, color_options);
             },
 
             else => {},
@@ -863,11 +888,11 @@ pub fn formatValueShort(context: FormatInstContext, writer: std.io.AnyWriter, va
         // try tw.neutral_400.print(writer, "{s}", .{@tagName(value_index)}, .{});
         switch (value_index) {
             .runtime => {
-                try tw.neutral_400.print(writer, "[runtime]", .{}, .{});
+                try tw.neutral_400.print(writer, "[runtime]", .{}, color_options);
             },
 
             else => {
-                try tw.amber_400.print(writer, "{s}", .{@tagName(value_index)}, .{});
+                try tw.amber_400.print(writer, "{s}", .{@tagName(value_index)}, color_options);
             },
         }
     }
@@ -893,22 +918,25 @@ fn charsWithoutEscapeSeq(str: []const u8) usize {
     }
     return count;
 }
-pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, depth: usize) !void {
-    try fmt.writeIndent(context.writer, depth, .{});
+pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, tree_writer: *TreeWriter, options: FormatOptions) !void {
+    try fmt.writeIndent(context.writer, 0, .{ .rainbow = options.color });
     const writer = context.writer;
     const instruction = context.instructions[inst_index];
-    try tw.neutral_400.print(writer, "{s: >12}", .{@tagName(instruction.data)[0..@min(@tagName(instruction.data).len, 12)]}, .{});
+    const color_options = @import("./Color.zig").FormatColorOptions{ .color = options.color };
     var buf = try std.ArrayList(u8).initCapacity(context.allocator, 1024);
     defer buf.deinit();
     const buf_writer = buf.writer().any();
-    try buf_writer.print("{s}%{d}", .{ if (instruction.liveness == 0) "!" else "", inst_index });
-    try writer.print("{s: >5}: ", .{buf.items});
+    try buf_writer.print("%{d}:{s}", .{
+        inst_index,
+        if (instruction.liveness == 0) "!" else "",
+    });
+    try writer.print("{s: <5} ", .{buf.items});
     buf.clearRetainingCapacity();
     // try writer.print("{s}", .{if (instruction.liveness == 0) "!: " else ":  "});
 
     // buf.clear();
 
-    try formatTypeShort(context, buf_writer, instruction.type);
+    try formatTypeShort(context, buf_writer, instruction.type, options);
     // buf.writer().writeAll(" = ");
     try buf_writer.print(" = ", .{});
     // try writer.print(" {s} = ", .{buf.slice()});
@@ -919,29 +947,29 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
     const data: Instruction.Data = instruction.data;
     switch (data) {
         .scoped => |scoped| {
-            try tw.neutral_200.print(buf_writer, "local, {s}, index: {d}", .{ if (scoped.mutable) "mut" else "const", scoped.index }, .{});
+            try tw.neutral_200.print(buf_writer, "local, {s}, index: {d}", .{ if (scoped.mutable) "mut" else "const", scoped.index }, color_options);
         },
         .global_get => |global_get| {
-            try tw.neutral_200.print(buf_writer, "global_get(%{d})", .{global_get.global}, .{});
+            try tw.neutral_200.print(buf_writer, "global_get(%{d})", .{global_get.global}, color_options);
         },
         .global_set => |global_set| {
-            try tw.neutral_200.print(buf_writer, "global_set(%{d}, %{d})", .{ global_set.global, global_set.value }, .{});
+            try tw.neutral_200.print(buf_writer, "global_set(%{d}, %{d})", .{ global_set.global, global_set.value }, color_options);
         },
         .instruction => |instruction_data| {
-            try tw.neutral_200.print(buf_writer, "{s}(%{d})", .{ @tagName(instruction.op), instruction_data }, .{});
+            try tw.neutral_200.print(buf_writer, "{s}(%{d})", .{ @tagName(instruction.op), instruction_data }, color_options);
         },
         .bin_op => |bin_op| {
-            try tw.neutral_200.print(buf_writer, "{s}(%{d}, %{d})", .{ @tagName(instruction.op), bin_op.lhs, bin_op.rhs }, .{});
+            try tw.neutral_200.print(buf_writer, "{s}(%{d}, %{d})", .{ @tagName(instruction.op), bin_op.lhs, bin_op.rhs }, color_options);
         },
         .store => |store| {
-            try tw.neutral_200.print(buf_writer, "store(%{d}, %{d})", .{ store.pointer, store.value }, .{});
+            try tw.neutral_200.print(buf_writer, "store(%{d}, %{d})", .{ store.pointer, store.value }, color_options);
         },
 
         .get_element_pointer => |get_element_pointer| {
-            try tw.neutral_200.print(buf_writer, "get_el_pointer(%{d}, %{d})", .{ get_element_pointer.pointer, get_element_pointer.index }, .{});
+            try tw.neutral_200.print(buf_writer, "get_el_pointer(%{d}, %{d})", .{ get_element_pointer.pointer, get_element_pointer.index }, color_options);
         },
         .call => |call| {
-            try tw.neutral_200.print(buf_writer, "call(%{d}, args = [", .{call.callee}, .{});
+            try tw.neutral_200.print(buf_writer, "call(%{d}, args = [", .{call.callee}, color_options);
             const args_list = context.lists.getSlice(call.args_list);
 
             var first = true;
@@ -952,32 +980,38 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
                 first = false;
                 try buf_writer.print("%{d}", .{arg_index});
             }
-            try tw.neutral_200.print(buf_writer, "])", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "])", .{}, color_options);
         },
         .type => |ty| {
-            try tw.neutral_200.print(buf_writer, "{s}(", .{@tagName(instruction.op)}, .{});
-            try formatTypeShort(context, buf_writer, ty);
-            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "{s}(", .{@tagName(instruction.op)}, color_options);
+            try formatTypeShort(context, buf_writer, ty, options);
+            try tw.neutral_200.print(buf_writer, ")", .{}, color_options);
         },
         .value => |value| {
-            try tw.neutral_200.print(buf_writer, "{s}(", .{@tagName(instruction.op)}, .{});
-            try formatValueShort(context, buf_writer, value);
-            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "{s}(", .{@tagName(instruction.op)}, color_options);
+            try formatValueShort(context, buf_writer, value, options);
+            try tw.neutral_200.print(buf_writer, ")", .{}, color_options);
         },
         .cast => |cast| {
-            try tw.neutral_200.print(buf_writer, "cast(%{d}, ", .{cast.instruction}, .{});
-            try formatTypeShort(context, buf_writer, cast.type);
-            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "cast(%{d}, ", .{cast.instruction}, color_options);
+            try formatTypeShort(context, buf_writer, cast.type, options);
+            try tw.neutral_200.print(buf_writer, ")", .{}, color_options);
         },
         .branch => |branch| {
             print_value = false;
 
-            try tw.neutral_200.print(buf_writer, "if (%{d}) then:\n\n", .{branch.condition}, .{});
+            try tw.neutral_200.print(buf_writer, "if (%{d}) then:\n", .{branch.condition}, color_options);
+            // try tree_writer.pushBlank();
             if (context.builder != null) {
                 // try formatWipInsts(context, buf_writer, branch.then_instructions_list, depth + 1);
             } else {
+                // try tree_writer.writeIndentTo(buf_writer, false, branch.else_instructions_list == null);
+                // try buf_writer.writeAll("then:\n");
+                try tree_writer.pushDirLine();
                 const then_instructions_list = context.lists.getSlice(branch.then_instructions_list);
-                for (then_instructions_list) |child_inst_index| {
+                for (then_instructions_list, 0..) |child_inst_index, i| {
+                    _ = i; // autofix
+                    try tree_writer.writeIndentTo(buf_writer, true, false);
                     try formatInst(.{
                         .allocator = context.allocator,
                         .instructions = context.instructions,
@@ -987,20 +1021,24 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
                         .builder = context.builder,
                         .writer = buf_writer,
                         .strings = context.strings,
-                    }, child_inst_index, depth + 1);
+                    }, child_inst_index, tree_writer, options);
                 }
+                try tree_writer.writeIndentTo(buf_writer, true, true);
+                try tw.neutral_200.print(buf_writer, "end if;", .{}, color_options);
+                try tree_writer.pop();
             }
 
             if (branch.else_instructions_list) |else_instructions_list| {
-                try fmt.writeIndent(buf_writer, depth, .{});
-                // try buf_writer.writeByteNTimes(' ', 26);
-                try tw.neutral_200.print(buf_writer, "else:\n", .{}, .{});
+                try tree_writer.writeIndentTo(buf_writer, true, true);
+                try tw.neutral_200.print(buf_writer, "else:\n", .{}, color_options);
 
                 if (context.builder != null) {
                     // try formatWipInsts(context, buf_writer, else_instructions_list, depth + 1);
                 } else {
                     const else_inst_list = context.lists.getSlice(else_instructions_list);
-                    for (else_inst_list) |child_inst_index| {
+
+                    for (else_inst_list, 0..) |child_inst_index, i| {
+                        try tree_writer.writeIndentTo(buf_writer, true, i == else_inst_list.len - 1);
                         try formatInst(.{
                             .allocator = context.allocator,
                             .instructions = context.instructions,
@@ -1010,23 +1048,32 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
                             .builder = context.builder,
                             .writer = buf_writer,
                             .strings = context.strings,
-                        }, child_inst_index, depth + 1);
+                        }, child_inst_index, tree_writer, options);
                     }
                 }
             }
-            try fmt.writeIndent(buf_writer, depth, .{});
+            // try tree_writer.writeIndentTo(buf_writer, true, true);
+            // try tw.neutral_200.print(buf_writer, "end if;\n", .{}, color_options);
+            // try tree_writer.pop();
+            // try fmt.writeIndent(buf_writer, 0, .{ .rainbow = options.color });
+
             // try buf_writer.writeByteNTimes(' ', 26);
-            try tw.neutral_200.print(buf_writer, "end if;\n", .{}, .{});
+            // try tw.neutral_200.print(buf_writer, "end if;\n", .{}, color_options);
+            // try tree_writer.pop();
         },
         .loop => |loop| {
             print_value = false;
-            try tw.neutral_200.print(buf_writer, "loop:\n\n", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "loop:\n", .{}, color_options);
 
             if (context.builder != null) {
                 // try formatWipInsts(context, buf_writer, loop.instructions_list, depth + 1);
             } else {
                 const instructions_list = context.lists.getSlice(loop.instructions_list);
-                for (instructions_list) |child_inst_index| {
+                try tree_writer.pushDirLine();
+                for (instructions_list, 0..) |child_inst_index, i| {
+                    _ = i; // autofix
+                    // try tree_writer.writeIndent(true, i == instructions_list.len - 1);
+                    try tree_writer.writeIndentTo(buf_writer, true, false);
                     try formatInst(.{
                         .allocator = context.allocator,
                         .instructions = context.instructions,
@@ -1036,26 +1083,28 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
                         .builder = context.builder,
                         .writer = buf_writer,
                         .strings = context.strings,
-                    }, child_inst_index, depth + 1);
+                    }, child_inst_index, tree_writer, options);
                 }
+                try tree_writer.writeIndentTo(buf_writer, true, true);
+                try tw.neutral_200.print(buf_writer, "end loop;", .{}, color_options);
+                try tree_writer.pop();
             }
 
-            try fmt.writeIndent(buf_writer, depth, .{});
+            // try fmt.writeIndent(buf_writer, 0, .{ .rainbow = options.color });
             // try buf_writer.writeByteNTimes(' ', 26);
-            try tw.neutral_200.print(buf_writer, "end loop;\n", .{}, .{});
         },
         .br => |br| {
-            try tw.neutral_200.print(buf_writer, "br(%{d}, ", .{br.instruction}, .{});
-            try formatValueShort(context, buf_writer, br.value);
-            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "br(%{d}, ", .{br.instruction}, color_options);
+            try formatValueShort(context, buf_writer, br.value, options);
+            try tw.neutral_200.print(buf_writer, ")", .{}, color_options);
         },
         .alloc => |alloc| {
-            try tw.neutral_200.print(buf_writer, "{s}alloc(", .{if (alloc.mutable) "mut " else ""}, .{});
-            try formatTypeShort(context, buf_writer, alloc.type);
-            try tw.neutral_200.print(buf_writer, ")", .{}, .{});
+            try tw.neutral_200.print(buf_writer, "{s}alloc(", .{if (alloc.mutable) "mut " else ""}, color_options);
+            try formatTypeShort(context, buf_writer, alloc.type, options);
+            try tw.neutral_200.print(buf_writer, ")", .{}, color_options);
         },
         else => {
-            try tw.neutral_400.print(buf_writer, "{s}", .{@tagName(instruction.op)}, .{});
+            try tw.neutral_400.print(buf_writer, "{s}", .{@tagName(instruction.op)}, color_options);
         },
     }
     const slice = buf.items;
@@ -1065,8 +1114,9 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, dep
         try writer.writeByteNTimes(' ', if (slice_len <= 50) 50 - slice_len else 0);
 
         buf.clearRetainingCapacity();
-        try formatValueShort(context, buf_writer, instruction.value);
+        try formatValueShort(context, buf_writer, instruction.value, options);
         try writer.print("; {s}", .{buf.items});
+        try tw.neutral_400.print(writer, " ~ {s}", .{@tagName(instruction.data)[0..@min(@tagName(instruction.data).len, 12)]}, color_options);
         // try writer.print("{s}", .{@tagName(instruction.op)});
     }
 

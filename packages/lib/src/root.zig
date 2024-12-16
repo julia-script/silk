@@ -20,4 +20,5 @@ test {
     _ = @import("interned-lists.zig");
     // _ = @import("Os.zig");
     // _ = @import("Fs.zig");
+    _ = @import("Tracer.zig");
 }
