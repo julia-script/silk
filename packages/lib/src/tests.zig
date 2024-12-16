@@ -28,30 +28,17 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     var errors_manager = try ErrorManager.init(allocator);
     defer errors_manager.deinit();
 
-    // var header_section_end: usize = 0;
-
-    // for (0..source.len) |i| {
-    //     if ((i == 0 or source[i - 1] == '\n') and std.mem.startsWith(u8, source[i..], "///")) {
-    //         header_section_end = i;
-    //         break;
-    //     }
-    // }
-    // const is_expression = std.mem.containsAtLeast(u8, source, 1, "/// !is_expression");
-
-    // const header_section = source[0..header_section_end];
-    // _ = header_section; // autofix
-    // const body_section = source[header_section_end + 1 ..];
-    // _ = body_section; // autofix
-
     const path_without_extension = try std.fs.path.join(allocator, &.{ CASES_DIR_PATH, path[0 .. path.len - SILK_EXTENSION.len] });
     defer allocator.free(path_without_extension);
 
+    const trace_dir = try std.mem.join(allocator, "", &.{ path_without_extension, "-trace" });
+    defer allocator.free(trace_dir);
     var ast = try Ast.parse(
         allocator,
         &errors_manager,
         source,
         .{
-            .trace_dir = path_without_extension,
+            .trace_dir = trace_dir,
             .trace_name = "ast",
             .unique_trace_name = true,
         },
@@ -65,36 +52,22 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
         .show_node_index = true,
     });
 
-    std.debug.print("{s}\n", .{ast_output.items});
-    try writeOutput(
-        allocator,
-        dir,
-        path,
-        ast_output.items,
-        ".ast",
-    );
+    try checkSnapshot(allocator, dir, ast_output.items, path, ".ast");
 
     var hir = try Hir.build(allocator, &ast, &errors_manager, .{
-        .trace_dir = path_without_extension,
+        .trace_dir = trace_dir,
         .trace_name = "hir",
         .unique_trace_name = true,
     });
     defer hir.deinit();
-
     var hir_output = std.ArrayList(u8).init(allocator);
     defer hir_output.deinit();
     try hir.format("", .{}, hir_output.writer().any());
-    std.debug.print("{s}\n", .{hir_output.items});
-    try writeOutput(
-        allocator,
-        dir,
-        path,
-        hir_output.items,
-        ".hir",
-    );
+
+    try checkSnapshot(allocator, dir, hir_output.items, path, ".hir");
 
     var mir = try Mir.build(allocator, &hir, &errors_manager, .{
-        .trace_dir = path_without_extension,
+        .trace_dir = trace_dir,
         .trace_name = "mir",
         .unique_trace_name = true,
     });
@@ -103,22 +76,42 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     var mir_output = std.ArrayList(u8).init(allocator);
     defer mir_output.deinit();
     try mir.formatMir(mir_output.writer().any(), .{ .color = false });
-    std.debug.print("{s}\n", .{mir_output.items});
-    try writeOutput(
-        allocator,
-        dir,
-        path,
-        mir_output.items,
-        ".mir",
-    );
+    try checkSnapshot(allocator, dir, mir_output.items, path, ".mir");
 }
 
 pub fn writeOutput(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8, data: []const u8, extension: []const u8) !void {
     const path_without_extension = path[0 .. path.len - SILK_EXTENSION.len];
     const ast_output_path = try std.mem.join(allocator, "", &.{ path_without_extension, extension });
     defer allocator.free(ast_output_path);
+    // try dir.makePath(path_without_extension);
     try dir.writeFile(.{
         .sub_path = ast_output_path,
         .data = data,
+        .flags = .{ .truncate = true },
     });
+}
+
+const diff = @import("patience_diff.zig").diff;
+pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []const u8, path: []const u8, extension: []const u8) !void {
+    const expected_path = try std.mem.join(allocator, "", &.{ path, extension });
+    defer allocator.free(expected_path);
+    const expected_file = dir.openFile(expected_path, .{ .mode = .read_write }) catch |err| {
+        switch (err) {
+            error.FileNotFound => {
+                try writeOutput(allocator, dir, path, actual, extension);
+                return;
+            },
+            else => return err,
+        }
+    };
+    defer expected_file.close();
+
+    const expected = try expected_file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(expected);
+    if (std.mem.eql(u8, actual, expected)) return;
+    var diff_result = try diff(allocator, expected, actual);
+    defer diff_result.deinit();
+    try diff_result.format(std.io.getStdOut().writer().any(), .{ .color = true });
+
+    return error.SnapshotMismatch;
 }
