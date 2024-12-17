@@ -27,6 +27,10 @@
             .url = "git+https://github.com/julia-script/zig-cmd.git#deb185da85c4693ac8568125102a3115e303399e",
             .hash = "1220a99c7a3dfcb024e900607cfffc944272936bcf54c012ea9491349e3913efcfda",
         },
+        .expect = .{
+            .url = "git+https://github.com/julia-script/zig-expect.git#f246eefe992d3d97f174431110c0e320920a10b7",
+            .hash = "1220b1a58a40734cd1ca08b5b858e7575aeb892ef66a290faf3d82fd86377af08316",
+        },
     },
     .paths = .{
         "build.zig",

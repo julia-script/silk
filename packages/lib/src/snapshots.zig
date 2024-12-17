@@ -3,18 +3,24 @@ const Ast = @import("Ast.zig");
 const Hir = @import("Hir.zig");
 const Mir = @import("Mir.zig");
 const ErrorManager = @import("ErrorManager.zig");
+const options = @import("options");
+const expect = @import("expect").expect;
 
 const CASES_DIR_PATH = "./src/tests/cases";
 const SNAPSHOTS_DIR_PATH = "./src/tests/snapshots";
 const SILK_EXTENSION = ".sk";
-test "TestCases" {
+test "Snapshots" {
     const allocator = std.testing.allocator;
     const cases_dir = try std.fs.cwd().openDir(CASES_DIR_PATH, .{});
     var walker = try cases_dir.walk(allocator);
     defer walker.deinit();
 
+    std.debug.print("test_filter: {s}\n", .{options.test_filter});
     while (try walker.next()) |entry| {
         if (!std.mem.endsWith(u8, entry.path, SILK_EXTENSION)) continue;
+        if (comptime options.test_filter.len > 0) {
+            if (!std.mem.containsAtLeast(u8, entry.path, 1, options.test_filter)) continue;
+        }
         std.debug.print("Running '{s}'\n", .{entry.path});
         runTestCases(allocator, cases_dir, entry.path) catch |err| {
             std.debug.print("Error on '{s}': {s}\n", .{ entry.path, @errorName(err) });
@@ -101,8 +107,16 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []co
     const expected_path = try std.fs.path.join(allocator, &.{ SNAPSHOTS_DIR_PATH, std.fs.path.dirname(path) orelse "", file_name });
     std.debug.print("expected_path: {s}\n", .{expected_path});
     try std.fs.cwd().makePath(std.fs.path.dirname(expected_path) orelse ".");
-
     defer allocator.free(expected_path);
+
+    if (options.update_snapshots) {
+        try std.fs.cwd().writeFile(.{
+            .sub_path = expected_path,
+            .data = actual,
+            .flags = .{ .truncate = true },
+        });
+        return;
+    }
     const expected_file = std.fs.cwd().openFile(expected_path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => {
@@ -124,9 +138,7 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []co
     defer allocator.free(expected);
 
     if (std.mem.eql(u8, actual, expected)) return;
-    var diff_result = try diff(allocator, expected, actual);
-    defer diff_result.deinit();
-    try diff_result.format(std.io.getStdErr().writer().any(), .{ .color = true });
+    std.debug.print("Snapshot mismatch on {s}\n", .{expected_path});
 
-    return error.SnapshotMismatch;
+    try expect(@as(@TypeOf(actual), expected)).toBeEqualString(actual);
 }

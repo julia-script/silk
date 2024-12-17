@@ -12,6 +12,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const enable_tracer = b.option(bool, "trace", "Enable tracer") orelse false;
+    const update_snapshots = b.option(bool, "update", "Update snapshots") orelse false;
     const test_filter = b.option(
         []const u8,
         "test-filter",
@@ -19,7 +20,10 @@ pub fn build(b: *std.Build) void {
     ) orelse "";
 
     const options = b.addOptions();
+
     options.addOption(bool, "enable_tracer", enable_tracer);
+    options.addOption(bool, "update_snapshots", update_snapshots);
+    options.addOption([]const u8, "test_filter", test_filter);
 
     options.addOption([]const []const u8, "log_scopes", &.{
         "Ast",
@@ -32,6 +36,8 @@ pub fn build(b: *std.Build) void {
     });
     const cmd_dep = b.dependency("zig-cmd", .{});
     const cmd_module = cmd_dep.module("cmd");
+    const expect_dep = b.dependency("expect", .{});
+    const expect_module = expect_dep.module("expect");
 
     const lib = b.addStaticLibrary(.{
         .name = "lang",
@@ -40,6 +46,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib.root_module.addImport("cmd", cmd_module);
+    lib.root_module.addImport("expect", expect_module);
     lib.root_module.addOptions("options", options);
     b.installArtifact(lib);
 
@@ -133,21 +140,24 @@ pub fn build(b: *std.Build) void {
     });
 
     const test_cases = b.addTest(.{
-        .name = "test-cases",
-        .root_source_file = b.path("src/tests.zig"),
-        .filter = test_filter,
+        .name = "snapshots",
+        .root_source_file = b.path("src/snapshots.zig"),
+        .filter = "Snapshots",
 
         .target = target,
+
         .optimize = optimize,
     });
+
     // test_cases.root_module.addImport("cmd", cmd_module);
     test_cases.root_module.addOptions("options", options);
 
     b.installArtifact(test_cases);
 
+    test_cases.root_module.addImport("expect", expect_module);
     queue(.{
         &test_cases.step,
         &b.addRunArtifact(test_cases).step,
-        b.step("test-cases", "Run test cases"),
+        b.step("snapshots", "Run snapshots"),
     });
 }

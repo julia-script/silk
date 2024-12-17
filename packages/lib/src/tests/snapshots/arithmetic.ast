@@ -1,8 +1,7 @@
-;; MIR
-;; 0 instructions
-;; 1 types
-;; 0 values
-;; 0 lists
+;; 12 Nodes
+;; 15 Tokens
+;; 2 Interned Lists
+
 %0 = .struct_decl - tok[0..15]
  └ members_list: 
     └ %11 = .fn_decl - tok[0..14]

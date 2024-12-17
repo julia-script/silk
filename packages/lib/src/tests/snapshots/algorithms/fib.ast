@@ -1,5 +1,87 @@
+;; 49 Nodes
+;; 65 Tokens
+;; 13 Interned Lists
+
 %0 = .struct_decl - tok[0..65]
  └ members_list: 
-    ├ %1 = .comment_line - tok[0..1] start
-    │  └ token: .comment '/// Fibonacci sequence' end
+    ├ %1 = .comment_line - tok[0..1]
+    │  └ token: .comment '/// Fibonacci sequence'
     └ %48 = .fn_decl - tok[2..64]
+       ├ proto: %7 = .fn_proto - tok[3..10]
+       │  ├ name: %2 = .identifier - tok[3..3]
+       │  │  └ token: .identifier 'fib'
+       │  ├ params_list: 
+       │  │  └ %3 = .fn_param - tok[5..7]
+       │  │     ├ name: %4 = .identifier - tok[5..5]
+       │  │     │  └ token: .identifier 'n'
+       │  │     └ type: %5 = .ty_i32 - tok[7..7]
+       │  │        └ token: .keyword_i32 'i32'
+       │  └ ret_type: %6 = .ty_i32 - tok[10..10]
+       │     └ token: .keyword_i32 'i32'
+       └ body: %47 = .block - tok[11..63]
+          └ list: 
+             ├ %11 = .var_decl - tok[12..17]
+             │  ├ name: %8 = .identifier - tok[13..13]
+             │  │  └ token: .identifier 'a'
+             │  ├ type: %9 = .ty_i32 - tok[15..15]
+             │  │  └ token: .keyword_i32 'i32'
+             │  └ value: %10 = .number_literal - tok[17..17]
+             │     └ token: .number_literal '0'
+             ├ %15 = .var_decl - tok[18..23]
+             │  ├ name: %12 = .identifier - tok[19..19]
+             │  │  └ token: .identifier 'b'
+             │  ├ type: %13 = .ty_i32 - tok[21..21]
+             │  │  └ token: .keyword_i32 'i32'
+             │  └ value: %14 = .number_literal - tok[23..23]
+             │     └ token: .number_literal '1'
+             ├ %44 = .if_expr - tok[24..60]
+             │  ├ condition: %18 = .gt - tok[26..28]
+             │  │  ├ lhs: %16 = .identifier - tok[26..26]
+             │  │  │  └ token: .identifier 'n'
+             │  │  └ rhs: %17 = .number_literal - tok[28..28]
+             │  │     └ token: .number_literal '0'
+             │  ├ then_branch: %43 = .block - tok[30..60]
+             │  │  └ list: 
+             │  │     ├ %40 = .while_loop - tok[31..57]
+             │  │     │  ├ condition: %21 = .gt - tok[33..35]
+             │  │     │  │  ├ lhs: %19 = .identifier - tok[33..33]
+             │  │     │  │  │  └ token: .identifier 'n'
+             │  │     │  │  └ rhs: %20 = .number_literal - tok[35..35]
+             │  │     │  │     └ token: .number_literal '1'
+             │  │     │  └ body: %39 = .block - tok[37..57]
+             │  │     │     └ list: 
+             │  │     │        ├ %27 = .var_decl - tok[38..45]
+             │  │     │        │  ├ name: %22 = .identifier - tok[39..39]
+             │  │     │        │  │  └ token: .identifier 't'
+             │  │     │        │  ├ type: %23 = .ty_i32 - tok[41..41]
+             │  │     │        │  │  └ token: .keyword_i32 'i32'
+             │  │     │        │  └ value: %26 = .add - tok[43..45]
+             │  │     │        │     ├ lhs: %24 = .identifier - tok[43..43]
+             │  │     │        │     │  └ token: .identifier 'a'
+             │  │     │        │     └ rhs: %25 = .identifier - tok[45..45]
+             │  │     │        │        └ token: .identifier 'b'
+             │  │     │        ├ %30 = .assign - tok[46..48]
+             │  │     │        │  ├ lhs: %28 = .identifier - tok[46..46]
+             │  │     │        │  │  └ token: .identifier 'a'
+             │  │     │        │  └ rhs: %29 = .identifier - tok[48..48]
+             │  │     │        │     └ token: .identifier 'b'
+             │  │     │        ├ %33 = .assign - tok[49..51]
+             │  │     │        │  ├ lhs: %31 = .identifier - tok[49..49]
+             │  │     │        │  │  └ token: .identifier 'b'
+             │  │     │        │  └ rhs: %32 = .identifier - tok[51..51]
+             │  │     │        │     └ token: .identifier 't'
+             │  │     │        └ %38 = .assign - tok[52..56]
+             │  │     │           ├ lhs: %34 = .identifier - tok[52..52]
+             │  │     │           │  └ token: .identifier 'n'
+             │  │     │           └ rhs: %37 = .sub - tok[54..56]
+             │  │     │              ├ lhs: %35 = .identifier - tok[54..54]
+             │  │     │              │  └ token: .identifier 'n'
+             │  │     │              └ rhs: %36 = .number_literal - tok[56..56]
+             │  │     │                 └ token: .number_literal '1'
+             │  │     └ %42 = .ret_expression - tok[58..59]
+             │  │        └ node: %41 = .identifier - tok[59..59]
+             │  │           └ token: .identifier 'b'
+             │  └ else_branch: NONE
+             └ %46 = .ret_expression - tok[61..62]
+                └ node: %45 = .identifier - tok[62..62]
+                   └ token: .identifier 'a'
