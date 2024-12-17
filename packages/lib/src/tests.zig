@@ -6,7 +6,7 @@ const ErrorManager = @import("ErrorManager.zig");
 
 const CASES_DIR_PATH = "./src/tests/cases";
 const SNAPSHOTS_DIR_PATH = "./src/tests/snapshots";
-const SILK_EXTENSION = ".silk";
+const SILK_EXTENSION = ".sk";
 test "TestCases" {
     const allocator = std.testing.allocator;
     const cases_dir = try std.fs.cwd().openDir(CASES_DIR_PATH, .{});
