@@ -9,6 +9,16 @@
 			"args": [],
 			"cwd": "${workspaceFolder}",
 			"preLaunchTask": "test"
+		},
+		{
+			"name": "Extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+
+			"args": [
+				"--extensionDevelopmentPath=/Users/juliaortiz/Documents/dev.nosync/sheet/packages/vscode"
+			]
 		}
 	]
 }

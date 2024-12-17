@@ -1,0 +1,33 @@
+{
+	"scopeName": "source.silk-tree",
+	"name": "Silk Tree Language",
+	"fileTypes": ["silk-tree"],
+	"patterns": [
+		{
+			"name": "constant.numeric.silk-tree",
+			"match": "%\\d+"
+		},
+		{
+			"name": "entity.name.tag.silk-tree",
+			"match": "\\.\\w+"
+		},
+		{
+			"name": "keyword.operator.silk-tree",
+			"match": "\\b(token):"
+		},
+		{
+			"name": "string.quoted.single.silk-tree",
+			"match": "'[^']*'"
+		},
+		{
+			"name": "punctuation.separator.silk-tree",
+			"match": "[-\\[\\](){}:]+"
+		}
+	],
+	"repository": {
+		"comments": {
+			"name": "comment.line.semicolon.silk-tree",
+			"match": ";;.*$"
+		}
+	}
+}

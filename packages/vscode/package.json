@@ -1,0 +1,56 @@
+{
+	"name": "silk-language",
+	"displayName": "Silk Language",
+	"description": "",
+	"version": "0.0.1",
+	"scripts": {
+		"vscode:prepublish": "bun run compile",
+		"compile": "tsc -p ./",
+		"lint": "eslint",
+		"dev": "tsc -watch -p ./"
+	},
+	"engines": {
+		"vscode": "^1.74.0"
+	},
+
+	"categories": ["Programming Languages"],
+	"main": "./dist/extension.js",
+
+	"contributes": {
+		"commands": [
+			{
+				"command": "extension.helloWorld",
+				"title": "Hello World"
+			}
+		],
+		"languages": [
+			{
+				"id": "silk",
+				"aliases": ["Silk", "silk"],
+				"extensions": [".sk", ".silk"],
+				"configuration": "./language-configuration.json"
+			},
+			{
+				"id": "silk-tree",
+				"aliases": ["Silk Tree", "silk-tree"],
+				"extensions": [".ast", ".hir", ".mir"],
+				"configuration": "./silk-tree-language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "silk",
+				"scopeName": "source.silk",
+				"path": "./syntaxes/silk.tmLanguage.json"
+			},
+			{
+				"language": "silk-tree",
+				"scopeName": "source.silk-tree",
+				"path": "./syntaxes/silk-tree.tmLanguage.json"
+			}
+		]
+	},
+	"dependencies": {
+		"@types/vscode": "^1.96.0"
+	}
+}

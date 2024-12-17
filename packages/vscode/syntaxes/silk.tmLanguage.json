@@ -1,0 +1,55 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Silk",
+	"patterns": [
+		{
+			"include": "#keywords"
+		},
+		{
+			"include": "#strings"
+		}
+	],
+	"repository": {
+		"storage_modifier": {
+			"match": "\\b(const|var|extern|packed|export|pub|noalias|inline|noinline|comptime|volatile|align|linksection|threadlocal|allowzero)\\b",
+			"name": "storage.modifier.silk"
+		},
+		"storage": {
+			"patterns": [
+				{
+					"match": "\\b(bool|void|noreturn|type|anyerror|anytype)\\b",
+					"name": "storage.type.silk"
+				},
+				{
+					"match": "\\b(?<!\\.)([iu]\\d+|[iu]size|comptime_int)\\b",
+					"name": "storage.type.integer.silk"
+				},
+				{
+					"match": "\\b(f16|f32|f64|f128|comptime_float)\\b",
+					"name": "storage.type.float.silk"
+				}
+			]
+		},
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.silk",
+					"match": "\\b(if|while|for|return|pub|export|extern)\\b"
+				}
+			]
+		},
+
+		"strings": {
+			"name": "string.quoted.double.silk",
+			"begin": "\"",
+			"end": "\"",
+			"patterns": [
+				{
+					"name": "constant.character.escape.silk",
+					"match": "\\\\."
+				}
+			]
+		}
+	},
+	"scopeName": "source.silk"
+}
