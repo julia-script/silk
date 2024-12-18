@@ -1,10 +1,10 @@
 ;; HIR: 11 instructions
 
-%0 = struct_decl
+%0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
  └ declarations_list: 1 items
-    └ 0: %1 = global_decl
+    └ 0: %1 = .global_decl
        ├ name_node: node(#1: "main")
        ├ extern: false
        ├ is_fn: true
@@ -12,12 +12,12 @@
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
-       ├ type: %10 = fn_decl
+       ├ type: %10 = .fn_decl
        │  ├ name_node: node(#1: "main")
-       │  ├ return_type: %2 = ty_i32
+       │  ├ return_type: %2 = .ty_i32
        │  │  └ node: node(#2: "i32")
        │  └ params_list: 0 items
-       └ init: %9 = block
+       └ init: %9 = .block
           ├ %3 = comptime_number node=(4)
           ├ %4 = comptime_number node=(5)
           ├ %5 = comptime_number node=(6)

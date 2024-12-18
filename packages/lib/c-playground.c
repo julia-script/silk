@@ -21,10 +21,17 @@ struct MyStruct {
   int varInt;
   unsigned int varUnsignedInt;
 };
+struct MyStruct2 {
+  int varInt;
+  struct MyStruct varStruct;
+};
 int len(long arr[]) { return 1; }
 // extern void p(char* fmt, ...);
 void playground() {
   long long arr[4] = {1, 2, 3, 4};
+  struct MyStruct2 a;
+  a.varInt = 1;
+  a.varStruct.varInt = 2;
   // long long arr2[4] = {1, 2, 3, 4};
   // len(arr);
   // int i = 0;

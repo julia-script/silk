@@ -1,10 +1,10 @@
-;; HIR: 9 instructions
+;; HIR: 11 instructions
 
-%0 = struct_decl
+%0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
  └ declarations_list: 1 items
-    └ 0: %1 = global_decl
+    └ 0: %1 = .global_decl
        ├ name_node: node(#1: "A")
        ├ extern: false
        ├ is_fn: false
@@ -13,19 +13,20 @@
        ├ exported: false
        ├ mutable: false
        ├ type: NONE
-       └ init: %8 = inline_block
-          └ %2 = struct_decl
+       └ init: %10 = .inline_block
+          └ %2 = .struct_decl
              ├ name_node: NONE
              ├ fields_list: 2 items
-             │  ├ 0: %4 = struct_field
+             │  ├ 0: %4 = .struct_field
              │  │  ├ name_node: node(#3: "a")
-             │  │  ├ ty: %3 = ty_i32
+             │  │  ├ ty: %3 = .ty_i32
              │  │  │  └ node: node(#4: "i32")
              │  │  └ init: NONE
-             │  └ 1: %7 = struct_field
+             │  └ 1: %9 = .struct_field
              │     ├ name_node: node(#6: "b")
-             │     ├ ty: %5 = ty_i32
+             │     ├ ty: %5 = .ty_i32
              │     │  └ node: node(#7: "i32")
-             │     └ init: %6 = comptime_number
-             │        └ node: node(#8: "2")
+             │     └ init: %8 = .inline_block
+             │        ├ %6 = comptime_number node=(8)
+             │        └ %7 = as lhs=(6), rhs=(5)
              └ declarations_list: 0 items

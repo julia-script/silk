@@ -1,7 +1,10 @@
 ;; MIR
-;; 0 instructions
-;; 1 types
-;; 0 values
-;; 0 lists
+;; 1 instructions
+;; 2 types
+;; 2 values
+;; 3 lists
 
-Globals (0):
+Globals (1):
+ └ [0] @A: type = type((1)struct {i32, i32})
+    └ %0:!  (1)struct {i32, i32} = struct_decl                ; type((1)struct {i32, i32}) ~ void
+   

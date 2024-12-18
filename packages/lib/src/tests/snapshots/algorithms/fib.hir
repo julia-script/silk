@@ -1,10 +1,10 @@
 ;; HIR: 46 instructions
 
-%0 = struct_decl
+%0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
  └ declarations_list: 1 items
-    └ 0: %1 = global_decl
+    └ 0: %1 = .global_decl
        ├ name_node: node(#2: "fib")
        ├ extern: false
        ├ is_fn: true
@@ -12,16 +12,16 @@
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
-       ├ type: %45 = fn_decl
+       ├ type: %45 = .fn_decl
        │  ├ name_node: node(#2: "fib")
-       │  ├ return_type: %4 = ty_i32
+       │  ├ return_type: %4 = .ty_i32
        │  │  └ node: node(#6: "i32")
        │  └ params_list: 1 items
-       │     └ 0: %3 = param_decl
+       │     └ 0: %3 = .param_decl
        │        ├ name_node: node(#4: "n")
-       │        └ ty: %2 = ty_i32
+       │        └ ty: %2 = .ty_i32
        │           └ node: node(#5: "i32")
-       └ init: %44 = block
+       └ init: %44 = .block
           ├ %5 = comptime_number node=(10)
           ├ %6 = ty_i32 node=(9)
           ├ %7 = alloc mutable=(true), type=(6)
@@ -33,15 +33,15 @@
           ├ %13 = param_get operand=(3)
           ├ %14 = comptime_number node=(17)
           ├ %15 = gt lhs=(13), rhs=(14)
-          ├ %41 = if_expr cond (%15)
-          │  └ then: %40 = block
-          │     ├ %16 = loop
-          │     │  └ body: %37 = block
+          ├ %41 = .if_expr cond (%15)
+          │  └ then: %40 = .block
+          │     ├ %16 = .loop
+          │     │  └ body: %37 = .block
           │     │     ├ %17 = param_get operand=(3)
           │     │     ├ %18 = comptime_number node=(20)
           │     │     ├ %19 = gt lhs=(17), rhs=(18)
-          │     │     └ %36 = if_expr cond (%19)
-          │     │        └ then: %35 = block
+          │     │     └ %36 = .if_expr cond (%19)
+          │     │        └ then: %35 = .block
           │     │           ├ %20 = load operand=(7)
           │     │           ├ %21 = load operand=(11)
           │     │           ├ %22 = add lhs=(20), rhs=(21)
