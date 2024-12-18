@@ -1,5 +1,6 @@
 const std = @import("std");
 const options = @import("options");
+const fmt = @import("format_utils.zig");
 
 const Event = struct {
     // name: []const u8,
@@ -10,13 +11,19 @@ const Event = struct {
 file: ?std.fs.File,
 // writer: std.io.AnyWriter,
 count: u32 = 0,
+indent: u64 = 0,
+name: std.BoundedArray(u8, 1024),
+// root_id: u64 = 0,
+
 const Self = @This();
 var ID: u64 = 0;
 
 pub fn init(dir: []const u8, name: []const u8, unique_name: bool) !Self {
+    const name_ = try std.BoundedArray(u8, 1024).fromSlice(name);
     if (comptime !options.enable_tracer) {
         return Self{
             .file = null,
+            .name = name_,
         };
     }
 
@@ -25,9 +32,6 @@ pub fn init(dir: []const u8, name: []const u8, unique_name: bool) !Self {
     const path = try std.fs.path.join(fba.allocator(), &.{ dir, name });
 
     try std.fs.cwd().makePath(path);
-
-    std.debug.print("trace_dir: {s}\n", .{path});
-    // fba.reset();
 
     var file_name_buf: [std.fs.max_path_bytes]u8 = undefined;
 
@@ -41,10 +45,9 @@ pub fn init(dir: []const u8, name: []const u8, unique_name: bool) !Self {
         .{path},
     );
 
-    std.debug.print("file_name: {s}\n", .{file_name});
-
     return Self{
         .file = try std.fs.cwd().createFile(file_name, .{ .truncate = true }),
+        .name = name_,
     };
 }
 
@@ -52,14 +55,26 @@ const file_end = "\n]\n";
 const Phase = enum {
     begin,
     end,
+    async_begin,
+    async_instant,
+    async_end,
     complete_event,
     instant,
+    flow_start,
+    flow_step,
+    flow_end,
     pub fn format(self: Phase, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self) {
             .begin => try writer.writeAll("B"),
             .end => try writer.writeAll("E"),
+            .async_begin => try writer.writeAll("b"),
+            .async_end => try writer.writeAll("e"),
+            .async_instant => try writer.writeAll("n"),
             .complete_event => try writer.writeAll("X"),
             .instant => try writer.writeAll("i"),
+            .flow_start => try writer.writeAll("s"),
+            .flow_step => try writer.writeAll("t"),
+            .flow_end => try writer.writeAll("f"),
         }
     }
 };
@@ -68,27 +83,106 @@ pub fn deinit(self: *Self) void {
         file.close();
     }
 }
-pub fn beginEvent(self: *Self, name: []const u8, args: anytype) u64 {
+pub fn beginEvent(self: *Self, comptime name: []const u8, args: anytype) u64 {
     const id = ID;
     ID += 1;
-    self.writeEvent(.begin, null, name, args, id) catch |err| {
+    self.writeEvent(.begin, null, comptime name, .{}, args, id) catch |err| {
         std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
     };
     return id;
 }
-pub fn endEvent(self: *Self, id: u64, name: []const u8, args: anytype) void {
-    self.writeEvent(.end, null, name, args, id) catch |err| {
+pub fn endEvent(self: *Self, id: u64, comptime name: []const u8, args: anytype) void {
+    self.writeEvent(.end, null, comptime name, .{}, args, id) catch |err| {
         std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
     };
 }
 
-pub fn logEvent(self: *Self, name: []const u8, args: anytype) void {
-    self.writeEvent(.instant, null, name, args, null) catch |err| {
+pub fn logEvent(self: *Self, comptime name: []const u8, args: anytype) void {
+    const id = ID;
+    ID += 1;
+    self.writeEvent(.instant, null, name, .{}, args, id) catch |err| {
         std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
     };
 }
-pub fn panic(self: *Self, msg: []const u8, args: anytype) noreturn {
-    self.writeEvent(.instant, "panic", msg, args, null) catch |err| {
+pub fn begin(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) u64 {
+    const id = ID;
+    ID += 1;
+    self.writeEvent(.begin, null, fmt_, fmt_args, args, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+    return id;
+}
+pub fn beginAsync(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) u64 {
+    const id = ID;
+    ID += 1;
+    self.writeEvent(.async_begin, null, fmt_, fmt_args, args, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+    return id;
+}
+pub fn end(self: *Self, id: u64) void {
+    self.writeEvent(.end, null, "", .{}, .{}, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+}
+pub fn endAsync(self: *Self, id: u64) void {
+    self.writeEvent(.async_end, null, "", .{}, .{}, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+}
+pub fn asyncInstant(self: *Self, id: u64, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) void {
+    self.writeEvent(.async_instant, null, fmt_, fmt_args, args, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+}
+pub fn beginFlow(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) u64 {
+    const id = ID;
+    ID += 1;
+    self.writeEvent(.flow_start, null, fmt_, fmt_args, args, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+    return id;
+}
+pub fn endFlow(self: *Self, id: u64) void {
+    self.writeEvent(.flow_end, null, "", .{}, .{}, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+}
+pub fn stepFlow(self: *Self, id: u64, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) void {
+    self.writeEvent(.flow_step, null, fmt_, fmt_args, args, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+}
+pub fn printEvent(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) void {
+    const id = ID;
+    ID += 1;
+    self.writeEvent(.instant, null, fmt_, fmt_args, args, id) catch |err| {
+        std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
+    };
+}
+const TraceBlock = struct {
+    event_id: u64,
+    tracer: *Self,
+    pub inline fn call(self: @This(), b: anytype) void {
+        std.debug.print("trace block end {d} {any}\n", .{ self.event_id, b });
+
+        self.tracer.end(self.event_id);
+    }
+};
+// pub inline fn traceBlock(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) *TraceBlock {
+//     var ty = (TraceBlock{
+//         .event_id = self.begin(fmt_, fmt_args, args),
+//         .tracer = self,
+//     });
+
+//     std.debug.print("trace block begin {d}\n", .{ty.event_id});
+//     return &ty;
+// }
+
+pub fn panic(self: *Self, comptime msg: []const u8, args: anytype) noreturn {
+    const id = ID;
+    ID += 1;
+    self.writeEvent(.instant, "panic", msg, .{}, args, id) catch |err| {
         std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
     };
     // std.debug.panic
@@ -165,6 +259,11 @@ pub fn writeArgs(T: type, writer: std.io.AnyWriter, args: anytype) !void {
                 try writer.writeAll("]");
                 return;
             }
+
+            if (ptr.size == .Many and ptr.sentinel == null) {
+                try writer.print("\"{any}\"", .{args});
+                return;
+            }
             try writeArgs(ptr.child, writer, args.*);
         },
         .optional => |opt| {
@@ -190,10 +289,33 @@ pub fn writeEvent(
     self: *Self,
     comptime phase: Phase,
     category: ?[]const u8,
-    name: []const u8,
+    // name: []const u8,
+    comptime fmt_: []const u8,
+    fmt_args: anytype,
     args: anytype,
-    id: ?u64,
+    id: u64,
 ) !void {
+    // std.debug.print
+    if (comptime options.print_trace) {
+        // if (phase == .end and id != null) {
+        //     self.indent = id.?;
+        // }
+        const color = fmt.pickColor(id);
+        const stderr = std.io.getStdErr().writer().any();
+
+        try color.print(stderr, "[{s}] ", .{self.name.slice()}, .{});
+        // if (self.root_id == id) {
+        //     try color.print(stderr, "root", .{}, .{});
+        // }
+        // try stderr.writeBytesNTimes("    ", indent);
+        try color.print(stderr, "{?d}: ", .{id}, .{});
+        try color.print(stderr, fmt_, fmt_args, .{});
+        try color.print(stderr, "\n", .{}, .{});
+
+        // if (phase == .begin and id != null) {
+        //     // self.indent += 1;
+        // }
+    }
     if (comptime !options.enable_tracer) {
         return;
     }
@@ -209,18 +331,21 @@ pub fn writeEvent(
     }
     defer self.count += 1;
 
-    try writer.print("  {{ \"pid\": \"{d}\", \"ph\": \"{}\", \"ts\": {d}, \"name\": \"{s}\", \"args\": ", .{
+    try writer.print("  {{ \"pid\": \"{d}\", \"tid\": \"{d}\", \"ph\": \"{}\", \"ts\": {d}, \"args\": ", .{
+        0,
         0,
         phase,
         ts,
-        name,
     });
 
     const T = @TypeOf(args);
     try writeArgs(T, writer, args);
-    if (id) |id_| {
-        try writer.print(", \"id\": {d}", .{id_});
+    if (phase != .end) {
+        try writer.print(", \"name\": \"", .{});
+        try writer.print(fmt_, fmt_args);
+        try writer.print("\"", .{});
     }
+    try writer.print(", \"id\": {d}", .{id});
     if (category) |cat| {
         try writer.print(", \"cat\": \"{s}\"", .{cat});
     }

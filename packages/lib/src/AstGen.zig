@@ -692,6 +692,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             },
             inline .keyword_const,
             .keyword_var,
+            .keyword_type,
             => |token_tag| {
                 const start_token = self.token_index;
                 self.consumeToken();
@@ -712,6 +713,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 const tag = comptime switch (token_tag) {
                     .keyword_const => .const_decl,
                     .keyword_var => .var_decl,
+                    .keyword_type => .type_decl,
                     else => unreachable,
                 };
                 return try self.pushNode(.{
@@ -1572,7 +1574,7 @@ pub fn parseTypeInit(self: *AstGen, ty: Node.Index) AstGenError!Node.Index {
     defer self.logger.close();
     self.consumeToken();
     const start_token = self.ast.nodes.items[ty].start_token;
-    if (!self.nextTokensAre(.identifier, .colon)) {
+    if (!self.nextTokensAre(.identifier, .equal)) {
         // array init
         var items = self.ast.interned_lists.new();
         while (true) {
@@ -1607,12 +1609,12 @@ pub fn parseTypeInit(self: *AstGen, ty: Node.Index) AstGenError!Node.Index {
 
         const name = try self.parseIdentifier();
 
-        if (!self.accept(.colon)) {
+        if (!self.accept(.equal)) {
             try self.errors.addError(.{
                 .tag = .expected_token,
                 .start = self.token_index,
                 .end = self.token_index,
-                .payload = @intFromEnum(Token.Tag.colon),
+                .payload = @intFromEnum(Token.Tag.equal),
             });
         }
         const expr = try self.parseExpression();
@@ -1635,7 +1637,7 @@ pub fn parseTypeInit(self: *AstGen, ty: Node.Index) AstGenError!Node.Index {
         }
     }
 
-    if (!self.tokenIs(.r_brace)) {
+    if (!self.accept(.r_brace)) {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,

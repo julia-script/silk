@@ -59,7 +59,6 @@ pub const Instruction = struct {
     pub const List = InternedLists.Range;
 
     pub const Data = union(enum) {
-        wip: usize,
         // void: void,
         bin_op: BinOp,
         instruction: Instruction.Index,
@@ -79,6 +78,9 @@ pub const Instruction = struct {
             instructions_list: Instruction.List,
         },
         loop_wip: struct {
+            wip: MirBuilder.Wip.Index,
+        },
+        struct_wip: struct {
             wip: MirBuilder.Wip.Index,
         },
         block: struct {
@@ -201,6 +203,7 @@ pub const Instruction = struct {
         store,
         load,
         get_element_pointer,
+        struct_decl,
 
         param,
         param_get,
@@ -253,7 +256,7 @@ pub const Instruction = struct {
 pub const Type = union(enum) {
     @"fn": Fn,
     optional: Optional,
-    module: Module,
+    @"struct": Module,
     array: TyArray,
     pointer: Pointer,
     slice: Slice,
@@ -408,7 +411,7 @@ pub const Type = union(enum) {
     };
     pub const Module = struct {
         fields: Type.List,
-        decls: Type.List,
+        // decls: Type.List,
         alignment: u32,
 
         pub const Decl = struct {
@@ -731,7 +734,6 @@ pub fn formatGlobal(self: *Self, writer: std.io.AnyWriter, global_index: Global.
     try formatTypeShort(format_context, writer, global.type, options);
     try writer.writeAll(" = ");
     try formatValueShort(format_context, writer, global.value, options);
-    // try self.formatValue(writer, global.value, 0);
     try writer.writeAll("\n");
 
     try tree_writer.pushDirLine();
@@ -768,8 +770,10 @@ pub fn formatMir(self: *Self, writer: std.io.AnyWriter, options: FormatOptions) 
         try tree_writer.pushDirLine();
         try tree_writer.writeIndent(true, global_index == self.globals.items.len - 1);
         try self.formatGlobal(writer, @intCast(global_index), options, &tree_writer);
-        try tree_writer.pop();
+        try tree_writer.writeIndent(false, false);
         try writer.writeAll("\n");
+        try tree_writer.pop();
+        // try writer.writeIndent(true, false);
     }
 }
 pub fn format(self_: Self, comptime _: []const u8, options: std.fmt.FormatOptions, writer: std.io.AnyWriter) !void {
@@ -833,6 +837,20 @@ pub fn formatTypeShort(context: FormatInstContext, writer: std.io.AnyWriter, typ
 
                 try tw.neutral_400.print(writer, " -> ", .{}, color_options);
                 try formatTypeShort(context, writer, fn_ty.return_type, options);
+            },
+            .@"struct" => |@"struct"| {
+                try tw.neutral_400.print(writer, "struct {{", .{}, color_options);
+                const fields_list = context.lists.getSlice(@"struct".fields);
+                for (fields_list, 0..) |field_index, i| {
+                    if (i > 0) try writer.writeAll(", ");
+                    const ty_index = Type.Index.asTypeIndex(field_index);
+                    try formatTypeShort(context, writer, ty_index, options);
+
+                    // const field = context.types[Type.Index.asTypeIndex(field_index).toInt().?];
+                    // try tw.neutral_400.print(writer, "{s}", .{context.strings.getSlice(decl_index.name)}, color_options);
+                }
+
+                try tw.neutral_400.print(writer, "}}", .{}, color_options);
             },
 
             else => {
@@ -1103,6 +1121,10 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, tre
             try formatTypeShort(context, buf_writer, alloc.type, options);
             try tw.neutral_200.print(buf_writer, ")", .{}, color_options);
         },
+        .struct_wip => |struct_wip| {
+            // try tw.neutral_200.print(buf_writer, "struct_wip(%{d})", .{struct_wip.wip}, color_options);
+            try formatWip(context, buf_writer, struct_wip.wip, tree_writer, options);
+        },
         else => {
             try tw.neutral_400.print(buf_writer, "{s}", .{@tagName(instruction.op)}, color_options);
         },
@@ -1121,6 +1143,92 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, tre
     }
 
     try writer.writeAll("\n");
+}
+pub fn formatWip(parent_context: FormatInstContext, writer: std.io.AnyWriter, wip_index: MirBuilder.Wip.Index, tree_writer: *TreeWriter, options: FormatOptions) Logger.Error!void {
+    const builder = parent_context.builder orelse unreachable;
+    const color_options = @import("./Color.zig").FormatColorOptions{ .color = options.color };
+    const wip = builder.getWip(wip_index);
+    const tag = @tagName(std.meta.activeTag(wip.data));
+    const name = switch (wip.data) {
+        .module => wip.data.module.name,
+        .fn_decl => wip.data.fn_decl.name,
+        .global_declaration => wip.data.global_declaration.name,
+        .param_declaration => wip.data.param_declaration.name,
+        .global_type_declaration => wip.data.global_type_declaration.name,
+
+        else => null,
+    };
+    if (name) |n| {
+        try writer.print("#{d} {s} \"{s}\" [{s}] hir({d}):\n", .{ wip.index, tag, builder.getSlice(n), @tagName(wip.stage), wip.hir_index });
+    } else {
+        try writer.print("#{d} {s} [{s}] hir({d}):\n", .{ wip.index, tag, @tagName(wip.stage), wip.hir_index });
+    }
+    switch (wip.data) {
+        .global_type_declaration => {
+            try tree_writer.pushDirLine();
+            if (wip.data.global_type_declaration.init_block) |init_block| {
+                try tree_writer.writeIndentTo(writer, true, false);
+                try formatWip(parent_context, writer, init_block, tree_writer, options);
+            }
+            try tree_writer.writeIndentTo(writer, true, true);
+            try tw.neutral_200.print(writer, "end global_type_declaration;\n", .{}, color_options);
+            try tree_writer.pop();
+        },
+
+        .block => |block| {
+            const context: FormatInstContext = .{
+                .allocator = parent_context.allocator,
+                .instructions = builder.getWip(block.owner).instructions.items,
+                .types = parent_context.types,
+                .values = parent_context.values,
+                .lists = parent_context.lists,
+                .builder = parent_context.builder,
+                .writer = writer,
+                .strings = parent_context.strings,
+            };
+            try tree_writer.pushDirLine();
+            for (block.instructions.items) |instruction_id| {
+                try tree_writer.writeIndentTo(writer, true, false);
+                try formatInst(context, instruction_id, tree_writer, options);
+            }
+            try tree_writer.writeIndentTo(writer, true, true);
+            try tw.neutral_200.print(writer, "end block;\n", .{}, color_options);
+            try tree_writer.pop();
+        },
+        .module => |module| {
+            // std.debug.print("module: {any}\n", .{module});
+            // var iter = builder.
+            try tree_writer.pushDirLine();
+            for (module.declarations.items) |declaration| {
+                try tree_writer.writeIndentTo(writer, true, false);
+                try formatWip(parent_context, writer, declaration, tree_writer, options);
+            }
+            try tree_writer.writeIndentTo(writer, true, true);
+            try tw.neutral_200.print(writer, "end module;\n", .{}, color_options);
+            try tree_writer.pop();
+        },
+        .fn_decl => |fn_decl| {
+            try tree_writer.pushDirLine();
+            // try tree_writer.writeIndentTo(writer, true, false);
+            // const name_slice = builder.getSlice(fn_decl.name);
+            // try tw.neutral_200.print(writer, "fn {s}()\n", .{name_slice}, color_options);
+
+            // try tree_writer.writeIndentTo(writer, true, true);
+            // try tw.neutral_200.print(writer, "end fn;\n", .{}, color_options);
+            // try tree_writer.pop();
+            if (fn_decl.init_block) |init_block| {
+                try tree_writer.writeIndentTo(writer, true, false);
+                try formatWip(parent_context, writer, init_block, tree_writer, options);
+            }
+            try tree_writer.writeIndentTo(writer, true, true);
+            try tw.neutral_200.print(writer, "end fn;\n", .{}, color_options);
+            try tree_writer.pop();
+            // try formatWipInsts(parent_context, writer, fn_decl.body, tree_writer, options);
+        },
+        else => {
+            // try tw.neutral_400.print(writer, "~|~{s}", .{@tagName(wip.data)}, color_options);
+        },
+    }
 }
 
 pub fn formatWipInsts(parent_context: FormatInstContext, buf_writer: std.io.AnyWriter, wip_index: MirBuilder.Wip.Index, depth: usize) Logger.Error!void {

@@ -1,60 +1,61 @@
 ;; HIR: 26 instructions
 
-%0 = struct_decl
+%0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
  └ declarations_list: 1 items
-    └ 0: %1 = global_decl
+    └ 0: %1 = .global_decl
        ├ name_node: node(#1: "A")
        ├ extern: false
        ├ is_fn: false
+       ├ is_type: true
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
        ├ type: NONE
-       └ init: %25 = inline_block
-          └ %2 = struct_decl
+       └ init: %25 = .inline_block
+          └ %2 = .struct_decl
              ├ name_node: NONE
              ├ fields_list: 3 items
-             │  ├ 0: %4 = struct_field
+             │  ├ 0: %4 = .struct_field
              │  │  ├ name_node: node(#3: "a")
-             │  │  ├ ty: %3 = ty_i32
+             │  │  ├ ty: %3 = .ty_i32
              │  │  │  └ node: node(#4: "i32")
              │  │  └ init: NONE
-             │  ├ 1: %7 = struct_field
+             │  ├ 1: %9 = .struct_field
              │  │  ├ name_node: node(#6: "b")
-             │  │  ├ ty: %5 = ty_i32
-             │  │  │  └ node: node(#7: "i32")
-             │  │  └ init: %6 = comptime_number
-             │  │     └ node: node(#8: "2")
-             │  └ 2: %10 = struct_field
+             │  │  ├ ty: %5 = .ty_i64
+             │  │  │  └ node: node(#7: "i64")
+             │  │  └ init: %8 = .inline_block
+             │  │     ├ %6 = comptime_number node=(8)
+             │  │     └ %7 = as lhs=(6), rhs=(5)
+             │  └ 2: %14 = .struct_field
              │     ├ name_node: node(#10: "c")
-             │     ├ ty: %8 = ty_i32
+             │     ├ ty: %10 = .ty_i32
              │     │  └ node: node(#11: "i32")
-             │     └ init: %9 = comptime_number
-             │        └ node: node(#12: "3")
+             │     └ init: %13 = .inline_block
+             │        ├ %11 = comptime_number node=(12)
+             │        └ %12 = as lhs=(11), rhs=(10)
              └ declarations_list: 1 items
-                └ 0: %11 = global_decl
+                └ 0: %15 = .global_decl
                    ├ name_node: node(#14: "foo")
                    ├ extern: false
                    ├ is_fn: true
+                   ├ is_type: false
                    ├ visibility: "public"
                    ├ exported: false
                    ├ mutable: false
-                   ├ type: %24 = fn_decl
+                   ├ type: %24 = .fn_decl
                    │  ├ name_node: node(#14: "foo")
-                   │  ├ return_type: %14 = ty_i32
+                   │  ├ return_type: %18 = .ty_i32
                    │  │  └ node: node(#18: "i32")
                    │  └ params_list: 1 items
-                   │     └ 0: %13 = param_decl
+                   │     └ 0: %17 = .param_decl
                    │        ├ name_node: node(#16: "self")
-                   │        └ ty: %12 = global_get
-                   │           └ operand:                    └ init: %23 = block
-                      ├ %15 = param_get operand=(13)
-                      ├ %16 = get_property_pointer base=(15), property_name_node=(21)
-                      ├ %17 = load operand=(16)
-                      ├ %18 = param_get operand=(13)
-                      ├ %19 = get_property_pointer base=(18), property_name_node=(24)
-                      ├ %20 = load operand=(19)
-                      ├ %21 = add lhs=(17), rhs=(20)
+                   │        └ ty: %16 = .ty_i32
+                   │           └ node: node(#17: "i32")
+                   └ init: %23 = .block
+                      ├ %19 = param_get operand=(17)
+                      ├ %20 = param_get operand=(17)
+                      ├ %21 = add lhs=(19), rhs=(20)
                       └ %22 = ret value=(21)

@@ -116,6 +116,7 @@ pub const Node = struct {
 
         const_decl: Declaration,
         var_decl: Declaration,
+        type_decl: Declaration,
 
         fn_decl: struct {
             proto: Index,
@@ -310,13 +311,13 @@ pub const Node = struct {
         ty_option,
         ty_string,
         ty_void,
-
         ty_generic,
         ty_list,
         array_init,
         ty_array,
         const_decl,
         var_decl,
+        type_decl,
 
         // fn
         fn_decl,

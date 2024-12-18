@@ -71,6 +71,27 @@ pub const Builder = struct {
         return self.wips.getPtr(index);
     }
     pub inline fn makeWip(self: *Builder, hir_index: Hir.Inst.Index, parent: Wip.Index, data: Wip.Data) !Wip.Index {
+        // switch (data) {
+        //     .fn_decl => |function| {
+        //         const name = self.mir.strings.getSlice(function.name);
+        //         self.tracer.logEvent("Builder.makeWip", .{ .type = @tagName(data), .name = name });
+        //     },
+        //     .module => |module| {
+        //         const name = self.mir.strings.getSlice(module.name);
+        //         self.tracer.logEvent("Builder.makeWip", .{ .type = @tagName(data), .name = name });
+        //     },
+        //     .global_declaration => |global| {
+        //         const name = self.mir.strings.getSlice(global.name);
+        //         self.tracer.logEvent("Builder.makeWip", .{ .type = @tagName(data), .name = name });
+        //     },
+        //     .param_declaration => |param| {
+        //         const name = self.mir.strings.getSlice(param.name);
+        //         self.tracer.logEvent("Builder.makeWip", .{ .type = @tagName(data), .name = name });
+        //     },
+        //     else => {
+        //         // self.tracer.panic("Builder.makeWip", .{ .data = data });
+        //     },
+        // }
         const index = self.wips.len;
         try self.wips.append(try Wip.init(index, self, hir_index, parent, data));
         return index;
@@ -101,6 +122,7 @@ pub const Builder = struct {
         const index: Mir.Instruction.Index = @intCast(self.mir.instructions.items.len);
         try self.mir.instructions.append(self.mir.allocator, instruction);
         self.tracer.logEvent("Builder.pushInstruction", .{ .instruction = instruction, .index = index });
+
         return index;
     }
     pub fn reserveInstructionIndex(self: *Builder) Mir.Instruction.Index {
@@ -116,6 +138,7 @@ pub const Builder = struct {
     }
     pub fn setType(self: *Builder, index: Mir.Type.Index, type_: Mir.Type) void {
         self.mir.types.items[index.toInt().?] = type_;
+
         self.tracer.logEvent("Builder.setType", .{ .type = type_, .index = index });
     }
     pub fn getType(self: *Builder, index: Mir.Type.Index) ?*Mir.Type {
@@ -134,6 +157,11 @@ pub const Builder = struct {
         self.tracer.logEvent("Builder.pushType", .{ .type = type_, .index = index });
         return index;
     }
+    pub fn computeTypeAlignment(self: *Builder, type_index: Mir.Type.Index) u32 {
+        _ = self; // autofix
+        _ = type_index; // autofix
+        return 1;
+    }
     const InternedResult = struct {
         index: Mir.Type.Index,
         hash: u64,
@@ -146,7 +174,26 @@ pub const Builder = struct {
             .{ .index = index },
         );
         if (index.toInt()) |int| {
-            return try self.internTypeInner(self.mir.types.items[@intCast(int)]);
+            const type_ = self.mir.types.items[@intCast(int)];
+            // switch (type_) {
+            //     .module => {
+            //         var hasher = std.hash.Wyhash.init(0);
+            //         hasher.update("module");
+            //         hasher.update(std.mem.asBytes(&int));
+
+            //         const hash = hasher.final();
+            //         const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+            //         if (interned.found_existing) {
+            //             return .{ .index = interned.value_ptr.*, .hash = hash };
+            //         }
+            //         const type_index = try self.pushType(type_);
+            //         interned.value_ptr.* = type_index;
+            //         return .{ .index = type_index, .hash = hash };
+            //     },
+            //     else => {
+            return try self.internTypeInner(type_);
+            // },
+            // }
         }
         return .{
             .index = index,
@@ -263,8 +310,36 @@ pub const Builder = struct {
                     .hash = hash,
                 };
             },
+            .@"struct" => |@"struct"| {
+                var hasher = std.hash.Wyhash.init(0);
+                hasher.update("struct");
+                const fields_list = self.mir.interned_lists.getSlice(@"struct".fields);
+                for (fields_list) |field_index| {
+                    const interned_field = try self.internTypeIndex(Mir.Type.Index.asTypeIndex(field_index));
+                    hasher.update(std.mem.asBytes(&interned_field.hash));
+                }
+                const hash = hasher.final();
+                const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+                if (interned.found_existing) {
+                    return .{ .index = interned.value_ptr.*, .hash = hash };
+                }
+                const index = try self.pushType(ty);
+                interned.value_ptr.* = index;
+                return .{ .index = index, .hash = hash };
+            },
             // .void => {
             //     return InternedResult{ .index = .void, .hash = 0 };
+            // },
+            // .module => |module| {
+            //     var hasher = std.hash.Wyhash.init(0);
+            //     hasher.update("module");
+            //     const hash = hasher.final();
+            //     module.
+
+            //     const interned = try self.interned_types.getOrPut(self.arena.allocator(), hash);
+            //     if (interned.found_existing) {
+            //         return .{ .index = interned.value_ptr.*, .hash = hash };
+            //     }
             // },
             else => {
                 self.tracer.panic("unimplemented: internTypeInner", .{ .type = ty });
@@ -325,12 +400,28 @@ pub const Builder = struct {
         }, writer, type_index, .{}) catch unreachable;
         return buf.slice();
     }
+    pub inline fn formatValue(self: *Builder, value: Mir.Value.Index) []const u8 {
+        var buf = std.BoundedArray(u8, 1024).init(0) catch unreachable;
+        const writer = buf.writer().any();
+        Mir.formatValueShort(.{
+            .allocator = self.allocator,
+            .builder = self,
+            .instructions = self.mir.instructions.items,
+            .lists = &self.mir.interned_lists,
+            .writer = writer,
+            .strings = &self.mir.strings,
+            .types = self.mir.types.items,
+            .values = self.mir.values.items,
+        }, writer, value, .{}) catch unreachable;
+        return buf.slice();
+    }
     fn build(self: *Builder) !void {
         const event_id = self.tracer.beginEvent("Builder.build", .{});
         defer self.tracer.endEvent(event_id, "Builder.build", .{});
         var root_wip = try self.makeAndGetWip(Hir.Inst.RootIndex, 0, .{
             .module = .{
                 .name = try self.internSlice("root"),
+                .fields = .{},
                 .declarations = .{},
             },
         });
@@ -390,7 +481,9 @@ pub const Wip = struct {
         block,
         module,
         global_declaration,
+        global_type_declaration,
         param_declaration,
+        field_declaration,
         type,
     };
     pub const Data = union(Kind) {
@@ -402,9 +495,11 @@ pub const Wip = struct {
             init_block: ?Wip.Index,
         },
         block: Block,
+
         module: struct {
             name: InternedSlice,
             declarations: Array(Wip.Index),
+            fields: std.AutoArrayHashMapUnmanaged(InternedSlice, StructFieldWip),
         },
         global_declaration: struct {
             global: Mir.Global.Index,
@@ -412,23 +507,37 @@ pub const Wip = struct {
             type: Wip.Index,
             init_block: ?Wip.Index,
         },
+        global_type_declaration: struct {
+            global: Mir.Global.Index,
+            name: InternedSlice,
+            value_instruction: ?InstructionId = null,
+            init_block: ?Wip.Index,
+        },
         param_declaration: struct {
             name: InternedSlice,
             type: Wip.Index,
         },
-
+        field_declaration: struct {
+            name: InternedSlice,
+            type: Wip.Index,
+            init: ?Wip.Index,
+        },
         type: void,
+        const StructFieldWip = struct {
+            index: u32,
+            wip: Wip.Index,
+        };
         pub const Block = struct {
             name: ?InternedSlice,
             owner: Wip.Index,
-            value: Mir.Value.Index = .void,
+            value_instruction: ?InstructionId = null,
             break_type: ?Mir.Type.Index = null,
             instructions: Array(InstructionId) = .{},
             is_inline: bool = false,
         };
     };
     pub fn init(index: Wip.Index, builder: *Builder, hir_index: Hir.Inst.Index, parent: Wip.Index, data: Data) !Wip {
-        const event_id = builder.tracer.beginEvent("Wip.init", .{ .index = index, .hir_index = hir_index, .parent = parent, .data = data });
+        const event_id = builder.tracer.beginAsync("Wip.init({d}:.{s}) hir({d}) parent({d})", .{ index, @tagName(std.meta.activeTag(data)), hir_index, parent }, .{ .wip_index = index, .wip_type = std.meta.activeTag(data), .hir_index = hir_index, .parent = parent, .data = data });
         return Wip{
             .index = index,
             .builder = builder,
@@ -442,6 +551,28 @@ pub const Wip = struct {
             .event_id = event_id,
         };
     }
+
+    pub fn getNameSlice(self: *Wip) []const u8 {
+        if (self.getName()) |name| {
+            return self.builder.getSlice(name);
+        }
+        return "";
+    }
+    pub fn getName(self: *Wip) ?InternedSlice {
+        return switch (self.data) {
+            .fn_decl => |fn_decl| fn_decl.name,
+            .field_declaration => |field_decl| field_decl.name,
+            .global_declaration => |global_decl| global_decl.name,
+            .global_type_declaration => |global_type_decl| global_type_decl.name,
+            .param_declaration => |param_decl| param_decl.name,
+            .type => null,
+            else => null,
+        };
+    }
+    pub fn deinit(self: *Wip) void {
+        self.builder.tracer.endFlow(self.event_id);
+        self.scope.deinit(self.builder.allocator);
+    }
     pub fn getBlockData(self: *Wip) *Data.Block {
         return &self.builder.getWip(self.index).data.block;
     }
@@ -452,16 +583,12 @@ pub const Wip = struct {
     //     pointer.* = self.*;
     // }
     pub fn getGlobal(self: *Wip, inst_index: Hir.Inst.Index) ?Wip.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.getGlobal", .{ .inst_index = inst_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.getGlobal", .{ .inst_index = inst_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.getGlobal", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .inst_index = inst_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.getGlobal", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .inst_index = inst_index });
         if (self.scope.globals.get(inst_index)) |global| return global;
         if (self.index == 0 and self.parent == 0) return null;
         const parent = self.builder.getWip(self.parent);
         return parent.getGlobal(inst_index);
-    }
-    pub fn deinit(self: *Wip) void {
-        self.builder.tracer.endEvent(self.event_id, "Wip.deinit", .{});
-        self.scope.deinit(self.builder.allocator);
     }
     pub fn getInstruction(self: *Wip, id: InstructionId) !*Mir.Instruction {
         switch (self.data) {
@@ -469,8 +596,11 @@ pub const Wip = struct {
                 const owner_wip = self.builder.getWip(block.owner);
                 return &owner_wip.instructions.items[@intCast(id)];
             },
-            else => {},
+            else => {
+                return &self.instructions.items[@intCast(id)];
+            },
         }
+        self.builder.tracer.logEvent("instruction not found", .{ .id = id, .wip = self.index });
         return error.InstructionNotFound;
     }
     pub fn getInstructionId(self: *Wip, hir_inst_index: Hir.Inst.Index) !InstructionId {
@@ -564,6 +694,16 @@ pub const Wip = struct {
     pub fn pushInstruction(self: *Wip, hir_inst: Hir.Inst.Index, instruction: Mir.Instruction) !InstructionId {
         const id = try self.reserveInstruction(hir_inst);
         self.setInstruction(id, instruction);
+        switch (self.data) {
+            .block => |*block| {
+                if (block.is_inline) {
+                    block.value_instruction = id;
+                    self.builder.tracer.printEvent("set instruction as value {d}", .{id}, .{ .instruction_id = id });
+                    block.break_type = instruction.type;
+                }
+            },
+            else => {},
+        }
         return id;
         // switch (self.data) {
         //     .block => |*block| {
@@ -594,19 +734,41 @@ pub const Wip = struct {
         //     else => @panic("only block has instructions"),
         // }
     }
-    pub fn collectSymbols(self: *Wip) !void {
-        const event_id = self.builder.tracer.beginEvent("Wip.collectSymbols", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.collectSymbols", .{ .wip = self.index });
-        self.builder.logger.open("collectSymbols: {s}", .{self.format()});
-        defer self.builder.logger.close();
+    pub fn collectSymbols(self: *Wip) Error!void {
+        const event_id = self.builder.tracer.begin("Wip({d}:.{s}).collectSymbols", .{ self.index, @tagName(std.meta.activeTag(self.data)) }, .{});
+        defer self.builder.tracer.end(event_id);
         switch (self.data) {
             .module => try self.collectModuleSymbols(),
+            .field_declaration => try self.collectFieldDeclarationSymbols(),
             else => {},
         }
     }
+    fn collectFieldDeclarationSymbols(self: *Wip) !void {
+        const hir_inst = self.builder.getHirInst(self.hir_index);
+        const type_hir_inst = hir_inst.struct_field.ty orelse std.debug.panic("field {s} has no type", .{self.getNameSlice()});
+        const type_wip_index: Wip.Index = try self.builder.makeWip(type_hir_inst, self.index, .{
+            .type = {},
+        });
+        const name = try self.builder.internNode(hir_inst.struct_field.name_node);
+        _ = name; // autofix
+        const init_wip = if (hir_inst.struct_field.init) |init_hir_index| try self.builder.makeWip(init_hir_index, self.index, .{
+            .block = .{
+                .name = null,
+                .owner = self.index,
+                .instructions = .{},
+                .break_type = null,
+                .is_inline = switch (self.builder.getHirInst(init_hir_index)) {
+                    .inline_block => true,
+                    else => false,
+                },
+            },
+        }) else null;
+        self.data.field_declaration.init = init_wip;
+        self.data.field_declaration.type = type_wip_index;
+    }
     fn collectModuleSymbols(self: *Wip) !void {
-        const event_id = self.builder.tracer.beginEvent("Wip.collectModuleSymbols", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.collectModuleSymbols", .{ .wip = self.index });
+        const event_id = self.builder.tracer.begin("Wip({d}:{s}).collectModuleSymbols", .{ self.index, @tagName(std.meta.activeTag(self.data)) }, .{});
+        defer self.builder.tracer.end(event_id);
         // const self_index = self.index;
         const builder = self.builder;
 
@@ -617,12 +779,101 @@ pub const Wip = struct {
         const module_decl = hir_inst.struct_decl;
 
         const allocator = builder.arena.allocator();
+
+        const hir_fields_list = builder.getListSlice(module_decl.fields_list);
+
+        for (hir_fields_list) |field_hir_index| {
+            const field_hir_inst = builder.getHirInst(field_hir_index);
+            const field_name = try builder.internNode(field_hir_inst.struct_field.name_node);
+            const field_name_slice = builder.getSlice(field_name);
+            const collect_field_event_id = self.builder.tracer.begin("[COLLECT_FIELD_SYMBOL='{s}']", .{field_name_slice}, .{
+                .field_hir_index = field_hir_index,
+                .field_name = field_name,
+            });
+            defer self.builder.tracer.end(collect_field_event_id);
+            var field_wip = try builder.makeAndGetWip(field_hir_index, self.index, .{
+                .field_declaration = .{
+                    .name = field_name,
+                    .type = 0,
+                    .init = null,
+                },
+            });
+            try field_wip.collectSymbols();
+            try self.data.module.fields.put(allocator, field_name, .{
+                .wip = field_wip.index,
+                .index = @intCast(self.data.module.fields.count()),
+            });
+
+            // const ty_hir_inst = field_hir_inst.struct_field.ty orelse std.debug.panic("field {s} has no type", .{field_name_slice});
+            // const type_wip_index: Wip.Index = try builder.makeWip(ty_hir_inst, field_wip_index, .{
+            //     .type = {},
+            // });
+            // const init_wip = if (field_hir_inst.struct_field.init) |init_hir_index| try builder.makeWip(init_hir_index, field_wip_index, .{
+            //     .block = .{
+            //         .name = null,
+            //         .owner = self.index,
+            //         .instructions = .{},
+            //         .break_type = null,
+            //         .is_inline = switch (self.builder.getHirInst(init_hir_index)) {
+            //             .inline_block => true,
+            //             else => false,
+            //         },
+            //     },
+            // }) else null;
+            // self.builder.getWip(field_wip_index).data.field_declaration.init = init_wip;
+            // self.builder.getWip(field_wip_index).data.field_declaration.type = type_wip_index;
+            // try self.data.module.fields.put(allocator, field_name, .{
+            //     .wip = field_wip_index,
+            //     .index = @intCast(self.data.module.fields.count()),
+            // });
+        }
+
         const hir_declarations_list = builder.getListSlice(module_decl.declarations_list);
 
         for (hir_declarations_list) |decl_hir_index| {
             const decl_hir_inst = builder.getHirInst(decl_hir_index);
             const global_decl = decl_hir_inst.global_decl;
             const name = try builder.internNode(global_decl.name_node);
+            const name_slice = builder.getSlice(name);
+            const collect_declaration_event_id = self.builder.tracer.begin("[COLLECT_DECLARATION_SYMBOL='{s}']", .{name_slice}, .{
+                .decl_hir_index = decl_hir_index,
+                .name = name,
+            });
+            defer self.builder.tracer.end(collect_declaration_event_id);
+            if (global_decl.is_type) {
+                const global_declaration_wip_index: Wip.Index = try builder.makeWip(decl_hir_index, self.index, .{
+                    .global_type_declaration = .{
+                        .global = try builder.reserveGlobalIndex(),
+                        .name = name,
+                        .init_block = null,
+                    },
+                });
+
+                builder.getWip(global_declaration_wip_index).stage = .type_resolved;
+                builder.getWip(global_declaration_wip_index).type_index = .type;
+
+                // const type_wip_index: Wip.Index = try builder.makeWip(type_hir_index, global_declaration_wip_index, .{
+                //     .type = {},
+                // });
+                // builder.getWip(global_declaration_wip_index).data.global_declaration.type = type_wip_index;
+                if (global_decl.init) |init_hir_index| {
+                    builder.getWip(global_declaration_wip_index).data.global_type_declaration.init_block = try builder.makeWip(init_hir_index, global_declaration_wip_index, .{
+                        .block = .{
+                            .name = null,
+                            .owner = global_declaration_wip_index,
+                            .instructions = .{},
+                            .break_type = null,
+                            .is_inline = switch (self.builder.getHirInst(init_hir_index)) {
+                                .inline_block => true,
+                                else => false,
+                            },
+                        },
+                    });
+                }
+                try self.putGlobal(decl_hir_index, global_declaration_wip_index);
+                try self.data.module.declarations.append(allocator, global_declaration_wip_index);
+                continue;
+            }
 
             if (global_decl.type) |type_hir_index| {
                 const type_hir_inst = builder.getHirInst(type_hir_index);
@@ -707,15 +958,14 @@ pub const Wip = struct {
                                 },
                             });
                         }
-                        // builder.getWip(global_declaration_wip_index).data.global_declaration.ty =
                         try self.putGlobal(decl_hir_index, global_declaration_wip_index);
                         try self.data.module.declarations.append(allocator, global_declaration_wip_index);
-                        // try self.builder.logger.panic("not implemented: #{d} {s}", .{ type_hir_index, @tagName(std.meta.activeTag(type_hir_inst)) });
                     },
                 }
             }
         }
     }
+
     pub const Error = error{
         Unimplemented,
         CircularTypeReference,
@@ -725,8 +975,8 @@ pub const Wip = struct {
         TypeMismatch,
     } || std.fmt.ParseFloatError || std.fmt.ParseIntError || std.mem.Allocator.Error;
     pub fn resolveType(self: *Wip) Error!Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.begin("Wip({d}:{s}).resolveType", .{ self.index, @tagName(std.meta.activeTag(self.data)) }, .{});
+        defer self.builder.tracer.end(event_id);
         self.builder.logger.open("resolveType: {s}", .{self.format()});
         defer self.builder.logger.close();
 
@@ -745,6 +995,10 @@ pub const Wip = struct {
                 return self.type_index;
             },
         }
+        // self.builder.tracer.stepFlow(event_id, "Wip({d}:{s}).resolveType", .{ self.index, @tagName(std.meta.activeTag(self.data)) }, .{
+        //     .wip = self.index,
+        //     .wip_type = std.meta.activeTag(self.data),
+        // });
         defer self.builder.logger.log("resolved: {s}", .{self.format()}, null);
         self.type_index = switch (self.data) {
             .module => try self.resolveModuleType(),
@@ -752,9 +1006,13 @@ pub const Wip = struct {
             .type => try self.resolveSimpleType(),
             .param_declaration => try self.resolveParamType(),
             .global_declaration => try self.resolveGlobalDeclarationType(),
+            .field_declaration => try self.resolveFieldDeclarationType(),
 
+            .global_type_declaration,
             .block,
-            => unreachable,
+            => {
+                std.debug.panic("unimplemented resolveType: {s}", .{@tagName(std.meta.activeTag(self.data))});
+            },
             // else => {
             //     return self.builder.logger.panic("unimplemented resolveType: {s}", .{@tagName(std.meta.activeTag(self.data))});
             // },
@@ -762,47 +1020,116 @@ pub const Wip = struct {
         self.stage = .type_resolved;
         return self.type_index;
     }
-    pub fn computeAlignment(self: *Wip, type_index: Mir.Type.Index) u32 {
-        _ = self; // autofix
-        _ = type_index; // autofix
-        return 1;
-    }
-    pub fn sortByAlignment(self: *Wip, lhs: u32, rhs: u32) bool {
-        const lhs_type_index = Mir.Type.Index.asTypeIndex(lhs);
-        const rhs_type_index = Mir.Type.Index.asTypeIndex(rhs);
-        return self.computeAlignment(lhs_type_index) < self.computeAlignment(rhs_type_index);
-    }
+
+    const SortByAlignmentContext = struct {
+        keys: []InternedSlice,
+        types: []Mir.Type.Index,
+        builder: *Builder,
+
+        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+            return ctx.computeAlignment(a_index) >= ctx.computeAlignment(b_index);
+        }
+        pub fn computeAlignment(ctx: @This(), index: usize) u32 {
+            const type_index: Mir.Type.Index = ctx.types[index];
+            if (ctx.builder.getType(type_index)) |ty| {
+                _ = ty; // autofix
+                @panic("TODO");
+            }
+            switch (type_index) {
+                .i8, .u8 => return 1,
+
+                .i16, .u16 => return 2,
+
+                .f32,
+                .i32,
+                .u32,
+                => return 4,
+
+                .i64, .f64, .u64 => return 8,
+
+                .usize => return 4, // TODO: this is platform dependent, we are assuming 32 bits here.
+
+                .i128,
+                .u128,
+                .i256,
+                .u256,
+                => @panic("TODO"),
+                else => @panic("TODO"),
+            }
+        }
+    };
     fn resolveModuleType(self: *Wip) !Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveModuleType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveModuleType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveModuleType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveModuleType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         const type_index = try self.builder.reserveTypeIndex();
         const builder = self.builder;
         const module = self.data.module;
-        var declaration_types = self.builder.newList();
+
+        var fields_list = self.builder.newList();
+
+        // trace({
+        var fields_map = std.AutoArrayHashMapUnmanaged(InternedSlice, Mir.Type.Index){};
+
+        // var field_types = self.builder.newList();
+        var field_iter = module.fields.iterator();
+        while (field_iter.next()) |entry| {
+            const field_name_slice = self.builder.getSlice(entry.key_ptr.*);
+            const resolving_field_event_id = builder.tracer.begin("[RESOLVING_FIELD_TYPE='{s}']", .{field_name_slice}, .{
+                .wip = self.index,
+                .wip_type = std.meta.activeTag(self.data),
+            });
+            defer builder.tracer.end(resolving_field_event_id);
+            const field_wip = builder.getWip(entry.value_ptr.wip);
+            _ = try field_wip.resolveType();
+            // const field_type_wip = builder.getWip(entry.value_ptr.type);
+            // const field_type_index = try field_type_wip.resolveType();
+            // try fields_map.put(builder.arena.allocator(), entry.key_ptr.*, field_type_index);
+            // if (entry.value_ptr.init) |init_wip_index| {
+            //     const init_wip = builder.getWip(init_wip_index);
+            //     const init_type_index = try init_wip.resolveType();
+            //     _ = init_type_index; // autofix
+            // }
+        }
+
+        fields_map.sort(SortByAlignmentContext{
+            .builder = builder,
+            .keys = fields_map.keys(),
+            .types = fields_map.values(),
+        });
+
+        var sorted_fields_iter = fields_map.iterator();
+        var index: u32 = 0;
+
+        while (sorted_fields_iter.next()) |entry| {
+            const field_name = entry.key_ptr.*;
+
+            const field_type_index = entry.value_ptr.*;
+            try fields_list.append(field_type_index.asInt());
+            const field_from_wip = module.fields.getPtr(field_name) orelse unreachable;
+            // field_from_wip.type = field_type_index;
+            field_from_wip.index = index;
+            index += 1;
+        }
+        // });
+        // var declaration_types = self.builder.newList();
 
         for (module.declarations.items) |declaration| {
             const declaration_wip = builder.getWip(declaration);
-            const declaration_type_index = try declaration_wip.resolveType();
-            const decl_type = try builder.makeType(.{ .global = .{
-                .name = switch (declaration_wip.data) {
-                    .global_declaration => declaration_wip.data.global_declaration.name,
-                    .fn_decl => declaration_wip.data.fn_decl.name,
-                    else => {
-                        unreachable;
-                    },
-                },
-                .type = declaration_type_index,
-                .init = null,
-            } });
-            try declaration_types.append(decl_type.asInt());
+            const resolving_declaration_event_id = builder.tracer.begin("[RESOLVING_DECLARATION_TYPE='{s}']", .{declaration_wip.getNameSlice()}, .{
+                .wip = self.index,
+                .wip_type = std.meta.activeTag(self.data),
+            });
+            defer builder.tracer.end(resolving_declaration_event_id);
+            _ = try declaration_wip.resolveType();
         }
 
         // std.mem.sort(u32, declaration_types.list.items, self, sortByAlignment);
+        // const declaration_types_list = try declaration_types.commit();
 
         builder.setType(type_index, .{
-            .module = .{
-                .fields = Mir.List.empty, // TODO
-                .decls = try declaration_types.commit(),
+            .@"struct" = .{
+                .fields = try fields_list.commit(),
+                // .decls = try declaration_types.commit(),
                 .alignment = 1,
             },
         });
@@ -810,8 +1137,8 @@ pub const Wip = struct {
         return type_index;
     }
     fn resolveFnDeclType(self: *Wip) !Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveFnDeclType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveFnDeclType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveFnDeclType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.end(event_id);
         const builder = self.builder;
         const fn_decl = self.data.fn_decl;
         const return_type_wip = builder.getWip(fn_decl.return_type);
@@ -836,9 +1163,10 @@ pub const Wip = struct {
         // return self.builder.logger.panic("not implemented: resolveFnDeclType", .{});
     }
     fn resolveSimpleType(self: *Wip) !Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveSimpleType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveSimpleType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveSimpleType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveSimpleType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         const type_inst = self.builder.getHirInst(self.hir_index);
+
         const type_index = switch (std.meta.activeTag(type_inst)) {
             inline .ty_i8,
             .ty_i16,
@@ -864,15 +1192,15 @@ pub const Wip = struct {
                 // return try self.builder.makeType(.{ .type_number = .{ .tag = tag } });
             },
             else => {
-                self.builder.tracer.panic("not implemented: resolveSimpleType", .{ .type = @tagName(std.meta.activeTag(type_inst)) });
+                std.debug.panic("not implemented: resolveSimpleType {s}", .{@tagName(std.meta.activeTag(type_inst))});
             },
         };
         self.type_index = type_index;
         return type_index;
     }
     fn resolveParamType(self: *Wip) !Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         const param = self.data.param_declaration;
         const type_index = try self.builder.makeType(.{
             .param = .{
@@ -888,8 +1216,8 @@ pub const Wip = struct {
     }
 
     fn resolveGlobalDeclarationType(self: *Wip) !Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalDeclarationType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalDeclarationType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalDeclarationType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalDeclarationType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.stage = .resolving_type;
         const global_decl = self.data.global_declaration;
         const type_index = try self.builder.getWip(global_decl.type).resolveType();
@@ -904,6 +1232,19 @@ pub const Wip = struct {
         // });
         self.type_index = type_index;
         self.stage = .type_resolved;
+        return type_index;
+    }
+    fn resolveFieldDeclarationType(self: *Wip) !Mir.Type.Index {
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveFieldDeclarationType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.end(event_id);
+        const field_decl = self.data.field_declaration;
+        const type_index = try self.builder.getWip(field_decl.type).resolveType();
+        if (field_decl.init) |init_wip_index| {
+            _ = init_wip_index; // autofix
+            // const init_wip = self.builder.getWip(init_wip_index);
+            // const init_type_index = try init_wip.resolveType();
+        }
+
         return type_index;
     }
     fn dumpType(self: *Wip, writer: std.io.AnyWriter, index: Mir.Type.Index, depth: usize) !void {
@@ -955,8 +1296,8 @@ pub const Wip = struct {
         }
     }
     pub fn resolveInitializer(self: *Wip) !void {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveInitializer", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveInitializer", .{ .wip = self.index });
+        const event_id = self.builder.tracer.begin("Wip({d}:{s}).resolveInitializer", .{ self.index, @tagName(std.meta.activeTag(self.data)) }, .{});
+        defer self.builder.tracer.end(event_id);
         switch (self.stage) {
             .collected_symbols => {
                 if (self.type_mode == .explicit) {
@@ -971,31 +1312,55 @@ pub const Wip = struct {
             .committed, .resolved => return,
             .type_resolved => {},
         }
+
+        self.stage = .resolving_instructions;
         switch (self.data) {
             .module => try self.resolveModuleInitializer(),
             .fn_decl => try self.resolveFnDeclInitializer(),
             .block => try self.resolveBlockInitializer(),
             .global_declaration => try self.resolveGlobalDeclarationInitializer(),
+            .global_type_declaration => try self.resolveGlobalTypeDeclarationInitializer(),
+            .field_declaration => try self.resolveFieldDeclarationInitializer(),
             else => {
-                return self.builder.tracer.panic("unimplemented: resolveInitializer", .{ .type = @tagName(std.meta.activeTag(self.data)) });
+                return std.debug.panic("unimplemented: resolveInitializer {s}", .{@tagName(std.meta.activeTag(self.data))});
             },
         }
+        self.stage = .resolved;
     }
     fn resolveModuleInitializer(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveModuleInitializer", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveModuleInitializer", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveModuleInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveModuleInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.stage = .resolving_instructions;
         const builder = self.builder;
         const module = self.data.module;
-        for (module.declarations.items) |field| {
-            const field_wip = builder.getWip(field);
+        var fields_iter = module.fields.iterator();
+
+        while (fields_iter.next()) |field| {
+            const field_wip = builder.getWip(field.value_ptr.wip);
+            const field_name_slice = field_wip.getNameSlice();
+            const resolve_field_initializer_event_id = builder.tracer.begin("[RESOLVE_FIELD_INITIALIZER='{s}']", .{field_name_slice}, .{
+                .wip = self.index,
+                .wip_type = std.meta.activeTag(self.data),
+            });
+            defer builder.tracer.end(resolve_field_initializer_event_id);
+
             try field_wip.resolveInitializer();
+        }
+
+        for (module.declarations.items) |field| {
+            const declaration_wip = builder.getWip(field);
+            const resolve_decl_initializer_event_id = builder.tracer.begin("[RESOLVE_DECL_INITIALIZER='{s}']", .{declaration_wip.getNameSlice()}, .{
+                .wip = self.index,
+                .wip_type = std.meta.activeTag(self.data),
+            });
+            defer builder.tracer.end(resolve_decl_initializer_event_id);
+            try declaration_wip.resolveInitializer();
         }
         self.stage = .resolved;
     }
     fn resolveFnDeclInitializer(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveFnDeclInitializer", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveFnDeclInitializer", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveFnDeclInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveFnDeclInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.stage = .resolving_instructions;
         defer self.stage = .resolved;
         const init_block_wip_index = self.data.fn_decl.init_block orelse {
@@ -1006,8 +1371,8 @@ pub const Wip = struct {
         try init_block_wip.resolveInitializer();
     }
     fn resolveBlockInitializer(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveBlockInitializer", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveBlockInitializer", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveBlockInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveBlockInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.stage = .resolving_instructions;
 
         //  Pushing Parameters as instructions
@@ -1023,12 +1388,23 @@ pub const Wip = struct {
                     );
                 }
             },
+            .field_declaration => |field_decl| {
+                const field_wip = self.builder.getWip(field_decl.type);
+                const ty = try field_wip.resolveType();
+                _ = try self.pushInstruction(field_wip.hir_index, .{
+                    .op = .type,
+                    .type = .type,
+                    .value = try self.getTypeAsValue(ty),
+                    .data = .{
+                        .type = ty,
+                    },
+                });
+            },
             .block => {},
             .global_declaration => {},
+            .global_type_declaration => {},
 
-            .module => {
-                self.builder.logger.todo("error message for blocks at the module level", .{});
-            },
+            .module => {},
             .param_declaration => {
                 self.builder.logger.todo("error message for blocks at the param_declaration level (maybe in the future?)", .{});
             },
@@ -1047,8 +1423,8 @@ pub const Wip = struct {
         self.stage = .resolved;
     }
     pub fn resolveGlobalDeclarationInitializer(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalDeclarationInitializer", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalDeclarationInitializer", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalDeclarationInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalDeclarationInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.stage = .resolving_instructions;
         defer self.stage = .resolved;
         const init_block_wip_index = self.data.global_declaration.init_block orelse {
@@ -1058,13 +1434,60 @@ pub const Wip = struct {
         const init_block_wip = self.builder.getWip(init_block_wip_index);
         try init_block_wip.resolveInitializer();
     }
+    pub fn resolveGlobalTypeDeclarationInitializer(self: *Wip) Error!void {
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalTypeDeclarationInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalTypeDeclarationInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        self.stage = .resolving_instructions;
+        defer self.stage = .resolved;
+        const init_block_wip_index = self.data.global_type_declaration.init_block orelse {
+            std.debug.panic("type declarations should have an init block", .{});
+            return;
+        };
+
+        const init_block_wip = self.builder.getWip(init_block_wip_index);
+        try init_block_wip.resolveInitializer();
+
+        // std.debug.panic("value_instruction: {any}", .{init_block_wip.data.block});
+        const value_instruction = init_block_wip.data.block.value_instruction orelse unreachable;
+        const value_inst = try init_block_wip.getInstruction(value_instruction);
+        const value = value_inst.getValue();
+        const value_str = self.builder.formatValue(value);
+
+        self.data.global_type_declaration.value_instruction = value_instruction;
+        self.builder.tracer.logEvent("set global_type_declaration.value_instruction", .{
+            .wip = self.index,
+            .value_instruction = value_inst,
+            .value_instruction_index = value_instruction,
+            .value_str = value_str,
+        });
+
+        try self.putGlobal(self.hir_index, self.index);
+
+        switch (value_inst.data) {
+            .struct_wip => {
+                const struct_wip = self.builder.getWip(value_inst.data.struct_wip.wip);
+                try struct_wip.resolveInitializer();
+            },
+            else => {},
+        }
+    }
+    pub fn resolveFieldDeclarationInitializer(self: *Wip) Error!void {
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveFieldDeclarationInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveFieldDeclarationInitializer", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        const init_block_wip_index = self.data.field_declaration.init orelse return;
+        const init_block_wip = self.builder.getWip(init_block_wip_index);
+        try init_block_wip.resolveInitializer();
+    }
+
     pub fn resolveBlockInstructions(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveBlockInstructions", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveBlockInstructions", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveBlockInstructions", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveBlockInstructions", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         const block_inst = self.builder.getHirInst(self.hir_index);
         const block_hir_inst = switch (block_inst) {
             .block, .inline_block => |hir_inst| hir_inst,
-            else => unreachable,
+            else => {
+                std.debug.panic("unimplemented: resolveBlockInstructions {s}", .{@tagName(std.meta.activeTag(block_inst))});
+            },
         };
         const instructions_list = self.builder.getListSlice(block_hir_inst.instructions_list);
         for (instructions_list) |hir_inst| {
@@ -1080,8 +1503,8 @@ pub const Wip = struct {
         // }
     }
     pub fn resolveParamInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, name: InternedSlice, type_index: Mir.Type.Index) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .name = name, .type_index = type_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .name = name, .type_index = type_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .name = name, .type_index = type_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .name = name, .type_index = type_index });
         return try self.pushInstruction(hir_inst_index, .{
             .op = .param,
             .type = type_index,
@@ -1096,9 +1519,9 @@ pub const Wip = struct {
         });
     }
     pub fn resolveInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index) Error!Mir.Instruction.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index });
         const hir_inst = self.builder.getHirInst(hir_inst_index);
+        const event_id = self.builder.tracer.begin("Wip.resolveInstruction(.{s})", .{@tagName(std.meta.activeTag(hir_inst))}, .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index });
         switch (hir_inst) {
             .local => |local| return try self.resolveLocalInstruction(hir_inst_index, local),
             .comptime_number => return try self.resolveConstantInstruction(hir_inst_index, hir_inst.comptime_number.node),
@@ -1146,14 +1569,15 @@ pub const Wip = struct {
             .get_property_value => |node| return try self.resolveGetPropertyValueInstruction(hir_inst_index, node),
             .load => |node| return try self.resolveLoadInstruction(hir_inst_index, node),
             .ty_pointer => |node| return try self.resolveTyPointerInstruction(hir_inst_index, node),
+            .struct_decl => |node| return try self.resolveStructDeclarationInstruction(hir_inst_index, node),
             else => {
-                return self.builder.tracer.panic("not implemented: resolveInstruction", .{ .tag = @tagName(std.meta.activeTag(hir_inst)) });
+                return std.debug.panic("not implemented: resolveInstruction {s}", .{@tagName(std.meta.activeTag(hir_inst))});
             },
         }
     }
     pub fn resolveConstantIntInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Constant) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveConstantIntInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveConstantIntInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveConstantIntInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveConstantIntInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const value_index = try self.builder.pushValue(.{ .integer = node.value });
         return try self.pushInstruction(hir_inst_index, .{
             .op = .constant,
@@ -1165,15 +1589,15 @@ pub const Wip = struct {
         });
     }
     pub fn markDead(self: *Wip, inst_index: InstructionId) !void {
-        self.builder.tracer.logEvent("Wip.markDead", .{ .wip = self.index, .inst_index = inst_index });
+        self.builder.tracer.logEvent("Wip.markDead", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .inst_index = inst_index });
         const inst = try self.getInstruction(inst_index);
         self.builder.logger.log("marking dead: {d}", .{inst_index}, null);
         inst.liveness = 0;
     }
 
     pub fn resolveLocalInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, local: Hir.Inst.Local) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveLocalInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .local = local });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLocalInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .local = local });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveLocalInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .local = local });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLocalInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .local = local });
         const type_inst_id = try self.getInstructionId(local.type);
         const type_inst = try self.getInstruction(type_inst_id);
 
@@ -1196,8 +1620,8 @@ pub const Wip = struct {
     }
 
     pub fn resolveConstantInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node_index: Ast.Node.Index) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveConstantInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node_index = node_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveConstantInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node_index = node_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveConstantInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node_index = node_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveConstantInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node_index = node_index });
         const ast = self.builder.hir.ast;
         const node = ast.getNodeData(node_index);
         const node_tag = ast.getNodeTag(node_index);
@@ -1237,8 +1661,8 @@ pub const Wip = struct {
         }
     }
     pub fn resolveTypeLiteralInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveTypeLiteralInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveTypeLiteralInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveTypeLiteralInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveTypeLiteralInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index });
         const hir_inst = self.builder.getHirInst(hir_inst_index);
         const ty = switch (std.meta.activeTag(hir_inst)) {
             inline .ty_i8,
@@ -1305,8 +1729,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveArrayTypeInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, ty_array: Hir.Inst.TyArray) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveArrayTypeInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .ty_array = ty_array });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveArrayTypeInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .ty_array = ty_array });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveArrayTypeInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .ty_array = ty_array });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveArrayTypeInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .ty_array = ty_array });
         // return try self.pushInstruction(hir_inst_index, .{
         //     .op = .type,
         //     .type = ty_array.type,
@@ -1316,8 +1740,8 @@ pub const Wip = struct {
 
     }
     pub fn resolveAsInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveAsInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveAsInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveAsInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveAsInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
         const instruction = try self.getInstructionId(bin_op.lhs);
         const type_instruction_id = try self.getInstructionId(bin_op.rhs);
         const type_instruction = try self.getInstruction(type_instruction_id);
@@ -1330,8 +1754,8 @@ pub const Wip = struct {
         );
     }
     pub fn resolveParamGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, param_get: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamGetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .param_get = param_get });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamGetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .param_get = param_get });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamGetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .param_get = param_get });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamGetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .param_get = param_get });
         const instruction_id = try self.getInstructionId(param_get.operand);
         const instruction = try self.getInstruction(instruction_id);
         const param_type_index = instruction.type;
@@ -1344,8 +1768,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveComparisonInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveComparisonInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveComparisonInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveComparisonInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveComparisonInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
         const hir_inst = self.builder.getHirInst(hir_inst_index);
         var lhs_id = try self.getInstructionId(bin_op.lhs);
         var rhs_id = try self.getInstructionId(bin_op.rhs);
@@ -1381,8 +1805,8 @@ pub const Wip = struct {
         });
     }
     pub fn tryResolveComparison(self: *Wip, op: Mir.Instruction.Op, lhs_id: InstructionId, rhs_id: InstructionId) Error!Mir.Value.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.tryResolveComparison", .{ .wip = self.index, .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id });
-        defer self.builder.tracer.endEvent(event_id, "Wip.tryResolveComparison", .{ .wip = self.index, .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id });
+        const event_id = self.builder.tracer.beginEvent("Wip.tryResolveComparison", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id });
+        defer self.builder.tracer.endEvent(event_id, "Wip.tryResolveComparison", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id });
         const lhs_instruction = try self.getInstruction(lhs_id);
         const rhs_instruction = try self.getInstruction(rhs_id);
         const lhs_value_index = lhs_instruction.getValue();
@@ -1466,8 +1890,8 @@ pub const Wip = struct {
         return lhs.type;
     }
     pub fn resolveArithmeticInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveArithmeticInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveArithmeticInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveArithmeticInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveArithmeticInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
         var lhs_id = try self.getInstructionId(bin_op.lhs);
         var rhs_id = try self.getInstructionId(bin_op.rhs);
 
@@ -1505,8 +1929,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveReturnInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Return) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveReturnInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveReturnInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveReturnInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveReturnInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         if (node.value == null) {
             return try self.pushInstruction(hir_inst_index, .{
                 .op = .ret,
@@ -1529,8 +1953,8 @@ pub const Wip = struct {
     }
 
     pub fn tryCastInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, id: InstructionId, type_index: Mir.Type.Index) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.tryCastInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.tryCastInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.tryCastInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.tryCastInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
         const instruction = try self.getInstruction(id);
         // if (@intFromEnum(type_index) >= Mir.Type.INDEX_START) {
         //     // TODO: check more complex types equality
@@ -1562,8 +1986,8 @@ pub const Wip = struct {
     }
 
     pub fn castInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, id: InstructionId, type_index: Mir.Type.Index) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.castInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.castInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.castInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.castInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .id = id, .type_index = type_index });
         const inst = try self.getInstruction(id);
         if (inst.value != .runtime) {
             try self.markDead(id);
@@ -1581,8 +2005,8 @@ pub const Wip = struct {
     }
 
     pub fn tryResolveArithmetic(self: *Wip, op: Mir.Instruction.Op, lhs_id: InstructionId, rhs_id: InstructionId, type_index: Mir.Type.Index) Error!Mir.Value.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.tryResolveArithmetic", .{ .wip = self.index, .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id, .type_index = type_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.tryResolveArithmetic", .{ .wip = self.index, .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id, .type_index = type_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.tryResolveArithmetic", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id, .type_index = type_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.tryResolveArithmetic", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .op = op, .lhs_id = lhs_id, .rhs_id = rhs_id, .type_index = type_index });
         const lhs_inst = try self.getInstruction(lhs_id);
         const rhs_inst = try self.getInstruction(rhs_id);
         const lhs_value_index = lhs_inst.getValue();
@@ -1659,8 +2083,8 @@ pub const Wip = struct {
     }
 
     pub fn resolveLocalSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveLocalSetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLocalSetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveLocalSetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLocalSetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
         const local_id = try self.getInstructionId(bin_op.lhs);
         const local_instruction = try self.getInstruction(local_id);
         const value_id = try self.getInstructionIdAsType(bin_op.rhs, local_instruction.type);
@@ -1682,8 +2106,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveParamSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamSetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamSetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveParamSetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveParamSetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
         const local_id = try self.getInstructionId(bin_op.lhs);
         const value_id = try self.getInstructionId(bin_op.rhs);
         const local_instruction = try self.getInstruction(local_id);
@@ -1705,8 +2129,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveGlobalSetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, bin_op: Hir.Inst.BinaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalSetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalSetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalSetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalSetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .bin_op = bin_op });
         const global_wip_index = self.getGlobal(bin_op.lhs) orelse self.builder.logger.todo("error for global not found: {d}", .{bin_op.lhs});
 
         const global_wip = self.builder.getWip(global_wip_index);
@@ -1735,8 +2159,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveLocalGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveLocalGetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLocalGetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveLocalGetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLocalGetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
         return try self.pushInstruction(hir_inst_index, .{
@@ -1747,8 +2171,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveLoadInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveLoadInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLoadInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveLoadInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLoadInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
         switch (instruction.op) {
@@ -1771,8 +2195,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveTyPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveTyPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveTyPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveTyPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveTyPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
         const ty = try self.builder.internType(.{ .pointer = .{ .child = instruction.data.type } });
@@ -1785,13 +2209,36 @@ pub const Wip = struct {
             .liveness = 0,
         });
     }
+    pub fn resolveStructDeclarationInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.StructDecl) Error!InstructionId {
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveStructDeclarationInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveStructDeclarationInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        const struct_wip = try self.builder.makeAndGetWip(hir_inst_index, self.index, .{
+            .module = .{
+                .name = try self.builder.internSlice("root"),
+                .declarations = .{},
+                .fields = .{},
+            },
+        });
+        try struct_wip.collectSymbols();
+        struct_wip.type_index = try struct_wip.resolveType();
+
+        // try struct_wip.resolveInitializer();
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .struct_decl,
+            .type = struct_wip.type_index,
+            .value = try self.getTypeAsValue(struct_wip.type_index),
+            .data = .{ .struct_wip = .{
+                .wip = struct_wip.index,
+            } },
+        });
+    }
     pub fn resolveGlobalGetInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalGetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalGetInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGlobalGetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGlobalGetInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const global_wip_id = self.getGlobal(node.operand) orelse self.builder.logger.todo("error for global not found: {d}", .{node.operand});
         const global_wip = self.builder.getWip(global_wip_id);
         const global_type = try global_wip.resolveType();
-        self.builder.logger.log("..global_get: {}", .{global_type}, null);
+        // std.debug.panic("..global_get: {}", .{global_type});
         switch (global_wip.data) {
             .global_declaration => {
                 return try self.pushInstruction(hir_inst_index, .{
@@ -1800,6 +2247,18 @@ pub const Wip = struct {
                     .value = .runtime,
                     .data = .{ .global_get = .{
                         .global = global_wip.data.global_declaration.global,
+                    } },
+                });
+            },
+            .global_type_declaration => |global_type_declaration| {
+                const value_instruction = try global_wip.getInstruction(global_type_declaration.value_instruction orelse unreachable);
+                const value = value_instruction.getValue();
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .global_get,
+                    .type = global_type,
+                    .value = value,
+                    .data = .{ .global_get = .{
+                        .global = global_wip.data.global_type_declaration.global,
                     } },
                 });
             },
@@ -1846,8 +2305,8 @@ pub const Wip = struct {
         // });
     }
     pub fn getTypeAsValue(self: *Wip, type_index: Mir.Type.Index) !Mir.Value.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.getTypeAsValue", .{ .wip = self.index, .type_index = type_index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.getTypeAsValue", .{ .wip = self.index, .type_index = type_index });
+        const event_id = self.builder.tracer.beginEvent("Wip.getTypeAsValue", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_index = type_index });
+        defer self.builder.tracer.endEvent(event_id, "Wip.getTypeAsValue", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_index = type_index });
         if (self.builder.getType(type_index)) |_| {
             return self.builder.pushValue(.{
                 .type = type_index,
@@ -1857,16 +2316,16 @@ pub const Wip = struct {
     }
 
     pub fn getValueAsType(self: *Wip, value: Mir.Value.Index) Mir.Type.Index {
-        const event_id = self.builder.tracer.beginEvent("Wip.getValueAsType", .{ .wip = self.index, .value = value });
-        defer self.builder.tracer.endEvent(event_id, "Wip.getValueAsType", .{ .wip = self.index, .value = value });
+        const event_id = self.builder.tracer.beginEvent("Wip.getValueAsType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .value = value });
+        defer self.builder.tracer.endEvent(event_id, "Wip.getValueAsType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .value = value });
         if (self.builder.getValue(value)) |v| {
             return v.type;
         }
         return value.toType();
     }
     pub fn resolveTypeOfInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveTypeOfInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveTypeOfInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveTypeOfInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveTypeOfInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const instruction_id = try self.getInstructionId(node.operand);
         const instruction = try self.getInstruction(instruction_id);
         return try self.pushInstruction(hir_inst_index, .{
@@ -1878,8 +2337,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveBreakInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.UnaryOp) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveBreakInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveBreakInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveBreakInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveBreakInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const operand_id = try self.getInstructionId(node.operand);
         const operand = try self.getInstruction(operand_id);
         const value = operand.getValue();
@@ -1900,8 +2359,8 @@ pub const Wip = struct {
     }
 
     pub fn resolveIfExpressionInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.IfExpr) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveIfExpressionInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveIfExpressionInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveIfExpressionInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveIfExpressionInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const owner = self.data.block.owner;
 
         const condition_id = try self.getInstructionId(node.cond);
@@ -1940,8 +2399,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveLoopExpressionInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Loop) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveLoopExpressionInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLoopExpressionInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveLoopExpressionInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveLoopExpressionInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const owner = self.data.block.owner;
 
         // const loop_wip = try self.builder.makeAndGetWip(hir_inst_index, self.index, .{
@@ -1974,8 +2433,8 @@ pub const Wip = struct {
     }
 
     pub fn resolveFnCallInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.FnCall) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveFnCallInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveFnCallInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveFnCallInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveFnCallInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         // const callee_id = try self.getInstructionId(node.callee);
         const callee_id = self.getGlobal(node.callee) orelse self.builder.logger.todo("error for global not found: {d}", .{node.callee});
         const callee_wip = self.builder.getWip(callee_id);
@@ -2009,8 +2468,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveAllocInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Alloc) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveAllocInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveAllocInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveAllocInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveAllocInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         // const size_id = try self.getInstructionId(node.size);
         // const size_instruction = try self.getInstruction(size_id);
         // const size = size_instruction.getValue();
@@ -2039,8 +2498,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveGetElementPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetElement) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetElementPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetElementPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetElementPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetElementPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const pointer_id = try self.getInstructionId(node.pointer);
         const pointer_instruction = try self.getInstruction(pointer_id);
 
@@ -2066,8 +2525,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveGetElementValueInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetElement) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetElementValueInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetElementValueInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetElementValueInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetElementValueInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const pointer_id = try self.getInstructionId(node.pointer);
         const index_id = try self.getInstructionIdAsType(
             node.index,
@@ -2094,8 +2553,8 @@ pub const Wip = struct {
         });
     }
     pub fn unwrapPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, pointer_id: InstructionId) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.unwrapPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .pointer_id = pointer_id });
-        defer self.builder.tracer.endEvent(event_id, "Wip.unwrapPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .pointer_id = pointer_id });
+        const event_id = self.builder.tracer.beginEvent("Wip.unwrapPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .pointer_id = pointer_id });
+        defer self.builder.tracer.endEvent(event_id, "Wip.unwrapPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .pointer_id = pointer_id });
         const pointer_instruction = try self.getInstruction(pointer_id);
         const pointer_type = try self.unwrapPointerType(pointer_instruction.type);
         // const pointer_type_value = try self.getTypeAsValue(pointer_type);
@@ -2108,8 +2567,8 @@ pub const Wip = struct {
         });
     }
     pub fn resolveGetPropertyPointerInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetProperty) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetPropertyPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetPropertyPointerInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetPropertyPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetPropertyPointerInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const base_id = try self.getInstructionId(node.base);
         const base_instruction = try self.getInstruction(base_id);
         const property_name = self.builder.hir.ast.getNodeSlice(node.property_name_node);
@@ -2142,8 +2601,8 @@ pub const Wip = struct {
     }
 
     pub fn resolveGetPropertyValueInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.GetProperty) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetPropertyValueInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetPropertyValueInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveGetPropertyValueInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveGetPropertyValueInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const base_id = try self.getInstructionId(node.base);
         const base_instruction = try self.getInstruction(base_id);
         const property_name = self.builder.hir.ast.getNodeSlice(node.property_name_node);
@@ -2185,7 +2644,7 @@ pub const Wip = struct {
     }
 
     pub fn getArrayElementType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
-        self.builder.tracer.logEvent("Wip.getArrayElementType", .{ .wip = self.index, .type_index = type_index });
+        self.builder.tracer.logEvent("Wip.getArrayElementType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_index = type_index });
         const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
         switch (type_value.*) {
             .pointer => |pointer| {
@@ -2200,7 +2659,7 @@ pub const Wip = struct {
         }
     }
     pub fn unwrapPointerType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
-        self.builder.tracer.logEvent("Wip.unwrapPointerType", .{ .wip = self.index, .type_index = type_index });
+        self.builder.tracer.logEvent("Wip.unwrapPointerType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_index = type_index });
         const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
         switch (type_value.*) {
             .pointer => |pointer| {
@@ -2212,7 +2671,7 @@ pub const Wip = struct {
         }
     }
     pub fn maybeUnwrapPointerType(self: *Wip, type_index: Mir.Type.Index) !Mir.Type.Index {
-        self.builder.tracer.logEvent("Wip.maybeUnwrapPointerType", .{ .wip = self.index, .type_index = type_index });
+        self.builder.tracer.logEvent("Wip.maybeUnwrapPointerType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_index = type_index });
         const type_value = self.builder.getType(type_index) orelse return error.TypeNotFound;
         switch (type_value.*) {
             .pointer => |pointer| {
@@ -2225,8 +2684,8 @@ pub const Wip = struct {
     }
 
     pub fn resolveStoreInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Store) Error!InstructionId {
-        const event_id = self.builder.tracer.beginEvent("Wip.resolveStoreInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
-        defer self.builder.tracer.endEvent(event_id, "Wip.resolveStoreInstruction", .{ .wip = self.index, .hir_inst_index = hir_inst_index, .node = node });
+        const event_id = self.builder.tracer.beginEvent("Wip.resolveStoreInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
+        defer self.builder.tracer.endEvent(event_id, "Wip.resolveStoreInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         const pointer_id = try self.getInstructionId(node.pointer);
         const pointer_instruction = try self.getInstruction(pointer_id);
         const expected_type = self.unwrapPointerType(pointer_instruction.type) catch {
@@ -2248,8 +2707,8 @@ pub const Wip = struct {
     }
 
     pub fn commit(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commit", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commit", .{ .wip = self.index });
+        const event_id = self.builder.tracer.begin("Wip({d}:.{s}).commit", .{ self.index, @tagName(std.meta.activeTag(self.data)) }, .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.end(event_id);
         self.builder.logger.log("commit: {s}", .{self.format()}, null);
         switch (self.data) {
             .module => try self.commitModule(),
@@ -2258,25 +2717,46 @@ pub const Wip = struct {
             .type => try self.commitType(),
             .block => try self.commitBlock(),
             .global_declaration => try self.commitGlobalDeclaration(),
+            .global_type_declaration => try self.commitGlobalTypeDeclaration(),
+            .field_declaration => try self.commitFieldDeclaration(),
             // else => {
             //     self.builder.logger.panic("Not implemented: {s}", .{@tagName(self.data)});
             // },
+
         }
         self.stage = .committed;
+        self.builder.tracer.endAsync(self.event_id);
     }
 
     pub fn commitModule(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitModule", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitModule", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitModule", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitModule", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.builder.logger.log("commit module: {s}", .{self.format()}, null);
         assert(self.stage == .resolved);
         assert(activeTag(self.data) == .module);
 
         const module_type = self.builder.getType(self.type_index) orelse unreachable;
-        assert(activeTag(module_type.*) == .module);
+        assert(activeTag(module_type.*) == .@"struct");
+        var fields_iterator = self.data.module.fields.iterator();
+        while (fields_iterator.next()) |field| {
+            const wip = self.builder.getWip(field.value_ptr.wip);
+            const commit_event_id = self.builder.tracer.begin(
+                "[COMMIT_FIELD='{s}']",
+                .{wip.getNameSlice()},
+                .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .field = field },
+            );
+            defer self.builder.tracer.end(commit_event_id);
+            try wip.commit();
+        }
 
         for (self.data.module.declarations.items) |declaration| {
             const wip = self.builder.getWip(declaration);
+            const commit_event_id = self.builder.tracer.begin(
+                "[COMMIT_DECLARATION='{s}']",
+                .{wip.getNameSlice()},
+                .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .declaration = declaration },
+            );
+            defer self.builder.tracer.end(commit_event_id);
             try wip.commit();
         }
 
@@ -2286,8 +2766,8 @@ pub const Wip = struct {
         // }
     }
     pub fn commitFnDecl(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitFnDecl", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitFnDecl", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitFnDecl", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitFnDecl", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.builder.logger.log("commit fn_decl: {s} type_index = {d}", .{ self.format(), self.type_index }, null);
         assert(self.stage == .resolved);
         assert(activeTag(self.data) == .fn_decl);
@@ -2323,8 +2803,8 @@ pub const Wip = struct {
     }
 
     pub fn commitBlock(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitBlock", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitBlock", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitBlock", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitBlock", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.builder.logger.log("commit block: {s}", .{self.format()}, null);
         assert(self.stage == .resolved);
         assert(activeTag(self.data) == .block);
@@ -2344,27 +2824,27 @@ pub const Wip = struct {
         // }
     }
     pub fn commitInstruction(self: *Wip, instruction_id: InstructionId) Mir.Instruction.Index!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitInstruction", .{ .wip = self.index, .instruction_id = instruction_id });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitInstruction", .{ .wip = self.index, .instruction_id = instruction_id });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .instruction_id = instruction_id });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .instruction_id = instruction_id });
         // self.builder.logger.log("commit instruction: {s}", .{self.format()}, null);
     }
     pub fn commitParamDecl(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitParamDecl", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitParamDecl", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitParamDecl", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitParamDecl", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.builder.logger.log("commit param_decl: {s}", .{self.format()}, null);
         assert(@intFromEnum(self.stage) >= @intFromEnum(Stage.type_resolved));
         var type_wip = self.builder.getWip(self.data.param_declaration.type);
         try type_wip.commit();
     }
     pub fn commitType(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitType", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitType", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.builder.logger.log("commit type: {s}", .{self.format()}, null);
         assert(@intFromEnum(self.stage) >= @intFromEnum(Stage.type_resolved));
     }
     pub fn setType(self: *Wip, type_: Mir.Type) !void {
-        const event_id = self.builder.tracer.beginEvent("Wip.setType", .{ .wip = self.index, .type_ = type_ });
-        defer self.builder.tracer.endEvent(event_id, "Wip.setType", .{ .wip = self.index, .type_ = type_ });
+        const event_id = self.builder.tracer.beginEvent("Wip.setType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_ = type_ });
+        defer self.builder.tracer.endEvent(event_id, "Wip.setType", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .type_ = type_ });
         if (self.type_index.toInt()) |int| {
             self.builder.mir.types.items[int] = type_;
             return;
@@ -2372,20 +2852,24 @@ pub const Wip = struct {
         self.type_index = try self.builder.makeType(type_);
     }
     pub fn commitGlobalDeclaration(self: *Wip) Error!void {
-        const event_id = self.builder.tracer.beginEvent("Wip.commitGlobalDeclaration", .{ .wip = self.index });
-        defer self.builder.tracer.endEvent(event_id, "Wip.commitGlobalDeclaration", .{ .wip = self.index });
+        const event_id = self.builder.tracer.beginEvent("Wip.commitGlobalDeclaration", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitGlobalDeclaration", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
         self.builder.logger.log("commit global_declaration: {s}", .{self.format()}, null);
         assert(self.stage == .resolved);
         if (self.data.global_declaration.init_block) |init_block| {
             const init_block_wip = self.builder.getWip(init_block);
             // const init_instructions = try InstructionSet.generate(init_block_wip);
-            const value = init_block_wip.data.block.value;
+            const value = blk: {
+                const value_instruction = init_block_wip.data.block.value_instruction orelse break :blk .void;
+                const value_inst = try self.getInstruction(value_instruction);
+                break :blk value_inst.getValue();
+            };
 
             self.builder.setGlobal(self.data.global_declaration.global, .{
                 .name = self.data.global_declaration.name,
                 .type = self.type_index,
-                .value = init_block_wip.data.block.value,
-                .init = if (value == .runtime) try InstructionSet.generate(init_block_wip) else null,
+                .value = value,
+                .init = try InstructionSet.generate(init_block_wip),
             });
             return;
         }
@@ -2395,6 +2879,46 @@ pub const Wip = struct {
             .value = .undefined,
             .init = null,
         });
+    }
+    pub fn commitGlobalTypeDeclaration(self: *Wip) Error!void {
+        const event_id = self.builder.tracer.beginEvent("Wip.commitGlobalTypeDeclaration", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitGlobalTypeDeclaration", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        self.builder.logger.log("commit global_type_declaration: {s}", .{self.format()}, null);
+        assert(self.stage == .resolved);
+        if (self.data.global_type_declaration.init_block) |init_block| {
+            const init_block_wip = self.builder.getWip(init_block);
+            // const init_instructions = try InstructionSet.generate(init_block_wip);
+            const value = blk: {
+                const value_instruction = init_block_wip.data.block.value_instruction orelse break :blk .void;
+                const value_inst = try self.getInstruction(value_instruction);
+                break :blk value_inst.getValue();
+            };
+
+            self.builder.setGlobal(self.data.global_type_declaration.global, .{
+                .name = self.data.global_type_declaration.name,
+                .type = self.type_index,
+                .value = value,
+                .init = try InstructionSet.generate(init_block_wip),
+            });
+            return;
+        }
+        self.builder.setGlobal(self.data.global_type_declaration.global, .{
+            .name = self.data.global_type_declaration.name,
+            .type = self.type_index,
+            .value = .undefined,
+            .init = null,
+        });
+    }
+    pub fn commitFieldDeclaration(self: *Wip) Error!void {
+        const event_id = self.builder.tracer.beginEvent("Wip.commitFieldDeclaration", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        defer self.builder.tracer.endEvent(event_id, "Wip.commitFieldDeclaration", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data) });
+        self.builder.logger.log("commit field_declaration: {s}", .{self.format()}, null);
+
+        // std.debug.panic("self.stage {s}", .{@tagName(self.stage)});
+
+        assert(self.stage == .resolved);
+        assert(activeTag(self.data) == .field_declaration);
+        // @panic("TODO");
     }
     pub fn dump(self: *Wip, writer: std.io.AnyWriter, index: Wip.Index) !void {
         try writer.print("Wips({d}):\n", .{self.builder.wips.len});
@@ -2409,23 +2933,27 @@ pub const Wip = struct {
             try writer.writeAll("\n");
         }
 
-        try self.dumpInner(writer, index, 0);
+        var tree_writer = TreeWriter.init(writer);
+        try Mir.formatWip(.{
+            .builder = self.builder,
+            .writer = writer,
+            .strings = &self.builder.mir.strings,
+            .types = self.builder.mir.types.items,
+            .values = self.builder.mir.values.items,
+            .lists = &self.builder.mir.interned_lists,
+            .instructions = self.instructions.items,
+            .allocator = self.builder.arena.allocator(),
+        }, writer, index, &tree_writer, .{});
+        // try self.dumpInner(writer, index, 0);
     }
 
     pub fn dumpInner(self: *Wip, writer: std.io.AnyWriter, index: Wip.Index, depth: usize) std.io.AnyWriter.Error!void {
         const wip = self.builder.getWip(index);
         const tag = @tagName(std.meta.activeTag(wip.data));
-        const name = switch (wip.data) {
-            .module => wip.data.module.name,
-            .fn_decl => wip.data.fn_decl.name,
-            .global_declaration => wip.data.global_declaration.name,
-            .param_declaration => wip.data.param_declaration.name,
-
-            else => null,
-        };
         try fmt.writeIndent(writer, depth, .{});
-        if (name) |n| {
-            try writer.print("#{d} {s} \"{s}\" [{s}] hir({d}):\n", .{ wip.index, tag, self.builder.getSlice(n), @tagName(wip.stage), wip.hir_index });
+        const name_slice = wip.getNameSlice();
+        if (name_slice.len > 0) {
+            try writer.print("#{d} {s} \"{s}\" [{s}] hir({d}):\n", .{ wip.index, tag, name_slice, @tagName(wip.stage), wip.hir_index });
         } else {
             try writer.print("#{d} {s} [{s}] hir({d}):\n", .{ wip.index, tag, @tagName(wip.stage), wip.hir_index });
         }
@@ -2476,6 +3004,16 @@ pub const Wip = struct {
                 try writer.writeAll("\n");
 
                 if (wip.data.global_declaration.init_block) |init_block_index| {
+                    try fmt.writeIndent(writer, depth + 1, .{});
+                    try writer.writeAll("init: {\n");
+                    try self.dumpInner(writer, init_block_index, depth + 2);
+                    try fmt.writeIndent(writer, depth + 1, .{});
+                    try writer.writeAll("}\n");
+                }
+            },
+            .global_type_declaration => {
+                try fmt.writeIndent(writer, depth + 1, .{});
+                if (wip.data.global_type_declaration.init_block) |init_block_index| {
                     try fmt.writeIndent(writer, depth + 1, .{});
                     try writer.writeAll("init: {\n");
                     try self.dumpInner(writer, init_block_index, depth + 2);
@@ -2728,16 +3266,7 @@ const InstructionSet = struct {
         try self.map.put(self.builder.arena.allocator(), instruction_id, index);
         return index;
     }
-    // pub fn markLive(self: *InstructionSet, instruction_id: InstructionId) void {
-    //     // const index = self.getIndex(instruction_id);
-    // }
-    //     return try self.builder.pushInstruction(.{
-    //         .op = .constant,
-    //         .type = ty,
-    //         .value = value,
-    //         .data = .{ .void = {} },
-    //     });
-    // }
+
     pub fn getIndex(self: *InstructionSet, instruction_id: InstructionId) Mir.Instruction.Index {
         return self.map.get(instruction_id) orelse {
             self.builder.tracer.panic("instruction_id not found", .{ .instruction_id = instruction_id });
@@ -2874,6 +3403,16 @@ const InstructionSet = struct {
                             .index = self.getIndexAndMarkLive(get_element_pointer.index),
                         },
                     },
+                });
+            },
+            .struct_wip => |struct_wip| {
+                const wip = self.builder.getWip(struct_wip.wip);
+                try wip.commit();
+                _ = try self.push(instruction_id, .{
+                    .op = .struct_decl,
+                    .type = instruction.type,
+                    .value = instruction.value,
+                    .data = .{ .void = {} },
                 });
             },
             .store => {

@@ -26,7 +26,6 @@ pub fn ChunkedArray(comptime T: type, chunk_size: usize) type {
         }
         pub fn append(self: *Self, item: T) !void {
             const chunk_index = getChunkIndex(self.len);
-            std.debug.print("chunk_index: {} self.chunks.items.len: {}\n", .{ chunk_index, self.chunks.items.len });
             while (chunk_index >= self.chunks.items.len)
                 try self.chunks.append(self.arena.allocator(), .{});
 

@@ -15,7 +15,6 @@ test "Snapshots" {
     var walker = try cases_dir.walk(allocator);
     defer walker.deinit();
 
-    std.debug.print("test_filter: {s}\n", .{options.test_filter});
     while (try walker.next()) |entry| {
         if (!std.mem.endsWith(u8, entry.path, SILK_EXTENSION)) continue;
         if (comptime options.test_filter.len > 0) {
@@ -105,7 +104,6 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []co
     defer allocator.free(file_name);
 
     const expected_path = try std.fs.path.join(allocator, &.{ SNAPSHOTS_DIR_PATH, std.fs.path.dirname(path) orelse "", file_name });
-    std.debug.print("expected_path: {s}\n", .{expected_path});
     try std.fs.cwd().makePath(std.fs.path.dirname(expected_path) orelse ".");
     defer allocator.free(expected_path);
 

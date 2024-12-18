@@ -423,7 +423,7 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
         return;
     }
 
-    try writer.print("%{} = {s}", .{ inst_index, @tagName(instruction) });
+    try writer.print("%{} = .{s}", .{ inst_index, @tagName(instruction) });
     switch (instruction) {
         .block, .inline_block => |data| {
             try writer.print("\n", .{});
@@ -764,6 +764,7 @@ pub const Inst = union(enum) {
         name_node: Ast.Node.Index,
         @"extern": bool,
         is_fn: bool,
+        is_type: bool,
         visibility: shared.Visibility,
         exported: bool,
         mutable: bool,

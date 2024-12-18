@@ -8,6 +8,7 @@
        ├ name_node: node(#1: "main")
        ├ extern: false
        ├ is_fn: true
+       ├ is_type: false
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false

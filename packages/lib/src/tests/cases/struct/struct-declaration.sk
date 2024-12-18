@@ -1,8 +1,13 @@
-const A = struct {
+type A = struct {
   a: i32,
-  b: i32 = 2,
+  b: i64 = 2,
   c: i32 = 3,
-  pub fn foo(self: A) i32 {
-    return self.a + self.b;
+  pub fn foo(self: i32): i32 {
+    // const a: A = A{
+    //   a = 1,
+    //   b = 2,
+    //   c = 3,
+    // }
+    return self + self
   }
 }

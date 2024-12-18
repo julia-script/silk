@@ -11,7 +11,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const enable_tracer = b.option(bool, "trace", "Enable tracer") orelse false;
+    const enable_tracer = b.option(bool, "emit-trace", "Enable tracer") orelse false;
+    const print_tracer = b.option(bool, "print-trace", "Print trace") orelse false;
     const update_snapshots = b.option(bool, "update", "Update snapshots") orelse false;
     const test_filter = b.option(
         []const u8,
@@ -23,6 +24,7 @@ pub fn build(b: *std.Build) void {
 
     options.addOption(bool, "enable_tracer", enable_tracer);
     options.addOption(bool, "update_snapshots", update_snapshots);
+    options.addOption(bool, "print_trace", print_tracer);
     options.addOption([]const u8, "test_filter", test_filter);
 
     options.addOption([]const []const u8, "log_scopes", &.{

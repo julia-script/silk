@@ -1,14 +1,14 @@
-;; 32 Nodes
-;; 43 Tokens
-;; 7 Interned Lists
+;; 33 Nodes
+;; 44 Tokens
+;; 12 Interned Lists
 
-%0 = .struct_decl - tok[0..43]
+%0 = .struct_decl - tok[0..44]
  └ members_list: 
-    └ %31 = .const_decl - tok[0..41]
+    └ %32 = .type_decl - tok[0..42]
        ├ name: %1 = .identifier - tok[1..1]
        │  └ token: .identifier 'A'
        ├ type: NONE
-       └ value: %2 = .struct_decl - tok[3..42]
+       └ value: %2 = .struct_decl - tok[3..43]
           └ members_list: 
              ├ %5 = .struct_field - tok[6..8]
              │  ├ name: %3 = .identifier - tok[5..5]
@@ -19,8 +19,8 @@
              ├ %9 = .struct_field - tok[10..14]
              │  ├ name: %6 = .identifier - tok[9..9]
              │  │  └ token: .identifier 'b'
-             │  ├ type: %7 = .ty_i32 - tok[11..11]
-             │  │  └ token: .keyword_i32 'i32'
+             │  ├ type: %7 = .ty_i64 - tok[11..11]
+             │  │  └ token: .keyword_i64 'i64'
              │  └ default_value: %8 = .number_literal - tok[13..13]
              │     └ token: .number_literal '2'
              ├ %13 = .struct_field - tok[16..20]
@@ -30,30 +30,34 @@
              │  │  └ token: .keyword_i32 'i32'
              │  └ default_value: %12 = .number_literal - tok[19..19]
              │     └ token: .number_literal '3'
-             └ %30 = .pub - tok[21..41]
-                └ node: %29 = .fn_decl - tok[22..41]
-                   ├ proto: %19 = .fn_proto - tok[23..29]
+             └ %31 = .pub - tok[21..42]
+                └ node: %30 = .fn_decl - tok[22..42]
+                   ├ proto: %19 = .fn_proto - tok[23..30]
                    │  ├ name: %14 = .identifier - tok[23..23]
                    │  │  └ token: .identifier 'foo'
                    │  ├ params_list: 
                    │  │  └ %15 = .fn_param - tok[25..27]
                    │  │     ├ name: %16 = .identifier - tok[25..25]
                    │  │     │  └ token: .identifier 'self'
-                   │  │     └ type: %17 = .identifier - tok[27..27]
-                   │  │        └ token: .identifier 'A'
-                   │  └ ret_type: %18 = .ty_i32 - tok[29..29]
+                   │  │     └ type: %17 = .ty_i32 - tok[27..27]
+                   │  │        └ token: .keyword_i32 'i32'
+                   │  └ ret_type: %18 = .ty_i32 - tok[30..30]
                    │     └ token: .keyword_i32 'i32'
-                   └ body: %28 = .block - tok[30..40]
+                   └ body: %29 = .block - tok[31..41]
                       └ list: 
-                         └ %27 = .ret_expression - tok[31..38]
-                            └ node: %26 = .add - tok[32..38]
-                               ├ lhs: %22 = .prop_access - tok[32..34]
-                               │  ├ lhs: %20 = .identifier - tok[32..32]
-                               │  │  └ token: .identifier 'self'
-                               │  └ rhs: %21 = .identifier - tok[34..34]
-                               │     └ token: .identifier 'a'
-                               └ rhs: %25 = .prop_access - tok[36..38]
-                                  ├ lhs: %23 = .identifier - tok[36..36]
-                                  │  └ token: .identifier 'self'
-                                  └ rhs: %24 = .identifier - tok[38..38]
-                                     └ token: .identifier 'b'
+                         ├ %20 = .comment_line - tok[32..33]
+                         │  └ token: .comment '// const a: A = A{'
+                         ├ %21 = .comment_line - tok[33..34]
+                         │  └ token: .comment '//   a = 1,'
+                         ├ %22 = .comment_line - tok[34..35]
+                         │  └ token: .comment '//   b = 2,'
+                         ├ %23 = .comment_line - tok[35..36]
+                         │  └ token: .comment '//   c = 3,'
+                         ├ %24 = .comment_line - tok[36..37]
+                         │  └ token: .comment '// }'
+                         └ %28 = .ret_expression - tok[37..40]
+                            └ node: %27 = .add - tok[38..40]
+                               ├ lhs: %25 = .identifier - tok[38..38]
+                               │  └ token: .identifier 'self'
+                               └ rhs: %26 = .identifier - tok[40..40]
+                                  └ token: .identifier 'self'
