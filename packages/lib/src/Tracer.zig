@@ -234,14 +234,14 @@ pub fn writeArgs(T: type, writer: std.io.AnyWriter, args: anytype) !void {
                 inline else => |tag| @tagName(tag),
             };
             _ = uni; // autofix
+            try writer.print("{{", .{});
+            try writer.print("\"{s}\": ", .{tag_name});
             switch (args) {
                 inline else => |value| {
-                    try writer.print("{{", .{});
-                    try writer.print("\"{s}\": ", .{tag_name});
                     try writeArgs(@TypeOf(value), writer, value);
-                    try writer.print("}}", .{});
                 },
             }
+            try writer.print("}}", .{});
         },
         .pointer => |ptr| {
             if (ptr.size == .Slice) {

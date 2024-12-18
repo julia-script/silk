@@ -70,6 +70,11 @@ pub const Instruction = struct {
             type: Type.Index,
             mutable: bool,
         },
+        alloc_wip: struct {
+            type: Type.Index,
+            mutable: bool,
+            wip: MirBuilder.Wip.Index,
+        },
         br: struct {
             instruction: Instruction.Index,
             value: Value.Index,
@@ -122,6 +127,9 @@ pub const Instruction = struct {
         },
         global_get: struct {
             global: Global.Index,
+        },
+        global_get_wip: struct {
+            wip: MirBuilder.Wip.Index,
         },
         store: struct {
             pointer: Instruction.Index,
@@ -411,7 +419,7 @@ pub const Type = union(enum) {
     };
     pub const Module = struct {
         fields: Type.List,
-        // decls: Type.List,
+        declarations: Type.List,
         alignment: u32,
 
         pub const Decl = struct {
@@ -984,7 +992,7 @@ pub fn formatInst(context: FormatInstContext, inst_index: Instruction.Index, tre
         },
 
         .get_element_pointer => |get_element_pointer| {
-            try tw.neutral_200.print(buf_writer, "get_el_pointer(%{d}, %{d})", .{ get_element_pointer.pointer, get_element_pointer.index }, color_options);
+            try tw.neutral_200.print(buf_writer, "get_el_pointer(%{d}, index = {d})", .{ get_element_pointer.pointer, get_element_pointer.index }, color_options);
         },
         .call => |call| {
             try tw.neutral_200.print(buf_writer, "call(%{d}, args = [", .{call.callee}, color_options);

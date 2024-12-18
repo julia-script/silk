@@ -177,6 +177,18 @@ const HirBuilderError = error{
     SymbolNotFound,
 } || std.io.AnyWriter.Error;
 
+pub fn genTypeInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
+    const event_id = self.tracer.beginEvent("genTypeInstruction", .{node_index});
+    defer self.tracer.endEvent(event_id, "genTypeInstruction", .{node_index});
+    const inst_index = try self.genInstruction(scope, node_index);
+    const inst = self.hir.insts.items[inst_index];
+    switch (inst) {
+        .global_decl => {
+            return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
+        },
+        else => return inst_index,
+    }
+}
 pub fn genLoadedInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
     const event_id = self.tracer.beginEvent("genLoadedInstruction", .{node_index});
     defer self.tracer.endEvent(event_id, "genLoadedInstruction", .{node_index});
@@ -243,24 +255,8 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 }
                 break :blk try scope.pushInstruction(.{ .undefined_value = .{ .node = null } });
             };
-            if (ty_node != 0) {
-                // const ty_inst = try self.genInstruction(scope, ty_node);
-                // const local_inst = try scope.pushInstruction(.{
-                //     .local = .{
-                //         .name_node = name_node,
-                //         .mutable = mutable,
-                //         .type = ty_inst,
-                //     },
-                // });
-                // try scope.pushSymbol(name_slice, local_inst);
-                // const cast_value_inst = try scope.pushInstruction(.{
-                //     .as = .{ .lhs = value_inst, .rhs = ty_inst },
-                // });
 
-                // _ = try scope.pushInstruction(.{ .local_set = .{ .lhs = local_inst, .rhs = cast_value_inst } });
-                // return local_inst;
-            }
-            const ty_inst_index = if (ty_node == 0) null else try self.genInstruction(scope, ty_node);
+            const ty_inst_index = if (ty_node == 0) null else try self.genTypeInstruction(scope, ty_node);
             // const ty_inst = self.hir.insts.items[ty_inst_index];
 
             // try scope.pushInstruction(.{ .typeof = .{ .operand = value_inst_index } })
@@ -350,9 +346,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 .param_decl => {
                     return try scope.pushInstruction(.{ .param_get = .{ .operand = inst_index } });
                 },
-                .global_decl => {
-                    return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
-                },
+                // .global_decl => {
+                //     return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
+                // },
                 .local => {
                     return try scope.pushInstruction(.{ .local_get = .{ .operand = inst_index } });
                 },
@@ -459,7 +455,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return inst_index;
         },
         .type_init => {
-            const type_inst_index = try self.genInstruction(scope, nav.data.type_init.type);
+            const type_inst_index = try self.genTypeInstruction(scope, nav.data.type_init.type);
             const inst_index = try scope.reserveInstruction();
 
             const field_init_list = self.hir.ast.interned_lists.getSlice(nav.data.type_init.field_init_list);
@@ -488,8 +484,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 // } });
             }
 
-            const type_inst = &self.hir.insts.items[type_inst_index];
-            _ = type_inst; // autofix
+            // const type_inst = &self.hir.insts.items[type_inst_index];
 
             self.setInstruction(inst_index, .{
                 .alloc = .{
