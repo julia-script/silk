@@ -1917,11 +1917,19 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
     while (!self.tokenIs(.r_brace) and !self.tokenIs(.eof)) {
         const before_parsing_token_index = self.token_index;
         if (!self.nextTokensAre(.identifier, .colon) and !self.nextTokensAre(.identifier, .equal)) {
+            const parse_event_id = self.tracer.begin("[PARSE_DECLARATION]", .{}, .{
+                .current_token = self.token_index,
+            });
+            defer self.tracer.end(parse_event_id);
             // Probably a declaration
             const declaration = try self.parsePrimary();
             if (declaration != 0)
                 try members_list.append(declaration);
         } else {
+            const parse_event_id = self.tracer.begin("[PARSE_FIELD]", .{}, .{
+                .current_token = self.token_index,
+            });
+            defer self.tracer.end(parse_event_id);
             const identifier = try self.parsePrimary();
             const field_start_token = self.token_index;
             if (!self.nodeIs(identifier, .identifier)) {
@@ -1974,7 +1982,6 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
                     .end = self.token_index,
                     .payload = Token.Tag.comma.toInt(),
                 });
-                continue;
             }
             // break;
         }
@@ -1995,7 +2002,7 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
         .end_token = self.token_index,
     });
     if (!is_root) {
-        if (!self.tokenIs(.r_brace)) {
+        if (!self.accept(.r_brace)) {
             try self.errors.addError(.{
                 .tag = .expected_token,
                 .start = self.token_index,

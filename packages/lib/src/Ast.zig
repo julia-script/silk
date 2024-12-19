@@ -844,8 +844,8 @@ pub fn formatNode(
 
                 // try tree_writer.pushDirLine();
                 if (comptime std.mem.endsWith(u8, field.name, "list")) {
-                    try writer.print("\n", .{});
                     const children = self.interned_lists.getSlice(value);
+                    try writer.print("{d} items\n", .{children.len});
                     try tree_writer.pushDirLine();
                     for (children, 0..) |child, j| {
                         try tree_writer.writeIndent(true, j == children.len - 1);
