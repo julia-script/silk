@@ -1,16 +1,9 @@
+
 type A = struct {
   a: i32,
   b: i64 = 2,
   c: i32 = 3,
-  pub fn foo(): void {
-    // const b:u32 = 2;
-    // var arr :[4]i32 = [4]i32 {1, 2, 3, 4}
-    const a:A = A{
-      a = 1,
-      b = 2,
-      c = 3,
-    }
-    a.a = 2;
-    return a.a;
+  pub fn foo(): i32 {
+    return 2 + 3;
   }
 }

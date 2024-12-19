@@ -1,4 +1,5 @@
 type A = struct {
-  a: i32,
+  a: usize,
   b: i32 = 2
+  c: i32 = 3
 }

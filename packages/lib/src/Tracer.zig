@@ -104,7 +104,7 @@ pub fn logEvent(self: *Self, comptime name: []const u8, args: anytype) void {
         std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
     };
 }
-pub fn begin(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) u64 {
+pub inline fn begin(self: *Self, comptime fmt_: []const u8, fmt_args: anytype, args: anytype) u64 {
     const id = ID;
     ID += 1;
     self.writeEvent(.begin, null, fmt_, fmt_args, args, id) catch |err| {

@@ -1,0 +1,71 @@
+;; 38 Nodes
+;; 56 Tokens
+;; 10 Interned Lists
+
+%0 = .struct_decl - tok[0..54]
+ └ members_list: 
+    ├ %23 = .fn_decl - tok[0..33]
+    │  ├ proto: %3 = .fn_proto - tok[1..5]
+    │  │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  │  └ token: .identifier 'main'
+    │  │  ├ params_list: 
+    │  │  └ ret_type: %2 = .ty_i32 - tok[5..5]
+    │  │     └ token: .keyword_i32 'i32'
+    │  └ body: %22 = .block - tok[6..32]
+    │     └ list: 
+    │        ├ %17 = .const_decl - tok[7..26]
+    │        │  ├ name: %4 = .identifier - tok[8..8]
+    │        │  │  └ token: .identifier 'a'
+    │        │  ├ type: %5 = .identifier - tok[10..10]
+    │        │  │  └ token: .identifier 'A'
+    │        │  └ value: %16 = .type_init - tok[12..27]
+    │        │     ├ type: %6 = .identifier - tok[12..12]
+    │        │     │  └ token: .identifier 'A'
+    │        │     └ field_init_list: 
+    │        │        ├ %9 = .field_init - tok[14..16]
+    │        │        │  ├ name: %7 = .identifier - tok[14..14]
+    │        │        │  │  └ token: .identifier 'a'
+    │        │        │  └ value: %8 = .number_literal - tok[16..16]
+    │        │        │     └ token: .number_literal '1'
+    │        │        ├ %12 = .field_init - tok[18..20]
+    │        │        │  ├ name: %10 = .identifier - tok[18..18]
+    │        │        │  │  └ token: .identifier 'b'
+    │        │        │  └ value: %11 = .number_literal - tok[20..20]
+    │        │        │     └ token: .number_literal '2'
+    │        │        └ %15 = .field_init - tok[22..24]
+    │        │           ├ name: %13 = .identifier - tok[22..22]
+    │        │           │  └ token: .identifier 'c'
+    │        │           └ value: %14 = .number_literal - tok[24..24]
+    │        │              └ token: .number_literal '3'
+    │        └ %21 = .ret_expression - tok[27..30]
+    │           └ node: %20 = .prop_access - tok[28..30]
+    │              ├ lhs: %18 = .identifier - tok[28..28]
+    │              │  └ token: .identifier 'a'
+    │              └ rhs: %19 = .identifier - tok[30..30]
+    │                 └ token: .identifier 'a'
+    └ %37 = .type_decl - tok[33..53]
+       ├ name: %24 = .identifier - tok[34..34]
+       │  └ token: .identifier 'A'
+       ├ type: NONE
+       └ value: %25 = .struct_decl - tok[36..54]
+          └ members_list: 
+             ├ %28 = .struct_field - tok[39..41]
+             │  ├ name: %26 = .identifier - tok[38..38]
+             │  │  └ token: .identifier 'a'
+             │  ├ type: %27 = .ty_usize - tok[40..40]
+             │  │  └ token: .keyword_usize 'usize'
+             │  └ default_value: NONE
+             ├ %32 = .struct_field - tok[43..47]
+             │  ├ name: %29 = .identifier - tok[42..42]
+             │  │  └ token: .identifier 'b'
+             │  ├ type: %30 = .ty_i32 - tok[44..44]
+             │  │  └ token: .keyword_i32 'i32'
+             │  └ default_value: %31 = .number_literal - tok[46..46]
+             │     └ token: .number_literal '2'
+             └ %36 = .struct_field - tok[49..53]
+                ├ name: %33 = .identifier - tok[48..48]
+                │  └ token: .identifier 'c'
+                ├ type: %34 = .ty_i32 - tok[50..50]
+                │  └ token: .keyword_i32 'i32'
+                └ default_value: %35 = .number_literal - tok[52..52]
+                   └ token: .number_literal '3'

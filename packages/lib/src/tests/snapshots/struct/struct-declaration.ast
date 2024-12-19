@@ -1,14 +1,14 @@
-;; 46 Nodes
-;; 65 Tokens
-;; 13 Interned Lists
+;; 25 Nodes
+;; 37 Tokens
+;; 6 Interned Lists
 
-%0 = .struct_decl - tok[0..65]
+%0 = .struct_decl - tok[0..35]
  └ members_list: 
-    └ %45 = .type_decl - tok[0..63]
+    └ %24 = .type_decl - tok[0..34]
        ├ name: %1 = .identifier - tok[1..1]
        │  └ token: .identifier 'A'
        ├ type: NONE
-       └ value: %2 = .struct_decl - tok[3..64]
+       └ value: %2 = .struct_decl - tok[3..35]
           └ members_list: 
              ├ %5 = .struct_field - tok[6..8]
              │  ├ name: %3 = .identifier - tok[5..5]
@@ -30,55 +30,19 @@
              │  │  └ token: .keyword_i32 'i32'
              │  └ default_value: %12 = .number_literal - tok[19..19]
              │     └ token: .number_literal '3'
-             └ %44 = .pub - tok[21..63]
-                └ node: %43 = .fn_decl - tok[22..63]
+             └ %23 = .pub - tok[21..35]
+                └ node: %22 = .fn_decl - tok[22..35]
                    ├ proto: %16 = .fn_proto - tok[23..27]
                    │  ├ name: %14 = .identifier - tok[23..23]
                    │  │  └ token: .identifier 'foo'
                    │  ├ params_list: 
-                   │  └ ret_type: %15 = .ty_void - tok[27..27]
-                   │     └ token: .keyword_void 'void'
-                   └ body: %42 = .block - tok[28..62]
+                   │  └ ret_type: %15 = .ty_i32 - tok[27..27]
+                   │     └ token: .keyword_i32 'i32'
+                   └ body: %21 = .block - tok[28..34]
                       └ list: 
-                         ├ %17 = .comment_line - tok[29..30]
-                         │  └ token: .comment '// const b:u32 = 2;'
-                         ├ %18 = .comment_line - tok[30..31]
-                         │  └ token: .comment '// var arr :[4]i32 = [4]i32 {1, 2, 3, 4}'
-                         ├ %32 = .const_decl - tok[31..50]
-                         │  ├ name: %19 = .identifier - tok[32..32]
-                         │  │  └ token: .identifier 'a'
-                         │  ├ type: %20 = .identifier - tok[34..34]
-                         │  │  └ token: .identifier 'A'
-                         │  └ value: %31 = .type_init - tok[36..51]
-                         │     ├ type: %21 = .identifier - tok[36..36]
-                         │     │  └ token: .identifier 'A'
-                         │     └ field_init_list: 
-                         │        ├ %24 = .field_init - tok[38..40]
-                         │        │  ├ name: %22 = .identifier - tok[38..38]
-                         │        │  │  └ token: .identifier 'a'
-                         │        │  └ value: %23 = .number_literal - tok[40..40]
-                         │        │     └ token: .number_literal '1'
-                         │        ├ %27 = .field_init - tok[42..44]
-                         │        │  ├ name: %25 = .identifier - tok[42..42]
-                         │        │  │  └ token: .identifier 'b'
-                         │        │  └ value: %26 = .number_literal - tok[44..44]
-                         │        │     └ token: .number_literal '2'
-                         │        └ %30 = .field_init - tok[46..48]
-                         │           ├ name: %28 = .identifier - tok[46..46]
-                         │           │  └ token: .identifier 'c'
-                         │           └ value: %29 = .number_literal - tok[48..48]
-                         │              └ token: .number_literal '3'
-                         ├ %37 = .assign - tok[51..55]
-                         │  ├ lhs: %35 = .prop_access - tok[51..53]
-                         │  │  ├ lhs: %33 = .identifier - tok[51..51]
-                         │  │  │  └ token: .identifier 'a'
-                         │  │  └ rhs: %34 = .identifier - tok[53..53]
-                         │  │     └ token: .identifier 'a'
-                         │  └ rhs: %36 = .number_literal - tok[55..55]
-                         │     └ token: .number_literal '2'
-                         └ %41 = .ret_expression - tok[57..60]
-                            └ node: %40 = .prop_access - tok[58..60]
-                               ├ lhs: %38 = .identifier - tok[58..58]
-                               │  └ token: .identifier 'a'
-                               └ rhs: %39 = .identifier - tok[60..60]
-                                  └ token: .identifier 'a'
+                         └ %20 = .ret_expression - tok[29..32]
+                            └ node: %19 = .add - tok[30..32]
+                               ├ lhs: %17 = .number_literal - tok[30..30]
+                               │  └ token: .number_literal '2'
+                               └ rhs: %18 = .number_literal - tok[32..32]
+                                  └ token: .number_literal '3'

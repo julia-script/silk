@@ -1,4 +1,4 @@
-;; HIR: 40 instructions
+;; HIR: 24 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -13,7 +13,7 @@
        ├ exported: false
        ├ mutable: false
        ├ type: NONE
-       └ init: %39 = .inline_block
+       └ init: %23 = .inline_block
           └ %2 = .struct_decl
              ├ name_node: NONE
              ├ fields_list: 3 items
@@ -45,29 +45,13 @@
                    ├ visibility: "public"
                    ├ exported: false
                    ├ mutable: false
-                   ├ type: %38 = .fn_decl
+                   ├ type: %22 = .fn_decl
                    │  ├ name_node: node(#14: "foo")
-                   │  ├ return_type: %16 = .ty_void
-                   │  │  └ node: node(#15: "void")
+                   │  ├ return_type: %16 = .ty_i32
+                   │  │  └ node: node(#15: "i32")
                    │  └ params_list: 0 items
-                   └ init: %37 = .block
-                      ├ %17 = global_get operand=(1)
-                      ├ %18 = alloc mutable=(false), type=(17)
-                      ├ %19 = get_property_pointer base=(18), property_name_node=(22)
-                      ├ %20 = comptime_number node=(23)
-                      ├ %21 = store pointer=(19), value=(20)
-                      ├ %22 = get_property_pointer base=(18), property_name_node=(25)
-                      ├ %23 = comptime_number node=(26)
-                      ├ %24 = store pointer=(22), value=(23)
-                      ├ %25 = get_property_pointer base=(18), property_name_node=(28)
-                      ├ %26 = comptime_number node=(29)
-                      ├ %27 = store pointer=(25), value=(26)
-                      ├ %28 = global_get operand=(1)
-                      ├ %29 = ty_pointer operand=(28)
-                      ├ %30 = as lhs=(18), rhs=(29)
-                      ├ %31 = get_property_pointer base=(18), property_name_node=(34)
-                      ├ %32 = comptime_number node=(36)
-                      ├ %33 = store pointer=(31), value=(32)
-                      ├ %34 = get_property_pointer base=(18), property_name_node=(39)
-                      ├ %35 = load operand=(34)
-                      └ %36 = ret value=(35)
+                   └ init: %21 = .block
+                      ├ %17 = comptime_number node=(17)
+                      ├ %18 = comptime_number node=(18)
+                      ├ %19 = add lhs=(17), rhs=(18)
+                      └ %20 = ret value=(19)

@@ -132,8 +132,13 @@ pub fn nextToken(self: *AstGen) ?Token {
 }
 pub fn accept(self: *AstGen, tag: Token.Tag) bool {
     const is_token = self.tokenIs(tag);
-    self.tracer.logEvent(
-        "AstGen.accept",
+    self.tracer.printEvent(
+        "AstGen.accept(%{d}.{s}) = %{}",
+        .{
+            self.token_index,
+            @tagName(tag),
+            is_token,
+        },
         .{
             .token_index = self.token_index,
             .tag = tag,
@@ -153,8 +158,12 @@ pub fn getToken(self: *AstGen) ?Token {
 }
 pub fn consumeToken(self: *AstGen) void {
     const token = self.getToken();
-    self.tracer.logEvent(
-        "AstGen.consumeToken",
+    self.tracer.printEvent(
+        "AstGen.consumeToken(%{d}.{s})",
+        .{
+            self.token_index,
+            if (token) |tok| @tagName(tok.tag) else "NONE",
+        },
         .{
             .token_index = self.token_index,
             .token = token,
@@ -539,13 +548,11 @@ pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
 }
 
 pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parsePrimary", .{
+    const parse_id = self.tracer.begin("AstGen.parsePrimary", .{}, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parsePrimary", .{
-        .current_token = self.token_index,
-    });
+    defer self.tracer.end(parse_id);
     if (self.peekToken()) |token| {
         switch (token.tag) {
             .eof => {
@@ -1818,13 +1825,11 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
 }
 
 pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseWhileLoop", .{
+    const parse_id = self.tracer.begin("AstGen.parseWhileLoop", .{}, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseWhileLoop", .{
-        .current_token = self.token_index,
-    });
+    defer self.tracer.end(parse_id);
     self.loggerOpen("parseWhileLoop");
     defer self.logger.close();
     const start_token = self.token_index;
@@ -1911,7 +1916,6 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
     var members_list = self.ast.interned_lists.new();
     while (!self.tokenIs(.r_brace) and !self.tokenIs(.eof)) {
         const before_parsing_token_index = self.token_index;
-        _ = before_parsing_token_index; // autofix
         if (!self.nextTokensAre(.identifier, .colon) and !self.nextTokensAre(.identifier, .equal)) {
             // Probably a declaration
             const declaration = try self.parsePrimary();
@@ -1954,8 +1958,15 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
                 .start_token = field_start_token,
                 .end_token = self.token_index,
             }));
-
-            if (self.accept(.comma)) continue;
+            if (!self.accept(.comma)) {
+                try self.errors.addError(.{
+                    .tag = .expected_token,
+                    .start = self.token_index,
+                    .end = self.token_index,
+                    .payload = Token.Tag.comma.toInt(),
+                });
+            }
+            // if (self.accept(.comma)) continue;
             if (self.accept(.semicolon)) {
                 try self.errors.addError(.{
                     .tag = .expected_token,
@@ -1965,13 +1976,15 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
                 });
                 continue;
             }
-            break;
+            // break;
         }
 
         // to be sure we don't get stuck in infinite loops
         // assert(self.token_index > before_parsing_token_index);
         if (self.accept(.eof)) break;
-        self.consumeToken();
+        if (self.token_index == before_parsing_token_index) {
+            self.consumeToken();
+        }
     }
 
     self.setNode(index, .{

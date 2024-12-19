@@ -9,7 +9,7 @@
        ├ extern: false
        ├ is_fn: true
        ├ is_type: false
-       ├ visibility: "private"
+       ├ visibility: "public"
        ├ exported: false
        ├ mutable: false
        ├ type: %45 = .fn_decl
