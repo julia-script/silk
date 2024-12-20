@@ -23,8 +23,31 @@ const POINTERS_TYPE = Mir.Type.Index.i32;
 const Tracer = @import("./Tracer.zig");
 const Color = @import("./Color.zig");
 const TreeWriter = @import("./TreeWriter.zig");
+const SemaEntity = struct {
+    const SemaStage = enum {
+        idle,
+        resolving,
+        resolved,
+    };
+    const SemaType = union(SemaStage) {
+        idle: void,
+        resolving: Mir.Type.Index,
+        resolved: Mir.Type.Index,
+    };
+    const SemaValue = union(SemaStage) {
+        idle: void,
+        resolving: Mir.Value.Index,
+        resolved: Mir.Value.Index,
+    };
+    const SemaInstruction = union(SemaStage) {
+        idle: void,
+        resolving: Mir.Instruction.Index,
+        resolved: Mir.Instruction.Index,
+    };
+};
 
 pub const Builder = struct {
+    entities: Array(SemaEntity) = .{},
     wips: WipArray,
     wip_map: std.AutoHashMapUnmanaged(Mir.Type.Index, Wip.Index) = .{},
     allocator: std.mem.Allocator,

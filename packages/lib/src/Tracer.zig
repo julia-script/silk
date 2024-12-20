@@ -190,31 +190,7 @@ pub fn panic(self: *Self, comptime msg: []const u8, args: anytype) noreturn {
     // std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
 }
 pub fn writeArgs(T: type, writer: std.io.AnyWriter, args: anytype) !void {
-    // const fields = std.meta.fields(T);
-    // try writer.print("{{", .{});
-    // var first = true;
-    // inline for (fields) |field| {
-    //     if (!first) {
-    //         try writer.print(", ", .{});
-    //     }
-    //     first = false;
-    //     try writer.print("\"{s}\": ", .{field.name});
-
-    //     switch (field.type) {
-    //         usize, u8, i8, u16, i16, u32, i32, u64, i64, f32, f64, comptime_int, comptime_float => try writer.print("{d}", .{@field(args, field.name)}),
-    //         []const u8, [:0]const u8, []u8 => try writer.print("\"{s}\"", .{@field(args, field.name)}),
-    //         bool => try writer.print("{}", .{field.value}),
-
-    //         else => {
-    //             switch (@typeInfo(field.type)) {
-    //                 // .Struct => try writer.print("{{{s}}}", .{@typeName(field.type)}),
-    //                 .@"enum" => try writer.print("\"{}\"", .{field.value}),
-    //                 else => @compileError("Unsupported type: " ++ @typeName(field.type)),
-    //             }
-    //         },
-    //     }
-    // }
-    // try writer.print("}}", .{});
+   
     switch (@typeInfo(T)) {
         .@"struct" => |struct_| {
             var first = true;

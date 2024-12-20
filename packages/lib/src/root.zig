@@ -21,4 +21,6 @@ test {
     // _ = @import("Os.zig");
     // _ = @import("Fs.zig");
     _ = @import("Tracer.zig");
+    _ = @import("Tracer2.zig");
+    _ = @import("sema/Sema.zig");
 }

@@ -74,6 +74,24 @@ pub fn InternedLists(T: type) type {
             }
             return self.lists.items[start .. start + len];
         }
+        pub fn getRange(self: *Self, source: []const u8) ?Range {
+            const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source));
+            return self.interned_map.get(hash);
+        }
+        pub fn internSlice(self: *Self, slice: []const T) !Range {
+            const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(slice));
+            const existing = try self.interned_map.getOrPut(self.allocator, hash);
+            if (existing.found_existing) {
+                return existing.value_ptr.*;
+            }
+            existing.value_ptr.* = .{
+                .start = @intCast(self.lists.items.len),
+                .len = @intCast(slice.len),
+            };
+
+            try self.lists.appendSlice(self.allocator, slice);
+            return existing.value_ptr.*;
+        }
         pub fn deinit(self: *Self) void {
             self.lists.deinit(self.allocator);
             self.interned_map.deinit(self.allocator);

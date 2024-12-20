@@ -2016,15 +2016,17 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
 
 const fmt = @import("./format_utils.zig");
 pub fn loggerOpen(self: *AstGen, label: []const u8) void {
+    _ = label; // autofix
     self.logger.writeIndent() catch {};
 
     const token = self.ast.tokens.items[@min(self.token_index, self.ast.tokens.items.len - 1)];
+    _ = token; // autofix
 
-    self.logger.print("#token({d}):", .{self.token_index}) catch {};
-    const color = fmt.pickColor(@intFromEnum(token.tag));
-    color.print(self.logger.writer, ".{s}", .{@tagName(token.tag)}, .{}) catch {};
-    self.logger.print(" {s} {{\n", .{label}) catch {};
-    self.logger.indent();
+    // self.logger.print("#token({d}):", .{self.token_index}) catch {};
+    // const color = fmt.pickColor(@intFromEnum(token.tag));
+    // color.print(self.logger.writer, ".{s}", .{@tagName(token.tag)}, .{}) catch {};
+    // self.logger.print(" {s} {{\n", .{label}) catch {};
+    // self.logger.indent();
     // self.logger.print("\n", .{}, null) catch {};
     // self.logger.log("#token({d}:)", .{ self.token_index }, null);
     // self.logger.open("#token({d}:.{s}) {s}", .{

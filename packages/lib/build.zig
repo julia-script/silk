@@ -28,12 +28,12 @@ pub fn build(b: *std.Build) void {
     options.addOption([]const u8, "test_filter", test_filter);
 
     options.addOption([]const []const u8, "log_scopes", &.{
-        "Ast",
-        "AstGen",
-        "HirBuilder",
+        // "Ast",
+        // "AstGen",
+        // "HirBuilder",
+        // // "MirBuilder",
+        // "Mir",
         // "MirBuilder",
-        "Mir",
-        "MirBuilder",
         // "Compilation",
     });
     const cmd_dep = b.dependency("zig-cmd", .{});
