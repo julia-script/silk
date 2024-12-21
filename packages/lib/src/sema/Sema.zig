@@ -65,6 +65,13 @@ pub const Type = struct {
         // pub fn complexFromIndex(self: usize) Key {
         //     return .{ .complex = self + SIMPLE_COUNT };
         // }
+
+        pub fn isEqual(self: Key, other: Key) bool {
+            return switch (self) {
+                .simple => |s| s == other.simple,
+                .complex => |c| c == other.complex,
+            };
+        }
     };
     pub const List = Lists.Range;
     pub const Simple = enum {
@@ -83,6 +90,7 @@ pub const Type = struct {
         f64,
         bool,
         string,
+        void,
     };
 
     pub fn simple(self: Simple) Key {
@@ -100,6 +108,13 @@ pub const Type = struct {
         function: struct {
             params: Type.List,
             ret: Type.Key,
+        },
+        array: struct {
+            child: Type.Key,
+            size: u32,
+        },
+        pointer: struct {
+            child: Type.Key,
         },
         pub const Ent = struct {
             entity: Entity.Key,
@@ -155,6 +170,7 @@ pub const Value = struct {
         false,
         undefined,
         nil,
+        void,
 
         type_number,
         type_i8,
@@ -195,9 +211,25 @@ pub const Instruction = struct {
         //     name: Value.Key,
         //     value: Value.Key,
         // },
+        alloc: struct {
+            type: Type.Key,
+            mutable: bool,
+        },
+        store: struct {
+            operand: Instruction.Index,
+            value: Instruction.Index,
+        },
+        cast: struct {
+            operand: Instruction.Index,
+        },
     };
     pub const Op = enum {
         param,
+        constant,
+        type,
+        alloc,
+        store,
+        cast,
     };
 
     pub const Index = usize;
@@ -208,48 +240,63 @@ test "Sema" {
     var errors_manager = try ErrorManager.init(allocator);
     defer errors_manager.deinit();
     const source =
-        \\type A = struct {
-        \\  a: usize,
-        \\  b: i32 = 2,
-        \\  c: i32 = 3,
-        \\  pub fn foo(): void {
-        \\    const b: B = B{
-        \\      d = 4,
-        \\      e = 5,
-        \\      f = 6,
-        \\    }
-        \\    const a: A = A{
-        \\      a = 1,
-        \\      b = 2,
-        \\      c = 3,
-        \\    }
-        \\  }
-        \\}
-        \\type B = struct {
-        \\  d: usize,
-        \\  e: i32 = 2,
-        \\  f: i32 = 3,
-        \\  pub fn bar(): void {
-        \\    const a: A = A{
-        \\      a = 1,
-        \\      b = 2,
-        \\      c = 3,
-        \\    }
-        \\    const b: B = B{
-        \\      d = 4,
-        \\      e = 5,
-        \\      f = 6,
-        \\    }
-        \\  }
-        \\}
-        \\fn main(b: i32): void {
-        \\  const a: A = A{
-        \\    a = 1,
-        \\    b = 2,
-        \\    c = 3,
-        \\  }
-        \\  a.foo();
-        \\}
+        \\ pub fn fib(n: i32): i32 {
+        \\   var a:i32 = 0
+        \\   var b:i32 = 1
+        \\   if (n > 0) {
+        \\     while (n > 1) {
+        \\       var t:i32 = a + b
+        \\       a = b
+        \\       b = t
+        \\       n = n - 1
+        \\     }
+        \\     return b
+        \\   }
+        \\   return a
+        \\ }
+        \\
+        // \\type A = struct {
+        // \\  a: usize,
+        // \\  b: i32 = 2,
+        // \\  c: i32 = 3,
+        // \\  pub fn foo(): void {
+        // \\    const b: B = B{
+        // \\      d = 4,
+        // \\      e = 5,
+        // \\      f = 6,
+        // \\    }
+        // \\    const a: A = A{
+        // \\      a = 1,
+        // \\      b = 2,
+        // \\      c = 3,
+        // \\    }
+        // \\  }
+        // \\}
+        // \\type B = struct {
+        // \\  d: usize,
+        // \\  e: i32 = 2,
+        // \\  f: i32 = 3,
+        // \\  pub fn bar(): void {
+        // \\    const a: A = A{
+        // \\      a = 1,
+        // \\      b = 2,
+        // \\      c = 3,
+        // \\    }
+        // \\    const b: B = B{
+        // \\      d = 4,
+        // \\      e = 5,
+        // \\      f = 6,
+        // \\    }
+        // \\  }
+        // \\}
+        // \\fn main(b: i32): void {
+        // \\  const a: A = A{
+        // \\    a = 1,
+        // \\    b = 2,
+        // \\    c = 3,
+        // \\  }
+        // \\  a.foo();
+        // \\}
     ;
     var ast = try Ast.parse(allocator, &errors_manager, source[0..], .{});
     defer ast.deinit();
@@ -259,6 +306,6 @@ test "Sema" {
     var sema = try Builder.build(allocator, &hir, &errors_manager, .{});
     defer sema.deinit();
     try sema.collectRoot();
-    try sema.analyze("%::main");
+    try sema.analyze("%::fib");
     // defer std.debug.panic("stop", .{});
 }

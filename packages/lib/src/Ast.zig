@@ -3,7 +3,6 @@ const MultiArray = std.MultiArrayList;
 const PackedLists = @import("PackedLists.zig").new;
 const Allocator = std.mem.Allocator;
 const Array = std.ArrayListUnmanaged;
-const Token = @import("Lexer.zig").Token;
 const Color = @import("Color.zig");
 const AstGen = @import("AstGen.zig");
 const tw = Color.tw;
@@ -15,6 +14,7 @@ const serializer = @import("serializer.zig");
 const InternedLists = @import("interned-lists.zig").InternedLists;
 const InternedIndexesList = InternedLists(Node.Index);
 const TreeWriter = @import("TreeWriter.zig");
+pub const Token = @import("Lexer.zig").Token;
 
 nodes: Array(Node),
 interned_lists: InternedIndexesList,
