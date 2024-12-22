@@ -1,0 +1,7 @@
+
+pub fn a(): void {
+  const _ = b;
+}
+pub fn b(): void {
+  const _ = a;
+}

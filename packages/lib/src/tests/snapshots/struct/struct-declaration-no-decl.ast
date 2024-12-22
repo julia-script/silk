@@ -2,14 +2,14 @@
 ;; 21 Tokens
 ;; 4 Interned Lists
 
-%0 = .struct_decl - tok[0..19]
- └ members_list: 
-    └ %14 = .type_decl - tok[0..18]
+%0 = .struct_decl - tok[0..21]
+ └ members_list: 1 items
+    └ %14 = .type_decl - tok[0..19]
        ├ name: %1 = .identifier - tok[1..1]
        │  └ token: .identifier 'A'
        ├ type: NONE
        └ value: %2 = .struct_decl - tok[3..19]
-          └ members_list: 
+          └ members_list: 3 items
              ├ %5 = .struct_field - tok[6..8]
              │  ├ name: %3 = .identifier - tok[5..5]
              │  │  └ token: .identifier 'a'

@@ -2536,9 +2536,6 @@ pub const Wip = struct {
     pub fn resolveAllocInstruction(self: *Wip, hir_inst_index: Hir.Inst.Index, node: Hir.Inst.Alloc) Error!InstructionId {
         const event_id = self.builder.tracer.beginEvent("Wip.resolveAllocInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
         defer self.builder.tracer.endEvent(event_id, "Wip.resolveAllocInstruction", .{ .wip = self.index, .wip_type = std.meta.activeTag(self.data), .hir_inst_index = hir_inst_index, .node = node });
-        // const size_id = try self.getInstructionId(node.size);
-        // const size_instruction = try self.getInstruction(size_id);
-        // const size = size_instruction.getValue();
         const type_value_id = try self.getInstructionId(node.type);
         const type_value = try self.getInstruction(type_value_id);
 

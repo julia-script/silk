@@ -182,6 +182,7 @@ pub fn genTypeInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index
     defer self.tracer.endEvent(event_id, "genTypeInstruction", .{node_index});
     const inst_index = try self.genInstruction(scope, node_index);
     const inst = self.hir.insts.items[inst_index];
+
     switch (inst) {
         .global_decl => {
             return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
@@ -198,7 +199,13 @@ pub fn genLoadedInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
         .get_element_pointer, .get_property_pointer, .alloc => {
             return scope.pushInstruction(.{ .load = .{ .operand = inst_index } });
         },
-        else => return inst_index,
+        .global_decl => {
+            return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
+        },
+
+        else => {
+            return inst_index;
+        },
     }
 }
 pub fn genBinaryExpression(self: *Self, comptime tag: Ast.Node.Tag, scope: *Scope, node_index: Ast.Node.Index) HirBuilderError!Hir.Inst.Index {
@@ -251,7 +258,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
 
             const value_inst_index: Hir.Inst.Index = blk: {
                 if (value_node != 0) {
-                    break :blk try self.genInstruction(scope, value_node);
+                    break :blk try self.genLoadedInstruction(scope, value_node);
                 }
                 break :blk try scope.pushInstruction(.{ .undefined_value = .{ .node = null } });
             };

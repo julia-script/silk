@@ -3,7 +3,7 @@
 ;; 13 Interned Lists
 
 %0 = .struct_decl - tok[0..65]
- └ members_list: 
+ └ members_list: 2 items
     ├ %1 = .comment_line - tok[0..1]
     │  └ token: .comment '/// Fibonacci sequence'
     └ %49 = .pub - tok[1..64]
@@ -11,7 +11,7 @@
           ├ proto: %7 = .fn_proto - tok[3..10]
           │  ├ name: %2 = .identifier - tok[3..3]
           │  │  └ token: .identifier 'fib'
-          │  ├ params_list: 
+          │  ├ params_list: 1 items
           │  │  └ %3 = .fn_param - tok[5..7]
           │  │     ├ name: %4 = .identifier - tok[5..5]
           │  │     │  └ token: .identifier 'n'
@@ -20,7 +20,7 @@
           │  └ ret_type: %6 = .ty_i32 - tok[10..10]
           │     └ token: .keyword_i32 'i32'
           └ body: %47 = .block - tok[11..63]
-             └ list: 
+             └ list: 4 items
                 ├ %11 = .var_decl - tok[12..17]
                 │  ├ name: %8 = .identifier - tok[13..13]
                 │  │  └ token: .identifier 'a'
@@ -42,7 +42,7 @@
                 │  │  └ rhs: %17 = .number_literal - tok[28..28]
                 │  │     └ token: .number_literal '0'
                 │  ├ then_branch: %43 = .block - tok[30..60]
-                │  │  └ list: 
+                │  │  └ list: 2 items
                 │  │     ├ %40 = .while_loop - tok[31..57]
                 │  │     │  ├ condition: %21 = .gt - tok[33..35]
                 │  │     │  │  ├ lhs: %19 = .identifier - tok[33..33]
@@ -50,7 +50,7 @@
                 │  │     │  │  └ rhs: %20 = .number_literal - tok[35..35]
                 │  │     │  │     └ token: .number_literal '1'
                 │  │     │  └ body: %39 = .block - tok[37..57]
-                │  │     │     └ list: 
+                │  │     │     └ list: 4 items
                 │  │     │        ├ %27 = .var_decl - tok[38..45]
                 │  │     │        │  ├ name: %22 = .identifier - tok[39..39]
                 │  │     │        │  │  └ token: .identifier 't'

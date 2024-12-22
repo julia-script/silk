@@ -16,6 +16,9 @@ pub fn InternedLists(T: type) type {
             len: u32,
             pub const empty = Range{ .start = 0, .len = 0 };
         };
+        pub fn count(self: *Self) usize {
+            return self.interned_map.count();
+        }
         pub const WorkingList = struct {
             list: Array(T),
             parent: *Self,

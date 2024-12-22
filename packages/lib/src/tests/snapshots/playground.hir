@@ -1,0 +1,42 @@
+;; HIR: 17 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 2 items
+    ├ 0: %1 = .global_decl
+    │  ├ name_node: node(#1: "a")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "public"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %9 = .fn_decl
+    │  │  ├ name_node: node(#1: "a")
+    │  │  ├ return_type: %3 = .ty_void
+    │  │  │  └ node: node(#2: "void")
+    │  │  └ params_list: 0 items
+    │  └ init: %8 = .block
+    │     ├ %4 = global_get operand=(2)
+    │     ├ %5 = typeof operand=(4)
+    │     ├ %6 = alloc mutable=(false), type=(5)
+    │     └ %7 = store pointer=(6), value=(4)
+    └ 1: %2 = .global_decl
+       ├ name_node: node(#10: "b")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "public"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %16 = .fn_decl
+       │  ├ name_node: node(#10: "b")
+       │  ├ return_type: %10 = .ty_void
+       │  │  └ node: node(#11: "void")
+       │  └ params_list: 0 items
+       └ init: %15 = .block
+          ├ %11 = global_get operand=(1)
+          ├ %12 = typeof operand=(11)
+          ├ %13 = alloc mutable=(false), type=(12)
+          └ %14 = store pointer=(13), value=(11)

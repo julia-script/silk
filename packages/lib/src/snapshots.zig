@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("Ast.zig");
 const Hir = @import("Hir.zig");
 const Mir = @import("Mir.zig");
+const Sema = @import("sema/Sema.zig");
 const ErrorManager = @import("ErrorManager.zig");
 const options = @import("options");
 const expect = @import("expect").expect;
@@ -72,17 +73,32 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 
     try checkSnapshot(allocator, dir, hir_output.items, path, ".hir");
 
-    var mir = try Mir.build(allocator, &hir, &errors_manager, .{
-        .trace_dir = trace_dir,
-        .trace_name = "mir",
-        .unique_trace_name = true,
-    });
-    defer mir.deinit();
+    // var mir = try Mir.build(allocator, &hir, &errors_manager, .{
+    //     .trace_dir = trace_dir,
+    //     .trace_name = "mir",
+    //     .unique_trace_name = true,
+    // });
+    // defer mir.deinit();
 
-    var mir_output = std.ArrayList(u8).init(allocator);
-    defer mir_output.deinit();
-    try mir.formatMir(mir_output.writer().any(), .{ .color = false });
-    try checkSnapshot(allocator, dir, mir_output.items, path, ".mir");
+    // defer mir_output.deinit();
+    // try mir.formatMir(mir_output.writer().any(), .{ .color = false });
+    // try checkSnapshot(allocator, dir, mir_output.items, path, ".mir");
+
+    var sema = try Sema.build(allocator, &hir, &errors_manager, .{
+        // .trace_dir = trace_dir,
+        // .trace_name = "sema",
+        // .unique_trace_name = true,
+    });
+    defer sema.deinit();
+
+    try sema.compileAll();
+
+    var sema_output = std.ArrayList(u8).init(allocator);
+    defer sema_output.deinit();
+    try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
+
+    try Sema.format(&sema, sema_output.writer().any());
+    try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
 }
 
 pub fn writeOutput(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8, data: []const u8, extension: []const u8) !void {

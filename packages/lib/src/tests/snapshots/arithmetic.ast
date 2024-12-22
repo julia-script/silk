@@ -3,16 +3,16 @@
 ;; 2 Interned Lists
 
 %0 = .struct_decl - tok[0..15]
- └ members_list: 
+ └ members_list: 1 items
     └ %11 = .fn_decl - tok[0..14]
        ├ proto: %3 = .fn_proto - tok[1..4]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'main'
-       │  ├ params_list: 
+       │  ├ params_list: 0 items
        │  └ ret_type: %2 = .ty_i32 - tok[4..4]
        │     └ token: .keyword_i32 'i32'
        └ body: %10 = .block - tok[5..13]
-          └ list: 
+          └ list: 1 items
              └ %9 = .ret_expression - tok[6..11]
                 └ node: %8 = .add - tok[7..11]
                    ├ lhs: %4 = .number_literal - tok[7..7]

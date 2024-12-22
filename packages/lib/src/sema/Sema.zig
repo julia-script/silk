@@ -11,36 +11,37 @@ const InternedList = @import("../interned-lists.zig").InternedLists;
 pub const Lists = InternedList(usize);
 pub const Strings = InternedList(u8);
 
-allocator: std.mem.Allocator,
+// allocator: std.mem.Allocator,
 
-instructions: Array(Instruction) = .{},
-values: ArrayHashMap(Value.Key, Value) = .{},
-types: ArrayHashMap(Type.Key, Type) = .{},
-strings: Strings,
-lists: Lists,
+// instructions: Array(Instruction) = .{},
+// values: ArrayHashMap(Value.Key, Value) = .{},
+// types: ArrayHashMap(Type.Key, Type) = .{},
+// strings: Strings,
+// lists: Lists,
 
 const Self = @This();
+pub const build = Builder.build;
 
-pub fn build(
-    allocator: std.mem.Allocator,
-    hir: *Hir,
-    errors_manager: *ErrorManager,
-    options: Builder.BuildOptions,
-) !Self {
-    return Builder.build(
-        allocator,
-        hir,
-        errors_manager,
-        options,
-    );
-}
-pub fn deinit(self: *Self) void {
-    self.instructions.deinit(self.allocator);
-    self.values.deinit(self.allocator);
-    self.types.deinit(self.allocator);
-    self.strings.deinit();
-    self.lists.deinit();
-}
+// pub fn build(
+//     allocator: std.mem.Allocator,
+//     hir: *Hir,
+//     errors_manager: *ErrorManager,
+//     options: Builder.BuildOptions,
+// ) !Self {
+//     return Builder.build(
+//         allocator,
+//         hir,
+//         errors_manager,
+//         options,
+//     );
+// }
+// pub fn deinit(self: *Self) void {
+//     self.instructions.deinit(self.allocator);
+//     self.values.deinit(self.allocator);
+//     self.types.deinit(self.allocator);
+//     self.strings.deinit();
+//     self.lists.deinit();
+// }
 
 pub const Type = struct {
     hash: u64,
@@ -226,6 +227,7 @@ pub const Value = struct {
 
         type_bool,
         type_string,
+        type_void,
     };
     pub fn simple(self: Simple) Key {
         return .{ .simple = self };
@@ -263,6 +265,7 @@ pub const Instruction = struct {
             operand: Instruction.Index,
             payload: Instruction.Index,
         },
+        declaration: Declaration.Index,
         @"if": struct {
             condition: Instruction.Index,
             then_instructions: InstRange,
@@ -294,6 +297,9 @@ pub const Instruction = struct {
         cast,
         loop,
         load,
+        typeof,
+        global_get,
+        global_set,
 
         param_get,
         param_set,
@@ -557,11 +563,41 @@ pub fn formatDeclaration(writer: std.io.AnyWriter, builder: *Builder, declaratio
 
     try tree_writer.pop();
 }
+
+pub fn format(builder: *Builder, writer: std.io.AnyWriter) !void {
+    try writer.print(";; Sema\n", .{});
+    try writer.print(";; {d} declarations\n", .{builder.declarations.items.len});
+    try writer.print(";; {d} entities\n", .{builder.entities.len});
+    try writer.print(";; {d} symbols\n", .{builder.symbols.count()});
+    try writer.print(";; {d} instructions\n", .{builder.instructions.items.len});
+    try writer.print(";; {d} values\n", .{builder.values.count()});
+    try writer.print(";; {d} types\n", .{builder.types.count()});
+    try writer.print(";; {d} lists\n", .{builder.lists.count()});
+    try writer.print(";; {d} strings\n", .{builder.strings.count()});
+
+    try writer.print("\n", .{});
+
+    for (0..builder.declarations.items.len) |i| {
+        try formatDeclaration(
+            writer,
+            builder,
+            i,
+        );
+        try writer.print("\n", .{});
+    }
+}
 test "Sema" {
     const allocator = std.testing.allocator;
     var errors_manager = try ErrorManager.init(allocator);
     defer errors_manager.deinit();
     const source =
+        // \\pub fn a():void {
+        // \\  const _ = b
+        // \\}
+        // \\pub fn b():void {
+        // \\  const _ = a
+        // \\}
+
         \\ pub fn fib(n: i32): i32 {
         \\   var a:i32 = 0
         \\   var b:i32 = 1
@@ -577,6 +613,7 @@ test "Sema" {
         \\   return a
         \\ }
         \\
+
         // \\type A = struct {
         // \\  a: usize,
         // \\  b: i32 = 2,
@@ -628,10 +665,10 @@ test "Sema" {
     var sema = try Builder.build(allocator, &hir, &errors_manager, .{});
     defer sema.deinit();
     try sema.collectRoot();
-    const compiled = try sema.compileDeclaration("root::fib");
-    try formatDeclaration(
-        std.io.getStdErr().writer().any(),
-        &sema,
-        compiled,
-    );
+    // const compiled = try sema.compileDeclaration("root::a");
+    // try formatDeclaration(
+    //     std.io.getStdErr().writer().any(),
+    //     &sema,
+    //     compiled,
+    // );
 }

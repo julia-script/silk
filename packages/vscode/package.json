@@ -33,7 +33,7 @@
 			{
 				"id": "silk-tree",
 				"aliases": ["Silk Tree", "silk-tree"],
-				"extensions": [".ast", ".hir", ".mir"],
+				"extensions": [".ast", ".hir", ".mir", ".sema"],
 				"configuration": "./silk-tree-language-configuration.json"
 			}
 		],

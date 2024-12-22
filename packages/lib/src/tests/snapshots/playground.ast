@@ -1,0 +1,38 @@
+;; 19 Nodes
+;; 29 Tokens
+;; 4 Interned Lists
+
+%0 = .struct_decl - tok[0..29]
+ └ members_list: 2 items
+    ├ %9 = .pub - tok[0..14]
+    │  └ node: %8 = .fn_decl - tok[1..14]
+    │     ├ proto: %3 = .fn_proto - tok[2..6]
+    │     │  ├ name: %1 = .identifier - tok[2..2]
+    │     │  │  └ token: .identifier 'a'
+    │     │  ├ params_list: 0 items
+    │     │  └ ret_type: %2 = .ty_void - tok[6..6]
+    │     │     └ token: .keyword_void 'void'
+    │     └ body: %7 = .block - tok[7..13]
+    │        └ list: 1 items
+    │           └ %6 = .const_decl - tok[8..11]
+    │              ├ name: %4 = .identifier - tok[9..9]
+    │              │  └ token: .identifier '_'
+    │              ├ type: NONE
+    │              └ value: %5 = .identifier - tok[11..11]
+    │                 └ token: .identifier 'b'
+    └ %18 = .pub - tok[14..28]
+       └ node: %17 = .fn_decl - tok[15..28]
+          ├ proto: %12 = .fn_proto - tok[16..20]
+          │  ├ name: %10 = .identifier - tok[16..16]
+          │  │  └ token: .identifier 'b'
+          │  ├ params_list: 0 items
+          │  └ ret_type: %11 = .ty_void - tok[20..20]
+          │     └ token: .keyword_void 'void'
+          └ body: %16 = .block - tok[21..27]
+             └ list: 1 items
+                └ %15 = .const_decl - tok[22..25]
+                   ├ name: %13 = .identifier - tok[23..23]
+                   │  └ token: .identifier '_'
+                   ├ type: NONE
+                   └ value: %14 = .identifier - tok[25..25]
+                      └ token: .identifier 'a'

@@ -1,0 +1,22 @@
+;; Sema
+;; 2 declarations
+;; 7 entities
+;; 2 symbols
+;; 8 instructions
+;; 3 values
+;; 2 types
+;; 0 lists
+;; 8 strings
+
+pub @root::a() -> void
+ ├ %0: todo(function) = .global_get declaration=(%1)                  ; runtime
+ ├ %1: type = .typeof operand=(%0)                                    ; type(todo(function))
+ ├ %2: *todo(function) = .alloc type_inst=(%1) mutable=(false)        ; runtime
+ └ %3: void = .store operand=(%2) payload=(%0)                        ; void
+
+pub @root::b() -> void
+ ├ %0: todo(function) = .global_get declaration=(%0)                  ; runtime
+ ├ %1: type = .typeof operand=(%0)                                    ; type(todo(function))
+ ├ %2: *todo(function) = .alloc type_inst=(%1) mutable=(false)        ; runtime
+ └ %3: void = .store operand=(%2) payload=(%0)                        ; void
+

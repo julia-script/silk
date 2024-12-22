@@ -1,0 +1,18 @@
+;; Sema
+;; 1 declarations
+;; 4 entities
+;; 1 symbols
+;; 6 instructions
+;; 4 values
+;; 1 types
+;; 0 lists
+;; 5 strings
+
+@root::main() -> i32
+ ├ %0: number = .constant void=(void)                                 ; int(2)
+ ├ %1: number = .constant void=(void)                                 ; int(3)
+ ├ %2: number = .constant void=(void)                                 ; int(4)
+ ├ %3: number = .mul lhs=(%1) rhs=(%2)                                ; runtime
+ ├ %4: number = .add lhs=(%0) rhs=(%3)                                ; runtime
+ └ %5: void = .ret maybe_operand=(%4)                                 ; void
+
