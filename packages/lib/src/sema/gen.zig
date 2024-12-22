@@ -531,7 +531,7 @@ pub const Builder = struct {
         const entity = try Entity.init(self, key, input);
         try self.entities.append(entity);
         switch (input.data) {
-            .global_declaration, .global_type_declaration, .function_declaration, .parameter_declaration => {
+            .global_declaration, .global_type_declaration, .function_declaration => {
                 self.tracer.trace(
                     @src(),
                     .{ "makeEntity", "symbols.put({s}, {d})", .{ self.getSlice(entity.name), key } },
@@ -1253,7 +1253,6 @@ pub const Entity = struct {
                             "resolveDeclaration", "{s}.resolveQueue({s})", .{
                                 try self.formatKey(),
                                 try queued.formatKey(),
-                                // try formatKey(),
                             },
                         },
                         .{},
@@ -1263,7 +1262,11 @@ pub const Entity = struct {
                 }
                 return self.data.function_declaration.declaration_index;
             },
-            else => std.debug.panic("unhandled data: {s}", .{@tagName(self.data)}),
+            // .parameter_declaration => {
+            //     // noop
+
+            // },
+            else => std.debug.panic("unhandled declaration: {s}", .{@tagName(self.data)}),
         }
     }
 };
