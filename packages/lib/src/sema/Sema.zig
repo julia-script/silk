@@ -296,7 +296,7 @@ pub const Instruction = struct {
         },
         get_element_pointer: struct {
             base: Instruction.Index,
-            index: usize,
+            index: Instruction.Index,
         },
         fn_call: struct {
             callee: Instruction.Index,

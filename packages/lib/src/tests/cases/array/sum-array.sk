@@ -1,0 +1,10 @@
+fn sum_array(): i32 {
+    const arr :[4]i32 = [4]i32 {1, 2, 3, 4}
+    var i: i32 = 0;
+    var sum: i32 = 0;
+    while (i < arr.len) {
+        sum = sum + arr[i];
+        i = i + 1;
+    }
+    return sum;
+}

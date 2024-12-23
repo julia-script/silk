@@ -764,7 +764,7 @@ pub const Inst = union(enum) {
         value: Inst.Index,
     };
     pub const GetElement = struct {
-        pointer: Inst.Index,
+        base: Inst.Index,
         index: Inst.Index,
     };
     pub const GetProperty = struct {

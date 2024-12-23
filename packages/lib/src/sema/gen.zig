@@ -1704,6 +1704,7 @@ const Block = struct {
         return switch (hir_inst) {
             .global_get => self.handleGlobalGet(hir_inst_index),
             .comptime_number => self.handleConstantInstruction(hir_inst_index),
+            .constant_int => self.handleConstantIntInstruction(hir_inst_index),
             .ty_i8,
             .ty_i16,
             .ty_i32,
@@ -1750,6 +1751,7 @@ const Block = struct {
             .struct_decl => self.handleStructDeclInstruction(hir_inst_index),
             .block, .inline_block => self.handleBlockInstruction(hir_inst_index),
             .get_property_pointer => self.handleGetPropertyPointerInstruction(hir_inst_index),
+            .get_element_pointer => self.handleGetElementPointerInstruction(hir_inst_index),
             .fn_call => self.handleFnCallInstruction(hir_inst_index),
             .param_decl => self.handleParamDeclInstruction(hir_inst_index),
             else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
@@ -1946,6 +1948,18 @@ const Block = struct {
             },
             else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(entity.data)}),
         }
+    }
+    pub fn handleConstantIntInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const value = hir_inst.constant_int.value;
+        // const slice = self.builder.getNodeSlice(value);
+        // const int = try std.fmt.parseInt(i64, slice, 10);
+        return self.pushInstruction(hir_inst_index, .{
+            .op = .constant,
+            .type = Sema.Type.simple(.number),
+            .value = try self.builder.internValueData(.{ .integer = value }),
+            .data = .void,
+        });
     }
     pub fn handleConstantInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
@@ -2345,6 +2359,17 @@ const Block = struct {
 
         const pointer_inst_index = self.getInstructionIndex(hir_inst.load.operand);
         const pointer_inst = self.getInstruction(pointer_inst_index);
+        switch (pointer_inst.op) {
+            .constant => {
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = pointer_inst.op,
+                    .type = pointer_inst.type,
+                    .value = pointer_inst.value,
+                    .data = pointer_inst.data,
+                });
+            },
+            else => {},
+        }
 
         const type_to_load = self.builder.unwrapPointerType(pointer_inst.type) orelse {
             std.debug.panic("expected type not found", .{});
@@ -2654,7 +2679,8 @@ const Block = struct {
             .instructions = self.scope.instructions.items,
         });
         const base_hir_index = hir_inst.get_property_pointer.base;
-        const name = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
+        const property_name_range = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
+        const property_name_slice = self.builder.getSlice(property_name_range);
 
         if (self.builder.getEntityKeyByHirInst(base_hir_index)) |base_entity_key| {
             // Is referecing a global
@@ -2667,7 +2693,7 @@ const Block = struct {
                     std.debug.panic("unreachable: should get a base type", .{});
                 };
                 const module = self.builder.getEntity(module_type.data.module.entity);
-                const declaration_entity_key = module.data.module_declaration.declarations.get(name) orelse {
+                const declaration_entity_key = module.data.module_declaration.declarations.get(property_name_range) orelse {
                     std.debug.panic("unreachable: should get a declaration", .{});
                 };
                 return try self.pushGlobalGetInstruction(hir_inst_index, declaration_entity_key);
@@ -2676,24 +2702,6 @@ const Block = struct {
 
         const base_index = self.getInstructionIndex(base_hir_index);
         const base_instruction = self.getInstruction(base_index);
-        // switch (base_instruction.op) {
-        //     .global_get => {
-        //         if (base_instruction.type.isEqualSimple(.type)) {
-        //             const base_type_key = self.builder.unwrapTypeValue(base_instruction.value);
-        //             const base_type = self.builder.getType(base_type_key) orelse {
-        //                 std.debug.panic("unreachable: should get a base type", .{});
-        //             };
-        //             const module = self.builder.getEntity(base_type.data.module.entity);
-        //             const declaration_entity_key = module.data.module_declaration.declarations.get(name) orelse {
-        //                 std.debug.panic("unreachable: should get a declaration", .{});
-        //             };
-        //             return try self.pushGlobalGetInstruction(hir_inst_index, declaration_entity_key);
-        //         }
-        //         std.debug.panic("TODO: handle get_element_pointer of non type global", .{});
-        //     },
-        //     else => {},
-        // }
-
         const unwrapped_base_type_key = self.builder.unwrapPointerType(base_instruction.type) orelse {
             std.debug.panic("unreachable: should get a pointer type {}", .{(base_instruction)});
         };
@@ -2701,8 +2709,21 @@ const Block = struct {
         const base_type = self.builder.getType(unwrapped_base_type_key) orelse {
             std.debug.panic("unreachable: should get a base type", .{});
         };
+        switch (base_type.data) {
+            .array => |array_type| {
+                if (!std.mem.eql(u8, property_name_slice, "len")) std.debug.panic("error: array property {s} doesn't exist", .{property_name_slice});
+
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .constant,
+                    .type = Sema.Type.simple(.usize),
+                    .value = try self.builder.internValueData(.{ .integer = array_type.size }),
+                    .data = .void,
+                });
+            },
+            else => {},
+        }
         const module = self.builder.getEntity(base_type.data.module.entity);
-        if (module.data.module_declaration.fields.get(name)) |field| {
+        if (module.data.module_declaration.fields.get(property_name_range)) |field| {
             const field_entity = self.builder.getEntity(field.entity);
             return self.pushInstruction(hir_inst_index, .{
                 .op = .get_element_pointer,
@@ -2714,11 +2735,34 @@ const Block = struct {
                 } },
             });
         }
-        if (module.data.module_declaration.declarations.get(name)) |declaration| {
+        if (module.data.module_declaration.declarations.get(property_name_range)) |declaration| {
             // const declaration_entity = self.builder.getEntity(declaration.entity);
             return try self.pushGlobalGetInstruction(hir_inst_index, declaration);
         }
         std.debug.panic("unreachable: should get a field or a declaration", .{});
+    }
+    pub fn handleGetElementPointerInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const base_index = self.getInstructionIndex(hir_inst.get_element_pointer.base);
+        const base_instruction = self.getInstruction(base_index);
+
+        const base_type_key = self.builder.unwrapPointerType(base_instruction.type) orelse {
+            std.debug.panic("unreachable: should get a pointer type {}", .{(base_instruction)});
+        };
+        const base_type = self.builder.getType(base_type_key) orelse {
+            std.debug.panic("unreachable: should get a base type", .{});
+        };
+        const element_type = base_type.data.array.child;
+        const index_inst = self.getInstructionIndex(hir_inst.get_element_pointer.index);
+        return self.pushInstruction(hir_inst_index, .{
+            .op = .get_element_pointer,
+            .type = try self.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
+            .value = Sema.Value.simple(.runtime),
+            .data = .{ .get_element_pointer = .{
+                .base = base_index,
+                .index = index_inst,
+            } },
+        });
     }
     pub fn handleFnCallInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);

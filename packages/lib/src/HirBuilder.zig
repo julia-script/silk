@@ -461,7 +461,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     .value = @intCast(i),
                 } });
                 const pointer_inst = try scope.pushInstruction(.{ .get_element_pointer = .{
-                    .pointer = inst_index,
+                    .base = inst_index,
                     .index = index_inst,
                 } });
                 _ = try scope.pushInstruction(.{ .store = .{
@@ -523,7 +523,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             const index_inst = try self.genLoadedInstruction(scope, nav.data.array_prop_access.rhs);
             // if (self.context == .assign_lhs) {
             return try scope.pushInstruction(.{ .get_element_pointer = .{
-                .pointer = array_inst,
+                .base = array_inst,
                 .index = index_inst,
             } });
             // }
