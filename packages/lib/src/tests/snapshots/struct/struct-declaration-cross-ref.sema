@@ -11,25 +11,25 @@
 %0 = @root::main() -> mod{ent{0}, {}}
  └ %0: void = .block: [%1-%21]                                        ; void
     ├ %1: type = .global_get declaration=(%1)                         ; type(mod{ent{4}, {i32, i32, i32}})
-    ├ %2: *mod{ent{4}, {i32, i32, i32}} = .alloc type_inst=(%1) mutable=(false); runtime
-    ├ %3: *i32 = .get_element_pointer base=(%2) index=(0)             ; runtime
+    ├ %2: *mod{ent{4}, {i32, i32, i32}} = .alloc type_inst=(%1) mutable=(false); exec_time
+    ├ %3: *i32 = .get_element_pointer base=(%2) index=(0)             ; exec_time
     ├ %4: number = .constant                                          ; int(1)
     ├ %5: i32 = .cast operand=(%4)                                    ; int(1)
     ├ %6: void = .store operand=(%3) payload=(%5)                     ; void
-    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; runtime
+    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; exec_time
     ├ %8: number = .constant                                          ; int(2)
     ├ %9: i32 = .cast operand=(%8)                                    ; int(2)
     ├ %10: void = .store operand=(%7) payload=(%9)                    ; void
-    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; runtime
+    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; exec_time
     ├ %12: number = .constant                                         ; int(3)
     ├ %13: i32 = .cast operand=(%12)                                  ; int(3)
     ├ %14: void = .store operand=(%11) payload=(%13)                  ; void
-    ├ %15: mod{ent{4}, {i32, i32, i32}} = .load operand=(%2)          ; runtime
+    ├ %15: mod{ent{4}, {i32, i32, i32}} = .load operand=(%2)          ; exec_time
     ├ %16: type = .global_get declaration=(%1)                        ; type(mod{ent{4}, {i32, i32, i32}})
-    ├ %17: *mod{ent{4}, {i32, i32, i32}} = .alloc type_inst=(%16) mutable=(false); runtime
+    ├ %17: *mod{ent{4}, {i32, i32, i32}} = .alloc type_inst=(%16) mutable=(false); exec_time
     ├ %18: void = .store operand=(%17) payload=(%15)                  ; void
-    ├ %19: *i32 = .get_element_pointer base=(%17) index=(0)           ; runtime
-    ├ %20: i32 = .load operand=(%19)                                  ; runtime
+    ├ %19: *i32 = .get_element_pointer base=(%17) index=(0)           ; exec_time
+    ├ %20: i32 = .load operand=(%19)                                  ; exec_time
     └ %21: void = .ret maybe_operand=(%20)                            ; void
 
 %1 = type @root::A = mod{ent{4}, {i32, i32, i32}}

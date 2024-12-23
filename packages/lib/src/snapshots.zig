@@ -62,7 +62,7 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
         .show_node_index = true,
     });
 
-    try checkSnapshot(allocator, dir, ast_output.items, path, ".ast");
+    try checkSnapshot(allocator, ast_output.items, path, ".ast");
 
     var hir = try Hir.build(allocator, &ast, &errors_manager, .{
         .trace_dir = trace_dir,
@@ -74,7 +74,7 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     defer hir_output.deinit();
     try hir.format("", .{}, hir_output.writer().any());
 
-    try checkSnapshot(allocator, dir, hir_output.items, path, ".hir");
+    try checkSnapshot(allocator, hir_output.items, path, ".hir");
 
     var sema = try Sema.build(allocator, &hir, &errors_manager, .{
         // .tracer =
@@ -91,7 +91,7 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     // try Sema.format(&sema, std.io.getStdErr().writer().any());
     try Sema.format(&sema, sema_output.writer().any());
 
-    try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
+    try checkSnapshot(allocator, sema_output.items, path, ".sema");
 
     // try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
 }
@@ -109,8 +109,7 @@ pub fn writeOutput(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const 
 }
 
 const diff = @import("patience_diff.zig").diff;
-pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []const u8, path: []const u8, extension: []const u8) !void {
-    _ = dir; // autofix
+pub fn checkSnapshot(allocator: std.mem.Allocator, actual: []const u8, path: []const u8, extension: []const u8) !void {
     const file_name = try std.mem.join(allocator, "", &.{ std.fs.path.stem(path), extension });
     defer allocator.free(file_name);
 
@@ -152,3 +151,24 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []co
 
     try expect(@as(@TypeOf(actual), expected)).toBeEqualString(actual);
 }
+
+// const Snapshot = struct {
+//     file_path: []const u8,
+//     allocator: std.mem.Allocator,
+//     actual: ?[]const u8 = null,
+//     expected: ?[]const u8 = null,
+//     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) Snapshot {
+//         return .{ .file_path = file_path, .allocator = allocator };
+//     }
+//     pub fn readActual(self: *Snapshot, fun: fn (self: *Snapshot) anyerror![]const u8) !void {
+//         _ = self; // autofix
+//         _ = fun; // autofix
+//     }
+//     pub fn writeActual(self: Snapshot, data: []const u8) !void {
+//         try std.fs.cwd().writeFile(.{
+//             .sub_path = self.file_path,
+//             .data = data,
+//             .flags = .{ .truncate = true },
+//         });
+//     }
+// };

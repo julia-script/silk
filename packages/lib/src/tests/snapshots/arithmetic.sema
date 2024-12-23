@@ -13,7 +13,7 @@
     ├ %1: number = .constant                                          ; int(2)
     ├ %2: number = .constant                                          ; int(3)
     ├ %3: number = .constant                                          ; int(4)
-    ├ %4: number = .mul lhs=(%2) rhs=(%3)                             ; runtime
-    ├ %5: number = .add lhs=(%1) rhs=(%4)                             ; runtime
+    ├ %4: number = .mul lhs=(%2) rhs=(%3)                             ; exec_time
+    ├ %5: number = .add lhs=(%1) rhs=(%4)                             ; exec_time
     └ %6: void = .ret maybe_operand=(%5)                              ; void
 

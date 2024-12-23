@@ -212,6 +212,7 @@ pub const Value = struct {
     };
     pub const Simple = enum {
         unknown,
+        exec_time,
         runtime,
         true,
         false,

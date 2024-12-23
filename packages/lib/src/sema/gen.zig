@@ -1293,7 +1293,7 @@ pub const Entity = struct {
             //     _ = try block.pushInstruction(param_entity.hir_inst_index, .{
             //         .op = .param,
             //         .type = param_type,
-            //         .value = Sema.Value.simple(.runtime),
+            //         .value = Sema.Value.simple(.exec_time),
             //         .data = .void,
             //     });
             // }
@@ -1897,7 +1897,7 @@ const Block = struct {
         //         return self.pushInstruction(hir_inst_index, .{
         //             .op = .global_get,
         //             .type = global_type,
-        //             .value = Sema.Value.simple(.runtime),
+        //             .value = Sema.Value.simple(.exec_time),
         //             .data = .{ .declaration = fn_decl.declaration_index },
         //         });
         //     },
@@ -1929,7 +1929,7 @@ const Block = struct {
                 return self.pushInstruction(hir_inst_index, .{
                     .op = .global_get,
                     .type = global_type,
-                    .value = Sema.Value.simple(.runtime),
+                    .value = Sema.Value.simple(.exec_time),
                     .data = .{ .declaration = fn_decl.declaration_index },
                 });
             },
@@ -2099,7 +2099,7 @@ const Block = struct {
                     .child = type_to_alloc,
                 },
             }),
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .alloc = .{
                 .type_inst = type_inst_index,
                 .mutable = hir_inst.alloc.mutable,
@@ -2206,7 +2206,7 @@ const Block = struct {
         return self.pushInstruction(hir_inst_index, .{
             .op = op,
             .type = Sema.Type.simple(.bool),
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .bin_op = .{
                 .lhs = lhs_index,
                 .rhs = rhs_index,
@@ -2247,7 +2247,7 @@ const Block = struct {
         //     return try self.pushInstruction(hir_inst_index, .{
         //         .op = .select,
         //         .type = then_block.type,
-        //         .value = Sema.Value.simple(.runtime),
+        //         .value = Sema.Value.simple(.exec_time),
         //         .data = .{ .select = .{ .condition = condition, .then_block = then_block_index, .else_block = else_block_index } },
         //     });
         // }
@@ -2299,7 +2299,7 @@ const Block = struct {
         return self.pushInstruction(hir_inst_index, .{
             .op = .select,
             .type = then_block.type,
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .select = .{ .condition = condition, .then_block = then_block_index, .else_block = else_block_index } },
         });
     }
@@ -2390,7 +2390,7 @@ const Block = struct {
         return self.pushInstruction(hir_inst_index, .{
             .op = .load,
             .type = type_to_load,
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .operand = pointer_inst_index },
         });
     }
@@ -2434,7 +2434,7 @@ const Block = struct {
             .op = op,
             .type = ty,
             // .value = try self.builder.maybeFoldArithmetic(op, lhs_index, rhs_index),
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .bin_op = .{
                 .lhs = lhs_index,
                 .rhs = rhs_index,
@@ -2728,7 +2728,7 @@ const Block = struct {
             return self.pushInstruction(hir_inst_index, .{
                 .op = .get_element_pointer,
                 .type = try self.builder.internTypeData(.{ .pointer = .{ .child = try field_entity.resolveType() } }),
-                .value = Sema.Value.simple(.runtime),
+                .value = Sema.Value.simple(.exec_time),
                 .data = .{ .get_element_pointer = .{
                     .base = base_index,
                     .index = field.index,
@@ -2757,7 +2757,7 @@ const Block = struct {
         return self.pushInstruction(hir_inst_index, .{
             .op = .get_element_pointer,
             .type = try self.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .get_element_pointer = .{
                 .base = base_index,
                 .index = index_inst,
@@ -2794,7 +2794,7 @@ const Block = struct {
         return try self.pushInstruction(hir_inst_index, .{
             .op = .fn_call,
             .type = function.ret,
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .{ .fn_call = .{
                 .callee = callee_inst,
                 .args_list = try args_list.commit(),
@@ -2816,7 +2816,7 @@ const Block = struct {
         return self.pushInstruction(hir_inst_index, .{
             .op = .param,
             .type = try param_entity.resolveType(),
-            .value = Sema.Value.simple(.runtime),
+            .value = Sema.Value.simple(.exec_time),
             .data = .void,
         });
     }
@@ -2829,26 +2829,16 @@ const Block = struct {
     pub fn pushMaybeFoldArithmetic(self: *Block, hir_inst_index: Hir.Inst.Index, data: Sema.Instruction) Error!Sema.Instruction.Index {
         const lhs_inst = self.getInstruction(data.data.bin_op.lhs);
         const rhs_inst = self.getInstruction(data.data.bin_op.rhs);
-        if (lhs_inst.value.isEqualSimple(.runtime) or rhs_inst.value.isEqualSimple(.runtime)) {}
+        if (lhs_inst.value.isEqualSimple(.exec_time) or rhs_inst.value.isEqualSimple(.exec_time)) {}
         return try self.pushInstruction(hir_inst_index, data);
-        // const lhs_value = getNumberValueAs(comptime T: type, lhs_inst.value);
-        // const rhs_value = getNumberValueAs(comptime T: type, rhs_inst.value);
-        // const result = switch (data.op) {
-        //     .add => lhs_value + rhs_value,
-        //     .sub => lhs_value - rhs_value,
-        //     .mul => lhs_value * rhs_value,
-        //     .div => lhs_value / rhs_value,
-        //     else => unreachable,
-        // };
-        // return try self.pushInstruction(hir_inst_index, data);
     }
     pub fn maybeFoldComparison(self: *Block, op: Sema.Instruction.Op, lhs_index: Sema.Instruction.Index, rhs_index: Sema.Instruction.Index) Error!Sema.Instruction.Index {
         _ = op; // autofix
         const lhs_inst = self.getInstruction(lhs_index);
         const rhs_inst = self.getInstruction(rhs_index);
 
-        if (lhs_inst.value.isEqualSimple(.runtime) or rhs_inst.value.isEqualSimple(.runtime)) {
-            return Sema.Value.simple(.runtime);
+        if (lhs_inst.value.isEqualSimple(.exec_time) or rhs_inst.value.isEqualSimple(.exec_time)) {
+            return Sema.Value.simple(.exec_time);
         }
 
         const lhs_value = self.builder.getValue(lhs_inst.value) orelse unreachable;
