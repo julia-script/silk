@@ -240,7 +240,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return inst;
         },
         .block => {
-            const inst = try self.genBlockInstruction(scope, node_index, null);
+            const inst = try Block.fromNode(self, scope, node_index);
             try scope.instructions.append(inst);
             return inst;
         },
@@ -387,7 +387,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             };
             // const cond_inst = try self.genInstruction(scope, data.condition);
             // try scope.instructions.append(cond_inst);
-            const then_body_inst = try self.genBlockInstruction(scope, data.then_branch, null);
+            const then_body_inst = try Block.fromNode(self, scope, data.then_branch);
 
             // var if_expr = Hir.Inst.IfExpr{
             //     .cond = cond_inst,
@@ -396,7 +396,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             // };
             var else_body_inst: ?Hir.Inst.Index = null;
             if (data.else_branch > 0) {
-                else_body_inst = try self.genBlockInstruction(scope, data.else_branch, null);
+                else_body_inst = try Block.fromNode(self, scope, data.else_branch);
                 if (activeTag(self.hir.insts.items[then_body_inst]) == .inline_block and activeTag(self.hir.insts.items[else_body_inst.?]) == .inline_block) {
                     return try scope.pushInstruction(.{ .select_expr = .{
                         .cond = cond_inst,
@@ -425,9 +425,12 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             //     .name_node = null,
             //     .instructions = try else_list.commit(),
             // } });
+            var loop_block = try Block.init(self, &loop_scope);
+            try loop_block.pushInstructionsFromBlock(nav.data.while_loop.body);
+            _ = try loop_block.pushInstruction(.{ .br = .{ .operand = null, .target = loop_index } });
             _ = try loop_scope.pushInstruction(.{ .if_expr = .{
                 .cond = cond_inst,
-                .then_body = try self.genBlockInstruction(&loop_scope, nav.data.while_loop.body, loop_index),
+                .then_body = try loop_block.commit(),
                 .else_body = null,
             } });
             // _ = try loop_scope.pushInstruction(.{ .br = .{ .operand = null, .target = loop_index } });
@@ -641,13 +644,22 @@ const Block = struct {
     scope: Scope,
 
     pub fn init(builder: *Self, parent_scope: *Scope) !Block {
-        const inst_index = try parent_scope.reserveInstruction();
+        const inst_index = try builder.reserveInstruction();
         // const is_inline = !nav.is(.block);
         return Block{
             .inst = inst_index,
             .is_inline = false,
             .scope = Scope.init(builder, parent_scope, .block, "block"),
         };
+    }
+    pub fn fromNode(builder: *Self, parent_scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
+        var block_inst = try Block.init(builder, parent_scope);
+        block_inst.is_inline = switch (builder.hir.ast.getNode(node_index).data) {
+            .block => false,
+            else => true,
+        };
+        try block_inst.pushInstructionsFromBlock(node_index);
+        return try block_inst.commit();
     }
     pub fn pushInstructionsFromBlock(self: *Block, node_index: Ast.Node.Index) !void {
         var nav = Ast.Navigator.init(self.scope.builder.hir.ast, node_index);
@@ -665,6 +677,18 @@ const Block = struct {
         return try self.scope.pushInstruction(inst);
     }
     pub fn commit(self: *Block) !Hir.Inst.Index {
+        if (self.is_inline) {
+            const last_inst = self.scope.instructions.list.items[self.scope.instructions.list.items.len - 1];
+            _ = try self.pushInstruction(.{ .br = .{ .operand = last_inst, .target = self.inst } });
+            const instructions = try self.scope.commit();
+            self.scope.builder.setInstruction(self.inst, .{
+                .inline_block = .{
+                    .name_node = null,
+                    .instructions_list = instructions,
+                },
+            });
+            return self.inst;
+        }
         const instructions = try self.scope.commit();
         self.scope.builder.setInstruction(self.inst, .{
             .block = .{
@@ -726,19 +750,6 @@ pub fn genScopedBlockInstruction(self: *Self, scope: *Scope, node_index: Ast.Nod
     });
     return inst_index;
 }
-pub fn genBlockInstruction(self: *Self, parent_scope: *Scope, node_index: Ast.Node.Index, break_index: ?Hir.Inst.Index) !Hir.Inst.Index {
-    const event_id = self.tracer.beginEvent("genBlockInstruction", .{node_index});
-    defer self.tracer.endEvent(event_id, "genBlockInstruction", .{node_index});
-    self.logger.open("#{d} genBlockInstruction", .{node_index});
-    defer self.logger.close();
-    // var nav = Ast.Navigator.init(self.hir.ast, node_index);
-    // nav.assertTag(.block);
-    var scope = Scope.init(self, parent_scope, .block, "block");
-
-    const inst = try self.genScopedBlockInstruction(&scope, node_index, break_index);
-    // try parent_scope.instructions.append(inst);
-    return inst;
-}
 
 const WipDef = struct {
     inst: Hir.Inst.Index,
@@ -778,7 +789,7 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
 
                 const inst_index = try self.reserveInstruction();
 
-                const inline_block_inst = if (field.default_value != 0) try self.genBlockInstruction(scope, field.default_value, null) else null;
+                const inline_block_inst = if (field.default_value != 0) try Block.fromNode(self, scope, field.default_value) else null;
                 const type_inst = if (field.type != 0) try self.genInstruction(scope, field.type) else null;
                 self.setInstruction(inst_index, .{
                     .struct_field = .{
@@ -814,7 +825,7 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
                 }
 
                 if (def.init_node) |init_node| {
-                    const inline_block = try self.genBlockInstruction(scope, init_node, null);
+                    const inline_block = try Block.fromNode(self, scope, init_node);
                     self.hir.insts.items[def.inst].global_decl.init = inline_block;
                 }
                 if (def.ty_node) |ty_node| {
