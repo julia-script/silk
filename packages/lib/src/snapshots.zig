@@ -15,6 +15,9 @@ test "Snapshots" {
     const cases_dir = try std.fs.cwd().openDir(CASES_DIR_PATH, .{});
     var walker = try cases_dir.walk(allocator);
     defer walker.deinit();
+    if (options.test_filter.len > 0) {
+        std.debug.print("Filtering test cases with '{s}'\n", .{options.test_filter});
+    }
 
     while (try walker.next()) |entry| {
         if (!std.mem.endsWith(u8, entry.path, SILK_EXTENSION)) continue;
@@ -73,18 +76,8 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 
     try checkSnapshot(allocator, dir, hir_output.items, path, ".hir");
 
-    // var mir = try Mir.build(allocator, &hir, &errors_manager, .{
-    //     .trace_dir = trace_dir,
-    //     .trace_name = "mir",
-    //     .unique_trace_name = true,
-    // });
-    // defer mir.deinit();
-
-    // defer mir_output.deinit();
-    // try mir.formatMir(mir_output.writer().any(), .{ .color = false });
-    // try checkSnapshot(allocator, dir, mir_output.items, path, ".mir");
-
     var sema = try Sema.build(allocator, &hir, &errors_manager, .{
+        // .tracer =
         // .trace_dir = trace_dir,
         // .trace_name = "sema",
         // .unique_trace_name = true,
@@ -95,10 +88,12 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 
     var sema_output = std.ArrayList(u8).init(allocator);
     defer sema_output.deinit();
+    // try Sema.format(&sema, std.io.getStdErr().writer().any());
+    try Sema.format(&sema, sema_output.writer().any());
+
     try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
 
-    try Sema.format(&sema, sema_output.writer().any());
-    try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
+    // try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
 }
 
 pub fn writeOutput(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8, data: []const u8, extension: []const u8) !void {
@@ -124,6 +119,7 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, dir: std.fs.Dir, actual: []co
     defer allocator.free(expected_path);
 
     if (options.update_snapshots) {
+        std.debug.print("Updating snapshot {s}\n", .{expected_path});
         try std.fs.cwd().writeFile(.{
             .sub_path = expected_path,
             .data = actual,

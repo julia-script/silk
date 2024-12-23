@@ -1,0 +1,12 @@
+;; Sema
+;; 1 declarations
+;; 9 entities
+;; 1 symbols
+;; 3 instructions
+;; 1 values
+;; 2 types
+;; 1 lists
+;; 15 strings
+
+%0 = type @root::A = mod{ent{2}, {usize, i32, i32}}
+

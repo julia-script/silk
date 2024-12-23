@@ -17,10 +17,10 @@
        │  ├ return_type: %2 = .ty_i32
        │  │  └ node: node(#2: "i32")
        │  └ params_list: 0 items
-       └ init: %9 = .block
-          ├ %3 = comptime_number node=(4)
-          ├ %4 = comptime_number node=(5)
-          ├ %5 = comptime_number node=(6)
-          ├ %6 = mul lhs=(4), rhs=(5)
-          ├ %7 = add lhs=(3), rhs=(6)
-          └ %8 = ret value=(7)
+       └ init: %3 = .block
+          ├ %4 = comptime_number node=(N[4])
+          ├ %5 = comptime_number node=(N[5])
+          ├ %6 = comptime_number node=(N[6])
+          ├ %7 = mul lhs=(%5), rhs=(%6)
+          ├ %8 = add lhs=(%4), rhs=(%7)
+          └ %9 = ret value=(8)

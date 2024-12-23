@@ -21,7 +21,7 @@ const Error = error{
     CircularDependency,
     SymbolNotFound,
     NoSpaceLeft,
-
+    SymbolAlreadyExists,
     Overflow,
 } || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 pub const Builder = struct {
@@ -46,6 +46,8 @@ pub const Builder = struct {
 
     pub const BuildOptions = struct {
         tracer: bool = false,
+        trace_dir: ?[]const u8 = null,
+        trace_name: ?[]const u8 = null,
     };
     const BuilderState = struct {
         // symbols: *std.meta.FieldType(Builder, .symbols),
@@ -59,12 +61,13 @@ pub const Builder = struct {
     pub fn getTokenSlice(self: *Builder, token: Ast.Token.Index) []const u8 {
         return self.hir.ast.getTokenSlice(token);
     }
-    fn getState(self: *Builder) []const u8 {
+    pub fn getState(self: *Builder) []const u8 {
         self.snapshot_scratch.clearRetainingCapacity();
         const writer = self.snapshot_scratch.writer(self.arena.allocator()).any();
 
         writer.print("Types: {d} items\n", .{self.types.count()}) catch {};
         writer.print("Values: {d} items\n", .{self.values.count()}) catch {};
+        writer.print("Declarations: {d} items\n", .{self.declarations.items.len}) catch {};
 
         writer.print("\n", .{}) catch {};
 
@@ -119,7 +122,15 @@ pub const Builder = struct {
     }
 
     pub fn reserveDeclaration(self: *Builder) !Sema.Declaration.Index {
+        const trace = self.tracer.begin(
+            @src(),
+            .{ "reserveDeclaration", "Builder.reserveDeclaration()", .{} },
+            .{},
+        );
         const index = self.declarations.items.len;
+        defer trace.end(.{
+            .index = index,
+        });
         try self.declarations.append(self.allocator, undefined);
         return index;
     }
@@ -128,13 +139,17 @@ pub const Builder = struct {
         self.declarations.items[index] = declaration;
     }
     pub fn queueEntity(self: *Builder, key: Entity.Key) !void {
+        const entity = self.getEntity(key);
         const trace = self.tracer.begin(
             @src(),
-            .{ "queueEntity", "Builder.queueEntity({d})", .{key} },
+            .{ "queueEntity", "Builder.queueEntity({s})", .{try entity.formatKey()} },
             .{},
         );
         defer trace.end(.{});
         try self.queue.put(self.allocator, key, {});
+    }
+    pub fn getEntityKeyByHirInst(self: *Builder, hir_inst_index: Hir.Inst.Index) ?Entity.Key {
+        return self.symbols_by_hir_inst.get(hir_inst_index);
     }
     fn getEntityByHirInst(self: *Builder, hir_inst_index: Hir.Inst.Index) *Entity {
         const entity_key = self.symbols_by_hir_inst.get(hir_inst_index) orelse std.debug.panic("no entity for hir_inst: {d}", .{hir_inst_index});
@@ -330,7 +345,26 @@ pub const Builder = struct {
                     .data = data,
                 });
             },
-            else => {},
+            .@"struct" => |str| {
+                var hasher = Hasher.new("struct");
+                for (self.lists.getSlice(str.fields)) |field| {
+                    hasher.update(self.getTypeKeyHash(Sema.Type.Key.decode(field)));
+                }
+                return try self.internType(.{
+                    .hash = hasher.final(),
+                    .data = data,
+                });
+            },
+            .module => |module| {
+                // Modules are always unique
+
+                return try self.internType(.{
+                    .hash = Hasher.hash(module.entity),
+                    .data = data,
+                });
+            },
+
+            // else => {},
         }
         _ = type; // autofix
         std.debug.panic("TODO: internType {s}", .{@tagName(data)});
@@ -451,6 +485,20 @@ pub const Builder = struct {
                 //     },
                 // };
             },
+            .global => |global| {
+                var hasher = Hasher.new("global");
+                const type_hash = try self.getTypeKeyHash(global.type);
+                const value_hash = try self.getValueKeyHash(global.value);
+                hasher.update(type_hash);
+                hasher.update(value_hash);
+                if (global.init) |init| {
+                    hasher.update(init);
+                }
+                return try self.internValue(.{
+                    .hash = hasher.final(),
+                    .data = data,
+                });
+            },
             else => {
                 std.debug.panic("TODO: internValueData {s}", .{@tagName(data)});
             },
@@ -515,6 +563,7 @@ pub const Builder = struct {
         self.instructions.deinit(self.allocator);
         self.queue.deinit(self.allocator);
     }
+
     pub fn makeEntity(self: *Builder, input: Entity.EntityInput) !Entity.Key {
         const trace = self.tracer.begin(
             @src(),
@@ -528,6 +577,11 @@ pub const Builder = struct {
         );
         const key = self.entities.len;
         defer trace.end(.{ .key = key, .post_state = self.getState() });
+        if (self.symbols_by_hir_inst.contains(input.hir_inst_index)) {
+            std.debug.panic("Symbol already exists: {s}", .{
+                try formatHirIndex(self.hir, input.hir_inst_index),
+            });
+        }
         const entity = try Entity.init(self, key, input);
         try self.entities.append(entity);
         switch (input.data) {
@@ -562,20 +616,7 @@ pub const Builder = struct {
 
         return try entity.resolveDeclaration();
     }
-    pub fn collectAll(self: *Builder) !void {
-        const trace = self.tracer.begin(
-            @src(),
-            .{ "collectAll", "Builder.collectAll", .{} },
-            .{},
-        );
-        defer trace.end(.{ .post_state = self.getState() });
-        try self.collectRoot();
-        var i: usize = 0;
-        while (i < self.entities.len) : (i += 1) {
-            var entity = self.entities.get(i);
-            try entity.collectEntities();
-        }
-    }
+
     pub fn compileAll(self: *Builder) !void {
         const trace = self.tracer.begin(
             @src(),
@@ -583,12 +624,24 @@ pub const Builder = struct {
             .{},
         );
         defer trace.end(.{ .post_state = self.getState() });
-        try self.collectAll();
+        // try self.collectAll();
+        try self.collectRoot();
 
-        var symbols_iter = self.symbols.iterator();
-        while (symbols_iter.next()) |entry| {
-            const entity = self.getEntity(entry.value_ptr.*);
-            _ = try entity.resolveDeclaration();
+        var i: usize = 0;
+        var j: usize = 0;
+        while (true) : (i += 1) {
+            if (i >= self.entities.len) {
+                // var symbols_iter = self.symbols.iterator();
+                const symbols = self.symbols.entries.items(.value);
+                while (j < symbols.len) : (j += 1) {
+                    const entity = self.getEntity(symbols[j]);
+                    _ = try entity.resolveDeclaration();
+                }
+
+                if (i >= self.entities.len) break;
+            }
+            var entity = self.entities.get(i);
+            try entity.collectEntities();
         }
     }
 };
@@ -677,7 +730,7 @@ pub const Entity = struct {
     };
     const Data = union(Kind) {
         module_declaration: struct {
-            fields: std.ArrayListUnmanaged(struct {
+            fields: std.AutoArrayHashMapUnmanaged(Sema.Strings.Range, struct {
                 name: Sema.Strings.Range,
                 entity: Entity.Key,
                 index: usize,
@@ -685,13 +738,17 @@ pub const Entity = struct {
             declarations: std.AutoArrayHashMapUnmanaged(Sema.Strings.Range, Entity.Key) = .{},
         },
         global_declaration: void,
-        global_type_declaration: void,
+        global_type_declaration: struct {
+            declaration_index: Sema.Declaration.Index,
+        },
         function_declaration: struct {
             declaration_index: Sema.Declaration.Index,
             parameters: std.AutoArrayHashMapUnmanaged(Sema.Strings.Range, Entity.Key) = .{},
             return_type: Entity.Key = 0,
         },
-        field_declaration: void,
+        field_declaration: struct {
+            type: Entity.Key,
+        },
         parameter_declaration: struct {
             type: Entity.Key,
         },
@@ -724,16 +781,16 @@ pub const Entity = struct {
             .builder = builder,
             .data = input.data,
         };
-        switch (input.data) {
-            .module_declaration => {
-                ent.type = .{ .resolved = Sema.Type.simple(.type) };
-            },
-            .type, .global_type_declaration => {
-                ent.symbols = .resolved;
-                ent.type = .{ .resolved = Sema.Type.simple(.type) };
-            },
-            else => {},
-        }
+        // switch (input.data) {
+        //     .module_declaration => {
+        //         ent.type = .{ .resolved = Sema.Type.simple(.type) };
+        //     },
+        //     .type, .global_type_declaration => {
+        //         ent.symbols = .resolved;
+        //         ent.type = .{ .resolved = Sema.Type.simple(.type) };
+        //     },
+        //     else => {},
+        // }
         switch (getHirInst(builder.hir, input.hir_inst_index)) {
             .global_decl => |global_decl| {
                 ent.is_pub = global_decl.visibility == .public;
@@ -762,7 +819,7 @@ pub const Entity = struct {
     }
     pub inline fn formatKey(self: *Entity) Error![]const u8 {
         var buf: [256]u8 = undefined;
-        const slice = try std.fmt.bufPrint(buf[0..], "Ent({d}, .{s}, hir ={s})", .{ self.key, @tagName(self.data), try formatHirIndex(self.builder.hir, self.hir_inst_index) });
+        const slice = try std.fmt.bufPrint(buf[0..], "Ent({d}, .{s}, {s})", .{ self.key, @tagName(self.data), try formatHirIndex(self.builder.hir, self.hir_inst_index) });
         return slice;
     }
 
@@ -776,8 +833,11 @@ pub const Entity = struct {
                 return;
             },
         }
+        const entity_key = self.key;
         self.symbols = .resolving;
-        defer self.symbols = .resolved;
+        var builder = self.builder;
+        defer builder.getEntity(entity_key).symbols = .resolved;
+
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "collectEntities", "{s}.collectEntities", .{
@@ -794,12 +854,14 @@ pub const Entity = struct {
         switch (self.data) {
             .module_declaration => try self.collectModuleSymbols(),
             .function_declaration => try self.collectFunctionSymbols(),
-
+            .field_declaration => try self.collectFieldSymbols(),
             // .function_declaration => {},
             .parameter_declaration => {},
             .global_type_declaration => {},
-            else => std.debug.print("unhandled collectEntities: {s}\n", .{@tagName(self.data)}),
+            .type => {},
+            else => std.debug.panic("unhandled collectEntities: {s}\n", .{@tagName(self.data)}),
         }
+        // self.symbols = .resolved;
     }
     pub fn collectModuleSymbols(self: *Entity) Error!void {
         const trace = self.builder.tracer.begin(
@@ -843,9 +905,9 @@ pub const Entity = struct {
                 .parent = self.key,
                 .name = name_slice_range,
                 .hir_inst_index = field_inst_index,
-                .data = .field_declaration,
+                .data = .{ .field_declaration = .{ .type = 0 } },
             });
-            try self.data.module_declaration.fields.append(self.builder.arena.allocator(), .{
+            try self.data.module_declaration.fields.put(self.builder.arena.allocator(), name_slice_range, .{
                 .name = name_slice_range,
                 .entity = field_entity_key,
                 .index = i,
@@ -878,7 +940,11 @@ pub const Entity = struct {
                             .parent = self.key,
                             .name = name_slice_range,
                             .hir_inst_index = declaration_inst_index,
-                            .data = .global_type_declaration,
+                            .data = .{
+                                .global_type_declaration = .{
+                                    .declaration_index = try self.builder.reserveDeclaration(),
+                                },
+                            },
                         });
                         try self.data.module_declaration.declarations.put(
                             self.builder.arena.allocator(),
@@ -930,17 +996,20 @@ pub const Entity = struct {
             },
         );
         defer trace.end(.{});
-        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).global_decl;
-        const fn_inst = getHirInst(self.builder.hir, hir_inst.type orelse unreachable).fn_decl;
-        const parameters_list = self.builder.getHirList(fn_inst.params_list);
+        var builder = self.builder;
+        const key = self.key;
+        const hir_inst = getHirInst(builder.hir, self.hir_inst_index).global_decl;
+        const fn_inst = getHirInst(builder.hir, hir_inst.type orelse unreachable).fn_decl;
+        const parameters_list = builder.getHirList(fn_inst.params_list);
+        const data = &self.data.function_declaration;
         for (parameters_list) |parameter_inst_index| {
-            const parameter_inst = getHirInst(self.builder.hir, parameter_inst_index).param_decl;
-            const name_slice_range = try self.builder.internNode(parameter_inst.name_node);
+            const parameter_inst = getHirInst(builder.hir, parameter_inst_index).param_decl;
+            const name_slice_range = try builder.internNode(parameter_inst.name_node);
 
-            const parameter_trace = self.builder.tracer.begin(
+            const parameter_trace = builder.tracer.begin(
                 @src(),
                 .{ "collectFunctionSymbols", "[COLLECT_PARAMETER='{s}']", .{
-                    self.builder.getSlice(name_slice_range),
+                    builder.getSlice(name_slice_range),
                 } },
                 .{
                     // .self = self.getState(),
@@ -949,35 +1018,80 @@ pub const Entity = struct {
                     .hir_inst = parameter_inst,
                 },
             );
-            const parameter_entity_key = try self.builder.makeEntity(.{
-                .parent = self.key,
+
+            const parameter_entity_key = try builder.makeEntity(.{
+                .parent = key,
                 .name = name_slice_range,
                 .hir_inst_index = parameter_inst_index,
                 .data = .{ .parameter_declaration = .{ .type = 0 } },
             });
-            const parameter_type_entity_key = try self.builder.makeEntity(.{
-                .parent = parameter_entity_key,
-                .name = try self.builder.internSlice("%type"),
-                .hir_inst_index = parameter_inst.ty,
-                .data = .{ .type = {} },
-            });
-            self.builder.getEntity(parameter_entity_key).data.parameter_declaration.type = parameter_type_entity_key;
+            if (builder.getEntityKeyByHirInst(parameter_inst.type)) |parameter_type_entity_key| {
+                builder.getEntity(parameter_entity_key).data.parameter_declaration.type = parameter_type_entity_key;
+            } else {
+                const parameter_type_entity_key = try builder.makeEntity(.{
+                    .parent = parameter_entity_key,
+                    .name = try builder.internSlice("%type"),
+                    .hir_inst_index = parameter_inst.type,
+                    .data = .{ .type = {} },
+                });
+                builder.getEntity(parameter_entity_key).data.parameter_declaration.type = parameter_type_entity_key;
+                try data.parameters.put(builder.arena.allocator(), name_slice_range, parameter_type_entity_key);
+            }
 
             defer parameter_trace.end(.{ .entity_key = parameter_entity_key });
-            try self.data.function_declaration.parameters.put(
-                self.builder.arena.allocator(),
+            try data.parameters.put(
+                builder.arena.allocator(),
                 name_slice_range,
                 parameter_entity_key,
             );
         }
 
-        const ret_entity_key = try self.builder.makeEntity(.{
-            .parent = self.key,
-            .name = try self.builder.internSlice("%return_type"),
-            .hir_inst_index = fn_inst.return_type,
-            .data = .{ .type = {} },
-        });
-        self.data.function_declaration.return_type = ret_entity_key;
+        if (builder.getEntityKeyByHirInst(fn_inst.return_type)) |ret_entity_key| {
+            data.return_type = ret_entity_key;
+        } else {
+            const ret_entity_key = try builder.makeEntity(.{
+                .parent = key,
+                .name = try builder.internSlice("%return_type"),
+                .hir_inst_index = fn_inst.return_type,
+                .data = .{ .type = {} },
+            });
+            data.return_type = ret_entity_key;
+        }
+    }
+    pub fn collectFieldSymbols(self: *Entity) Error!void {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "collectFieldSymbols", "{s}.collectFieldSymbols", .{
+                try self.formatKey(),
+            } },
+            .{},
+        );
+        defer trace.end(.{});
+
+        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).struct_field;
+        // const name_slice_range = try self.builder.internNode(hir_inst.name_node);
+        // const name_slice = self.builder.getSlice(name_slice_range);
+
+        // const field_trace = self.builder.tracer.begin(
+        //     @src(),
+        //     .{ "collectFieldSymbols", "[COLLECT_FIELD='{s}']", .{
+        //         name_slice,
+        //     } },
+        //     .{},
+        // );
+        // defer field_trace.end(.{});
+
+        const type_hir_inst = hir_inst.type orelse std.debug.panic("field type not resolved: {any}", .{hir_inst.type});
+        if (self.builder.getEntityKeyByHirInst(type_hir_inst)) |field_type_entity_key| {
+            self.data.field_declaration.type = field_type_entity_key;
+        } else {
+            self.data.field_declaration.type = try self.builder.makeEntity(.{
+                .parent = self.key,
+                .name = try self.builder.internSlice("%type"),
+                .hir_inst_index = type_hir_inst,
+                .data = .{ .type = {} },
+            });
+        }
     }
     pub fn collectParameterSymbols(self: *Entity) Error!void {
         const trace = self.builder.tracer.begin(
@@ -1016,8 +1130,12 @@ pub const Entity = struct {
                 // .struct_declaration => {},
                 .function_declaration => try self.resolveFunctionType(),
                 .parameter_declaration => try self.resolveParameterType(),
+                .field_declaration => try self.resolveFieldType(),
                 //noop, type of type is always 'type'..the actual type is the type values
-                .type => Sema.Type.simple(.type),
+                .module_declaration,
+                .type,
+                .global_type_declaration,
+                => Sema.Type.simple(.type),
                 else => std.debug.panic("unhandled data: {s}", .{@tagName(self.data)}),
             },
         };
@@ -1073,6 +1191,20 @@ pub const Entity = struct {
 
         return self.builder.unwrapTypeValue(parameter_type_value);
     }
+    pub fn resolveFieldType(self: *Entity) Error!Sema.Type.Key {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "resolveFieldType", "{s}.resolveFieldType", .{
+                try self.formatKey(),
+            } },
+            .{},
+        );
+        defer trace.end(.{});
+        // const field_type_entity = self.builder.getEntity(self.data.field_declaration);
+        const field_type_entity = self.builder.getEntity(self.data.field_declaration.type);
+        const field_type_value = try field_type_entity.resolveValue();
+        return self.builder.unwrapTypeValue(field_type_value);
+    }
     pub fn resolveValue(self: *Entity) Error!Sema.Value.Key {
         const trace = self.builder.tracer.begin(
             @src(),
@@ -1099,6 +1231,7 @@ pub const Entity = struct {
             .type => try self.resolveTypeValue(),
             .function_declaration => try self.resolveFunctionValue(),
             .global_type_declaration => try self.resolveGlobalTypeValue(),
+            .module_declaration => try self.resolveModuleValue(),
             else => std.debug.panic("unhandled value: {s}", .{@tagName(self.data)}),
         } };
         return self.value.resolved;
@@ -1127,7 +1260,10 @@ pub const Entity = struct {
                         ),
                     );
                 }
-                std.debug.panic("TODO: resolveTypeValue {s}", .{tag_name});
+                // const type_entity = self.builder.getEntityByHirInst(self.hir_inst_index);
+
+                // return self.builder.internValueData(.{ .type = try self.resolveType() });
+                std.debug.panic("TODO: resolveTypeValue {d} {s}", .{ self.hir_inst_index, tag_name });
             },
         }
     }
@@ -1144,25 +1280,29 @@ pub const Entity = struct {
         // const type_key = try self.resolveType();
         // const ty = self.builder.getType(type_key) orelse std.debug.panic("function type not resolved: {any}", .{type_key});
 
-        var init_block: ?Sema.Instruction.InstRange = null;
+        var init_block: ?Sema.Instruction.Index = null;
         if (hir_inst.init) |init_inst| {
             var scope = Scope.init(self, self.builder.allocator);
+            defer scope.deinit();
             var block = try scope.makeBlock(init_inst);
-            var param_iter = self.data.function_declaration.parameters.iterator();
+            // var param_iter = self.data.function_declaration.parameters.iterator();
 
-            while (param_iter.next()) |param_entry| {
-                var param_entity = self.builder.getEntity(param_entry.value_ptr.*);
-                const param_type = try param_entity.resolveType();
-                _ = try block.pushInstruction(param_entity.hir_inst_index, .{
-                    .op = .param,
-                    .type = param_type,
-                    .value = Sema.Value.simple(.runtime),
-                    .data = .void,
-                });
-            }
-            try block.computeInstructionsBlock();
+            // while (param_iter.next()) |param_entry| {
+            //     var param_entity = self.builder.getEntity(param_entry.value_ptr.*);
+            //     const param_type = try param_entity.resolveType();
+            //     _ = try block.pushInstruction(param_entity.hir_inst_index, .{
+            //         .op = .param,
+            //         .type = param_type,
+            //         .value = Sema.Value.simple(.runtime),
+            //         .data = .void,
+            //     });
+            // }
+            try block.handleBlockInstructionInner(init_inst);
 
-            init_block = try scope.commit();
+            // init_block = try block.computeInstructionsBlock();
+            const block_inst = try block.commit();
+
+            init_block = block_inst;
         }
 
         return self.builder.internValueData(.{
@@ -1192,8 +1332,71 @@ pub const Entity = struct {
             .{},
         );
         defer trace.end(.{});
+        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).global_decl;
 
-        std.debug.panic("TODO: resolveGlobalTypeValue {s}", .{@tagName(self.data)});
+        const init_inst = hir_inst.init orelse std.debug.panic("global type declaration has no init", .{});
+        // if (hir_inst.init) |init_inst| {
+        var scope = Scope.init(self, self.builder.allocator);
+        defer scope.deinit();
+        var block = try scope.makeBlock(init_inst);
+        try block.handleBlockInstructionInner(init_inst);
+        const block_inst = try block.commit();
+
+        const inst = self.builder.instructions.items[block_inst];
+        return inst.value;
+        // return self.builder.internValueData(.{
+        //     .global = .{
+        //         .type = inst.type,
+        //         .value = inst.value,
+        //         .init = block_inst,
+        //     },
+        // });
+    }
+    pub fn resolveModuleValue(self: *Entity) Error!Sema.Value.Key {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "resolveModuleValue", "{s}.resolveModuleValue", .{
+                try self.formatKey(),
+            } },
+            .{},
+        );
+        defer trace.end(.{});
+
+        var fields_list = self.builder.newList();
+
+        // const struct_decl_hir = getHirInst(self.builder.hir, self.hir_inst_index).struct_decl;
+
+        var iter = self.data.module_declaration.fields.iterator();
+        while (iter.next()) |field| {
+            var field_entity = self.builder.getEntity(field.value_ptr.*.entity);
+            const ty = try field_entity.resolveType();
+            try fields_list.append(ty.encode());
+        }
+        const struct_ty = try self.builder.internTypeData(.{
+            .@"struct" = .{
+                .fields = try fields_list.commit(),
+            },
+        });
+        const module_type = try self.builder.internTypeData(.{
+            .module = .{
+                .entity = self.key,
+                .struct_type = struct_ty,
+            },
+        });
+
+        return try self.builder.internValueData(.{
+            .type = module_type,
+        });
+        // const  try self.builder.internValueData(.{
+        //     .type = struct_ty,
+        // });
+        // const fields_list = self.builder.getHirList(struct_decl_hir.fields_list);
+        // for (fields_list) |field_inst_index| {
+        //     const field_hir = getHirInst(self.builder.hir, field_inst_index).struct_field;
+        //     const field_entity = self.builder.getEntity(field_hir.name_node);
+        //     _ = try field_entity.resolveValue();
+        // }
+        // std.debug.panic("TODO: resolveModuleValue {s}", .{@tagName(self.data)});
     }
 
     pub fn resolveDeclaration(self: *Entity) Error!Sema.Declaration.Index {
@@ -1207,7 +1410,9 @@ pub const Entity = struct {
         defer trace.end(.{});
 
         switch (self.declaration) {
-            .idle => {},
+            .idle => {
+                _ = try self.resolveValue();
+            },
             .resolving => {
                 return error.CircularDependency;
             },
@@ -1260,7 +1465,24 @@ pub const Entity = struct {
                     defer queue_trace.end(.{});
                     _ = try queued.resolveDeclaration();
                 }
+
                 return self.data.function_declaration.declaration_index;
+            },
+            .global_type_declaration => {
+                self.builder.setDeclaration(self.data.global_type_declaration.declaration_index, .{
+                    .name = self.name,
+                    .is_export = self.is_export,
+                    .is_pub = self.is_pub,
+                    .type = try self.resolveType(),
+                    .value = try self.resolveValue(),
+                });
+                self.declaration = .{ .resolved = self.data.global_type_declaration.declaration_index };
+                while (self.builder.queue.popOrNull()) |entry| {
+                    // try self.builder.queueEntity(entry.key_ptr.*);
+                    var queued = self.builder.getEntity(entry.key);
+                    _ = try queued.resolveDeclaration();
+                }
+                return self.data.global_type_declaration.declaration_index;
             },
             // .parameter_declaration => {
             //     // noop
@@ -1279,6 +1501,7 @@ const Scope = struct {
 
     dependencies: std.AutoArrayHashMapUnmanaged(Entity.Key, void) = .{},
 
+    entity: *Entity,
     builder: *Builder,
     trace: Tracer.EndTrace,
     pub fn init(entity: *Entity, allocator: std.mem.Allocator) Scope {
@@ -1286,6 +1509,7 @@ const Scope = struct {
             // .allocator = allocator,
             .arena = std.heap.ArenaAllocator.init(allocator),
             .builder = entity.builder,
+            .entity = entity,
             .trace = entity.builder.tracer.begin(
                 @src(),
                 .{ "newScope", "Scope.newScope", .{} },
@@ -1295,11 +1519,46 @@ const Scope = struct {
     }
 
     pub fn makeBlock(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Block {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "makeBlock", "Scope.makeBlock({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{},
+        );
+        const instruction_index = try self.pushInstruction(hir_inst_index, .{
+            .op = .block,
+            .type = Sema.Type.simple(.void),
+            .value = Sema.Value.simple(.void),
+            .data = .{ .block = .{
+                .instructions_count = 0,
+            } },
+        });
+        defer trace.end(.{
+            .instructions = self.instructions.items,
+            .index = instruction_index,
+        });
         return Block{
             .scope = self,
             .builder = self.builder,
             .root_hir_inst_index = hir_inst_index,
+            .instruction_index = instruction_index,
         };
+    }
+    pub fn reserveInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const index = self.instructions.items.len;
+        try self.instructions.append(self.arena.allocator(), undefined);
+        try self.instructions_by_hir_inst.put(self.arena.allocator(), hir_inst_index, index);
+        return index;
+    }
+    pub fn setInstruction(self: *Scope, index: Sema.Instruction.Index, instruction: Sema.Instruction) void {
+        self.instructions.items[index] = instruction;
+    }
+    pub fn pushInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index, instruction: Sema.Instruction) Error!Sema.Instruction.Index {
+        const index = self.instructions.items.len;
+        try self.instructions.append(self.arena.allocator(), instruction);
+        try self.instructions_by_hir_inst.put(self.arena.allocator(), hir_inst_index, index);
+        return index;
     }
 
     pub fn deinit(self: *Scope) void {
@@ -1307,23 +1566,24 @@ const Scope = struct {
 
         self.arena.deinit();
     }
-    pub fn commit(self: *Scope) Error!Sema.Instruction.InstRange {
-        defer self.deinit();
-        const start = self.builder.instructions.items.len;
-        const len = self.instructions.items.len;
-        try self.builder.instructions.appendSlice(self.builder.allocator, self.instructions.items);
+    // pub fn commit(self: *Scope) Error!Sema.Instruction.InstRange {
+    //     defer self.deinit();
+    //     const start = self.builder.instructions.items.len;
+    //     const len = self.instructions.items.len;
+    //     try self.builder.instructions.appendSlice(self.builder.allocator, self.instructions.items);
 
-        return .{
-            .start = start,
-            .len = len,
-        };
-    }
+    //     return .{
+    //         .start = start,
+    //         .len = len,
+    //     };
+    // }
 
     pub fn pushDependency(self: *Scope, key: Entity.Key) !void {
+        const entity = self.builder.getEntity(key);
         const trace = self.builder.tracer.begin(
             @src(),
-            .{ "pushDependency", "Scope.pushDependency({d})", .{
-                key,
+            .{ "pushDependency", "Scope.pushDependency({s})", .{
+                try entity.formatKey(),
             } },
             .{},
         );
@@ -1337,10 +1597,34 @@ const Scope = struct {
 const Block = struct {
     scope: *Scope,
     builder: *Builder,
+
     root_hir_inst_index: Hir.Inst.Index,
     instructions: std.ArrayListUnmanaged(Sema.Instruction.Index) = .{},
+    instruction_index: Sema.Instruction.Index,
+
+    pub fn commit(self: *Block) Error!Sema.Instruction.Index {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "commit", "Block.commit", .{} },
+            .{},
+        );
+
+        const inst = self.builder.instructions.items.len;
+        const len = self.instructions.items.len + 1;
+        self.getInstruction(self.instruction_index).data.block.instructions_count = len;
+        try self.builder.instructions.appendSlice(self.builder.allocator, self.scope.instructions.items);
+        defer trace.end(.{
+            .start = 0,
+            .len = len,
+            .instructions = self.scope.instructions.items,
+            .index = self.instruction_index,
+
+            .result = self.getInstruction(self.instruction_index),
+        });
+        return inst;
+    }
     pub fn reserveInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const index = self.scope.instructions.items.len;
+        const index = try self.scope.reserveInstruction(hir_inst_index);
         self.builder.tracer.trace(
             @src(),
             .{ "newInstruction", "Block.reserveInstruction({s})", .{
@@ -1348,8 +1632,7 @@ const Block = struct {
             } },
             .{},
         );
-        try self.scope.instructions_by_hir_inst.put(self.scope.arena.allocator(), hir_inst_index, index);
-        try self.scope.instructions.append(self.scope.arena.allocator(), undefined);
+
         try self.instructions.append(self.scope.arena.allocator(), index);
         return index;
     }
@@ -1365,13 +1648,12 @@ const Block = struct {
             .{
                 .index = index,
                 .instructions = self.scope.instructions.items,
+                .block_instructions = self.instructions.items,
             },
         );
     }
     pub fn pushInstruction(self: *Block, hir_inst_index: Hir.Inst.Index, instruction: Sema.Instruction) !Sema.Instruction.Index {
-        const index = self.scope.instructions.items.len;
-        try self.scope.instructions.append(self.scope.arena.allocator(), instruction);
-        try self.scope.instructions_by_hir_inst.put(self.scope.arena.allocator(), hir_inst_index, index);
+        const index = try self.scope.pushInstruction(hir_inst_index, instruction);
         self.builder.tracer.trace(
             @src(),
             .{ "newInstruction", "Block.pushInstruction(.{s}, hir = {d}, index = {d})", .{
@@ -1382,8 +1664,10 @@ const Block = struct {
             .{
                 .index = index,
                 .instructions = self.scope.instructions.items,
+                .block_instructions = self.instructions.items,
             },
         );
+        try self.instructions.append(self.scope.arena.allocator(), index);
         return index;
     }
 
@@ -1395,28 +1679,9 @@ const Block = struct {
         return &self.scope.instructions.items[index];
     }
     pub fn getInstructionIndex(self: *Block, hir_inst_index: Hir.Inst.Index) Sema.Instruction.Index {
-        return self.scope.instructions_by_hir_inst.get(hir_inst_index).?;
-    }
-
-    pub fn computeInstructionsBlock(self: *Block) Error!void {
-        const trace = self.builder.tracer.begin(
-            @src(),
-            .{ "computeInstructionsBlock", "Block.computeInstructionsBlock", .{} },
-            .{},
-        );
-        const hir_inst = getHirInst(self.builder.hir, self.root_hir_inst_index);
-        defer trace.end(.{
-            .instructions = self.scope.instructions.items,
-        });
-        const list_index = switch (hir_inst) {
-            .block, .inline_block => |list_inst| list_inst.instructions_list,
-            else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
+        return self.scope.instructions_by_hir_inst.get(hir_inst_index) orelse {
+            std.debug.panic("unreachable: no instruction index for hir_inst_index: {d}", .{hir_inst_index});
         };
-        const list = self.builder.getHirList(list_index);
-        for (list) |hir_inst_index| {
-            _ = try self.computeInstruction(hir_inst_index);
-        }
-        return;
     }
 
     pub fn computeInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
@@ -1473,6 +1738,7 @@ const Block = struct {
             .store => self.handleStoreInstruction(hir_inst_index),
             .param_get => self.handleParamGetInstruction(hir_inst_index),
             .if_expr => self.handleIfExprInstruction(hir_inst_index),
+            .select_expr => self.handleSelectExprInstruction(hir_inst_index),
             .loop => self.handleLoopInstruction(hir_inst_index),
             .load => self.handleLoadInstruction(hir_inst_index),
 
@@ -1480,6 +1746,12 @@ const Block = struct {
             .br => self.handleBrInstruction(hir_inst_index),
             .ret => self.handleRetInstruction(hir_inst_index),
             .typeof => self.handleTypeOfInstruction(hir_inst_index),
+
+            .struct_decl => self.handleStructDeclInstruction(hir_inst_index),
+            .block, .inline_block => self.handleBlockInstruction(hir_inst_index),
+            .get_property_pointer => self.handleGetPropertyPointerInstruction(hir_inst_index),
+            .fn_call => self.handleFnCallInstruction(hir_inst_index),
+            .param_decl => self.handleParamDeclInstruction(hir_inst_index),
             else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
         };
     }
@@ -1597,34 +1869,83 @@ const Block = struct {
     pub fn handleGlobalGet(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
         const global_entity = self.builder.getEntityByHirInst(hir_inst.global_get.operand);
-        try self.scope.pushDependency(global_entity.key);
-        const global_type = try global_entity.resolveType();
-        // const global_value = try global_entity.resolveValue();
-        // const global_value = try global_entity.resolveValue();
-        // return self.pushInstruction(hir_inst_index, .{
-        //     .op = .global_get,
-        //     .type = global_value.type,
-        //     .value = global_value,
-        //     .data = .void,
-        // });
-        // std.debug.panic("TODO: handleGlobalGet {s}", .{@tagName(hir_inst)});
-        //   const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
 
-        // const operand_inst_index = self.getInstructionIndex(hir_inst.param_get.operand);
-        // const operand_inst = self.getInstruction(operand_inst_index);
-        // const param_type = self.builder.getType(operand_inst.type) orelse {
-        // //     std.debug.panic("unreachable: should get a param type", .{});
-        // // };
+        return self.pushGlobalGetInstruction(hir_inst_index, global_entity.key);
+        // const global_type = try global_entity.resolveType();
+        // // const global_value = try global_entity.resolveValue();
+        // // const global_value = try global_entity.resolveValue();
+        // // return self.pushInstruction(hir_inst_index, .{
+        // //     .op = .global_get,
+        // //     .type = global_value.type,
+        // //     .value = global_value,
+        // //     .data = .void,
+        // // });
+        // // std.debug.panic("TODO: handleGlobalGet {s}", .{@tagName(hir_inst)});
+        // //   const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
 
-        return self.pushInstruction(hir_inst_index, .{
-            .op = .global_get,
-            .type = global_type,
-            .value = Sema.Value.simple(.runtime),
-            .data = .{ .declaration = switch (global_entity.data) {
-                .function_declaration => global_entity.data.function_declaration.declaration_index,
-                else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(global_entity.data)}),
-            } },
-        });
+        // // const operand_inst_index = self.getInstructionIndex(hir_inst.param_get.operand);
+        // // const operand_inst = self.getInstruction(operand_inst_index);
+        // // const param_type = self.builder.getType(operand_inst.type) orelse {
+        // // //     std.debug.panic("unreachable: should get a param type", .{});
+        // // // };
+
+        // switch (global_entity.data) {
+        //     .function_declaration => |fn_decl| {
+        //         // global_entity.data.function_declaration.declaration_index,
+        //         return self.pushInstruction(hir_inst_index, .{
+        //             .op = .global_get,
+        //             .type = global_type,
+        //             .value = Sema.Value.simple(.runtime),
+        //             .data = .{ .declaration = fn_decl.declaration_index },
+        //         });
+        //     },
+        //     .global_type_declaration => |type_decl| {
+        //         const global_key = try global_entity.resolveValue();
+        //         // const global = self.builder.getValue(global_key) orelse {
+        //         //     std.debug.panic("unreachable: should get a global value", .{});
+        //         // };
+
+        //         return self.pushInstruction(hir_inst_index, .{
+        //             .op = .global_get,
+        //             .type = global_type,
+        //             .value = global_key,
+        //             .data = .{ .declaration = type_decl.declaration_index },
+        //         });
+        //     },
+        //     else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(global_entity.data)}),
+        // }
+        // // const declaration = self.builder.declarations.items[declaration_index];
+
+    }
+    pub fn pushGlobalGetInstruction(self: *Block, hir_inst_index: Hir.Inst.Index, entity_key: Entity.Key) Error!Sema.Instruction.Index {
+        const entity = self.builder.getEntity(entity_key);
+        try self.scope.pushDependency(entity_key);
+        const global_type = try entity.resolveType();
+        switch (entity.data) {
+            .function_declaration => |fn_decl| {
+                // global_entity.data.function_declaration.declaration_index,
+                return self.pushInstruction(hir_inst_index, .{
+                    .op = .global_get,
+                    .type = global_type,
+                    .value = Sema.Value.simple(.runtime),
+                    .data = .{ .declaration = fn_decl.declaration_index },
+                });
+            },
+            .global_type_declaration => |type_decl| {
+                const global_key = try entity.resolveValue();
+                // const global = self.builder.getValue(global_key) orelse {
+                //     std.debug.panic("unreachable: should get a global value", .{});
+                // };
+
+                return self.pushInstruction(hir_inst_index, .{
+                    .op = .global_get,
+                    .type = global_type,
+                    .value = global_key,
+                    .data = .{ .declaration = type_decl.declaration_index },
+                });
+            },
+            else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(entity.data)}),
+        }
     }
     pub fn handleConstantInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
@@ -1892,40 +2213,81 @@ const Block = struct {
         defer trace.end(.{
             .instructions = self.scope.instructions.items,
         });
+        // const then_is_inline = switch (getHirInst(self.builder.hir, hir_inst.if_expr.then_body)) {
+        //     .inline_block => true,
+        //     else => false,
+        // };
+        // const else_is_inline = if (hir_inst.if_expr.else_body) |else_body| switch (getHirInst(self.builder.hir, else_body)) {
+        //     .inline_block => true,
+        //     else => false,
+        // } else false;
+        // if (then_is_inline and else_is_inline) {
+        //     const condition = self.getInstructionIndex(hir_inst.if_expr.cond);
+        //     const then_block_index = try self.computeInstruction(hir_inst.if_expr.then_body);
+        //     const else_block_index = try self.computeInstruction(hir_inst.if_expr.else_body.?);
+        //     const then_block = self.getInstruction(then_block_index);
+        //     const else_block = self.getInstruction(else_block_index);
+        //     if (!then_block.type.isEqual(else_block.type)) {
+        //         std.debug.panic("error: phi argument types are not equal", .{});
+        //     }
+        //     return try self.pushInstruction(hir_inst_index, .{
+        //         .op = .select,
+        //         .type = then_block.type,
+        //         .value = Sema.Value.simple(.runtime),
+        //         .data = .{ .select = .{ .condition = condition, .then_block = then_block_index, .else_block = else_block_index } },
+        //     });
+        // }
 
         const index = try self.reserveInstruction(hir_inst_index);
-        var then_range: Sema.Instruction.InstRange = .{
-            .start = self.scope.instructions.items.len,
-            .len = 0,
-        };
-        var then_block = try self.scope.makeBlock(hir_inst.if_expr.then_body);
-        // _ = then_block; // autofix
-        try then_block.computeInstructionsBlock();
-        then_range.len = self.scope.instructions.items.len - then_range.start;
+        const condition = self.getInstructionIndex(hir_inst.if_expr.cond);
 
-        var else_range: ?Sema.Instruction.InstRange = null;
-        if (hir_inst.if_expr.else_body) |else_body| {
-            var else_block = try self.scope.makeBlock(else_body);
-            const start = self.scope.instructions.items.len;
-            try else_block.computeInstructionsBlock();
-            const end = self.scope.instructions.items.len;
-            else_range = .{
-                .start = start,
-                .len = end - start,
-            };
-        }
+        const then_block_index = try self.computeInstruction(hir_inst.if_expr.then_body);
+        const else_block_index = if (hir_inst.if_expr.else_body) |else_body| try self.computeInstruction(else_body) else null;
 
         self.setInstruction(index, .{
             .op = .@"if",
             .type = Sema.Type.simple(.void),
             .value = Sema.Value.simple(.void),
             .data = .{ .@"if" = .{
-                .condition = self.getInstructionIndex(hir_inst.if_expr.cond),
-                .then_instructions = then_range,
-                .else_instructions = else_range,
+                .condition = condition,
+                .then_block = then_block_index,
+                .else_block = else_block_index,
             } },
         });
+
         return index;
+    }
+
+    pub fn handleSelectExprInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleSelectExprInstruction", "Block.handleSelectExprInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
+
+        const condition = self.getInstructionIndex(hir_inst.select_expr.cond);
+        const then_block_index = try self.computeInstruction(hir_inst.select_expr.then_body);
+        const else_block_index = try self.computeInstruction(hir_inst.select_expr.else_body.?);
+        const then_block = self.getInstruction(then_block_index);
+        const else_block = self.getInstruction(else_block_index);
+        if (!then_block.type.isEqual(else_block.type)) {
+            std.debug.panic("error: 'select' argument types are not equal", .{});
+        }
+
+        return self.pushInstruction(hir_inst_index, .{
+            .op = .select,
+            .type = then_block.type,
+            .value = Sema.Value.simple(.runtime),
+            .data = .{ .select = .{ .condition = condition, .then_block = then_block_index, .else_block = else_block_index } },
+        });
     }
     pub fn handleLoopInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
@@ -1944,13 +2306,13 @@ const Block = struct {
 
         const index = try self.reserveInstruction(hir_inst_index);
 
-        var body_inst_range = Sema.Instruction.InstRange{
-            .start = self.scope.instructions.items.len,
-            .len = 0,
-        };
-        var body_block = try self.scope.makeBlock(hir_inst.loop.body);
-        try body_block.computeInstructionsBlock();
-        body_inst_range.len = self.scope.instructions.items.len - body_inst_range.start;
+        // var body_inst_range = Sema.Instruction.InstRange{
+        //     .start = self.scope.instructions.items.len,
+        //     .len = 0,
+        // };
+        // var body_block = try self.scope.makeBlock(hir_inst.loop.body);
+        // try body_block.computeInstructionsBlock();
+        // body_inst_range.len = self.scope.instructions.items.len - body_inst_range.start;
 
         self.setInstruction(index, .{
             .op = .loop,
@@ -1958,7 +2320,7 @@ const Block = struct {
             .value = Sema.Value.simple(.void),
             .data = .{
                 .loop = .{
-                    .instructions = body_inst_range,
+                    .body_block = try self.computeInstruction(hir_inst.loop.body),
                 },
             },
         });
@@ -2105,29 +2467,29 @@ const Block = struct {
             .instructions = self.scope.instructions.items,
         });
 
-        const operand_index = self.getInstructionIndex(hir_inst.br.operand);
-        // const operand_inst = self.getInstruction(operand_index);
-
-        // const payload_index = self.getInstructionIndex(hir_inst.br.payload);
-
-        // return try self.pushInstruction(hir_inst_index, .{
-        //     .op = .br,
-        //     .type = Sema.Type.simple(.void),
-        //     .value = Sema.Value.simple(.void),
-        //     .data = .{ .operand_payload = .{
-        //         .operand = operand_index,
-        //         .payload =
-        //     } },
-        // });
-
-        // std.debug.panic("todo", .{});
+        const target_index = self.getInstructionIndex(hir_inst.br.target);
+        const target_inst = self.getInstruction(target_index);
+        if (hir_inst.br.operand) |operand| {
+            const operand_index = self.getInstructionIndex(operand);
+            const operand_inst = self.getInstruction(operand_index);
+            target_inst.type = operand_inst.type;
+            target_inst.value = operand_inst.value;
+            // std.debug.panic("{}\n\n{d} = {any}\n\n{d} = {any}\n\n", .{
+            //     hir_inst.br,
+            //     operand_index,
+            //     operand_inst,
+            //     target_index,
+            //     target_inst,
+            // });
+        }
+        // target_inst.type =
 
         return self.pushInstruction(hir_inst_index, .{
             .op = .br,
             .type = Sema.Type.simple(.void),
             .value = Sema.Value.simple(.void),
             .data = .{
-                .operand = operand_index,
+                .operand = target_index,
             },
         });
     }
@@ -2157,6 +2519,18 @@ const Block = struct {
         });
     }
     pub fn handleTypeOfInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleTypeOfInstruction", "Block.handleTypeOfInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
         const operand_index = self.getInstructionIndex(hir_inst.typeof.operand);
         const operand_inst = self.getInstruction(operand_index);
@@ -2168,6 +2542,240 @@ const Block = struct {
         });
     }
 
+    pub fn handleStructDeclInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        _ = hir_inst; // autofix
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleStructDeclInstruction", "Block.handleStructDeclInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
+
+        // hir_inst.struct_decl.fields_list;
+        const entity_key = try self.builder.makeEntity(.{
+            .parent = self.scope.entity.key,
+            .hir_inst_index = hir_inst_index,
+            .name = try self.builder.internSlice("mod"),
+            .data = .{
+                .module_declaration = .{
+                    // .name = try self.builder.internSlice("mod"),
+                    // .exports = .{},
+                },
+            },
+
+            // .name =
+
+            // .kind = .struct,
+        });
+        var entity = self.builder.getEntity(entity_key);
+        // const ty = try entity.resolveValue();
+
+        // std.debug.panic("todo", .{});
+        return self.pushInstruction(hir_inst_index, .{
+            .op = .type,
+            .type = Sema.Type.simple(.type),
+            .value = try entity.resolveValue(),
+            .data = .void,
+        });
+    }
+
+    pub fn handleBlockInstructionInner(self: *Block, hir_inst_index: Hir.Inst.Index) Error!void {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const list_index = switch (hir_inst) {
+            .block, .inline_block => |list_inst| list_inst.instructions_list,
+            else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
+        };
+        const list = self.builder.getHirList(list_index);
+        for (list) |block_inst| {
+            _ = try self.computeInstruction(block_inst);
+        }
+    }
+    pub fn handleBlockInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleBlockInstruction", "Block.handleBlockInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
+
+        // var block =try  self.scope.makeBlock(hir_inst_index);
+        const start = self.scope.instructions.items.len;
+        const index = try self.reserveInstruction(hir_inst_index);
+        self.setInstruction(index, .{
+            .op = .block,
+            .type = Sema.Type.simple(.void),
+            .value = Sema.Value.simple(.void),
+            .data = .{ .block = .{ .instructions_count = 0 } },
+        });
+        try self.handleBlockInstructionInner(hir_inst_index);
+        // var body_inst_range = Sema.Instruction.InstRange{
+        //     .start = self.scope.instructions.items.len,
+        //     .len = 0,
+        // };
+
+        // const list_index = switch (hir_inst) {
+        //     .block, .inline_block => |list_inst| list_inst.instructions_list,
+        //     else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
+        // };
+        // const list = self.builder.getHirList(list_index);
+        // for (list) |block_inst| {
+        //     _ = try self.computeInstruction(block_inst);
+        // }
+        self.getInstruction(index).data.block.instructions_count = self.scope.instructions.items.len - start;
+
+        return index;
+    }
+
+    pub fn handleGetPropertyPointerInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleGetPropertyPointerInstruction", "Block.handleGetPropertyPointerInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
+        const base_hir_index = hir_inst.get_property_pointer.base;
+        const name = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
+
+        if (self.builder.getEntityKeyByHirInst(base_hir_index)) |base_entity_key| {
+            // Is referecing a global
+            const base_entity = self.builder.getEntity(base_entity_key);
+            const base_type = try base_entity.resolveType();
+            if (base_type.isEqualSimple(.type)) {
+                const value = try base_entity.resolveValue();
+                const module_type_key = self.builder.unwrapTypeValue(value);
+                const module_type = self.builder.getType(module_type_key) orelse {
+                    std.debug.panic("unreachable: should get a base type", .{});
+                };
+                const module = self.builder.getEntity(module_type.data.module.entity);
+                const declaration_entity_key = module.data.module_declaration.declarations.get(name) orelse {
+                    std.debug.panic("unreachable: should get a declaration", .{});
+                };
+                return try self.pushGlobalGetInstruction(hir_inst_index, declaration_entity_key);
+            }
+        }
+
+        const base_index = self.getInstructionIndex(base_hir_index);
+        const base_instruction = self.getInstruction(base_index);
+        // switch (base_instruction.op) {
+        //     .global_get => {
+        //         if (base_instruction.type.isEqualSimple(.type)) {
+        //             const base_type_key = self.builder.unwrapTypeValue(base_instruction.value);
+        //             const base_type = self.builder.getType(base_type_key) orelse {
+        //                 std.debug.panic("unreachable: should get a base type", .{});
+        //             };
+        //             const module = self.builder.getEntity(base_type.data.module.entity);
+        //             const declaration_entity_key = module.data.module_declaration.declarations.get(name) orelse {
+        //                 std.debug.panic("unreachable: should get a declaration", .{});
+        //             };
+        //             return try self.pushGlobalGetInstruction(hir_inst_index, declaration_entity_key);
+        //         }
+        //         std.debug.panic("TODO: handle get_element_pointer of non type global", .{});
+        //     },
+        //     else => {},
+        // }
+
+        const unwrapped_base_type_key = self.builder.unwrapPointerType(base_instruction.type) orelse {
+            std.debug.panic("unreachable: should get a pointer type {}", .{(base_instruction)});
+        };
+
+        const base_type = self.builder.getType(unwrapped_base_type_key) orelse {
+            std.debug.panic("unreachable: should get a base type", .{});
+        };
+        const module = self.builder.getEntity(base_type.data.module.entity);
+        if (module.data.module_declaration.fields.get(name)) |field| {
+            const field_entity = self.builder.getEntity(field.entity);
+            return self.pushInstruction(hir_inst_index, .{
+                .op = .get_element_pointer,
+                .type = try self.builder.internTypeData(.{ .pointer = .{ .child = try field_entity.resolveType() } }),
+                .value = Sema.Value.simple(.runtime),
+                .data = .{ .get_element_pointer = .{
+                    .base = base_index,
+                    .index = field.index,
+                } },
+            });
+        }
+        if (module.data.module_declaration.declarations.get(name)) |declaration| {
+            // const declaration_entity = self.builder.getEntity(declaration.entity);
+            return try self.pushGlobalGetInstruction(hir_inst_index, declaration);
+        }
+        std.debug.panic("unreachable: should get a field or a declaration", .{});
+    }
+    pub fn handleFnCallInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleFnCallInstruction", "Block.handleFnCallInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
+
+        const callee_inst = self.getInstructionIndex(hir_inst.fn_call.callee);
+        const callee_instruction = self.getInstruction(callee_inst);
+        const callee_type = self.builder.getType(callee_instruction.type) orelse unreachable;
+        const function = switch (callee_type.data) {
+            .function => |fn_type| fn_type,
+            else => std.debug.panic("error: trying to call non function type", .{}),
+        };
+        var args_list = self.builder.newList();
+        for (self.builder.getHirList(hir_inst.fn_call.args_list)) |arg_inst| {
+            const arg_index = self.getInstructionIndex(arg_inst);
+            try args_list.append(arg_index);
+        }
+        return try self.pushInstruction(hir_inst_index, .{
+            .op = .fn_call,
+            .type = function.ret,
+            .value = Sema.Value.simple(.runtime),
+            .data = .{ .fn_call = .{
+                .callee = callee_inst,
+                .args_list = try args_list.commit(),
+            } },
+        });
+        // callee_instruction.value
+
+        // _ = hir_inst; // autofix
+        // return self.pushInstruction(hir_inst_index, .{
+        //     .op = .fn_call,
+        //     .type = Sema.Type.simple(.void),
+        //     .value = Sema.Value.simple(.void),
+        //     .data = .void,
+        // });
+    }
+    pub fn handleParamDeclInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        // const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const param_entity = self.builder.getEntityByHirInst(hir_inst_index);
+        return self.pushInstruction(hir_inst_index, .{
+            .op = .param,
+            .type = try param_entity.resolveType(),
+            .value = Sema.Value.simple(.runtime),
+            .data = .void,
+        });
+    }
     pub fn pushMaybeFoldInstruction(self: *Block, hir_inst_index: Hir.Inst.Index, data: Sema.Instruction) Error!Sema.Instruction.Index {
         switch (data.op) {
             .add, .sub, .mul, .div => return try self.pushMaybeFoldArithmetic(hir_inst_index, data),

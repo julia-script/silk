@@ -1,0 +1,155 @@
+;; HIR: 88 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 2 items
+    ├ 0: %1 = .global_decl
+    │  ├ name_node: node(#1: "A")
+    │  ├ extern: false
+    │  ├ is_fn: false
+    │  ├ is_type: true
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: NONE
+    │  └ init: %3 = .inline_block
+    │     ├ %4 = .struct_decl
+    │     │  ├ name_node: NONE
+    │     │  ├ fields_list: 3 items
+    │     │  │  ├ 0: %5 = .struct_field
+    │     │  │  │  ├ name_node: node(#3: "a")
+    │     │  │  │  ├ type: %6 = .ty_usize
+    │     │  │  │  │  └ node: node(#4: "usize")
+    │     │  │  │  └ init: NONE
+    │     │  │  ├ 1: %7 = .struct_field
+    │     │  │  │  ├ name_node: node(#6: "b")
+    │     │  │  │  ├ type: %11 = .ty_i32
+    │     │  │  │  │  └ node: node(#7: "i32")
+    │     │  │  │  └ init: %8 = .inline_block
+    │     │  │  │     ├ %9 = comptime_number node=(N[8])
+    │     │  │  │     └ %10 = br operand=(9), target=(%8)
+    │     │  │  └ 2: %12 = .struct_field
+    │     │  │     ├ name_node: node(#10: "c")
+    │     │  │     ├ type: %16 = .ty_i32
+    │     │  │     │  └ node: node(#11: "i32")
+    │     │  │     └ init: %13 = .inline_block
+    │     │  │        ├ %14 = comptime_number node=(N[12])
+    │     │  │        └ %15 = br operand=(14), target=(%13)
+    │     │  └ declarations_list: 1 items
+    │     │     └ 0: %17 = .global_decl
+    │     │        ├ name_node: node(#14: "foo")
+    │     │        ├ extern: false
+    │     │        ├ is_fn: true
+    │     │        ├ is_type: false
+    │     │        ├ visibility: "public"
+    │     │        ├ exported: false
+    │     │        ├ mutable: false
+    │     │        ├ type: %54 = .fn_decl
+    │     │        │  ├ name_node: node(#14: "foo")
+    │     │        │  ├ return_type: %21 = .ty_void
+    │     │        │  │  └ node: node(#21: "void")
+    │     │        │  └ params_list: 2 items
+    │     │        │     ├ 0: %19 = .param_decl
+    │     │        │     │  ├ name_node: node(#16: "d")
+    │     │        │     │  └ type: %18 = .ty_i32
+    │     │        │     │     └ node: node(#17: "i32")
+    │     │        │     └ 1: %20 = .param_decl
+    │     │        │        ├ name_node: node(#19: "c")
+    │     │        │        └ type: .global_decl(%1: 'A')
+    │     │        └ init: %22 = .block
+    │     │           ├ %19 = param_decl name_node=(N[16]), type=(%18)
+    │     │           ├ %20 = param_decl name_node=(N[19]), type=(%1)
+    │     │           ├ %23 = global_get operand=(%2)
+    │     │           ├ %24 = alloc mutable=(false), type=(%23)
+    │     │           ├ %25 = get_property_pointer base=(%24), property_name_node=(N[26])
+    │     │           ├ %26 = comptime_number node=(N[27])
+    │     │           ├ %27 = store pointer=(%25), value=(%26)
+    │     │           ├ %28 = get_property_pointer base=(%24), property_name_node=(N[29])
+    │     │           ├ %29 = comptime_number node=(N[30])
+    │     │           ├ %30 = store pointer=(%28), value=(%29)
+    │     │           ├ %31 = get_property_pointer base=(%24), property_name_node=(N[32])
+    │     │           ├ %32 = comptime_number node=(N[33])
+    │     │           ├ %33 = store pointer=(%31), value=(%32)
+    │     │           ├ %34 = load operand=(%24)
+    │     │           ├ %35 = global_get operand=(%2)
+    │     │           ├ %36 = alloc mutable=(false), type=(%35)
+    │     │           ├ %37 = store pointer=(%36), value=(%34)
+    │     │           ├ %38 = global_get operand=(%1)
+    │     │           ├ %39 = alloc mutable=(false), type=(%38)
+    │     │           ├ %40 = get_property_pointer base=(%39), property_name_node=(N[40])
+    │     │           ├ %41 = comptime_number node=(N[41])
+    │     │           ├ %42 = store pointer=(%40), value=(%41)
+    │     │           ├ %43 = get_property_pointer base=(%39), property_name_node=(N[43])
+    │     │           ├ %44 = comptime_number node=(N[44])
+    │     │           ├ %45 = store pointer=(%43), value=(%44)
+    │     │           ├ %46 = get_property_pointer base=(%39), property_name_node=(N[46])
+    │     │           ├ %47 = comptime_number node=(N[47])
+    │     │           ├ %48 = store pointer=(%46), value=(%47)
+    │     │           ├ %49 = load operand=(%39)
+    │     │           ├ %50 = global_get operand=(%1)
+    │     │           ├ %51 = alloc mutable=(false), type=(%50)
+    │     │           ├ %52 = store pointer=(%51), value=(%49)
+    │     │           └ %53 = get_property_pointer base=(%2), property_name_node=(N[52])
+    │     └ %55 = br operand=(4), target=(%3)
+    └ 1: %2 = .global_decl
+       ├ name_node: node(#58: "B")
+       ├ extern: false
+       ├ is_fn: false
+       ├ is_type: true
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: NONE
+       └ init: %56 = .inline_block
+          ├ %57 = .struct_decl
+          │  ├ name_node: NONE
+          │  ├ fields_list: 3 items
+          │  │  ├ 0: %58 = .struct_field
+          │  │  │  ├ name_node: node(#60: "d")
+          │  │  │  ├ type: %59 = .ty_usize
+          │  │  │  │  └ node: node(#61: "usize")
+          │  │  │  └ init: NONE
+          │  │  ├ 1: %60 = .struct_field
+          │  │  │  ├ name_node: node(#63: "e")
+          │  │  │  ├ type: %64 = .ty_i32
+          │  │  │  │  └ node: node(#64: "i32")
+          │  │  │  └ init: %61 = .inline_block
+          │  │  │     ├ %62 = comptime_number node=(N[65])
+          │  │  │     └ %63 = br operand=(62), target=(%61)
+          │  │  └ 2: %65 = .struct_field
+          │  │     ├ name_node: node(#67: "f")
+          │  │     ├ type: %69 = .ty_i32
+          │  │     │  └ node: node(#68: "i32")
+          │  │     └ init: %66 = .inline_block
+          │  │        ├ %67 = comptime_number node=(N[69])
+          │  │        └ %68 = br operand=(67), target=(%66)
+          │  └ declarations_list: 1 items
+          │     └ 0: %70 = .global_decl
+          │        ├ name_node: node(#71: "bar")
+          │        ├ extern: false
+          │        ├ is_fn: true
+          │        ├ is_type: false
+          │        ├ visibility: "public"
+          │        ├ exported: false
+          │        ├ mutable: false
+          │        ├ type: %86 = .fn_decl
+          │        │  ├ name_node: node(#71: "bar")
+          │        │  ├ return_type: %71 = .ty_void
+          │        │  │  └ node: node(#72: "void")
+          │        │  └ params_list: 0 items
+          │        └ init: %72 = .block
+          │           ├ %73 = global_get operand=(%1)
+          │           ├ %74 = alloc mutable=(false), type=(%73)
+          │           ├ %75 = get_property_pointer base=(%74), property_name_node=(N[77])
+          │           ├ %76 = comptime_number node=(N[78])
+          │           ├ %77 = store pointer=(%75), value=(%76)
+          │           ├ %78 = load operand=(%74)
+          │           ├ %79 = global_get operand=(%1)
+          │           ├ %80 = alloc mutable=(false), type=(%79)
+          │           ├ %81 = store pointer=(%80), value=(%78)
+          │           ├ %82 = get_property_pointer base=(%80), property_name_node=(N[88])
+          │           ├ %83 = get_property_pointer base=(%80), property_name_node=(N[91])
+          │           ├ %84 = load operand=(%83)
+          │           └ %85 = fn_call callee=(%82), args_list=(interned-lists.InternedLists(u32).Range{ .start = 49, .len = 1 })
+          └ %87 = br operand=(57), target=(%56)

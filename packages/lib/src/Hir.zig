@@ -407,10 +407,41 @@ pub fn formatInstShort(self: *Self, writer: std.io.AnyWriter, tree_writer: *Tree
                 if (i > 0) {
                     try writer.print(", ", .{});
                 }
-                try writer.print("{s}=({any})", .{
-                    field.name,
-                    @field(data, field.name),
-                });
+                const value = @field(data, field.name);
+
+                if (comptime std.mem.endsWith(u8, field.name, "node")) {
+                    try writer.print("{s}=(N[{?d}])", .{
+                        field.name,
+                        value,
+                    });
+                    // if (field.type == ?u32) {
+                    //     if (value) |v| {
+                    //         try writer.print("{s}=node(#{d}: \"{s}\")", .{
+                    //             field.name,
+                    //             v,
+                    //             self.ast.getNodeSlice(v),
+                    //         });
+                    //     } else {
+                    //         try writer.print("{s}=NONE", .{field.name});
+                    //     }
+                    // } else {
+                    //     try writer.print("{s}=node(#{d}: \"{s}\")", .{
+                    //         field.name,
+                    //         value,
+                    //         self.ast.getNodeSlice(value),
+                    //     });
+                    // }
+                } else if (field.type == Inst.Index) {
+                    try writer.print("{s}=(%{d})", .{
+                        field.name,
+                        value,
+                    });
+                } else {
+                    try writer.print("{s}=({any})", .{
+                        field.name,
+                        value,
+                    });
+                }
             }
         },
     }
@@ -436,7 +467,7 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                     .block, .inline_block, .loop, .global_decl, .struct_decl => {
                         try formatInst(self, writer, tree_writer, instruction_index);
                     },
-                    .if_expr => {
+                    .if_expr, .select_expr => {
                         try formatInst(self, writer, tree_writer, instruction_index);
                     },
                     else => {
@@ -467,6 +498,33 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
             //     try formatInst(self, writer, tree_writer, else_body);
             // }
         },
+        // .fn_decl => |data| {
+        //     // try writer.print("{s}\n", .{self.ast.getNodeSlice(data.name_node)});
+        //     // try formatN
+        //     try tree_writer.pushDirLine();
+        //     try writer.writeAll("\n");
+        //     try tree_writer.writeIndent(true, false);
+        //     try writer.print("name_node: node(#{d}: \"{s}\")\n", .{ data.name_node, self.ast.getNodeSlice(data.name_node) });
+        //     try tree_writer.writeIndent(true, false);
+        //     try writer.print("params_list:\n", .{});
+        //     try tree_writer.pushDirLine();
+        //     const params_slice = self.lists.getSlice(data.params_list);
+        //     for (params_slice, 0..params_slice.len) |param_index, i| {
+        //         const is_last = i == params_slice.len - 1;
+        //         const param_inst = self.insts.items[param_index];
+        //         try tree_writer.writeIndent(true, is_last);
+        //         try writer.print("name: {s}\n", .{ self.ast.getNodeSlice(param_inst.param_decl.name_node), self.ast.getNodeSlice(param_inst.param_decl.ty) });
+        //     }
+        //     try tree_writer.pop();
+
+        //     try tree_writer.pop();
+
+        //     // try tree_writer.writeIndent(true, false);
+        //     // try writer.writeAll("name_node: ");
+        //     // try writer.writeAll(self.ast.getNodeSlice(data.name_node));
+        //     // try tree_writer.pop();
+        //     try writer.writeAll("\n");
+        // },
         inline else => |data| {
             const Data: type = @TypeOf(data);
 
@@ -492,6 +550,10 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                     } else {
                         try writer.print("node(#{d}: \"{s}\")\n", .{ field_value, self.ast.getNodeSlice(field_value) });
                     }
+                } else if (field.type == Inst.Index and std.meta.activeTag(self.insts.items[field_value]) == .global_decl and comptime std.mem.endsWith(u8, field.name, "type")) {
+                    const type_inst = self.insts.items[field_value];
+
+                    try writer.print(".{s}(%{d}: '{s}')\n", .{ @tagName(type_inst), field_value, self.ast.getNodeSlice(type_inst.global_decl.name_node) });
                 } else {
                     switch (field.type) {
                         u32 => {
@@ -623,6 +685,7 @@ pub const Inst = union(enum) {
     get_element_value: GetElement,
     get_property_pointer: GetProperty,
     get_property_value: GetProperty,
+
     constant_int: Constant,
 
     as: BinaryOp,
@@ -642,7 +705,8 @@ pub const Inst = union(enum) {
     sizeof: UnaryOp,
     ret: Return,
     if_expr: IfExpr,
-    br: UnaryOp,
+    select_expr: IfExpr,
+    br: Break,
 
     decl_ref: AstNode,
     comptime_number: AstNode,
@@ -670,6 +734,7 @@ pub const Inst = union(enum) {
     ty_f64: AstNode,
     ty_void: AstNode,
     ty_pointer: UnaryOp,
+    ty_global: UnaryOp,
 
     debug_var: DebugVar,
 
@@ -735,6 +800,10 @@ pub const Inst = union(enum) {
         lhs: Index,
         rhs: Index,
     };
+    pub const Break = struct {
+        operand: ?Index,
+        target: Index,
+    };
     pub const FnDecl = struct {
         // name: InternedSlice,
         name_node: Ast.Node.Index,
@@ -778,13 +847,13 @@ pub const Inst = union(enum) {
     };
     pub const StructField = struct {
         name_node: Ast.Node.Index,
-        ty: ?Inst.Index,
+        type: ?Inst.Index,
         init: ?Inst.Index,
     };
     pub const Param = struct {
         name_node: Ast.Node.Index,
         // ty_node: Ast.Node.Index,
-        ty: Inst.Index,
+        type: Inst.Index,
     };
 };
 

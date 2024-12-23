@@ -1,0 +1,86 @@
+;; HIR: 38 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 2 items
+    ├ 0: %1 = .global_decl
+    │  ├ name_node: node(#1: "max")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %19 = .fn_decl
+    │  │  ├ name_node: node(#1: "max")
+    │  │  ├ return_type: %7 = .ty_i32
+    │  │  │  └ node: node(#8: "i32")
+    │  │  └ params_list: 2 items
+    │  │     ├ 0: %4 = .param_decl
+    │  │     │  ├ name_node: node(#3: "a")
+    │  │     │  └ type: %3 = .ty_i32
+    │  │     │     └ node: node(#4: "i32")
+    │  │     └ 1: %6 = .param_decl
+    │  │        ├ name_node: node(#6: "b")
+    │  │        └ type: %5 = .ty_i32
+    │  │           └ node: node(#7: "i32")
+    │  └ init: %8 = .block
+    │     ├ %4 = param_decl name_node=(N[3]), type=(%3)
+    │     ├ %6 = param_decl name_node=(N[6]), type=(%5)
+    │     ├ %9 = param_get operand=(%4)
+    │     ├ %10 = param_get operand=(%6)
+    │     ├ %11 = gt lhs=(%9), rhs=(%10)
+    │     └ %18 = .if_expr cond (%11)
+    │        ├ then: %12 = .block
+    │        │  ├ %13 = param_get operand=(%4)
+    │        │  └ %14 = ret value=(13)
+    │        └ else:%15 = .block
+    │           ├ %16 = param_get operand=(%6)
+    │           └ %17 = ret value=(16)
+    └ 1: %2 = .global_decl
+       ├ name_node: node(#22: "min")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %37 = .fn_decl
+       │  ├ name_node: node(#22: "min")
+       │  ├ return_type: %24 = .ty_i32
+       │  │  └ node: node(#29: "i32")
+       │  └ params_list: 2 items
+       │     ├ 0: %21 = .param_decl
+       │     │  ├ name_node: node(#24: "a")
+       │     │  └ type: %20 = .ty_i32
+       │     │     └ node: node(#25: "i32")
+       │     └ 1: %23 = .param_decl
+       │        ├ name_node: node(#27: "b")
+       │        └ type: %22 = .ty_i32
+       │           └ node: node(#28: "i32")
+       └ init: %25 = .block
+          ├ %21 = param_decl name_node=(N[24]), type=(%20)
+          ├ %23 = param_decl name_node=(N[27]), type=(%22)
+          ├ %26 = param_get operand=(%21)
+          ├ %27 = param_get operand=(%23)
+          ├ %28 = lt lhs=(%26), rhs=(%27)
+          ├ %35 = .select_expr
+          │  ├ cond: %28 = .lt
+          │  │  ├ lhs: %26 = .param_get
+          │  │  │  └ operand: %21 = .param_decl
+          │  │  │     ├ name_node: node(#24: "a")
+          │  │  │     └ type: %20 = .ty_i32
+          │  │  │        └ node: node(#25: "i32")
+          │  │  └ rhs: %27 = .param_get
+          │  │     └ operand: %23 = .param_decl
+          │  │        ├ name_node: node(#27: "b")
+          │  │        └ type: %22 = .ty_i32
+          │  │           └ node: node(#28: "i32")
+          │  ├ then_body: %29 = .inline_block
+          │  │  ├ %30 = param_get operand=(%21)
+          │  │  └ %31 = br operand=(30), target=(%29)
+          │  └ else_body: %32 = .inline_block
+          │     ├ %33 = param_get operand=(%23)
+          │     └ %34 = br operand=(33), target=(%32)
+          └ %36 = ret value=(35)

@@ -1,22 +1,24 @@
 ;; Sema
 ;; 2 declarations
-;; 7 entities
+;; 5 entities
 ;; 2 symbols
-;; 8 instructions
-;; 3 values
-;; 2 types
+;; 10 instructions
+;; 4 values
+;; 4 types
 ;; 0 lists
 ;; 8 strings
 
-pub @root::a() -> void
- ├ %0: todo(function) = .global_get declaration=(%1)                  ; runtime
- ├ %1: type = .typeof operand=(%0)                                    ; type(todo(function))
- ├ %2: *todo(function) = .alloc type_inst=(%1) mutable=(false)        ; runtime
- └ %3: void = .store operand=(%2) payload=(%0)                        ; void
+%0 = pub @root::a() -> mod{ent{0}, {}}
+ └ %0: void = .block: [%1-%4]                                         ; void
+    ├ %1: todo(function) = .global_get declaration=(%1)               ; runtime
+    ├ %2: type = .typeof operand=(%1)                                 ; type(todo(function))
+    ├ %3: *todo(function) = .alloc type_inst=(%2) mutable=(false)     ; runtime
+    └ %4: void = .store operand=(%3) payload=(%1)                     ; void
 
-pub @root::b() -> void
- ├ %0: todo(function) = .global_get declaration=(%0)                  ; runtime
- ├ %1: type = .typeof operand=(%0)                                    ; type(todo(function))
- ├ %2: *todo(function) = .alloc type_inst=(%1) mutable=(false)        ; runtime
- └ %3: void = .store operand=(%2) payload=(%0)                        ; void
+%1 = pub @root::b() -> mod{ent{0}, {}}
+ └ %0: void = .block: [%1-%4]                                         ; void
+    ├ %1: todo(function) = .global_get declaration=(%0)               ; runtime
+    ├ %2: type = .typeof operand=(%1)                                 ; type(todo(function))
+    ├ %3: *todo(function) = .alloc type_inst=(%2) mutable=(false)     ; runtime
+    └ %4: void = .store operand=(%3) payload=(%1)                     ; void
 

@@ -142,6 +142,11 @@ pub const Node = struct {
             then_branch: Index,
             else_branch: Index,
         },
+        select_expr: struct {
+            condition: Index,
+            then_branch: Index,
+            else_branch: Index,
+        },
         ret_expression: NodeIndex,
         block: struct {
             list: ChildList,
@@ -329,6 +334,7 @@ pub const Node = struct {
         expr,
         group,
         if_expr,
+        select_expr,
         ret_expression,
         block,
         while_loop,

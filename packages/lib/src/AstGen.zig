@@ -1612,6 +1612,9 @@ pub fn parseTypeInit(self: *AstGen, ty: Node.Index) AstGenError!Node.Index {
     }
     var initializers = self.ast.interned_lists.new();
     while (!self.tokenIs(.r_brace)) {
+        if (self.accept(.comment)) {
+            continue;
+        }
         const field_start_token = self.token_index;
 
         const name = try self.parseIdentifier();
