@@ -1,0 +1,33 @@
+;; Sema
+;; 1 declarations
+;; 5 entities
+;; 1 symbols
+;; 21 instructions
+;; 13 values
+;; 1 types
+;; 0 lists
+;; 9 strings
+
+%0 = @root::folding() -> i32
+ └ %0: void = .block: [%1-%20]                                        ; void
+    ├ %1: i32 = .param                                                ; exec_time
+    ├ %2: i32 = .param_get operand=(%1)                               ; exec_time
+    ├ !%3: number = .constant                                         ; int(1)
+    ├ %4: i32 = .constant                                             ; int(1)
+    ├ %5: i32 = .add lhs=(%2) rhs=(%4)                                ; exec_time
+    ├ !%6: number = .constant                                         ; int(2)
+    ├ !%7: number = .constant                                         ; int(3)
+    ├ !%8: number = .constant                                         ; float(6)
+    ├ %9: i32 = .constant                                             ; int(6)
+    ├ %10: i32 = .add lhs=(%5) rhs=(%9)                               ; exec_time
+    ├ !%11: number = .constant                                        ; int(4)
+    ├ !%12: number = .constant                                        ; int(5)
+    ├ !%13: number = .constant                                        ; float(9)
+    ├ !%14: number = .constant                                        ; int(2)
+    ├ !%15: number = .constant                                        ; float(18)
+    ├ %16: i32 = .constant                                            ; int(18)
+    ├ %17: i32 = .add lhs=(%10) rhs=(%16)                             ; exec_time
+    ├ %18: type = .type                                               ; type(i32)
+    ├ %19: type = .cast operand=(%17)                                 ; exec_time
+    └ %20: void = .ret maybe_operand=(%19)                            ; void
+

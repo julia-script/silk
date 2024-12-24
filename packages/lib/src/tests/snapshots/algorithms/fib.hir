@@ -1,4 +1,4 @@
-;; HIR: 46 instructions
+;; HIR: 50 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -12,7 +12,7 @@
        ├ visibility: "public"
        ├ exported: false
        ├ mutable: false
-       ├ type: %45 = .fn_decl
+       ├ type: %49 = .fn_decl
        │  ├ name_node: node(#2: "fib")
        │  ├ return_type: %4 = .ty_i32
        │  │  └ node: node(#6: "i32")
@@ -34,7 +34,7 @@
           ├ %14 = .param_get operand=(%3)
           ├ %15 = .comptime_number node=(n[17:"0"])
           ├ %16 = .gt lhs=(%14), rhs=(%15)
-          ├ %42 = .if_expr cond (%16)
+          ├ %44 = .if_expr cond (%16)
           │  └ then: %17 = .block
           │     ├ %18 = .loop
           │     │  └ body: %39 = .block
@@ -59,6 +59,10 @@
           │     │           ├ %36 = .param_set lhs=(%3), rhs=(%35)
           │     │           └ %37 = .br operand=(null), target=(%18)
           │     ├ %40 = .load operand=(%12)
-          │     └ %41 = .ret value=(40)
-          ├ %43 = .load operand=(%8)
-          └ %44 = .ret value=(43)
+          │     ├ %41 = .ty_i32 node=(n[6:"i32"])
+          │     ├ %42 = .as lhs=(%40), rhs=(%41)
+          │     └ %43 = .ret operand=(42)
+          ├ %45 = .load operand=(%8)
+          ├ %46 = .ty_i32 node=(n[6:"i32"])
+          ├ %47 = .as lhs=(%45), rhs=(%46)
+          └ %48 = .ret operand=(47)

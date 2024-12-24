@@ -1,0 +1,4 @@
+
+fn explicit_casting(): i32 {
+  123:as(i32):as(u8):as(f32):as(i32);
+}

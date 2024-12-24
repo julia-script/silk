@@ -1,0 +1,33 @@
+;; HIR: 18 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 1 items
+    └ 0: %1 = .global_decl
+       ├ name_node: node(#1: "explicit_casting")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %17 = .fn_decl
+       │  ├ name_node: node(#1: "explicit_casting")
+       │  ├ return_type: %2 = .ty_i32
+       │  │  └ node: node(#2: "i32")
+       │  └ params_list: 0 items
+       └ init: %3 = .block
+          ├ %4 = .comptime_number node=(n[4:"123"])
+          ├ %5 = .get_property_pointer base=(%4), property_name_node=(n[5:"as"]), is_builtin=(true)
+          ├ %6 = .ty_i32 node=(n[7:"i32"])
+          ├ %7 = .fn_call callee=(%5), args_list=({%6})
+          ├ %8 = .get_property_pointer base=(%7), property_name_node=(n[9:"as"]), is_builtin=(true)
+          ├ %9 = .ty_u8 node=(n[11:"u8"])
+          ├ %10 = .fn_call callee=(%8), args_list=({%9})
+          ├ %11 = .get_property_pointer base=(%10), property_name_node=(n[13:"as"]), is_builtin=(true)
+          ├ %12 = .ty_f32 node=(n[15:"f32"])
+          ├ %13 = .fn_call callee=(%11), args_list=({%12})
+          ├ %14 = .get_property_pointer base=(%13), property_name_node=(n[17:"as"]), is_builtin=(true)
+          ├ %15 = .ty_i32 node=(n[19:"i32"])
+          └ %16 = .fn_call callee=(%14), args_list=({%15})

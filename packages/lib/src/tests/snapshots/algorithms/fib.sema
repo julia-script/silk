@@ -2,57 +2,61 @@
 ;; 1 declarations
 ;; 5 entities
 ;; 1 symbols
-;; 46 instructions
-;; 4 values
+;; 50 instructions
+;; 6 values
 ;; 2 types
 ;; 0 lists
 ;; 9 strings
 
 %0 = pub @root::fib() -> i32
- └ %0: void = .block: [%1-%45]                                        ; void
+ └ %0: void = .block: [%1-%49]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
-    ├ %2: number = .constant                                          ; int(0)
-    ├ %3: type = .type                                                ; type(i32)
-    ├ %4: *i32 = .alloc type_inst=(%3) mutable=(true)                 ; exec_time
-    ├ %5: i32 = .cast operand=(%2)                                    ; int(0)
+    ├ !%2: number = .constant                                         ; int(0)
+    ├ !%3: type = .type                                               ; type(i32)
+    ├ %4: *i32 = .alloc type=(i32) mutable=(true)                     ; exec_time
+    ├ %5: i32 = .constant                                             ; int(0)
     ├ %6: void = .store operand=(%4) payload=(%5)                     ; void
-    ├ %7: number = .constant                                          ; int(1)
-    ├ %8: type = .type                                                ; type(i32)
-    ├ %9: *i32 = .alloc type_inst=(%8) mutable=(true)                 ; exec_time
-    ├ %10: i32 = .cast operand=(%7)                                   ; int(1)
+    ├ !%7: number = .constant                                         ; int(1)
+    ├ !%8: type = .type                                               ; type(i32)
+    ├ %9: *i32 = .alloc type=(i32) mutable=(true)                     ; exec_time
+    ├ %10: i32 = .constant                                            ; int(1)
     ├ %11: void = .store operand=(%9) payload=(%10)                   ; void
     ├ %12: i32 = .param_get operand=(%1)                              ; exec_time
-    ├ %13: number = .constant                                         ; int(0)
-    ├ %14: i32 = .cast operand=(%13)                                  ; int(0)
+    ├ !%13: number = .constant                                        ; int(0)
+    ├ %14: i32 = .constant                                            ; int(0)
     ├ %15: bool = .gt lhs=(%12) rhs=(%14)                             ; exec_time
-    ├ %16: if (%15) then: [%17-%43]
-    │  └ %17: void = .block: [%18-%43]                                ; void
+    ├ %16: if (%15) then: [%17-%45]
+    │  └ %17: void = .block: [%18-%45]                                ; void
     │     ├ %18 loop: [%19-%41]
     │     │  └ %19: void = .block: [%20-%41]                          ; void
     │     │     ├ %20: i32 = .param_get operand=(%1)                  ; exec_time
-    │     │     ├ %21: number = .constant                             ; int(1)
-    │     │     ├ %22: i32 = .cast operand=(%21)                      ; int(1)
+    │     │     ├ !%21: number = .constant                            ; int(1)
+    │     │     ├ %22: i32 = .constant                                ; int(1)
     │     │     ├ %23: bool = .gt lhs=(%20) rhs=(%22)                 ; exec_time
     │     │     └ %24: if (%23) then: [%25-%41]
     │     │        └ %25: void = .block: [%26-%41]                    ; void
     │     │           ├ %26: i32 = .load operand=(%4)                 ; exec_time
     │     │           ├ %27: i32 = .load operand=(%9)                 ; exec_time
     │     │           ├ %28: i32 = .add lhs=(%26) rhs=(%27)           ; exec_time
-    │     │           ├ %29: type = .type                             ; type(i32)
-    │     │           ├ %30: *i32 = .alloc type_inst=(%29) mutable=(true); exec_time
+    │     │           ├ !%29: type = .type                            ; type(i32)
+    │     │           ├ %30: *i32 = .alloc type=(i32) mutable=(true)  ; exec_time
     │     │           ├ %31: void = .store operand=(%30) payload=(%28); void
     │     │           ├ %32: i32 = .load operand=(%9)                 ; exec_time
     │     │           ├ %33: void = .store operand=(%4) payload=(%32) ; void
     │     │           ├ %34: i32 = .load operand=(%30)                ; exec_time
     │     │           ├ %35: void = .store operand=(%9) payload=(%34) ; void
     │     │           ├ %36: i32 = .param_get operand=(%1)            ; exec_time
-    │     │           ├ %37: number = .constant                       ; int(1)
-    │     │           ├ %38: i32 = .cast operand=(%37)                ; int(1)
+    │     │           ├ !%37: number = .constant                      ; int(1)
+    │     │           ├ %38: i32 = .constant                          ; int(1)
     │     │           ├ %39: i32 = .sub lhs=(%36) rhs=(%38)           ; exec_time
     │     │           ├ %40: void = .param_set operand=(%1) payload=(%39); void
     │     │           └ %41: void = .br operand=(%18)                 ; void
     │     ├ %42: i32 = .load operand=(%9)                             ; exec_time
-    │     └ %43: void = .ret maybe_operand=(%42)                      ; void
-    ├ %44: i32 = .load operand=(%4)                                   ; exec_time
-    └ %45: void = .ret maybe_operand=(%44)                            ; void
+    │     ├ %43: type = .type                                         ; type(i32)
+    │     ├ %44: type = .cast operand=(%42)                           ; exec_time
+    │     └ %45: void = .ret maybe_operand=(%44)                      ; void
+    ├ %46: i32 = .load operand=(%4)                                   ; exec_time
+    ├ %47: type = .type                                               ; type(i32)
+    ├ %48: type = .cast operand=(%46)                                 ; exec_time
+    └ %49: void = .ret maybe_operand=(%48)                            ; void
 

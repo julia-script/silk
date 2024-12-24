@@ -1,0 +1,44 @@
+;; 25 Nodes
+;; 29 Tokens
+;; 4 Interned Lists
+
+%0 = .struct_decl - tok[0..29]
+ └ members_list: 1 items
+    └ %24 = .fn_decl - tok[0..28]
+       ├ proto: %6 = .fn_proto - tok[1..8]
+       │  ├ name: %1 = .identifier - tok[1..1]
+       │  │  └ token: .identifier 'folding'
+       │  ├ params_list: 1 items
+       │  │  └ %2 = .fn_param - tok[3..5]
+       │  │     ├ name: %3 = .identifier - tok[3..3]
+       │  │     │  └ token: .identifier 'n'
+       │  │     └ type: %4 = .ty_i32 - tok[5..5]
+       │  │        └ token: .keyword_i32 'i32'
+       │  └ ret_type: %5 = .ty_i32 - tok[8..8]
+       │     └ token: .keyword_i32 'i32'
+       └ body: %23 = .block - tok[9..27]
+          └ list: 2 items
+             ├ %7 = .comment_line - tok[10..11]
+             │  └ token: .comment '// n + 25'
+             └ %22 = .ret_expression - tok[11..26]
+                └ node: %21 = .add - tok[12..26]
+                   ├ lhs: %14 = .add - tok[12..18]
+                   │  ├ lhs: %10 = .add - tok[12..14]
+                   │  │  ├ lhs: %8 = .identifier - tok[12..12]
+                   │  │  │  └ token: .identifier 'n'
+                   │  │  └ rhs: %9 = .number_literal - tok[14..14]
+                   │  │     └ token: .number_literal '1'
+                   │  └ rhs: %13 = .mul - tok[16..18]
+                   │     ├ lhs: %11 = .number_literal - tok[16..16]
+                   │     │  └ token: .number_literal '2'
+                   │     └ rhs: %12 = .number_literal - tok[18..18]
+                   │        └ token: .number_literal '3'
+                   └ rhs: %20 = .mul - tok[20..26]
+                      ├ lhs: %18 = .group - tok[20..24]
+                      │  └ node: %17 = .add - tok[21..23]
+                      │     ├ lhs: %15 = .number_literal - tok[21..21]
+                      │     │  └ token: .number_literal '4'
+                      │     └ rhs: %16 = .number_literal - tok[23..23]
+                      │        └ token: .number_literal '5'
+                      └ rhs: %19 = .number_literal - tok[26..26]
+                         └ token: .number_literal '2'

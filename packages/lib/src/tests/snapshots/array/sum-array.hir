@@ -1,4 +1,4 @@
-;; HIR: 62 instructions
+;; HIR: 64 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -12,7 +12,7 @@
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
-       ├ type: %61 = .fn_decl
+       ├ type: %63 = .fn_decl
        │  ├ name_node: node(#1: "sum_array")
        │  ├ return_type: %2 = .ty_i32
        │  │  └ node: node(#2: "i32")
@@ -74,4 +74,6 @@
           │           ├ %55 = .store pointer=(%32), value=(%54)
           │           └ %56 = .br operand=(null), target=(%38)
           ├ %59 = .load operand=(%36)
-          └ %60 = .ret value=(59)
+          ├ %60 = .ty_i32 node=(n[2:"i32"])
+          ├ %61 = .as lhs=(%59), rhs=(%60)
+          └ %62 = .ret operand=(61)

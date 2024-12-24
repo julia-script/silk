@@ -1,4 +1,4 @@
-;; HIR: 25 instructions
+;; HIR: 27 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -45,7 +45,7 @@
           │        ├ visibility: "public"
           │        ├ exported: false
           │        ├ mutable: false
-          │        ├ type: %23 = .fn_decl
+          │        ├ type: %25 = .fn_decl
           │        │  ├ name_node: node(#14: "foo")
           │        │  ├ return_type: %17 = .ty_i32
           │        │  │  └ node: node(#15: "i32")
@@ -54,5 +54,7 @@
           │           ├ %19 = .comptime_number node=(n[17:"2"])
           │           ├ %20 = .comptime_number node=(n[18:"3"])
           │           ├ %21 = .add lhs=(%19), rhs=(%20)
-          │           └ %22 = .ret value=(21)
-          └ %24 = .br operand=(3), target=(%2)
+          │           ├ %22 = .ty_i32 node=(n[15:"i32"])
+          │           ├ %23 = .as lhs=(%21), rhs=(%22)
+          │           └ %24 = .ret operand=(23)
+          └ %26 = .br operand=(3), target=(%2)

@@ -2,18 +2,20 @@
 ;; 1 declarations
 ;; 3 entities
 ;; 1 symbols
-;; 7 instructions
-;; 4 values
+;; 9 instructions
+;; 7 values
 ;; 1 types
 ;; 0 lists
 ;; 5 strings
 
 %0 = @root::main() -> i32
- └ %0: void = .block: [%1-%6]                                         ; void
-    ├ %1: number = .constant                                          ; int(2)
-    ├ %2: number = .constant                                          ; int(3)
-    ├ %3: number = .constant                                          ; int(4)
-    ├ %4: number = .mul lhs=(%2) rhs=(%3)                             ; exec_time
-    ├ %5: number = .add lhs=(%1) rhs=(%4)                             ; exec_time
-    └ %6: void = .ret maybe_operand=(%5)                              ; void
+ └ %0: void = .block: [%1-%8]                                         ; void
+    ├ !%1: number = .constant                                         ; int(2)
+    ├ !%2: number = .constant                                         ; int(3)
+    ├ !%3: number = .constant                                         ; int(4)
+    ├ !%4: number = .constant                                         ; float(12)
+    ├ !%5: number = .constant                                         ; float(14)
+    ├ %6: type = .type                                                ; type(i32)
+    ├ %7: type = .constant                                            ; float(14)
+    └ %8: void = .ret maybe_operand=(%7)                              ; void
 
