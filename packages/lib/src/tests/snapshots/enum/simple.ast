@@ -1,0 +1,17 @@
+;; 6 Nodes
+;; 11 Tokens
+;; 4 Interned Lists
+
+%0 = .struct_decl - tok[0..9]
+ └ members_list: 3 items
+    ├ %2 = .type_decl - tok[0..2]
+    │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  └ token: .identifier 'E'
+    │  ├ type: NONE
+    │  └ value: NONE
+    ├ %4 = .block - tok[4..5]
+    │  └ list: 1 items
+    │     └ %3 = .identifier - tok[5..5]
+    │        └ token: .identifier 'A'
+    └ %5 = .identifier - tok[7..7]
+       └ token: .identifier 'B'

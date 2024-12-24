@@ -1,0 +1,37 @@
+type Enum = enum {
+  a,
+  b,
+}
+
+type TaggedUnion = enum {
+  a: i32,
+  b: i32,
+}
+
+type Message = enum {
+  ImplicitVoid,
+  Position: struct { x: i32, y: i32 },
+  Message: string,
+  NestedEnum: enum {
+    a,
+    b,
+  },
+}
+
+type ExplicitTag = enum(u8) {
+  a,
+  b,
+}
+
+
+fn main():void {
+  const a: Message = _.Position{ x = 1, y = 2 };
+  const b: Message = _.Message("hello");
+  const c: Message = _.NestedEnum.a;
+  const d: Message = _.ImplicitVoid;
+
+  const e = Message.Position{ x = 1, y = 2 };
+  const f = Message.Message("hello");
+  const g = Message.NestedEnum.a;
+  const h = Message.ImplicitVoid;
+}

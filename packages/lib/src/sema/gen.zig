@@ -24,6 +24,7 @@ const Error = error{
     SymbolAlreadyExists,
     Overflow,
 } || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
+
 pub const Builder = struct {
     // sema: *Sema,
     entities: ChunkedArray(Entity, 1024),
@@ -166,9 +167,7 @@ pub const Builder = struct {
     fn getHirList(self: *Builder, range: Hir.InternedLists.Range) []Hir.Inst.Index {
         return self.hir.lists.getSlice(range);
     }
-    // fn getNodeSlice(self: *Builder, node_index: Ast.Node.Index) []const u8 {
-    //     return self.hir.ast.getNodeSlice(node_index);
-    // }
+
     pub fn getSlice(self: *Builder, range: Sema.Strings.Range) []const u8 {
         return self.strings.getSlice(range);
     }
@@ -1465,23 +1464,6 @@ pub const Entity = struct {
         }
         self.declaration = .resolving;
 
-        // try self.collectEntities();
-        // const declaration_index = self.builder.declarations.items.len;
-        // try self.builder.declarations.append(self.builder.allocator, undefined);
-
-        // const declaration = Sema.Declaration{
-        //     .name = self.name,
-        //     .is_export = self.is_export,
-        //     .is_pub = self.is_pub,
-        //     .type = try self.resolveType(),
-        //     .value = try self.resolveValue(),
-        // };
-        // self.builder.declarations.items[declaration_index] = declaration;
-        // try self.builder.declarations_by_hir_inst.put(
-        //     self.builder.allocator,
-        //     self.hir_inst_index,
-        //     declaration_index,
-        // );
         switch (self.data) {
             .function_declaration => {
                 self.builder.setDeclaration(self.data.function_declaration.declaration_index, .{
@@ -2279,6 +2261,7 @@ const Block = struct {
                     .child = self.builder.unwrapTypeValue(type_value_index),
                     .size = size_int,
                 } });
+
                 break :ty type_index;
             },
 
@@ -2330,6 +2313,7 @@ const Block = struct {
             } },
         });
     }
+
     pub fn handleStoreInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
         const trace = self.builder.tracer.begin(
@@ -3090,7 +3074,6 @@ const Block = struct {
                     .type = Sema.Type.simple(.usize),
                     .value = try self.builder.internValueData(.{ .integer = array_type.size }),
                     .data = .void,
-                    // .liveness = 0,
                 });
             },
             else => {},

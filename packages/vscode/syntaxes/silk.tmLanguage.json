@@ -11,7 +11,7 @@
 	],
 	"repository": {
 		"storage_modifier": {
-			"match": "\\b(const|var|extern|packed|export|pub|noalias|inline|noinline|comptime|volatile|align|linksection|threadlocal|allowzero)\\b",
+			"match": "\\b(const|var|type|extern|packed|export|pub|noalias|inline|noinline|comptime|volatile|align|linksection|threadlocal|allowzero)\\b",
 			"name": "storage.modifier.silk"
 		},
 		"storage": {
