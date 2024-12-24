@@ -1992,6 +1992,7 @@ const Block = struct {
         const value = try self.maybeCoerceValue(instruction.value, instruction.type);
 
         // self.markDeadIfComptimeKnown(instruction_index);
+        std.debug.assert(!type_index.isEqualSimple(.type));
         if (self.isComptimeKnown(instruction_index)) {
             self.markDead(instruction_index);
             return self.pushInstruction(hir_inst_index, .{
@@ -3393,20 +3394,12 @@ const Block = struct {
         const lhs_inst_index = self.getInstructionIndex(hir_inst.as.lhs);
         const rhs_inst_index = self.getInstructionIndex(hir_inst.as.rhs);
         const rhs_inst = self.getInstruction(rhs_inst_index);
-        // if (self.pushMaybeCastInstructionToType(
 
-        // )) |instruction_index| {
-        //     return instruction_index;
-        // }
+        self.markDeadIfComptimeKnown(rhs_inst_index);
+        self.markDeadIfComptimeKnown(lhs_inst_index);
+        const rhs_type = self.builder.unwrapTypeValue(rhs_inst.value);
 
-        return try self.pushCastInstruction(hir_inst_index, lhs_inst_index, rhs_inst.type);
-        // return try self.pushInstruction(hir_inst_index, .{
-        //     .op = .as,
-        //     .type = hir_inst.as.rhs,
-        //     .value = Sema.Value.simple(.exec_time),
-        //     .data = .void,
-        // });
-        // return try self.pushMaybeCastInstruction(hir_inst_index, lhs_inst_index, rhs_inst_index);
+        return try self.pushCastInstruction(hir_inst_index, lhs_inst_index, rhs_type);
     }
     pub fn pushMaybeFoldInstruction(self: *Block, hir_inst_index: Hir.Inst.Index, data: Sema.Instruction) Error!Sema.Instruction.Index {
         switch (data.op) {
@@ -3505,7 +3498,7 @@ const Block = struct {
                 };
                 return try self.pushInstruction(hir_inst_index, .{
                     .op = .constant,
-                    .type = instruction.type,
+                    .type = Sema.Type.simple(.bool),
                     .value = if (result) Sema.Value.simple(.true) else Sema.Value.simple(.false),
                     .data = .void,
                 });
@@ -3524,7 +3517,7 @@ const Block = struct {
                 };
                 return try self.pushInstruction(hir_inst_index, .{
                     .op = .constant,
-                    .type = instruction.type,
+                    .type = Sema.Type.simple(.bool),
                     .value = if (result) Sema.Value.simple(.true) else Sema.Value.simple(.false),
                     .data = .void,
                 });

@@ -3,7 +3,7 @@
 ;; 3 entities
 ;; 1 symbols
 ;; 15 instructions
-;; 12 values
+;; 13 values
 ;; 1 types
 ;; 0 lists
 ;; 5 strings
@@ -21,7 +21,7 @@
     ├ !%9: number = .constant                                         ; int(2)
     ├ !%10: number = .constant                                        ; float(18)
     ├ !%11: number = .constant                                        ; float(25)
-    ├ %12: type = .type                                               ; type(i32)
-    ├ %13: type = .constant                                           ; float(25)
+    ├ !%12: type = .type                                              ; type(i32)
+    ├ %13: i32 = .constant                                            ; int(25)
     └ %14: void = .ret maybe_operand=(%13)                            ; void
 
