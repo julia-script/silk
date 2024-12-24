@@ -754,55 +754,55 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
 //     });
 // }
 
-fn getTokenPrecedence(tag: Token.Tag) i8 {
+fn getTokenPrecedence(tag: Token.Tag) i32 {
     return switch (tag) {
         .equal => 0,
         // .colon => 0,
 
         // logical
-        .keyword_or => 1,
-        .keyword_and => 2,
+        .keyword_or => 10,
+        .keyword_and => 20,
         // bitwise
-        .pipe => 3,
-        .caret => 4,
-        .ampersand => 5,
+        .pipe => 30,
+        .caret => 40,
+        .ampersand => 50,
         // equality
-        .double_equal => 6,
-        .bang_equal => 6,
+        .double_equal => 60,
+        .bang_equal => 60,
         // relational
-        .l_angle_bracket => 7,
-        .l_angle_bracket_equal => 7,
-        .r_angle_bracket => 7,
-        .r_angle_bracket_equal => 7,
+        .l_angle_bracket => 70,
+        .l_angle_bracket_equal => 70,
+        .r_angle_bracket => 70,
+        .r_angle_bracket_equal => 70,
         // bitwise shift
-        .double_l_angle_bracket => 8,
-        .double_r_angle_bracket => 8,
+        .double_l_angle_bracket => 80,
+        .double_r_angle_bracket => 80,
         // additive
-        .plus => 9,
-        .minus => 9,
+        .plus => 90,
+        .minus => 90,
         // multiplicative
-        .star => 10,
-        .slash => 10,
-        .percent => 10,
+        .star => 100,
+        .slash => 100,
+        .percent => 100,
 
-        .double_star => 11,
+        .double_star => 110,
 
         // unary
-        .bang => 12,
-        .tilde => 12,
+        .bang => 120,
+        .tilde => 120,
         // .dot => 12,
 
         // .l_parenthesis => 13,
 
         .l_parenthesis,
         .l_brace,
-        => 13,
+        => 130,
 
-        .l_bracket, .dot, .colon => 14,
+        .l_bracket, .dot, .colon => 140,
         else => -1,
     };
 }
-fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) AstGenError!Node.Index {
+fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) AstGenError!Node.Index {
     const parse_id = self.tracer.beginEvent("AstGen.parseBinaryRhs", .{
         .snapshot = self.ast.nodes.items,
         .expression_precedence = expression_precedence,
@@ -828,28 +828,6 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
                 self.consumeToken();
             }
         }
-        // switch (token.tag) {
-        //     .double_plus, .double_minus => {
-        //         const _lhs = try self.parsePostfixUnary(lhs);
-        //         if (_lhs == 0) return _lhs;
-        //         lhs = _lhs;
-        //         continue;
-        //     },
-        //     .l_parenthesis => {
-        //         const _lhs = try self.parseFnCall(lhs);
-        //         if (_lhs == 0) return _lhs;
-        //         lhs = _lhs;
-        //         continue;
-        //     },
-        //     .colon => {
-        //         self.consumeToken();
-        //         const rhs = try self.parseExpression();
-        //         if (rhs == 0) return lhs;
-        //         lhs = try self.makeBinaryExpression(token, lhs, rhs);
-        //         continue;
-        //     },
-        //     else => {},
-        // }
 
         const tok_prec = getTokenPrecedence(token.tag);
 
