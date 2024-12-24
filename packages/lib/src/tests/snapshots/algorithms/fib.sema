@@ -52,11 +52,11 @@
     │     │           ├ %40: void = .param_set operand=(%1) payload=(%39); void
     │     │           └ %41: void = .br operand=(%18)                 ; void
     │     ├ %42: i32 = .load operand=(%9)                             ; exec_time
-    │     ├ %43: type = .type                                         ; type(i32)
-    │     ├ %44: type = .cast operand=(%42)                           ; exec_time
+    │     ├ !%43: type = .type                                        ; type(i32)
+    │     ├ %44: i32 = .cast operand=(%42)                            ; exec_time
     │     └ %45: void = .ret maybe_operand=(%44)                      ; void
     ├ %46: i32 = .load operand=(%4)                                   ; exec_time
-    ├ %47: type = .type                                               ; type(i32)
-    ├ %48: type = .cast operand=(%46)                                 ; exec_time
+    ├ !%47: type = .type                                              ; type(i32)
+    ├ %48: i32 = .cast operand=(%46)                                  ; exec_time
     └ %49: void = .ret maybe_operand=(%48)                            ; void
 

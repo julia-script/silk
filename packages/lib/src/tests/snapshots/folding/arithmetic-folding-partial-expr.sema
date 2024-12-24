@@ -27,7 +27,7 @@
     ├ !%15: number = .constant                                        ; float(18)
     ├ %16: i32 = .constant                                            ; int(18)
     ├ %17: i32 = .add lhs=(%10) rhs=(%16)                             ; exec_time
-    ├ %18: type = .type                                               ; type(i32)
-    ├ %19: type = .cast operand=(%17)                                 ; exec_time
+    ├ !%18: type = .type                                              ; type(i32)
+    ├ %19: i32 = .cast operand=(%17)                                  ; exec_time
     └ %20: void = .ret maybe_operand=(%19)                            ; void
 

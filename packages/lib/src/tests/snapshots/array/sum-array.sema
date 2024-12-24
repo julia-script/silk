@@ -73,7 +73,7 @@
     │           ├ %61: void = .store operand=(%33) payload=(%60)      ; void
     │           └ %62: void = .br operand=(%41)                       ; void
     ├ %63: i32 = .load operand=(%38)                                  ; exec_time
-    ├ %64: type = .type                                               ; type(i32)
-    ├ %65: type = .cast operand=(%63)                                 ; exec_time
+    ├ !%64: type = .type                                              ; type(i32)
+    ├ %65: i32 = .cast operand=(%63)                                  ; exec_time
     └ %66: void = .ret maybe_operand=(%65)                            ; void
 
