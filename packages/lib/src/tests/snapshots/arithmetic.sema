@@ -3,12 +3,12 @@
 ;; 3 entities
 ;; 1 symbols
 ;; 7 instructions
-;; 5 values
-;; 3 types
+;; 4 values
+;; 1 types
 ;; 0 lists
 ;; 5 strings
 
-%0 = @root::main() -> mod{ent{0}, {}}
+%0 = @root::main() -> i32
  └ %0: void = .block: [%1-%6]                                         ; void
     ├ %1: number = .constant                                          ; int(2)
     ├ %2: number = .constant                                          ; int(3)

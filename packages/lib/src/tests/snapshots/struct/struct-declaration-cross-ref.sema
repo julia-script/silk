@@ -3,12 +3,12 @@
 ;; 11 entities
 ;; 2 symbols
 ;; 25 instructions
-;; 6 values
-;; 7 types
+;; 5 values
+;; 5 types
 ;; 1 lists
 ;; 19 strings
 
-%0 = @root::main() -> mod{ent{0}, {}}
+%0 = @root::main() -> i32
  └ %0: void = .block: [%1-%21]                                        ; void
     ├ %1: type = .global_get declaration=(%1)                         ; type(mod{ent{4}, {i32, i32, i32}})
     ├ %2: *mod{ent{4}, {i32, i32, i32}} = .alloc type_inst=(%1) mutable=(false); exec_time

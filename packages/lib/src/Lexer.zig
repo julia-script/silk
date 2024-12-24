@@ -101,7 +101,7 @@ pub const Token = struct {
         keyword_interface,
         keyword_extends,
         keyword_implements,
-        keyword_as,
+        // keyword_as,
         keyword_in,
         keyword_of,
         keyword_is,

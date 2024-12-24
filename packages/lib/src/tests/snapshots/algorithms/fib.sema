@@ -3,12 +3,12 @@
 ;; 5 entities
 ;; 1 symbols
 ;; 46 instructions
-;; 5 values
-;; 4 types
+;; 4 values
+;; 2 types
 ;; 0 lists
 ;; 9 strings
 
-%0 = pub @root::fib() -> mod{ent{0}, {}}
+%0 = pub @root::fib() -> i32
  └ %0: void = .block: [%1-%45]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
     ├ %2: number = .constant                                          ; int(0)

@@ -104,20 +104,26 @@ pub const Type = struct {
     pub const Simple = enum {
         type,
         number,
+
         i8,
         i16,
         i32,
         i64,
+
         u8,
         u16,
         u32,
         u64,
         usize,
+
         f32,
         f64,
+
         bool,
         string,
         void,
+
+        builtin_fn_as,
     };
 
     pub fn simple(self: Simple) Key {
@@ -126,6 +132,7 @@ pub const Type = struct {
     pub fn complex(self: usize) Key {
         return .{ .complex = self };
     }
+
     pub const Data = union(enum) {
         module: struct {
             entity: Entity.Key,
@@ -239,6 +246,8 @@ pub const Value = struct {
         type_bool,
         type_string,
         type_void,
+
+        type_builtin_fn_as,
     };
     pub fn simple(self: Simple) Key {
         return .{ .simple = self };
@@ -352,6 +361,19 @@ pub const Instruction = struct {
         br,
         ret,
         get_element_pointer,
+
+        get_builtin_fn_as,
+
+        cast_promote,
+        cast_demote,
+        cast_extend,
+        cast_truncate,
+        cast_convert,
+        cast_wrap,
+        cast_reinterpret,
+
+        max,
+        min,
     };
 
     pub const Index = usize;

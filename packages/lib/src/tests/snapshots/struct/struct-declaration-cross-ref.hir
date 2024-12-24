@@ -20,20 +20,20 @@
     │  └ init: %4 = .block
     │     ├ %5 = global_get operand=(%2)
     │     ├ %6 = alloc mutable=(false), type=(%5)
-    │     ├ %7 = get_property_pointer base=(%6), property_name_node=(N[7])
-    │     ├ %8 = comptime_number node=(N[8])
+    │     ├ %7 = get_property_pointer base=(%6), property_name_node=(n[7:"a"]), is_builtin=(false)
+    │     ├ %8 = comptime_number node=(n[8:"1"])
     │     ├ %9 = store pointer=(%7), value=(%8)
-    │     ├ %10 = get_property_pointer base=(%6), property_name_node=(N[10])
-    │     ├ %11 = comptime_number node=(N[11])
+    │     ├ %10 = get_property_pointer base=(%6), property_name_node=(n[10:"b"]), is_builtin=(false)
+    │     ├ %11 = comptime_number node=(n[11:"2"])
     │     ├ %12 = store pointer=(%10), value=(%11)
-    │     ├ %13 = get_property_pointer base=(%6), property_name_node=(N[13])
-    │     ├ %14 = comptime_number node=(N[14])
+    │     ├ %13 = get_property_pointer base=(%6), property_name_node=(n[13:"c"]), is_builtin=(false)
+    │     ├ %14 = comptime_number node=(n[14:"3"])
     │     ├ %15 = store pointer=(%13), value=(%14)
     │     ├ %16 = load operand=(%6)
     │     ├ %17 = global_get operand=(%2)
     │     ├ %18 = alloc mutable=(false), type=(%17)
     │     ├ %19 = store pointer=(%18), value=(%16)
-    │     ├ %20 = get_property_pointer base=(%18), property_name_node=(N[19])
+    │     ├ %20 = get_property_pointer base=(%18), property_name_node=(n[19:"a"]), is_builtin=(false)
     │     ├ %21 = load operand=(%20)
     │     └ %22 = ret value=(21)
     └ 1: %2 = .global_decl
@@ -59,14 +59,14 @@
           │  │  │  ├ type: %32 = .ty_i32
           │  │  │  │  └ node: node(#30: "i32")
           │  │  │  └ init: %29 = .inline_block
-          │  │  │     ├ %30 = comptime_number node=(N[31])
+          │  │  │     ├ %30 = comptime_number node=(n[31:"2"])
           │  │  │     └ %31 = br operand=(30), target=(%29)
           │  │  └ 2: %33 = .struct_field
           │  │     ├ name_node: node(#33: "c")
           │  │     ├ type: %37 = .ty_i32
           │  │     │  └ node: node(#34: "i32")
           │  │     └ init: %34 = .inline_block
-          │  │        ├ %35 = comptime_number node=(N[35])
+          │  │        ├ %35 = comptime_number node=(n[35:"3"])
           │  │        └ %36 = br operand=(35), target=(%34)
           │  └ declarations_list: 0 items
           └ %38 = br operand=(25), target=(%24)

@@ -3,12 +3,12 @@
 ;; 13 entities
 ;; 2 symbols
 ;; 27 instructions
-;; 3 values
-;; 3 types
+;; 2 values
+;; 1 types
 ;; 0 lists
 ;; 19 strings
 
-%0 = @root::max() -> mod{ent{0}, {}}
+%0 = @root::max() -> i32
  └ %0: void = .block: [%1-%12]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
     ├ %2: i32 = .param                                                ; exec_time
@@ -24,7 +24,7 @@
           ├ %11: i32 = .param_get operand=(%2)                        ; exec_time
           └ %12: void = .ret maybe_operand=(%11)                      ; void
 
-%1 = @root::min() -> mod{ent{0}, {}}
+%1 = @root::min() -> i32
  └ %0: void = .block: [%1-%13]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
     ├ %2: i32 = .param                                                ; exec_time

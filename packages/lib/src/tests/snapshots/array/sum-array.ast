@@ -1,17 +1,17 @@
-;; 48 Nodes
-;; 72 Tokens
-;; 12 Interned Lists
+;; 52 Nodes
+;; 77 Tokens
+;; 13 Interned Lists
 
-%0 = .struct_decl - tok[0..72]
+%0 = .struct_decl - tok[0..77]
  └ members_list: 1 items
-    └ %47 = .fn_decl - tok[0..71]
+    └ %51 = .fn_decl - tok[0..76]
        ├ proto: %3 = .fn_proto - tok[1..5]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'sum_array'
        │  ├ params_list: 0 items
        │  └ ret_type: %2 = .ty_i32 - tok[5..5]
        │     └ token: .keyword_i32 'i32'
-       └ body: %46 = .block - tok[6..70]
+       └ body: %50 = .block - tok[6..75]
           └ list: 5 items
              ├ %16 = .const_decl - tok[7..27]
              │  ├ name: %4 = .identifier - tok[8..8]
@@ -50,36 +50,43 @@
              │  │  └ token: .keyword_i32 'i32'
              │  └ value: %23 = .number_literal - tok[40..40]
              │     └ token: .number_literal '0'
-             ├ %43 = .while_loop - tok[42..66]
-             │  ├ condition: %29 = .lt - tok[44..48]
+             ├ %47 = .while_loop - tok[42..71]
+             │  ├ condition: %33 = .lt - tok[44..53]
              │  │  ├ lhs: %25 = .identifier - tok[44..44]
              │  │  │  └ token: .identifier 'i'
-             │  │  └ rhs: %28 = .prop_access - tok[46..48]
-             │  │     ├ lhs: %26 = .identifier - tok[46..46]
-             │  │     │  └ token: .identifier 'arr'
-             │  │     └ rhs: %27 = .identifier - tok[48..48]
-             │  │        └ token: .identifier 'len'
-             │  └ body: %42 = .block - tok[50..66]
+             │  │  └ rhs: %32 = .fn_call - tok[46..53]
+             │  │     ├ callee: %30 = .builtin_prop_access - tok[46..50]
+             │  │     │  ├ lhs: %28 = .prop_access - tok[46..48]
+             │  │     │  │  ├ lhs: %26 = .identifier - tok[46..46]
+             │  │     │  │  │  └ token: .identifier 'arr'
+             │  │     │  │  └ rhs: %27 = .identifier - tok[48..48]
+             │  │     │  │     └ token: .identifier 'len'
+             │  │     │  └ rhs: %29 = .identifier - tok[50..50]
+             │  │     │     └ token: .identifier 'as'
+             │  │     └ args_list: 1 items
+             │  │        └ %31 = .ty_i32 - tok[52..52]
+             │  │           └ token: .keyword_i32 'i32'
+             │  └ body: %46 = .block - tok[55..71]
              │     └ list: 2 items
-             │        ├ %36 = .assign - tok[51..58]
-             │        │  ├ lhs: %30 = .identifier - tok[51..51]
+             │        ├ %40 = .assign - tok[56..63]
+             │        │  ├ lhs: %34 = .identifier - tok[56..56]
              │        │  │  └ token: .identifier 'sum'
-             │        │  └ rhs: %35 = .add - tok[53..58]
-             │        │     ├ lhs: %31 = .identifier - tok[53..53]
+             │        │  └ rhs: %39 = .add - tok[58..63]
+             │        │     ├ lhs: %35 = .identifier - tok[58..58]
              │        │     │  └ token: .identifier 'sum'
-             │        │     └ rhs: %34 = .array_prop_access - tok[55..58]
-             │        │        ├ lhs: %32 = .identifier - tok[55..55]
+             │        │     └ rhs: %38 = .array_prop_access - tok[60..63]
+             │        │        ├ lhs: %36 = .identifier - tok[60..60]
              │        │        │  └ token: .identifier 'arr'
-             │        │        └ rhs: %33 = .identifier - tok[57..57]
+             │        │        └ rhs: %37 = .identifier - tok[62..62]
              │        │           └ token: .identifier 'i'
-             │        └ %41 = .assign - tok[60..64]
-             │           ├ lhs: %37 = .identifier - tok[60..60]
+             │        └ %45 = .assign - tok[65..69]
+             │           ├ lhs: %41 = .identifier - tok[65..65]
              │           │  └ token: .identifier 'i'
-             │           └ rhs: %40 = .add - tok[62..64]
-             │              ├ lhs: %38 = .identifier - tok[62..62]
+             │           └ rhs: %44 = .add - tok[67..69]
+             │              ├ lhs: %42 = .identifier - tok[67..67]
              │              │  └ token: .identifier 'i'
-             │              └ rhs: %39 = .number_literal - tok[64..64]
+             │              └ rhs: %43 = .number_literal - tok[69..69]
              │                 └ token: .number_literal '1'
-             └ %45 = .ret_expression - tok[67..68]
-                └ node: %44 = .identifier - tok[68..68]
+             └ %49 = .ret_expression - tok[72..73]
+                └ node: %48 = .identifier - tok[73..73]
                    └ token: .identifier 'sum'

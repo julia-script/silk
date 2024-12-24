@@ -537,6 +537,48 @@ pub const Builder = struct {
 
         // return builder;
     }
+
+    pub fn isSigned(self: *Builder, type_key: Sema.Type.Key) bool {
+        _ = self; // autofix
+        switch (type_key) {
+            .simple => |simple| {
+                return switch (simple) {
+                    .number, .i8, .i16, .i32, .i64 => true,
+                    .u8, .u16, .u32, .u64, .usize => false,
+                    else => unreachable,
+                };
+            },
+            else => unreachable,
+        }
+    }
+
+    pub fn numberBits(self: *Builder, type_key: Sema.Type.Key) u8 {
+        _ = self; // autofix
+        switch (type_key) {
+            .simple => |simple| {
+                return switch (simple) {
+                    .i8, .u8 => 8,
+                    .i16, .u16 => 16,
+                    .i32, .u32 => 32,
+                    .i64, .u64 => 64,
+                    .usize => 64, // TODO: platform dependent
+                    .number => 64,
+                    else => unreachable,
+                };
+            },
+            else => unreachable,
+        }
+    }
+    pub fn isFloat(self: *Builder, type_key: Sema.Type.Key) bool {
+        _ = self; // autofix
+        switch (type_key) {
+            .simple => |simple| return switch (simple) {
+                .f32, .f64 => true,
+                else => false,
+            },
+            else => unreachable,
+        }
+    }
     pub fn collectRoot(self: *Builder) !void {
         // const root_entity = try Entity.init(self, Hir.Inst.RootIndex);
 
@@ -1047,7 +1089,7 @@ pub const Entity = struct {
         }
 
         if (builder.getEntityKeyByHirInst(fn_inst.return_type)) |ret_entity_key| {
-            data.return_type = ret_entity_key;
+            builder.getEntity(key).data.function_declaration.return_type = ret_entity_key;
         } else {
             const ret_entity_key = try builder.makeEntity(.{
                 .parent = key,
@@ -1055,7 +1097,7 @@ pub const Entity = struct {
                 .hir_inst_index = fn_inst.return_type,
                 .data = .{ .type = {} },
             });
-            data.return_type = ret_entity_key;
+            builder.getEntity(key).data.function_declaration.return_type = ret_entity_key;
         }
     }
     pub fn collectFieldSymbols(self: *Entity) Error!void {
@@ -2664,6 +2706,69 @@ const Block = struct {
         return index;
     }
 
+    pub fn handleBuiltinPropertyAccessInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "handleBuiltinPropertyAccessInstruction", "Block.handleBuiltinPropertyAccessInstruction({s})", .{
+                try formatHirIndex(self.builder.hir, hir_inst_index),
+            } },
+            .{
+                .before = self.scope.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.scope.instructions.items,
+        });
+        const base_hir_index = hir_inst.get_property_pointer.base;
+        const property_name_range = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
+        const property_name_slice = self.builder.getSlice(property_name_range);
+
+        const base_index = self.getInstructionIndex(base_hir_index);
+        const base_instruction = self.getInstruction(base_index);
+        if (self.builder.getType(base_instruction.type)) |base_type| {
+            std.debug.panic("todo {s}", .{@tagName(base_type.data)});
+            // switch (base_type.data) {
+
+            //     .array => |array_type| {
+            //         _ = array_type; // autofix
+            //     },
+            //     else => {},
+            // }
+        }
+
+        // var a: u16 = 0xabcd; // runtime-known
+        // _ = &a;
+        // const b: u8 = @intCast(a);
+        // _ = b; // autofix
+
+        switch (base_instruction.type.simple) {
+            .usize,
+            .i8,
+            .i16,
+            .i32,
+            .i64,
+            .u8,
+            .u16,
+            .u32,
+            .u64,
+            .f32,
+            .f64,
+            => {
+                if (std.mem.eql(u8, property_name_slice, "as")) {
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .get_builtin_fn_as,
+                        .type = Sema.Type.simple(.builtin_fn_as),
+                        .value = Sema.Value.simple(.type_builtin_fn_as),
+                        .data = .{ .operand = base_index },
+                    });
+                }
+                std.debug.panic("todo {s}", .{property_name_slice});
+            },
+            else => |tag| std.debug.panic("unhandled base type: {s}", .{@tagName(tag)}),
+        }
+        std.debug.panic("unhandled base type", .{});
+    }
     pub fn handleGetPropertyPointerInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
         const trace = self.builder.tracer.begin(
@@ -2678,6 +2783,10 @@ const Block = struct {
         defer trace.end(.{
             .instructions = self.scope.instructions.items,
         });
+        const is_builtin = hir_inst.get_property_pointer.is_builtin;
+        if (is_builtin) {
+            return try self.handleBuiltinPropertyAccessInstruction(hir_inst_index);
+        }
         const base_hir_index = hir_inst.get_property_pointer.base;
         const property_name_range = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
         const property_name_slice = self.builder.getSlice(property_name_range);
@@ -2764,6 +2873,151 @@ const Block = struct {
             } },
         });
     }
+    pub fn handleBuiltinCastCall(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+
+        const callee_inst_index = self.getInstructionIndex(hir_inst.fn_call.callee);
+        const callee_inst = self.getInstruction(callee_inst_index);
+        const lhs_inst_index = callee_inst.data.operand;
+        const lhs_inst = self.getInstruction(lhs_inst_index);
+        const args = self.builder.getHirList(hir_inst.fn_call.args_list);
+        if (args.len != 1) {
+            std.debug.panic("error: builtin_fn_as expects 1 type argument", .{});
+        }
+        const rhs_inst_index = self.getInstructionIndex(args[0]);
+        const rhs_inst = self.getInstruction(rhs_inst_index);
+        if (!rhs_inst.type.isEqualSimple(.type)) {
+            std.debug.panic("Error: builtin_fn_as expects a type argument, received {}", .{rhs_inst.type});
+        }
+
+        const rhs_type = self.builder.unwrapTypeValue(rhs_inst.value);
+        const lhs_type = lhs_inst.type;
+
+        if (lhs_type.isEqual(rhs_type)) {
+            std.debug.panic("error: unnecessary cast", .{});
+        }
+        const lhs_bits = self.builder.numberBits(lhs_type);
+        const rhs_bits = self.builder.numberBits(rhs_type);
+
+        const lhs_is_float = self.builder.isFloat(lhs_type);
+        const rhs_is_float = self.builder.isFloat(rhs_type);
+
+        if (lhs_is_float != rhs_is_float) {
+            // std.debug.panic("error: cannot cast {s} to {s}", .{ @tagName(lhs_type.simple), @tagName(rhs_type.simple) });
+            if (lhs_is_float) {
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .cast_truncate,
+                    .type = rhs_type,
+                    .value = lhs_inst.value,
+                    .data = .{ .operand = lhs_inst_index },
+                });
+            } else {
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .cast_convert,
+                    .type = rhs_type,
+                    .value = lhs_inst.value,
+                    .data = .{ .operand = lhs_inst_index },
+                });
+            }
+        }
+
+        switch (lhs_type.simple) {
+            .f32, .f64 => {
+                // const lhs_bits = self.builder.numberBits(lhs_type);
+                // const rhs_bits = self.builder.numberBits(rhs_type);
+                if (rhs_bits > lhs_bits) {
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .cast_promote,
+                        .type = rhs_type,
+                        .value = lhs_inst.value,
+                        .data = .{ .operand = lhs_inst_index },
+                    });
+                }
+
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .cast_demote,
+                    .type = rhs_type,
+                    .value = lhs_inst.value,
+                    .data = .{ .operand = lhs_inst_index },
+                });
+            },
+            .u8, .u16, .u32, .u64, .usize => {
+                // const lhs_bits = self.builder.numberBits(lhs_type);
+                // const rhs_bits = self.builder.numberBits(rhs_type);
+                const rhs_signed = self.builder.isSigned(rhs_type);
+                if (rhs_signed) {
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .cast_reinterpret,
+                        .type = rhs_type,
+                        .value = lhs_inst.value,
+                        .data = .{ .operand = lhs_inst_index },
+                    });
+                }
+                if (rhs_bits > lhs_bits) {
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .cast_extend,
+                        .type = rhs_type,
+                        .value = lhs_inst.value,
+                        .data = .{ .operand = lhs_inst_index },
+                    });
+                }
+
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .cast_wrap,
+                    .type = rhs_type,
+                    .value = lhs_inst.value,
+                    .data = .{ .operand = lhs_inst_index },
+                });
+            },
+
+            .i8, .i16, .i32, .i64 => {
+                // const lhs_bits = self.builder.numberBits(lhs_type);
+                // const rhs_bits = self.builder.numberBits(rhs_type);
+                const rhs_signed = self.builder.isSigned(rhs_type);
+                if (!rhs_signed) {
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .cast_reinterpret,
+                        .type = rhs_type,
+                        .value = lhs_inst.value,
+                        .data = .{ .operand = lhs_inst_index },
+                    });
+                }
+
+                if (rhs_bits > lhs_bits) {
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .cast_extend,
+                        .type = rhs_type,
+                        .value = lhs_inst.value,
+                        .data = .{ .operand = lhs_inst_index },
+                    });
+                }
+
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .cast_wrap,
+                    .type = rhs_type,
+                    .value = lhs_inst.value,
+                    .data = .{ .operand = lhs_inst_index },
+                });
+            },
+
+            // .number => {},
+            else => {
+                std.debug.panic("error: cannot cast {s} to {s}", .{ @tagName(lhs_type.simple), @tagName(rhs_type.simple) });
+            },
+        }
+
+        // const lhs_bits = self.builder.numberBits(lhs_type);
+        // _ = lhs_bits; // autofix
+        // const rhs_bits = self.builder.numberBits(rhs_type);
+        // _ = rhs_bits; // autofix
+
+        // const lhs_signed = self.builder.isSigned(lhs_type);
+        // _ = lhs_signed; // autofix
+        // const rhs_signed = self.builder.isSigned(rhs_type);
+        // _ = rhs_signed; // autofix
+
+        // std.debug.panic("unhandled callee type: {s}", .{@tagName(callee_instruction.type.simple)});
+    }
     pub fn handleFnCallInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
         const trace = self.builder.tracer.begin(
@@ -2781,14 +3035,66 @@ const Block = struct {
 
         const callee_inst = self.getInstructionIndex(hir_inst.fn_call.callee);
         const callee_instruction = self.getInstruction(callee_inst);
-        const callee_type = self.builder.getType(callee_instruction.type) orelse unreachable;
+
+        // switch (callee_instruction.type) {
+        //     .simple => |simple| switch (simple) {
+        //         .builtin_fn_as => {
+        //             const value = self.builder.getValue(callee_instruction.value) orelse unreachable;
+        //             const type_value = self.builder.unwrapTypeValue(value);
+        //             const type = self.builder.getType(type_value) orelse unreachable;
+        //             return try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .get_builtin_fn_as,
+        //                 .type = Sema.Type.simple(.builtin_fn_as),
+        //                 .value = Sema.Value.simple(.type_builtin_fn_as),
+        //                 .data = .{ .operand = callee_inst },
+        //             });
+        //         },
+        //         else => {},
+        //     },
+        //     else => {},
+        // }
+
+        const callee_type = self.builder.getType(callee_instruction.type) orelse {
+            switch (callee_instruction.type.simple) {
+                .builtin_fn_as => {
+                    return try self.handleBuiltinCastCall(hir_inst_index);
+                    // if (args.len != 1) {
+                    //     std.debug.panic("error: builtin_fn_as expects 1 type argument", .{});
+                    // }
+
+                    // const arg_inst = self.getInstruction(self.getInstructionIndex(args[0]));
+                    // const arg_type = self.builder.unwrapTypeValue(arg_inst.value);
+                    // const callee_type = callee_instruction.type;
+                    // if (callee_type.isEqual(arg_type)) {
+                    //     std.debug.panic("error: unnecessary cast", .{});
+                    // }
+
+                    // std.debug.panic("unhandled callee type: {s}", .{@tagName(callee_instruction.type.simple)});
+                },
+                else => {
+                    std.debug.panic("unhandled callee type: {s}", .{@tagName(callee_instruction.type.simple)});
+                },
+            }
+        };
+        const args = self.builder.getHirList(hir_inst.fn_call.args_list);
+
         const function = switch (callee_type.data) {
             .function => |fn_type| fn_type,
             else => std.debug.panic("error: trying to call non function type", .{}),
         };
+        const param_types = self.builder.lists.getSlice(function.params);
+        // const arg_types = function.
         var args_list = self.builder.newList();
-        for (self.builder.getHirList(hir_inst.fn_call.args_list)) |arg_inst| {
-            const arg_index = self.getInstructionIndex(arg_inst);
+        if (args.len != param_types.len) {
+            std.debug.panic("error: function has {d} params but {d} args were provided", .{ param_types.len, args.len });
+        }
+        for (args, param_types) |arg_hir_index, param_type_key| {
+            const arg_index = self.getInstructionIndex(arg_hir_index);
+            const param_type = Sema.Type.Key.decode(param_type_key);
+            const arg_inst = self.getInstruction(arg_index);
+            if (!arg_inst.type.isEqual(param_type)) {
+                std.debug.panic("error: argument type mismatch", .{});
+            }
             try args_list.append(arg_index);
         }
         return try self.pushInstruction(hir_inst_index, .{

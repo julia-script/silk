@@ -3,19 +3,19 @@
 ;; 5 entities
 ;; 2 symbols
 ;; 10 instructions
-;; 4 values
-;; 4 types
+;; 3 values
+;; 2 types
 ;; 0 lists
 ;; 8 strings
 
-%0 = pub @root::a() -> mod{ent{0}, {}}
+%0 = pub @root::a() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
     ├ %1: todo(function) = .global_get declaration=(%1)               ; exec_time
     ├ %2: type = .typeof operand=(%1)                                 ; type(todo(function))
     ├ %3: *todo(function) = .alloc type_inst=(%2) mutable=(false)     ; exec_time
     └ %4: void = .store operand=(%3) payload=(%1)                     ; void
 
-%1 = pub @root::b() -> mod{ent{0}, {}}
+%1 = pub @root::b() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
     ├ %1: todo(function) = .global_get declaration=(%0)               ; exec_time
     ├ %2: type = .typeof operand=(%1)                                 ; type(todo(function))

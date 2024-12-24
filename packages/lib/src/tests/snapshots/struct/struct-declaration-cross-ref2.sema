@@ -1,73 +1,95 @@
 ;; Sema
 ;; 4 declarations
-;; 24 entities
+;; 21 entities
 ;; 4 symbols
-;; 61 instructions
-;; 11 values
-;; 10 types
-;; 2 lists
-;; 37 strings
+;; 83 instructions
+;; 10 values
+;; 8 types
+;; 1 lists
+;; 34 strings
 
 %0 = type @root::A = mod{ent{3}, {usize, i32, i32}}
 
 %1 = type @root::B = mod{ent{11}, {usize, i32, i32}}
 
-%2 = pub @root::A::mod::foo() -> mod{ent{0}, {}}
- └ %0: void = .block: [%1-%39]                                        ; void
-    ├ %1: i32 = .param                                                ; exec_time
-    ├ %2: mod{ent{3}, {usize, i32, i32}} = .param                     ; exec_time
-    ├ %3: type = .global_get declaration=(%1)                         ; type(mod{ent{11}, {usize, i32, i32}})
-    ├ %4: *mod{ent{11}, {usize, i32, i32}} = .alloc type_inst=(%3) mutable=(false); exec_time
-    ├ %5: *usize = .get_element_pointer base=(%4) index=(0)           ; exec_time
-    ├ %6: number = .constant                                          ; int(4)
-    ├ %7: usize = .cast operand=(%6)                                  ; int(4)
-    ├ %8: void = .store operand=(%5) payload=(%7)                     ; void
-    ├ %9: *i32 = .get_element_pointer base=(%4) index=(1)             ; exec_time
-    ├ %10: number = .constant                                         ; int(5)
-    ├ %11: i32 = .cast operand=(%10)                                  ; int(5)
-    ├ %12: void = .store operand=(%9) payload=(%11)                   ; void
-    ├ %13: *i32 = .get_element_pointer base=(%4) index=(2)            ; exec_time
-    ├ %14: number = .constant                                         ; int(6)
-    ├ %15: i32 = .cast operand=(%14)                                  ; int(6)
-    ├ %16: void = .store operand=(%13) payload=(%15)                  ; void
-    ├ %17: mod{ent{11}, {usize, i32, i32}} = .load operand=(%4)       ; exec_time
-    ├ %18: type = .global_get declaration=(%1)                        ; type(mod{ent{11}, {usize, i32, i32}})
-    ├ %19: *mod{ent{11}, {usize, i32, i32}} = .alloc type_inst=(%18) mutable=(false); exec_time
-    ├ %20: void = .store operand=(%19) payload=(%17)                  ; void
-    ├ %21: type = .global_get declaration=(%0)                        ; type(mod{ent{3}, {usize, i32, i32}})
-    ├ %22: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%21) mutable=(false); exec_time
-    ├ %23: *usize = .get_element_pointer base=(%22) index=(0)         ; exec_time
-    ├ %24: number = .constant                                         ; int(1)
-    ├ %25: usize = .cast operand=(%24)                                ; int(1)
-    ├ %26: void = .store operand=(%23) payload=(%25)                  ; void
-    ├ %27: *i32 = .get_element_pointer base=(%22) index=(1)           ; exec_time
-    ├ %28: number = .constant                                         ; int(2)
-    ├ %29: i32 = .cast operand=(%28)                                  ; int(2)
-    ├ %30: void = .store operand=(%27) payload=(%29)                  ; void
-    ├ %31: *i32 = .get_element_pointer base=(%22) index=(2)           ; exec_time
-    ├ %32: number = .constant                                         ; int(3)
-    ├ %33: i32 = .cast operand=(%32)                                  ; int(3)
-    ├ %34: void = .store operand=(%31) payload=(%33)                  ; void
-    ├ %35: mod{ent{3}, {usize, i32, i32}} = .load operand=(%22)       ; exec_time
-    ├ %36: type = .global_get declaration=(%0)                        ; type(mod{ent{3}, {usize, i32, i32}})
-    ├ %37: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%36) mutable=(false); exec_time
-    ├ %38: void = .store operand=(%37) payload=(%35)                  ; void
-    └ %39: todo(function) = .global_get declaration=(%3)              ; exec_time
+%2 = pub @root::A::mod::foo() -> void
+ └ %0: void = .block: [%1-%37]                                        ; void
+    ├ %1: type = .global_get declaration=(%1)                         ; type(mod{ent{11}, {usize, i32, i32}})
+    ├ %2: *mod{ent{11}, {usize, i32, i32}} = .alloc type_inst=(%1) mutable=(false); exec_time
+    ├ %3: *usize = .get_element_pointer base=(%2) index=(0)           ; exec_time
+    ├ %4: number = .constant                                          ; int(4)
+    ├ %5: usize = .cast operand=(%4)                                  ; int(4)
+    ├ %6: void = .store operand=(%3) payload=(%5)                     ; void
+    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; exec_time
+    ├ %8: number = .constant                                          ; int(5)
+    ├ %9: i32 = .cast operand=(%8)                                    ; int(5)
+    ├ %10: void = .store operand=(%7) payload=(%9)                    ; void
+    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; exec_time
+    ├ %12: number = .constant                                         ; int(6)
+    ├ %13: i32 = .cast operand=(%12)                                  ; int(6)
+    ├ %14: void = .store operand=(%11) payload=(%13)                  ; void
+    ├ %15: mod{ent{11}, {usize, i32, i32}} = .load operand=(%2)       ; exec_time
+    ├ %16: type = .global_get declaration=(%1)                        ; type(mod{ent{11}, {usize, i32, i32}})
+    ├ %17: *mod{ent{11}, {usize, i32, i32}} = .alloc type_inst=(%16) mutable=(false); exec_time
+    ├ %18: void = .store operand=(%17) payload=(%15)                  ; void
+    ├ %19: type = .global_get declaration=(%0)                        ; type(mod{ent{3}, {usize, i32, i32}})
+    ├ %20: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%19) mutable=(false); exec_time
+    ├ %21: *usize = .get_element_pointer base=(%20) index=(0)         ; exec_time
+    ├ %22: number = .constant                                         ; int(1)
+    ├ %23: usize = .cast operand=(%22)                                ; int(1)
+    ├ %24: void = .store operand=(%21) payload=(%23)                  ; void
+    ├ %25: *i32 = .get_element_pointer base=(%20) index=(1)           ; exec_time
+    ├ %26: number = .constant                                         ; int(2)
+    ├ %27: i32 = .cast operand=(%26)                                  ; int(2)
+    ├ %28: void = .store operand=(%25) payload=(%27)                  ; void
+    ├ %29: *i32 = .get_element_pointer base=(%20) index=(2)           ; exec_time
+    ├ %30: number = .constant                                         ; int(3)
+    ├ %31: i32 = .cast operand=(%30)                                  ; int(3)
+    ├ %32: void = .store operand=(%29) payload=(%31)                  ; void
+    ├ %33: mod{ent{3}, {usize, i32, i32}} = .load operand=(%20)       ; exec_time
+    ├ %34: type = .global_get declaration=(%0)                        ; type(mod{ent{3}, {usize, i32, i32}})
+    ├ %35: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%34) mutable=(false); exec_time
+    ├ %36: void = .store operand=(%35) payload=(%33)                  ; void
+    └ %37: todo(function) = .global_get declaration=(%3)              ; exec_time
 
-%3 = pub @root::B::mod::bar() -> mod{ent{0}, {}}
- └ %0: void = .block: [%1-%14]                                        ; void
+%3 = pub @root::B::mod::bar() -> void
+ └ %0: void = .block: [%1-%38]                                        ; void
     ├ %1: type = .global_get declaration=(%0)                         ; type(mod{ent{3}, {usize, i32, i32}})
     ├ %2: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%1) mutable=(false); exec_time
     ├ %3: *usize = .get_element_pointer base=(%2) index=(0)           ; exec_time
     ├ %4: number = .constant                                          ; int(1)
     ├ %5: usize = .cast operand=(%4)                                  ; int(1)
     ├ %6: void = .store operand=(%3) payload=(%5)                     ; void
-    ├ %7: mod{ent{3}, {usize, i32, i32}} = .load operand=(%2)         ; exec_time
-    ├ %8: type = .global_get declaration=(%0)                         ; type(mod{ent{3}, {usize, i32, i32}})
-    ├ %9: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%8) mutable=(false); exec_time
-    ├ %10: void = .store operand=(%9) payload=(%7)                    ; void
-    ├ %11: todo(function) = .global_get declaration=(%2)              ; exec_time
-    ├ %12: *usize = .get_element_pointer base=(%9) index=(0)          ; exec_time
-    ├ %13: usize = .load operand=(%12)                                ; exec_time
-    └ %14: mod{ent{0}, {}} = .fn_call callee=(%11) args_list=(interned-lists.InternedLists(usize).Range{ .start = 3, .len = 1 }); exec_time
+    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; exec_time
+    ├ %8: number = .constant                                          ; int(2)
+    ├ %9: i32 = .cast operand=(%8)                                    ; int(2)
+    ├ %10: void = .store operand=(%7) payload=(%9)                    ; void
+    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; exec_time
+    ├ %12: number = .constant                                         ; int(3)
+    ├ %13: i32 = .cast operand=(%12)                                  ; int(3)
+    ├ %14: void = .store operand=(%11) payload=(%13)                  ; void
+    ├ %15: mod{ent{3}, {usize, i32, i32}} = .load operand=(%2)        ; exec_time
+    ├ %16: type = .global_get declaration=(%0)                        ; type(mod{ent{3}, {usize, i32, i32}})
+    ├ %17: *mod{ent{3}, {usize, i32, i32}} = .alloc type_inst=(%16) mutable=(false); exec_time
+    ├ %18: void = .store operand=(%17) payload=(%15)                  ; void
+    ├ %19: type = .global_get declaration=(%1)                        ; type(mod{ent{11}, {usize, i32, i32}})
+    ├ %20: *mod{ent{11}, {usize, i32, i32}} = .alloc type_inst=(%19) mutable=(false); exec_time
+    ├ %21: *usize = .get_element_pointer base=(%20) index=(0)         ; exec_time
+    ├ %22: number = .constant                                         ; int(4)
+    ├ %23: usize = .cast operand=(%22)                                ; int(4)
+    ├ %24: void = .store operand=(%21) payload=(%23)                  ; void
+    ├ %25: *i32 = .get_element_pointer base=(%20) index=(1)           ; exec_time
+    ├ %26: number = .constant                                         ; int(5)
+    ├ %27: i32 = .cast operand=(%26)                                  ; int(5)
+    ├ %28: void = .store operand=(%25) payload=(%27)                  ; void
+    ├ %29: *i32 = .get_element_pointer base=(%20) index=(2)           ; exec_time
+    ├ %30: number = .constant                                         ; int(6)
+    ├ %31: i32 = .cast operand=(%30)                                  ; int(6)
+    ├ %32: void = .store operand=(%29) payload=(%31)                  ; void
+    ├ %33: mod{ent{11}, {usize, i32, i32}} = .load operand=(%20)      ; exec_time
+    ├ %34: type = .global_get declaration=(%1)                        ; type(mod{ent{11}, {usize, i32, i32}})
+    ├ %35: *mod{ent{11}, {usize, i32, i32}} = .alloc type_inst=(%34) mutable=(false); exec_time
+    ├ %36: void = .store operand=(%35) payload=(%33)                  ; void
+    ├ %37: todo(function) = .global_get declaration=(%2)              ; exec_time
+    └ %38: void = .fn_call callee=(%37) args_list=(interned-lists.InternedLists(usize).Range{ .start = 0, .len = 0 }); exec_time
 

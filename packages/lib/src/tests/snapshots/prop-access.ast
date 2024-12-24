@@ -1,0 +1,17 @@
+;; 7 Nodes
+;; 10 Tokens
+;; 2 Interned Lists
+
+%0 = .struct_decl - tok[0..10]
+ └ members_list: 1 items
+    └ %6 = .fn_decl - tok[0..9]
+       ├ proto: %3 = .fn_proto - tok[1..5]
+       │  ├ name: %1 = .identifier - tok[1..1]
+       │  │  └ token: .identifier 'main'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %2 = .ty_void - tok[5..5]
+       │     └ token: .keyword_void 'void'
+       └ body: %5 = .block - tok[6..8]
+          └ list: 1 items
+             └ %4 = .comment_line - tok[7..8]
+                └ token: .comment '// return a.b:as(usize)'

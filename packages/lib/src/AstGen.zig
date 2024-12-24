@@ -287,36 +287,6 @@ pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
 
     if (lhs == 0) return 0;
 
-    // var tok = self.peekToken() orelse return lhs;
-    // while (switch (tok.tag) {
-    //     .dot => true,
-    //     .l_parenthesis => true,
-    //     .l_brace => true,
-    //     .l_bracket => true,
-    //     else => false,
-    // } and lhs != 0) {
-    //     switch (tok.tag) {
-    //         .dot => {
-    //             lhs = try self.parsePropertyAccess(lhs);
-    //         },
-    //         .l_parenthesis => {
-    //             lhs = try self.parseFunctionCall(lhs);
-    //         },
-    //         .l_brace => {
-    //             lhs = try self.parseTypeInit(lhs);
-    //         },
-    //         .l_bracket => {
-    //             lhs = try self.parseArrayPropertyAccess(lhs);
-    //         },
-    //         else => unreachable,
-    //     }
-    //     if (self.peekToken()) |token| {
-    //         tok = token;
-    //     } else {
-    //         break;
-    //     }
-    // }
-
     self.logger.log("parse RHS", .{}, null);
     const expr = try self.parseBinaryRhs(0, lhs);
     return expr;
@@ -330,16 +300,20 @@ fn parsePropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
     defer self.tracer.endEvent(parse_id, "AstGen.parsePropertyAccess", .{
         .lhs = lhs,
     });
+    std.debug.print("parse prop access {s}\n", .{@tagName(self.peekToken().?.tag)});
     self.logger.log("parse prop access", .{}, null);
+    const is_builtin = self.tokenIs(.colon);
     self.consumeToken();
     const start_token = self.ast.nodes.items[lhs].start_token;
+    const rhs = try self.parsePrimary();
     return try self.pushNode(.{
-        .data = .{
-            .prop_access = .{
-                .lhs = lhs,
-                .rhs = try self.parsePrimary(),
-            },
-        },
+        .data = if (is_builtin) .{ .builtin_prop_access = .{
+            .lhs = lhs,
+            .rhs = rhs,
+        } } else .{ .prop_access = .{
+            .lhs = lhs,
+            .rhs = rhs,
+        } },
         .start_token = start_token,
         .end_token = self.token_index - 1,
     });
@@ -824,7 +798,7 @@ fn getTokenPrecedence(tag: Token.Tag) i8 {
         .l_brace,
         => 13,
 
-        .l_bracket, .dot => 14,
+        .l_bracket, .dot, .colon => 14,
         else => -1,
     };
 }
@@ -887,7 +861,7 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i8, lhs_: Node.Index) As
         }, null);
 
         switch (token.tag) {
-            .dot => {
+            .dot, .colon => {
                 lhs = try self.parsePropertyAccess(lhs);
                 continue;
             },

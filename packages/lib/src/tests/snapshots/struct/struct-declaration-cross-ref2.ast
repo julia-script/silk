@@ -1,14 +1,14 @@
-;; 98 Nodes
-;; 142 Tokens
-;; 30 Interned Lists
+;; 104 Nodes
+;; 153 Tokens
+;; 28 Interned Lists
 
-%0 = .struct_decl - tok[0..142]
+%0 = .struct_decl - tok[0..153]
  └ members_list: 2 items
-    ├ %57 = .type_decl - tok[0..81]
+    ├ %51 = .type_decl - tok[0..74]
     │  ├ name: %1 = .identifier - tok[1..1]
     │  │  └ token: .identifier 'A'
     │  ├ type: NONE
-    │  └ value: %2 = .struct_decl - tok[3..81]
+    │  └ value: %2 = .struct_decl - tok[3..74]
     │     └ members_list: 4 items
     │        ├ %5 = .struct_field - tok[6..8]
     │        │  ├ name: %3 = .identifier - tok[5..5]
@@ -30,148 +30,157 @@
     │        │  │  └ token: .keyword_i32 'i32'
     │        │  └ default_value: %12 = .number_literal - tok[19..19]
     │        │     └ token: .number_literal '3'
-    │        └ %56 = .pub - tok[21..81]
-    │           └ node: %55 = .fn_decl - tok[22..81]
-    │              ├ proto: %22 = .fn_proto - tok[23..34]
+    │        └ %50 = .pub - tok[21..74]
+    │           └ node: %49 = .fn_decl - tok[22..74]
+    │              ├ proto: %16 = .fn_proto - tok[23..27]
     │              │  ├ name: %14 = .identifier - tok[23..23]
     │              │  │  └ token: .identifier 'foo'
-    │              │  ├ params_list: 2 items
-    │              │  │  ├ %15 = .fn_param - tok[25..27]
-    │              │  │  │  ├ name: %16 = .identifier - tok[25..25]
-    │              │  │  │  │  └ token: .identifier 'd'
-    │              │  │  │  └ type: %17 = .ty_i32 - tok[27..27]
-    │              │  │  │     └ token: .keyword_i32 'i32'
-    │              │  │  └ %18 = .fn_param - tok[29..31]
-    │              │  │     ├ name: %19 = .identifier - tok[29..29]
-    │              │  │     │  └ token: .identifier 'c'
-    │              │  │     └ type: %20 = .identifier - tok[31..31]
-    │              │  │        └ token: .identifier 'A'
-    │              │  └ ret_type: %21 = .ty_void - tok[34..34]
+    │              │  ├ params_list: 0 items
+    │              │  └ ret_type: %15 = .ty_void - tok[27..27]
     │              │     └ token: .keyword_void 'void'
-    │              └ body: %54 = .block - tok[35..80]
+    │              └ body: %48 = .block - tok[28..73]
     │                 └ list: 3 items
-    │                    ├ %36 = .const_decl - tok[36..55]
-    │                    │  ├ name: %23 = .identifier - tok[37..37]
+    │                    ├ %30 = .const_decl - tok[29..48]
+    │                    │  ├ name: %17 = .identifier - tok[30..30]
     │                    │  │  └ token: .identifier 'b'
-    │                    │  ├ type: %24 = .identifier - tok[39..39]
+    │                    │  ├ type: %18 = .identifier - tok[32..32]
     │                    │  │  └ token: .identifier 'B'
-    │                    │  └ value: %35 = .type_init - tok[41..56]
-    │                    │     ├ type: %25 = .identifier - tok[41..41]
+    │                    │  └ value: %29 = .type_init - tok[34..49]
+    │                    │     ├ type: %19 = .identifier - tok[34..34]
     │                    │     │  └ token: .identifier 'B'
     │                    │     └ field_init_list: 3 items
-    │                    │        ├ %28 = .field_init - tok[43..45]
-    │                    │        │  ├ name: %26 = .identifier - tok[43..43]
+    │                    │        ├ %22 = .field_init - tok[36..38]
+    │                    │        │  ├ name: %20 = .identifier - tok[36..36]
     │                    │        │  │  └ token: .identifier 'd'
-    │                    │        │  └ value: %27 = .number_literal - tok[45..45]
+    │                    │        │  └ value: %21 = .number_literal - tok[38..38]
     │                    │        │     └ token: .number_literal '4'
-    │                    │        ├ %31 = .field_init - tok[47..49]
-    │                    │        │  ├ name: %29 = .identifier - tok[47..47]
+    │                    │        ├ %25 = .field_init - tok[40..42]
+    │                    │        │  ├ name: %23 = .identifier - tok[40..40]
     │                    │        │  │  └ token: .identifier 'e'
-    │                    │        │  └ value: %30 = .number_literal - tok[49..49]
+    │                    │        │  └ value: %24 = .number_literal - tok[42..42]
     │                    │        │     └ token: .number_literal '5'
-    │                    │        └ %34 = .field_init - tok[51..53]
-    │                    │           ├ name: %32 = .identifier - tok[51..51]
+    │                    │        └ %28 = .field_init - tok[44..46]
+    │                    │           ├ name: %26 = .identifier - tok[44..44]
     │                    │           │  └ token: .identifier 'f'
-    │                    │           └ value: %33 = .number_literal - tok[53..53]
+    │                    │           └ value: %27 = .number_literal - tok[46..46]
     │                    │              └ token: .number_literal '6'
-    │                    ├ %50 = .const_decl - tok[56..75]
-    │                    │  ├ name: %37 = .identifier - tok[57..57]
+    │                    ├ %44 = .const_decl - tok[49..68]
+    │                    │  ├ name: %31 = .identifier - tok[50..50]
     │                    │  │  └ token: .identifier 'a'
-    │                    │  ├ type: %38 = .identifier - tok[59..59]
+    │                    │  ├ type: %32 = .identifier - tok[52..52]
     │                    │  │  └ token: .identifier 'A'
-    │                    │  └ value: %49 = .type_init - tok[61..76]
-    │                    │     ├ type: %39 = .identifier - tok[61..61]
+    │                    │  └ value: %43 = .type_init - tok[54..69]
+    │                    │     ├ type: %33 = .identifier - tok[54..54]
     │                    │     │  └ token: .identifier 'A'
     │                    │     └ field_init_list: 3 items
-    │                    │        ├ %42 = .field_init - tok[63..65]
-    │                    │        │  ├ name: %40 = .identifier - tok[63..63]
+    │                    │        ├ %36 = .field_init - tok[56..58]
+    │                    │        │  ├ name: %34 = .identifier - tok[56..56]
     │                    │        │  │  └ token: .identifier 'a'
-    │                    │        │  └ value: %41 = .number_literal - tok[65..65]
+    │                    │        │  └ value: %35 = .number_literal - tok[58..58]
     │                    │        │     └ token: .number_literal '1'
-    │                    │        ├ %45 = .field_init - tok[67..69]
-    │                    │        │  ├ name: %43 = .identifier - tok[67..67]
+    │                    │        ├ %39 = .field_init - tok[60..62]
+    │                    │        │  ├ name: %37 = .identifier - tok[60..60]
     │                    │        │  │  └ token: .identifier 'b'
-    │                    │        │  └ value: %44 = .number_literal - tok[69..69]
+    │                    │        │  └ value: %38 = .number_literal - tok[62..62]
     │                    │        │     └ token: .number_literal '2'
-    │                    │        └ %48 = .field_init - tok[71..73]
-    │                    │           ├ name: %46 = .identifier - tok[71..71]
+    │                    │        └ %42 = .field_init - tok[64..66]
+    │                    │           ├ name: %40 = .identifier - tok[64..64]
     │                    │           │  └ token: .identifier 'c'
-    │                    │           └ value: %47 = .number_literal - tok[73..73]
+    │                    │           └ value: %41 = .number_literal - tok[66..66]
     │                    │              └ token: .number_literal '3'
-    │                    └ %53 = .prop_access - tok[76..78]
-    │                       ├ lhs: %51 = .identifier - tok[76..76]
+    │                    └ %47 = .prop_access - tok[69..71]
+    │                       ├ lhs: %45 = .identifier - tok[69..69]
     │                       │  └ token: .identifier 'B'
-    │                       └ rhs: %52 = .identifier - tok[78..78]
+    │                       └ rhs: %46 = .identifier - tok[71..71]
     │                          └ token: .identifier 'bar'
-    └ %97 = .type_decl - tok[82..140]
-       ├ name: %58 = .identifier - tok[83..83]
+    └ %103 = .type_decl - tok[75..151]
+       ├ name: %52 = .identifier - tok[76..76]
        │  └ token: .identifier 'B'
        ├ type: NONE
-       └ value: %59 = .struct_decl - tok[85..140]
+       └ value: %53 = .struct_decl - tok[78..151]
           └ members_list: 4 items
-             ├ %62 = .struct_field - tok[88..90]
-             │  ├ name: %60 = .identifier - tok[87..87]
+             ├ %56 = .struct_field - tok[81..83]
+             │  ├ name: %54 = .identifier - tok[80..80]
              │  │  └ token: .identifier 'd'
-             │  ├ type: %61 = .ty_usize - tok[89..89]
+             │  ├ type: %55 = .ty_usize - tok[82..82]
              │  │  └ token: .keyword_usize 'usize'
              │  └ default_value: NONE
-             ├ %66 = .struct_field - tok[92..96]
-             │  ├ name: %63 = .identifier - tok[91..91]
+             ├ %60 = .struct_field - tok[85..89]
+             │  ├ name: %57 = .identifier - tok[84..84]
              │  │  └ token: .identifier 'e'
-             │  ├ type: %64 = .ty_i32 - tok[93..93]
+             │  ├ type: %58 = .ty_i32 - tok[86..86]
              │  │  └ token: .keyword_i32 'i32'
-             │  └ default_value: %65 = .number_literal - tok[95..95]
+             │  └ default_value: %59 = .number_literal - tok[88..88]
              │     └ token: .number_literal '2'
-             ├ %70 = .struct_field - tok[98..102]
-             │  ├ name: %67 = .identifier - tok[97..97]
+             ├ %64 = .struct_field - tok[91..95]
+             │  ├ name: %61 = .identifier - tok[90..90]
              │  │  └ token: .identifier 'f'
-             │  ├ type: %68 = .ty_i32 - tok[99..99]
+             │  ├ type: %62 = .ty_i32 - tok[92..92]
              │  │  └ token: .keyword_i32 'i32'
-             │  └ default_value: %69 = .number_literal - tok[101..101]
+             │  └ default_value: %63 = .number_literal - tok[94..94]
              │     └ token: .number_literal '3'
-             └ %96 = .pub - tok[103..140]
-                └ node: %95 = .fn_decl - tok[104..140]
-                   ├ proto: %73 = .fn_proto - tok[105..109]
-                   │  ├ name: %71 = .identifier - tok[105..105]
+             └ %102 = .pub - tok[96..151]
+                └ node: %101 = .fn_decl - tok[97..151]
+                   ├ proto: %67 = .fn_proto - tok[98..102]
+                   │  ├ name: %65 = .identifier - tok[98..98]
                    │  │  └ token: .identifier 'bar'
                    │  ├ params_list: 0 items
-                   │  └ ret_type: %72 = .ty_void - tok[109..109]
+                   │  └ ret_type: %66 = .ty_void - tok[102..102]
                    │     └ token: .keyword_void 'void'
-                   └ body: %94 = .block - tok[110..139]
-                      └ list: 7 items
-                         ├ %81 = .const_decl - tok[111..124]
-                         │  ├ name: %74 = .identifier - tok[112..112]
+                   └ body: %100 = .block - tok[103..150]
+                      └ list: 3 items
+                         ├ %81 = .const_decl - tok[104..123]
+                         │  ├ name: %68 = .identifier - tok[105..105]
                          │  │  └ token: .identifier 'a'
-                         │  ├ type: %75 = .identifier - tok[114..114]
+                         │  ├ type: %69 = .identifier - tok[107..107]
                          │  │  └ token: .identifier 'A'
-                         │  └ value: %80 = .type_init - tok[116..125]
-                         │     ├ type: %76 = .identifier - tok[116..116]
+                         │  └ value: %80 = .type_init - tok[109..124]
+                         │     ├ type: %70 = .identifier - tok[109..109]
                          │     │  └ token: .identifier 'A'
-                         │     └ field_init_list: 1 items
-                         │        └ %79 = .field_init - tok[118..120]
-                         │           ├ name: %77 = .identifier - tok[118..118]
-                         │           │  └ token: .identifier 'a'
-                         │           └ value: %78 = .number_literal - tok[120..120]
-                         │              └ token: .number_literal '1'
-                         ├ %82 = .comment_line - tok[125..126]
-                         │  └ token: .comment '// const b: B = B{'
-                         ├ %83 = .comment_line - tok[126..127]
-                         │  └ token: .comment '//   d = 4,'
-                         ├ %84 = .comment_line - tok[127..128]
-                         │  └ token: .comment '//   e = 5,'
-                         ├ %85 = .comment_line - tok[128..129]
-                         │  └ token: .comment '//   f = 6,'
-                         ├ %86 = .comment_line - tok[129..130]
-                         │  └ token: .comment '// }'
-                         └ %93 = .fn_call - tok[130..137]
-                            ├ callee: %89 = .prop_access - tok[130..132]
-                            │  ├ lhs: %87 = .identifier - tok[130..130]
+                         │     └ field_init_list: 3 items
+                         │        ├ %73 = .field_init - tok[111..113]
+                         │        │  ├ name: %71 = .identifier - tok[111..111]
+                         │        │  │  └ token: .identifier 'a'
+                         │        │  └ value: %72 = .number_literal - tok[113..113]
+                         │        │     └ token: .number_literal '1'
+                         │        ├ %76 = .field_init - tok[115..117]
+                         │        │  ├ name: %74 = .identifier - tok[115..115]
+                         │        │  │  └ token: .identifier 'b'
+                         │        │  └ value: %75 = .number_literal - tok[117..117]
+                         │        │     └ token: .number_literal '2'
+                         │        └ %79 = .field_init - tok[119..121]
+                         │           ├ name: %77 = .identifier - tok[119..119]
+                         │           │  └ token: .identifier 'c'
+                         │           └ value: %78 = .number_literal - tok[121..121]
+                         │              └ token: .number_literal '3'
+                         ├ %95 = .const_decl - tok[124..143]
+                         │  ├ name: %82 = .identifier - tok[125..125]
+                         │  │  └ token: .identifier 'b'
+                         │  ├ type: %83 = .identifier - tok[127..127]
+                         │  │  └ token: .identifier 'B'
+                         │  └ value: %94 = .type_init - tok[129..144]
+                         │     ├ type: %84 = .identifier - tok[129..129]
+                         │     │  └ token: .identifier 'B'
+                         │     └ field_init_list: 3 items
+                         │        ├ %87 = .field_init - tok[131..133]
+                         │        │  ├ name: %85 = .identifier - tok[131..131]
+                         │        │  │  └ token: .identifier 'd'
+                         │        │  └ value: %86 = .number_literal - tok[133..133]
+                         │        │     └ token: .number_literal '4'
+                         │        ├ %90 = .field_init - tok[135..137]
+                         │        │  ├ name: %88 = .identifier - tok[135..135]
+                         │        │  │  └ token: .identifier 'e'
+                         │        │  └ value: %89 = .number_literal - tok[137..137]
+                         │        │     └ token: .number_literal '5'
+                         │        └ %93 = .field_init - tok[139..141]
+                         │           ├ name: %91 = .identifier - tok[139..139]
+                         │           │  └ token: .identifier 'f'
+                         │           └ value: %92 = .number_literal - tok[141..141]
+                         │              └ token: .number_literal '6'
+                         └ %99 = .fn_call - tok[144..148]
+                            ├ callee: %98 = .prop_access - tok[144..146]
+                            │  ├ lhs: %96 = .identifier - tok[144..144]
                             │  │  └ token: .identifier 'a'
-                            │  └ rhs: %88 = .identifier - tok[132..132]
+                            │  └ rhs: %97 = .identifier - tok[146..146]
                             │     └ token: .identifier 'foo'
-                            └ args_list: 1 items
-                               └ %92 = .prop_access - tok[134..136]
-                                  ├ lhs: %90 = .identifier - tok[134..134]
-                                  │  └ token: .identifier 'a'
-                                  └ rhs: %91 = .identifier - tok[136..136]
-                                     └ token: .identifier 'a'
+                            └ args_list: 0 items

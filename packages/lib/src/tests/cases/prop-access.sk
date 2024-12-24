@@ -1,0 +1,4 @@
+
+fn main (): void {
+  // return a.b:as(usize)
+}

@@ -409,36 +409,28 @@ pub fn formatInstShort(self: *Self, writer: std.io.AnyWriter, tree_writer: *Tree
                 }
                 const value = @field(data, field.name);
 
+                try writer.print("{s}=", .{
+                    field.name,
+                });
                 if (comptime std.mem.endsWith(u8, field.name, "node")) {
-                    try writer.print("{s}=(N[{?d}])", .{
-                        field.name,
-                        value,
-                    });
-                    // if (field.type == ?u32) {
-                    //     if (value) |v| {
-                    //         try writer.print("{s}=node(#{d}: \"{s}\")", .{
-                    //             field.name,
-                    //             v,
-                    //             self.ast.getNodeSlice(v),
-                    //         });
-                    //     } else {
-                    //         try writer.print("{s}=NONE", .{field.name});
-                    //     }
-                    // } else {
-                    //     try writer.print("{s}=node(#{d}: \"{s}\")", .{
-                    //         field.name,
-                    //         value,
-                    //         self.ast.getNodeSlice(value),
-                    //     });
-                    // }
+                    try writer.print("({s})", .{NodeRef.init(self, value, true)});
+                } else if (comptime std.mem.endsWith(u8, field.name, "list")) {
+                    const list = self.lists.getSlice(value);
+                    try writer.writeAll("({");
+                    for (list, 0..list.len) |item, j| {
+                        if (j > 0) {
+                            try writer.print(", ", .{});
+                        }
+                        try writer.print("%{d}", .{item});
+                    }
+                    try writer.writeAll("})");
+                    // try writer.print("({d} items)", .{value.len});
                 } else if (field.type == Inst.Index) {
-                    try writer.print("{s}=(%{d})", .{
-                        field.name,
+                    try writer.print("(%{d})", .{
                         value,
                     });
                 } else {
-                    try writer.print("{s}=({any})", .{
-                        field.name,
+                    try writer.print("({any})", .{
                         value,
                     });
                 }
@@ -447,8 +439,32 @@ pub fn formatInstShort(self: *Self, writer: std.io.AnyWriter, tree_writer: *Tree
     }
     try writer.print("\n", .{});
 }
+const NodeRef = struct {
+    node_index: ?Ast.Node.Index,
+    show_slice: bool,
+    hir: *Self,
+    pub fn init(hir: *Self, node_index: ?Ast.Node.Index, show_slice: bool) @This() {
+        return .{
+            .node_index = node_index,
+            .show_slice = show_slice,
+            .hir = hir,
+        };
+    }
+    pub fn format(value: @This(), comptime _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = options; // autofix
+        if (value.node_index) |index| {
+            if (value.show_slice) {
+                try writer.print("n[{d}:\"{s}\"]", .{ index, value.hir.ast.getNodeSlice(index) });
+            } else {
+                try writer.print("n[{d}]", .{index});
+            }
+        } else {
+            try writer.writeAll("NONE");
+        }
+    }
+};
+
 pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWriter, inst_index: Inst.Index) std.io.AnyWriter.Error!void {
-    // @setEvalBranchQuota(10000);
     const instruction: Inst = self.insts.items[inst_index];
     if (tree_writer.indents.len > 10) {
         return;
@@ -492,39 +508,8 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                 try formatInst(self, writer, tree_writer, else_body);
             }
             try tree_writer.pop();
-            // try formatInst(self, writer, tree_writer, if_expr.then_body);
-            // try formatInst(self, writer, tree_writer, if_expr.then_body);
-            // if (if_expr.else_body) |else_body| {
-            //     try formatInst(self, writer, tree_writer, else_body);
-            // }
         },
-        // .fn_decl => |data| {
-        //     // try writer.print("{s}\n", .{self.ast.getNodeSlice(data.name_node)});
-        //     // try formatN
-        //     try tree_writer.pushDirLine();
-        //     try writer.writeAll("\n");
-        //     try tree_writer.writeIndent(true, false);
-        //     try writer.print("name_node: node(#{d}: \"{s}\")\n", .{ data.name_node, self.ast.getNodeSlice(data.name_node) });
-        //     try tree_writer.writeIndent(true, false);
-        //     try writer.print("params_list:\n", .{});
-        //     try tree_writer.pushDirLine();
-        //     const params_slice = self.lists.getSlice(data.params_list);
-        //     for (params_slice, 0..params_slice.len) |param_index, i| {
-        //         const is_last = i == params_slice.len - 1;
-        //         const param_inst = self.insts.items[param_index];
-        //         try tree_writer.writeIndent(true, is_last);
-        //         try writer.print("name: {s}\n", .{ self.ast.getNodeSlice(param_inst.param_decl.name_node), self.ast.getNodeSlice(param_inst.param_decl.ty) });
-        //     }
-        //     try tree_writer.pop();
 
-        //     try tree_writer.pop();
-
-        //     // try tree_writer.writeIndent(true, false);
-        //     // try writer.writeAll("name_node: ");
-        //     // try writer.writeAll(self.ast.getNodeSlice(data.name_node));
-        //     // try tree_writer.pop();
-        //     try writer.writeAll("\n");
-        // },
         inline else => |data| {
             const Data: type = @TypeOf(data);
 
@@ -543,7 +528,8 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                     // @compileLog(field.name);
                     if (@typeInfo(field.type) == .optional) {
                         if (field_value) |value| {
-                            try writer.print("node(#{d}: \"{s}\")\n", .{ value, self.ast.getNodeSlice(value) });
+                            // try writer.print("node(#{d}: \"{s}\")\n", .{ value, self.ast.getNodeSlice(value) });
+                            try writer.print("({s})", .{NodeRef.init(self, value, true)});
                         } else {
                             try writer.print("NONE\n", .{});
                         }
@@ -770,6 +756,7 @@ pub const Inst = union(enum) {
     pub const GetProperty = struct {
         base: Inst.Index,
         property_name_node: Ast.Node.Index,
+        is_builtin: bool,
     };
     pub const Local = struct {
         name_node: Ast.Node.Index,

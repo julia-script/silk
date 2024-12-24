@@ -27,14 +27,14 @@
           │  │  │  ├ type: %10 = .ty_i64
           │  │  │  │  └ node: node(#7: "i64")
           │  │  │  └ init: %7 = .inline_block
-          │  │  │     ├ %8 = comptime_number node=(N[8])
+          │  │  │     ├ %8 = comptime_number node=(n[8:"2"])
           │  │  │     └ %9 = br operand=(8), target=(%7)
           │  │  └ 2: %11 = .struct_field
           │  │     ├ name_node: node(#10: "c")
           │  │     ├ type: %15 = .ty_i32
           │  │     │  └ node: node(#11: "i32")
           │  │     └ init: %12 = .inline_block
-          │  │        ├ %13 = comptime_number node=(N[12])
+          │  │        ├ %13 = comptime_number node=(n[12:"3"])
           │  │        └ %14 = br operand=(13), target=(%12)
           │  └ declarations_list: 1 items
           │     └ 0: %16 = .global_decl
@@ -51,8 +51,8 @@
           │        │  │  └ node: node(#15: "i32")
           │        │  └ params_list: 0 items
           │        └ init: %18 = .block
-          │           ├ %19 = comptime_number node=(N[17])
-          │           ├ %20 = comptime_number node=(N[18])
+          │           ├ %19 = comptime_number node=(n[17:"2"])
+          │           ├ %20 = comptime_number node=(n[18:"3"])
           │           ├ %21 = add lhs=(%19), rhs=(%20)
           │           └ %22 = ret value=(21)
           └ %24 = br operand=(3), target=(%2)

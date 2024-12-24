@@ -58,6 +58,7 @@ pub const Node = struct {
         xor: BinaryExpression,
 
         prop_access: BinaryExpression,
+        builtin_prop_access: BinaryExpression,
         array_prop_access: BinaryExpression,
 
         band: BinaryExpression,
@@ -278,6 +279,7 @@ pub const Node = struct {
 
         // - Property access
         prop_access, // a.b
+        builtin_prop_access, // a:b
         array_prop_access, // a[b]
 
         // Bitwise operators

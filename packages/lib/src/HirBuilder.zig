@@ -490,6 +490,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     .get_property_pointer = .{
                         .base = inst_index,
                         .property_name_node = node.data.field_init.name,
+                        .is_builtin = false,
                     },
                 });
                 const field_inst = try self.genInstruction(scope, node.data.field_init.value);
@@ -532,12 +533,17 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             //     .index = index_inst,
             // } });
         },
-        .prop_access => {
-            const lhs_inst = try self.genInstruction(scope, nav.data.prop_access.lhs);
+        .prop_access, .builtin_prop_access => |data| {
+            const lhs_inst = try self.genInstruction(scope, data.lhs);
             // if (self.context == .assign_lhs) {
             return try scope.pushInstruction(.{ .get_property_pointer = .{
                 .base = lhs_inst,
-                .property_name_node = nav.data.prop_access.rhs,
+                .property_name_node = data.rhs,
+                .is_builtin = switch (nav.tag) {
+                    .builtin_prop_access => true,
+                    .prop_access => false,
+                    else => unreachable,
+                },
             } });
             // }
             // return try scope.pushInstruction(.{ .get_property_value = .{
