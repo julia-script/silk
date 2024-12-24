@@ -1,0 +1,36 @@
+;; 20 Nodes
+;; 24 Tokens
+;; 3 Interned Lists
+
+%0 = .struct_decl - tok[0..24]
+ └ members_list: 1 items
+    └ %19 = .fn_decl - tok[0..23]
+       ├ proto: %3 = .fn_proto - tok[1..5]
+       │  ├ name: %1 = .identifier - tok[1..1]
+       │  │  └ token: .identifier 'folding'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %2 = .ty_i32 - tok[5..5]
+       │     └ token: .keyword_i32 'i32'
+       └ body: %18 = .block - tok[6..22]
+          └ list: 2 items
+             ├ %4 = .comment_line - tok[7..8]
+             │  └ token: .comment '// 25'
+             └ %17 = .ret_expression - tok[8..21]
+                └ node: %16 = .add - tok[9..21]
+                   ├ lhs: %9 = .add - tok[9..13]
+                   │  ├ lhs: %5 = .number_literal - tok[9..9]
+                   │  │  └ token: .number_literal '1'
+                   │  └ rhs: %8 = .mul - tok[11..13]
+                   │     ├ lhs: %6 = .number_literal - tok[11..11]
+                   │     │  └ token: .number_literal '2'
+                   │     └ rhs: %7 = .number_literal - tok[13..13]
+                   │        └ token: .number_literal '3'
+                   └ rhs: %15 = .mul - tok[15..21]
+                      ├ lhs: %13 = .group - tok[15..19]
+                      │  └ node: %12 = .add - tok[16..18]
+                      │     ├ lhs: %10 = .number_literal - tok[16..16]
+                      │     │  └ token: .number_literal '4'
+                      │     └ rhs: %11 = .number_literal - tok[18..18]
+                      │        └ token: .number_literal '5'
+                      └ rhs: %14 = .number_literal - tok[21..21]
+                         └ token: .number_literal '2'

@@ -90,6 +90,7 @@ const Scope = struct {
 
     symbols_table: std.StringHashMapUnmanaged(Hir.Inst.Index) = .{},
     event_id: u64,
+    ret_type: ?Hir.Inst.Index = null,
 
     const Kind = enum {
         struct_decl,
@@ -110,6 +111,7 @@ const Scope = struct {
             .instructions = builder.newList(),
             .label = label,
             .event_id = event_id,
+            .ret_type = if (parent) |p| p.ret_type else null,
         };
     }
     pub fn commit(self: *Scope) !Hir.InternedLists.Range {
@@ -373,9 +375,25 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return try scope.pushInstruction(.{ .comptime_number = .{ .node = nav.node } });
         },
         .ret_expression => |ret_expr| {
+            // const ret = if (ret_expr.node == 0) null else try self.genLoadedInstruction(scope, ret_expr.node);
+            if (ret_expr.node == 0) {
+                return try scope.pushInstruction(.{
+                    .ret = .{
+                        .operand = null,
+                    },
+                });
+            }
+            var operand_inst = try self.genLoadedInstruction(scope, ret_expr.node);
+            if (scope.ret_type) |ret_type| {
+                const ret_type_src_inst = self.hir.insts.items[ret_type];
+                const ret_type_inst = try scope.pushInstruction(ret_type_src_inst);
+                operand_inst = try scope.pushInstruction(.{
+                    .as = .{ .lhs = operand_inst, .rhs = ret_type_inst },
+                });
+            }
             return try scope.pushInstruction(.{
                 .ret = .{
-                    .value = if (ret_expr.node == 0) null else try self.genLoadedInstruction(scope, ret_expr.node),
+                    .operand = operand_inst,
                 },
             });
         },
@@ -892,11 +910,12 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
     var fn_scope = Scope.init(self, scope, .block, "fn_decl");
     const params = try self.genFnParams(&fn_scope, proto);
     const return_type = try self.genInstruction(scope, proto_data.ret_type);
+    fn_scope.ret_type = return_type;
     // const init_inst = if
     const init_inst = blk: {
         if (body == 0) break :blk null;
 
-        var block = try Block.init(self, scope);
+        var block = try Block.init(self, &fn_scope);
         for (self.hir.lists.getSlice(params)) |param| {
             const name = self.hir.insts.items[param].param_decl.name_node;
             try block.scope.pushSymbol(self.hir.ast.getNodeSlice(name), param);

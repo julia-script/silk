@@ -262,6 +262,7 @@ pub const Instruction = struct {
     type: Type.Key,
     value: Value.Key,
     data: Data,
+    liveness: u8 = 1,
 
     pub const Data = union(enum) {
         void,
@@ -270,7 +271,7 @@ pub const Instruction = struct {
         //     value: Value.Key,
         // },
         alloc: struct {
-            type_inst: Instruction.Index,
+            type: Type.Key,
             mutable: bool,
         },
 
@@ -483,6 +484,7 @@ pub fn formatInstructionRange(
                         true,
                         last_inst == range_end,
                     );
+
                     try writer.print("%{d}: if (%{d}) then: [%{d}-%{d}]\n", .{
                         index,
                         if_expr.condition,
@@ -584,6 +586,9 @@ pub fn formatInstructionRange(
             },
             inline else => |data| {
                 try tree_writer.writeIndentTo(buf_writer, true, i == range_end);
+                if (inst.liveness == 0) {
+                    try buf_writer.writeAll("!");
+                }
                 try buf_writer.print("%{d}: ", .{i});
                 try formatType(buf_writer, builder, inst.type);
                 try buf_writer.print(" = .{s}", .{@tagName(inst.op)});

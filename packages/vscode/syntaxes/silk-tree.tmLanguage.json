@@ -43,6 +43,10 @@
 		{
 			"name": "comment.block.silk-tree",
 			"match": ";;.*$"
+		},
+		{
+			"name": "invalid.deprecated.silk-tree",
+			"match": "!%\\d+.*$"
 		}
 	],
 	"repository": {

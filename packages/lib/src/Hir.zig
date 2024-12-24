@@ -689,7 +689,7 @@ pub const Inst = union(enum) {
 
     typeof: UnaryOp,
     sizeof: UnaryOp,
-    ret: Return,
+    ret: MaybeOperand,
     if_expr: IfExpr,
     select_expr: IfExpr,
     br: Break,
@@ -782,6 +782,9 @@ pub const Inst = union(enum) {
     };
     pub const UnaryOp = struct {
         operand: Index,
+    };
+    pub const MaybeOperand = struct {
+        operand: ?Index,
     };
     pub const BinaryOp = struct {
         lhs: Index,

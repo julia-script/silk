@@ -1712,6 +1712,26 @@ const Block = struct {
         try self.instructions.append(self.scope.arena.allocator(), index);
         return index;
     }
+    pub fn markDead(self: *Block, index: Sema.Instruction.Index) void {
+        self.getInstruction(index).liveness = 0;
+    }
+
+    pub fn isComptimeKnown(self: *Block, index: Sema.Instruction.Index) bool {
+        const inst = self.getInstruction(index);
+        return switch (inst.value) {
+            .simple => |simple| switch (simple) {
+                .exec_time, .runtime => false,
+                else => true,
+            },
+            else => true,
+        };
+    }
+    pub fn markDeadIfComptimeKnown(self: *Block, index: Sema.Instruction.Index) void {
+        var inst = self.getInstruction(index);
+        if (self.isComptimeKnown(index)) {
+            inst.liveness = 0;
+        }
+    }
 
     pub fn getInstructionByHirIndex(self: *Block, hir_inst_index: Hir.Inst.Index) *Sema.Instruction {
         const index = self.scope.instructions_by_hir_inst.get(hir_inst_index).?;
@@ -1796,6 +1816,7 @@ const Block = struct {
             .get_element_pointer => self.handleGetElementPointerInstruction(hir_inst_index),
             .fn_call => self.handleFnCallInstruction(hir_inst_index),
             .param_decl => self.handleParamDeclInstruction(hir_inst_index),
+            .as => self.handleAsInstruction(hir_inst_index),
             else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
         };
     }
@@ -1818,7 +1839,8 @@ const Block = struct {
         defer trace.end(.{
             .instructions = self.scope.instructions.items,
         });
-        // return self.scope.instructions.put(self.scope.arena.allocator(), hir_inst_index, instruction);
+
+        self.markDeadIfComptimeKnown(instruction_index);
         return self.pushInstruction(hir_inst_index, .{
             .op = .cast,
             .type = type_index,
@@ -1831,7 +1853,8 @@ const Block = struct {
 
                 break :blk switch (value.data) {
                     .integer => |int| switch (ty) {
-                        .f32, .f64 => try self.builder.internValueData(.{ .float = @floatFromInt(int) }),
+                        .number, .f32, .f64 => try self.builder.internValueData(.{ .float = @floatFromInt(int) }),
+
                         else => instruction.value,
                     },
                     .float => |fl| switch (ty) {
@@ -1845,6 +1868,7 @@ const Block = struct {
                         .u16,
                         .u32,
                         .u64,
+                        .number,
                         => try self.builder.internValueData(.{ .integer = @intFromFloat(fl) }),
                         else => instruction.value,
                     },
@@ -2131,6 +2155,7 @@ const Block = struct {
 
         const type_inst_index = self.getInstructionIndex(hir_inst.alloc.type);
         const type_inst = self.getInstruction(type_inst_index);
+        self.markDead(type_inst_index);
 
         const type_to_alloc = self.builder.unwrapTypeValue(type_inst.value);
 
@@ -2143,7 +2168,7 @@ const Block = struct {
             }),
             .value = Sema.Value.simple(.exec_time),
             .data = .{ .alloc = .{
-                .type_inst = type_inst_index,
+                .type = type_to_alloc,
                 .mutable = hir_inst.alloc.mutable,
             } },
         });
@@ -2463,16 +2488,53 @@ const Block = struct {
         var rhs_index = self.getInstructionIndex(bin_op.rhs);
         const lhs_inst = self.getInstruction(lhs_index);
         const rhs_inst = self.getInstruction(rhs_index);
-        var ty = lhs_inst.type;
 
-        if (lhs_inst.type.isEqualSimple(.number) and !rhs_inst.type.isEqualSimple(.number)) {
-            lhs_index = try self.pushMaybeCastInstruction(hir_inst_index, lhs_index, rhs_inst.type);
-            ty = rhs_inst.type;
-        } else if (rhs_inst.type.isEqualSimple(.number) and !lhs_inst.type.isEqualSimple(.number)) {
-            rhs_index = try self.pushMaybeCastInstruction(hir_inst_index, rhs_index, lhs_inst.type);
+        const lhs_is_number = lhs_inst.type.isEqualSimple(.number);
+        const rhs_is_number = rhs_inst.type.isEqualSimple(.number);
+
+        if (lhs_is_number and !rhs_is_number) {
+            // lhs_index = try self.pushCastInstruction(hir_inst_index, lhs_index, rhs_inst.type);
+            // ty = rhs_inst.type;
+            return self.pushMaybeFoldArithmetic(hir_inst_index, .{
+                .op = op,
+                .type = rhs_inst.type,
+                .value = Sema.Value.simple(.exec_time),
+                .data = .{ .bin_op = .{
+                    .lhs = try self.pushCastInstruction(hir_inst_index, lhs_index, rhs_inst.type),
+                    .rhs = rhs_index,
+                } },
+            });
+        } else if (rhs_is_number and !lhs_is_number) {
+            return self.pushMaybeFoldArithmetic(hir_inst_index, .{
+                .op = op,
+                .type = lhs_inst.type,
+                .value = Sema.Value.simple(.exec_time),
+                .data = .{ .bin_op = .{
+                    .lhs = lhs_index,
+                    .rhs = try self.pushCastInstruction(hir_inst_index, rhs_index, lhs_inst.type),
+                } },
+            });
         }
 
-        return self.pushMaybeFoldInstruction(hir_inst_index, .{
+        const lhs_is_signed = self.builder.isSigned(lhs_inst.type);
+        const rhs_is_signed = self.builder.isSigned(rhs_inst.type);
+
+        if (lhs_is_signed != rhs_is_signed) {
+            std.debug.panic("error: arithmetic operands have different signedness", .{});
+        }
+        const lhs_bits = self.builder.numberBits(lhs_inst.type);
+        const rhs_bits = self.builder.numberBits(rhs_inst.type);
+
+        var ty = lhs_inst.type;
+        if (lhs_bits > rhs_bits) {
+            ty = lhs_inst.type;
+            rhs_index = try self.pushCastInstruction(hir_inst_index, rhs_index, lhs_inst.type);
+        } else if (rhs_bits > lhs_bits) {
+            ty = rhs_inst.type;
+            lhs_index = try self.pushCastInstruction(hir_inst_index, lhs_index, rhs_inst.type);
+        }
+
+        return self.pushMaybeFoldArithmetic(hir_inst_index, .{
             .op = op,
             .type = ty,
             // .value = try self.builder.maybeFoldArithmetic(op, lhs_index, rhs_index),
@@ -2581,7 +2643,7 @@ const Block = struct {
             .type = Sema.Type.simple(.void),
             .value = Sema.Value.simple(.void),
             .data = .{
-                .maybe_operand = if (hir_inst.ret.value) |operand| self.getInstructionIndex(operand) else null,
+                .maybe_operand = if (hir_inst.ret.operand) |operand| self.getInstructionIndex(operand) else null,
             },
         });
     }
@@ -2827,6 +2889,7 @@ const Block = struct {
                     .type = Sema.Type.simple(.usize),
                     .value = try self.builder.internValueData(.{ .integer = array_type.size }),
                     .data = .void,
+                    // .liveness = 0,
                 });
             },
             else => {},
@@ -2901,6 +2964,11 @@ const Block = struct {
 
         const lhs_is_float = self.builder.isFloat(lhs_type);
         const rhs_is_float = self.builder.isFloat(rhs_type);
+
+        self.markDead(callee_inst_index);
+        self.markDeadIfComptimeKnown(lhs_inst_index);
+        self.markDead(rhs_inst_index);
+        // if (!lhs_inst.value.isEqualSimple(.exec_time))
 
         if (lhs_is_float != rhs_is_float) {
             // std.debug.panic("error: cannot cast {s} to {s}", .{ @tagName(lhs_type.simple), @tagName(rhs_type.simple) });
@@ -3106,15 +3174,6 @@ const Block = struct {
                 .args_list = try args_list.commit(),
             } },
         });
-        // callee_instruction.value
-
-        // _ = hir_inst; // autofix
-        // return self.pushInstruction(hir_inst_index, .{
-        //     .op = .fn_call,
-        //     .type = Sema.Type.simple(.void),
-        //     .value = Sema.Value.simple(.void),
-        //     .data = .void,
-        // });
     }
     pub fn handleParamDeclInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         // const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
@@ -3126,6 +3185,14 @@ const Block = struct {
             .data = .void,
         });
     }
+    pub fn handleAsInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const lhs_inst_index = self.getInstructionIndex(hir_inst.as.lhs);
+        const rhs_inst_index = self.getInstructionIndex(hir_inst.as.rhs);
+        const type_inst = self.getInstruction(rhs_inst_index);
+        const ty = self.builder.unwrapTypeValue(type_inst.value);
+        return try self.pushMaybeCastInstruction(hir_inst_index, lhs_inst_index, ty);
+    }
     pub fn pushMaybeFoldInstruction(self: *Block, hir_inst_index: Hir.Inst.Index, data: Sema.Instruction) Error!Sema.Instruction.Index {
         switch (data.op) {
             .add, .sub, .mul, .div => return try self.pushMaybeFoldArithmetic(hir_inst_index, data),
@@ -3133,9 +3200,65 @@ const Block = struct {
         }
     }
     pub fn pushMaybeFoldArithmetic(self: *Block, hir_inst_index: Hir.Inst.Index, data: Sema.Instruction) Error!Sema.Instruction.Index {
-        const lhs_inst = self.getInstruction(data.data.bin_op.lhs);
-        const rhs_inst = self.getInstruction(data.data.bin_op.rhs);
-        if (lhs_inst.value.isEqualSimple(.exec_time) or rhs_inst.value.isEqualSimple(.exec_time)) {}
+        if (!self.isComptimeKnown(data.data.bin_op.lhs) or !self.isComptimeKnown(data.data.bin_op.rhs)) {
+            return try self.pushInstruction(hir_inst_index, data);
+        }
+
+        const lhs_inst_index = data.data.bin_op.lhs;
+        const rhs_inst_index = data.data.bin_op.rhs;
+        const lhs_inst = self.getInstruction(lhs_inst_index);
+        const rhs_inst = self.getInstruction(rhs_inst_index);
+
+        self.markDead(lhs_inst_index);
+        self.markDead(rhs_inst_index);
+
+        switch (data.type.simple) {
+            .i8,
+            .i16,
+            .i32,
+            .i64,
+            .u8,
+            .u16,
+            .u32,
+            .u64,
+            .usize,
+            => {
+                const lhs_value = self.getNumberValueKeyAs(i64, lhs_inst.value);
+                const rhs_value = self.getNumberValueKeyAs(i64, rhs_inst.value);
+                const result: i64 = switch (data.op) {
+                    .add => lhs_value + rhs_value,
+                    .sub => lhs_value - rhs_value,
+                    .mul => lhs_value * rhs_value,
+                    .div => @divExact(lhs_value, rhs_value),
+                    else => unreachable,
+                };
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .constant,
+                    .type = data.type,
+                    .value = try self.builder.internValueData(.{ .integer = result }),
+                    .data = .void,
+                });
+            },
+            .f32, .f64, .number => {
+                const lhs_value = self.getNumberValueKeyAs(f64, lhs_inst.value);
+                const rhs_value = self.getNumberValueKeyAs(f64, rhs_inst.value);
+                const result = switch (data.op) {
+                    .add => lhs_value + rhs_value,
+                    .sub => lhs_value - rhs_value,
+                    .mul => lhs_value * rhs_value,
+                    .div => lhs_value / rhs_value,
+                    else => unreachable,
+                };
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .constant,
+                    .type = data.type,
+                    .value = try self.builder.internValueData(.{ .float = result }),
+                    .data = .void,
+                });
+            },
+            else => unreachable,
+        }
+
         return try self.pushInstruction(hir_inst_index, data);
     }
     pub fn maybeFoldComparison(self: *Block, op: Sema.Instruction.Op, lhs_index: Sema.Instruction.Index, rhs_index: Sema.Instruction.Index) Error!Sema.Instruction.Index {
@@ -3163,6 +3286,12 @@ const Block = struct {
             .ne => lhs != rhs,
             else => unreachable,
         };
+    }
+    pub fn getNumberValueKeyAs(self: *Block, comptime T: type, value_key: Sema.Value.Key) T {
+        const value = self.builder.getValue(value_key) orelse {
+            std.debug.panic("error: value not found", .{});
+        };
+        return getNumberValueAs(T, value);
     }
 };
 

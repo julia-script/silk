@@ -1,0 +1,34 @@
+;; HIR: 19 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 1 items
+    └ 0: %1 = .global_decl
+       ├ name_node: node(#1: "folding")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %18 = .fn_decl
+       │  ├ name_node: node(#1: "folding")
+       │  ├ return_type: %2 = .ty_i32
+       │  │  └ node: node(#2: "i32")
+       │  └ params_list: 0 items
+       └ init: %3 = .block
+          ├ %4 = .comptime_number node=(n[5:"1"])
+          ├ %5 = .comptime_number node=(n[6:"2"])
+          ├ %6 = .comptime_number node=(n[7:"3"])
+          ├ %7 = .mul lhs=(%5), rhs=(%6)
+          ├ %8 = .add lhs=(%4), rhs=(%7)
+          ├ %9 = .comptime_number node=(n[10:"4"])
+          ├ %10 = .comptime_number node=(n[11:"5"])
+          ├ %11 = .add lhs=(%9), rhs=(%10)
+          ├ %12 = .comptime_number node=(n[14:"2"])
+          ├ %13 = .mul lhs=(%11), rhs=(%12)
+          ├ %14 = .add lhs=(%8), rhs=(%13)
+          ├ %15 = .ty_i32 node=(n[2:"i32"])
+          ├ %16 = .as lhs=(%14), rhs=(%15)
+          └ %17 = .ret operand=(16)

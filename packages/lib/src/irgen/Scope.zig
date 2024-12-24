@@ -207,11 +207,6 @@ pub const FnDefWip = struct {
             .is_local = true,
         };
     }
-    // pub fn sync(self: *FnDefWip) !void {
-    //     if (self.definition_index) |index| {
-    //         self.scope.irGen.ir.defs.items[index] = self.getDef();
-    //     }
-    // }
 };
 pub const GlobalDefWip = struct {
     scope: *Self,
