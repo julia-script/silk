@@ -4,29 +4,50 @@
 	"fileTypes": ["silk-tree"],
 	"patterns": [
 		{
-			"name": "constant.numeric.silk-tree",
+			"name": "entity.name.type.silk-tree",
 			"match": "%\\d+"
 		},
 		{
 			"name": "entity.name.tag.silk-tree",
 			"match": "\\.\\w+"
 		},
-		{
-			"name": "keyword.operator.silk-tree",
-			"match": "\\b(token):"
-		},
+
 		{
 			"name": "string.quoted.single.silk-tree",
 			"match": "'[^']*'"
 		},
 		{
 			"name": "punctuation.separator.silk-tree",
-			"match": "[-\\[\\](){}:]+"
+			"match": "[-\\[\\](){}:\\.]+"
+		},
+		{
+			"name": "constant.language.nil.silk-tree",
+			"match": "NONE"
+		},
+		{
+			"name": "string.quoted.double.silk-tree",
+			"match": "\"[^\"]*\""
+		},
+		{
+			"name": "constant.language.boolean.silk-tree",
+			"match": "\\b(true|false)\\b"
+		},
+		{
+			"name": "constant.numeric.integer.silk-tree",
+			"match": "\\b\\d+\\b"
+		},
+		{
+			"name": "comment.dir.silk-tree",
+			"match": "│|└|├"
+		},
+		{
+			"name": "comment.block.silk-tree",
+			"match": ";;.*$"
 		}
 	],
 	"repository": {
 		"comments": {
-			"name": "comment.line.semicolon.silk-tree",
+			"name": "comment.line.silk-tree",
 			"match": ";;.*$"
 		}
 	}

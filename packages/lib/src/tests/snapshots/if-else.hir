@@ -26,18 +26,18 @@
     │  │        └ type: %5 = .ty_i32
     │  │           └ node: node(#7: "i32")
     │  └ init: %8 = .block
-    │     ├ %4 = param_decl name_node=(n[3:"a"]), type=(%3)
-    │     ├ %6 = param_decl name_node=(n[6:"b"]), type=(%5)
-    │     ├ %9 = param_get operand=(%4)
-    │     ├ %10 = param_get operand=(%6)
-    │     ├ %11 = gt lhs=(%9), rhs=(%10)
+    │     ├ %4 = .param_decl name_node=(n[3:"a"]), type=(%3)
+    │     ├ %6 = .param_decl name_node=(n[6:"b"]), type=(%5)
+    │     ├ %9 = .param_get operand=(%4)
+    │     ├ %10 = .param_get operand=(%6)
+    │     ├ %11 = .gt lhs=(%9), rhs=(%10)
     │     └ %18 = .if_expr cond (%11)
     │        ├ then: %12 = .block
-    │        │  ├ %13 = param_get operand=(%4)
-    │        │  └ %14 = ret value=(13)
+    │        │  ├ %13 = .param_get operand=(%4)
+    │        │  └ %14 = .ret value=(13)
     │        └ else:%15 = .block
-    │           ├ %16 = param_get operand=(%6)
-    │           └ %17 = ret value=(16)
+    │           ├ %16 = .param_get operand=(%6)
+    │           └ %17 = .ret value=(16)
     └ 1: %2 = .global_decl
        ├ name_node: node(#22: "min")
        ├ extern: false
@@ -60,11 +60,11 @@
        │        └ type: %22 = .ty_i32
        │           └ node: node(#28: "i32")
        └ init: %25 = .block
-          ├ %21 = param_decl name_node=(n[24:"a"]), type=(%20)
-          ├ %23 = param_decl name_node=(n[27:"b"]), type=(%22)
-          ├ %26 = param_get operand=(%21)
-          ├ %27 = param_get operand=(%23)
-          ├ %28 = lt lhs=(%26), rhs=(%27)
+          ├ %21 = .param_decl name_node=(n[24:"a"]), type=(%20)
+          ├ %23 = .param_decl name_node=(n[27:"b"]), type=(%22)
+          ├ %26 = .param_get operand=(%21)
+          ├ %27 = .param_get operand=(%23)
+          ├ %28 = .lt lhs=(%26), rhs=(%27)
           ├ %35 = .select_expr
           │  ├ cond: %28 = .lt
           │  │  ├ lhs: %26 = .param_get
@@ -78,9 +78,9 @@
           │  │        └ type: %22 = .ty_i32
           │  │           └ node: node(#28: "i32")
           │  ├ then_body: %29 = .inline_block
-          │  │  ├ %30 = param_get operand=(%21)
-          │  │  └ %31 = br operand=(30), target=(%29)
+          │  │  ├ %30 = .param_get operand=(%21)
+          │  │  └ %31 = .br operand=(30), target=(%29)
           │  └ else_body: %32 = .inline_block
-          │     ├ %33 = param_get operand=(%23)
-          │     └ %34 = br operand=(33), target=(%32)
-          └ %36 = ret value=(35)
+          │     ├ %33 = .param_get operand=(%23)
+          │     └ %34 = .br operand=(33), target=(%32)
+          └ %36 = .ret value=(35)

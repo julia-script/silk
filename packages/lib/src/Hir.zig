@@ -399,7 +399,7 @@ pub fn formatInstShort(self: *Self, writer: std.io.AnyWriter, tree_writer: *Tree
     _ = tree_writer; // autofix
     const instruction: Inst = self.insts.items[inst_index];
 
-    try writer.print("%{} = {s} ", .{ inst_index, @tagName(instruction) });
+    try writer.print("%{} = .{s} ", .{ inst_index, @tagName(instruction) });
     switch (instruction) {
         inline else => |data| {
             const fields = comptime std.meta.fields(@TypeOf(data));

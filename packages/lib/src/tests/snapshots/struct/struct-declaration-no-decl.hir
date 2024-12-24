@@ -27,14 +27,14 @@
           │  │  │  ├ type: %10 = .ty_i32
           │  │  │  │  └ node: node(#7: "i32")
           │  │  │  └ init: %7 = .inline_block
-          │  │  │     ├ %8 = comptime_number node=(n[8:"2"])
-          │  │  │     └ %9 = br operand=(8), target=(%7)
+          │  │  │     ├ %8 = .comptime_number node=(n[8:"2"])
+          │  │  │     └ %9 = .br operand=(8), target=(%7)
           │  │  └ 2: %11 = .struct_field
           │  │     ├ name_node: node(#10: "c")
           │  │     ├ type: %15 = .ty_i32
           │  │     │  └ node: node(#11: "i32")
           │  │     └ init: %12 = .inline_block
-          │  │        ├ %13 = comptime_number node=(n[12:"3"])
-          │  │        └ %14 = br operand=(13), target=(%12)
+          │  │        ├ %13 = .comptime_number node=(n[12:"3"])
+          │  │        └ %14 = .br operand=(13), target=(%12)
           │  └ declarations_list: 0 items
-          └ %16 = br operand=(3), target=(%2)
+          └ %16 = .br operand=(3), target=(%2)
