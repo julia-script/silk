@@ -158,9 +158,6 @@ pub const Builder = struct {
         const entity_key = self.symbols.get(range) orelse return null;
         return self.getEntity(entity_key);
     }
-    // fn getHirList(self: *Builder, range: Hir.InternedLists.Range) []Hir.Inst.Index {
-    //     return self.hir.lists.getSlice(range);
-    // }
 
     pub fn getSlice(self: *Builder, range: Sema.Strings.Range) []const u8 {
         return self.sema.strings.getSlice(range);
@@ -181,6 +178,42 @@ pub const Builder = struct {
     }
     pub fn newList(self: *Builder) Sema.Lists.WorkingList {
         return self.sema.lists.new();
+    }
+
+    pub fn computeTypeSize(self: *Builder, type_key: Sema.Type.Key) usize {
+        switch (type_key) {
+            .simple => |simple| switch (simple) {
+                .bool, .i8, .u8 => 1,
+                .i16, .u16 => 2,
+                .i32, .u32 => 4,
+                .i64, .u64 => 8,
+                .usize => 8,
+
+                .f32 => 4,
+                .f64 => 8,
+
+                .void => 0,
+                else => unreachable,
+            },
+            .complex => |index| {
+                const ty = self.sema.types.entries.items(.value)[index];
+
+                if (ty.size != 0) {
+                    return ty.size;
+                }
+
+                switch (ty.data) {
+                    .@"struct" => |str| {
+                        var size = 0;
+                        for (self.sema.lists.getSlice(str.fields)) |field| {
+                            size += self.computeTypeSize(field);
+                        }
+                        return size;
+                    },
+                    else => std.debug.panic("TODO: getTypeSize {s}", .{@tagName(ty.data)}),
+                }
+            },
+        }
     }
     // fn internNode(self: *Builder, node: Ast.Node.Index) Error!Sema.Strings.Range {
     //     return try self.internSlice(self.hir.ast.getNodeSlice(node));
@@ -325,6 +358,7 @@ pub const Builder = struct {
                 var hasher = Hasher.new("array");
                 hasher.update(self.getTypeKeyHash(array.child));
                 hasher.update(array.size);
+
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -348,11 +382,20 @@ pub const Builder = struct {
                     .data = data,
                 });
             },
-            .module => |module| {
-                // Modules are always unique
+            // .module => |module| {
+            //     // Modules are always unique
 
+            //     return try self.internType(.{
+            //         .hash = Hasher.hash(module.entity),
+            //         .data = data,
+            //     });
+            // },
+            .struct_field => |field| {
+                var hasher = Hasher.new("struct_field");
+                hasher.update(self.getTypeKeyHash(field.type));
+                hasher.update(field.alignment);
                 return try self.internType(.{
-                    .hash = Hasher.hash(module.entity),
+                    .hash = hasher.final(),
                     .data = data,
                 });
             },
@@ -1445,22 +1488,29 @@ pub const Entity = struct {
         while (iter.next()) |field| {
             var field_entity = self.builder.getEntity(field.value_ptr.*.entity);
             const ty = try field_entity.resolveType();
-            try fields_list.append(ty.encode());
+
+            const field_type = try self.builder.internTypeData(.{
+                .struct_field = .{
+                    .type = ty,
+                    .alignment = 1,
+                },
+            });
+            try fields_list.append(field_type.encode());
         }
         const struct_ty = try self.builder.internTypeData(.{
             .@"struct" = .{
+                .entity = self.key,
                 .fields = try fields_list.commit(),
             },
         });
-        const module_type = try self.builder.internTypeData(.{
-            .module = .{
-                .entity = self.key,
-                .struct_type = struct_ty,
-            },
-        });
+        // const module_type = try self.builder.internTypeData(.{
+        //     .module = .{
+        //         .struct_type = struct_ty,
+        //     },
+        // });
 
         return try self.builder.internValueData(.{
-            .type = module_type,
+            .type = struct_ty,
         });
         // const  try self.builder.internValueData(.{
         //     .type = struct_ty,
@@ -3081,7 +3131,7 @@ const Block = struct {
                 const module_type = self.builder.getType(module_type_key) orelse {
                     std.debug.panic("unreachable: should get a base type", .{});
                 };
-                const module = self.builder.getEntity(module_type.data.module.entity);
+                const module = self.builder.getEntity(module_type.data.@"struct".entity);
                 const declaration_entity_key = module.data.module_declaration.declarations.get(property_name_range) orelse {
                     std.debug.panic("unreachable: should get a declaration", .{});
                 };
@@ -3111,7 +3161,7 @@ const Block = struct {
             },
             else => {},
         }
-        const module = self.builder.getEntity(base_type.data.module.entity);
+        const module = self.builder.getEntity(base_type.data.@"struct".entity);
         if (module.data.module_declaration.fields.get(property_name_range)) |field| {
             const field_entity = self.builder.getEntity(field.entity);
             return self.pushInstruction(hir_inst_index, .{
@@ -3549,6 +3599,31 @@ const Block = struct {
             std.debug.panic("error: value not found", .{});
         };
         return getNumberValueAs(T, value);
+    }
+};
+
+const ComptimeStack = struct {
+    memory: std.ArrayListUnmanaged(u8) = .{},
+    builder: *Builder,
+
+    // pub fn alloc(self: *ComptimeAllocator, size: usize) Pointer {
+    //     const ptr = self.memory.items.len;
+    //     // self.memory.items.len += size;
+    //     try self.memory.ensureUnusedCapacity(self.builder.allocator, size);
+    //     return Pointer{ .ptr = ptr, .len = size };
+    // }
+    // pub fn dealloc(self: *ComptimeAllocator, ptr: Pointer) void {
+    //     self.memory.shrinkRetainingCapacity(self.memory.items.len - ptr.len);
+    // }
+    pub fn create(self: *ComptimeStack, ty: Sema.Type.Key) !usize {
+        _ = self; // autofix
+        _ = ty; // autofix
+        return 0;
+    }
+    pub fn destroy(self: *ComptimeStack, ty: Sema.Type.Key, ptr: usize) void {
+        _ = ty; // autofix
+        _ = self; // autofix
+        _ = ptr; // autofix
     }
 };
 

@@ -13,11 +13,12 @@ pub const Strings = InternedList(u8);
 const activeTag = std.meta.activeTag;
 
 const Self = @This();
-// pub const build = Builder.build;
 
 allocator: std.mem.Allocator,
+
 values: ArrayHashMap(u64, Value) = .{},
 types: ArrayHashMap(u64, Type) = .{},
+
 lists: Lists,
 strings: Strings,
 declarations: std.ArrayListUnmanaged(Declaration) = .{},
@@ -32,26 +33,15 @@ pub fn init(allocator: std.mem.Allocator, error_manager: *ErrorManager, options:
     return Self{
         .allocator = allocator,
         .errors_manager = error_manager,
-        // .lists = Lists.init(allocator),
-        .lists = undefined,
-        // .strings = Strings.init(allocator),
-        .strings = undefined,
+        .lists = Lists.init(allocator),
+        .strings = Strings.init(allocator),
         .builder = undefined,
     };
-    // sema.builder =
-    //
-    // sema.builder.sema = &sema;
-
 }
 
 pub fn makeRootSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
-    self.lists = Lists.init(self.allocator);
-    self.strings = Strings.init(self.allocator);
     self.builder = try Builder.build(self.allocator, self, self.errors_manager, .{});
-
-    const root = try self.makeSource(source, path);
-    // std.debug.panic("{}", .{root});
-    return root;
+    return try self.makeSource(source, path);
 }
 
 pub fn makeSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
@@ -129,6 +119,7 @@ pub fn deinit(self: *Self) void {
 pub const Type = struct {
     hash: u64,
     data: Data,
+    size: usize = 0,
 
     pub const Key = union(enum) {
         simple: Simple,
@@ -202,7 +193,6 @@ pub const Type = struct {
         f64,
 
         bool,
-        string,
         void,
 
         builtin_fn_as,
@@ -215,14 +205,41 @@ pub const Type = struct {
         return .{ .complex = self };
     }
 
+    pub fn getSize(key: Key) usize {
+        return switch (key) {
+            .simple => |s| switch (s) {
+                .bool => 1,
+                .i8 => 1,
+                .u8 => 1,
+                .i16 => 2,
+                .u16 => 2,
+                .i32 => 4,
+                .u32 => 4,
+                .i64 => 8,
+                .u64 => 8,
+                .usize => 8,
+                .f32 => 4,
+                .f64 => 8,
+                .void => 0,
+                else => unreachable,
+            },
+            .complex => unreachable,
+        };
+    }
+
     pub const Data = union(enum) {
-        module: struct {
-            entity: Entity.Key,
-            struct_type: Type.Key,
-        },
+        // module: struct {
+        //     entity: Entity.Key,
+        //     struct_type: Type.Key,
+        // },
 
         @"struct": struct {
+            entity: Entity.Key,
             fields: Type.List,
+        },
+        struct_field: struct {
+            type: Type.Key,
+            alignment: usize,
         },
         function: struct {
             params: Type.List,
@@ -247,6 +264,7 @@ pub const Value = struct {
         integer: i64,
         float: f64,
         type: Type.Key,
+        pointer: usize,
 
         struct_instance: struct {
             struct_entity: Entity.Key,
@@ -484,18 +502,24 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                 try writer.print("[{d}]", .{array.size});
                 try self.formatType(writer, array.child);
             },
-            .module => |module| {
-                try writer.print("mod{{ent{{{d}}}, ", .{module.entity});
-                try self.formatType(writer, module.struct_type);
+            // .module => |module| {
+            //     try writer.print("mod{{ent{{{d}}}, ", .{module.entity});
+            //     try self.formatType(writer, module.struct_type);
+            //     try writer.writeAll("}");
+            // },
+            .struct_field => |struct_field| {
+                try writer.writeAll("struct_field{");
+                try self.formatType(writer, struct_field.type);
                 try writer.writeAll("}");
             },
             .@"struct" => |struct_type| {
-                try writer.writeAll("{");
+                try writer.writeAll("struct{");
                 for (self.lists.getSlice(struct_type.fields), 0..) |field, i| {
                     if (i > 0) {
                         try writer.writeAll(", ");
                     }
-                    try self.formatType(writer, Type.Key.decode(field));
+                    const field_type = self.builder.getType(Type.Key.decode(field)) orelse unreachable;
+                    try self.formatType(writer, field_type.data.struct_field.type);
                 }
                 try writer.writeAll("}");
             },
@@ -897,20 +921,5 @@ test "Sema" {
     var sema = try Self.init(allocator, &errors_manager, .{});
     defer sema.deinit();
     const root = try sema.makeRootSource(source, "root.sk");
-    // std.debug.panic("{}", .{sema.root});
     try sema.compileAll(root);
-    // var ast = try Ast.parse(allocator, &errors_manager, source[0..], .{});
-    // defer ast.deinit();
-    // var hir = try Hir.build(allocator, &ast, &errors_manager, .{});
-    // defer hir.deinit();
-    // std.debug.print("hir: {s}\n", .{hir});
-    // var sema = try Builder.build(allocator, &hir, &errors_manager, .{});
-    // defer sema.deinit();
-    // try sema.collectRoot();
-    // const compiled = try sema.compileDeclaration("root::a");
-    // try formatDeclaration(
-    //     std.io.getStdErr().writer().any(),
-    //     &sema,
-    //     compiled,
-    // );
 }

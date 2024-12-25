@@ -42,52 +42,11 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     const path_without_extension = try std.fs.path.join(allocator, &.{ CASES_DIR_PATH, path[0 .. path.len - SILK_EXTENSION.len] });
     defer allocator.free(path_without_extension);
 
-    // const trace_dir = try std.mem.join(allocator, "", &.{ path_without_extension, "-trace" });
-    // defer allocator.free(trace_dir);
-    // var ast = try Ast.parse(
-    //     allocator,
-    //     &errors_manager,
-    //     source,
-    //     .{
-    //         .trace_dir = trace_dir,
-    //         .trace_name = "ast",
-    //         .unique_trace_name = true,
-    //     },
-    // );
-    // defer ast.deinit();
-
-    // var ast_output = std.ArrayList(u8).init(allocator);
-    // defer ast_output.deinit();
-    // try ast.format(ast_output.writer().any(), 0, .{
-    //     .show_slice = false,
-    //     .show_node_index = true,
-    // });
-
-    // try checkSnapshot(allocator, ast_output.items, path, ".ast");
-
-    // var hir = try Hir.build(allocator, &ast, &errors_manager, .{
-    //     .trace_dir = trace_dir,
-    //     .trace_name = "hir",
-    //     .unique_trace_name = true,
-    // });
-    // defer hir.deinit();
-    // var hir_output = std.ArrayList(u8).init(allocator);
-    // defer hir_output.deinit();
-    // try hir.format("", .{}, hir_output.writer().any());
-
-    // var sema = try Sema.init(allocator, &errors_manager, .{
-    //     // .tracer =
-    //     // .trace_dir = trace_dir,
-    //     // .trace_name = "sema",
-    //     // .unique_trace_name = true,
-    // });
-    // try checkSnapshot(allocator, hir_output.items, path, ".hir");
-
-    // defer sema.deinit();
-
     var sema = try Sema.init(allocator, &errors_manager, .{});
     defer sema.deinit();
+
     const root_path = try sema.makeRootSource(source, path);
+
     try sema.compileAll(root_path);
     const root = sema.getSource(root_path);
 
@@ -112,19 +71,6 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 
     try sema.format(writer);
     try checkSnapshot(allocator, output.items, path, ".sema");
-
-    // root.hir.format("", .{}, hir_output.writer().any());
-    // std.debug.panic("{}", .{sema.root});
-    // try sema.compileAll();
-
-    // var sema_output = std.ArrayList(u8).init(allocator);
-    // defer sema_output.deinit();
-    // // try Sema.format(&sema, std.io.getStdErr().writer().any());
-    // try Sema.format(&sema, sema_output.writer().any());
-
-    // try checkSnapshot(allocator, sema_output.items, path, ".sema");
-
-    // try checkSnapshot(allocator, dir, sema_output.items, path, ".sema");
 }
 
 pub fn writeOutput(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8, data: []const u8, extension: []const u8) !void {
