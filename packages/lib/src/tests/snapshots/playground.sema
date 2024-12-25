@@ -8,14 +8,14 @@
 ;; 0 lists
 ;; 8 strings
 
-%0 = pub @playground.sk::a() -> void
+%0 = pub fn @"playground.sk::a"() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
     ├ %1: todo(function) = .global_get declaration=(%1)               ; exec_time
     ├ !%2: type = .typeof operand=(%1)                                ; type(todo(function))
     ├ %3: *todo(function) = .alloc type=(todo(function)) mutable=(false); exec_time
     └ %4: void = .store operand=(%3) payload=(%1)                     ; void
 
-%1 = pub @playground.sk::b() -> void
+%1 = pub fn @"playground.sk::b"() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
     ├ %1: todo(function) = .global_get declaration=(%0)               ; exec_time
     ├ !%2: type = .typeof operand=(%1)                                ; type(todo(function))

@@ -190,7 +190,6 @@ pub fn panic(self: *Self, comptime msg: []const u8, args: anytype) noreturn {
     // std.debug.panic("Error writing event: {s}\n{}", .{ @errorName(err), err });
 }
 pub fn writeArgs(T: type, writer: std.io.AnyWriter, args: anytype) !void {
-   
     switch (@typeInfo(T)) {
         .@"struct" => |struct_| {
             var first = true;
@@ -273,24 +272,24 @@ pub fn writeEvent(
 ) !void {
     // std.debug.print
     if (comptime options.print_trace) {
-        // if (phase == .end and id != null) {
-        //     self.indent = id.?;
-        // }
-        const color = fmt.pickColor(id);
-        const stderr = std.io.getStdErr().writer().any();
+        // // if (phase == .end and id != null) {
+        // //     self.indent = id.?;
+        // // }
+        // const color = fmt.pickColor(id);
+        // const stderr = std.io.getStdErr().writer().any();
 
-        try color.print(stderr, "[{s}] ", .{self.name.slice()}, .{});
-        // if (self.root_id == id) {
-        //     try color.print(stderr, "root", .{}, .{});
-        // }
-        // try stderr.writeBytesNTimes("    ", indent);
-        try color.print(stderr, "{?d}: ", .{id}, .{});
-        try color.print(stderr, fmt_, fmt_args, .{});
-        try color.print(stderr, "\n", .{}, .{});
+        // try color.print(stderr, "[{s}] ", .{self.name.slice()}, .{});
+        // // if (self.root_id == id) {
+        // //     try color.print(stderr, "root", .{}, .{});
+        // // }
+        // // try stderr.writeBytesNTimes("    ", indent);
+        // try color.print(stderr, "{?d}: ", .{id}, .{});
+        // try color.print(stderr, fmt_, fmt_args, .{});
+        // try color.print(stderr, "\n", .{}, .{});
 
-        // if (phase == .begin and id != null) {
-        //     // self.indent += 1;
-        // }
+        // // if (phase == .begin and id != null) {
+        // //     // self.indent += 1;
+        // // }
     }
     if (comptime !options.enable_tracer) {
         return;

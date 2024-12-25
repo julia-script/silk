@@ -8,7 +8,7 @@
 ;; 0 lists
 ;; 7 strings
 
-%0 = @array/sum-array.sk::sum_array() -> i32
+%0 = fn @"array/sum-array.sk::sum_array"() -> i32
  └ %0: void = .block: [%1-%66]                                        ; void
     ├ %1: type = .type                                                ; type(i32)
     ├ %2: number = .constant                                          ; int(4)

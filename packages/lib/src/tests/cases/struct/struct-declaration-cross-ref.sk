@@ -8,7 +8,7 @@ fn main(): i32 {
 }
 
 type A = struct {
-  a: i32,
+  a: i8,
   b: i32 = 2,
   c: i32 = 3,
 }

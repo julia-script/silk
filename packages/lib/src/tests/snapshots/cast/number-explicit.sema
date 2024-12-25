@@ -8,7 +8,7 @@
 ;; 0 lists
 ;; 6 strings
 
-%0 = @cast/number-explicit.sk::explicit_casting() -> i32
+%0 = fn @"cast/number-explicit.sk::explicit_casting"() -> i32
  └ %0: void = .block: [%1-%13]                                        ; void
     ├ !%1: number = .constant                                         ; int(123)
     ├ !%2: builtin_fn_as = .get_builtin_fn_as operand=(%1)            ; type(builtin_fn_as)

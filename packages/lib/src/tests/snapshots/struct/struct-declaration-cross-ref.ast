@@ -52,8 +52,8 @@
              ├ %28 = .struct_field - tok[39..41]
              │  ├ name: %26 = .identifier - tok[38..38]
              │  │  └ token: .identifier 'a'
-             │  ├ type: %27 = .ty_i32 - tok[40..40]
-             │  │  └ token: .keyword_i32 'i32'
+             │  ├ type: %27 = .ty_i8 - tok[40..40]
+             │  │  └ token: .keyword_i8 'i8'
              │  └ default_value: NONE
              ├ %32 = .struct_field - tok[43..47]
              │  ├ name: %29 = .identifier - tok[42..42]

@@ -25,7 +25,31 @@ const Error = error{
     SymbolAlreadyExists,
     Overflow,
 } || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
-
+const Hasher = struct {
+    hasher: std.hash.Wyhash,
+    pub fn new(value: anytype) Hasher {
+        var hasher = Hasher{ .hasher = std.hash.Wyhash.init(0) };
+        hasher.update(value);
+        return hasher;
+    }
+    pub fn update(self: *Hasher, value: anytype) void {
+        switch (@TypeOf(value)) {
+            []const u8 => {
+                self.hasher.update(value);
+            },
+            else => {
+                self.hasher.update(std.mem.asBytes(&value));
+            },
+        }
+    }
+    pub fn hash(value: anytype) u64 {
+        var hasher = Hasher.new(value);
+        return hasher.final();
+    }
+    pub fn final(self: *Hasher) u64 {
+        return self.hasher.final();
+    }
+};
 pub const Builder = struct {
     // sema: *Sema,
     entities: ChunkedArray(Entity, 1024),
@@ -116,6 +140,25 @@ pub const Builder = struct {
         }
     }
 
+    pub fn getSimpletTypeSize(self: *Builder, simple: Sema.Type.Simple) u32 {
+        _ = self; // autofix
+        return switch (simple) {
+            .bool => 1,
+            .i8 => 1,
+            .u8 => 1,
+            .i16 => 2,
+            .u16 => 2,
+            .i32 => 4,
+            .u32 => 4,
+            .i64 => 8,
+            .u64 => 8,
+            .usize => 8, // TODO: this is platform dependent,
+            .f32 => 4,
+            .f64 => 8,
+            .void => 0,
+            else => unreachable,
+        };
+    }
     pub fn reserveDeclaration(self: *Builder) !Sema.Declaration.Index {
         const trace = self.tracer.begin(
             @src(),
@@ -180,45 +223,6 @@ pub const Builder = struct {
         return self.sema.lists.new();
     }
 
-    pub fn computeTypeSize(self: *Builder, type_key: Sema.Type.Key) usize {
-        switch (type_key) {
-            .simple => |simple| switch (simple) {
-                .bool, .i8, .u8 => 1,
-                .i16, .u16 => 2,
-                .i32, .u32 => 4,
-                .i64, .u64 => 8,
-                .usize => 8,
-
-                .f32 => 4,
-                .f64 => 8,
-
-                .void => 0,
-                else => unreachable,
-            },
-            .complex => |index| {
-                const ty = self.sema.types.entries.items(.value)[index];
-
-                if (ty.size != 0) {
-                    return ty.size;
-                }
-
-                switch (ty.data) {
-                    .@"struct" => |str| {
-                        var size = 0;
-                        for (self.sema.lists.getSlice(str.fields)) |field| {
-                            size += self.computeTypeSize(field);
-                        }
-                        return size;
-                    },
-                    else => std.debug.panic("TODO: getTypeSize {s}", .{@tagName(ty.data)}),
-                }
-            },
-        }
-    }
-    // fn internNode(self: *Builder, node: Ast.Node.Index) Error!Sema.Strings.Range {
-    //     return try self.internSlice(self.hir.ast.getNodeSlice(node));
-    // }
-
     pub fn unwrapTypeValue(self: *Builder, value_key: Sema.Value.Key) Sema.Type.Key {
         switch (value_key) {
             .complex => |complex| {
@@ -260,31 +264,7 @@ pub const Builder = struct {
             },
         }
     }
-    const Hasher = struct {
-        hasher: std.hash.Wyhash,
-        pub fn new(value: anytype) Hasher {
-            var hasher = Hasher{ .hasher = std.hash.Wyhash.init(0) };
-            hasher.update(value);
-            return hasher;
-        }
-        pub fn update(self: *Hasher, value: anytype) void {
-            switch (@TypeOf(value)) {
-                []const u8 => {
-                    self.hasher.update(value);
-                },
-                else => {
-                    self.hasher.update(std.mem.asBytes(&value));
-                },
-            }
-        }
-        pub fn hash(value: anytype) u64 {
-            var hasher = Hasher.new(value);
-            return hasher.final();
-        }
-        pub fn final(self: *Hasher) u64 {
-            return self.hasher.final();
-        }
-    };
+
     fn getTypeKeyHash(self: *Builder, type_key: Sema.Type.Key) Error!u64 {
         switch (type_key) {
             .simple => |simple| {
@@ -377,9 +357,12 @@ pub const Builder = struct {
                 for (self.sema.lists.getSlice(str.fields)) |field| {
                     hasher.update(self.getTypeKeyHash(Sema.Type.Key.decode(field)));
                 }
+                // const alignment = self.computeTypeAlignment(data);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
+                    // .alignment = alignment.alignment,
+                    // .size = alignment.size,
                 });
             },
             // .module => |module| {
@@ -393,7 +376,7 @@ pub const Builder = struct {
             .struct_field => |field| {
                 var hasher = Hasher.new("struct_field");
                 hasher.update(self.getTypeKeyHash(field.type));
-                hasher.update(field.alignment);
+                hasher.update(field.offset);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -1187,18 +1170,6 @@ pub const Entity = struct {
         defer trace.end(.{});
 
         const hir_inst = self.getHirInstruction(self.hir_inst_index).struct_field;
-        // const name_slice_range = try self.builder.internNode(hir_inst.name_node);
-        // const name_slice = self.builder.getSlice(name_slice_range);
-
-        // const field_trace = self.builder.tracer.begin(
-        //     @src(),
-        //     .{ "collectFieldSymbols", "[COLLECT_FIELD='{s}']", .{
-        //         name_slice,
-        //     } },
-        //     .{},
-        // );
-        // defer field_trace.end(.{});
-
         const type_hir_inst = hir_inst.type orelse std.debug.panic("field type not resolved: {any}", .{hir_inst.type});
         if (self.builder.getEntityKeyByHirInst(type_hir_inst)) |field_type_entity_key| {
             self.data.field_declaration.type = field_type_entity_key;
@@ -1453,7 +1424,6 @@ pub const Entity = struct {
         const hir_inst = self.getHirInstruction(self.hir_inst_index).global_decl;
 
         const init_inst = hir_inst.init orelse std.debug.panic("global type declaration has no init", .{});
-        // if (hir_inst.init) |init_inst| {
         var scope = Scope.init(self, self.builder.allocator);
         defer scope.deinit();
         var block = try scope.makeBlock(init_inst);
@@ -1462,14 +1432,13 @@ pub const Entity = struct {
 
         const inst = self.builder.sema.instructions.items[block_inst];
         return inst.value;
-        // return self.builder.internValueData(.{
-        //     .global = .{
-        //         .type = inst.type,
-        //         .value = inst.value,
-        //         .init = block_inst,
-        //     },
-        // });
     }
+    const SortByAlignmentContext = struct {
+        values: []const Sema.Type,
+        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+            return ctx.values[a_index].alignment > ctx.values[b_index].alignment;
+        }
+    };
     pub fn resolveModuleValue(self: *Entity) Error!Sema.Value.Key {
         const trace = self.builder.tracer.begin(
             @src(),
@@ -1482,46 +1451,89 @@ pub const Entity = struct {
 
         var fields_list = self.builder.newList();
 
-        // const struct_decl_hir = getHirInst(self.builder.hir, self.hir_inst_index).struct_decl;
-
         var iter = self.data.module_declaration.fields.iterator();
+
+        var fields_data = std.AutoArrayHashMap(Sema.Strings.Range, Sema.Type).init(self.builder.allocator);
+        defer fields_data.deinit();
+        var alignment: u32 = 0;
         while (iter.next()) |field| {
             var field_entity = self.builder.getEntity(field.value_ptr.*.entity);
             const ty = try field_entity.resolveType();
+            const field_size, const field_alignment = blk: {
+                if (self.builder.getType(ty)) |field_ty| {
+                    break :blk .{ field_ty.size, field_ty.alignment };
+                } else {
+                    const simple_size = self.builder.getSimpletTypeSize(ty.simple);
+                    break :blk .{ simple_size, simple_size };
+                }
+            };
 
-            const field_type = try self.builder.internTypeData(.{
-                .struct_field = .{
-                    .type = ty,
-                    .alignment = 1,
+            alignment = @max(alignment, field_alignment);
+            try fields_data.put(field.key_ptr.*, .{
+                .hash = 0,
+                .data = .{
+                    .struct_field = .{
+                        .type = ty,
+                        .offset = 0,
+                    },
                 },
+                .size = field_size,
+                .alignment = field_alignment,
             });
-            try fields_list.append(field_type.encode());
         }
-        const struct_ty = try self.builder.internTypeData(.{
-            .@"struct" = .{
-                .entity = self.key,
-                .fields = try fields_list.commit(),
+        fields_data.sort(SortByAlignmentContext{ .values = fields_data.values() });
+
+        var iter_sorted_fields = fields_data.iterator();
+        var i: usize = 0;
+
+        var offset: u32 = 0;
+        var struct_hasher = Hasher.new(0);
+        struct_hasher.update("struct");
+
+        // For now I think it makes sense for struct/modules to be unique, so let's hash the entity key with it to make sure of that.
+        // We may want to change this for simple structs, like, structs without declarations or tuples..let's see.
+        struct_hasher.update(self.key);
+
+        while (iter_sorted_fields.next()) |entry| {
+            var field = entry.value_ptr.*;
+            const padding = @mod(field.alignment - @mod(offset, field.alignment), field.alignment);
+            offset += padding;
+            field.data.struct_field.offset = offset;
+            offset += field.size;
+
+            var hasher = Hasher.new(0);
+            hasher.update(field.data.struct_field.offset);
+            hasher.update(self.builder.getTypeKeyHash(field.data.struct_field.type));
+
+            field.hash = hasher.final();
+            struct_hasher.update("field");
+
+            struct_hasher.update(field.hash);
+
+            const field_type = try self.builder.internType(field);
+            try fields_list.append(field_type.encode());
+
+            self.data.module_declaration.fields.getPtr(entry.key_ptr.*).?.index = i;
+            i += 1;
+        }
+
+        const trailing_padding = @mod(alignment - @mod(offset, alignment), alignment);
+        const struct_size = offset + trailing_padding;
+        const struct_ty = try self.builder.internType(.{
+            .hash = struct_hasher.final(),
+            .data = .{
+                .@"struct" = .{
+                    .entity = self.key,
+                    .fields = try fields_list.commit(),
+                },
             },
+            .size = struct_size,
+            .alignment = alignment,
         });
-        // const module_type = try self.builder.internTypeData(.{
-        //     .module = .{
-        //         .struct_type = struct_ty,
-        //     },
-        // });
 
         return try self.builder.internValueData(.{
             .type = struct_ty,
         });
-        // const  try self.builder.internValueData(.{
-        //     .type = struct_ty,
-        // });
-        // const fields_list = self.builder.getHirList(struct_decl_hir.fields_list);
-        // for (fields_list) |field_inst_index| {
-        //     const field_hir = getHirInst(self.builder.hir, field_inst_index).struct_field;
-        //     const field_entity = self.builder.getEntity(field_hir.name_node);
-        //     _ = try field_entity.resolveValue();
-        // }
-        // std.debug.panic("TODO: resolveModuleValue {s}", .{@tagName(self.data)});
     }
 
     pub fn resolveDeclaration(self: *Entity) Error!Sema.Declaration.Index {
@@ -3178,7 +3190,7 @@ const Block = struct {
             // const declaration_entity = self.builder.getEntity(declaration.entity);
             return try self.pushGlobalGetInstruction(hir_inst_index, declaration);
         }
-        std.debug.panic("unreachable: should get a field or a declaration", .{});
+        std.debug.panic("unreachable: %{d} should get a field or a declaration", .{hir_inst_index});
     }
     pub fn handleGetElementPointerInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);

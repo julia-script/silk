@@ -53,8 +53,8 @@
           │  ├ fields_list: 3 items
           │  │  ├ 0: %28 = .struct_field
           │  │  │  ├ name_node: node(#26: "a")
-          │  │  │  ├ type: %29 = .ty_i32
-          │  │  │  │  └ node: node(#27: "i32")
+          │  │  │  ├ type: %29 = .ty_i8
+          │  │  │  │  └ node: node(#27: "i8")
           │  │  │  └ init: NONE
           │  │  ├ 1: %30 = .struct_field
           │  │  │  ├ name_node: node(#29: "b")

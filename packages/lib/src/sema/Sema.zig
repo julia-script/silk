@@ -119,7 +119,8 @@ pub fn deinit(self: *Self) void {
 pub const Type = struct {
     hash: u64,
     data: Data,
-    size: usize = 0,
+    size: u32 = 0,
+    alignment: u32 = 0,
 
     pub const Key = union(enum) {
         simple: Simple,
@@ -205,7 +206,7 @@ pub const Type = struct {
         return .{ .complex = self };
     }
 
-    pub fn getSize(key: Key) usize {
+    pub fn geSimpletSize(key: Key) u32 {
         return switch (key) {
             .simple => |s| switch (s) {
                 .bool => 1,
@@ -239,7 +240,7 @@ pub const Type = struct {
         },
         struct_field: struct {
             type: Type.Key,
-            alignment: usize,
+            offset: u32,
         },
         function: struct {
             params: Type.List,
@@ -532,7 +533,73 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
     }
     try writer.print("{s}", .{@tagName(type_key.simple)});
 }
+pub fn formatTypeLong(
+    self: *Self,
+    writer: std.io.AnyWriter,
+    tree_writer: *TreeWriter,
+    type_key: Type.Key,
+) !void {
+    if (self.builder.getType(type_key)) |ty| {
+        switch (ty.data) {
+            .@"struct" => |struct_type| {
+                try writer.print("struct:\n", .{});
+                try tree_writer.pushDirLine();
+                try tree_writer.writeIndent(true, false);
+                try writer.print("type: ", .{});
+                try self.formatType(writer, type_key);
+                try writer.print("\n", .{});
 
+                try tree_writer.writeIndent(true, false);
+                try writer.print("alignment: {d}\n", .{ty.alignment});
+
+                try tree_writer.writeIndent(true, false);
+                try writer.print("size: {d}\n", .{ty.size});
+
+                try tree_writer.writeIndent(true, true);
+                const slice = self.lists.getSlice(struct_type.fields);
+                try writer.print("fields: {d}\n", .{slice.len});
+                try tree_writer.pushDirLine();
+                for (slice, 0..) |field, i| {
+                    try tree_writer.writeIndent(true, i == slice.len - 1);
+                    // if (i > 0) {
+                    //     try writer.writeAll(" ");
+                    // }
+                    // try self.formatTypeLong(writer, tree_writer, Type.Key.decode(field));
+                    const field_type = self.builder.getType(Type.Key.decode(field)) orelse unreachable;
+
+                    try writer.print("[{d}]\n", .{i});
+                    try tree_writer.pushDirLine();
+
+                    try tree_writer.writeIndent(true, false);
+                    try writer.print("alignment: {d}\n", .{field_type.alignment});
+
+                    try tree_writer.writeIndent(true, false);
+                    try writer.print("size: {d}\n", .{field_type.size});
+
+                    try tree_writer.writeIndent(true, false);
+                    try writer.print("offset: {d}\n", .{field_type.data.struct_field.offset});
+
+                    try tree_writer.writeIndent(true, true);
+                    try writer.writeAll("type: ");
+                    try self.formatType(writer, field_type.data.struct_field.type);
+
+                    try tree_writer.pop();
+                    try writer.writeAll("\n");
+                }
+
+                try tree_writer.pop(); // fields
+                try tree_writer.pop(); // struct
+                return;
+            },
+            // .struct_field => |struct_field| {
+            //     try writer.print("struct_field: ", .{});
+            //     try self.formatTypeLong(writer, tree_writer, struct_field.type);
+            // },
+            else => {},
+        }
+    }
+    try self.formatType(writer, type_key);
+}
 fn formatValue(self: *Self, writer: std.io.AnyWriter, value: Value.Key) !void {
     if (self.builder.getValue(value)) |val| {
         switch (val.data) {
@@ -745,7 +812,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
     var tree_writer = TreeWriter.init(writer);
     const declaration = self.declarations.items[declaration_index];
 
-    try tree_writer.pushDirLine();
+    // try tree_writer.pushDirLine();
     const name = self.strings.getSlice(declaration.name);
     if (declaration.is_pub) {
         try writer.print("pub ", .{});
@@ -758,7 +825,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
         switch (value.data) {
             .function => |func| {
                 const ty = self.builder.getType(func.type) orelse unreachable;
-                try writer.print("@{s}", .{name});
+                try writer.print("fn @\"{s}\"", .{name});
                 const params_iter = self.lists.getSlice(ty.data.function.params);
                 try writer.print("(", .{});
 
@@ -774,6 +841,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                 try writer.print("\n", .{});
                 const func_value = self.builder.getValue(declaration.value) orelse unreachable;
                 if (func_value.data.function.init) |init_inst_index| {
+                    try tree_writer.pushDirLine();
                     const init_inst = self.instructions.items[init_inst_index];
                     const count = init_inst.data.block.instructions_count;
                     // std.debug.panic("TODO: formatDeclaration {any}", .{range});
@@ -783,20 +851,21 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                         self.instructions.items[init_inst_index..],
                         .{ .start = 0, .len = count },
                     );
+                    try tree_writer.pop();
                 }
             },
             .global => {
                 try writer.print("global ", .{});
                 try self.formatType(writer, value.data.global.type);
-                try writer.print(" @{s}", .{name});
+                try writer.print(" @\"{s}\"", .{name});
                 try writer.print(" ", .{});
                 try self.formatValue(writer, value.data.global.value);
                 try writer.print("\n", .{});
                 // try writer.print("global {}\n", .{value.data.global.value});
             },
             .type => {
-                try writer.print("type @{s} = ", .{name});
-                try self.formatType(writer, value.data.type);
+                try writer.print("type @\"{s}\" = ", .{name});
+                try self.formatTypeLong(writer, &tree_writer, value.data.type);
                 try writer.print("\n", .{});
             },
             else => {
@@ -816,7 +885,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
     //     },
     // }
 
-    try tree_writer.pop();
+    // try tree_writer.pop();
 }
 
 pub fn format(self: *Self, writer: std.io.AnyWriter) !void {

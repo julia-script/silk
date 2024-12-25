@@ -4,13 +4,33 @@
 ;; 2 symbols
 ;; 10 instructions
 ;; 7 values
-;; 3 types
+;; 5 types
 ;; 1 lists
 ;; 19 strings
 
-%0 = type @struct/struct-declaration.sk::A = mod{ent{2}, {i32, i64, i32}}
+%0 = type @"struct/struct-declaration.sk::A" = struct:
+ ├ type: struct{i64, i32, i32}
+ ├ alignment: 8
+ ├ size: 16
+ └ fields: 3
+    ├ [0]
+    │  ├ alignment: 8
+    │  ├ size: 8
+    │  ├ offset: 0
+    │  └ type: i64
+    ├ [1]
+    │  ├ alignment: 4
+    │  ├ size: 4
+    │  ├ offset: 8
+    │  └ type: i32
+    └ [2]
+       ├ alignment: 4
+       ├ size: 4
+       ├ offset: 12
+       └ type: i32
 
-%1 = pub @struct/struct-declaration.sk::A::mod::foo() -> i32
+
+%1 = pub fn @"struct/struct-declaration.sk::A::mod::foo"() -> i32
  └ %0: void = .block: [%1-%6]                                         ; void
     ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: number = .constant                                         ; int(3)

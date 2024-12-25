@@ -4,35 +4,55 @@
 ;; 2 symbols
 ;; 27 instructions
 ;; 9 values
-;; 5 types
+;; 8 types
 ;; 1 lists
 ;; 19 strings
 
-%0 = @struct/struct-declaration-cross-ref.sk::main() -> i32
+%0 = fn @"struct/struct-declaration-cross-ref.sk::main"() -> i32
  └ %0: void = .block: [%1-%23]                                        ; void
-    ├ !%1: type = .global_get declaration=(%1)                        ; type(mod{ent{4}, {i32, i32, i32}})
-    ├ %2: *mod{ent{4}, {i32, i32, i32}} = .alloc type=(mod{ent{4}, {i32, i32, i32}}) mutable=(false); exec_time
-    ├ %3: *i32 = .get_element_pointer base=(%2) index=(0)             ; exec_time
+    ├ !%1: type = .global_get declaration=(%1)                        ; type(struct{i32, i32, i8})
+    ├ %2: *struct{i32, i32, i8} = .alloc type=(struct{i32, i32, i8}) mutable=(false); exec_time
+    ├ %3: *i8 = .get_element_pointer base=(%2) index=(2)              ; exec_time
     ├ !%4: number = .constant                                         ; int(1)
-    ├ %5: i32 = .constant                                             ; int(1)
+    ├ %5: i8 = .constant                                              ; int(1)
     ├ %6: void = .store operand=(%3) payload=(%5)                     ; void
-    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; exec_time
+    ├ %7: *i32 = .get_element_pointer base=(%2) index=(0)             ; exec_time
     ├ !%8: number = .constant                                         ; int(2)
     ├ %9: i32 = .constant                                             ; int(2)
     ├ %10: void = .store operand=(%7) payload=(%9)                    ; void
-    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; exec_time
+    ├ %11: *i32 = .get_element_pointer base=(%2) index=(1)            ; exec_time
     ├ !%12: number = .constant                                        ; int(3)
     ├ %13: i32 = .constant                                            ; int(3)
     ├ %14: void = .store operand=(%11) payload=(%13)                  ; void
-    ├ %15: mod{ent{4}, {i32, i32, i32}} = .load operand=(%2)          ; exec_time
-    ├ !%16: type = .global_get declaration=(%1)                       ; type(mod{ent{4}, {i32, i32, i32}})
-    ├ %17: *mod{ent{4}, {i32, i32, i32}} = .alloc type=(mod{ent{4}, {i32, i32, i32}}) mutable=(false); exec_time
+    ├ %15: struct{i32, i32, i8} = .load operand=(%2)                  ; exec_time
+    ├ !%16: type = .global_get declaration=(%1)                       ; type(struct{i32, i32, i8})
+    ├ %17: *struct{i32, i32, i8} = .alloc type=(struct{i32, i32, i8}) mutable=(false); exec_time
     ├ %18: void = .store operand=(%17) payload=(%15)                  ; void
-    ├ %19: *i32 = .get_element_pointer base=(%17) index=(0)           ; exec_time
-    ├ %20: i32 = .load operand=(%19)                                  ; exec_time
+    ├ %19: *i8 = .get_element_pointer base=(%17) index=(2)            ; exec_time
+    ├ %20: i8 = .load operand=(%19)                                   ; exec_time
     ├ !%21: type = .type                                              ; type(i32)
     ├ %22: i32 = .cast operand=(%20)                                  ; exec_time
     └ %23: void = .ret maybe_operand=(%22)                            ; void
 
-%1 = type @struct/struct-declaration-cross-ref.sk::A = mod{ent{4}, {i32, i32, i32}}
+%1 = type @"struct/struct-declaration-cross-ref.sk::A" = struct:
+ ├ type: struct{i32, i32, i8}
+ ├ alignment: 4
+ ├ size: 12
+ └ fields: 3
+    ├ [0]
+    │  ├ alignment: 4
+    │  ├ size: 4
+    │  ├ offset: 0
+    │  └ type: i32
+    ├ [1]
+    │  ├ alignment: 4
+    │  ├ size: 4
+    │  ├ offset: 4
+    │  └ type: i32
+    └ [2]
+       ├ alignment: 1
+       ├ size: 1
+       ├ offset: 8
+       └ type: i8
+
 

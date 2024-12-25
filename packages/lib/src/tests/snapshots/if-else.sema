@@ -8,7 +8,7 @@
 ;; 0 lists
 ;; 19 strings
 
-%0 = @if-else.sk::max() -> i32
+%0 = fn @"if-else.sk::max"() -> i32
  └ %0: void = .block: [%1-%16]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
     ├ %2: i32 = .param                                                ; exec_time
@@ -28,7 +28,7 @@
           ├ %15: i32 = .cast operand=(%13)                            ; exec_time
           └ %16: void = .ret maybe_operand=(%15)                      ; void
 
-%1 = @if-else.sk::min() -> i32
+%1 = fn @"if-else.sk::min"() -> i32
  └ %0: void = .block: [%1-%15]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
     ├ %2: i32 = .param                                                ; exec_time

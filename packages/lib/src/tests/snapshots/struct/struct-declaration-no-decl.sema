@@ -4,9 +4,29 @@
 ;; 1 symbols
 ;; 3 instructions
 ;; 1 values
-;; 2 types
+;; 4 types
 ;; 1 lists
 ;; 15 strings
 
-%0 = type @struct/struct-declaration-no-decl.sk::A = mod{ent{2}, {usize, i32, i32}}
+%0 = type @"struct/struct-declaration-no-decl.sk::A" = struct:
+ ├ type: struct{usize, i32, i32}
+ ├ alignment: 8
+ ├ size: 16
+ └ fields: 3
+    ├ [0]
+    │  ├ alignment: 8
+    │  ├ size: 8
+    │  ├ offset: 0
+    │  └ type: usize
+    ├ [1]
+    │  ├ alignment: 4
+    │  ├ size: 4
+    │  ├ offset: 8
+    │  └ type: i32
+    └ [2]
+       ├ alignment: 4
+       ├ size: 4
+       ├ offset: 12
+       └ type: i32
+
 

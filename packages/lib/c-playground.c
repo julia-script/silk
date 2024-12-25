@@ -14,39 +14,35 @@
 //   }
 //   return a;
 // }
+#include <stdio.h>
 
-struct MyStruct {
-  char varSignedChar;
-  unsigned char varUnsignedChar;
-  int varInt;
-  unsigned int varUnsignedInt;
+// type E = struct {
+//   a: i8,
+//   b: i32,
+// }
+
+// type F = struct {
+//   a: i8,
+//   b: E,
+//   c: i32,
+// }
+struct E {
+  char a;
+  int b;
 };
-struct MyStruct2 {
-  int varInt;
-  struct MyStruct varStruct;
+
+struct F {
+  struct E b;
+  int c;
+  char a;
 };
-int len(long arr[]) { return 1; }
-// extern void p(char* fmt, ...);
-void playground() {
-  long long arr[4] = {1, 2, 3, 4};
-  struct MyStruct2 a;
-  a.varInt = 1;
-  a.varStruct.varInt = 2;
-  // long long arr2[4] = {1, 2, 3, 4};
-  // len(arr);
-  // int i = 0;
-  // int sum = 0;
-  // while (i < len(arr)) {
-  //   sum = sum + arr[i];
-  //   i = i + 1;
-  // }
-  // return sum;
-  // //   var arr :[1]i32 = [1]i32 {3}
-  // var i: usize = 0;
-  // var sum: i32 = 0;
-  // while (i < arr.len) {
-  //       sum = sum + arr[i];
-  //       i = i + 1;
-  // }
-  // return sum;
+
+int main() {
+  printf("Size of E: %zu bytes\n", sizeof(struct E));
+  printf("Alignment of E: %zu bytes\n", _Alignof(struct E));
+
+  printf("Size of F: %zu bytes\n", sizeof(struct F));
+  printf("Alignment of F: %zu bytes\n", _Alignof(struct F));
+
+  return 0;
 }

@@ -1,0 +1,186 @@
+;; 91 Nodes
+;; 129 Tokens
+;; 38 Interned Lists
+
+%0 = .struct_decl - tok[0..129]
+ └ members_list: 18 items
+    ├ %1 = .comment_line - tok[0..1]
+    │  └ token: .comment '// Reordered to struct { i32, i32, i8}'
+    ├ %2 = .comment_line - tok[1..2]
+    │  └ token: .comment '// alignment 4, size 12'
+    ├ %14 = .type_decl - tok[2..19]
+    │  ├ name: %3 = .identifier - tok[3..3]
+    │  │  └ token: .identifier 'A'
+    │  ├ type: NONE
+    │  └ value: %4 = .struct_decl - tok[5..19]
+    │     └ members_list: 3 items
+    │        ├ %7 = .struct_field - tok[8..10]
+    │        │  ├ name: %5 = .identifier - tok[7..7]
+    │        │  │  └ token: .identifier 'a'
+    │        │  ├ type: %6 = .ty_i8 - tok[9..9]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        ├ %10 = .struct_field - tok[12..14]
+    │        │  ├ name: %8 = .identifier - tok[11..11]
+    │        │  │  └ token: .identifier 'b'
+    │        │  ├ type: %9 = .ty_i32 - tok[13..13]
+    │        │  │  └ token: .keyword_i32 'i32'
+    │        │  └ default_value: NONE
+    │        └ %13 = .struct_field - tok[16..18]
+    │           ├ name: %11 = .identifier - tok[15..15]
+    │           │  └ token: .identifier 'c'
+    │           ├ type: %12 = .ty_i32 - tok[17..17]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ default_value: NONE
+    ├ %15 = .comment_line - tok[20..21]
+    │  └ token: .comment '// Reordered to struct { i64, i32, i16, i8, i8} '
+    ├ %16 = .comment_line - tok[21..22]
+    │  └ token: .comment '// alignment 8, size 16'
+    ├ %34 = .type_decl - tok[22..47]
+    │  ├ name: %17 = .identifier - tok[23..23]
+    │  │  └ token: .identifier 'B'
+    │  ├ type: NONE
+    │  └ value: %18 = .struct_decl - tok[25..47]
+    │     └ members_list: 5 items
+    │        ├ %21 = .struct_field - tok[28..30]
+    │        │  ├ name: %19 = .identifier - tok[27..27]
+    │        │  │  └ token: .identifier 'a'
+    │        │  ├ type: %20 = .ty_i8 - tok[29..29]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        ├ %24 = .struct_field - tok[32..34]
+    │        │  ├ name: %22 = .identifier - tok[31..31]
+    │        │  │  └ token: .identifier 'b'
+    │        │  ├ type: %23 = .ty_i16 - tok[33..33]
+    │        │  │  └ token: .keyword_i16 'i16'
+    │        │  └ default_value: NONE
+    │        ├ %27 = .struct_field - tok[36..38]
+    │        │  ├ name: %25 = .identifier - tok[35..35]
+    │        │  │  └ token: .identifier 'c'
+    │        │  ├ type: %26 = .ty_i8 - tok[37..37]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        ├ %30 = .struct_field - tok[40..42]
+    │        │  ├ name: %28 = .identifier - tok[39..39]
+    │        │  │  └ token: .identifier 'd'
+    │        │  ├ type: %29 = .ty_i64 - tok[41..41]
+    │        │  │  └ token: .keyword_i64 'i64'
+    │        │  └ default_value: NONE
+    │        └ %33 = .struct_field - tok[44..46]
+    │           ├ name: %31 = .identifier - tok[43..43]
+    │           │  └ token: .identifier 'e'
+    │           ├ type: %32 = .ty_i32 - tok[45..45]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ default_value: NONE
+    ├ %35 = .comment_line - tok[48..49]
+    │  └ token: .comment '// Reordered to: struct { i16, i8, i8 }'
+    ├ %36 = .comment_line - tok[49..50]
+    │  └ token: .comment '// alignment 2, size 4  '
+    ├ %48 = .type_decl - tok[50..67]
+    │  ├ name: %37 = .identifier - tok[51..51]
+    │  │  └ token: .identifier 'C'
+    │  ├ type: NONE
+    │  └ value: %38 = .struct_decl - tok[53..67]
+    │     └ members_list: 3 items
+    │        ├ %41 = .struct_field - tok[56..58]
+    │        │  ├ name: %39 = .identifier - tok[55..55]
+    │        │  │  └ token: .identifier 'a'
+    │        │  ├ type: %40 = .ty_i8 - tok[57..57]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        ├ %44 = .struct_field - tok[60..62]
+    │        │  ├ name: %42 = .identifier - tok[59..59]
+    │        │  │  └ token: .identifier 'b'
+    │        │  ├ type: %43 = .ty_i16 - tok[61..61]
+    │        │  │  └ token: .keyword_i16 'i16'
+    │        │  └ default_value: NONE
+    │        └ %47 = .struct_field - tok[64..66]
+    │           ├ name: %45 = .identifier - tok[63..63]
+    │           │  └ token: .identifier 'c'
+    │           ├ type: %46 = .ty_i8 - tok[65..65]
+    │           │  └ token: .keyword_i8 'i8'
+    │           └ default_value: NONE
+    ├ %49 = .comment_line - tok[68..69]
+    │  └ token: .comment '// Reordered to: struct { i32, i16, i8, i8 }'
+    ├ %50 = .comment_line - tok[69..70]
+    │  └ token: .comment '// alignment 4, size 8'
+    ├ %65 = .type_decl - tok[70..91]
+    │  ├ name: %51 = .identifier - tok[71..71]
+    │  │  └ token: .identifier 'D'
+    │  ├ type: NONE
+    │  └ value: %52 = .struct_decl - tok[73..91]
+    │     └ members_list: 4 items
+    │        ├ %55 = .struct_field - tok[76..78]
+    │        │  ├ name: %53 = .identifier - tok[75..75]
+    │        │  │  └ token: .identifier 'a'
+    │        │  ├ type: %54 = .ty_i8 - tok[77..77]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        ├ %58 = .struct_field - tok[80..82]
+    │        │  ├ name: %56 = .identifier - tok[79..79]
+    │        │  │  └ token: .identifier 'b'
+    │        │  ├ type: %57 = .ty_i8 - tok[81..81]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        ├ %61 = .struct_field - tok[84..86]
+    │        │  ├ name: %59 = .identifier - tok[83..83]
+    │        │  │  └ token: .identifier 'c'
+    │        │  ├ type: %60 = .ty_i16 - tok[85..85]
+    │        │  │  └ token: .keyword_i16 'i16'
+    │        │  └ default_value: NONE
+    │        └ %64 = .struct_field - tok[88..90]
+    │           ├ name: %62 = .identifier - tok[87..87]
+    │           │  └ token: .identifier 'd'
+    │           ├ type: %63 = .ty_i32 - tok[89..89]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ default_value: NONE
+    ├ %66 = .comment_line - tok[92..93]
+    │  └ token: .comment '// Reordered to: struct { i32, i8 }'
+    ├ %67 = .comment_line - tok[93..94]
+    │  └ token: .comment '// alignment 4, size 8'
+    ├ %76 = .type_decl - tok[94..107]
+    │  ├ name: %68 = .identifier - tok[95..95]
+    │  │  └ token: .identifier 'E'
+    │  ├ type: NONE
+    │  └ value: %69 = .struct_decl - tok[97..107]
+    │     └ members_list: 2 items
+    │        ├ %72 = .struct_field - tok[100..102]
+    │        │  ├ name: %70 = .identifier - tok[99..99]
+    │        │  │  └ token: .identifier 'a'
+    │        │  ├ type: %71 = .ty_i8 - tok[101..101]
+    │        │  │  └ token: .keyword_i8 'i8'
+    │        │  └ default_value: NONE
+    │        └ %75 = .struct_field - tok[104..106]
+    │           ├ name: %73 = .identifier - tok[103..103]
+    │           │  └ token: .identifier 'b'
+    │           ├ type: %74 = .ty_i32 - tok[105..105]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ default_value: NONE
+    ├ %77 = .comment_line - tok[108..109]
+    │  └ token: .comment '// Reordered to: struct { E, i32, i8 }'
+    ├ %78 = .comment_line - tok[109..110]
+    │  └ token: .comment '// alignment 4, size 16'
+    └ %90 = .type_decl - tok[110..127]
+       ├ name: %79 = .identifier - tok[111..111]
+       │  └ token: .identifier 'F'
+       ├ type: NONE
+       └ value: %80 = .struct_decl - tok[113..127]
+          └ members_list: 3 items
+             ├ %83 = .struct_field - tok[116..118]
+             │  ├ name: %81 = .identifier - tok[115..115]
+             │  │  └ token: .identifier 'a'
+             │  ├ type: %82 = .ty_i8 - tok[117..117]
+             │  │  └ token: .keyword_i8 'i8'
+             │  └ default_value: NONE
+             ├ %86 = .struct_field - tok[120..122]
+             │  ├ name: %84 = .identifier - tok[119..119]
+             │  │  └ token: .identifier 'b'
+             │  ├ type: %85 = .identifier - tok[121..121]
+             │  │  └ token: .identifier 'E'
+             │  └ default_value: NONE
+             └ %89 = .struct_field - tok[124..126]
+                ├ name: %87 = .identifier - tok[123..123]
+                │  └ token: .identifier 'c'
+                ├ type: %88 = .ty_i32 - tok[125..125]
+                │  └ token: .keyword_i32 'i32'
+                └ default_value: NONE
