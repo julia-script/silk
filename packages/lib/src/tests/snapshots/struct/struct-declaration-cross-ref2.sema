@@ -8,11 +8,11 @@
 ;; 1 lists
 ;; 34 strings
 
-%0 = type @root::A = mod{ent{3}, {usize, i32, i32}}
+%0 = type @struct/struct-declaration-cross-ref2.sk::A = mod{ent{3}, {usize, i32, i32}}
 
-%1 = type @root::B = mod{ent{11}, {usize, i32, i32}}
+%1 = type @struct/struct-declaration-cross-ref2.sk::B = mod{ent{11}, {usize, i32, i32}}
 
-%2 = pub @root::A::mod::foo() -> void
+%2 = pub @struct/struct-declaration-cross-ref2.sk::A::mod::foo() -> void
  └ %0: void = .block: [%1-%37]                                        ; void
     ├ !%1: type = .global_get declaration=(%1)                        ; type(mod{ent{11}, {usize, i32, i32}})
     ├ %2: *mod{ent{11}, {usize, i32, i32}} = .alloc type=(mod{ent{11}, {usize, i32, i32}}) mutable=(false); exec_time
@@ -52,7 +52,7 @@
     ├ %36: void = .store operand=(%35) payload=(%33)                  ; void
     └ %37: todo(function) = .global_get declaration=(%3)              ; exec_time
 
-%3 = pub @root::B::mod::bar() -> void
+%3 = pub @struct/struct-declaration-cross-ref2.sk::B::mod::bar() -> void
  └ %0: void = .block: [%1-%38]                                        ; void
     ├ !%1: type = .global_get declaration=(%0)                        ; type(mod{ent{3}, {usize, i32, i32}})
     ├ %2: *mod{ent{3}, {usize, i32, i32}} = .alloc type=(mod{ent{3}, {usize, i32, i32}}) mutable=(false); exec_time

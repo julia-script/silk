@@ -8,13 +8,14 @@ const HirBuilder = @import("HirBuilder.zig");
 const MirBuilder = @import("MirBuilder.zig");
 const WasmBackend = @import("backend/wasm/Backend.zig");
 const dir = @import("./dir.zig");
-
+const Sema = @import("./sema/Sema.zig");
 errors: ErrorManager,
 sources: std.StringHashMapUnmanaged(Source),
 root: []const u8,
 name: []const u8,
 stack_memory_size: usize = std.math.pow(usize, 2, 10),
 output_dir: []const u8,
+sema: Sema.Builder,
 
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
@@ -41,7 +42,7 @@ pub const Source = struct {
     name: []const u8,
     ast: ?Ast = null,
     hir: ?Hir = null,
-    mir: ?Mir = null,
+
     pub const Location = union(enum) {
         path: []const u8,
         virtual: u64,
@@ -61,9 +62,6 @@ pub const Source = struct {
         self.hir = try Hir.build(allocator, &self.ast.?, &compilation.errors);
         std.debug.print("HIR:\n", .{});
         std.debug.print("{any}\n", .{self.hir});
-        self.mir = try Mir.build(allocator, &self.hir.?, &compilation.errors);
-        std.debug.print("MIR:\n", .{});
-        std.debug.print("{any}\n", .{self.mir});
     }
 };
 

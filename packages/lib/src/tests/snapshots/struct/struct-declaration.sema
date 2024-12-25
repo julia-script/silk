@@ -8,9 +8,9 @@
 ;; 1 lists
 ;; 19 strings
 
-%0 = type @root::A = mod{ent{2}, {i32, i64, i32}}
+%0 = type @struct/struct-declaration.sk::A = mod{ent{2}, {i32, i64, i32}}
 
-%1 = pub @root::A::mod::foo() -> i32
+%1 = pub @struct/struct-declaration.sk::A::mod::foo() -> i32
  └ %0: void = .block: [%1-%6]                                         ; void
     ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: number = .constant                                         ; int(3)

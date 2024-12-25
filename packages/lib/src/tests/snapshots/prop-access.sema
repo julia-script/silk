@@ -8,6 +8,6 @@
 ;; 0 lists
 ;; 5 strings
 
-%0 = @root::main() -> void
+%0 = @prop-access.sk::main() -> void
  └ %0: void = .block: [%1-%0]                                         ; void
 

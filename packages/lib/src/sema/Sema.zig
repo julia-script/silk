@@ -2,7 +2,7 @@ const std = @import("std");
 const Array = std.ArrayListUnmanaged;
 const ArrayHashMap = std.AutoArrayHashMapUnmanaged;
 const Tracer = @import("../Tracer.zig");
-const Builder = @import("./gen.zig").Builder;
+pub const Builder = @import("./gen.zig").Builder;
 const Hir = @import("../Hir.zig");
 const Ast = @import("../Ast.zig");
 const ErrorManager = @import("../ErrorManager.zig");
@@ -12,38 +12,120 @@ pub const Lists = InternedList(usize);
 pub const Strings = InternedList(u8);
 const activeTag = std.meta.activeTag;
 
-// allocator: std.mem.Allocator,
-
-// instructions: Array(Instruction) = .{},
-// values: ArrayHashMap(Value.Key, Value) = .{},
-// types: ArrayHashMap(Type.Key, Type) = .{},
-// strings: Strings,
-// lists: Lists,
-
 const Self = @This();
-pub const build = Builder.build;
+// pub const build = Builder.build;
 
-// pub fn build(
-//     allocator: std.mem.Allocator,
-//     hir: *Hir,
-//     errors_manager: *ErrorManager,
-//     options: Builder.BuildOptions,
-// ) !Self {
-//     return Builder.build(
-//         allocator,
-//         hir,
-//         errors_manager,
-//         options,
-//     );
-// }
-// pub fn deinit(self: *Self) void {
-//     self.instructions.deinit(self.allocator);
-//     self.values.deinit(self.allocator);
-//     self.types.deinit(self.allocator);
-//     self.strings.deinit();
-//     self.lists.deinit();
-// }
+allocator: std.mem.Allocator,
+values: ArrayHashMap(u64, Value) = .{},
+types: ArrayHashMap(u64, Type) = .{},
+lists: Lists,
+strings: Strings,
+declarations: std.ArrayListUnmanaged(Declaration) = .{},
+instructions: std.ArrayListUnmanaged(Instruction) = .{},
+builder: Builder,
 
+root: Strings.Range = Strings.Range.empty,
+sources: std.AutoArrayHashMapUnmanaged(Strings.Range, Source) = .{},
+errors_manager: *ErrorManager,
+pub fn init(allocator: std.mem.Allocator, error_manager: *ErrorManager, options: Builder.BuildOptions) !Self {
+    _ = options; // autofix
+    return Self{
+        .allocator = allocator,
+        .errors_manager = error_manager,
+        // .lists = Lists.init(allocator),
+        .lists = undefined,
+        // .strings = Strings.init(allocator),
+        .strings = undefined,
+        .builder = undefined,
+    };
+    // sema.builder =
+    //
+    // sema.builder.sema = &sema;
+
+}
+
+pub fn makeRootSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
+    self.lists = Lists.init(self.allocator);
+    self.strings = Strings.init(self.allocator);
+    self.builder = try Builder.build(self.allocator, self, self.errors_manager, .{});
+
+    const root = try self.makeSource(source, path);
+    // std.debug.panic("{}", .{root});
+    return root;
+}
+
+pub fn makeSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
+    const source_range = try self.strings.internSlice(path);
+    const source_gop = try self.sources.getOrPut(self.allocator, source_range);
+    if (source_gop.found_existing) {
+        return error.SourceAlreadyExists;
+    }
+    source_gop.value_ptr.* = try Source.init(self.builder.allocator, self.errors_manager, source);
+    return source_range;
+}
+pub fn compileAll(self: *Self, source: Strings.Range) !void {
+    try self.builder.compileAll(source);
+}
+pub fn getSource(self: *Self, source: Strings.Range) *Source {
+    return self.sources.getPtr(source) orelse std.debug.panic("source not found", .{});
+}
+pub fn getHir(self: *Self, source: Strings.Range) *Hir {
+    return self.getSource(source).hir;
+}
+pub const Source = struct {
+    id: u64,
+    path: Strings.Range,
+    source: []const u8,
+    ast: *Ast,
+    hir: *Hir,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, errors_manager: *ErrorManager, source: []const u8) !Source {
+        const source_dupe = try allocator.dupe(u8, source);
+        errdefer allocator.free(source_dupe);
+        const ast = try allocator.create(Ast);
+        errdefer allocator.destroy(ast);
+        ast.* = try Ast.parse(
+            allocator,
+            errors_manager,
+            source_dupe,
+            .{},
+        );
+        const hir = try allocator.create(Hir);
+        errdefer allocator.destroy(hir);
+        hir.* = try Hir.build(allocator, ast, errors_manager, .{});
+        return Source{
+            .id = std.hash.Wyhash.hash(0, source_dupe),
+            .path = Strings.Range.empty,
+            .source = source_dupe,
+            .allocator = allocator,
+            .ast = ast,
+            .hir = hir,
+        };
+    }
+    pub fn deinit(self: *Source) void {
+        self.ast.deinit();
+        self.hir.deinit();
+        self.allocator.free(self.source);
+        self.allocator.destroy(self.ast);
+        self.allocator.destroy(self.hir);
+    }
+};
+
+pub fn deinit(self: *Self) void {
+    self.builder.deinit();
+    const sources = self.sources.values();
+    for (sources) |*source| {
+        source.deinit();
+    }
+    self.sources.deinit(self.allocator);
+    self.strings.deinit();
+    self.lists.deinit();
+    self.declarations.deinit(self.allocator);
+    self.instructions.deinit(self.allocator);
+    self.values.deinit(self.allocator);
+    self.types.deinit(self.allocator);
+}
 pub const Type = struct {
     hash: u64,
     data: Data,
@@ -391,29 +473,29 @@ pub const Declaration = struct {
 
 const TreeWriter = @import("../TreeWriter.zig");
 
-pub fn formatType(writer: std.io.AnyWriter, builder: *Builder, type_key: Type.Key) !void {
-    if (builder.getType(type_key)) |ty| {
+pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !void {
+    if (self.builder.getType(type_key)) |ty| {
         switch (ty.data) {
             .pointer => |pointer| {
                 try writer.writeAll("*");
-                try formatType(writer, builder, pointer.child);
+                try self.formatType(writer, pointer.child);
             },
             .array => |array| {
                 try writer.print("[{d}]", .{array.size});
-                try formatType(writer, builder, array.child);
+                try self.formatType(writer, array.child);
             },
             .module => |module| {
                 try writer.print("mod{{ent{{{d}}}, ", .{module.entity});
-                try formatType(writer, builder, module.struct_type);
+                try self.formatType(writer, module.struct_type);
                 try writer.writeAll("}");
             },
             .@"struct" => |struct_type| {
                 try writer.writeAll("{");
-                for (builder.lists.getSlice(struct_type.fields), 0..) |field, i| {
+                for (self.lists.getSlice(struct_type.fields), 0..) |field, i| {
                     if (i > 0) {
                         try writer.writeAll(", ");
                     }
-                    try formatType(writer, builder, Type.Key.decode(field));
+                    try self.formatType(writer, Type.Key.decode(field));
                 }
                 try writer.writeAll("}");
             },
@@ -427,8 +509,8 @@ pub fn formatType(writer: std.io.AnyWriter, builder: *Builder, type_key: Type.Ke
     try writer.print("{s}", .{@tagName(type_key.simple)});
 }
 
-fn formatValue(writer: std.io.AnyWriter, builder: *Builder, value: Value.Key) !void {
-    if (builder.getValue(value)) |val| {
+fn formatValue(self: *Self, writer: std.io.AnyWriter, value: Value.Key) !void {
+    if (self.builder.getValue(value)) |val| {
         switch (val.data) {
             .float => |f| {
                 try writer.print("float({d})", .{f});
@@ -438,7 +520,7 @@ fn formatValue(writer: std.io.AnyWriter, builder: *Builder, value: Value.Key) !v
             },
             .type => |type_key| {
                 try writer.print("type(", .{});
-                try formatType(writer, builder, type_key);
+                try self.formatType(writer, type_key);
                 try writer.print(")", .{});
             },
 
@@ -456,8 +538,8 @@ fn formatValue(writer: std.io.AnyWriter, builder: *Builder, value: Value.Key) !v
     }
 }
 pub fn formatInstructionRange(
+    self: *Self,
     writer: std.io.AnyWriter,
-    builder: *Builder,
     tree_writer: *TreeWriter,
     instructions: []Instruction,
     range: Instruction.InstRange,
@@ -493,9 +575,8 @@ pub fn formatInstructionRange(
                     });
                     try tree_writer.pushDirLine();
 
-                    try formatInstructionRange(
+                    try self.formatInstructionRange(
                         writer,
-                        builder,
                         tree_writer,
                         instructions,
                         inner_range,
@@ -517,9 +598,8 @@ pub fn formatInstructionRange(
                         last_inst,
                     });
                     try tree_writer.pushDirLine();
-                    try formatInstructionRange(
+                    try self.formatInstructionRange(
                         writer,
-                        builder,
                         tree_writer,
                         instructions,
                         inner_range,
@@ -544,9 +624,8 @@ pub fn formatInstructionRange(
                     last_inst,
                 });
                 try tree_writer.pushDirLine();
-                try formatInstructionRange(
+                try self.formatInstructionRange(
                     writer,
-                    builder,
                     tree_writer,
                     instructions,
                     inner_range,
@@ -563,20 +642,19 @@ pub fn formatInstructionRange(
                 try tree_writer.writeIndentTo(buf_writer, true, last_inst == range_end);
 
                 try buf_writer.print("%{d}: ", .{i});
-                try formatType(buf_writer, builder, inst.type);
+                try self.formatType(buf_writer, inst.type);
                 try buf_writer.print(" = .{s}: [%{d}-%{d}]", .{
                     @tagName(inst.op),
                     inner_range.start,
                     last_inst,
                 });
                 try writer.print("{s: <70}; ", .{buf.slice()});
-                try formatValue(writer, builder, inst.value);
+                try self.formatValue(writer, inst.value);
                 try writer.print("\n", .{});
 
                 try tree_writer.pushDirLine();
-                try formatInstructionRange(
+                try self.formatInstructionRange(
                     writer,
-                    builder,
                     tree_writer,
                     instructions,
                     inner_range,
@@ -590,7 +668,7 @@ pub fn formatInstructionRange(
                     try buf_writer.writeAll("!");
                 }
                 try buf_writer.print("%{d}: ", .{i});
-                try formatType(buf_writer, builder, inst.type);
+                try self.formatType(buf_writer, inst.type);
                 try buf_writer.print(" = .{s}", .{@tagName(inst.op)});
                 const T = @TypeOf(data);
                 switch (@typeInfo(T)) {
@@ -606,7 +684,7 @@ pub fn formatInstructionRange(
 
                             if (comptime std.mem.eql(u8, field.name, "type")) {
                                 try buf_writer.print("(", .{});
-                                try formatType(buf_writer, builder, value);
+                                try self.formatType(buf_writer, value);
                                 try buf_writer.print(")", .{});
                             } else if (comptime std.mem.eql(u8, field.name, "index")) {
                                 try buf_writer.print("({d})", .{value});
@@ -633,18 +711,18 @@ pub fn formatInstructionRange(
                     },
                 }
                 try writer.print("{s: <70}; ", .{buf.slice()});
-                try formatValue(writer, builder, inst.value);
+                try self.formatValue(writer, inst.value);
                 try writer.print("\n", .{});
             },
         }
     }
 }
-pub fn formatDeclaration(writer: std.io.AnyWriter, builder: *Builder, declaration_index: Declaration.Index) !void {
+pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_index: Declaration.Index) !void {
     var tree_writer = TreeWriter.init(writer);
-    const declaration = builder.declarations.items[declaration_index];
+    const declaration = self.declarations.items[declaration_index];
 
     try tree_writer.pushDirLine();
-    const name = builder.strings.getSlice(declaration.name);
+    const name = self.strings.getSlice(declaration.name);
     if (declaration.is_pub) {
         try writer.print("pub ", .{});
     }
@@ -652,50 +730,49 @@ pub fn formatDeclaration(writer: std.io.AnyWriter, builder: *Builder, declaratio
         try writer.print("export ", .{});
     }
 
-    if (builder.getValue(declaration.value)) |value| {
+    if (self.builder.getValue(declaration.value)) |value| {
         switch (value.data) {
             .function => |func| {
-                const ty = builder.getType(func.type) orelse unreachable;
+                const ty = self.builder.getType(func.type) orelse unreachable;
                 try writer.print("@{s}", .{name});
-                const params_iter = builder.lists.getSlice(ty.data.function.params);
+                const params_iter = self.lists.getSlice(ty.data.function.params);
                 try writer.print("(", .{});
 
                 for (params_iter, 0..) |param, i| {
                     if (i > 0) {
                         try writer.print(", ", .{});
                     }
-                    try formatType(writer, builder, Type.Key.decode(param));
+                    try self.formatType(writer, Type.Key.decode(param));
                 }
 
                 try writer.print(") -> ", .{});
-                try formatType(writer, builder, ty.data.function.ret);
+                try self.formatType(writer, ty.data.function.ret);
                 try writer.print("\n", .{});
-                const func_value = builder.getValue(declaration.value) orelse unreachable;
-                if (func_value.data.function.init) |init| {
-                    const init_inst = builder.instructions.items[init];
+                const func_value = self.builder.getValue(declaration.value) orelse unreachable;
+                if (func_value.data.function.init) |init_inst_index| {
+                    const init_inst = self.instructions.items[init_inst_index];
                     const count = init_inst.data.block.instructions_count;
                     // std.debug.panic("TODO: formatDeclaration {any}", .{range});
-                    try formatInstructionRange(
+                    try self.formatInstructionRange(
                         writer,
-                        builder,
                         &tree_writer,
-                        builder.instructions.items[init..],
+                        self.instructions.items[init_inst_index..],
                         .{ .start = 0, .len = count },
                     );
                 }
             },
             .global => {
                 try writer.print("global ", .{});
-                try formatType(writer, builder, value.data.global.type);
+                try self.formatType(writer, value.data.global.type);
                 try writer.print(" @{s}", .{name});
                 try writer.print(" ", .{});
-                try formatValue(writer, builder, value.data.global.value);
+                try self.formatValue(writer, value.data.global.value);
                 try writer.print("\n", .{});
                 // try writer.print("global {}\n", .{value.data.global.value});
             },
             .type => {
                 try writer.print("type @{s} = ", .{name});
-                try formatType(writer, builder, value.data.type);
+                try self.formatType(writer, value.data.type);
                 try writer.print("\n", .{});
             },
             else => {
@@ -718,39 +795,28 @@ pub fn formatDeclaration(writer: std.io.AnyWriter, builder: *Builder, declaratio
     try tree_writer.pop();
 }
 
-pub fn format(builder: *Builder, writer: std.io.AnyWriter) !void {
-    const declarations = builder.declarations.items;
+pub fn format(self: *Self, writer: std.io.AnyWriter) !void {
+    const builder = self.builder;
+    const declarations = self.declarations.items;
     const len = declarations.len;
-    const trace = builder.tracer.begin(
-        @src(),
-        .{ "format", "Sema.format()", .{} },
-        .{
-            .post_state = builder.getState(),
-            .declarations = declarations,
-            .len = declarations.len,
-            .len_eq_1 = len == 1,
-        },
-    );
-    defer trace.end(.{});
 
     try writer.print(";; Sema\n", .{});
 
     try writer.print(";; {d} declarations\n", .{len});
     try writer.print(";; {d} entities\n", .{builder.entities.len});
     try writer.print(";; {d} symbols\n", .{builder.symbols.count()});
-    try writer.print(";; {d} instructions\n", .{builder.instructions.items.len});
-    try writer.print(";; {d} values\n", .{builder.values.count()});
-    try writer.print(";; {d} types\n", .{builder.types.count()});
-    try writer.print(";; {d} lists\n", .{builder.lists.count()});
-    try writer.print(";; {d} strings\n", .{builder.strings.count()});
+    try writer.print(";; {d} instructions\n", .{self.instructions.items.len});
+    try writer.print(";; {d} values\n", .{self.values.count()});
+    try writer.print(";; {d} types\n", .{self.types.count()});
+    try writer.print(";; {d} lists\n", .{self.lists.count()});
+    try writer.print(";; {d} strings\n", .{self.strings.count()});
 
     try writer.print("\n", .{});
 
-    for (0..builder.declarations.items.len) |i| {
+    for (0..self.declarations.items.len) |i| {
         try writer.print("%{d} = ", .{i});
-        try formatDeclaration(
+        try self.formatDeclaration(
             writer,
-            builder,
             i,
         );
         try writer.print("\n", .{});
@@ -827,14 +893,20 @@ test "Sema" {
         // \\  a.foo();
         // \\}
     ;
-    var ast = try Ast.parse(allocator, &errors_manager, source[0..], .{});
-    defer ast.deinit();
-    var hir = try Hir.build(allocator, &ast, &errors_manager, .{});
-    defer hir.deinit();
-    std.debug.print("hir: {s}\n", .{hir});
-    var sema = try Builder.build(allocator, &hir, &errors_manager, .{});
+
+    var sema = try Self.init(allocator, &errors_manager, .{});
     defer sema.deinit();
-    try sema.collectRoot();
+    const root = try sema.makeRootSource(source, "root.sk");
+    // std.debug.panic("{}", .{sema.root});
+    try sema.compileAll(root);
+    // var ast = try Ast.parse(allocator, &errors_manager, source[0..], .{});
+    // defer ast.deinit();
+    // var hir = try Hir.build(allocator, &ast, &errors_manager, .{});
+    // defer hir.deinit();
+    // std.debug.print("hir: {s}\n", .{hir});
+    // var sema = try Builder.build(allocator, &hir, &errors_manager, .{});
+    // defer sema.deinit();
+    // try sema.collectRoot();
     // const compiled = try sema.compileDeclaration("root::a");
     // try formatDeclaration(
     //     std.io.getStdErr().writer().any(),

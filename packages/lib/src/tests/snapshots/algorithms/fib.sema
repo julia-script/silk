@@ -8,7 +8,7 @@
 ;; 0 lists
 ;; 9 strings
 
-%0 = pub @root::fib() -> i32
+%0 = pub @algorithms/fib.sk::fib() -> i32
  └ %0: void = .block: [%1-%49]                                        ; void
     ├ %1: i32 = .param                                                ; exec_time
     ├ !%2: number = .constant                                         ; int(0)

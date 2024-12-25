@@ -8,5 +8,5 @@
 ;; 1 lists
 ;; 15 strings
 
-%0 = type @root::A = mod{ent{2}, {usize, i32, i32}}
+%0 = type @struct/struct-declaration-no-decl.sk::A = mod{ent{2}, {usize, i32, i32}}
 

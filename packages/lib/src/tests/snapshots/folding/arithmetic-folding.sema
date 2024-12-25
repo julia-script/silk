@@ -8,7 +8,7 @@
 ;; 0 lists
 ;; 5 strings
 
-%0 = @root::folding() -> i32
+%0 = @folding/arithmetic-folding.sk::folding() -> i32
  └ %0: void = .block: [%1-%14]                                        ; void
     ├ !%1: number = .constant                                         ; int(1)
     ├ !%2: number = .constant                                         ; int(2)

@@ -8,7 +8,7 @@
 ;; 0 lists
 ;; 9 strings
 
-%0 = @root::fold_to_true() -> i32
+%0 = @folding/comparison-folding.sk::fold_to_true() -> i32
  └ %0: void = .block: [%1-%117]                                       ; void
     ├ !%1: number = .constant                                         ; int(1)
     ├ !%2: number = .constant                                         ; int(1)
@@ -128,7 +128,7 @@
     ├ !%116: i32 = .constant                                          ; int(32767)
     └ %117: bool = .constant                                          ; true
 
-%1 = @root::fold_to_false() -> i32
+%1 = @folding/comparison-folding.sk::fold_to_false() -> i32
  └ %0: void = .block: [%1-%120]                                       ; void
     ├ !%1: number = .constant                                         ; int(1)
     ├ !%2: number = .constant                                         ; int(2)

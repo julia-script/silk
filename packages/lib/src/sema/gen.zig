@@ -7,6 +7,7 @@ const Array = std.ArrayListUnmanaged;
 const ArrayHashMap = std.AutoArrayHashMapUnmanaged;
 const ChunkedArray = @import("../chunked_array.zig").ChunkedArray;
 const Ast = @import("../Ast.zig");
+const Source = @import("../Compilation.zig").Source;
 
 inline fn formatHirIndex(hir: *Hir, index: Hir.Inst.Index) ![]const u8 {
     const hir_inst = getHirInst(hir, index);
@@ -28,20 +29,22 @@ const Error = error{
 pub const Builder = struct {
     // sema: *Sema,
     entities: ChunkedArray(Entity, 1024),
-    strings: Sema.Strings,
+
+    // strings: Sema.Strings,
     arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
     tracer: Tracer,
     errors_manager: *ErrorManager,
-    hir: *Hir,
+    // hir: *Hir,
+    sema: *Sema,
+
     symbols: std.AutoArrayHashMapUnmanaged(Sema.Strings.Range, Entity.Key) = .{},
     symbols_by_hir_inst: std.AutoArrayHashMapUnmanaged(Hir.Inst.Index, Entity.Key) = .{},
-    values: ArrayHashMap(u64, Sema.Value) = .{},
-    types: ArrayHashMap(u64, Sema.Type) = .{},
-    lists: Sema.Lists,
+    // values: ArrayHashMap(u64, Sema.Value) = .{},
+    pes: ArrayHashMap(u64, Sema.Type) = .{},
+    // lists: Sema.Lists,
     snapshot_scratch: std.ArrayListUnmanaged(u8) = .{},
-    instructions: std.ArrayListUnmanaged(Sema.Instruction) = .{},
-    declarations: std.ArrayListUnmanaged(Sema.Declaration) = .{},
+    // declarations: std.ArrayListUnmanaged(Sema.Declaration) = .{},
     declarations_by_hir_inst: std.AutoArrayHashMapUnmanaged(Hir.Inst.Index, Sema.Declaration.Index) = .{},
     queue: std.AutoArrayHashMapUnmanaged(Entity.Key, void) = .{},
 
@@ -53,22 +56,13 @@ pub const Builder = struct {
     const BuilderState = struct {
         // symbols: *std.meta.FieldType(Builder, .symbols),
     };
-    pub fn getAstNode(self: *Builder, node_index: Ast.Node.Index) Ast.Node {
-        return self.hir.ast.getNode(node_index);
-    }
-    pub fn getNodeSlice(self: *Builder, node_index: Ast.Node.Index) []const u8 {
-        return self.hir.ast.getNodeSlice(node_index);
-    }
-    pub fn getTokenSlice(self: *Builder, token: Ast.Token.Index) []const u8 {
-        return self.hir.ast.getTokenSlice(token);
-    }
     pub fn getState(self: *Builder) []const u8 {
         self.snapshot_scratch.clearRetainingCapacity();
         const writer = self.snapshot_scratch.writer(self.arena.allocator()).any();
 
-        writer.print("Types: {d} items\n", .{self.types.count()}) catch {};
-        writer.print("Values: {d} items\n", .{self.values.count()}) catch {};
-        writer.print("Declarations: {d} items\n", .{self.declarations.items.len}) catch {};
+        writer.print("Types: {d} items\n", .{self.sema.types.count()}) catch {};
+        writer.print("Values: {d} items\n", .{self.sema.values.count()}) catch {};
+        writer.print("Declarations: {d} items\n", .{self.sema.declarations.items.len}) catch {};
 
         writer.print("\n", .{}) catch {};
 
@@ -82,10 +76,10 @@ pub const Builder = struct {
 
         writer.print("\n", .{}) catch {};
         writer.print("Symbols by hir inst: {d} items\n\n", .{self.symbols_by_hir_inst.count()}) catch {};
-        var symbols_by_hir_inst_iter = self.symbols_by_hir_inst.iterator();
-        while (symbols_by_hir_inst_iter.next()) |entry| {
-            writer.print("- {s} = Ent({d})\n", .{ formatHirIndex(self.hir, entry.key_ptr.*) catch unreachable, entry.value_ptr.* }) catch unreachable;
-        }
+        // var symbols_by_hir_inst_iter = self.symbols_by_hir_inst.iterator();
+        // while (symbols_by_hir_inst_iter.next()) |entry| {
+        //     writer.print("- {s} = Ent({d})\n", .{ formatHirIndex(self.hir, entry.key_ptr.*) catch unreachable, entry.value_ptr.* }) catch unreachable;
+        // }
 
         writer.print("\n", .{}) catch {};
         writer.print("Entities: {d} items\n\n", .{self.entities.len}) catch unreachable;
@@ -107,7 +101,7 @@ pub const Builder = struct {
                 return null;
             },
             .complex => |complex| {
-                return self.types.entries.items(.value)[complex];
+                return self.sema.types.entries.items(.value)[complex];
             },
         }
     }
@@ -117,7 +111,7 @@ pub const Builder = struct {
                 return null;
             },
             .complex => |complex| {
-                return self.values.entries.items(.value)[complex];
+                return self.sema.values.entries.items(.value)[complex];
             },
         }
     }
@@ -128,16 +122,16 @@ pub const Builder = struct {
             .{ "reserveDeclaration", "Builder.reserveDeclaration()", .{} },
             .{},
         );
-        const index = self.declarations.items.len;
+        const index = self.sema.declarations.items.len;
         defer trace.end(.{
             .index = index,
         });
-        try self.declarations.append(self.allocator, undefined);
+        try self.sema.declarations.append(self.sema.allocator, undefined);
         return index;
     }
 
     pub fn setDeclaration(self: *Builder, index: Sema.Declaration.Index, declaration: Sema.Declaration) void {
-        self.declarations.items[index] = declaration;
+        self.sema.declarations.items[index] = declaration;
     }
     pub fn queueEntity(self: *Builder, key: Entity.Key) !void {
         const entity = self.getEntity(key);
@@ -164,18 +158,18 @@ pub const Builder = struct {
         const entity_key = self.symbols.get(range) orelse return null;
         return self.getEntity(entity_key);
     }
-    fn getHirList(self: *Builder, range: Hir.InternedLists.Range) []Hir.Inst.Index {
-        return self.hir.lists.getSlice(range);
-    }
+    // fn getHirList(self: *Builder, range: Hir.InternedLists.Range) []Hir.Inst.Index {
+    //     return self.hir.lists.getSlice(range);
+    // }
 
     pub fn getSlice(self: *Builder, range: Sema.Strings.Range) []const u8 {
-        return self.strings.getSlice(range);
+        return self.sema.strings.getSlice(range);
     }
     fn internSlice(self: *Builder, slice: []const u8) Error!Sema.Strings.Range {
-        return self.strings.internSlice(slice);
+        return self.sema.strings.internSlice(slice);
     }
     inline fn internMultipleSlices(self: *Builder, slices: anytype) Error!Sema.Strings.Range {
-        var list = self.strings.new();
+        var list = self.sema.strings.new();
         inline for (slices) |slice| {
             if (@TypeOf(slice) == Sema.Strings.Range) {
                 try list.appendSlice(self.getSlice(slice));
@@ -186,16 +180,16 @@ pub const Builder = struct {
         return try list.commit();
     }
     pub fn newList(self: *Builder) Sema.Lists.WorkingList {
-        return self.lists.new();
+        return self.sema.lists.new();
     }
-    fn internNode(self: *Builder, node: Ast.Node.Index) Error!Sema.Strings.Range {
-        return try self.internSlice(self.hir.ast.getNodeSlice(node));
-    }
+    // fn internNode(self: *Builder, node: Ast.Node.Index) Error!Sema.Strings.Range {
+    //     return try self.internSlice(self.hir.ast.getNodeSlice(node));
+    // }
 
     pub fn unwrapTypeValue(self: *Builder, value_key: Sema.Value.Key) Sema.Type.Key {
         switch (value_key) {
             .complex => |complex| {
-                const value = self.values.entries.items(.value)[complex];
+                const value = self.sema.values.entries.items(.value)[complex];
                 return switch (value.data) {
                     .type => |type_key| {
                         return type_key;
@@ -267,7 +261,7 @@ pub const Builder = struct {
                 return hash;
             },
             .complex => |complex| {
-                const ty = self.types.entries.items(.value)[complex];
+                const ty = self.sema.types.entries.items(.value)[complex];
                 return ty.hash;
             },
         }
@@ -280,7 +274,7 @@ pub const Builder = struct {
                 .ty = ty,
             },
         );
-        if (self.types.getIndex(ty.hash)) |index| {
+        if (self.sema.types.getIndex(ty.hash)) |index| {
             const existing = Sema.Type.complex(index);
 
             trace.end(.{
@@ -289,8 +283,8 @@ pub const Builder = struct {
             });
             return existing;
         }
-        const index = self.types.count();
-        try self.types.put(self.allocator, ty.hash, ty);
+        const index = self.sema.types.count();
+        try self.sema.types.put(self.sema.allocator, ty.hash, ty);
         const new_key = Sema.Type.complex(index);
         self.tracer.trace(
             @src(),
@@ -316,7 +310,7 @@ pub const Builder = struct {
         switch (data) {
             .function => |function| {
                 var hasher = Hasher.new("function");
-                for (self.lists.getSlice(function.params)) |param| {
+                for (self.sema.lists.getSlice(function.params)) |param| {
                     const decoded = Sema.Type.Key.decode(param);
                     hasher.update(self.getTypeKeyHash(decoded));
                 }
@@ -346,7 +340,7 @@ pub const Builder = struct {
             },
             .@"struct" => |str| {
                 var hasher = Hasher.new("struct");
-                for (self.lists.getSlice(str.fields)) |field| {
+                for (self.sema.lists.getSlice(str.fields)) |field| {
                     hasher.update(self.getTypeKeyHash(Sema.Type.Key.decode(field)));
                 }
                 return try self.internType(.{
@@ -377,7 +371,7 @@ pub const Builder = struct {
                 return hash;
             },
             .complex => |complex| {
-                const value = self.values.entries.items(.value)[complex];
+                const value = self.sema.values.entries.items(.value)[complex];
                 return value.hash;
             },
         }
@@ -390,7 +384,7 @@ pub const Builder = struct {
                 .value = value,
             },
         );
-        if (self.values.getIndex(value.hash)) |index| {
+        if (self.sema.values.getIndex(value.hash)) |index| {
             const existing = Sema.Value.complex(index);
 
             trace.end(.{
@@ -399,8 +393,8 @@ pub const Builder = struct {
             });
             return existing;
         }
-        const index = self.values.count();
-        try self.values.put(self.allocator, value.hash, value);
+        const index = self.sema.values.count();
+        try self.sema.values.put(self.sema.allocator, value.hash, value);
         const new_key = Sema.Value.complex(index);
         self.tracer.trace(
             @src(),
@@ -503,15 +497,15 @@ pub const Builder = struct {
             },
         }
     }
-    pub inline fn build(allocator: std.mem.Allocator, hir: *Hir, errors_manager: *ErrorManager, options: BuildOptions) Error!Builder {
+    pub inline fn build(allocator: std.mem.Allocator, sema: *Sema, errors_manager: *ErrorManager, options: BuildOptions) Error!Builder {
         _ = options; // autofix
         return Builder{
-            .strings = Sema.Strings.init(allocator),
-            .hir = hir,
-            .errors_manager = errors_manager,
+            // .strings = Sema.Strings.init(allocator),
             .entities = ChunkedArray(Entity, 1024).init(allocator),
-            // .sema = sema,
-            .lists = Sema.Lists.init(allocator),
+            .errors_manager = errors_manager,
+            .sema = sema,
+
+            // .lists = Sema.Lists.init(allocator),
             .arena = std.heap.ArenaAllocator.init(allocator),
             .allocator = allocator,
             .tracer = Tracer.init(
@@ -579,49 +573,51 @@ pub const Builder = struct {
             else => unreachable,
         }
     }
-    pub fn collectRoot(self: *Builder) !void {
-        // const root_entity = try Entity.init(self, Hir.Inst.RootIndex);
+    // pub fn collectRoot(self: *Builder) !void {
+    //     // const root_entity = try Entity.init(self, Hir.Inst.RootIndex);
 
-        const root_entity_key = try self.makeEntity(.{
-            .name = try self.internSlice("root"),
-            .hir_inst_index = Hir.Inst.RootIndex,
-            .data = .{ .module_declaration = .{} },
-        });
-        var root_entity = self.getEntity(root_entity_key);
-        try root_entity.collectEntities();
-    }
+    //     const root_entity_key = try self.makeEntity(.{
+    //         .name = try self.sema.strings.internSlice("root"),
+    //         .source = self.sema.root,
+    //         .hir_inst_index = Hir.Inst.RootIndex,
+    //         .data = .{ .module_declaration = .{} },
+    //     });
+    //     var root_entity = self.getEntity(root_entity_key);
+    //     try root_entity.collectEntities();
+    // }
     pub fn deinit(self: *Builder) void {
-        self.strings.deinit();
-        self.lists.deinit();
+        // self.strings.deinit();
+        // self.lists.deinit();
         self.entities.deinit();
         self.arena.deinit();
-        self.values.deinit(self.allocator);
-        self.types.deinit(self.allocator);
+        // self.values.deinit(self.allocator);
+        // self.types.deinit(self.allocator);
         self.symbols.deinit(self.allocator);
         self.symbols_by_hir_inst.deinit(self.allocator);
         self.tracer.deinit();
-        self.declarations.deinit(self.allocator);
+        // self.declarations.deinit(self.allocator);
         self.declarations_by_hir_inst.deinit(self.allocator);
-        self.instructions.deinit(self.allocator);
         self.queue.deinit(self.allocator);
     }
 
     pub fn makeEntity(self: *Builder, input: Entity.EntityInput) !Entity.Key {
         const trace = self.tracer.begin(
             @src(),
-            .{ "makeEntity", "makeEntity({s}, {s})", .{
-                try formatHirIndex(self.hir, input.hir_inst_index),
-                @tagName(input.data),
-            } },
             .{
-                .input = input,
+                "makeEntity", "makeEntity({s})", .{
+                    // try formatHirIndex(self.hir, input.hir_inst_index),
+                    @tagName(input.data),
+                },
+            },
+            .{
+                // .input = input,
             },
         );
         const key = self.entities.len;
         defer trace.end(.{ .key = key, .post_state = self.getState() });
         if (self.symbols_by_hir_inst.contains(input.hir_inst_index)) {
-            std.debug.panic("Symbol already exists: {s}", .{
-                try formatHirIndex(self.hir, input.hir_inst_index),
+            std.debug.panic("Symbol already exists", .{
+                // try formatHirIndex(self.hir, input.hir_inst_index),
             });
         }
         const entity = try Entity.init(self, key, input);
@@ -659,15 +655,24 @@ pub const Builder = struct {
         return try entity.resolveDeclaration();
     }
 
-    pub fn compileAll(self: *Builder) !void {
+    pub fn collectSource(self: *Builder, source: Sema.Strings.Range) !void {
+        const root_entity_key = try self.makeEntity(.{
+            .name = source,
+            .source = source,
+            .hir_inst_index = Hir.Inst.RootIndex,
+            .data = .{ .module_declaration = .{} },
+        });
+        var root_entity = self.getEntity(root_entity_key);
+        try root_entity.collectEntities();
+    }
+    pub fn compileAll(self: *Builder, source: Sema.Strings.Range) !void {
         const trace = self.tracer.begin(
             @src(),
             .{ "compileAll", "Builder.compileAll", .{} },
             .{},
         );
         defer trace.end(.{ .post_state = self.getState() });
-        // try self.collectAll();
-        try self.collectRoot();
+        try self.collectSource(source);
 
         var i: usize = 0;
         var j: usize = 0;
@@ -734,6 +739,7 @@ pub const Entity = struct {
     data: Data,
     is_pub: bool = false,
     is_export: bool = false,
+    source: Sema.Strings.Range,
 
     type: union(Stage) {
         idle: void,
@@ -808,20 +814,38 @@ pub const Entity = struct {
     };
     pub const EntityInput = struct {
         parent: ?Entity.Key = null,
+        source: ?Sema.Strings.Range = null,
         name: Sema.Strings.Range,
         hir_inst_index: Hir.Inst.Index,
+
         data: Data,
     };
-    pub fn init(builder: *Builder, key: Key, input: EntityInput) !Entity {
-        const hir_inst = getHirInst(builder.hir, input.hir_inst_index);
 
-        _ = hir_inst; // autofix
+    pub fn getHir(self: *Entity) *Hir {
+        return self.builder.sema.getHir(self.source);
+    }
+    pub fn getHirInstruction(self: *Entity, hir_inst_index: Hir.Inst.Index) Hir.Inst {
+        const hir = self.builder.sema.getHir(self.source);
+        return hir.insts.items[hir_inst_index];
+    }
+    pub fn getHirList(self: *Entity, hir_list_index: Hir.InternedLists.Range) []Hir.Inst.Index {
+        const hir = self.builder.sema.getHir(self.source);
+        return hir.lists.getSlice(hir_list_index);
+    }
+
+    pub fn internNode(self: *Entity, node: Ast.Node.Index) Error!Sema.Strings.Range {
+        const hir = self.builder.sema.getHir(self.source);
+        const slice = hir.ast.getNodeSlice(node);
+        return try self.builder.sema.strings.internSlice(slice);
+    }
+    pub fn init(builder: *Builder, key: Key, input: EntityInput) !Entity {
         var ent = Entity{
             .name = if (input.parent) |parent| try builder.internMultipleSlices(&.{ builder.getEntity(parent).name, "::", input.name }) else input.name,
             .key = key,
             .hir_inst_index = input.hir_inst_index,
             .builder = builder,
             .data = input.data,
+            .source = input.source orelse if (input.parent) |parent| builder.getEntity(parent).source else std.debug.panic("no source", .{}),
         };
         // switch (input.data) {
         //     .module_declaration => {
@@ -833,11 +857,12 @@ pub const Entity = struct {
         //     },
         //     else => {},
         // }
-        switch (getHirInst(builder.hir, input.hir_inst_index)) {
+        switch (ent.getHirInstruction(input.hir_inst_index)) {
             .global_decl => |global_decl| {
                 ent.is_pub = global_decl.visibility == .public;
                 ent.is_export = global_decl.exported;
             },
+
             else => {},
         }
         return ent;
@@ -861,7 +886,15 @@ pub const Entity = struct {
     }
     pub inline fn formatKey(self: *Entity) Error![]const u8 {
         var buf: [256]u8 = undefined;
-        const slice = try std.fmt.bufPrint(buf[0..], "Ent({d}, .{s}, {s})", .{ self.key, @tagName(self.data), try formatHirIndex(self.builder.hir, self.hir_inst_index) });
+        const slice = try std.fmt.bufPrint(
+            buf[0..],
+            "Ent({d}, .{s}, {s})",
+            .{
+                self.key,
+                @tagName(self.data),
+                try formatHirIndex(self.getHir(), self.hir_inst_index),
+            },
+        );
         return slice;
     }
 
@@ -921,12 +954,12 @@ pub const Entity = struct {
 
         });
 
-        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).struct_decl;
-        const fields_list = self.builder.getHirList(hir_inst.fields_list);
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).struct_decl;
+        const fields_list = self.getHirList(hir_inst.fields_list);
         for (fields_list, 0..) |field_inst_index, i| {
-            const field_inst = getHirInst(self.builder.hir, field_inst_index).struct_field;
+            const field_inst = self.getHirInstruction(field_inst_index).struct_field;
 
-            const name_slice_range = try self.builder.internNode(field_inst.name_node);
+            const name_slice_range = try self.internNode(field_inst.name_node);
             const name_slice = self.builder.getSlice(name_slice_range);
 
             const field_trace = self.builder.tracer.begin(
@@ -956,11 +989,11 @@ pub const Entity = struct {
             });
         }
 
-        const declarations_list = self.builder.getHirList(hir_inst.declarations_list);
+        const declarations_list = self.getHirList(hir_inst.declarations_list);
         for (declarations_list) |declaration_inst_index| {
-            switch (getHirInst(self.builder.hir, declaration_inst_index)) {
+            switch (self.getHirInstruction(declaration_inst_index)) {
                 .global_decl => |global_decl_inst| {
-                    const name_slice_range = try self.builder.internNode(global_decl_inst.name_node);
+                    const name_slice_range = try self.internNode(global_decl_inst.name_node);
                     const decl_type = if (global_decl_inst.is_type) "TYPE" else if (global_decl_inst.is_fn) "FN" else "GLOBAL";
                     const declaration_trace = self.builder.tracer.begin(
                         @src(),
@@ -1040,18 +1073,18 @@ pub const Entity = struct {
         defer trace.end(.{});
         var builder = self.builder;
         const key = self.key;
-        const hir_inst = getHirInst(builder.hir, self.hir_inst_index).global_decl;
-        const fn_inst = getHirInst(builder.hir, hir_inst.type orelse unreachable).fn_decl;
-        const parameters_list = builder.getHirList(fn_inst.params_list);
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).global_decl;
+        const fn_inst = self.getHirInstruction(hir_inst.type orelse unreachable).fn_decl;
+        const parameters_list = self.getHirList(fn_inst.params_list);
         const data = &self.data.function_declaration;
         for (parameters_list) |parameter_inst_index| {
-            const parameter_inst = getHirInst(builder.hir, parameter_inst_index).param_decl;
-            const name_slice_range = try builder.internNode(parameter_inst.name_node);
+            const parameter_inst = self.getHirInstruction(parameter_inst_index).param_decl;
+            const name_slice_range = try self.internNode(parameter_inst.name_node);
 
             const parameter_trace = builder.tracer.begin(
                 @src(),
                 .{ "collectFunctionSymbols", "[COLLECT_PARAMETER='{s}']", .{
-                    builder.getSlice(name_slice_range),
+                    self.builder.getSlice(name_slice_range),
                 } },
                 .{
                     // .self = self.getState(),
@@ -1110,7 +1143,7 @@ pub const Entity = struct {
         );
         defer trace.end(.{});
 
-        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).struct_field;
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).struct_field;
         // const name_slice_range = try self.builder.internNode(hir_inst.name_node);
         // const name_slice = self.builder.getSlice(name_slice_range);
 
@@ -1288,7 +1321,7 @@ pub const Entity = struct {
             .{},
         );
         defer trace.end(.{});
-        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index);
+        const hir_inst = self.getHirInstruction(self.hir_inst_index);
 
         switch (std.meta.activeTag(hir_inst)) {
             inline else => |tag| {
@@ -1318,7 +1351,7 @@ pub const Entity = struct {
             .{},
         );
         defer trace.end(.{});
-        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).global_decl;
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).global_decl;
         // const type_key = try self.resolveType();
         // const ty = self.builder.getType(type_key) orelse std.debug.panic("function type not resolved: {any}", .{type_key});
 
@@ -1374,7 +1407,7 @@ pub const Entity = struct {
             .{},
         );
         defer trace.end(.{});
-        const hir_inst = getHirInst(self.builder.hir, self.hir_inst_index).global_decl;
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).global_decl;
 
         const init_inst = hir_inst.init orelse std.debug.panic("global type declaration has no init", .{});
         // if (hir_inst.init) |init_inst| {
@@ -1384,7 +1417,7 @@ pub const Entity = struct {
         try block.handleBlockInstructionInner(init_inst);
         const block_inst = try block.commit();
 
-        const inst = self.builder.instructions.items[block_inst];
+        const inst = self.builder.sema.instructions.items[block_inst];
         return inst.value;
         // return self.builder.internValueData(.{
         //     .global = .{
@@ -1547,7 +1580,7 @@ const Scope = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "makeBlock", "Scope.makeBlock({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.builder.sema.getHir(self.entity.source), hir_inst_index),
             } },
             .{},
         );
@@ -1634,10 +1667,10 @@ const Block = struct {
             .{},
         );
 
-        const inst = self.builder.instructions.items.len;
+        const inst = self.builder.sema.instructions.items.len;
         const len = self.instructions.items.len + 1;
         self.getInstruction(self.instruction_index).data.block.instructions_count = len;
-        try self.builder.instructions.appendSlice(self.builder.allocator, self.scope.instructions.items);
+        try self.builder.sema.instructions.appendSlice(self.builder.allocator, self.scope.instructions.items);
         defer trace.end(.{
             .start = 0,
             .len = len,
@@ -1653,7 +1686,7 @@ const Block = struct {
         self.builder.tracer.trace(
             @src(),
             .{ "newInstruction", "Block.reserveInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{},
         );
@@ -1730,12 +1763,12 @@ const Block = struct {
     }
 
     pub fn computeInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
 
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "computeInstruction", "Block.computeInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .hir_inst_index = hir_inst_index,
@@ -1962,7 +1995,7 @@ const Block = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "pushCastInstruction", "Block.pushCastInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2001,7 +2034,7 @@ const Block = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "pushMaybeCastInstruction", "Block.pushMaybeCastInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2027,7 +2060,7 @@ const Block = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "pushMaybeCastInstructionToType", "Block.pushMaybeCastInstructionToType({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2055,7 +2088,7 @@ const Block = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "getInstructionAsType", "Block.getInstructionAsType({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2074,7 +2107,7 @@ const Block = struct {
     }
 
     pub fn handleGlobalGet(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const global_entity = self.builder.getEntityByHirInst(hir_inst.global_get.operand);
 
         return self.pushGlobalGetInstruction(hir_inst_index, global_entity.key);
@@ -2155,7 +2188,7 @@ const Block = struct {
         }
     }
     pub fn handleConstantIntInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const value = hir_inst.constant_int.value;
         // const slice = self.builder.getNodeSlice(value);
         // const int = try std.fmt.parseInt(i64, slice, 10);
@@ -2167,11 +2200,11 @@ const Block = struct {
         });
     }
     pub fn handleConstantInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleConstantNumber", "Block.handleConstantNumber({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .hir_inst_index = hir_inst_index,
@@ -2185,7 +2218,7 @@ const Block = struct {
 
         switch (hir_inst) {
             .comptime_number => |ast_node| {
-                const slice = self.builder.getNodeSlice(ast_node.node);
+                const slice = self.scope.entity.getHir().ast.getNodeSlice(ast_node.node);
                 const is_float = std.mem.indexOf(u8, slice, ".") != null;
                 const value: Sema.Value.Data = blk: {
                     if (is_float) {
@@ -2210,11 +2243,11 @@ const Block = struct {
     }
 
     pub fn handleTypeLiteralInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleTypeLiteralInstruction", "Block.handleTypeLiteralInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .hir_inst_index = hir_inst_index,
@@ -2279,11 +2312,11 @@ const Block = struct {
         );
     }
     pub fn handleAllocInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleAllocInstruction", "Block.handleAllocInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2315,11 +2348,11 @@ const Block = struct {
     }
 
     pub fn handleStoreInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleStoreInstruction", "Block.handleStoreInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2358,11 +2391,11 @@ const Block = struct {
         });
     }
     pub fn handleParamGetInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleParamGetInstruction", "Block.handleParamGetInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2385,11 +2418,11 @@ const Block = struct {
         });
     }
     pub fn handleComparisonInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleComparisonInstruction", "Block.handleComparisonInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2464,11 +2497,11 @@ const Block = struct {
         });
     }
     pub fn handleIfExprInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleIfExprInstruction", "Block.handleIfExprInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2523,11 +2556,11 @@ const Block = struct {
     }
 
     pub fn handleSelectExprInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleSelectExprInstruction", "Block.handleSelectExprInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2554,11 +2587,11 @@ const Block = struct {
         });
     }
     pub fn handleLoopInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleLoopInstruction", "Block.handleLoopInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2593,11 +2626,11 @@ const Block = struct {
     }
 
     pub fn handleLoadInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleLoadInstruction", "Block.handleLoadInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2646,11 +2679,11 @@ const Block = struct {
     }
 
     pub fn handleArithmeticInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleArithmeticInstruction", "Block.handleArithmeticInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2730,11 +2763,11 @@ const Block = struct {
     }
 
     pub fn handleParamSetInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleParamSetInstruction", "Block.handleParamSetInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2765,11 +2798,11 @@ const Block = struct {
     }
 
     pub fn handleBrInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleBrInstruction", "Block.handleBrInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2807,11 +2840,11 @@ const Block = struct {
     }
 
     pub fn handleRetInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleRetInstruction", "Block.handleRetInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2834,7 +2867,7 @@ const Block = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleTypeOfInstruction", "Block.handleTypeOfInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2843,7 +2876,7 @@ const Block = struct {
         defer trace.end(.{
             .instructions = self.scope.instructions.items,
         });
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const operand_index = self.getInstructionIndex(hir_inst.typeof.operand);
         const operand_inst = self.getInstruction(operand_index);
         return self.pushInstruction(hir_inst_index, .{
@@ -2855,12 +2888,12 @@ const Block = struct {
     }
 
     pub fn handleStructDeclInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         _ = hir_inst; // autofix
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleStructDeclInstruction", "Block.handleStructDeclInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2899,12 +2932,12 @@ const Block = struct {
     }
 
     pub fn handleBlockInstructionInner(self: *Block, hir_inst_index: Hir.Inst.Index) Error!void {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const list_index = switch (hir_inst) {
             .block, .inline_block => |list_inst| list_inst.instructions_list,
             else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
         };
-        const list = self.builder.getHirList(list_index);
+        const list = self.scope.entity.getHirList(list_index);
         for (list) |block_inst| {
             _ = try self.computeInstruction(block_inst);
         }
@@ -2913,7 +2946,7 @@ const Block = struct {
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleBlockInstruction", "Block.handleBlockInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2952,11 +2985,11 @@ const Block = struct {
     }
 
     pub fn handleBuiltinPropertyAccessInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleBuiltinPropertyAccessInstruction", "Block.handleBuiltinPropertyAccessInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -2966,7 +2999,7 @@ const Block = struct {
             .instructions = self.scope.instructions.items,
         });
         const base_hir_index = hir_inst.get_property_pointer.base;
-        const property_name_range = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
+        const property_name_range = try self.scope.entity.internNode(hir_inst.get_property_pointer.property_name_node);
         const property_name_slice = self.builder.getSlice(property_name_range);
 
         const base_index = self.getInstructionIndex(base_hir_index);
@@ -3017,11 +3050,11 @@ const Block = struct {
         std.debug.panic("unhandled base type", .{});
     }
     pub fn handleGetPropertyPointerInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleGetPropertyPointerInstruction", "Block.handleGetPropertyPointerInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -3035,7 +3068,7 @@ const Block = struct {
             return try self.handleBuiltinPropertyAccessInstruction(hir_inst_index);
         }
         const base_hir_index = hir_inst.get_property_pointer.base;
-        const property_name_range = try self.builder.internNode(hir_inst.get_property_pointer.property_name_node);
+        const property_name_range = try self.scope.entity.internNode(hir_inst.get_property_pointer.property_name_node);
         const property_name_slice = self.builder.getSlice(property_name_range);
 
         if (self.builder.getEntityKeyByHirInst(base_hir_index)) |base_entity_key| {
@@ -3098,7 +3131,7 @@ const Block = struct {
         std.debug.panic("unreachable: should get a field or a declaration", .{});
     }
     pub fn handleGetElementPointerInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const base_index = self.getInstructionIndex(hir_inst.get_element_pointer.base);
         const base_instruction = self.getInstruction(base_index);
 
@@ -3121,13 +3154,13 @@ const Block = struct {
         });
     }
     pub fn handleBuiltinCastCall(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
 
         const callee_inst_index = self.getInstructionIndex(hir_inst.fn_call.callee);
         const callee_inst = self.getInstruction(callee_inst_index);
         const lhs_inst_index = callee_inst.data.operand;
         const lhs_inst = self.getInstruction(lhs_inst_index);
-        const args = self.builder.getHirList(hir_inst.fn_call.args_list);
+        const args = self.scope.entity.getHirList(hir_inst.fn_call.args_list);
         if (args.len != 1) {
             std.debug.panic("error: builtin_fn_as expects 1 type argument", .{});
         }
@@ -3274,11 +3307,11 @@ const Block = struct {
         // std.debug.panic("unhandled callee type: {s}", .{@tagName(callee_instruction.type.simple)});
     }
     pub fn handleFnCallInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const trace = self.builder.tracer.begin(
             @src(),
             .{ "handleFnCallInstruction", "Block.handleFnCallInstruction({s})", .{
-                try formatHirIndex(self.builder.hir, hir_inst_index),
+                try formatHirIndex(self.scope.entity.getHir(), hir_inst_index),
             } },
             .{
                 .before = self.scope.instructions.items,
@@ -3331,13 +3364,13 @@ const Block = struct {
                 },
             }
         };
-        const args = self.builder.getHirList(hir_inst.fn_call.args_list);
+        const args = self.scope.entity.getHirList(hir_inst.fn_call.args_list);
 
         const function = switch (callee_type.data) {
             .function => |fn_type| fn_type,
             else => std.debug.panic("error: trying to call non function type", .{}),
         };
-        const param_types = self.builder.lists.getSlice(function.params);
+        const param_types = self.builder.sema.lists.getSlice(function.params);
         // const arg_types = function.
         var args_list = self.builder.newList();
         if (args.len != param_types.len) {
@@ -3373,7 +3406,7 @@ const Block = struct {
         });
     }
     pub fn handleAsInstruction(self: *Block, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
-        const hir_inst = getHirInst(self.builder.hir, hir_inst_index);
+        const hir_inst = self.scope.entity.getHirInstruction(hir_inst_index);
         const lhs_inst_index = self.getInstructionIndex(hir_inst.as.lhs);
         const rhs_inst_index = self.getInstructionIndex(hir_inst.as.rhs);
         const rhs_inst = self.getInstruction(rhs_inst_index);
