@@ -332,6 +332,8 @@ pub const Builder = struct {
                 return try self.internType(.{
                     .hash = hash,
                     .data = data,
+                    .alignment = 0,
+                    .size = 0,
                 });
             },
             .array => |array| {
@@ -339,51 +341,43 @@ pub const Builder = struct {
                 hasher.update(self.getTypeKeyHash(array.child));
                 hasher.update(array.size);
 
+                const alignment, const element_size = blk: {
+                    if (self.getType(array.child)) |child_ty| {
+                        break :blk .{
+                            child_ty.alignment,
+                            child_ty.size,
+                        };
+                    }
+                    const child_alignment = self.getSimpletTypeSize(array.child.simple);
+                    break :blk .{
+                        child_alignment,
+                        child_alignment,
+                    };
+                };
+
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
+                    .alignment = alignment,
+                    .size = element_size * array.size,
                 });
             },
             .pointer => |pointer| {
                 var hasher = Hasher.new("pointer");
                 hasher.update(self.getTypeKeyHash(pointer.child));
+                const alignment = self.getSimpletTypeSize(.usize);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
+                    .alignment = alignment,
+                    .size = alignment,
                 });
             },
-            .@"struct" => |str| {
-                var hasher = Hasher.new("struct");
-                for (self.sema.lists.getSlice(str.fields)) |field| {
-                    hasher.update(self.getTypeKeyHash(Sema.Type.Key.decode(field)));
-                }
-                // const alignment = self.computeTypeAlignment(data);
-                return try self.internType(.{
-                    .hash = hasher.final(),
-                    .data = data,
-                    // .alignment = alignment.alignment,
-                    // .size = alignment.size,
-                });
+            .struct_field, .@"struct" => {
+                // structs properties like alignment,offsets, size, are a bit more complicated to calculate so we resolve it before interning
+                // also, they are always unique, so it doesn't really matter
+                unreachable;
             },
-            // .module => |module| {
-            //     // Modules are always unique
-
-            //     return try self.internType(.{
-            //         .hash = Hasher.hash(module.entity),
-            //         .data = data,
-            //     });
-            // },
-            .struct_field => |field| {
-                var hasher = Hasher.new("struct_field");
-                hasher.update(self.getTypeKeyHash(field.type));
-                hasher.update(field.offset);
-                return try self.internType(.{
-                    .hash = hasher.final(),
-                    .data = data,
-                });
-            },
-
-            // else => {},
         }
         _ = type; // autofix
         std.debug.panic("TODO: internType {s}", .{@tagName(data)});
