@@ -1,0 +1,49 @@
+;; Sema
+;; 2 declarations
+;; 9 entities
+;; 2 symbols
+;; 23 instructions
+;; 10 values
+;; 6 types
+;; 2 lists
+;; 16 strings
+
+%0 = fn @"struct/struct-init.sk::main"() -> i32
+ └ %0: void = .block: [%1-%19]                                        ; void
+    ├ !%1: type = .global_get declaration=(%1)                        ; type(struct{i32, i32})
+    ├ !%2: number = .constant                                         ; int(22)
+    ├ !%3: void = .field_init                                         ; todo(field_init)
+    ├ !%4: number = .constant                                         ; int(33)
+    ├ !%5: void = .field_init                                         ; todo(field_init)
+    ├ !%6: struct{i32, i32} = .type_init                              ; todo(type_init)
+    ├ !%7: type = .global_get declaration=(%1)                        ; type(struct{i32, i32})
+    ├ %8: *struct{i32, i32} = .alloc type=(struct{i32, i32}) mutable=(false); comp_ptr(0)
+    ├ %9: i32 = .constant                                             ; int(22)
+    ├ %10: *i32 = .get_element_pointer base=(%8) index=(0)            ; comp_ptr(0)
+    ├ %11: void = .store operand=(%10) payload=(%9)                   ; void
+    ├ %12: i32 = .constant                                            ; int(33)
+    ├ %13: *i32 = .get_element_pointer base=(%8) index=(1)            ; comp_ptr(4)
+    ├ %14: void = .store operand=(%13) payload=(%12)                  ; void
+    ├ %15: *i32 = .get_element_pointer base=(%8) index=(0)            ; comp_ptr(0)
+    ├ !%16: i32 = .load operand=(%15)                                 ; int(22)
+    ├ !%17: type = .type                                              ; type(i32)
+    ├ %18: i32 = .constant                                            ; int(22)
+    └ %19: void = .ret maybe_operand=(%18)                            ; void
+
+%1 = type @"struct/struct-init.sk::A" = struct:
+ ├ type: struct{i32, i32}
+ ├ alignment: 4
+ ├ size: 8
+ └ fields: 2
+    ├ [0]
+    │  ├ alignment: 4
+    │  ├ size: 4
+    │  ├ offset: 0
+    │  └ type: i32
+    └ [1]
+       ├ alignment: 4
+       ├ size: 4
+       ├ offset: 4
+       └ type: i32
+
+

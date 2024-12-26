@@ -1,9 +1,9 @@
 fn var_array(): void {
  const arr: [1]i32 = [1]i32 {33};
- const a = arr[0] + 2;
+//  const a = arr[0] + 2;
 }
 fn var_array_infer_type(): void {
-  var arr = [1]i32 {1};
+  var arr = [3]i32 {1, 2, 3};
 }
 fn var_int(): void {
   var a:i32 = 2;

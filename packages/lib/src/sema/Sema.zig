@@ -11,11 +11,12 @@ const InternedList = @import("../interned-lists.zig").InternedLists;
 pub const Lists = InternedList(usize);
 pub const Strings = InternedList(u8);
 const activeTag = std.meta.activeTag;
+const ComptimeMemory = @import("./ComptimeMemory.zig");
 
 const Self = @This();
 
 allocator: std.mem.Allocator,
-
+memory: ComptimeMemory,
 values: ArrayHashMap(u64, Value) = .{},
 types: ArrayHashMap(u64, Type) = .{},
 
@@ -36,11 +37,13 @@ pub fn init(allocator: std.mem.Allocator, error_manager: *ErrorManager, options:
         .lists = Lists.init(allocator),
         .strings = Strings.init(allocator),
         .builder = undefined,
+        .memory = undefined,
     };
 }
 
 pub fn makeRootSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
     self.builder = try Builder.build(self.allocator, self, self.errors_manager, .{});
+    self.memory = ComptimeMemory.init(self.allocator, self);
     return try self.makeSource(source, path);
 }
 
@@ -50,6 +53,7 @@ pub fn makeSource(self: *Self, source: []const u8, path: []const u8) !Strings.Ra
     if (source_gop.found_existing) {
         return error.SourceAlreadyExists;
     }
+
     source_gop.value_ptr.* = try Source.init(self.builder.allocator, self.errors_manager, source);
     return source_range;
 }
@@ -84,6 +88,7 @@ pub const Source = struct {
         const hir = try allocator.create(Hir);
         errdefer allocator.destroy(hir);
         hir.* = try Hir.build(allocator, ast, errors_manager, .{});
+        try hir.format("", .{}, std.io.getStdErr().writer().any());
         return Source{
             .id = std.hash.Wyhash.hash(0, source_dupe),
             .path = Strings.Range.empty,
@@ -108,6 +113,7 @@ pub fn deinit(self: *Self) void {
     for (sources) |*source| {
         source.deinit();
     }
+    self.memory.deinit();
     self.sources.deinit(self.allocator);
     self.strings.deinit();
     self.lists.deinit();
@@ -177,6 +183,7 @@ pub const Type = struct {
     pub const List = Lists.Range;
     pub const Simple = enum {
         type,
+        infer,
         number,
 
         i8,
@@ -266,6 +273,8 @@ pub const Value = struct {
         float: f64,
         type: Type.Key,
         pointer: usize,
+        comptime_pointer: usize,
+        comptime_register: [8]u8,
 
         struct_instance: struct {
             struct_entity: Entity.Key,
@@ -281,12 +290,25 @@ pub const Value = struct {
             value: Value.Key,
             init: ?Instruction.Index,
         },
+        array_init: struct {
+            items_list: Value.List,
+            type: Type.Key,
+        },
+        type_init: struct {
+            field_init_list: Value.List,
+            type: Type.Key,
+        },
+        field_init: struct {
+            field_name: Strings.Range,
+            value_inst: Instruction.Index,
+        },
     };
 
     pub const List = Lists.Range;
     pub const Key = union(enum) {
         simple: Simple,
         complex: usize,
+        comptime_pointer: usize,
 
         pub const SIMPLE_COUNT = std.meta.fields(Value.Simple).len;
         pub fn complexFromIndex(self: usize) Key {
@@ -414,6 +436,10 @@ pub const Instruction = struct {
             callee: Instruction.Index,
             args_list: Instruction.List,
         },
+        array_init: struct {
+            items_list: Instruction.List,
+            type_inst: Instruction.Index,
+        },
     };
     pub const InstRange = struct {
         start: Instruction.Index,
@@ -440,6 +466,9 @@ pub const Instruction = struct {
         global_get,
         global_set,
         fn_call,
+        array_init,
+        type_init,
+        field_init,
 
         param_get,
         param_set,
@@ -503,6 +532,7 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                 try writer.print("[{d}]", .{array.size});
                 try self.formatType(writer, array.child);
             },
+
             // .module => |module| {
             //     try writer.print("mod{{ent{{{d}}}, ", .{module.entity});
             //     try self.formatType(writer, module.struct_type);
@@ -621,11 +651,18 @@ fn formatValue(self: *Self, writer: std.io.AnyWriter, value: Value.Key) !void {
         }
         return;
     }
-
-    if (std.mem.startsWith(u8, @tagName(value.simple), "type_")) {
-        try writer.print("type({s})", .{@tagName(value.simple)[5..]});
-    } else {
-        try writer.print("{s}", .{@tagName(value.simple)});
+    switch (value) {
+        .comptime_pointer => |comptime_pointer| {
+            try writer.print("comp_ptr({x})", .{comptime_pointer});
+        },
+        else => {
+            const tag_name = @tagName(value.simple);
+            if (std.mem.startsWith(u8, tag_name, "type_")) {
+                try writer.print("type({s})", .{tag_name[5..]});
+            } else {
+                try writer.print("{s}", .{tag_name});
+            }
+        },
     }
 }
 pub fn formatInstructionRange(

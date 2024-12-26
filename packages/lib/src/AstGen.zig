@@ -300,8 +300,6 @@ fn parsePropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
     defer self.tracer.endEvent(parse_id, "AstGen.parsePropertyAccess", .{
         .lhs = lhs,
     });
-    std.debug.print("parse prop access {s}\n", .{@tagName(self.peekToken().?.tag)});
-    self.logger.log("parse prop access", .{}, null);
     const is_builtin = self.tokenIs(.colon);
     self.consumeToken();
     const start_token = self.ast.nodes.items[lhs].start_token;

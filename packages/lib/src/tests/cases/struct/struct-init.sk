@@ -1,0 +1,13 @@
+fn main(): i32 {
+  const a: A = A{
+    a = 22, 
+    b = 33,
+  }
+  return a.a;
+}
+
+type A = struct {
+  a: i32,
+  b: i32,
+}
+

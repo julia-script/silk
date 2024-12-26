@@ -2,10 +2,10 @@
 ;; 4 declarations
 ;; 21 entities
 ;; 4 symbols
-;; 83 instructions
-;; 16 values
+;; 87 instructions
+;; 32 values
 ;; 10 types
-;; 1 lists
+;; 3 lists
 ;; 34 strings
 
 %0 = type @"struct/struct-declaration-cross-ref2.sk::A" = struct:
@@ -53,83 +53,87 @@
 
 
 %2 = pub fn @"struct/struct-declaration-cross-ref2.sk::A::mod::foo"() -> void
- └ %0: void = .block: [%1-%37]                                        ; void
+ └ %0: void = .block: [%1-%39]                                        ; void
     ├ !%1: type = .global_get declaration=(%1)                        ; type(struct{usize, i32, i32})
-    ├ %2: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %3: *usize = .get_element_pointer base=(%2) index=(0)           ; exec_time
-    ├ !%4: number = .constant                                         ; int(4)
-    ├ %5: usize = .constant                                           ; int(4)
-    ├ %6: void = .store operand=(%3) payload=(%5)                     ; void
-    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; exec_time
-    ├ !%8: number = .constant                                         ; int(5)
-    ├ %9: i32 = .constant                                             ; int(5)
-    ├ %10: void = .store operand=(%7) payload=(%9)                    ; void
-    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; exec_time
-    ├ !%12: number = .constant                                        ; int(6)
-    ├ %13: i32 = .constant                                            ; int(6)
-    ├ %14: void = .store operand=(%11) payload=(%13)                  ; void
-    ├ %15: struct{usize, i32, i32} = .load operand=(%2)               ; exec_time
-    ├ !%16: type = .global_get declaration=(%1)                       ; type(struct{usize, i32, i32})
-    ├ %17: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %18: void = .store operand=(%17) payload=(%15)                  ; void
-    ├ !%19: type = .global_get declaration=(%0)                       ; type(struct{usize, i32, i32})
-    ├ %20: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %21: *usize = .get_element_pointer base=(%20) index=(0)         ; exec_time
-    ├ !%22: number = .constant                                        ; int(1)
-    ├ %23: usize = .constant                                          ; int(1)
-    ├ %24: void = .store operand=(%21) payload=(%23)                  ; void
-    ├ %25: *i32 = .get_element_pointer base=(%20) index=(1)           ; exec_time
-    ├ !%26: number = .constant                                        ; int(2)
-    ├ %27: i32 = .constant                                            ; int(2)
-    ├ %28: void = .store operand=(%25) payload=(%27)                  ; void
-    ├ %29: *i32 = .get_element_pointer base=(%20) index=(2)           ; exec_time
-    ├ !%30: number = .constant                                        ; int(3)
-    ├ %31: i32 = .constant                                            ; int(3)
-    ├ %32: void = .store operand=(%29) payload=(%31)                  ; void
-    ├ %33: struct{usize, i32, i32} = .load operand=(%20)              ; exec_time
-    ├ !%34: type = .global_get declaration=(%0)                       ; type(struct{usize, i32, i32})
-    ├ %35: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %36: void = .store operand=(%35) payload=(%33)                  ; void
-    └ %37: todo(function) = .global_get declaration=(%3)              ; exec_time
+    ├ !%2: number = .constant                                         ; int(4)
+    ├ !%3: void = .field_init                                         ; todo(field_init)
+    ├ !%4: number = .constant                                         ; int(5)
+    ├ !%5: void = .field_init                                         ; todo(field_init)
+    ├ !%6: number = .constant                                         ; int(6)
+    ├ !%7: void = .field_init                                         ; todo(field_init)
+    ├ !%8: struct{usize, i32, i32} = .type_init                       ; todo(type_init)
+    ├ !%9: type = .global_get declaration=(%1)                        ; type(struct{usize, i32, i32})
+    ├ %10: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); comp_ptr(0)
+    ├ %11: usize = .constant                                          ; int(4)
+    ├ %12: *usize = .get_element_pointer base=(%10) index=(0)         ; comp_ptr(0)
+    ├ %13: void = .store operand=(%12) payload=(%11)                  ; void
+    ├ %14: i32 = .constant                                            ; int(5)
+    ├ %15: *i32 = .get_element_pointer base=(%10) index=(1)           ; comp_ptr(8)
+    ├ %16: void = .store operand=(%15) payload=(%14)                  ; void
+    ├ %17: i32 = .constant                                            ; int(6)
+    ├ %18: *i32 = .get_element_pointer base=(%10) index=(2)           ; comp_ptr(c)
+    ├ %19: void = .store operand=(%18) payload=(%17)                  ; void
+    ├ !%20: type = .global_get declaration=(%0)                       ; type(struct{usize, i32, i32})
+    ├ !%21: number = .constant                                        ; int(1)
+    ├ !%22: void = .field_init                                        ; todo(field_init)
+    ├ !%23: number = .constant                                        ; int(2)
+    ├ !%24: void = .field_init                                        ; todo(field_init)
+    ├ !%25: number = .constant                                        ; int(3)
+    ├ !%26: void = .field_init                                        ; todo(field_init)
+    ├ !%27: struct{usize, i32, i32} = .type_init                      ; todo(type_init)
+    ├ !%28: type = .global_get declaration=(%0)                       ; type(struct{usize, i32, i32})
+    ├ %29: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); comp_ptr(10)
+    ├ %30: usize = .constant                                          ; int(1)
+    ├ %31: *usize = .get_element_pointer base=(%29) index=(0)         ; comp_ptr(10)
+    ├ %32: void = .store operand=(%31) payload=(%30)                  ; void
+    ├ %33: i32 = .constant                                            ; int(2)
+    ├ %34: *i32 = .get_element_pointer base=(%29) index=(1)           ; comp_ptr(18)
+    ├ %35: void = .store operand=(%34) payload=(%33)                  ; void
+    ├ %36: i32 = .constant                                            ; int(3)
+    ├ %37: *i32 = .get_element_pointer base=(%29) index=(2)           ; comp_ptr(1c)
+    ├ %38: void = .store operand=(%37) payload=(%36)                  ; void
+    └ %39: todo(function) = .global_get declaration=(%3)              ; exec_time
 
 %3 = pub fn @"struct/struct-declaration-cross-ref2.sk::B::mod::bar"() -> void
- └ %0: void = .block: [%1-%38]                                        ; void
+ └ %0: void = .block: [%1-%40]                                        ; void
     ├ !%1: type = .global_get declaration=(%0)                        ; type(struct{usize, i32, i32})
-    ├ %2: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %3: *usize = .get_element_pointer base=(%2) index=(0)           ; exec_time
-    ├ !%4: number = .constant                                         ; int(1)
-    ├ %5: usize = .constant                                           ; int(1)
-    ├ %6: void = .store operand=(%3) payload=(%5)                     ; void
-    ├ %7: *i32 = .get_element_pointer base=(%2) index=(1)             ; exec_time
-    ├ !%8: number = .constant                                         ; int(2)
-    ├ %9: i32 = .constant                                             ; int(2)
-    ├ %10: void = .store operand=(%7) payload=(%9)                    ; void
-    ├ %11: *i32 = .get_element_pointer base=(%2) index=(2)            ; exec_time
-    ├ !%12: number = .constant                                        ; int(3)
-    ├ %13: i32 = .constant                                            ; int(3)
-    ├ %14: void = .store operand=(%11) payload=(%13)                  ; void
-    ├ %15: struct{usize, i32, i32} = .load operand=(%2)               ; exec_time
-    ├ !%16: type = .global_get declaration=(%0)                       ; type(struct{usize, i32, i32})
-    ├ %17: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %18: void = .store operand=(%17) payload=(%15)                  ; void
-    ├ !%19: type = .global_get declaration=(%1)                       ; type(struct{usize, i32, i32})
-    ├ %20: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %21: *usize = .get_element_pointer base=(%20) index=(0)         ; exec_time
-    ├ !%22: number = .constant                                        ; int(4)
-    ├ %23: usize = .constant                                          ; int(4)
-    ├ %24: void = .store operand=(%21) payload=(%23)                  ; void
-    ├ %25: *i32 = .get_element_pointer base=(%20) index=(1)           ; exec_time
-    ├ !%26: number = .constant                                        ; int(5)
-    ├ %27: i32 = .constant                                            ; int(5)
-    ├ %28: void = .store operand=(%25) payload=(%27)                  ; void
-    ├ %29: *i32 = .get_element_pointer base=(%20) index=(2)           ; exec_time
-    ├ !%30: number = .constant                                        ; int(6)
-    ├ %31: i32 = .constant                                            ; int(6)
-    ├ %32: void = .store operand=(%29) payload=(%31)                  ; void
-    ├ %33: struct{usize, i32, i32} = .load operand=(%20)              ; exec_time
-    ├ !%34: type = .global_get declaration=(%1)                       ; type(struct{usize, i32, i32})
-    ├ %35: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); exec_time
-    ├ %36: void = .store operand=(%35) payload=(%33)                  ; void
-    ├ %37: todo(function) = .global_get declaration=(%2)              ; exec_time
-    └ %38: void = .fn_call callee=(%37) args_list=(interned-lists.InternedLists(usize).Range{ .start = 0, .len = 0 }); exec_time
+    ├ !%2: number = .constant                                         ; int(1)
+    ├ !%3: void = .field_init                                         ; todo(field_init)
+    ├ !%4: number = .constant                                         ; int(2)
+    ├ !%5: void = .field_init                                         ; todo(field_init)
+    ├ !%6: number = .constant                                         ; int(3)
+    ├ !%7: void = .field_init                                         ; todo(field_init)
+    ├ !%8: struct{usize, i32, i32} = .type_init                       ; todo(type_init)
+    ├ !%9: type = .global_get declaration=(%0)                        ; type(struct{usize, i32, i32})
+    ├ %10: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); comp_ptr(20)
+    ├ %11: usize = .constant                                          ; int(1)
+    ├ %12: *usize = .get_element_pointer base=(%10) index=(0)         ; comp_ptr(20)
+    ├ %13: void = .store operand=(%12) payload=(%11)                  ; void
+    ├ %14: i32 = .constant                                            ; int(2)
+    ├ %15: *i32 = .get_element_pointer base=(%10) index=(1)           ; comp_ptr(28)
+    ├ %16: void = .store operand=(%15) payload=(%14)                  ; void
+    ├ %17: i32 = .constant                                            ; int(3)
+    ├ %18: *i32 = .get_element_pointer base=(%10) index=(2)           ; comp_ptr(2c)
+    ├ %19: void = .store operand=(%18) payload=(%17)                  ; void
+    ├ !%20: type = .global_get declaration=(%1)                       ; type(struct{usize, i32, i32})
+    ├ !%21: number = .constant                                        ; int(4)
+    ├ !%22: void = .field_init                                        ; todo(field_init)
+    ├ !%23: number = .constant                                        ; int(5)
+    ├ !%24: void = .field_init                                        ; todo(field_init)
+    ├ !%25: number = .constant                                        ; int(6)
+    ├ !%26: void = .field_init                                        ; todo(field_init)
+    ├ !%27: struct{usize, i32, i32} = .type_init                      ; todo(type_init)
+    ├ !%28: type = .global_get declaration=(%1)                       ; type(struct{usize, i32, i32})
+    ├ %29: *struct{usize, i32, i32} = .alloc type=(struct{usize, i32, i32}) mutable=(false); comp_ptr(30)
+    ├ %30: usize = .constant                                          ; int(4)
+    ├ %31: *usize = .get_element_pointer base=(%29) index=(0)         ; comp_ptr(30)
+    ├ %32: void = .store operand=(%31) payload=(%30)                  ; void
+    ├ %33: i32 = .constant                                            ; int(5)
+    ├ %34: *i32 = .get_element_pointer base=(%29) index=(1)           ; comp_ptr(38)
+    ├ %35: void = .store operand=(%34) payload=(%33)                  ; void
+    ├ %36: i32 = .constant                                            ; int(6)
+    ├ %37: *i32 = .get_element_pointer base=(%29) index=(2)           ; comp_ptr(3c)
+    ├ %38: void = .store operand=(%37) payload=(%36)                  ; void
+    ├ %39: todo(function) = .global_get declaration=(%2)              ; exec_time
+    └ %40: void = .fn_call callee=(%39) args_list=(interned-lists.InternedLists(usize).Range{ .start = 0, .len = 0 }); exec_time
 

@@ -659,13 +659,16 @@ pub const Inst = union(enum) {
     load: UnaryOp,
     block: Block,
     inline_block: Block,
-    local: Local,
     local_set: BinaryOp,
     param_set: BinaryOp,
     global_set: BinaryOp,
     loop: Loop,
     assign: BinaryOp,
     alloc: Alloc,
+    array_init: ArrayInit,
+    type_init: TypeInit,
+    field_init: FieldInit,
+
     store: Store,
     get_element_pointer: GetElement,
     get_element_value: GetElement,
@@ -736,7 +739,20 @@ pub const Inst = union(enum) {
     };
     pub const Alloc = struct {
         mutable: bool,
+
         type: Inst.Index,
+    };
+    pub const ArrayInit = struct {
+        type: Inst.Index,
+        items_list: List,
+    };
+    pub const TypeInit = struct {
+        type: Inst.Index,
+        field_init_list: List,
+    };
+    pub const FieldInit = struct {
+        name_node: Ast.Node.Index,
+        value: Inst.Index,
     };
     pub const Constant = struct {
         value: i64,
@@ -758,12 +774,7 @@ pub const Inst = union(enum) {
         property_name_node: Ast.Node.Index,
         is_builtin: bool,
     };
-    pub const Local = struct {
-        name_node: Ast.Node.Index,
-        mutable: bool,
-        type: Inst.Index,
-        // init: Inst.Index,
-    };
+
     pub const FnCall = struct {
         callee: Index,
         args_list: List,
