@@ -940,6 +940,7 @@ pub fn format(self: *Self, writer: std.io.AnyWriter) !void {
     try writer.print(";; {d} types\n", .{self.types.count()});
     try writer.print(";; {d} lists\n", .{self.lists.count()});
     try writer.print(";; {d} strings\n", .{self.strings.count()});
+    try writer.print(";; {d}/{d} comptime memory bytes allocated\n", .{ self.memory.memory.items.len, self.memory.memory.capacity });
 
     try writer.print("\n", .{});
 

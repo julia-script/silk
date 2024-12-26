@@ -3,10 +3,11 @@
 ;; 17 entities
 ;; 8 symbols
 ;; 87 instructions
-;; 22 values
+;; 24 values
 ;; 7 types
 ;; 2 lists
 ;; 27 strings
+;; 24/38 comptime memory bytes allocated
 
 %0 = fn @"array/array-init.sk::var_array"() -> void
  └ %0: void = .block: [%1-%14]                                        ; void

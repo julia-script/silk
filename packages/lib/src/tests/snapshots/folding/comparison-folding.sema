@@ -7,6 +7,7 @@
 ;; 1 types
 ;; 0 lists
 ;; 9 strings
+;; 0/0 comptime memory bytes allocated
 
 %0 = fn @"folding/comparison-folding.sk::fold_to_true"() -> i32
  └ %0: void = .block: [%1-%117]                                       ; void

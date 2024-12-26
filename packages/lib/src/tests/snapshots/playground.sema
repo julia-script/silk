@@ -3,10 +3,11 @@
 ;; 17 entities
 ;; 8 symbols
 ;; 88 instructions
-;; 20 values
+;; 23 values
 ;; 5 types
 ;; 1 lists
 ;; 27 strings
+;; 28/38 comptime memory bytes allocated
 
 %0 = fn @"playground.sk::var_array"() -> void
  └ %0: void = .block: [%1-%23]                                        ; void

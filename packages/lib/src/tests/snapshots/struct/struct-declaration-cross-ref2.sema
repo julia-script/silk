@@ -7,6 +7,7 @@
 ;; 10 types
 ;; 3 lists
 ;; 34 strings
+;; 64/65 comptime memory bytes allocated
 
 %0 = type @"struct/struct-declaration-cross-ref2.sk::A" = struct:
  ├ type: struct{usize, i32, i32}

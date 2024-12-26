@@ -27,7 +27,7 @@ const Error = error{
 } || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
 const Hasher = struct {
     hasher: std.hash.Wyhash,
-    var MAGIC_NUMBER: u64 = 0x1234567890abcdef;
+    var MAGIC_NUMBER: u64 = std.hash.Wyhash.hash(0, "magic");
     pub fn new(value: anytype) Hasher {
         var hasher = Hasher{ .hasher = std.hash.Wyhash.init(0) };
         hasher.update(value);
@@ -35,7 +35,7 @@ const Hasher = struct {
     }
 
     pub fn unique() u64 {
-        Hasher.MAGIC_NUMBER += 1;
+        Hasher.MAGIC_NUMBER = std.hash.Wyhash.hash(Hasher.MAGIC_NUMBER, "magic");
         return Hasher.MAGIC_NUMBER;
     }
     pub fn update(self: *Hasher, value: anytype) void {
@@ -575,14 +575,14 @@ pub const Builder = struct {
                 });
             },
             .array_init => |array_init| {
-                var hasher = Hasher.new("array_init");
-                const list_slice = self.sema.lists.getSlice(array_init.items_list);
-                hasher.update(list_slice);
-                const type_key = try self.getTypeKeyHash(array_init.type);
-                hasher.update(type_key);
+                _ = array_init; // autofix
+                // const list_slice = self.sema.lists.getSlice(array_init.items_list);
+                // hasher.update(list_slice);
+                // const type_key = try self.getTypeKeyHash(array_init.type);
+                // hasher.update(type_key);
 
                 return try self.internValue(.{
-                    .hash = hasher.final(),
+                    .hash = Hasher.unique(),
                     .data = data,
                 });
             },

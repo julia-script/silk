@@ -7,6 +7,7 @@
 ;; 1 types
 ;; 0 lists
 ;; 9 strings
+;; 0/0 comptime memory bytes allocated
 
 %0 = fn @"folding/arithmetic-folding-partial-expr.sk::folding"() -> i32
  └ %0: void = .block: [%1-%20]                                        ; void

@@ -21,7 +21,7 @@ test "Snapshots" {
 
     while (try walker.next()) |entry| {
         if (!std.mem.endsWith(u8, entry.path, SILK_EXTENSION)) continue;
-        if (std.mem.endsWith(u8, entry.path, ".ignore.sk")) continue;
+        if (std.mem.endsWith(u8, entry.path, ".todo.sk")) continue;
         if (comptime options.test_filter.len > 0) {
             if (!std.mem.containsAtLeast(u8, entry.path, 1, options.test_filter)) continue;
         }

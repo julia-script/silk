@@ -7,6 +7,7 @@
 ;; 8 types
 ;; 2 lists
 ;; 19 strings
+;; 12/20 comptime memory bytes allocated
 
 %0 = fn @"struct/struct-declaration-cross-ref.sk::main"() -> i32
  └ %0: void = .block: [%1-%24]                                        ; void
