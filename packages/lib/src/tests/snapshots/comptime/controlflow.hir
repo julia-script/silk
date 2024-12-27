@@ -1,0 +1,32 @@
+;; HIR: 17 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 1 items
+    └ 0: %1 = .global_decl
+       ├ name_node: node(#1: "main")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %16 = .fn_decl
+       │  ├ name_node: node(#1: "main")
+       │  ├ return_type: %2 = .ty_i32
+       │  │  └ node: node(#2: "i32")
+       │  └ params_list: 0 items
+       └ init: %3 = .block
+          ├ %4 = .comptime_boolean node=(n[4:"true"])
+          └ %15 = .if_expr cond (%4)
+             ├ then: %5 = .block
+             │  ├ %6 = .comptime_number node=(n[5:"1"])
+             │  ├ %7 = .ty_i32 node=(n[2:"i32"])
+             │  ├ %8 = .as lhs=(%6), rhs=(%7)
+             │  └ %9 = .ret operand=(8)
+             └ else:%10 = .block
+                ├ %11 = .comptime_number node=(n[8:"2"])
+                ├ %12 = .ty_i32 node=(n[2:"i32"])
+                ├ %13 = .as lhs=(%11), rhs=(%12)
+                └ %14 = .ret operand=(13)

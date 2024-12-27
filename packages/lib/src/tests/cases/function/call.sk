@@ -1,0 +1,20 @@
+type T = struct {
+  fn foo_add(a: i32, b: i32): i32 {
+    return a + b;
+  }
+}
+
+fn bar_add(a: i32, b: i32): i32 {
+  return a + b;
+}
+
+fn namespaced(): void {
+  const a = T.foo_add(1, 2);
+}
+fn global(): void {
+  const b = bar_add(1, 2);
+}
+
+fn builtin(): void {
+  const c = 2:as(i32);
+}

@@ -1,0 +1,108 @@
+;; HIR: 54 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 4 items
+    ├ 0: %1 = .global_decl
+    │  ├ name_node: node(#1: "foo")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %13 = .fn_decl
+    │  │  ├ name_node: node(#1: "foo")
+    │  │  ├ return_type: %7 = .ty_i32
+    │  │  │  └ node: node(#5: "i32")
+    │  │  └ params_list: 1 items
+    │  │     └ 0: %6 = .param_decl
+    │  │        ├ name_node: node(#3: "a")
+    │  │        └ type: %5 = .ty_i32
+    │  │           └ node: node(#4: "i32")
+    │  └ init: %8 = .block
+    │     ├ %6 = .param_decl name_node=(n[3:"a"]), type=(%5)
+    │     ├ %9 = .param_get operand=(%6)
+    │     ├ %10 = .ty_i32 node=(n[5:"i32"])
+    │     ├ %11 = .as lhs=(%9), rhs=(%10)
+    │     └ %12 = .ret operand=(11)
+    ├ 1: %2 = .global_decl
+    │  ├ name_node: node(#11: "bar")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %23 = .fn_decl
+    │  │  ├ name_node: node(#11: "bar")
+    │  │  ├ return_type: %16 = .ty_i32
+    │  │  │  └ node: node(#15: "i32")
+    │  │  └ params_list: 1 items
+    │  │     └ 0: %15 = .param_decl
+    │  │        ├ name_node: node(#13: "a")
+    │  │        └ type: %14 = .ty_i32
+    │  │           └ node: node(#14: "i32")
+    │  └ init: %17 = .block
+    │     ├ %15 = .param_decl name_node=(n[13:"a"]), type=(%14)
+    │     ├ %18 = .param_get operand=(%15)
+    │     ├ %19 = .fn_call callee=(%3), args_list=({%18})
+    │     ├ %20 = .ty_i32 node=(n[15:"i32"])
+    │     ├ %21 = .as lhs=(%19), rhs=(%20)
+    │     └ %22 = .ret operand=(21)
+    ├ 2: %3 = .global_decl
+    │  ├ name_node: node(#23: "rec")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %44 = .fn_decl
+    │  │  ├ name_node: node(#23: "rec")
+    │  │  ├ return_type: %26 = .ty_i32
+    │  │  │  └ node: node(#27: "i32")
+    │  │  └ params_list: 1 items
+    │  │     └ 0: %25 = .param_decl
+    │  │        ├ name_node: node(#25: "a")
+    │  │        └ type: %24 = .ty_i32
+    │  │           └ node: node(#26: "i32")
+    │  └ init: %27 = .block
+    │     ├ %25 = .param_decl name_node=(n[25:"a"]), type=(%24)
+    │     ├ %28 = .param_get operand=(%25)
+    │     ├ %29 = .comptime_number node=(n[30:"10"])
+    │     ├ %30 = .lt lhs=(%28), rhs=(%29)
+    │     ├ %39 = .if_expr cond (%30)
+    │     │  └ then: %31 = .block
+    │     │     ├ %32 = .comptime_number node=(n[33:"2"])
+    │     │     ├ %33 = .param_get operand=(%25)
+    │     │     ├ %34 = .mul lhs=(%32), rhs=(%33)
+    │     │     ├ %35 = .fn_call callee=(%2), args_list=({%34})
+    │     │     ├ %36 = .ty_i32 node=(n[27:"i32"])
+    │     │     ├ %37 = .as lhs=(%35), rhs=(%36)
+    │     │     └ %38 = .ret operand=(37)
+    │     ├ %40 = .param_get operand=(%25)
+    │     ├ %41 = .ty_i32 node=(n[27:"i32"])
+    │     ├ %42 = .as lhs=(%40), rhs=(%41)
+    │     └ %43 = .ret operand=(42)
+    └ 3: %4 = .global_decl
+       ├ name_node: node(#44: "main")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %53 = .fn_decl
+       │  ├ name_node: node(#44: "main")
+       │  ├ return_type: %45 = .ty_void
+       │  │  └ node: node(#45: "void")
+       │  └ params_list: 0 items
+       └ init: %46 = .block
+          └ %47 = comptime .inline_block
+             ├ %48 = .comptime_number node=(n[48:"1"])
+             ├ %49 = .fn_call callee=(%3), args_list=({%48})
+             ├ %50 = .comptime_number node=(n[50:"16"])
+             ├ %51 = .eq lhs=(%49), rhs=(%50)
+             └ %52 = .br operand=(51), target=(%47)

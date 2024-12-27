@@ -5,13 +5,13 @@
 ;; 50 instructions
 ;; 6 values
 ;; 2 types
-;; 0 lists
+;; 1 lists
 ;; 9 strings
-;; 0/0 comptime memory bytes allocated
+;; 0/0 comptime memory used/allocated bytes
 
-%0 = pub fn @"algorithms/fib.sk::fib"() -> i32
+%0 = pub fn @"algorithms/fib.sk::fib"(i32) -> i32
  └ %0: void = .block: [%1-%49]                                        ; void
-    ├ %1: i32 = .param                                                ; exec_time
+    ├ %1: i32 = .param index=(%0)                                     ; exec_time
     ├ !%2: number = .constant                                         ; int(0)
     ├ !%3: type = .type                                               ; type(i32)
     ├ %4: *i32 = .alloc type=(i32) mutable=(true)                     ; exec_time

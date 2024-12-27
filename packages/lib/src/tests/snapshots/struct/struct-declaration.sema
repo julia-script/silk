@@ -7,7 +7,7 @@
 ;; 5 types
 ;; 1 lists
 ;; 19 strings
-;; 0/0 comptime memory bytes allocated
+;; 0/0 comptime memory used/allocated bytes
 
 %0 = type @"struct/struct-declaration.sk::A" = struct:
  ├ type: struct{i64, i32, i32}

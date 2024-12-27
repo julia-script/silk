@@ -1,0 +1,15 @@
+
+
+fn sum_all(a: i32, b: i32, c: i32, d: i32): i32 {
+    return add(add(a, b), add(c, d));
+}
+
+fn main(): void {
+    const result_comptime = comp sum_all(1, 2, 3, 4);
+    const result_runtime = sum_all(1, 2, 3, 4);
+    const abc = comp 2 + 3
+
+}
+fn add(a: i32, b: i32): i32 {
+    return a + b;
+}

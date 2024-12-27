@@ -249,9 +249,20 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             return inst;
         },
         .block => {
-            const inst = try Block.fromNode(self, scope, node_index);
-            try scope.instructions.append(inst);
-            return inst;
+            const inst_index = try Block.fromNode(self, scope, node_index);
+
+            try scope.instructions.append(inst_index);
+            return inst_index;
+        },
+        .comp => |comp| {
+            const inst_index = try Block.fromNode(self, scope, comp.node);
+            const inst = &self.hir.insts.items[inst_index];
+            switch (inst.*) {
+                .block, .inline_block => |*block| block.is_comptime = true,
+                else => unreachable,
+            }
+            try scope.instructions.append(inst_index);
+            return inst_index;
         },
         // .const_decl => |declaration| {
         //     const name_node = declaration.name;
@@ -381,6 +392,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
         .number_literal => {
             return try scope.pushInstruction(.{ .comptime_number = .{ .node = nav.node } });
+        },
+        .true_literal, .false_literal => {
+            return try scope.pushInstruction(.{ .comptime_boolean = .{ .node = nav.node } });
         },
         .ret_expression => |ret_expr| {
             // const ret = if (ret_expr.node == 0) null else try self.genLoadedInstruction(scope, ret_expr.node);

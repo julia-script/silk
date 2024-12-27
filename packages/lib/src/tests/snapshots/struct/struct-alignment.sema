@@ -7,7 +7,7 @@
 ;; 23 types
 ;; 6 lists
 ;; 65 strings
-;; 0/0 comptime memory bytes allocated
+;; 0/0 comptime memory used/allocated bytes
 
 %0 = type @"struct/struct-alignment.sk::A" = struct:
  ├ type: struct{i32, i32, i8}

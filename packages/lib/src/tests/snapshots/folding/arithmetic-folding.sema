@@ -7,7 +7,7 @@
 ;; 1 types
 ;; 0 lists
 ;; 5 strings
-;; 0/0 comptime memory bytes allocated
+;; 0/0 comptime memory used/allocated bytes
 
 %0 = fn @"folding/arithmetic-folding.sk::folding"() -> i32
  └ %0: void = .block: [%1-%14]                                        ; void

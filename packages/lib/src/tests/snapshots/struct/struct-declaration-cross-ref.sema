@@ -7,7 +7,7 @@
 ;; 8 types
 ;; 2 lists
 ;; 19 strings
-;; 12/20 comptime memory bytes allocated
+;; 12/20 comptime memory used/allocated bytes
 
 %0 = fn @"struct/struct-declaration-cross-ref.sk::main"() -> i32
  └ %0: void = .block: [%1-%24]                                        ; void
@@ -22,15 +22,15 @@
     ├ !%9: type = .global_get declaration=(%1)                        ; type(struct{i32, i32, i8})
     ├ %10: *struct{i32, i32, i8} = .alloc type=(struct{i32, i32, i8}) mutable=(false); comp_ptr(0)
     ├ %11: i8 = .constant                                             ; int(1)
-    ├ %12: *i8 = .get_element_pointer base=(%10) index=(2)            ; comp_ptr(8)
+    ├ %12: *i8 = .get_element_pointer base=(%10) index=(%2)           ; comp_ptr(8)
     ├ %13: void = .store operand=(%12) payload=(%11)                  ; void
     ├ %14: i32 = .constant                                            ; int(2)
-    ├ %15: *i32 = .get_element_pointer base=(%10) index=(0)           ; comp_ptr(0)
+    ├ %15: *i32 = .get_element_pointer base=(%10) index=(%0)          ; comp_ptr(0)
     ├ %16: void = .store operand=(%15) payload=(%14)                  ; void
     ├ %17: i32 = .constant                                            ; int(3)
-    ├ %18: *i32 = .get_element_pointer base=(%10) index=(1)           ; comp_ptr(4)
+    ├ %18: *i32 = .get_element_pointer base=(%10) index=(%1)          ; comp_ptr(4)
     ├ %19: void = .store operand=(%18) payload=(%17)                  ; void
-    ├ %20: *i8 = .get_element_pointer base=(%10) index=(2)            ; comp_ptr(0)
+    ├ %20: *i8 = .get_element_pointer base=(%10) index=(%2)           ; comp_ptr(0)
     ├ !%21: i8 = .load operand=(%20)                                  ; int(2)
     ├ !%22: type = .type                                              ; type(i32)
     ├ %23: i32 = .constant                                            ; int(2)

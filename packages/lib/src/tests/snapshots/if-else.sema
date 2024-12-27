@@ -4,15 +4,15 @@
 ;; 2 symbols
 ;; 33 instructions
 ;; 3 values
-;; 1 types
-;; 0 lists
+;; 2 types
+;; 1 lists
 ;; 19 strings
-;; 0/0 comptime memory bytes allocated
+;; 0/0 comptime memory used/allocated bytes
 
-%0 = fn @"if-else.sk::max"() -> i32
+%0 = fn @"if-else.sk::max"(i32, i32) -> i32
  └ %0: void = .block: [%1-%16]                                        ; void
-    ├ %1: i32 = .param                                                ; exec_time
-    ├ %2: i32 = .param                                                ; exec_time
+    ├ %1: i32 = .param index=(%0)                                     ; exec_time
+    ├ %2: i32 = .param index=(%1)                                     ; exec_time
     ├ %3: i32 = .param_get operand=(%1)                               ; exec_time
     ├ %4: i32 = .param_get operand=(%2)                               ; exec_time
     ├ %5: bool = .gt lhs=(%3) rhs=(%4)                                ; exec_time
@@ -29,10 +29,10 @@
           ├ %15: i32 = .cast operand=(%13)                            ; exec_time
           └ %16: void = .ret maybe_operand=(%15)                      ; void
 
-%1 = fn @"if-else.sk::min"() -> i32
+%1 = fn @"if-else.sk::min"(i32, i32) -> i32
  └ %0: void = .block: [%1-%15]                                        ; void
-    ├ %1: i32 = .param                                                ; exec_time
-    ├ %2: i32 = .param                                                ; exec_time
+    ├ %1: i32 = .param index=(%0)                                     ; exec_time
+    ├ %2: i32 = .param index=(%1)                                     ; exec_time
     ├ %3: i32 = .param_get operand=(%1)                               ; exec_time
     ├ %4: i32 = .param_get operand=(%2)                               ; exec_time
     ├ %5: bool = .lt lhs=(%3) rhs=(%4)                                ; exec_time

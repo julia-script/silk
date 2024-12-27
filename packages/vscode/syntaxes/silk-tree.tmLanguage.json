@@ -4,6 +4,10 @@
 	"fileTypes": ["silk-tree"],
 	"patterns": [
 		{
+			"name": "keyword.storage.comptime.silk-tree",
+			"match": "\\b(comptime|comp)\\b"
+		},
+		{
 			"name": "entity.name.type.silk-tree",
 			"match": "%\\d+"
 		},

@@ -7,7 +7,7 @@
 ;; 6 types
 ;; 2 lists
 ;; 16 strings
-;; 8/8 comptime memory bytes allocated
+;; 8/8 comptime memory used/allocated bytes
 
 %0 = fn @"struct/struct-init.sk::main"() -> i32
  └ %0: void = .block: [%1-%19]                                        ; void
@@ -20,12 +20,12 @@
     ├ !%7: type = .global_get declaration=(%1)                        ; type(struct{i32, i32})
     ├ %8: *struct{i32, i32} = .alloc type=(struct{i32, i32}) mutable=(false); comp_ptr(0)
     ├ %9: i32 = .constant                                             ; int(22)
-    ├ %10: *i32 = .get_element_pointer base=(%8) index=(0)            ; comp_ptr(0)
+    ├ %10: *i32 = .get_element_pointer base=(%8) index=(%0)           ; comp_ptr(0)
     ├ %11: void = .store operand=(%10) payload=(%9)                   ; void
     ├ %12: i32 = .constant                                            ; int(33)
-    ├ %13: *i32 = .get_element_pointer base=(%8) index=(1)            ; comp_ptr(4)
+    ├ %13: *i32 = .get_element_pointer base=(%8) index=(%1)           ; comp_ptr(4)
     ├ %14: void = .store operand=(%13) payload=(%12)                  ; void
-    ├ %15: *i32 = .get_element_pointer base=(%8) index=(0)            ; comp_ptr(0)
+    ├ %15: *i32 = .get_element_pointer base=(%8) index=(%0)           ; comp_ptr(0)
     ├ !%16: i32 = .load operand=(%15)                                 ; int(22)
     ├ !%17: type = .type                                              ; type(i32)
     ├ %18: i32 = .constant                                            ; int(22)

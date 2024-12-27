@@ -1,0 +1,99 @@
+;; 55 Nodes
+;; 78 Tokens
+;; 16 Interned Lists
+
+%0 = .struct_decl - tok[0..78]
+ └ members_list: 4 items
+    ├ %10 = .fn_decl - tok[0..14]
+    │  ├ proto: %6 = .fn_proto - tok[1..8]
+    │  │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  │  └ token: .identifier 'foo'
+    │  │  ├ params_list: 1 items
+    │  │  │  └ %2 = .fn_param - tok[3..5]
+    │  │  │     ├ name: %3 = .identifier - tok[3..3]
+    │  │  │     │  └ token: .identifier 'a'
+    │  │  │     └ type: %4 = .ty_i32 - tok[5..5]
+    │  │  │        └ token: .keyword_i32 'i32'
+    │  │  └ ret_type: %5 = .ty_i32 - tok[8..8]
+    │  │     └ token: .keyword_i32 'i32'
+    │  └ body: %9 = .block - tok[9..13]
+    │     └ list: 1 items
+    │        └ %8 = .ret_expression - tok[10..11]
+    │           └ node: %7 = .identifier - tok[11..11]
+    │              └ token: .identifier 'a'
+    ├ %22 = .fn_decl - tok[14..31]
+    │  ├ proto: %16 = .fn_proto - tok[15..22]
+    │  │  ├ name: %11 = .identifier - tok[15..15]
+    │  │  │  └ token: .identifier 'bar'
+    │  │  ├ params_list: 1 items
+    │  │  │  └ %12 = .fn_param - tok[17..19]
+    │  │  │     ├ name: %13 = .identifier - tok[17..17]
+    │  │  │     │  └ token: .identifier 'a'
+    │  │  │     └ type: %14 = .ty_i32 - tok[19..19]
+    │  │  │        └ token: .keyword_i32 'i32'
+    │  │  └ ret_type: %15 = .ty_i32 - tok[22..22]
+    │  │     └ token: .keyword_i32 'i32'
+    │  └ body: %21 = .block - tok[23..30]
+    │     └ list: 1 items
+    │        └ %20 = .ret_expression - tok[24..28]
+    │           └ node: %19 = .fn_call - tok[25..28]
+    │              ├ callee: %17 = .identifier - tok[25..25]
+    │              │  └ token: .identifier 'rec'
+    │              └ args_list: 1 items
+    │                 └ %18 = .identifier - tok[27..27]
+    │                    └ token: .identifier 'a'
+    ├ %43 = .fn_decl - tok[31..61]
+    │  ├ proto: %28 = .fn_proto - tok[32..39]
+    │  │  ├ name: %23 = .identifier - tok[32..32]
+    │  │  │  └ token: .identifier 'rec'
+    │  │  ├ params_list: 1 items
+    │  │  │  └ %24 = .fn_param - tok[34..36]
+    │  │  │     ├ name: %25 = .identifier - tok[34..34]
+    │  │  │     │  └ token: .identifier 'a'
+    │  │  │     └ type: %26 = .ty_i32 - tok[36..36]
+    │  │  │        └ token: .keyword_i32 'i32'
+    │  │  └ ret_type: %27 = .ty_i32 - tok[39..39]
+    │  │     └ token: .keyword_i32 'i32'
+    │  └ body: %42 = .block - tok[40..60]
+    │     └ list: 2 items
+    │        ├ %39 = .if_expr - tok[41..56]
+    │        │  ├ condition: %31 = .lt - tok[43..45]
+    │        │  │  ├ lhs: %29 = .identifier - tok[43..43]
+    │        │  │  │  └ token: .identifier 'a'
+    │        │  │  └ rhs: %30 = .number_literal - tok[45..45]
+    │        │  │     └ token: .number_literal '10'
+    │        │  ├ then_branch: %38 = .block - tok[47..56]
+    │        │  │  └ list: 1 items
+    │        │  │     └ %37 = .ret_expression - tok[48..54]
+    │        │  │        └ node: %36 = .fn_call - tok[49..54]
+    │        │  │           ├ callee: %32 = .identifier - tok[49..49]
+    │        │  │           │  └ token: .identifier 'bar'
+    │        │  │           └ args_list: 1 items
+    │        │  │              └ %35 = .mul - tok[51..53]
+    │        │  │                 ├ lhs: %33 = .number_literal - tok[51..51]
+    │        │  │                 │  └ token: .number_literal '2'
+    │        │  │                 └ rhs: %34 = .identifier - tok[53..53]
+    │        │  │                    └ token: .identifier 'a'
+    │        │  └ else_branch: NONE
+    │        └ %41 = .ret_expression - tok[57..58]
+    │           └ node: %40 = .identifier - tok[58..58]
+    │              └ token: .identifier 'a'
+    └ %54 = .fn_decl - tok[61..77]
+       ├ proto: %46 = .fn_proto - tok[62..66]
+       │  ├ name: %44 = .identifier - tok[62..62]
+       │  │  └ token: .identifier 'main'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %45 = .ty_void - tok[66..66]
+       │     └ token: .keyword_void 'void'
+       └ body: %53 = .block - tok[67..76]
+          └ list: 1 items
+             └ %52 = .comp - tok[68..75]
+                └ node: %51 = .eq - tok[69..74]
+                   ├ lhs: %49 = .fn_call - tok[69..72]
+                   │  ├ callee: %47 = .identifier - tok[69..69]
+                   │  │  └ token: .identifier 'rec'
+                   │  └ args_list: 1 items
+                   │     └ %48 = .number_literal - tok[71..71]
+                   │        └ token: .number_literal '1'
+                   └ rhs: %50 = .number_literal - tok[74..74]
+                      └ token: .number_literal '16'

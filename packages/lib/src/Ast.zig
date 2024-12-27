@@ -152,6 +152,7 @@ pub const Node = struct {
         block: struct {
             list: ChildList,
         },
+        comp: NodeIndex,
         while_loop: WhileLoop,
         type_init: struct {
             type: Index,
@@ -264,7 +265,6 @@ pub const Node = struct {
         pow,
         sub,
 
-        // - Comparison
         eq,
         gt,
         ge,
@@ -339,6 +339,7 @@ pub const Node = struct {
         select_expr,
         ret_expression,
         block,
+        comp,
         while_loop,
         type_init,
         field_init,

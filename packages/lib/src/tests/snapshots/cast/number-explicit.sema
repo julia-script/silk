@@ -7,7 +7,7 @@
 ;; 1 types
 ;; 0 lists
 ;; 6 strings
-;; 0/0 comptime memory bytes allocated
+;; 0/0 comptime memory used/allocated bytes
 
 %0 = fn @"cast/number-explicit.sk::explicit_casting"() -> i32
  └ %0: void = .block: [%1-%13]                                        ; void

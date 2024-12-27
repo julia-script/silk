@@ -4,10 +4,10 @@
 ;; 8 symbols
 ;; 87 instructions
 ;; 24 values
-;; 7 types
+;; 14 types
 ;; 2 lists
 ;; 27 strings
-;; 24/38 comptime memory bytes allocated
+;; 24/38 comptime memory used/allocated bytes
 
 %0 = fn @"array/array-init.sk::var_array"() -> void
  └ %0: void = .block: [%1-%14]                                        ; void
@@ -23,7 +23,7 @@
     ├ !%10: type = .type                                              ; type([1]i32)
     ├ %11: *[1]i32 = .alloc type=([1]i32) mutable=(false)             ; comp_ptr(0)
     ├ %12: i32 = .constant                                            ; int(33)
-    ├ %13: *i32 = .get_element_pointer base=(%11) index=(0)           ; comp_ptr(0)
+    ├ %13: *i32 = .get_element_pointer base=(%11) index=(%0)          ; comp_ptr(0)
     └ %14: void = .store operand=(%13) payload=(%12)                  ; void
 
 %1 = fn @"array/array-init.sk::var_array_infer_type"() -> void
@@ -39,13 +39,13 @@
     ├ !%9: type = .typeof operand=(%8)                                ; type([3]i32)
     ├ %10: *[3]i32 = .alloc type=([3]i32) mutable=(true)              ; exec_time
     ├ %11: i32 = .constant                                            ; int(1)
-    ├ %12: *i32 = .get_element_pointer base=(%10) index=(0)           ; exec_time
+    ├ %12: *i32 = .get_element_pointer base=(%10) index=(%0)          ; exec_time
     ├ %13: void = .store operand=(%12) payload=(%11)                  ; void
     ├ %14: i32 = .constant                                            ; int(2)
-    ├ %15: *i32 = .get_element_pointer base=(%10) index=(1)           ; exec_time
+    ├ %15: *i32 = .get_element_pointer base=(%10) index=(%1)          ; exec_time
     ├ %16: void = .store operand=(%15) payload=(%14)                  ; void
     ├ %17: i32 = .constant                                            ; int(3)
-    ├ %18: *i32 = .get_element_pointer base=(%10) index=(2)           ; exec_time
+    ├ %18: *i32 = .get_element_pointer base=(%10) index=(%2)          ; exec_time
     └ %19: void = .store operand=(%18) payload=(%17)                  ; void
 
 %2 = fn @"array/array-init.sk::var_int"() -> void
@@ -80,7 +80,7 @@
     ├ !%10: type = .type                                              ; type([1]i32)
     ├ %11: *[1]i32 = .alloc type=([1]i32) mutable=(false)             ; comp_ptr(4)
     ├ %12: i32 = .constant                                            ; int(1)
-    ├ %13: *i32 = .get_element_pointer base=(%11) index=(0)           ; comp_ptr(4)
+    ├ %13: *i32 = .get_element_pointer base=(%11) index=(%0)          ; comp_ptr(4)
     └ %14: void = .store operand=(%13) payload=(%12)                  ; void
 
 %5 = fn @"array/array-init.sk::const_array_infer_type"() -> void
@@ -94,7 +94,7 @@
     ├ !%7: type = .typeof operand=(%6)                                ; type([1]i32)
     ├ %8: *[1]i32 = .alloc type=([1]i32) mutable=(false)              ; comp_ptr(8)
     ├ %9: i32 = .constant                                             ; int(1)
-    ├ %10: *i32 = .get_element_pointer base=(%8) index=(0)            ; comp_ptr(8)
+    ├ %10: *i32 = .get_element_pointer base=(%8) index=(%0)           ; comp_ptr(8)
     └ %11: void = .store operand=(%10) payload=(%9)                   ; void
 
 %6 = fn @"array/array-init.sk::const_int"() -> void
