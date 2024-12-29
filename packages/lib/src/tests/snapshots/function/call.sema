@@ -55,10 +55,10 @@
     ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: builtin_fn_as = .get_builtin_fn_as operand=(%1)            ; type(builtin_fn_as)
     ├ !%3: type = .type                                               ; type(i32)
-    ├ %4: i32 = .constant                                             ; int(2)
+    ├ !%4: i32 = .constant                                            ; int(2)
     ├ !%5: type = .typeof operand=(%4)                                ; type(i32)
     ├ %6: *i32 = .alloc type=(i32) mutable=(false)                    ; comp_ptr(8)
-    └ %7: void = .store operand=(%6) payload=(%4)                     ; void
+    └ !%7: void = .store operand=(%6) payload=(%4)                    ; void
 
 %5 = fn @"function/call.sk::T::mod::foo_add"(i32, i32) -> i32
  └ %0: void = .block: [%1-%8]                                         ; void

@@ -212,6 +212,9 @@ pub fn genLoadedInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
         .global_decl => {
             return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
         },
+        .param => {
+            return try scope.pushInstruction(.{ .param_get = .{ .operand = inst_index } });
+        },
 
         else => {
             return inst_index;
@@ -352,7 +355,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             scope.context = .normal;
             // const lhs_inst = self.hir.insts.items[lhs_index];
             switch (lhs_inst) {
-                .param_decl => {
+                .param => {
                     return try scope.pushInstruction(.{ .param_set = .{ .lhs = lhs_inst_index, .rhs = rhs_inst_index } });
                 },
                 .alloc => {
@@ -365,7 +368,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                     return try scope.pushInstruction(.{ .store = .{ .pointer = lhs_inst_index, .value = rhs_inst_index } });
                 },
                 else => {
-                    self.tracer.panic("Unsupported instruction:", .{@tagName(lhs_inst)});
+                    std.debug.panic("Unsupported instruction: {s}", .{@tagName(lhs_inst)});
                 },
             }
 
@@ -421,67 +424,68 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
         .if_expr => |data| {
             nav.move(data.condition);
+            const is_select = !self.hir.ast.nodeIs(data.then_branch, .block) and !self.hir.ast.nodeIs(data.else_branch, .block);
+            if (is_select) {
+                const then_body_inst = try Block.fromNode(self, scope, data.then_branch);
+                const else_body_inst = try Block.fromNode(self, scope, data.else_branch);
+                const cond_inst = blk: {
+                    if (nav.is(.group)) break :blk try self.genInstruction(scope, nav.data.group.node);
+                    break :blk try self.genInstruction(scope, data.condition);
+                };
+                return try scope.pushInstruction(.{ .select_expr = .{
+                    .cond = cond_inst,
+                    .then_body = then_body_inst,
+                    .else_body = else_body_inst,
+                } });
+            }
+
             const cond_inst = blk: {
                 if (nav.is(.group)) break :blk try self.genInstruction(scope, nav.data.group.node);
                 break :blk try self.genInstruction(scope, data.condition);
             };
-            // const cond_inst = try self.genInstruction(scope, data.condition);
-            // try scope.instructions.append(cond_inst);
+            const if_inst = try scope.reserveInstruction();
             const then_body_inst = try Block.fromNode(self, scope, data.then_branch);
 
-            // var if_expr = Hir.Inst.IfExpr{
-            //     .cond = cond_inst,
-            //     .then_body = then_body_inst,
-            //     .else_body = null,
-            // };
             var else_body_inst: ?Hir.Inst.Index = null;
             if (data.else_branch > 0) {
                 else_body_inst = try Block.fromNode(self, scope, data.else_branch);
-                if (activeTag(self.hir.insts.items[then_body_inst]) == .inline_block and activeTag(self.hir.insts.items[else_body_inst.?]) == .inline_block) {
-                    return try scope.pushInstruction(.{ .select_expr = .{
-                        .cond = cond_inst,
-                        .then_body = then_body_inst,
-                        .else_body = else_body_inst,
-                    } });
-                }
             }
 
-            return try scope.pushInstruction(.{ .if_expr = .{
+            scope.setInstruction(if_inst, .{ .if_expr = .{
                 .cond = cond_inst,
                 .then_body = then_body_inst,
                 .else_body = else_body_inst,
             } });
+
+            return if_inst;
         },
 
         .while_loop => {
             const loop_index = try scope.reserveInstruction();
+            const body_block_index = try self.reserveInstruction();
             var loop_scope = Scope.init(self, scope, .block, "while_loop");
             const cond_inst = try self.genInstruction(&loop_scope, nav.data.while_loop.condition);
-
-            // const break_instruction = try self.pushInstruction(.{ .br = .{ .operand = loop_index } });
-            // var else_list = self.newList();
-            // try else_list.append(break_instruction);
-            // const else_block = try self.pushInstruction(.{ .inline_block = .{
-            //     .name_node = null,
-            //     .instructions = try else_list.commit(),
-            // } });
+            const if_expr_inst = try loop_scope.reserveInstruction();
             var loop_block = try Block.init(self, &loop_scope);
+            // std.debug.print("block_inst: {d}\n", .{loop_block.inst});
+
             try loop_block.pushInstructionsFromBlock(nav.data.while_loop.body);
             _ = try loop_block.pushInstruction(.{ .br = .{ .operand = null, .target = loop_index } });
-            _ = try loop_scope.pushInstruction(.{ .if_expr = .{
+            loop_scope.setInstruction(if_expr_inst, .{ .if_expr = .{
                 .cond = cond_inst,
                 .then_body = try loop_block.commit(),
                 .else_body = null,
             } });
+            self.setInstruction(body_block_index, .{
+                .block = .{
+                    .name_node = null,
+                    .instructions_list = try loop_scope.commit(),
+                },
+            });
             // _ = try loop_scope.pushInstruction(.{ .br = .{ .operand = null, .target = loop_index } });
             self.setInstruction(loop_index, .{
                 .loop = .{
-                    .body = try self.pushInstruction(.{
-                        .block = .{
-                            .name_node = null,
-                            .instructions_list = try loop_scope.commit(),
-                        },
-                    }),
+                    .body = body_block_index,
                 },
             });
             return loop_index;
@@ -697,8 +701,10 @@ const Block = struct {
     }
     pub fn commit(self: *Block) !Hir.Inst.Index {
         if (self.is_inline) {
-            const last_inst = self.scope.instructions.list.items[self.scope.instructions.list.items.len - 1];
-            _ = try self.pushInstruction(.{ .br = .{ .operand = last_inst, .target = self.inst } });
+            if (self.scope.instructions.list.items.len > 0) {
+                const last_inst = self.scope.instructions.list.items[self.scope.instructions.list.items.len - 1];
+                _ = try self.pushInstruction(.{ .br = .{ .operand = last_inst, .target = self.inst } });
+            }
             const instructions = try self.scope.commit();
             self.scope.builder.setInstruction(self.inst, .{
                 .inline_block = .{
@@ -913,20 +919,19 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
         var block = try Block.init(self, &fn_scope);
         for (self.hir.lists.getSlice(params)) |param| {
             const name = self.hir.insts.items[param].param_decl.name_node;
-            try block.scope.pushSymbol(self.hir.ast.getNodeSlice(name), param);
-            // try block.pushInstruction(.{ .param_ = .{ .name_node = name, .type = self.hir.insts.items[param].param_decl.type } });
-            try block.scope.instructions.append(param);
-            // _ = try block.pushInstruction(param);
+
+            const param_inst = try block.pushInstruction(.{
+                .param = .{
+                    .operand = param,
+                },
+            });
+            try block.scope.pushSymbol(self.hir.ast.getNodeSlice(name), param_inst);
         }
 
         try block.pushInstructionsFromBlock(body);
 
-        // const inst = try self.genScopedBlockInstruction(&fn_scope, body, null);
-
-        // try scope.instructions.append(inst);
         break :blk try block.commit();
     };
-    // try scope.instructions.append(params);
 
     return .{
         .index = try scope.pushInstruction(.{
@@ -1117,13 +1122,6 @@ pub fn genFnParams(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.
 
         nav_param.move(nav_param.data.fn_param.name);
         try scope.pushSymbol(nav_param.getNodeSlice(), inst_index);
-        // var keyIter = scope.symbols_table.keyIterator();
-        // while (keyIter.next()) |key| {
-        //     std.debug.print("key: {s} ptr: {*}\n", .{ key.*, scope });
-        // }
-        // std.debug.print("scope.symbols_table: {}\n", .{scope.symbols_table.keyIterator()});
-
-        // try scope.pushSymbol(nav_param.getNodeSlice(), inst_index);
 
         try params.append(inst_index);
     }

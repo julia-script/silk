@@ -1,4 +1,4 @@
-;; HIR: 23 instructions
+;; HIR: 24 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -12,7 +12,7 @@
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
-       ├ type: %22 = .fn_decl
+       ├ type: %23 = .fn_decl
        │  ├ name_node: node(#1: "folding")
        │  ├ return_type: %4 = .ty_i32
        │  │  └ node: node(#5: "i32")
@@ -22,20 +22,20 @@
        │        └ type: %2 = .ty_i32
        │           └ node: node(#4: "i32")
        └ init: %5 = .block
-          ├ %3 = .param_decl name_node=(n[3:"n"]), type=(%2)
-          ├ %6 = .param_get operand=(%3)
-          ├ %7 = .comptime_number node=(n[11:"1"])
-          ├ %8 = .add lhs=(%6), rhs=(%7)
-          ├ %9 = .comptime_number node=(n[13:"2"])
-          ├ %10 = .comptime_number node=(n[14:"3"])
-          ├ %11 = .mul lhs=(%9), rhs=(%10)
-          ├ %12 = .add lhs=(%8), rhs=(%11)
-          ├ %13 = .comptime_number node=(n[17:"4"])
-          ├ %14 = .comptime_number node=(n[18:"5"])
-          ├ %15 = .add lhs=(%13), rhs=(%14)
-          ├ %16 = .comptime_number node=(n[21:"2"])
-          ├ %17 = .mul lhs=(%15), rhs=(%16)
-          ├ %18 = .add lhs=(%12), rhs=(%17)
-          ├ %19 = .ty_i32 node=(n[5:"i32"])
-          ├ %20 = .as lhs=(%18), rhs=(%19)
-          └ %21 = .ret operand=(20)
+          ├ %6 = .param operand=(%3)
+          ├ %7 = .param_get operand=(%6)
+          ├ %8 = .comptime_number node=(n[11:"1"])
+          ├ %9 = .add lhs=(%7), rhs=(%8)
+          ├ %10 = .comptime_number node=(n[13:"2"])
+          ├ %11 = .comptime_number node=(n[14:"3"])
+          ├ %12 = .mul lhs=(%10), rhs=(%11)
+          ├ %13 = .add lhs=(%9), rhs=(%12)
+          ├ %14 = .comptime_number node=(n[17:"4"])
+          ├ %15 = .comptime_number node=(n[18:"5"])
+          ├ %16 = .add lhs=(%14), rhs=(%15)
+          ├ %17 = .comptime_number node=(n[21:"2"])
+          ├ %18 = .mul lhs=(%16), rhs=(%17)
+          ├ %19 = .add lhs=(%13), rhs=(%18)
+          ├ %20 = .ty_i32 node=(n[5:"i32"])
+          ├ %21 = .as lhs=(%19), rhs=(%20)
+          └ %22 = .ret operand=(21)

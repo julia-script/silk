@@ -1,0 +1,19 @@
+;; Sema
+;; 1 declarations
+;; 3 entities
+;; 1 symbols
+;; 6 instructions
+;; 2 values
+;; 1 types
+;; 0 lists
+;; 5 strings
+;; 0/0 comptime memory used/allocated bytes
+
+%0 = fn @"comptime/break.sk::main"() -> void
+ └ %0: void = .block: [%1-%5]                                         ; void
+    └ %1: bool = .block: [%2-%5]                                      ; true
+       ├ !%2: number = .constant                                      ; int(1)
+       ├ !%3: number = .constant                                      ; int(1)
+       ├ !%4: bool = .constant                                        ; true
+       └ !%5: void = .br operand=(%1)                                 ; void
+

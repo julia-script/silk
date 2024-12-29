@@ -1,0 +1,60 @@
+;; 32 Nodes
+;; 44 Tokens
+;; 14 Interned Lists
+
+%0 = .struct_decl - tok[0..44]
+ └ members_list: 9 items
+    ├ %23 = .fn_decl - tok[0..35]
+    │  ├ proto: %3 = .fn_proto - tok[1..5]
+    │  │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  │  └ token: .identifier 'unfold'
+    │  │  ├ params_list: 0 items
+    │  │  └ ret_type: %2 = .ty_i32 - tok[5..5]
+    │  │     └ token: .keyword_i32 'i32'
+    │  └ body: %22 = .block - tok[6..34]
+    │     └ list: 1 items
+    │        └ %21 = .comp - tok[7..34]
+    │           └ node: %20 = .block - tok[8..33]
+    │              └ list: 3 items
+    │                 ├ %7 = .var_decl - tok[9..14]
+    │                 │  ├ name: %4 = .identifier - tok[10..10]
+    │                 │  │  └ token: .identifier 'i'
+    │                 │  ├ type: %5 = .ty_i32 - tok[12..12]
+    │                 │  │  └ token: .keyword_i32 'i32'
+    │                 │  └ value: %6 = .number_literal - tok[14..14]
+    │                 │     └ token: .number_literal '0'
+    │                 ├ %17 = .while_loop - tok[16..29]
+    │                 │  ├ condition: %10 = .lt - tok[18..20]
+    │                 │  │  ├ lhs: %8 = .identifier - tok[18..18]
+    │                 │  │  │  └ token: .identifier 'i'
+    │                 │  │  └ rhs: %9 = .number_literal - tok[20..20]
+    │                 │  │     └ token: .number_literal '3'
+    │                 │  └ body: %16 = .block - tok[22..29]
+    │                 │     └ list: 1 items
+    │                 │        └ %15 = .assign - tok[23..27]
+    │                 │           ├ lhs: %11 = .identifier - tok[23..23]
+    │                 │           │  └ token: .identifier 'i'
+    │                 │           └ rhs: %14 = .add - tok[25..27]
+    │                 │              ├ lhs: %12 = .identifier - tok[25..25]
+    │                 │              │  └ token: .identifier 'i'
+    │                 │              └ rhs: %13 = .number_literal - tok[27..27]
+    │                 │                 └ token: .number_literal '1'
+    │                 └ %19 = .ret_expression - tok[30..31]
+    │                    └ node: %18 = .identifier - tok[31..31]
+    │                       └ token: .identifier 'i'
+    ├ %24 = .comment_line - tok[35..36]
+    │  └ token: .comment '// should be equivalent to '
+    ├ %25 = .comment_line - tok[36..37]
+    │  └ token: .comment '// fn unfolded(): i32 {'
+    ├ %26 = .comment_line - tok[37..38]
+    │  └ token: .comment '//   comp var i:i32 = 0;'
+    ├ %27 = .comment_line - tok[38..39]
+    │  └ token: .comment '//   i = i + 1;'
+    ├ %28 = .comment_line - tok[39..40]
+    │  └ token: .comment '//   i = i + 1;'
+    ├ %29 = .comment_line - tok[40..41]
+    │  └ token: .comment '//   i = i + 1;'
+    ├ %30 = .comment_line - tok[41..42]
+    │  └ token: .comment '//   return i;'
+    └ %31 = .comment_line - tok[42..43]
+       └ token: .comment '// }'

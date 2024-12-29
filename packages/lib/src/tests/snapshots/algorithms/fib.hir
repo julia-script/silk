@@ -1,4 +1,4 @@
-;; HIR: 50 instructions
+;; HIR: 51 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -12,7 +12,7 @@
        ├ visibility: "public"
        ├ exported: false
        ├ mutable: false
-       ├ type: %49 = .fn_decl
+       ├ type: %50 = .fn_decl
        │  ├ name_node: node(#2: "fib")
        │  ├ return_type: %4 = .ty_i32
        │  │  └ node: node(#6: "i32")
@@ -22,47 +22,47 @@
        │        └ type: %2 = .ty_i32
        │           └ node: node(#5: "i32")
        └ init: %5 = .block
-          ├ %3 = .param_decl name_node=(n[4:"n"]), type=(%2)
-          ├ %6 = .comptime_number node=(n[10:"0"])
-          ├ %7 = .ty_i32 node=(n[9:"i32"])
-          ├ %8 = .alloc mutable=(true), type=(%7)
-          ├ %9 = .store pointer=(%8), value=(%6)
-          ├ %10 = .comptime_number node=(n[14:"1"])
-          ├ %11 = .ty_i32 node=(n[13:"i32"])
-          ├ %12 = .alloc mutable=(true), type=(%11)
-          ├ %13 = .store pointer=(%12), value=(%10)
-          ├ %14 = .param_get operand=(%3)
-          ├ %15 = .comptime_number node=(n[17:"0"])
-          ├ %16 = .gt lhs=(%14), rhs=(%15)
-          ├ %44 = .if_expr cond (%16)
-          │  └ then: %17 = .block
-          │     ├ %18 = .loop
-          │     │  └ body: %39 = .block
-          │     │     ├ %19 = .param_get operand=(%3)
-          │     │     ├ %20 = .comptime_number node=(n[20:"1"])
-          │     │     ├ %21 = .gt lhs=(%19), rhs=(%20)
-          │     │     └ %38 = .if_expr cond (%21)
-          │     │        └ then: %22 = .block
-          │     │           ├ %23 = .load operand=(%8)
-          │     │           ├ %24 = .load operand=(%12)
-          │     │           ├ %25 = .add lhs=(%23), rhs=(%24)
-          │     │           ├ %26 = .ty_i32 node=(n[23:"i32"])
-          │     │           ├ %27 = .alloc mutable=(true), type=(%26)
-          │     │           ├ %28 = .store pointer=(%27), value=(%25)
-          │     │           ├ %29 = .load operand=(%12)
-          │     │           ├ %30 = .store pointer=(%8), value=(%29)
-          │     │           ├ %31 = .load operand=(%27)
-          │     │           ├ %32 = .store pointer=(%12), value=(%31)
-          │     │           ├ %33 = .param_get operand=(%3)
-          │     │           ├ %34 = .comptime_number node=(n[36:"1"])
-          │     │           ├ %35 = .sub lhs=(%33), rhs=(%34)
-          │     │           ├ %36 = .param_set lhs=(%3), rhs=(%35)
-          │     │           └ %37 = .br operand=(null), target=(%18)
-          │     ├ %40 = .load operand=(%12)
-          │     ├ %41 = .ty_i32 node=(n[6:"i32"])
-          │     ├ %42 = .as lhs=(%40), rhs=(%41)
-          │     └ %43 = .ret operand=(42)
-          ├ %45 = .load operand=(%8)
-          ├ %46 = .ty_i32 node=(n[6:"i32"])
-          ├ %47 = .as lhs=(%45), rhs=(%46)
-          └ %48 = .ret operand=(47)
+          ├ %6 = .param operand=(%3)
+          ├ %7 = .comptime_number node=(n[10:"0"])
+          ├ %8 = .ty_i32 node=(n[9:"i32"])
+          ├ %9 = .alloc mutable=(true), type=(%8)
+          ├ %10 = .store pointer=(%9), value=(%7)
+          ├ %11 = .comptime_number node=(n[14:"1"])
+          ├ %12 = .ty_i32 node=(n[13:"i32"])
+          ├ %13 = .alloc mutable=(true), type=(%12)
+          ├ %14 = .store pointer=(%13), value=(%11)
+          ├ %15 = .param_get operand=(%6)
+          ├ %16 = .comptime_number node=(n[17:"0"])
+          ├ %17 = .gt lhs=(%15), rhs=(%16)
+          ├ %18 = .if_expr cond (%17)
+          │  └ then: %19 = .block
+          │     ├ %20 = .loop
+          │     │  └ body: %21 = .block
+          │     │     ├ %22 = .param_get operand=(%6)
+          │     │     ├ %23 = .comptime_number node=(n[20:"1"])
+          │     │     ├ %24 = .gt lhs=(%22), rhs=(%23)
+          │     │     └ %25 = .if_expr cond (%24)
+          │     │        └ then: %26 = .block
+          │     │           ├ %27 = .load operand=(%9)
+          │     │           ├ %28 = .load operand=(%13)
+          │     │           ├ %29 = .add lhs=(%27), rhs=(%28)
+          │     │           ├ %30 = .ty_i32 node=(n[23:"i32"])
+          │     │           ├ %31 = .alloc mutable=(true), type=(%30)
+          │     │           ├ %32 = .store pointer=(%31), value=(%29)
+          │     │           ├ %33 = .load operand=(%13)
+          │     │           ├ %34 = .store pointer=(%9), value=(%33)
+          │     │           ├ %35 = .load operand=(%31)
+          │     │           ├ %36 = .store pointer=(%13), value=(%35)
+          │     │           ├ %37 = .param_get operand=(%6)
+          │     │           ├ %38 = .comptime_number node=(n[36:"1"])
+          │     │           ├ %39 = .sub lhs=(%37), rhs=(%38)
+          │     │           ├ %40 = .param_set lhs=(%6), rhs=(%39)
+          │     │           └ %41 = .br operand=(null), target=(%20)
+          │     ├ %42 = .load operand=(%13)
+          │     ├ %43 = .ty_i32 node=(n[6:"i32"])
+          │     ├ %44 = .as lhs=(%42), rhs=(%43)
+          │     └ %45 = .ret operand=(44)
+          ├ %46 = .load operand=(%9)
+          ├ %47 = .ty_i32 node=(n[6:"i32"])
+          ├ %48 = .as lhs=(%46), rhs=(%47)
+          └ %49 = .ret operand=(48)

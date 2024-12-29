@@ -102,13 +102,13 @@
     ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: type = .type                                               ; type(i32)
     ├ %3: *i32 = .alloc type=(i32) mutable=(false)                    ; comp_ptr(c)
-    ├ %4: i32 = .constant                                             ; int(2)
-    └ %5: void = .store operand=(%3) payload=(%4)                     ; void
+    ├ !%4: i32 = .constant                                            ; int(2)
+    └ !%5: void = .store operand=(%3) payload=(%4)                    ; void
 
 %7 = fn @"array/array-init.sk::const_int_infer_type"() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
-    ├ %1: number = .constant                                          ; int(2)
+    ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: type = .typeof operand=(%1)                                ; type(number)
     ├ %3: *number = .alloc type=(number) mutable=(false)              ; comp_ptr(10)
-    └ %4: void = .store operand=(%3) payload=(%1)                     ; void
+    └ !%4: void = .store operand=(%3) payload=(%1)                    ; void
 

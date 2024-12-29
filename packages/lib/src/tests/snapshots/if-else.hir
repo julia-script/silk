@@ -12,7 +12,7 @@
     │  ├ visibility: "private"
     │  ├ exported: false
     │  ├ mutable: false
-    │  ├ type: %23 = .fn_decl
+    │  ├ type: %25 = .fn_decl
     │  │  ├ name_node: node(#1: "max")
     │  │  ├ return_type: %7 = .ty_i32
     │  │  │  └ node: node(#8: "i32")
@@ -26,22 +26,22 @@
     │  │        └ type: %5 = .ty_i32
     │  │           └ node: node(#7: "i32")
     │  └ init: %8 = .block
-    │     ├ %4 = .param_decl name_node=(n[3:"a"]), type=(%3)
-    │     ├ %6 = .param_decl name_node=(n[6:"b"]), type=(%5)
-    │     ├ %9 = .param_get operand=(%4)
-    │     ├ %10 = .param_get operand=(%6)
-    │     ├ %11 = .gt lhs=(%9), rhs=(%10)
-    │     └ %22 = .if_expr cond (%11)
-    │        ├ then: %12 = .block
-    │        │  ├ %13 = .param_get operand=(%4)
-    │        │  ├ %14 = .ty_i32 node=(n[8:"i32"])
-    │        │  ├ %15 = .as lhs=(%13), rhs=(%14)
-    │        │  └ %16 = .ret operand=(15)
-    │        └ else:%17 = .block
-    │           ├ %18 = .param_get operand=(%6)
-    │           ├ %19 = .ty_i32 node=(n[8:"i32"])
-    │           ├ %20 = .as lhs=(%18), rhs=(%19)
-    │           └ %21 = .ret operand=(20)
+    │     ├ %9 = .param operand=(%4)
+    │     ├ %10 = .param operand=(%6)
+    │     ├ %11 = .param_get operand=(%9)
+    │     ├ %12 = .param_get operand=(%10)
+    │     ├ %13 = .gt lhs=(%11), rhs=(%12)
+    │     └ %14 = .if_expr cond (%13)
+    │        ├ then: %15 = .block
+    │        │  ├ %16 = .param_get operand=(%9)
+    │        │  ├ %17 = .ty_i32 node=(n[8:"i32"])
+    │        │  ├ %18 = .as lhs=(%16), rhs=(%17)
+    │        │  └ %19 = .ret operand=(18)
+    │        └ else:%20 = .block
+    │           ├ %21 = .param_get operand=(%10)
+    │           ├ %22 = .ty_i32 node=(n[8:"i32"])
+    │           ├ %23 = .as lhs=(%21), rhs=(%22)
+    │           └ %24 = .ret operand=(23)
     └ 1: %2 = .global_decl
        ├ name_node: node(#22: "min")
        ├ extern: false
@@ -52,41 +52,24 @@
        ├ mutable: false
        ├ type: %43 = .fn_decl
        │  ├ name_node: node(#22: "min")
-       │  ├ return_type: %28 = .ty_i32
+       │  ├ return_type: %30 = .ty_i32
        │  │  └ node: node(#29: "i32")
        │  └ params_list: 2 items
-       │     ├ 0: %25 = .param_decl
+       │     ├ 0: %27 = .param_decl
        │     │  ├ name_node: node(#24: "a")
-       │     │  └ type: %24 = .ty_i32
+       │     │  └ type: %26 = .ty_i32
        │     │     └ node: node(#25: "i32")
-       │     └ 1: %27 = .param_decl
+       │     └ 1: %29 = .param_decl
        │        ├ name_node: node(#27: "b")
-       │        └ type: %26 = .ty_i32
+       │        └ type: %28 = .ty_i32
        │           └ node: node(#28: "i32")
-       └ init: %29 = .block
-          ├ %25 = .param_decl name_node=(n[24:"a"]), type=(%24)
-          ├ %27 = .param_decl name_node=(n[27:"b"]), type=(%26)
-          ├ %30 = .param_get operand=(%25)
-          ├ %31 = .param_get operand=(%27)
-          ├ %32 = .lt lhs=(%30), rhs=(%31)
-          ├ %39 = .select_expr
-          │  ├ cond: %32 = .lt
-          │  │  ├ lhs: %30 = .param_get
-          │  │  │  └ operand: %25 = .param_decl
-          │  │  │     ├ name_node: node(#24: "a")
-          │  │  │     └ type: %24 = .ty_i32
-          │  │  │        └ node: node(#25: "i32")
-          │  │  └ rhs: %31 = .param_get
-          │  │     └ operand: %27 = .param_decl
-          │  │        ├ name_node: node(#27: "b")
-          │  │        └ type: %26 = .ty_i32
-          │  │           └ node: node(#28: "i32")
-          │  ├ then_body: %33 = .inline_block
-          │  │  ├ %34 = .param_get operand=(%25)
-          │  │  └ %35 = .br operand=(34), target=(%33)
-          │  └ else_body: %36 = .inline_block
-          │     ├ %37 = .param_get operand=(%27)
-          │     └ %38 = .br operand=(37), target=(%36)
+       └ init: %31 = .block
+          ├ %32 = .param operand=(%27)
+          ├ %33 = .param operand=(%29)
+          ├ %36 = .param_get operand=(%32)
+          ├ %37 = .param_get operand=(%33)
+          ├ %38 = .lt lhs=(%36), rhs=(%37)
+          ├ %39 = .select_expr cond=(%38), then_body=(%34), else_body=(35)
           ├ %40 = .ty_i32 node=(n[29:"i32"])
           ├ %41 = .as lhs=(%39), rhs=(%40)
           └ %42 = .ret operand=(41)

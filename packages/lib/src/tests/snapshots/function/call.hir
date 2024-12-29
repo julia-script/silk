@@ -1,4 +1,4 @@
-;; HIR: 65 instructions
+;; HIR: 69 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
@@ -26,7 +26,7 @@
     │     │        ├ visibility: "private"
     │     │        ├ exported: false
     │     │        ├ mutable: false
-    │     │        ├ type: %21 = .fn_decl
+    │     │        ├ type: %23 = .fn_decl
     │     │        │  ├ name_node: node(#3: "foo_add")
     │     │        │  ├ return_type: %13 = .ty_i32
     │     │        │  │  └ node: node(#10: "i32")
@@ -40,15 +40,15 @@
     │     │        │        └ type: %11 = .ty_i32
     │     │        │           └ node: node(#9: "i32")
     │     │        └ init: %14 = .block
-    │     │           ├ %10 = .param_decl name_node=(n[5:"a"]), type=(%9)
-    │     │           ├ %12 = .param_decl name_node=(n[8:"b"]), type=(%11)
-    │     │           ├ %15 = .param_get operand=(%10)
-    │     │           ├ %16 = .param_get operand=(%12)
-    │     │           ├ %17 = .add lhs=(%15), rhs=(%16)
-    │     │           ├ %18 = .ty_i32 node=(n[10:"i32"])
-    │     │           ├ %19 = .as lhs=(%17), rhs=(%18)
-    │     │           └ %20 = .ret operand=(19)
-    │     └ %22 = .br operand=(7), target=(%6)
+    │     │           ├ %15 = .param operand=(%10)
+    │     │           ├ %16 = .param operand=(%12)
+    │     │           ├ %17 = .param_get operand=(%15)
+    │     │           ├ %18 = .param_get operand=(%16)
+    │     │           ├ %19 = .add lhs=(%17), rhs=(%18)
+    │     │           ├ %20 = .ty_i32 node=(n[10:"i32"])
+    │     │           ├ %21 = .as lhs=(%19), rhs=(%20)
+    │     │           └ %22 = .ret operand=(21)
+    │     └ %24 = .br operand=(7), target=(%6)
     ├ 1: %2 = .global_decl
     │  ├ name_node: node(#19: "bar_add")
     │  ├ extern: false
@@ -57,28 +57,28 @@
     │  ├ visibility: "private"
     │  ├ exported: false
     │  ├ mutable: false
-    │  ├ type: %35 = .fn_decl
+    │  ├ type: %39 = .fn_decl
     │  │  ├ name_node: node(#19: "bar_add")
-    │  │  ├ return_type: %27 = .ty_i32
+    │  │  ├ return_type: %29 = .ty_i32
     │  │  │  └ node: node(#26: "i32")
     │  │  └ params_list: 2 items
-    │  │     ├ 0: %24 = .param_decl
+    │  │     ├ 0: %26 = .param_decl
     │  │     │  ├ name_node: node(#21: "a")
-    │  │     │  └ type: %23 = .ty_i32
+    │  │     │  └ type: %25 = .ty_i32
     │  │     │     └ node: node(#22: "i32")
-    │  │     └ 1: %26 = .param_decl
+    │  │     └ 1: %28 = .param_decl
     │  │        ├ name_node: node(#24: "b")
-    │  │        └ type: %25 = .ty_i32
+    │  │        └ type: %27 = .ty_i32
     │  │           └ node: node(#25: "i32")
-    │  └ init: %28 = .block
-    │     ├ %24 = .param_decl name_node=(n[21:"a"]), type=(%23)
-    │     ├ %26 = .param_decl name_node=(n[24:"b"]), type=(%25)
-    │     ├ %29 = .param_get operand=(%24)
-    │     ├ %30 = .param_get operand=(%26)
-    │     ├ %31 = .add lhs=(%29), rhs=(%30)
-    │     ├ %32 = .ty_i32 node=(n[26:"i32"])
-    │     ├ %33 = .as lhs=(%31), rhs=(%32)
-    │     └ %34 = .ret operand=(33)
+    │  └ init: %30 = .block
+    │     ├ %31 = .param operand=(%26)
+    │     ├ %32 = .param operand=(%28)
+    │     ├ %33 = .param_get operand=(%31)
+    │     ├ %34 = .param_get operand=(%32)
+    │     ├ %35 = .add lhs=(%33), rhs=(%34)
+    │     ├ %36 = .ty_i32 node=(n[26:"i32"])
+    │     ├ %37 = .as lhs=(%35), rhs=(%36)
+    │     └ %38 = .ret operand=(37)
     ├ 2: %3 = .global_decl
     │  ├ name_node: node(#34: "namespaced")
     │  ├ extern: false
@@ -87,19 +87,19 @@
     │  ├ visibility: "private"
     │  ├ exported: false
     │  ├ mutable: false
-    │  ├ type: %45 = .fn_decl
+    │  ├ type: %49 = .fn_decl
     │  │  ├ name_node: node(#34: "namespaced")
-    │  │  ├ return_type: %36 = .ty_void
+    │  │  ├ return_type: %40 = .ty_void
     │  │  │  └ node: node(#35: "void")
     │  │  └ params_list: 0 items
-    │  └ init: %37 = .block
-    │     ├ %38 = .get_property_pointer base=(%1), property_name_node=(n[39:"foo_add"]), is_builtin=(false)
-    │     ├ %39 = .comptime_number node=(n[41:"1"])
-    │     ├ %40 = .comptime_number node=(n[42:"2"])
-    │     ├ %41 = .fn_call callee=(%38), args_list=({%39, %40})
-    │     ├ %42 = .typeof operand=(%41)
-    │     ├ %43 = .alloc mutable=(false), type=(%42)
-    │     └ %44 = .store pointer=(%43), value=(%41)
+    │  └ init: %41 = .block
+    │     ├ %42 = .get_property_pointer base=(%1), property_name_node=(n[39:"foo_add"]), is_builtin=(false)
+    │     ├ %43 = .comptime_number node=(n[41:"1"])
+    │     ├ %44 = .comptime_number node=(n[42:"2"])
+    │     ├ %45 = .fn_call callee=(%42), args_list=({%43, %44})
+    │     ├ %46 = .typeof operand=(%45)
+    │     ├ %47 = .alloc mutable=(false), type=(%46)
+    │     └ %48 = .store pointer=(%47), value=(%45)
     ├ 3: %4 = .global_decl
     │  ├ name_node: node(#47: "global")
     │  ├ extern: false
@@ -108,18 +108,18 @@
     │  ├ visibility: "private"
     │  ├ exported: false
     │  ├ mutable: false
-    │  ├ type: %54 = .fn_decl
+    │  ├ type: %58 = .fn_decl
     │  │  ├ name_node: node(#47: "global")
-    │  │  ├ return_type: %46 = .ty_void
+    │  │  ├ return_type: %50 = .ty_void
     │  │  │  └ node: node(#48: "void")
     │  │  └ params_list: 0 items
-    │  └ init: %47 = .block
-    │     ├ %48 = .comptime_number node=(n[52:"1"])
-    │     ├ %49 = .comptime_number node=(n[53:"2"])
-    │     ├ %50 = .fn_call callee=(%2), args_list=({%48, %49})
-    │     ├ %51 = .typeof operand=(%50)
-    │     ├ %52 = .alloc mutable=(false), type=(%51)
-    │     └ %53 = .store pointer=(%52), value=(%50)
+    │  └ init: %51 = .block
+    │     ├ %52 = .comptime_number node=(n[52:"1"])
+    │     ├ %53 = .comptime_number node=(n[53:"2"])
+    │     ├ %54 = .fn_call callee=(%2), args_list=({%52, %53})
+    │     ├ %55 = .typeof operand=(%54)
+    │     ├ %56 = .alloc mutable=(false), type=(%55)
+    │     └ %57 = .store pointer=(%56), value=(%54)
     └ 4: %5 = .global_decl
        ├ name_node: node(#58: "builtin")
        ├ extern: false
@@ -128,16 +128,16 @@
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
-       ├ type: %64 = .fn_decl
+       ├ type: %68 = .fn_decl
        │  ├ name_node: node(#58: "builtin")
-       │  ├ return_type: %55 = .ty_void
+       │  ├ return_type: %59 = .ty_void
        │  │  └ node: node(#59: "void")
        │  └ params_list: 0 items
-       └ init: %56 = .block
-          ├ %57 = .comptime_number node=(n[62:"2"])
-          ├ %58 = .get_property_pointer base=(%57), property_name_node=(n[63:"as"]), is_builtin=(true)
-          ├ %59 = .ty_i32 node=(n[65:"i32"])
-          ├ %60 = .fn_call callee=(%58), args_list=({%59})
-          ├ %61 = .typeof operand=(%60)
-          ├ %62 = .alloc mutable=(false), type=(%61)
-          └ %63 = .store pointer=(%62), value=(%60)
+       └ init: %60 = .block
+          ├ %61 = .comptime_number node=(n[62:"2"])
+          ├ %62 = .get_property_pointer base=(%61), property_name_node=(n[63:"as"]), is_builtin=(true)
+          ├ %63 = .ty_i32 node=(n[65:"i32"])
+          ├ %64 = .fn_call callee=(%62), args_list=({%63})
+          ├ %65 = .typeof operand=(%64)
+          ├ %66 = .alloc mutable=(false), type=(%65)
+          └ %67 = .store pointer=(%66), value=(%64)

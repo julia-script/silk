@@ -349,6 +349,12 @@ pub const Value = struct {
                 .comptime_pointer => false,
             };
         }
+        pub fn isComptimeKnown(self: Key) bool {
+            return switch (self) {
+                .simple => |s| s != .exec_time and s != .runtime,
+                else => true,
+            };
+        }
     };
     pub const Simple = enum {
         unknown,
@@ -1015,13 +1021,13 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                     try tree_writer.pushDirLine();
                     const init_inst = self.instructions.items[init_inst_index];
                     const count = init_inst.data.block.instructions_count;
-                    // std.debug.panic("TODO: formatDeclaration {any}", .{range});
                     try self.formatInstructionRange(
                         writer,
                         &tree_writer,
                         self.instructions.items[init_inst_index..],
                         .{ .start = 0, .len = count },
                     );
+
                     try tree_writer.pop();
                 }
             },

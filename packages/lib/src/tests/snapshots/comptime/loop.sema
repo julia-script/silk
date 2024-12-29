@@ -1,0 +1,36 @@
+;; Sema
+;; 1 declarations
+;; 3 entities
+;; 1 symbols
+;; 24 instructions
+;; 8 values
+;; 2 types
+;; 0 lists
+;; 5 strings
+;; 4/8 comptime memory used/allocated bytes
+
+%0 = fn @"comptime/loop.sk::unfold"() -> i32
+ └ %0: void = .block: [%1-%23]                                        ; void
+    └ %1: void = .block: [%2-%23]                                     ; void
+       ├ !%2: number = .constant                                      ; int(0)
+       ├ !%3: type = .type                                            ; type(i32)
+       ├ %4: *i32 = .alloc type=(i32) mutable=(true)                  ; comp_ptr(0)
+       ├ !%5: i32 = .constant                                         ; int(0)
+       ├ !%6: void = .store operand=(%4) payload=(%5)                 ; void
+       ├ !%7: void = .void                                            ; void
+       ├ %8: void = comptime .block: [%9-%19]                         ; void
+       │  ├ !%9: i32 = .load operand=(%4)                             ; int(0)
+       │  ├ !%10: number = .constant                                  ; int(3)
+       │  ├ !%11: i32 = .constant                                     ; int(3)
+       │  ├ !%12: bool = .constant                                    ; true
+       │  └ %13: void = comptime .block: [%14-%19]                    ; void
+       │     ├ !%14: i32 = .load operand=(%4)                         ; int(0)
+       │     ├ !%15: number = .constant                               ; int(1)
+       │     ├ !%16: i32 = .constant                                  ; int(1)
+       │     ├ !%17: i32 = .constant                                  ; int(1)
+       │     ├ !%18: void = .store operand=(%4) payload=(%17)         ; void
+       │     └ !%19: void = .br operand=(%7)                          ; void
+       ├ !%21: type = .type                                           ; type(i32)
+       ├ %22: i32 = .constant                                         ; int(1)
+       └ %23: void = .ret maybe_operand=(%22)                         ; void
+

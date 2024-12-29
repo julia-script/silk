@@ -1,0 +1,19 @@
+
+fn unfold(): i32 {
+  comp {
+    var i:i32 = 0;
+    while (i < 3) {
+      i = i + 1;
+    }
+
+    return i;
+  }
+}
+// should be equivalent to 
+// fn unfolded(): i32 {
+//   comp var i:i32 = 0;
+//   i = i + 1;
+//   i = i + 1;
+//   i = i + 1;
+//   return i;
+// }

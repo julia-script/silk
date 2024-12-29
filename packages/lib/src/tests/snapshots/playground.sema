@@ -30,10 +30,10 @@
     ├ !%17: i32 = .load operand=(%16)                                 ; int(33)
     ├ !%18: number = .constant                                        ; int(2)
     ├ !%19: i32 = .constant                                           ; int(2)
-    ├ %20: i32 = .constant                                            ; int(35)
+    ├ !%20: i32 = .constant                                           ; int(35)
     ├ !%21: type = .typeof operand=(%20)                              ; type(i32)
     ├ %22: *i32 = .alloc type=(i32) mutable=(false)                   ; comp_ptr(4)
-    └ %23: void = .store operand=(%22) payload=(%20)                  ; void
+    └ !%23: void = .store operand=(%22) payload=(%20)                 ; void
 
 %1 = fn @"playground.sk::var_array_infer_type"() -> void
  └ %0: void = .block: [%1-%11]                                        ; void
@@ -103,13 +103,13 @@
     ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: type = .type                                               ; type(i32)
     ├ %3: *i32 = .alloc type=(i32) mutable=(false)                    ; comp_ptr(10)
-    ├ %4: i32 = .constant                                             ; int(2)
-    └ %5: void = .store operand=(%3) payload=(%4)                     ; void
+    ├ !%4: i32 = .constant                                            ; int(2)
+    └ !%5: void = .store operand=(%3) payload=(%4)                    ; void
 
 %7 = fn @"playground.sk::const_int_infer_type"() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
-    ├ %1: number = .constant                                          ; int(2)
+    ├ !%1: number = .constant                                         ; int(2)
     ├ !%2: type = .typeof operand=(%1)                                ; type(number)
     ├ %3: *number = .alloc type=(number) mutable=(false)              ; comp_ptr(14)
-    └ %4: void = .store operand=(%3) payload=(%1)                     ; void
+    └ !%4: void = .store operand=(%3) payload=(%1)                    ; void
 

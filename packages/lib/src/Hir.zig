@@ -222,7 +222,7 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
                     .block, .inline_block, .loop, .global_decl, .struct_decl => {
                         try formatInst(self, writer, tree_writer, instruction_index);
                     },
-                    .if_expr, .select_expr => {
+                    .if_expr => {
                         try formatInst(self, writer, tree_writer, instruction_index);
                     },
                     else => {
@@ -394,6 +394,7 @@ pub const Inst = union(enum) {
     struct_decl: StructDecl,
     struct_field: StructField,
     param_decl: Param,
+    param: UnaryOp,
     param_get: UnaryOp,
     global_get: UnaryOp,
     global_decl: GlobalDecl,

@@ -1,0 +1,41 @@
+;; HIR: 26 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 1 items
+    └ 0: %1 = .global_decl
+       ├ name_node: node(#1: "unfold")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %25 = .fn_decl
+       │  ├ name_node: node(#1: "unfold")
+       │  ├ return_type: %2 = .ty_i32
+       │  │  └ node: node(#2: "i32")
+       │  └ params_list: 0 items
+       └ init: %3 = .block
+          └ %4 = comptime .block
+             ├ %5 = .comptime_number node=(n[6:"0"])
+             ├ %6 = .ty_i32 node=(n[5:"i32"])
+             ├ %7 = .alloc mutable=(true), type=(%6)
+             ├ %8 = .store pointer=(%7), value=(%5)
+             ├ %9 = .loop
+             │  └ body: %10 = .block
+             │     ├ %11 = .load operand=(%7)
+             │     ├ %12 = .comptime_number node=(n[9:"3"])
+             │     ├ %13 = .lt lhs=(%11), rhs=(%12)
+             │     └ %14 = .if_expr cond (%13)
+             │        └ then: %15 = .block
+             │           ├ %16 = .load operand=(%7)
+             │           ├ %17 = .comptime_number node=(n[13:"1"])
+             │           ├ %18 = .add lhs=(%16), rhs=(%17)
+             │           ├ %19 = .store pointer=(%7), value=(%18)
+             │           └ %20 = .br operand=(null), target=(%9)
+             ├ %21 = .load operand=(%7)
+             ├ %22 = .ty_i32 node=(n[2:"i32"])
+             ├ %23 = .as lhs=(%21), rhs=(%22)
+             └ %24 = .ret operand=(23)

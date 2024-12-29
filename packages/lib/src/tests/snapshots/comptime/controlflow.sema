@@ -2,26 +2,19 @@
 ;; 1 declarations
 ;; 3 entities
 ;; 1 symbols
-;; 13 instructions
-;; 6 values
+;; 7 instructions
+;; 4 values
 ;; 1 types
 ;; 0 lists
 ;; 5 strings
 ;; 0/0 comptime memory used/allocated bytes
 
 %0 = fn @"comptime/controlflow.sk::main"() -> i32
- └ %0: void = .block: [%1-%12]                                        ; void
+ └ %0: void = .block: [%1-%6]                                         ; void
     ├ !%1: bool = .constant                                           ; true
-    ├ !%2: if (%1) then: [%3-%7]
-    │  └ %3: void = .block: [%4-%7]                                   ; void
-    │     ├ !%4: number = .constant                                   ; int(1)
-    │     ├ !%5: type = .type                                         ; type(i32)
-    │     ├ %6: i32 = .constant                                       ; int(1)
-    │     └ %7: void = .ret maybe_operand=(%6)                        ; void
-    └ !%2 else [%8-%12]:
-       └ !%8: void = .block: [%9-%12]                                 ; void
-          ├ !%9: number = .constant                                   ; int(2)
-          ├ !%10: type = .type                                        ; type(i32)
-          ├ %11: i32 = .constant                                      ; int(2)
-          └ %12: void = .ret maybe_operand=(%11)                      ; void
+    └ %2: void = .block: [%3-%6]                                      ; void
+       ├ !%3: number = .constant                                      ; int(1)
+       ├ !%4: type = .type                                            ; type(i32)
+       ├ %5: i32 = .constant                                          ; int(1)
+       └ %6: void = .ret maybe_operand=(%5)                           ; void
 

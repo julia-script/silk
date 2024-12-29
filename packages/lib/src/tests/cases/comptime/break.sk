@@ -1,0 +1,5 @@
+
+
+fn main(): void {
+  comp 1 == 1;
+}
