@@ -28,8 +28,8 @@
             .hash = "1220a99c7a3dfcb024e900607cfffc944272936bcf54c012ea9491349e3913efcfda",
         },
         .expect = .{
-            .url = "git+https://github.com/julia-script/zig-expect.git#f246eefe992d3d97f174431110c0e320920a10b7",
-            .hash = "1220b1a58a40734cd1ca08b5b858e7575aeb892ef66a290faf3d82fd86377af08316",
+            .url = "git+https://github.com/julia-script/zig-expect.git#eab3dd8ef915301a7fa3b27661813f9b4e02b3d4",
+            .hash = "1220e862ef32905eb28b2ca54fceb5cb5ee0452196a35da1230dbbb8a593d9ade5f3",
         },
     },
     .paths = .{

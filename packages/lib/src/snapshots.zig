@@ -143,26 +143,5 @@ pub fn checkSnapshot(allocator: std.mem.Allocator, actual: []const u8, path: []c
     if (std.mem.eql(u8, actual, expected)) return;
     std.debug.print("Snapshot mismatch on {s}\n", .{expected_path});
 
-    try expect(@as(@TypeOf(actual), expected)).toBeEqualString(actual);
+    try expect(@as(@TypeOf(actual), expected)).toBeEqualString(allocator, actual);
 }
-
-// const Snapshot = struct {
-//     file_path: []const u8,
-//     allocator: std.mem.Allocator,
-//     actual: ?[]const u8 = null,
-//     expected: ?[]const u8 = null,
-//     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) Snapshot {
-//         return .{ .file_path = file_path, .allocator = allocator };
-//     }
-//     pub fn readActual(self: *Snapshot, fun: fn (self: *Snapshot) anyerror![]const u8) !void {
-//         _ = self; // autofix
-//         _ = fun; // autofix
-//     }
-//     pub fn writeActual(self: Snapshot, data: []const u8) !void {
-//         try std.fs.cwd().writeFile(.{
-//             .sub_path = self.file_path,
-//             .data = data,
-//             .flags = .{ .truncate = true },
-//         });
-//     }
-// };
