@@ -1706,7 +1706,6 @@ pub const Entity = struct {
         // const block_inst = try block.commit();
 
         const inst = self.builder.sema.instructions.items[block_inst];
-        std.debug.print("global type root inst: {any} {any}\n", .{ block_inst, inst });
         return inst.value;
     }
     const SortByAlignmentContext = struct {
@@ -1977,7 +1976,7 @@ const Scope = struct {
     }
     pub fn pushInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index, instruction: Sema.Instruction) Error!Sema.Instruction.Index {
         const index = self.instructions.items.len;
-        std.debug.print("pushInstruction: {d} -> {d} {s}\n", .{ hir_inst_index, index, @tagName(instruction.op) });
+        // std.debug.print("pushInstruction: {d} -> {d} {s}\n", .{ hir_inst_index, index, @tagName(instruction.op) });
         try self.instructions.append(self.arena.allocator(), instruction);
         try self.instructions_by_hir_inst.put(self.arena.allocator(), hir_inst_index, index);
         return index;
@@ -2038,7 +2037,6 @@ const Scope = struct {
             .instructions = self.instructions.items,
         });
         self.cursor = hir_inst_index;
-        std.debug.print("{d}: resolveInstruction{s}: {s}\n", .{ hir_inst_index, if (self.is_comptime) " comptime" else "", @tagName(hir_inst) });
 
         const inst = switch (hir_inst) {
             .block, .inline_block => self.handleBlockInstruction(hir_inst_index),
@@ -2148,11 +2146,8 @@ const Scope = struct {
         // }
         for (hir_inst_list) |index| {
             if (self.cursor > index) {
-                std.debug.print("{d} skip {d}\n", .{ hir_inst_index, index });
-
                 continue;
             }
-            std.debug.print("{d} cursor: {d}\n", .{ hir_inst_index, index });
             _ = try self.resolveInstruction(index);
         }
 
@@ -2251,17 +2246,8 @@ const Scope = struct {
             const operand_index = self.getInstructionIndex(operand);
             const operand_inst = self.getInstruction(operand_index);
             const target_hir_inst = self.entity.getHirInstruction(hir_inst.br.target);
-            std.debug.print("target_hir_inst: {any}\n", .{target_hir_inst});
             switch (target_hir_inst) {
                 .block, .inline_block => {
-                    const target_inst_index = self.getInstructionIndex(hir_inst.br.target);
-
-                    // std.debug.print("operand_inst: {d} {any}\n", .{ target_index, target_inst });
-                    std.debug.print("setting {d} hir_inst: {d}\n", .{ target_inst_index, hir_inst.br.target });
-                    const writer = std.io.getStdErr().writer().any();
-                    self.builder.sema.formatValue(writer, operand_inst.value) catch unreachable;
-                    writer.writeAll("\n") catch unreachable;
-
                     var target_inst = self.getInstructionByHirIndex(hir_inst.br.target);
                     target_inst.type = operand_inst.type;
                     target_inst.value = operand_inst.value;
@@ -2289,7 +2275,6 @@ const Scope = struct {
                 .loop => target_hir_inst_index,
                 else => unreachable,
             };
-            std.debug.print("goto: {any}\n", .{goto});
             self.cursor = goto;
             return try self.pushInstruction(hir_inst_index, .{
                 .op = .br,
@@ -2664,14 +2649,6 @@ const Scope = struct {
 
         std.debug.assert(lhs_inst.type.isEqual(rhs_inst.type));
         const resolved = self.builder.doComparison(instruction.op, .{ .type = lhs_inst.type, .value = lhs_inst.value }, .{ .type = rhs_inst.type, .value = rhs_inst.value });
-
-        const writer = std.io.getStdErr().writer().any();
-        self.builder.sema.formatValue(writer, lhs_inst.value) catch {};
-        writer.print(" {s} ", .{@tagName(instruction.op)}) catch {};
-        self.builder.sema.formatValue(writer, rhs_inst.value) catch {};
-        writer.print(" = ", .{}) catch {};
-        self.builder.sema.formatValue(writer, resolved.value) catch {};
-        writer.print("\n", .{}) catch {};
 
         return try self.pushInstruction(hir_inst_index, .{
             .op = .constant,
@@ -3116,10 +3093,7 @@ const Scope = struct {
 
         const condition_index = self.getInstructionIndex(hir_inst.if_expr.cond);
         const condition_inst = self.getInstruction(condition_index);
-        const writer = std.io.getStdErr().writer().any();
-        writer.print("condition_result: ", .{}) catch {};
-        self.builder.sema.formatValue(writer, condition_inst.value) catch {};
-        writer.print("\n", .{}) catch {};
+
         // std.debug.panic("todo", .{});
 
         const condition_result = if (self.isComptimeKnown(condition_index))
@@ -3203,22 +3177,6 @@ const Scope = struct {
         const then_block_index = try self.resolveInstruction(hir_inst.select_expr.then_body);
         const else_block_index = try self.resolveInstruction(hir_inst.select_expr.else_body.?);
         const then_block = self.getInstruction(then_block_index);
-        const else_block = self.getInstruction(else_block_index);
-        if (!then_block.type.isEqual(else_block.type)) {
-            const writer = std.io.getStdErr().writer().any();
-            writer.print("then_block: ", .{}) catch {};
-            self.builder.sema.formatType(
-                writer,
-                then_block.type,
-            ) catch {};
-            writer.print("\nelse_block: ", .{}) catch {};
-            self.builder.sema.formatType(
-                writer,
-                else_block.type,
-            ) catch {};
-            writer.print("\n", .{}) catch {};
-            std.debug.panic("error: {d} 'select' argument types are not equal", .{hir_inst_index});
-        }
 
         return self.pushInstruction(hir_inst_index, .{
             .op = .select,
@@ -3391,7 +3349,6 @@ const Scope = struct {
         // std.debug.panic("todo", .{});
         // self.cursor = @intCast(self.instructions.items.len);
         const value = try entity.resolveValue();
-        std.debug.print("{d} value: {}\n", .{ entity.key, value });
         return self.pushInstruction(hir_inst_index, .{
             .op = .type,
             .type = Sema.Type.simple(.type),
@@ -3493,8 +3450,6 @@ const Scope = struct {
             if (base_type.isEqualSimple(.type)) {
                 const value = try self.builder.getEntity(base_entity_key).resolveValue();
 
-                const entity = self.builder.getEntity(base_entity_key);
-                std.debug.print("{d} value: {} {s}\n", .{ base_entity_key, value, self.builder.getSlice(entity.name) });
                 const module_type_key = self.builder.unwrapTypeValue(value);
                 const module_type = self.builder.getType(module_type_key) orelse {
                     std.debug.panic("unreachable: should get a base type", .{});
@@ -6156,9 +6111,6 @@ const ExecContext = struct {
         self.depth -= 1;
     }
     pub fn putValue(self: *ExecContext, inst_index: Sema.Instruction.Index, typed_value: Sema.TypedValue) !void {
-        const writer = std.io.getStdErr().writer().any();
-        self.builder.sema.formatValue(writer, typed_value.value) catch {};
-        writer.writeAll("\n") catch {};
         try self.values.put(self.allocator, inst_index, typed_value);
     }
     pub fn getValue(self: *ExecContext, inst_index: Sema.Instruction.Index) Sema.TypedValue {
@@ -6178,11 +6130,11 @@ const ExecContext = struct {
         if (inst.liveness == 0 and inst.op != .@"if") {
             return;
         }
-        std.debug.print("{} execInstruction {} {s} \n", .{
-            self.id,
-            inst_index,
-            @tagName(inst.op),
-        });
+        // std.debug.print("{} execInstruction {} {s} \n", .{
+        //     self.id,
+        //     inst_index,
+        //     @tagName(inst.op),
+        // });
         return switch (inst.op) {
             // .fn_call => try self.execFunctionCall(inst_index),
             .block => try self.execBlock(inst_index),
@@ -6250,7 +6202,6 @@ const ExecContext = struct {
 
         const last_block_inst = inst.data.@"if".else_block orelse inst.data.@"if".then_block;
         const end = inst_index + self.getInstruction(last_block_inst).data.block.instructions_count;
-        std.debug.print("{} if ends at {}\n", .{ inst_index, end });
         if (cond_value.value.isEqualSimple(.true)) {
             try self.execInstruction(inst.data.@"if".then_block);
             return;

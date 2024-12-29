@@ -12,6 +12,7 @@ pub const Lists = InternedList(usize);
 pub const Strings = InternedList(u8);
 const activeTag = std.meta.activeTag;
 const ComptimeMemory = @import("./ComptimeMemory.zig");
+const build_options = @import("options");
 
 const Self = @This();
 
@@ -91,10 +92,21 @@ pub const Source = struct {
             source_dupe,
             .{},
         );
+
+        if (std.mem.containsAtLeast(u8, build_options.log_scopes, 1, "ast")) {
+            try ast.format(std.io.getStdErr().writer().any(), 0, .{
+                .show_slice = false,
+                .show_node_index = true,
+            });
+        }
         const hir = try allocator.create(Hir);
         errdefer allocator.destroy(hir);
         hir.* = try Hir.build(allocator, ast, errors_manager, .{});
-        try hir.format("", .{}, std.io.getStdErr().writer().any());
+
+        if (std.mem.containsAtLeast(u8, build_options.log_scopes, 1, "hir")) {
+            try hir.format("", .{}, std.io.getStdErr().writer().any());
+        }
+
         return Source{
             .id = std.hash.Wyhash.hash(0, source_dupe),
             .path = Strings.Range.empty,

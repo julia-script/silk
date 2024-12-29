@@ -6,7 +6,6 @@ const ErrorManager = @import("ErrorManager.zig");
 const InternedSlice = @import("InternedStrings.zig").InternedSlice;
 const assert = @import("assert.zig");
 const shared = @import("shared.zig");
-const Logger = @import("Logger.zig");
 const serializer = @import("serializer.zig");
 const host = @import("host.zig");
 const tw = @import("tw.zig");
@@ -15,7 +14,6 @@ hir: *Hir,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 error_manager: *ErrorManager,
-logger: Logger = Logger.init(host.getStdErrWriter(), "HirBuilder"),
 // context: Context = .normal,
 tracer: Tracer,
 const activeTag = std.meta.activeTag;
@@ -63,8 +61,6 @@ pub fn pushType(self: *Self, ty: Hir.Type, hash: u64) !Hir.Type.Index {
 pub fn genRoot(self: *Self) !void {
     const event_id = self.tracer.beginEvent("genRoot", .{});
     defer self.tracer.endEvent(event_id, "genRoot", .{});
-    self.logger.open("#0 genRoot", .{});
-    defer self.logger.close();
     var scope = Scope.init(self, null, .struct_decl, "root");
     _ = try self.genStructDecl(&scope, 0);
 
@@ -109,7 +105,6 @@ const Scope = struct {
         const event_id = builder.tracer.beginEvent("Scope.init", .{label});
         const index = Scope.COUNT;
         Scope.COUNT += 1;
-        builder.logger.log("[INIT_SCOPE]: {s} {s} {d}\n", .{ @tagName(kind), label, index }, null);
         return .{
             .index = index,
             .builder = builder,
@@ -123,7 +118,6 @@ const Scope = struct {
     }
     pub fn commit(self: *Scope) !Hir.InternedLists.Range {
         self.builder.tracer.endEvent(self.event_id, "Scope.commit", .{});
-        self.builder.logger.log("[COMMIT SCOPE] {s} {d}\n", .{ self.label, self.index }, null);
         if (self.kind == .struct_decl) {
             // We can discard struct decl instruction list
             // because all inner declarations will have their own instructions list
@@ -140,9 +134,6 @@ const Scope = struct {
     pub fn resolveSymbolRecursively(self: *Scope, name: []const u8) ?Hir.Inst.Index {
         const event_id = self.builder.tracer.beginEvent("Scope.resolveSymbolRecursively", .{name});
         defer self.builder.tracer.endEvent(event_id, "Scope.resolveSymbolRecursively", .{name});
-        self.builder.logger.open("resolveSymbolRecursively \"{s}\"", .{name});
-
-        defer self.builder.logger.close();
         if (self.symbols_table.get(name)) |index| return index;
         if (self.parent) |parent| return parent.resolveSymbolRecursively(name);
         return null;
@@ -153,8 +144,6 @@ const Scope = struct {
         // const inst = self.builder.hir.insts.items[index];
         // const tag = std.meta.activeTag(inst);
         // assert.fmt(tag == .local or tag == .param_decl or tag == .global_decl or tag == .alloc, "expected local, param_decl or global_decl instruction, got {s}", .{@tagName(tag)});
-        self.builder.logger.open("pushSymbol \"{s}\" {d}", .{ name, index });
-        defer self.builder.logger.close();
         if (self.symbols_table.contains(name)) {
             self.builder.tracer.panic("Symbol already defined", .{name});
         }
@@ -237,8 +226,6 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
     const event_id = self.tracer.beginEvent("genInstruction", .{node_index});
     defer self.tracer.endEvent(event_id, "genInstruction", .{node_index});
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
-    self.logger.open("#{d} genInstruction .{s}", .{ node_index, @tagName(nav.tag) });
-    defer self.logger.close();
 
     switch (nav.data.*) {
         .comment_line => {
@@ -592,7 +579,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         },
 
         .fn_decl => {
-            self.logger.todo("Error message: functions are only allowed at the module level", .{});
+            std.debug.panic("Error message: functions are only allowed at the module level", .{});
         },
 
         else => {
@@ -784,10 +771,9 @@ const WipDef = struct {
 pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
     const event_id = self.tracer.beginEvent("genStructDecl", .{node_index});
     defer self.tracer.endEvent(event_id, "genStructDecl", .{node_index});
-    self.logger.open("#{d} genStructDecl", .{node_index});
-    defer self.logger.close();
     const index = try scope.reserveInstruction();
     const is_root = node_index == 0;
+    _ = is_root; // autofix
     const nav = Ast.Navigator.init(self.hir.ast, node_index);
     var wip_declarations_list = std.ArrayList(WipDef).init(self.arena.allocator());
     defer wip_declarations_list.deinit();
@@ -804,12 +790,9 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
                 continue;
             },
             .struct_field => {
-                if (is_root) {
-                    self.logger.todo("error for: root struct declaration should not have fields", .{});
-                }
                 const field = child.data.struct_field;
                 if (decl_list.len() > 0) {
-                    self.logger.todo("error for: struct field declared after struct declaration", .{});
+                    std.debug.panic("error for: struct field declared after struct declaration", .{});
                 }
 
                 const inst_index = try self.reserveInstruction();
@@ -900,8 +883,6 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
 } {
     const event_id = self.tracer.beginEvent("genFnDeclInstruction", .{node_index});
     defer self.tracer.endEvent(event_id, "genFnDeclInstruction", .{node_index});
-    self.logger.open("#{d} genFnDeclInstruction", .{node_index});
-    defer self.logger.close();
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     const fn_decl = nav.data.fn_decl;
     const proto = fn_decl.proto;
@@ -990,8 +971,6 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
 pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
     const event_id = self.tracer.beginEvent("genDef", .{node_index});
     defer self.tracer.endEvent(event_id, "genDef", .{node_index});
-    self.logger.open("#{d} genDef", .{node_index});
-    defer self.logger.close();
     var ast = Ast.Navigator.init(self.hir.ast, node_index);
     const visibility: shared.Visibility = visibility: {
         if (ast.is(.@"pub")) {
@@ -1079,11 +1058,6 @@ pub fn pushInstruction(self: *Self, instruction: Hir.Inst) !Hir.Inst.Index {
     const event_id = self.tracer.beginEvent("pushInstruction", .{instruction});
     defer self.tracer.endEvent(event_id, "pushInstruction", .{instruction});
     const index: Hir.Inst.Index = @intCast(self.hir.insts.items.len);
-    self.logger.log(
-        "pushInstruction: #{d} {s}",
-        .{ index, @tagName(instruction) },
-        tw.yellow_400,
-    );
     try self.hir.insts.append(self.hir.allocator, instruction);
     return index;
 }

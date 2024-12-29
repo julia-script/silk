@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
 
     const enable_tracer = b.option(bool, "emit-trace", "Enable tracer") orelse false;
     const print_tracer = b.option(bool, "print-trace", "Print trace") orelse false;
+    const log_scopes = b.option([]const u8, "log-scopes", "ast, hir, sema") orelse &.{};
     const update_snapshots = b.option(bool, "update", "Update snapshots") orelse false;
     const test_filter = b.option(
         []const u8,
@@ -27,15 +28,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "print_trace", print_tracer);
     options.addOption([]const u8, "test_filter", test_filter);
 
-    options.addOption([]const []const u8, "log_scopes", &.{
-        // "Ast",
-        // "AstGen",
-        // "HirBuilder",
-        // // "MirBuilder",
-        // "Mir",
-        // "MirBuilder",
-        // "Compilation",
-    });
+    options.addOption([]const u8, "log_scopes", log_scopes);
     const cmd_dep = b.dependency("zig-cmd", .{});
     const cmd_module = cmd_dep.module("cmd");
     const expect_dep = b.dependency("expect", .{});
@@ -141,10 +134,9 @@ pub fn build(b: *std.Build) void {
         b.step("wasi", "Install wasi"),
     });
 
-    const test_cases = b.addTest(.{
+    const test_cases = b.addExecutable(.{
         .name = "snapshots",
         .root_source_file = b.path("src/snapshots.zig"),
-        .filter = "Snapshots",
 
         .target = target,
 

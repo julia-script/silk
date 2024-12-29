@@ -10,27 +10,36 @@ const expect = @import("expect").expect;
 const CASES_DIR_PATH = "./src/tests/cases";
 const SNAPSHOTS_DIR_PATH = "./src/tests/snapshots";
 const SILK_EXTENSION = ".sk";
-test "Snapshots" {
-    const allocator = std.testing.allocator;
-    const cases_dir = try std.fs.cwd().openDir(CASES_DIR_PATH, .{});
-    var walker = try cases_dir.walk(allocator);
-    defer walker.deinit();
-    if (options.test_filter.len > 0) {
-        std.debug.print("Filtering test cases with '{s}'\n", .{options.test_filter});
-    }
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    {
+        // std.debug.print("{s}\n", .{options.log_scopes});
+        const cases_dir = try std.fs.cwd().openDir(CASES_DIR_PATH, .{});
+        var walker = try cases_dir.walk(allocator);
 
-    while (try walker.next()) |entry| {
-        if (!std.mem.endsWith(u8, entry.path, SILK_EXTENSION)) continue;
-        if (std.mem.endsWith(u8, entry.path, ".todo.sk")) continue;
-        if (comptime options.test_filter.len > 0) {
-            if (!std.mem.containsAtLeast(u8, entry.path, 1, options.test_filter)) continue;
+        defer walker.deinit();
+        if (options.test_filter.len > 0) {
+            std.debug.print("Filtering test cases with '{s}'\n", .{options.test_filter});
         }
-        std.debug.print("Running '{s}'\n", .{entry.path});
-        runTestCases(allocator, cases_dir, entry.path) catch |err| {
-            std.debug.print("Error on '{s}': {s}\n", .{ entry.path, @errorName(err) });
-            return err;
-        };
+
+        while (try walker.next()) |entry| {
+            var entry_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            const entry_allocator = entry_gpa.allocator();
+            if (!std.mem.endsWith(u8, entry.path, SILK_EXTENSION)) continue;
+            if (std.mem.endsWith(u8, entry.path, ".todo.sk")) continue;
+            if (comptime options.test_filter.len > 0) {
+                if (!std.mem.containsAtLeast(u8, entry.path, 1, options.test_filter)) continue;
+            }
+            std.debug.print("Running '{s}'\n", .{entry.path});
+            runTestCases(entry_allocator, cases_dir, entry.path) catch |err| {
+                std.debug.print("Error on '{s}': {s}\n", .{ entry.path, @errorName(err) });
+                return err;
+            };
+            _ = entry_gpa.detectLeaks();
+        }
     }
+    _ = gpa.detectLeaks();
 }
 fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) !void {
     const source = try dir.readFileAlloc(allocator, path, std.math.maxInt(usize));

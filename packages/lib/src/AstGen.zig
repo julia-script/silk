@@ -10,30 +10,23 @@ const Allocator = std.mem.Allocator;
 const Array = std.ArrayListUnmanaged;
 const Ast = @import("Ast.zig");
 const Node = Ast.Node;
-const Logger = @import("Logger.zig");
 const builtin = @import("builtin");
 const host = @import("host.zig");
-const log = Logger.new(.ast_gen);
 
 const compile_options = @import("options");
 
 const assert = std.debug.assert;
 const AstGen = @This();
-const Tracer = @import("Tracer.zig");
+const Tracer = @import("Tracer2.zig");
 
 ast: *Ast,
 errors: *ErrorManager,
-// nodes: MultiArray(Node) = .{},
-// node_lists: PackedLists(Node.Index, 0) = .{},
-// allocator: Allocator,
 token_index: Token.Index = 0,
-// source: []const u8,
-logger: Logger = Logger.init(host.getStdErrWriter(), "AstGen"),
 tracer: Tracer,
 
 const AstGenError = error{
     OutOfMemory,
-} || Logger.Error;
+};
 
 pub const Options = struct {
     trace_dir: ?[]const u8 = null,
@@ -41,19 +34,25 @@ pub const Options = struct {
     unique_trace_name: bool = true,
 };
 pub fn init(ast: *Ast, errors: *ErrorManager, options: Options) !AstGen {
-    var tracer = try Tracer.init(
-        options.trace_dir orelse "./.tmp/trace",
-        options.trace_name orelse "ast-gen",
-        options.unique_trace_name,
-    );
-    tracer.logEvent(
-        "AstGen.init",
-        .{},
-    );
+    _ = options; // autofix
+    // var tracer = try Tracer.init(
+    //     options.trace_dir orelse "./.tmp/trace",
+    //     options.trace_name orelse "ast-gen",
+    //     options.unique_trace_name,
+    // );
+    // tracer.logEvent(
+    //     "AstGen.init",
+    //     .{},
+    // );
+
     return AstGen{
         .ast = ast,
         .errors = errors,
-        .tracer = tracer,
+        .tracer = Tracer.init(
+            ast.allocator,
+            .ast,
+            .{},
+        ) catch @panic("Tracer.init failed"),
     };
 }
 pub fn deinit(self: *AstGen) void {
@@ -61,15 +60,15 @@ pub fn deinit(self: *AstGen) void {
 }
 fn pushNode(self: *AstGen, node: Node) AstGenError!Node.Index {
     const index = self.ast.nodes.items.len;
-    self.logger.printLnIndented(comptime "[PUSH_NODE]: {s}", .{@tagName(node.data)}) catch {};
-
-    for (self.ast.tokens.items[node.start_token..node.end_token]) |token| {
-        self.logger.log(comptime " - tok .{s}", .{@tagName(token.tag)}, null);
-    }
 
     try self.ast.nodes.append(self.ast.allocator, node);
-    self.tracer.logEvent(
-        "AstGen.pushNode",
+    self.tracer.trace(
+        @src(),
+        .{
+            "AstGen.pushNode",
+            "AstGen.pushNode",
+            .{},
+        },
         .{
             .snapshot = self.ast.nodes.items,
             .node_index = index,
@@ -82,12 +81,14 @@ fn pushNode(self: *AstGen, node: Node) AstGenError!Node.Index {
     return @intCast(index);
 }
 pub fn reserveNodeIndex(self: *AstGen) AstGenError!Node.Index {
-    self.tracer.logEvent(
+    self.tracer.trace(@src(), .{
+        "reserveNodeIndex",
         "AstGen.reserveNodeIndex",
-        .{
-            .index = self.ast.nodes.items.len,
-        },
-    );
+        .{},
+    }, .{
+        .index = self.ast.nodes.items.len,
+    });
+
     const index = self.ast.nodes.items.len;
     try self.ast.nodes.append(self.ast.allocator, .{
         .data = .{ .reserved = .{} },
@@ -97,31 +98,29 @@ pub fn reserveNodeIndex(self: *AstGen) AstGenError!Node.Index {
     return @intCast(index);
 }
 pub fn setNode(self: *AstGen, index: Node.Index, node: Node) void {
-    self.tracer.logEvent(
+    self.tracer.trace(@src(), .{
         "AstGen.setNode",
-        .{
-            .index = index,
-            .node = node,
-        },
-    );
-    self.logger.printLnIndented(comptime "[SET_NODE]: {s}", .{@tagName(node.data)}) catch {};
-    for (self.ast.tokens.items[node.start_token..node.end_token]) |token| {
-        self.logger.log(comptime " - tok .{s}", .{@tagName(token.tag)}, null);
-    }
+        "AstGen.setNode",
+        .{},
+    }, .{
+        .index = index,
+        .node = node,
+    });
     self.ast.nodes.items[index] = node;
 }
 
 /// Token helpers
 pub fn nextToken(self: *AstGen) ?Token {
     const next_token = if (self.token_index < self.ast.tokens.items.len) self.ast.tokens.items[self.token_index] else null;
-    self.tracer.logEvent(
+    self.tracer.trace(@src(), .{
         "AstGen.nextToken",
-        .{
-            .snapshot = self.ast.nodes.items,
-            .token_index = self.token_index,
-            .token = next_token,
-        },
-    );
+        "AstGen.nextToken",
+        .{},
+    }, .{
+        .snapshot = self.ast.nodes.items,
+        .token_index = self.token_index,
+        .token = next_token,
+    });
     // if (self.token_index >= self.ast.tokens.items.len) return null;
     // const token = self.ast.tokens.items[self.token_index];
     if (next_token) |token| {
@@ -132,19 +131,18 @@ pub fn nextToken(self: *AstGen) ?Token {
 }
 pub fn accept(self: *AstGen, tag: Token.Tag) bool {
     const is_token = self.tokenIs(tag);
-    self.tracer.printEvent(
+    self.tracer.trace(@src(), .{
         "AstGen.accept(%{d}.{s}) = %{}",
         .{
             self.token_index,
             @tagName(tag),
             is_token,
         },
-        .{
-            .token_index = self.token_index,
-            .tag = tag,
-            .accepted = is_token,
-        },
-    );
+    }, .{
+        .token_index = self.token_index,
+        .tag = tag,
+        .accepted = is_token,
+    });
     if (is_token) {
         self.consumeToken();
         return true;
@@ -158,21 +156,16 @@ pub fn getToken(self: *AstGen) ?Token {
 }
 pub fn consumeToken(self: *AstGen) void {
     const token = self.getToken();
-    self.tracer.printEvent(
-        "AstGen.consumeToken(%{d}.{s})",
-        .{
-            self.token_index,
-            if (token) |tok| @tagName(tok.tag) else "NONE",
-        },
-        .{
-            .token_index = self.token_index,
-            .token = token,
-        },
-    );
+    self.tracer.trace(@src(), .{ "consumeToken", "AstGen.consumeToken(%{d}.{s})", .{
+        self.token_index,
+        if (token) |tok| @tagName(tok.tag) else "NONE",
+    } }, .{
+        .token_index = self.token_index,
+        .token = token,
+    });
 
     if (token) |tok| {
-        const slice = self.ast.source[tok.start..tok.end];
-        self.logger.log(comptime " consumed [{d}].{s} \"{s}\"", .{ self.token_index, @tagName(tok.tag), slice }, null);
+        _ = tok; // autofix
         self.token_index += 1;
     }
 }
@@ -216,13 +209,13 @@ pub fn parse(self: *AstGen) AstGenError!void {
     while (lexer.next()) |token| {
         try self.ast.tokens.append(self.ast.allocator, token);
     }
-    const parse_id = self.tracer.beginEvent("AstGen.parse", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parse", "AstGen.parse", .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .tokens = self.ast.tokens.items,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parse", .{});
-    self.loggerOpen("parse");
-    defer self.logger.close();
+    defer trace.end(.{});
 
     // if (mode == .expression) {
     //     const root = try self.reserveNodeIndex();
@@ -265,16 +258,17 @@ pub fn parse(self: *AstGen) AstGenError!void {
 }
 
 pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseExpression", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseExpression",
+        "AstGen.parseExpression",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseExpression", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseExpression");
-    defer self.logger.close();
-    self.logger.log("parse LHS", .{}, null);
     const lhs = try self.parseUnary();
     const lhs_data = self.getNode(lhs).data;
 
@@ -287,17 +281,20 @@ pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
 
     if (lhs == 0) return 0;
 
-    self.logger.log("parse RHS", .{}, null);
     const expr = try self.parseBinaryRhs(0, lhs);
     return expr;
 }
 
 fn parsePropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parsePropertyAccess", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parsePropertyAccess",
+        "AstGen.parsePropertyAccess",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .lhs = lhs,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parsePropertyAccess", .{
+    defer trace.end(.{
         .lhs = lhs,
     });
     const is_builtin = self.tokenIs(.colon);
@@ -318,14 +315,17 @@ fn parsePropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
 }
 
 fn parseArrayPropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseArrayPropertyAccess", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseArrayPropertyAccess",
+        "AstGen.parseArrayPropertyAccess",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .lhs = lhs,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseArrayPropertyAccess", .{
+    defer trace.end(.{
         .lhs = lhs,
     });
-    self.logger.log("parse array like property access", .{}, null);
     self.consumeToken();
     const index = try self.parseExpression();
     if (index == 0) {
@@ -358,14 +358,17 @@ fn parseArrayPropertyAccess(self: *AstGen, lhs: Node.Index) AstGenError!Node.Ind
 }
 
 fn parseFunctionCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseFunctionCall", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseFunctionCall",
+        "AstGen.parseFunctionCall",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .callee = callee,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseFunctionCall", .{
+    defer trace.end(.{
         .callee = callee,
     });
-    self.logger.log("parse fn call", .{}, null);
     self.consumeToken();
     var args_list = self.ast.interned_lists.new();
     const first_expr = try self.parseExpression();
@@ -401,15 +404,17 @@ fn parseFunctionCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
 }
 
 fn parseUnary(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseUnary", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseUnary",
+        "AstGen.parseUnary",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseUnary", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseUnary");
-    defer self.logger.close();
     const token = self.peekToken() orelse return 0;
     // If the current token is not an operator, it must be a primary expr.
     switch (token.tag) {
@@ -501,11 +506,15 @@ fn parseUnary(self: *AstGen) AstGenError!Node.Index {
     }
 }
 pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseIdentifier", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseIdentifier",
+        "AstGen.parseIdentifier",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseIdentifier", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
     const token = self.peekToken() orelse return 0;
@@ -520,11 +529,15 @@ pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
 }
 
 pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.begin("AstGen.parsePrimary", .{}, .{
+    const trace = self.tracer.begin(@src(), .{
+        "parsePrimary",
+        "AstGen.parsePrimary",
+        .{},
+    }, .{});
+    defer trace.end(.{
+        .end_at_token = self.token_index,
         .snapshot = self.ast.nodes.items,
-        .current_token = self.token_index,
     });
-    defer self.tracer.end(parse_id);
     if (self.peekToken()) |token| {
         switch (token.tag) {
             .eof => {
@@ -803,12 +816,16 @@ fn getTokenPrecedence(tag: Token.Tag) i32 {
     };
 }
 fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseBinaryRhs", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseBinaryRhs",
+        "AstGen.parseBinaryRhs",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .expression_precedence = expression_precedence,
         .lhs = lhs_,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseBinaryRhs", .{
+    defer trace.end(.{
         .expression_precedence = expression_precedence,
         .lhs = lhs_,
     });
@@ -832,11 +849,6 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) A
         const tok_prec = getTokenPrecedence(token.tag);
 
         if (tok_prec < expression_precedence) return lhs;
-        self.logger.log("{s} tok_prec: {d} expression_precedence: {d}", .{
-            @tagName(token.tag),
-            tok_prec,
-            expression_precedence,
-        }, null);
 
         switch (token.tag) {
             .dot, .colon => {
@@ -878,13 +890,17 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) A
 }
 
 pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index, rhs: Node.Index) !Node.Index {
-    const make_id = self.tracer.beginEvent("AstGen.makeBinaryExpression", .{
+    const trace = self.tracer.begin(@src(), .{
+        "makeBinaryExpression",
+        "AstGen.makeBinaryExpression",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .bin_op_token = bin_op_token,
         .lhs = lhs,
         .rhs = rhs,
     });
-    defer self.tracer.endEvent(make_id, "AstGen.makeBinaryExpression", .{
+    defer trace.end(.{
         .bin_op_token = bin_op_token,
         .lhs = lhs,
         .rhs = rhs,
@@ -1035,11 +1051,15 @@ pub fn makeBinaryExpression(self: *AstGen, bin_op_token: Token, lhs: Node.Index,
     // });
 }
 pub fn parseGroup(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseGroup", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseGroup",
+        "AstGen.parseGroup",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseGroup", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
     const start_token = self.token_index;
@@ -1088,15 +1108,17 @@ pub inline fn mapTagName(tag: Token.Tag, comptime options: []const struct { Toke
     unreachable;
 }
 pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parsePostfixUnary", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parsePostfixUnary",
+        "AstGen.parsePostfixUnary",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parsePostfixUnary", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parsePostfixUnary");
-    defer self.logger.close();
     const token = self.peekToken() orelse return lhs;
     self.consumeToken();
 
@@ -1121,15 +1143,17 @@ pub fn parsePostfixUnary(self: *AstGen, lhs: Node.Index) AstGenError!Node.Index 
 }
 
 pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseFnDecl", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseFnDecl",
+        "AstGen.parseFnDecl",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseFnDecl", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseFnDecl");
-    defer self.logger.close();
     const start_token = self.token_index;
     if (!self.tokenIs(.keyword_fn)) {
         try self.errors.addError(.{
@@ -1162,14 +1186,16 @@ pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseFnProto", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseFnProto",
+        "AstGen.parseFnProto",
+        .{},
+    }, .{
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseFnProto", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseFnProto");
-    defer self.logger.close();
     assert(self.tokenIs(.keyword_fn));
     self.consumeToken();
     if (!self.tokenIs(.identifier)) {
@@ -1239,11 +1265,15 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseFnParam", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseFnParam",
+        "AstGen.parseFnParam",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseFnParam", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
     if (!self.tokenIs(.identifier)) {
@@ -1424,15 +1454,17 @@ pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
     @panic("unimplemented");
 }
 pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseBlock", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseBlock",
+        "AstGen.parseBlock",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseBlock", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseBlock");
-    defer self.logger.close();
     const start_token = self.token_index;
     assert(self.tokenIs(.l_brace));
     self.consumeToken();
@@ -1446,7 +1478,6 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
             break;
         }
         try nodes.append(node);
-        self.logger.log("push statement {d}", .{node}, null);
         if (!self.tokenIs(.semicolon)) {
             try self.errors.addError(.{
                 .tag = .expected_token,
@@ -1522,15 +1553,17 @@ pub fn parseFnCall(self: *AstGen, callee: Node.Index) AstGenError!Node.Index {
     return index;
 }
 pub fn parseTypeInit(self: *AstGen, ty: Node.Index) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseTypeInit", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseTypeInit",
+        "AstGen.parseTypeInit",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseTypeInit", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseTypeInit");
-    defer self.logger.close();
     self.consumeToken();
     const start_token = self.ast.nodes.items[ty].start_token;
     if (!self.nextTokensAre(.identifier, .equal)) {
@@ -1689,15 +1722,17 @@ pub fn parseArrayInit(self: *AstGen) AstGenError!Node.Index {
 }
 
 pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseIfExpression", .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseIfExpression",
+        "AstGen.parseIfExpression",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseIfExpression", .{
+    defer trace.end(.{
         .current_token = self.token_index,
     });
-    self.loggerOpen("parseIfExpression");
-    defer self.logger.close();
     const start_token = self.token_index;
     assert(self.tokenIs(.keyword_if));
     self.consumeToken();
@@ -1780,13 +1815,17 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
 }
 
 pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.begin("AstGen.parseWhileLoop", .{}, .{
+    const trace = self.tracer.begin(@src(), .{
+        "parseWhileLoop",
+        "AstGen.parseWhileLoop",
+        .{},
+    }, .{
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.end(parse_id);
-    self.loggerOpen("parseWhileLoop");
-    defer self.logger.close();
+    defer trace.end(.{
+        .current_token = self.token_index,
+    });
     const start_token = self.token_index;
     assert(self.tokenIs(.keyword_while));
     self.consumeToken();
@@ -1841,18 +1880,21 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
     });
 }
 pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
-    const parse_id = self.tracer.beginEvent("AstGen.parseStructDecl", .{
+    const trace = self.tracer.begin(
+        @src(),
+        .{ "parseStructDecl", "AstGen.parseStructDecl", .{} },
+        .{
+            .begin_at_token = self.token_index,
+        },
+    );
+    defer trace.end(.{
+        .end_at_token = self.token_index,
         .snapshot = self.ast.nodes.items,
         .current_token = self.token_index,
     });
-    defer self.tracer.endEvent(parse_id, "AstGen.parseStructDecl", .{
-        .current_token = self.token_index,
-    });
-    self.loggerOpen("parseStructDecl");
 
     const index = try self.reserveNodeIndex();
     const is_root = index == 0;
-    defer self.logger.close();
     const start_token = self.token_index;
     if (!is_root) {
         assert(self.tokenIs(.keyword_struct));
@@ -1872,19 +1914,29 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
     while (!self.tokenIs(.r_brace) and !self.tokenIs(.eof)) {
         const before_parsing_token_index = self.token_index;
         if (!self.nextTokensAre(.identifier, .colon) and !self.nextTokensAre(.identifier, .equal)) {
-            const parse_event_id = self.tracer.begin("[PARSE_DECLARATION]", .{}, .{
+            const decl_trace = self.tracer.begin(@src(), .{
+                "parsePrimary", "[PARSE_DECLARATION]", .{},
+            }, .{});
+            defer decl_trace.end(.{
+                .end_at_token = self.token_index,
+                .snapshot = self.ast.nodes.items,
                 .current_token = self.token_index,
             });
-            defer self.tracer.end(parse_event_id);
             // Probably a declaration
             const declaration = try self.parsePrimary();
             if (declaration != 0)
                 try members_list.append(declaration);
         } else {
-            const parse_event_id = self.tracer.begin("[PARSE_FIELD]", .{}, .{
+            const trace_field = self.tracer.begin(@src(), .{
+                "parseField",
+                "[PARSE_FIELD]",
+                .{},
+            }, .{
                 .current_token = self.token_index,
             });
-            defer self.tracer.end(parse_event_id);
+            defer trace_field.end(.{
+                .current_token = self.token_index,
+            });
             const identifier = try self.parsePrimary();
             const field_start_token = self.token_index;
             if (!self.nodeIs(identifier, .identifier)) {
