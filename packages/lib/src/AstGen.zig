@@ -669,11 +669,11 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .keyword_comp,
             => |token_tag| {
                 const start_token = self.token_index;
-                const tag = comptime switch (token_tag) {
+                const tag: Node.Tag = comptime switch (token_tag) {
                     .keyword_export => .@"export",
                     .keyword_extern => .@"extern",
                     .keyword_pub => .@"pub",
-                    .keyword_comp => .comp,
+                    .keyword_comp => .comp_block,
                     else => unreachable,
                 };
 

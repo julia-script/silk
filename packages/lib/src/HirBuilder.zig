@@ -15,6 +15,14 @@ allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 error_manager: *ErrorManager,
 tracer: Tracer,
+const BUILTIN_GLOBALS = blk: {
+    const enum_fields = std.meta.fields(shared.BuiltinNameSpace);
+    var map_fields: [enum_fields.len]struct { []const u8 } = undefined;
+    for (enum_fields, 0..) |field, i| {
+        map_fields[i] = .{field.name};
+    }
+    break :blk std.StaticStringMap(void).initComptime(map_fields);
+};
 const activeTag = std.meta.activeTag;
 const Tracer = @import("Tracer2.zig");
 const Context = enum {
@@ -286,7 +294,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             try scope.instructions.append(inst_index);
             return inst_index;
         },
-        .comp => |comp| {
+        .comp_block => |comp| {
             const inst_index = try Block.fromNode(self, scope, comp.node);
             const inst = &self.hir.insts.items[inst_index];
             switch (inst.*) {
@@ -406,7 +414,18 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
 
         .identifier => {
             const slice = nav.getNodeSlice();
-            const inst_index = scope.resolveSymbolRecursively(slice) orelse std.debug.panic("Symbol not found: {s}\n", .{slice});
+            if (slice.len > 0 and slice[0] == '@') {
+                return try scope.pushInstruction(.{ .builtin_global_get = .{
+                    .builtin = shared.BuiltinGlobal.fromSlice(slice[1..]) orelse std.debug.panic("Builtin not found: {s}", .{slice}),
+                } });
+            }
+            const inst_index = scope.resolveSymbolRecursively(slice) orelse {
+                // if (BUILTIN_GLOBALS.has(slice)) {
+                //     return try scope.pushInstruction(.{ .builtin_global_get = .{ .namespace = shared.BuiltinNameSpace.fromSlice(slice) } });
+                // }
+
+                std.debug.panic("Symbol not found: {s}\n", .{slice});
+            };
             const inst: Hir.Inst = scope.builder.hir.insts.items[inst_index];
             switch (inst) {
                 .param_decl => {

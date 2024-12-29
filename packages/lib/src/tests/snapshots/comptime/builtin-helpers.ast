@@ -1,0 +1,32 @@
+;; AST
+;; 15 Nodes
+;; 23 Tokens
+;; 5 Interned Lists
+
+%0 = .struct_decl - tok[0..23]
+ └ members_list: 1 items
+    └ %14 = .fn_decl - tok[0..22]
+       ├ proto: %3 = .fn_proto - tok[1..5]
+       │  ├ name: %1 = .identifier - tok[1..1]
+       │  │  └ token: .identifier 'main'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %2 = .ty_void - tok[5..5]
+       │     └ token: .keyword_void 'void'
+       └ body: %13 = .block - tok[6..21]
+          └ list: 3 items
+             ├ %8 = .const_decl - tok[7..13]
+             │  ├ name: %4 = .identifier - tok[8..8]
+             │  │  └ token: .identifier 'a'
+             │  ├ type: %5 = .ty_i32 - tok[10..10]
+             │  │  └ token: .keyword_i32 'i32'
+             │  └ value: %7 = .comp_block - tok[12..14]
+             │     └ node: %6 = .number_literal - tok[13..13]
+             │        └ token: .number_literal '2'
+             ├ %9 = .comment_line - tok[15..16]
+             │  └ token: .comment '// cmp:log(a);'
+             └ %12 = .fn_call - tok[16..19]
+                ├ callee: %10 = .identifier - tok[16..16]
+                │  └ token: .identifier '@comptime_log'
+                └ args_list: 1 items
+                   └ %11 = .identifier - tok[18..18]
+                      └ token: .identifier 'a'

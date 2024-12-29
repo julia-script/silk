@@ -517,16 +517,16 @@ pub fn lex(self: *Lexer) Token {
                 };
             },
 
-            'a'...'z', 'A'...'Z', '$', '_' => {
+            'a'...'z', 'A'...'Z', '$', '_', '@' => {
                 const start = cursor;
                 cursor += 1;
-                if (self.charAt(start) == '$') {
-                    if (self.charAt(cursor)) |c_| {
-                        if (c_ >= '0' and c_ <= '9' or c_ == '-' or c_ == '+' or c_ == '_') {
-                            return self.keywordOrIdentifier(start, cursor);
-                        }
-                    }
-                }
+                // if (self.charAt(start) == '$') {
+                //     if (self.charAt(cursor)) |c_| {
+                //         if (c_ >= '0' and c_ <= '9' or c_ == '-' or c_ == '+' or c_ == '_') {
+                //             return self.keywordOrIdentifier(start, cursor);
+                //         }
+                //     }
+                // }
                 while (self.charAt(cursor)) |c_| {
                     if (std.ascii.isAlphanumeric(c_) or c_ == '_' or c_ == '-' or c_ == '$') {
                         cursor += 1;

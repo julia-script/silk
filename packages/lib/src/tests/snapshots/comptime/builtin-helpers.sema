@@ -1,0 +1,23 @@
+;; Sema
+;; 1 declarations
+;; 3 entities
+;; 1 symbols
+;; 11 instructions
+;; 5 values
+;; 3 types
+;; 1 lists
+;; 5 strings
+;; 4/8 comptime memory used/allocated bytes
+
+%0 = fn @"comptime/builtin-helpers.sk::main"() -> void
+ └ %0: void = .block: [%1-%10]                                        ; void
+    ├ !%1: number = .block: [%2-%3]                                   ; int(2)
+    │  ├ !%2: number = .constant                                      ; int(2)
+    │  └ !%3: void = .br operand=(%1)                                 ; void
+    ├ %5: *i32 = .alloc type=(i32) mutable=(false)                    ; comp_ptr(0)
+    ├ !%6: i32 = .constant                                            ; int(2)
+    ├ !%7: void = .store operand=(%5) payload=(%6)                    ; void
+    ├ %8: todo(function) = .builtin_global_get                        ; todo(builtin_global)
+    ├ %9: i32 = .load operand=(%5)                                    ; int(2)
+    └ !%10: void = .void                                              ; void
+

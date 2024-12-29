@@ -1,3 +1,4 @@
+;; AST
 ;; 32 Nodes
 ;; 44 Tokens
 ;; 14 Interned Lists
@@ -13,7 +14,7 @@
     │  │     └ token: .keyword_i32 'i32'
     │  └ body: %22 = .block - tok[6..34]
     │     └ list: 1 items
-    │        └ %21 = .comp - tok[7..34]
+    │        └ %21 = .comp_block - tok[7..34]
     │           └ node: %20 = .block - tok[8..33]
     │              └ list: 3 items
     │                 ├ %7 = .var_decl - tok[9..14]

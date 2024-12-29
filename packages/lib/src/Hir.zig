@@ -396,6 +396,10 @@ pub const Inst = union(enum) {
     param_decl: Param,
     param: UnaryOp,
     param_get: UnaryOp,
+    builtin_global_get: struct {
+        builtin: shared.BuiltinGlobal,
+    },
+
     global_get: UnaryOp,
     global_decl: GlobalDecl,
     local_get: UnaryOp,
@@ -472,6 +476,7 @@ pub const Inst = union(enum) {
     debug_var: DebugVar,
 
     pub const Tag: type = std.meta.Tag(@This());
+
     pub const Return = struct {
         value: ?Inst.Index,
     };

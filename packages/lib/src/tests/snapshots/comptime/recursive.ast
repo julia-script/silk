@@ -1,3 +1,4 @@
+;; AST
 ;; 55 Nodes
 ;; 78 Tokens
 ;; 16 Interned Lists
@@ -87,7 +88,7 @@
        │     └ token: .keyword_void 'void'
        └ body: %53 = .block - tok[67..76]
           └ list: 1 items
-             └ %52 = .comp - tok[68..75]
+             └ %52 = .comp_block - tok[68..75]
                 └ node: %51 = .eq - tok[69..74]
                    ├ lhs: %49 = .fn_call - tok[69..72]
                    │  ├ callee: %47 = .identifier - tok[69..69]

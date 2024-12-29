@@ -152,7 +152,7 @@ pub const Node = struct {
         block: struct {
             list: ChildList,
         },
-        comp: NodeIndex,
+        comp_block: NodeIndex,
         while_loop: WhileLoop,
         type_init: struct {
             type: Index,
@@ -339,7 +339,7 @@ pub const Node = struct {
         select_expr,
         ret_expression,
         block,
-        comp,
+        comp_block,
         while_loop,
         type_init,
         field_init,
@@ -450,6 +450,7 @@ pub fn nodeIs(self: *Ast, node_i: Node.Index, tag: Node.Tag) bool {
 }
 
 pub fn formatRoot(self: *Ast, writer: std.io.AnyWriter, root_index: Node.Index, options: FormatOptions) !void {
+    try writer.print(";; AST\n", .{});
     try writer.print(";; {d} Nodes\n", .{self.nodes.items.len});
     try writer.print(";; {d} Tokens\n", .{self.tokens.items.len});
     try writer.print(";; {d} Interned Lists\n", .{self.interned_lists.lists.items.len});

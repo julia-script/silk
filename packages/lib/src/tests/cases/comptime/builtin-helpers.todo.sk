@@ -1,4 +1,0 @@
-fn main(): void {
-  const a = 2;
-  comp:log(a);
-}

@@ -13,6 +13,7 @@ pub const Strings = InternedList(u8);
 const activeTag = std.meta.activeTag;
 const ComptimeMemory = @import("./ComptimeMemory.zig");
 const build_options = @import("options");
+const shared = @import("../shared.zig");
 
 const Self = @This();
 
@@ -219,6 +220,8 @@ pub const Type = struct {
     pub const List = Lists.Range;
     pub const Simple = enum {
         unknown,
+        any,
+
         type,
         infer,
         number,
@@ -241,6 +244,7 @@ pub const Type = struct {
         void,
 
         builtin_fn_as,
+        builtin_global,
     };
 
     pub fn simple(self: Simple) Key {
@@ -298,6 +302,7 @@ pub const Type = struct {
             entity: Entity.Key,
         };
         pub const Function = struct {
+            is_builtin: bool,
             entity: Entity.Key,
             params: Type.List,
             ret: Type.Key,
@@ -323,6 +328,9 @@ pub const Value = struct {
         function: struct {
             type: Type.Key,
             init: ?Instruction.Index,
+        },
+        builtin_global: struct {
+            builtin: shared.BuiltinGlobal,
         },
         global: struct {
             type: Type.Key,
@@ -428,6 +436,7 @@ pub const Value = struct {
 pub const TypedValue = struct {
     type: Type.Key,
     value: Value.Key,
+    // pub fn format(self: TypedValue, writer: std.io.AnyWriter, )
 };
 
 pub const Instruction = struct {
@@ -496,6 +505,9 @@ pub const Instruction = struct {
             items_list: Instruction.List,
             type_inst: Instruction.Index,
         },
+        builtin_namespace: struct {
+            namespace: shared.BuiltinNameSpace,
+        },
     };
     pub const InstRange = struct {
         start: Instruction.Index,
@@ -551,6 +563,8 @@ pub const Instruction = struct {
         get_element_pointer,
 
         get_builtin_fn_as,
+
+        builtin_global_get,
 
         cast_promote,
         cast_demote,
@@ -686,6 +700,58 @@ pub fn formatTypeLong(
         }
     }
     try self.formatType(writer, type_key);
+}
+const FormatTypedValueOptions = struct {
+    color: bool = true,
+};
+
+fn formatTypedValueValue(self: *Self, writer: std.io.AnyWriter, typed_value: TypedValue) !void {
+    if (self.builder.getValue(typed_value.value)) |val| {
+        switch (val.data) {
+            .integer => |i| {
+                try writer.print("{d}", .{i});
+            },
+            .float => |f| {
+                try writer.print("{d}", .{f});
+            },
+
+            else => {
+                try writer.print("todo({s})", .{@tagName(val.data)});
+            },
+        }
+        return;
+    }
+    switch (typed_value.value.simple) {
+        .exec_time, .runtime => {
+            try writer.print("[{s}]", .{@tagName(typed_value.value.simple)});
+        },
+
+        else => |simple| {
+            try writer.print("{s}", .{@tagName(simple)});
+        },
+    }
+}
+pub fn formatTypedValue(
+    self: *Self,
+    writer: std.io.AnyWriter,
+    typed_value: TypedValue,
+    options: FormatTypedValueOptions,
+) !void {
+    _ = options; // autofix
+    switch (typed_value.type) {
+        .simple => |simple| switch (simple) {
+            .f32, .f64, .number, .u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .usize, .bool => {
+                try writer.print("{s}{{ ", .{
+                    @tagName(simple),
+                });
+                try self.formatTypedValueValue(writer, typed_value);
+                try writer.print(" }}", .{});
+            },
+
+            else => {},
+        },
+        else => {},
+    }
 }
 pub fn formatValue(self: *Self, writer: std.io.AnyWriter, value: Value.Key) !void {
     if (self.builder.getValue(value)) |val| {

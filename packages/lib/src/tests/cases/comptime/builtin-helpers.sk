@@ -1,0 +1,4 @@
+fn main(): void {
+  const a:i32 = comp 2;
+  @comptime_log(a);
+}

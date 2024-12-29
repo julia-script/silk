@@ -1,3 +1,4 @@
+;; AST
 ;; 10 Nodes
 ;; 14 Tokens
 ;; 2 Interned Lists
@@ -13,7 +14,7 @@
        │     └ token: .keyword_void 'void'
        └ body: %8 = .block - tok[6..12]
           └ list: 1 items
-             └ %7 = .comp - tok[7..11]
+             └ %7 = .comp_block - tok[7..11]
                 └ node: %6 = .eq - tok[8..10]
                    ├ lhs: %4 = .number_literal - tok[8..8]
                    │  └ token: .number_literal '1'

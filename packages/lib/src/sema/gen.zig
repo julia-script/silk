@@ -27,7 +27,7 @@ pub const Error = error{
     NoSpaceLeft,
     SymbolAlreadyExists,
     Overflow,
-} || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError;
+} || std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError || std.io.AnyWriter.Error;
 
 const Hasher = struct {
     hasher: std.hash.Wyhash,
@@ -626,6 +626,14 @@ pub const Builder = struct {
                 _ = field_init; // autofix
                 return try self.internValue(.{
                     .hash = Hasher.unique(),
+                    .data = data,
+                });
+            },
+            .builtin_global => |builtin_global| {
+                var hasher = Hasher.new("builtin_global");
+                hasher.update(builtin_global.builtin);
+                return try self.internValue(.{
+                    .hash = hasher.final(),
                     .data = data,
                 });
             },
@@ -1516,6 +1524,7 @@ pub const Entity = struct {
 
         const ty = try self.builder.internTypeData(.{
             .function = .{
+                .is_builtin = false,
                 .entity = self.key,
                 .params = try params_list.commit(),
                 .ret = self.builder.unwrapTypeValue(ret_type_value),
@@ -2044,6 +2053,9 @@ const Scope = struct {
             .br => self.handleBrInstruction(hir_inst_index),
             .loop => self.handleLoopInstruction(hir_inst_index),
             .global_get => self.handleGlobalGet(hir_inst_index),
+            // .builtin_get => self.handleBuiltinGetInstruction(hir_inst_index),
+
+            .builtin_global_get => self.handleBuiltinGlobalGetInstruction(hir_inst_index),
             .comptime_number, .comptime_boolean => self.handleConstantInstruction(hir_inst_index),
             .constant_int => self.handleConstantIntInstruction(hir_inst_index),
             .ty_i8,
@@ -2309,6 +2321,72 @@ const Scope = struct {
 
         return self.pushGlobalGetInstruction(hir_inst_index, global_entity.key);
     }
+
+    pub fn handleBuiltinGlobalGetInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = self.entity.getHirInstruction(hir_inst_index);
+        // return self.pushGlobalGetInstruction(hir_inst_index, global_entity.key);
+        switch (hir_inst.builtin_global_get.builtin) {
+            .comptime_log => {
+                const ty = try self.builder.internTypeData(.{ .function = .{
+                    .is_builtin = true,
+                    .params = try self.builder.sema.lists.internSlice(
+                        &.{
+                            Sema.Type.simple(.any).encode(),
+                        },
+                    ),
+                    .ret = Sema.Type.simple(.void),
+                    .entity = std.math.maxInt(Entity.Key),
+                } });
+
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .builtin_global_get,
+                    .type = ty,
+                    .value = try self.builder.internValueData(.{ .builtin_global = .{
+                        .builtin = .comptime_log,
+                    } }),
+                    .data = .void,
+                });
+            },
+        }
+        // return try self.pushInstruction(hir_inst_index, .{
+        //     .op = .builtin_global_get,
+        //     .type = Sema.Type.simple(.type),
+        //     .value = switch (hir_inst.builtin_global_get.builtin) {
+        //         .comptime_log => try self.builder.internValueData(.{ .type = try self.builder.internType(.{
+        //             .hash = Hasher.hash("builtin-comptime-log"),
+        //             .data = .{ .function = .{
+
+        //             } },
+        //         }) }),
+        //         // .std => std.debug.panic("TODO: std", .{}),
+        //         // .cmp => try self.builder.internValueData(.{
+        //         //     .type = try self.builder.internType(.{
+        //         //         .hash = Hasher.hash("builtin-cmp"),
+        //         //         .data = .{
+        //         //             .@"struct" = .{
+        //         //                 .entity = std.math.maxInt(Entity.Key),
+        //         //                 .fields = try self.builder.sema.lists.internSlice(
+        //         //                     &.{
+
+        //         //                         // .{ .name = "eq", .type = .{ .simple = .bool } },
+        //         //                         // .{ .name = "ne", .type = .{ .simple = .bool } },
+        //         //                         // .{ .name = "lt", .type = .{ .simple = .bool } },
+        //         //                         // .{ .name = "le", .type = .{ .simple = .bool } },
+        //         //                         // .{ .name = "gt", .type = .{ .simple = .bool } },
+        //         //                         // .{ .name = "ge", .type = .{ .simple = .bool } },
+        //         //                     },
+        //         //                 ),
+        //         //             },
+        //         //         },
+        //         //         .size = 0,
+        //         //         .alignment = 0,
+        //         //     }),
+        //         // }),
+        //     },
+        //     .data = .{ .builtin_namespace = .{ .namespace = hir_inst.builtin_global_get.namespace } },
+        // });
+    }
+
     pub fn pushGlobalGetInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index, entity_key: Entity.Key) Error!Sema.Instruction.Index {
         const entity = self.builder.getEntity(entity_key);
         // try self.scope.pushDependency(entity_key);
@@ -3583,7 +3661,7 @@ const Scope = struct {
             break :blk callee_instruction.type;
         };
 
-        const callee_type = self.builder.getType(callee_type_key) orelse {
+        const callee_type: Sema.Type = self.builder.getType(callee_type_key) orelse {
             switch (callee_type_key.simple) {
                 .builtin_fn_as => return try self.handleBuiltinCastCall(hir_inst_index),
                 else => {
@@ -3591,6 +3669,9 @@ const Scope = struct {
                 },
             }
         };
+        if (callee_type.data.function.is_builtin) {
+            return try self.handleBuiltinCall(hir_inst_index);
+        }
 
         const args = self.entity.getHirList(hir_inst.fn_call.args_list);
 
@@ -3671,6 +3752,39 @@ const Scope = struct {
                 },
             },
         });
+    }
+    pub fn handleBuiltinCall(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = self.entity.getHirInstruction(hir_inst_index);
+        const callee_inst_index = self.getInstructionIndex(hir_inst.fn_call.callee);
+        const callee_inst = self.getInstruction(callee_inst_index);
+        const callee_value: Sema.Value = self.builder.getValue(callee_inst.value) orelse {
+            std.debug.panic("error: builtin call value is not a builtin global", .{});
+        };
+        switch (callee_value.data.builtin_global.builtin) {
+            .comptime_log => {
+                const writer = std.io.getStdErr().writer().any();
+                const args = self.entity.getHirList(hir_inst.fn_call.args_list);
+                for (args) |arg_index| {
+                    const arg_inst = self.getInstructionByHirIndex(arg_index);
+                    try self.builder.sema.formatTypedValue(writer, .{
+                        .type = arg_inst.type,
+                        .value = arg_inst.value,
+                    }, .{});
+                }
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .void,
+                    .type = Sema.Type.simple(.void),
+                    .value = Sema.Value.simple(.void),
+                    .data = .void,
+                    .liveness = 0,
+                });
+            },
+            // else => |builtin| {
+            //     std.debug.panic("unimplemented builtin: @{s}", .{@tagName(builtin)});
+            // },
+        }
+        // callee_inst.
+        // const builtin_global = callee_inst.data.builtin_global;
     }
     pub fn handleBuiltinCastCall(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = self.entity.getHirInstruction(hir_inst_index);

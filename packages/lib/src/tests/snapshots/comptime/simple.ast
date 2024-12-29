@@ -1,3 +1,4 @@
+;; AST
 ;; 72 Nodes
 ;; 106 Tokens
 ;; 28 Interned Lists
@@ -67,7 +68,7 @@
     │        │  ├ name: %32 = .identifier - tok[49..49]
     │        │  │  └ token: .identifier 'result_comptime'
     │        │  ├ type: NONE
-    │        │  └ value: %39 = .comp - tok[51..62]
+    │        │  └ value: %39 = .comp_block - tok[51..62]
     │        │     └ node: %38 = .fn_call - tok[52..61]
     │        │        ├ callee: %33 = .identifier - tok[52..52]
     │        │        │  └ token: .identifier 'sum_all'
@@ -100,7 +101,7 @@
     │           ├ name: %49 = .identifier - tok[78..78]
     │           │  └ token: .identifier 'abc'
     │           ├ type: NONE
-    │           └ value: %53 = .comp - tok[80..84]
+    │           └ value: %53 = .comp_block - tok[80..84]
     │              └ node: %52 = .add - tok[81..83]
     │                 ├ lhs: %50 = .number_literal - tok[81..81]
     │                 │  └ token: .number_literal '2'
