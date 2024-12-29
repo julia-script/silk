@@ -10,3 +10,4 @@ tmp*
 + .turbo
 **/trace.json
 **/trace-*
+.DS_Store
