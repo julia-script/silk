@@ -1,5 +1,6 @@
 const std = @import("std");
 const Src = std.builtin.SourceLocation;
+const IS_ENABLED = @import("options").enable_tracer;
 
 allocator: std.mem.Allocator,
 namespace: []const u8,
@@ -15,6 +16,13 @@ pub fn init(
     comptime namespace: anytype,
     options: TraceOptions,
 ) !Self {
+    if (comptime !IS_ENABLED) {
+        return Self{
+            .allocator = undefined,
+            .namespace = undefined,
+            .scratch = undefined,
+        };
+    }
     const dir_path = try std.fs.path.join(allocator, &.{ options.dir, @tagName(namespace) });
     defer allocator.free(dir_path);
     try std.fs.cwd().makePath(dir_path);
@@ -80,9 +88,15 @@ pub const EndTrace = struct {
         self: *const EndTrace,
         args: anytype,
     ) void {
+        if (comptime !IS_ENABLED) {
+            return;
+        }
         self.endLater(self.tracer, args);
     }
     pub inline fn endLater(self: *const EndTrace, tracer: *Self, args: anytype) void {
+        if (comptime !IS_ENABLED) {
+            return;
+        }
         tracer.writeEntry(.{
             .id = self.id,
             .ph = self.phase.format(),
@@ -99,6 +113,14 @@ pub inline fn begin(
     format: anytype,
     args: anytype,
 ) EndTrace {
+    if (comptime !IS_ENABLED) {
+        return EndTrace{
+            .id = 0,
+            .indent = 0,
+            .tracer = undefined,
+            .phase = undefined,
+        };
+    }
     const id = getId(self);
     self.writeTrace(
         id,
@@ -115,6 +137,9 @@ pub fn trace(
     format: anytype,
     args: anytype,
 ) void {
+    if (comptime !IS_ENABLED) {
+        return;
+    }
     const id = getId(self);
     self.writeTrace(
         id,
@@ -130,6 +155,14 @@ pub fn beginAsync(
     format: anytype,
     args: anytype,
 ) EndTrace {
+    if (comptime !IS_ENABLED) {
+        return EndTrace{
+            .id = 0,
+            .indent = 0,
+            .tracer = undefined,
+            .phase = undefined,
+        };
+    }
     const id = getId(self);
     self.writeTrace(
         id,
@@ -164,6 +197,9 @@ pub fn writeTrace(
     format: anytype,
     args: anytype,
 ) !void {
+    if (comptime !IS_ENABLED) {
+        return;
+    }
     var event_name = try std.BoundedArray(u8, 1024).init(0);
     try event_name.writer().print(format[format.len - 2], format[format.len - 1]);
 
@@ -186,6 +222,9 @@ pub fn writeTrace(
     });
 }
 pub fn writeEntry(self: *Self, body: anytype) !void {
+    if (comptime !IS_ENABLED) {
+        return;
+    }
     const file = self.file orelse return;
     self.scratch.clearRetainingCapacity();
 

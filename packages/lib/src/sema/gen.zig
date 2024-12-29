@@ -635,7 +635,6 @@ pub const Builder = struct {
         }
     }
     pub inline fn build(allocator: std.mem.Allocator, sema: *Sema, errors_manager: *ErrorManager, options: BuildOptions) Error!Builder {
-        _ = options; // autofix
         return Builder{
             // .strings = Sema.Strings.init(allocator),
             .entities = ChunkedArray(Entity, 1024).init(allocator),
@@ -649,7 +648,9 @@ pub const Builder = struct {
             .tracer = Tracer.init(
                 allocator,
                 .sema,
-                .{},
+                .{
+                    .dir = options.trace_dir orelse "./.tmp/trace",
+                },
             ) catch @panic("Tracer.init failed"),
         };
 

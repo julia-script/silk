@@ -34,7 +34,6 @@ pub const Options = struct {
     unique_trace_name: bool = true,
 };
 pub fn init(ast: *Ast, errors: *ErrorManager, options: Options) !AstGen {
-    _ = options; // autofix
     // var tracer = try Tracer.init(
     //     options.trace_dir orelse "./.tmp/trace",
     //     options.trace_name orelse "ast-gen",
@@ -51,7 +50,9 @@ pub fn init(ast: *Ast, errors: *ErrorManager, options: Options) !AstGen {
         .tracer = Tracer.init(
             ast.allocator,
             .ast,
-            .{},
+            .{
+                .dir = options.trace_dir orelse "./.tmp/trace",
+            },
         ) catch @panic("Tracer.init failed"),
     };
 }

@@ -36,6 +36,7 @@ pub fn main() !void {
                 std.debug.print("Error on '{s}': {s}\n", .{ entry.path, @errorName(err) });
                 return err;
             };
+            std.debug.print("Done\n\n", .{});
             _ = entry_gpa.detectLeaks();
         }
     }
@@ -50,13 +51,20 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 
     const path_without_extension = try std.fs.path.join(allocator, &.{ CASES_DIR_PATH, path[0 .. path.len - SILK_EXTENSION.len] });
     defer allocator.free(path_without_extension);
+    const trace_dir = try std.fs.path.join(allocator, &.{ ".tmp/trace", path_without_extension });
+    defer allocator.free(trace_dir);
 
-    var sema = try Sema.init(allocator, &errors_manager, .{});
+    var sema = try Sema.init(allocator, &errors_manager, .{
+        .trace_dir = trace_dir,
+    });
     defer sema.deinit();
 
     const root_path = try sema.makeRootSource(source, path);
 
+    const start = std.time.nanoTimestamp();
     try sema.compileAll(root_path);
+    const end = std.time.nanoTimestamp();
+    std.debug.print("Sema compile took: {}\n", .{std.fmt.fmtDurationSigned(@intCast(end - start))});
     const root = sema.getSource(root_path);
 
     var output = std.ArrayList(u8).init(allocator);

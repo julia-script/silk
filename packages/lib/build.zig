@@ -9,6 +9,7 @@ pub inline fn queue(steps: anytype) void {
 }
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
+
     const optimize = b.standardOptimizeOption(.{});
 
     const enable_tracer = b.option(bool, "emit-trace", "Enable tracer") orelse false;

@@ -31,24 +31,28 @@ root: Strings.Range = Strings.Range.empty,
 sources: std.AutoArrayHashMapUnmanaged(Strings.Range, Source) = .{},
 errors_manager: *ErrorManager,
 settings: Settings = .{},
+trace_dir: []const u8 = "",
 pub const Settings = struct {
     // we can skip dead branches on compilation but keep them for debugging or LSP for example
     compute_dead_branches: bool = true,
 };
 pub fn init(allocator: std.mem.Allocator, error_manager: *ErrorManager, options: Builder.BuildOptions) !Self {
-    _ = options; // autofix
     return Self{
         .allocator = allocator,
         .errors_manager = error_manager,
         .lists = Lists.init(allocator),
         .strings = Strings.init(allocator),
-        .builder = undefined,
+        .builder = try Builder.build(allocator, undefined, error_manager, .{
+            .trace_dir = options.trace_dir,
+        }),
         .memory = undefined,
+        .trace_dir = options.trace_dir orelse "./.tmp/trace",
     };
 }
 
 pub fn makeRootSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
-    self.builder = try Builder.build(self.allocator, self, self.errors_manager, .{});
+    self.builder.sema = self;
+    // self.builder = try Builder.build(self.allocator, self, self.errors_manager, .{});
     self.memory = ComptimeMemory.init(self.allocator, self);
     return try self.makeSource(source, path);
 }
@@ -60,7 +64,12 @@ pub fn makeSource(self: *Self, source: []const u8, path: []const u8) !Strings.Ra
         return error.SourceAlreadyExists;
     }
 
-    source_gop.value_ptr.* = try Source.init(self.builder.allocator, self.errors_manager, source);
+    source_gop.value_ptr.* = try Source.init(
+        self.builder.allocator,
+        self.errors_manager,
+        source,
+        self.trace_dir,
+    );
     return source_range;
 }
 pub fn compileAll(self: *Self, source: Strings.Range) !void {
@@ -81,18 +90,23 @@ pub const Source = struct {
     hir: *Hir,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, errors_manager: *ErrorManager, source: []const u8) !Source {
+    pub fn init(allocator: std.mem.Allocator, errors_manager: *ErrorManager, source: []const u8, trace_dir: []const u8) !Source {
         const source_dupe = try allocator.dupe(u8, source);
         errdefer allocator.free(source_dupe);
         const ast = try allocator.create(Ast);
         errdefer allocator.destroy(ast);
+        var start = std.time.nanoTimestamp();
         ast.* = try Ast.parse(
             allocator,
             errors_manager,
             source_dupe,
-            .{},
+            .{
+                .trace_dir = trace_dir,
+            },
         );
+        var end = std.time.nanoTimestamp();
 
+        std.debug.print("Ast parse took: {}\n", .{std.fmt.fmtDurationSigned(@intCast(end - start))});
         if (std.mem.containsAtLeast(u8, build_options.log_scopes, 1, "ast")) {
             try ast.format(std.io.getStdErr().writer().any(), 0, .{
                 .show_slice = false,
@@ -101,8 +115,12 @@ pub const Source = struct {
         }
         const hir = try allocator.create(Hir);
         errdefer allocator.destroy(hir);
-        hir.* = try Hir.build(allocator, ast, errors_manager, .{});
-
+        start = std.time.nanoTimestamp();
+        hir.* = try Hir.build(allocator, ast, errors_manager, .{
+            .trace_dir = trace_dir,
+        });
+        end = std.time.nanoTimestamp();
+        std.debug.print("Hir build took: {}\n", .{std.fmt.fmtDurationSigned(@intCast(end - start))});
         if (std.mem.containsAtLeast(u8, build_options.log_scopes, 1, "hir")) {
             try hir.format("", .{}, std.io.getStdErr().writer().any());
         }
