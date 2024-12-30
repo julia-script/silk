@@ -1,23 +1,31 @@
 ;; Sema
-;; 1 declarations
-;; 3 entities
-;; 1 symbols
-;; 11 instructions
-;; 5 values
-;; 3 types
-;; 1 lists
-;; 5 strings
-;; 4/8 comptime memory used/allocated bytes
+;; 2 declarations
+;; 7 entities
+;; 2 symbols
+;; 17 instructions
+;; 7 values
+;; 5 types
+;; 5 lists
+;; 12 strings
+;; 0/0 comptime memory used/allocated bytes
 
-%0 = fn @"comptime/builtin-helpers.sk::main"() -> void
+%0 = fn @"comptime/builtin-helpers.sk::foo"(i32) -> void
+ └ %0: void = .block: [%1-%5]                                         ; void
+    ├ %1: i32 = .param index=(%0)                                     ; exec_time
+    ├ %2: todo(function) = .builtin_global_get                        ; todo(builtin_global)
+    ├ %3: i32 = .param_get operand=(%1)                               ; exec_time
+    ├ %4: todo(any) = .cast operand=(%3)                              ; exec_time
+    └ %5: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%4}); void
+
+%1 = fn @"comptime/builtin-helpers.sk::main"() -> void
  └ %0: void = .block: [%1-%10]                                        ; void
-    ├ !%1: number = .block: [%2-%3]                                   ; int(2)
-    │  ├ !%2: number = .constant                                      ; int(2)
-    │  └ !%3: void = .br operand=(%1)                                 ; void
-    ├ %5: *i32 = .alloc type=(i32) mutable=(false)                    ; comp_ptr(0)
-    ├ !%6: i32 = .constant                                            ; int(2)
-    ├ !%7: void = .store operand=(%5) payload=(%6)                    ; void
-    ├ %8: todo(function) = .builtin_global_get                        ; todo(builtin_global)
-    ├ %9: i32 = .load operand=(%5)                                    ; int(2)
-    └ !%10: void = .void                                              ; void
+    ├ %1: void = .block: [%2-%5]                                      ; void
+    │  ├ !%2: number = .constant                                      ; int(123)
+    │  ├ !%3: i32 = .constant                                         ; int(123)
+    │  ├ !%4: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%3}); void
+    │  └ !%5: void = .br operand=(%1)                                 ; void
+    ├ !%7: number = .constant                                         ; int(456)
+    ├ !%8: i32 = .constant                                            ; int(456)
+    ├ !%9: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%8}); void
+    └ !%10: void = .br operand=(%6)                                   ; void
 

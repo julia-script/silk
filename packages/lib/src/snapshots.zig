@@ -10,6 +10,7 @@ const expect = @import("expect").expect;
 const CASES_DIR_PATH = "./src/tests/cases";
 const SNAPSHOTS_DIR_PATH = "./src/tests/snapshots";
 const SILK_EXTENSION = ".sk";
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();

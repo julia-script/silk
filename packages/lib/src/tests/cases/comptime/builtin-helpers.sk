@@ -1,4 +1,7 @@
-fn main(): void {
-  const a:i32 = comp 2;
+fn foo(a: i32): void {
   @comptime_log(a);
+}
+fn main(): void {
+  comp foo(123);
+  comp foo(456);
 }

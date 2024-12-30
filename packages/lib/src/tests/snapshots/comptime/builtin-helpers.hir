@@ -1,29 +1,50 @@
-;; HIR: 14 instructions
+;; HIR: 23 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
- └ declarations_list: 1 items
-    └ 0: %1 = .global_decl
-       ├ name_node: node(#1: "main")
+ └ declarations_list: 2 items
+    ├ 0: %1 = .global_decl
+    │  ├ name_node: node(#1: "foo")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %11 = .fn_decl
+    │  │  ├ name_node: node(#1: "foo")
+    │  │  ├ return_type: %5 = .ty_void
+    │  │  │  └ node: node(#5: "void")
+    │  │  └ params_list: 1 items
+    │  │     └ 0: %4 = .param_decl
+    │  │        ├ name_node: node(#3: "a")
+    │  │        └ type: %3 = .ty_i32
+    │  │           └ node: node(#4: "i32")
+    │  └ init: %6 = .block
+    │     ├ %7 = .param operand=(%4)
+    │     ├ %8 = .builtin_global_get builtin=(shared.BuiltinGlobal.comptime_log)
+    │     ├ %9 = .param_get operand=(%7)
+    │     └ %10 = .fn_call callee=(%8), args_list=({%9})
+    └ 1: %2 = .global_decl
+       ├ name_node: node(#12: "main")
        ├ extern: false
        ├ is_fn: true
        ├ is_type: false
        ├ visibility: "private"
        ├ exported: false
        ├ mutable: false
-       ├ type: %13 = .fn_decl
-       │  ├ name_node: node(#1: "main")
-       │  ├ return_type: %2 = .ty_void
-       │  │  └ node: node(#2: "void")
+       ├ type: %22 = .fn_decl
+       │  ├ name_node: node(#12: "main")
+       │  ├ return_type: %12 = .ty_void
+       │  │  └ node: node(#13: "void")
        │  └ params_list: 0 items
-       └ init: %3 = .block
-          ├ %4 = comptime .inline_block
-          │  ├ %5 = .comptime_number node=(n[6:"2"])
-          │  └ %6 = .br operand=(5), target=(%4)
-          ├ %7 = .ty_i32 node=(n[5:"i32"])
-          ├ %8 = .alloc mutable=(false), type=(%7)
-          ├ %9 = .store pointer=(%8), value=(%4)
-          ├ %10 = .builtin_global_get builtin=(shared.BuiltinGlobal.comptime_log)
-          ├ %11 = .load operand=(%8)
-          └ %12 = .fn_call callee=(%10), args_list=({%11})
+       └ init: %13 = .block
+          ├ %14 = comptime .inline_block
+          │  ├ %15 = .comptime_number node=(n[16:"123"])
+          │  ├ %16 = .fn_call callee=(%1), args_list=({%15})
+          │  └ %17 = .br operand=(16), target=(%14)
+          └ %18 = comptime .inline_block
+             ├ %19 = .comptime_number node=(n[20:"456"])
+             ├ %20 = .fn_call callee=(%1), args_list=({%19})
+             └ %21 = .br operand=(20), target=(%18)

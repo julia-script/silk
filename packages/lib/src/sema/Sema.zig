@@ -220,7 +220,6 @@ pub const Type = struct {
     pub const List = Lists.Range;
     pub const Simple = enum {
         unknown,
-        any,
 
         type,
         infer,
@@ -281,7 +280,9 @@ pub const Type = struct {
         //     entity: Entity.Key,
         //     struct_type: Type.Key,
         // },
-
+        any: struct {
+            concrete: Type.Key = .{ .simple = .unknown },
+        },
         @"struct": struct {
             entity: Entity.Key,
             fields: Type.List,
@@ -501,6 +502,10 @@ pub const Instruction = struct {
             callee: Declaration.Index,
             args_list: Instruction.List,
         },
+        builtin_call: struct {
+            builtin: shared.BuiltinGlobal,
+            args_list: Instruction.List,
+        },
         array_init: struct {
             items_list: Instruction.List,
             type_inst: Instruction.Index,
@@ -565,6 +570,7 @@ pub const Instruction = struct {
         get_builtin_fn_as,
 
         builtin_global_get,
+        comptime_log,
 
         cast_promote,
         cast_demote,
@@ -579,6 +585,12 @@ pub const Instruction = struct {
     };
 
     pub const Index = usize;
+    pub fn getTypedValue(self: *Self) TypedValue {
+        return .{
+            .type = self.type,
+            .value = self.value,
+        };
+    }
 };
 
 pub const Declaration = struct {

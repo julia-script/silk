@@ -431,6 +431,16 @@ pub const Builder = struct {
                 // also, they are always unique, so it doesn't really matter
                 unreachable;
             },
+            .any => {
+                var hasher = Hasher.new("any");
+                hasher.update(self.getTypeKeyHash(data.any.concrete));
+                return try self.internType(.{
+                    .hash = hasher.final(),
+                    .data = data,
+                    .alignment = 0,
+                    .size = 0,
+                });
+            },
         }
         _ = type; // autofix
         std.debug.panic("TODO: internType {s}", .{@tagName(data)});
@@ -2331,7 +2341,7 @@ const Scope = struct {
                     .is_builtin = true,
                     .params = try self.builder.sema.lists.internSlice(
                         &.{
-                            Sema.Type.simple(.any).encode(),
+                            (try self.builder.internTypeData(.{ .any = .{} })).encode(),
                         },
                     ),
                     .ret = Sema.Type.simple(.void),
@@ -2687,6 +2697,22 @@ const Scope = struct {
 
         if (instruction.type.isEqual(Sema.Type.simple(.number))) {
             return try self.pushCastInstruction(hir_inst_index, instruction_index, type_index);
+        }
+        if (self.builder.getType(type_index)) |expected_type| {
+            switch (expected_type.data) {
+                .any => {
+                    if (self.builder.getType(instruction.type)) |inst_type| {
+                        switch (inst_type.data) {
+                            .any => return null,
+                            else => {},
+                        }
+                    }
+                    return try self.pushCastInstruction(hir_inst_index, instruction_index, try self.builder.internTypeData(.{ .any = .{
+                        .concrete = instruction.type,
+                    } }));
+                },
+                else => {},
+            }
         }
 
         std.debug.panic("TODO:{d} pushMaybeCastInstruction {} to {}", .{ hir_inst_index, (instruction.type), (type_index) });
@@ -3669,9 +3695,6 @@ const Scope = struct {
                 },
             }
         };
-        if (callee_type.data.function.is_builtin) {
-            return try self.handleBuiltinCall(hir_inst_index);
-        }
 
         const args = self.entity.getHirList(hir_inst.fn_call.args_list);
 
@@ -3694,7 +3717,7 @@ const Scope = struct {
             const param_type = Sema.Type.Key.decode(param_type_key);
             const arg_index = try self.getInstructionAsType(arg_hir_index, param_type);
             const arg_inst = self.getInstruction(arg_index);
-            if (!arg_inst.type.isEqual(param_type)) {
+            if (!arg_inst.type.isEqual(param_type) and !param_type.isEqual(try self.builder.internTypeData(.{ .any = .{} }))) {
                 std.debug.panic("error: argument type mismatch: {} != {}", .{ arg_inst.type, param_type });
             }
 
@@ -3707,7 +3730,18 @@ const Scope = struct {
                 all_args_resolved = false;
             }
         }
-
+        if (callee_type.data.function.is_builtin) {
+            return try self.pushInstruction(hir_inst_index, .{
+                .op = .fn_call,
+                .type = callee_type.data.function.ret,
+                .value = Sema.Value.simple(.void),
+                .data = .{ .builtin_call = .{
+                    .builtin = .comptime_log,
+                    .args_list = try args_list.commit(),
+                } },
+            });
+            // return try self.handleBuiltinCall(hir_inst_index);
+        }
         const callee_entity = self.builder.getEntity(function.entity);
         const callee_value_key = try self.maybeResolveDependency(function.entity);
 
@@ -3762,21 +3796,30 @@ const Scope = struct {
         };
         switch (callee_value.data.builtin_global.builtin) {
             .comptime_log => {
-                const writer = std.io.getStdErr().writer().any();
-                const args = self.entity.getHirList(hir_inst.fn_call.args_list);
-                for (args) |arg_index| {
-                    const arg_inst = self.getInstructionByHirIndex(arg_index);
-                    try self.builder.sema.formatTypedValue(writer, .{
-                        .type = arg_inst.type,
-                        .value = arg_inst.value,
-                    }, .{});
+                // const writer = std.io.getStdErr().writer().any();
+                const hir_args_list = self.entity.getHirList(hir_inst.fn_call.args_list);
+                const args_list = self.builder.newList();
+                for (hir_args_list) |arg_hir_index| {
+                    const arg_inst_index = try self.getInstructionAsType(arg_hir_index, Sema.Type.simple(.any));
+                    try args_list.append(arg_inst_index);
                 }
+
+                // for (args) |arg_index| {
+                //     const arg_inst = self.getInstructionByHirIndex(arg_index);
+                //     try self.builder.sema.formatTypedValue(writer, .{
+                //         .type = arg_inst.type,
+                //         .value = arg_inst.value,
+                //     }, .{});
+                // }
+                self.markDead(callee_inst_index);
                 return try self.pushInstruction(hir_inst_index, .{
-                    .op = .void,
+                    .op = .fn_call,
                     .type = Sema.Type.simple(.void),
                     .value = Sema.Value.simple(.void),
-                    .data = .void,
-                    .liveness = 0,
+                    .data = .{ .builtin_call = .{
+                        .builtin = .comptime_log,
+                        .args_list = try args_list.commit(),
+                    } },
                 });
             },
             // else => |builtin| {
@@ -6338,6 +6381,26 @@ const ExecContext = struct {
     }
     pub fn execFunctionCall(self: *ExecContext, inst_index: Sema.Instruction.Index) Error!void {
         const inst = self.getInstruction(inst_index);
+        switch (inst.data) {
+            .builtin_call => |call| {
+                switch (call.builtin) {
+                    .comptime_log => {
+                        const args = self.builder.sema.lists.getSlice(call.args_list);
+                        const writer = std.io.getStdErr().writer().any();
+                        for (args) |arg| {
+                            const value = self.getValue(arg);
+                            try self.builder.sema.formatTypedValue(writer, value, .{});
+                        }
+
+                        try self.putValue(inst_index, .{ .type = Sema.Type.simple(.void), .value = Sema.Value.simple(.void) });
+
+                        return;
+                    },
+                    // else => |builtin| std.debug.panic("unimplemented builtin {s}\n", .{@tagName(builtin)}),
+                }
+            },
+            else => {},
+        }
         const callee_entity = self.builder.getEntity(inst.data.fn_call.callee_entity);
         const callee_type_key = try callee_entity.resolveType();
         const callee_value_key = try callee_entity.resolveValue();
