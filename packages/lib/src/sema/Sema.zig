@@ -322,6 +322,7 @@ pub const Value = struct {
         integer: i64,
         float: f64,
         type: Type.Key,
+        string_literal: Strings.Range,
         // static_string: Strings.Range,
         // pointer: usize,
         // comptime_pointer: u32,
@@ -551,6 +552,7 @@ pub const Instruction = struct {
         fn_call,
         array_init,
         type_init,
+        string_literal_init,
         field_init,
 
         param_get,
@@ -591,6 +593,8 @@ pub const Instruction = struct {
 
         max,
         min,
+
+        memcpy,
     };
 
     pub const Index = usize;
@@ -839,12 +843,25 @@ pub fn formatTypedValue(
 ) !void {
     switch (typed_value.type) {
         .simple => |simple| switch (simple) {
-            .u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .usize => {
+            .u8, .u16, .u32, .u64, .usize => {
                 try writer.print("{s}{{ ", .{
                     @tagName(simple),
                 });
                 if (typed_value.value.isComptimeKnown()) {
                     const val = self.builder.getNumberValueKeyAs(u64, typed_value.value);
+                    try writer.print("{d}", .{val});
+                } else {
+                    try writer.writeAll("[runtime]");
+                }
+
+                try writer.print(" }}", .{});
+            },
+            .i8, .i16, .i32, .i64 => {
+                try writer.print("{s}{{ ", .{
+                    @tagName(simple),
+                });
+                if (typed_value.value.isComptimeKnown()) {
+                    const val = self.builder.getNumberValueKeyAs(i64, typed_value.value);
                     try writer.print("{d}", .{val});
                 } else {
                     try writer.writeAll("[runtime]");

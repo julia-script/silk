@@ -445,6 +445,7 @@ pub const Inst = union(enum) {
     br: Break,
 
     decl_ref: AstNode,
+    char_literal: AstNode,
     comptime_number: AstNode,
     comptime_boolean: AstNode,
     string_literal: AstNode,

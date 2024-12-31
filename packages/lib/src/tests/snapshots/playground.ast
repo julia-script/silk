@@ -1,57 +1,30 @@
 ;; AST
-;; 26 Nodes
-;; 26 Tokens
-;; 25 Interned Lists
+;; 13 Nodes
+;; 18 Tokens
+;; 6 Interned Lists
 
-%0 = .struct_decl - tok[0..26]
- └ members_list: 25 items
-    ├ %1 = .comment_line - tok[0..1]
-    │  └ token: .comment '// fn var_array(): void {'
-    ├ %2 = .comment_line - tok[1..2]
-    │  └ token: .comment '//  const arr: [1]i32 = [1]i32 {33};'
-    ├ %3 = .comment_line - tok[2..3]
-    │  └ token: .comment '//  const a = arr[0] + 2;'
-    ├ %4 = .comment_line - tok[3..4]
-    │  └ token: .comment '// }'
-    ├ %5 = .comment_line - tok[4..5]
-    │  └ token: .comment '// fn var_array_infer_type(): void {'
-    ├ %6 = .comment_line - tok[5..6]
-    │  └ token: .comment '//   var arr = [1]i32 {1};'
-    ├ %7 = .comment_line - tok[6..7]
-    │  └ token: .comment '// }'
-    ├ %8 = .comment_line - tok[7..8]
-    │  └ token: .comment '// fn var_int(): void {'
-    ├ %9 = .comment_line - tok[8..9]
-    │  └ token: .comment '//   var a:i32 = 2;'
-    ├ %10 = .comment_line - tok[9..10]
-    │  └ token: .comment '// }'
-    ├ %11 = .comment_line - tok[10..11]
-    │  └ token: .comment '// fn var_int_infer_type(): void {'
-    ├ %12 = .comment_line - tok[11..12]
-    │  └ token: .comment '//   var a = 2:as(i32);'
-    ├ %13 = .comment_line - tok[12..13]
-    │  └ token: .comment '// }'
-    ├ %14 = .comment_line - tok[13..14]
-    │  └ token: .comment '// fn const_array(): void {'
-    ├ %15 = .comment_line - tok[14..15]
-    │  └ token: .comment '//   const arr: [1]i32 = [1]i32 {1};'
-    ├ %16 = .comment_line - tok[15..16]
-    │  └ token: .comment '// }'
-    ├ %17 = .comment_line - tok[16..17]
-    │  └ token: .comment '// fn const_array_infer_type(): void {'
-    ├ %18 = .comment_line - tok[17..18]
-    │  └ token: .comment '//   const arr = [1]i32 {1};'
-    ├ %19 = .comment_line - tok[18..19]
-    │  └ token: .comment '// }'
-    ├ %20 = .comment_line - tok[19..20]
-    │  └ token: .comment '// fn const_int(): void {'
-    ├ %21 = .comment_line - tok[20..21]
-    │  └ token: .comment '//   const a:i32 = 2;'
-    ├ %22 = .comment_line - tok[21..22]
-    │  └ token: .comment '// }'
-    ├ %23 = .comment_line - tok[22..23]
-    │  └ token: .comment '// fn const_int_infer_type(): void {'
-    ├ %24 = .comment_line - tok[23..24]
-    │  └ token: .comment '//   const a = 2;'
-    └ %25 = .comment_line - tok[24..25]
-       └ token: .comment '// }'
+%0 = .struct_decl - tok[0..18]
+ └ members_list: 1 items
+    └ %12 = .fn_decl - tok[0..17]
+       ├ proto: %3 = .fn_proto - tok[1..5]
+       │  ├ name: %1 = .identifier - tok[1..1]
+       │  │  └ token: .identifier 'main'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %2 = .ty_void - tok[5..5]
+       │     └ token: .keyword_void 'void'
+       └ body: %11 = .block - tok[6..16]
+          └ list: 5 items
+             ├ %6 = .const_decl - tok[7..10]
+             │  ├ name: %4 = .identifier - tok[8..8]
+             │  │  └ token: .identifier 'hello_world'
+             │  ├ type: NONE
+             │  └ value: %5 = .string_literal - tok[10..10]
+             │     └ token: .string_literal '"Hello, World!"'
+             ├ %7 = .comment_line - tok[12..13]
+             │  └ token: .comment '// @comptime_log(hello_world[0]);'
+             ├ %8 = .comment_line - tok[13..14]
+             │  └ token: .comment '// hello_world.* = A {};'
+             ├ %9 = .comment_line - tok[14..15]
+             │  └ token: .comment '// const test = (A {}).add(B{});'
+             └ %10 = .comment_line - tok[15..16]
+                └ token: .comment '// const first_char = hello_world[0];'

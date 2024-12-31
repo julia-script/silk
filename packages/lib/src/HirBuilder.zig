@@ -333,7 +333,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
 
             const value_inst_index: Hir.Inst.Index = blk: {
                 if (value_node != 0) {
-                    break :blk try self.genInstruction(scope, value_node);
+                    break :blk try self.genLoadedInstruction(scope, value_node);
                 }
                 break :blk try scope.pushInstruction(.{ .undefined_value = .{ .node = null } });
             };
@@ -440,6 +440,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             }
 
             return inst_index;
+        },
+        .char_literal => {
+            return try scope.pushInstruction(.{ .char_literal = .{ .node = nav.node } });
         },
         .number_literal => {
             return try scope.pushInstruction(.{ .comptime_number = .{ .node = nav.node } });

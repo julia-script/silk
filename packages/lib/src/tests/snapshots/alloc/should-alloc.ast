@@ -1,0 +1,103 @@
+;; AST
+;; 52 Nodes
+;; 75 Tokens
+;; 22 Interned Lists
+
+%0 = .struct_decl - tok[0..75]
+ └ members_list: 16 items
+    ├ %6 = .type_decl - tok[0..9]
+    │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  └ token: .identifier 'T'
+    │  ├ type: NONE
+    │  └ value: %2 = .struct_decl - tok[3..9]
+    │     └ members_list: 1 items
+    │        └ %5 = .struct_field - tok[6..8]
+    │           ├ name: %3 = .identifier - tok[5..5]
+    │           │  └ token: .identifier 'a'
+    │           ├ type: %4 = .ty_i32 - tok[7..7]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ default_value: NONE
+    ├ %18 = .fn_decl - tok[11..29]
+    │  ├ proto: %9 = .fn_proto - tok[12..16]
+    │  │  ├ name: %7 = .identifier - tok[12..12]
+    │  │  │  └ token: .identifier 'should_alloc_1'
+    │  │  ├ params_list: 0 items
+    │  │  └ ret_type: %8 = .ty_void - tok[16..16]
+    │  │     └ token: .keyword_void 'void'
+    │  └ body: %17 = .block - tok[17..28]
+    │     └ list: 1 items
+    │        └ %16 = .const_decl - tok[18..26]
+    │           ├ name: %10 = .identifier - tok[19..19]
+    │           │  └ token: .identifier 'a'
+    │           ├ type: NONE
+    │           └ value: %15 = .type_init - tok[21..27]
+    │              ├ type: %11 = .identifier - tok[21..21]
+    │              │  └ token: .identifier 'T'
+    │              └ field_init_list: 1 items
+    │                 └ %14 = .field_init - tok[23..25]
+    │                    ├ name: %12 = .identifier - tok[23..23]
+    │                    │  └ token: .identifier 'a'
+    │                    └ value: %13 = .number_literal - tok[25..25]
+    │                       └ token: .number_literal '1'
+    ├ %30 = .fn_decl - tok[29..47]
+    │  ├ proto: %21 = .fn_proto - tok[30..34]
+    │  │  ├ name: %19 = .identifier - tok[30..30]
+    │  │  │  └ token: .identifier 'should_alloc_2'
+    │  │  ├ params_list: 0 items
+    │  │  └ ret_type: %20 = .ty_void - tok[34..34]
+    │  │     └ token: .keyword_void 'void'
+    │  └ body: %29 = .block - tok[35..46]
+    │     └ list: 1 items
+    │        └ %28 = .var_decl - tok[36..44]
+    │           ├ name: %22 = .identifier - tok[37..37]
+    │           │  └ token: .identifier 'b'
+    │           ├ type: NONE
+    │           └ value: %27 = .type_init - tok[39..45]
+    │              ├ type: %23 = .identifier - tok[39..39]
+    │              │  └ token: .identifier 'T'
+    │              └ field_init_list: 1 items
+    │                 └ %26 = .field_init - tok[41..43]
+    │                    ├ name: %24 = .identifier - tok[41..41]
+    │                    │  └ token: .identifier 'a'
+    │                    └ value: %25 = .number_literal - tok[43..43]
+    │                       └ token: .number_literal '2'
+    ├ %39 = .fn_decl - tok[47..62]
+    │  ├ proto: %33 = .fn_proto - tok[48..52]
+    │  │  ├ name: %31 = .identifier - tok[48..48]
+    │  │  │  └ token: .identifier 'should_alloc_3'
+    │  │  ├ params_list: 0 items
+    │  │  └ ret_type: %32 = .ty_void - tok[52..52]
+    │  │     └ token: .keyword_void 'void'
+    │  └ body: %38 = .block - tok[53..61]
+    │     └ list: 1 items
+    │        └ %37 = .const_decl - tok[54..59]
+    │           ├ name: %34 = .identifier - tok[55..55]
+    │           │  └ token: .identifier 'c'
+    │           ├ type: %35 = .ty_i32 - tok[57..57]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ value: %36 = .number_literal - tok[59..59]
+    │              └ token: .number_literal '10'
+    ├ %40 = .comment_line - tok[62..63]
+    │  └ token: .comment '// fn should_not_alloc_1(b: T): void {'
+    ├ %41 = .comment_line - tok[63..64]
+    │  └ token: .comment '//   b.a = 3;'
+    ├ %42 = .comment_line - tok[64..65]
+    │  └ token: .comment '// }'
+    ├ %43 = .comment_line - tok[65..66]
+    │  └ token: .comment '// fn should_not_alloc_2(b: T): void {'
+    ├ %44 = .comment_line - tok[66..67]
+    │  └ token: .comment '//   b = T { a = 4 };'
+    ├ %45 = .comment_line - tok[67..68]
+    │  └ token: .comment '// }'
+    ├ %46 = .comment_line - tok[68..69]
+    │  └ token: .comment '// fn should_not_alloc_3(a: T): void {'
+    ├ %47 = .comment_line - tok[69..70]
+    │  └ token: .comment '//   const b = a;'
+    ├ %48 = .comment_line - tok[70..71]
+    │  └ token: .comment '// }'
+    ├ %49 = .comment_line - tok[71..72]
+    │  └ token: .comment '// fn maybe_alloc(a: T, b: bool): void {'
+    ├ %50 = .comment_line - tok[72..73]
+    │  └ token: .comment '//   const c = if (b) a else T { a = 4 };'
+    └ %51 = .comment_line - tok[73..74]
+       └ token: .comment '// }'

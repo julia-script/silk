@@ -35,7 +35,11 @@ pub fn create(self: *Self, ty: Sema.Type.Key) !u32 {
     // _ = ty; // autofix
     return @intCast(pointer);
 }
-
+pub fn dupe(self: *Self, typed_value: Sema.TypedValue) !u32 {
+    _ = typed_value; // autofix
+    _ = self; // autofix
+    return 0;
+}
 pub fn destroy(self: *Self, ty: Sema.Type.Key, ptr: usize) void {
     _ = ty; // autofix
     _ = self; // autofix
@@ -66,25 +70,30 @@ pub fn storeAt(self: *Self, T: type, ptr: u32, value: T) void {
     };
     std.mem.copyForwards(u8, self.memory.items[ptr..], bytes);
 }
+// pub fn memcpy(self: *Self, typed_value: Sema.TypedValue, ptr: usize) void {
+//     const bytes = std.mem.asBytes(&self.sema.builder.getNumberValueKeyAs(typed_value.type_key, typed_value.value));
+//     std.mem.copyForwards(u8, self.memory.items[ptr..], bytes);
+// }
 pub fn store(self: *Self, type_key: Sema.Type.Key, ptr: usize, value: Sema.Value.Key) !void {
     const type_size = self.sema.builder.getTypeSize(type_key);
     _ = type_size; // autofix
     switch (type_key) {
         .simple => |simple| switch (simple) {
-            .i8 => self.storeType(i8, ptr, value),
-            .i16 => self.storeType(i16, ptr, value),
-            .i32 => self.storeType(i32, ptr, value),
-            .i64 => self.storeType(i64, ptr, value),
-            .u8 => self.storeType(u8, ptr, value),
-            .u16 => self.storeType(u16, ptr, value),
-            .u32 => self.storeType(u32, ptr, value),
-            .u64 => self.storeType(u64, ptr, value),
-            .f32 => self.storeType(f32, ptr, value),
-            .f64 => self.storeType(f64, ptr, value),
-            .number => self.storeType(i64, ptr, value),
-            .usize => self.storeType(u64, ptr, value),
-            .bchar => self.storeType(u8, ptr, value),
-            else => std.debug.panic("unsupported type: {any}", .{simple}),
+            .i8 => return self.storeType(i8, ptr, value),
+            .i16 => return self.storeType(i16, ptr, value),
+            .i32 => return self.storeType(i32, ptr, value),
+            .i64 => return self.storeType(i64, ptr, value),
+            .u8 => return self.storeType(u8, ptr, value),
+            .u16 => return self.storeType(u16, ptr, value),
+            .u32 => return self.storeType(u32, ptr, value),
+            .u64 => return self.storeType(u64, ptr, value),
+            .f32 => return self.storeType(f32, ptr, value),
+            .f64 => return self.storeType(f64, ptr, value),
+            .number => return self.storeType(i64, ptr, value),
+            .usize => return self.storeType(u64, ptr, value),
+            .bchar => return self.storeType(u8, ptr, value),
+
+            else => {},
         },
 
         .complex => |complex| switch (self.sema.types.entries.items(.value)[complex].data) {
@@ -92,11 +101,16 @@ pub fn store(self: *Self, type_key: Sema.Type.Key, ptr: usize, value: Sema.Value
             //     const ty = self.sema.builder.getType(type_key).?;
             //     std.debug.panic("unsupported type: {any}", .{ty});
             // },
-            else => {
-                std.debug.panic("unsupported type: {any}", .{complex});
+            .any => |any| {
+                return try self.store(any.concrete, ptr, value);
             },
+            else => {},
         },
     }
+    std.debug.print("unsupported type:", .{});
+    try self.sema.formatType(std.io.getStdErr().writer().any(), type_key);
+    std.debug.print("\n", .{});
+    @panic("unsupported type");
 }
 
 fn loadType(self: *Self, T: type, ptr: usize) !Sema.Value.Key {
@@ -115,30 +129,33 @@ fn loadType(self: *Self, T: type, ptr: usize) !Sema.Value.Key {
     }
 }
 pub fn load(self: *Self, ty: Sema.Type.Key, ptr: usize) !Sema.Value.Key {
-    return switch (ty) {
+    switch (ty) {
         .simple => |simple| switch (simple) {
-            .i8 => try self.loadType(i8, ptr),
-            .i16 => try self.loadType(i16, ptr),
-            .i32 => try self.loadType(i32, ptr),
-            .i64 => try self.loadType(i64, ptr),
-            .u8 => try self.loadType(u8, ptr),
-            .u16 => try self.loadType(u16, ptr),
-            .u32 => try self.loadType(u32, ptr),
-            .u64 => try self.loadType(u64, ptr),
-            .f32 => try self.loadType(f32, ptr),
-            .f64 => try self.loadType(f64, ptr),
-            .usize => try self.loadType(u64, ptr),
-            .number => try self.loadType(i64, ptr),
+            .i8 => return try self.loadType(i8, ptr),
+            .i16 => return try self.loadType(i16, ptr),
+            .i32 => return try self.loadType(i32, ptr),
+            .i64 => return try self.loadType(i64, ptr),
+            .u8 => return try self.loadType(u8, ptr),
+            .u16 => return try self.loadType(u16, ptr),
+            .u32 => return try self.loadType(u32, ptr),
+            .u64 => return try self.loadType(u64, ptr),
+            .f32 => return try self.loadType(f32, ptr),
+            .f64 => return try self.loadType(f64, ptr),
+            .usize => return try self.loadType(u64, ptr),
+            .number => return try self.loadType(i64, ptr),
             else => std.debug.panic("unsupported type: {any}", .{simple}),
         },
         .complex => {
-            const loaded_type = self.sema.builder.getType(ty).?;
+            // const loaded_type = self.sema.builder.getType(ty).?;
             // const loaded_value = try self.load(loaded_type, ptr);
-            std.debug.panic("unsupported type: {any}", .{loaded_type});
             // return try self.sema.builder.internValueData(.{ .complex = loaded_type });
+            // std.debug.panic("unsupported type: {any}", .{ty});
         },
         // else => {
-        //     std.debug.panic("unsupported type: {any}", .{ty});
         // },
-    };
+    }
+    std.debug.print("unsupported type: ", .{});
+    try self.sema.formatType(std.io.getStdErr().writer().any(), ty);
+    std.debug.print("\n", .{});
+    @panic("unsupported type");
 }

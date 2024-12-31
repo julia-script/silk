@@ -1,29 +1,8 @@
-// fn var_array(): void {
-//  const arr: [1]i32 = [1]i32 {33};
-//  const a = arr[0] + 2;
-// }
-// fn var_array_infer_type(): void {
-//   var arr = [1]i32 {1};
-// }
-// fn var_int(): void {
-//   var a:i32 = 2;
-// }
-// fn var_int_infer_type(): void {
-//   var a = 2:as(i32);
-// }
+fn main(): void { 
+  const hello_world = "Hello, World!";
+  // @comptime_log(hello_world[0]);
 
-
-// fn const_array(): void {
-//   const arr: [1]i32 = [1]i32 {1};
-// }
-
-// fn const_array_infer_type(): void {
-//   const arr = [1]i32 {1};
-// }
-// fn const_int(): void {
-//   const a:i32 = 2;
-// }
-
-// fn const_int_infer_type(): void {
-//   const a = 2;
-// }
+  // hello_world.* = A {};
+  // const test = (A {}).add(B{});
+  // const first_char = hello_world[0];
+}

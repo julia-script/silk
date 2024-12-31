@@ -3,17 +3,17 @@
 ;; 3 entities
 ;; 1 symbols
 ;; 10 instructions
-;; 8 values
+;; 6 values
 ;; 5 types
 ;; 2 lists
-;; 6 strings
+;; 7 strings
 ;; 15/20 comptime memory used/allocated bytes
 
 %0 = fn @"strings/simple.sk::main"() -> void
  └ %0: void = .block: [%1-%9]                                         ; void
     ├ %1: fn(any) void = .builtin_global_get                          ; fn(any) void
-    ├ !%2: [..]bchar = .constant                                      ; [..15]bchar@0
-    ├ %3: any([..]bchar) = .constant                                  ; [..15]bchar@0
+    ├ !%2: [15]bchar = .constant                                      ; todo_complex(3)
+    ├ %3: any([15]bchar) = .constant                                  ; todo_complex(3)
     ├ %4: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%3}); void
     ├ %5: number = .constant                                          ; number{ 2 }
     ├ !%6: number = .constant                                         ; number{ 2 }

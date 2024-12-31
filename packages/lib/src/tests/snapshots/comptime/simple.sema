@@ -28,7 +28,7 @@
 
 %1 = fn @"comptime/simple.sk::main"() -> void
  └ %0: void = .block: [%1-%34]                                        ; void
-    ├ !%1: i32 = .block: [%2-%11]                                     ; i32{ 10 }
+    ├ %1: i32 = .block: [%2-%11]                                      ; i32{ 10 }
     │  ├ !%2: number = .constant                                      ; number{ 1 }
     │  ├ !%3: number = .constant                                      ; number{ 2 }
     │  ├ !%4: number = .constant                                      ; number{ 3 }
@@ -40,7 +40,7 @@
     │  ├ !%10: i32 = .fn_call callee_entity=(%1) callee=(%0) args_list=({%6, %7, %8, %9}); i32{ 10 }
     │  └ !%11: void = .br operand=(%1)                                ; void
     ├ %13: *i32 = .alloc type=(i32) mutable=(false)                   ; *i32@0
-    ├ !%14: void = .store operand=(%13) payload=(%1)                  ; void
+    ├ %14: void = .store operand=(%13) payload=(%1)                   ; void
     ├ !%15: number = .constant                                        ; number{ 1 }
     ├ !%16: number = .constant                                        ; number{ 2 }
     ├ !%17: number = .constant                                        ; number{ 3 }
@@ -53,13 +53,13 @@
     ├ !%24: type = .typeof operand=(%23)                              ; type(i32)
     ├ %25: *i32 = .alloc type=(i32) mutable=(false)                   ; *i32@4
     ├ %26: void = .store operand=(%25) payload=(%23)                  ; void
-    ├ !%27: number = .block: [%28-%31]                                ; number{ 5 }
+    ├ %27: number = .block: [%28-%31]                                 ; number{ 5 }
     │  ├ !%28: number = .constant                                     ; number{ 2 }
     │  ├ !%29: number = .constant                                     ; number{ 3 }
     │  ├ !%30: number = .constant                                     ; number{ 5 }
     │  └ !%31: void = .br operand=(%27)                               ; void
     ├ %33: *number = .alloc type=(number) mutable=(false)             ; *number@8
-    └ !%34: void = .store operand=(%33) payload=(%27)                 ; void
+    └ %34: void = .store operand=(%33) payload=(%27)                  ; void
 
 %2 = fn @"comptime/simple.sk::add"(i32, i32) -> i32
  └ %0: void = .block: [%1-%8]                                         ; void

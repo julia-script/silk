@@ -19,7 +19,8 @@
 		"dev:ts": "tsc --watch",
 		"wasm:dump": "wasm2wat ./dist/bin/lang.wasm",
 		"gen:types": "zig run ./generate_types.zig",
-		"c:playground": "clang --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export=playground -o ./.tmp/c-playground.wasm c-playground.c && clang --target=wasm32 -O0 -S -emit-llvm c-playground.c -o ./.tmp/c-playground.ll && wasm2wat ./.tmp/c-playground.wasm -o ./.tmp/c-playground.wat"
+		"c:playground": "clang --target=wasm32 -nostdlib -Wl,--no-entry -Wl,--export=playground -o ./.tmp/c-playground.wasm c-playground.c && clang --target=wasm32 -O0 -S -emit-llvm c-playground.c -o ./.tmp/c-playground.ll && wasm2wat ./.tmp/c-playground.wasm -o ./.tmp/c-playground.wat",
+		"rust:playground": "rustc --target=wasm32-unknown-unknown -C opt-level=0 -o ./.tmp/rust-playground.wasm rust-playground.rs && rustc --target=wasm32-unknown-unknown -C opt-level=0 -o ./.tmp/rust-playground.ll rust-playground.rs --emit llvm-ir && wasm2wat ./.tmp/rust-playground.wasm -o ./.tmp/rust-playground.wat"
 	},
 	"type": "module"
 }

@@ -547,6 +547,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             },
             inline .string_literal,
             .number_literal,
+            .char_literal,
             .keyword_true,
             .keyword_false,
             .keyword_number,
@@ -575,6 +576,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 const tag: Node.Tag = comptime switch (token_tag) {
                     .string_literal => .string_literal,
                     .number_literal => .number_literal,
+                    .char_literal => .char_literal,
                     .keyword_false => .false_literal,
                     .keyword_true => .true_literal,
                     .keyword_number => .ty_number,

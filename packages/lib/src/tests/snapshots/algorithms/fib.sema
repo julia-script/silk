@@ -2,7 +2,7 @@
 ;; 1 declarations
 ;; 5 entities
 ;; 1 symbols
-;; 48 instructions
+;; 50 instructions
 ;; 6 values
 ;; 2 types
 ;; 1 lists
@@ -10,52 +10,54 @@
 ;; 0/0 comptime memory used/allocated bytes
 
 %0 = pub fn @"algorithms/fib.sk::fib"(i32) -> i32
- └ %0: void = .block: [%1-%47]                                        ; void
+ └ %0: void = .block: [%1-%49]                                        ; void
     ├ %1: i32 = .param index=(%0)                                     ; i32{ [runtime] }
-    ├ %2: number = .constant                                          ; number{ 0 }
+    ├ !%2: number = .constant                                         ; number{ 0 }
     ├ !%3: type = .type                                               ; type(i32)
     ├ %4: *i32 = .alloc type=(i32) mutable=(true)                     ; *i32[runtime]
-    ├ %5: void = .store operand=(%4) payload=(%2)                     ; void
-    ├ %6: number = .constant                                          ; number{ 1 }
-    ├ !%7: type = .type                                               ; type(i32)
-    ├ %8: *i32 = .alloc type=(i32) mutable=(true)                     ; *i32[runtime]
-    ├ %9: void = .store operand=(%8) payload=(%6)                     ; void
-    ├ %10: i32 = .param_get operand=(%1)                              ; i32{ [runtime] }
-    ├ !%11: number = .constant                                        ; number{ 0 }
-    ├ %12: i32 = .constant                                            ; i32{ 0 }
-    ├ %13: bool = .gt lhs=(%10) rhs=(%12)                             ; bool{ [runtime] }
-    ├ %14: if (%13) then: [%15-%43]
-    │  └ %15: void = .block: [%16-%43]                                ; void
-    │     ├ %16 loop: [%17-%39]
-    │     │  └ %17: void = .block: [%18-%39]                          ; void
-    │     │     ├ %18: i32 = .param_get operand=(%1)                  ; i32{ [runtime] }
-    │     │     ├ !%19: number = .constant                            ; number{ 1 }
-    │     │     ├ %20: i32 = .constant                                ; i32{ 1 }
-    │     │     ├ %21: bool = .gt lhs=(%18) rhs=(%20)                 ; bool{ [runtime] }
-    │     │     └ %22: if (%21) then: [%23-%39]
-    │     │        └ %23: void = .block: [%24-%39]                    ; void
-    │     │           ├ %24: i32 = .load operand=(%4)                 ; i32{ [runtime] }
-    │     │           ├ %25: i32 = .load operand=(%8)                 ; i32{ [runtime] }
-    │     │           ├ %26: i32 = .add lhs=(%24) rhs=(%25)           ; i32{ [runtime] }
-    │     │           ├ !%27: type = .type                            ; type(i32)
-    │     │           ├ %28: *i32 = .alloc type=(i32) mutable=(true)  ; *i32[runtime]
-    │     │           ├ %29: void = .store operand=(%28) payload=(%26); void
-    │     │           ├ %30: i32 = .load operand=(%8)                 ; i32{ [runtime] }
-    │     │           ├ %31: void = .store operand=(%4) payload=(%30) ; void
-    │     │           ├ %32: i32 = .load operand=(%28)                ; i32{ [runtime] }
-    │     │           ├ %33: void = .store operand=(%8) payload=(%32) ; void
-    │     │           ├ %34: i32 = .param_get operand=(%1)            ; i32{ [runtime] }
-    │     │           ├ !%35: number = .constant                      ; number{ 1 }
-    │     │           ├ %36: i32 = .constant                          ; i32{ 1 }
-    │     │           ├ %37: i32 = .sub lhs=(%34) rhs=(%36)           ; i32{ [runtime] }
-    │     │           ├ %38: void = .param_set operand=(%1) payload=(%37); void
-    │     │           └ %39: void = .br operand=(%16)                 ; void
-    │     ├ %40: i32 = .load operand=(%8)                             ; i32{ [runtime] }
-    │     ├ !%41: type = .type                                        ; type(i32)
-    │     ├ %42: i32 = .cast operand=(%40)                            ; i32{ [runtime] }
-    │     └ %43: void = .ret maybe_operand=(%42)                      ; void
-    ├ %44: i32 = .load operand=(%4)                                   ; i32{ [runtime] }
-    ├ !%45: type = .type                                              ; type(i32)
-    ├ %46: i32 = .cast operand=(%44)                                  ; i32{ [runtime] }
-    └ %47: void = .ret maybe_operand=(%46)                            ; void
+    ├ %5: i32 = .constant                                             ; i32{ 0 }
+    ├ %6: void = .store operand=(%4) payload=(%5)                     ; void
+    ├ !%7: number = .constant                                         ; number{ 1 }
+    ├ !%8: type = .type                                               ; type(i32)
+    ├ %9: *i32 = .alloc type=(i32) mutable=(true)                     ; *i32[runtime]
+    ├ %10: i32 = .constant                                            ; i32{ 1 }
+    ├ %11: void = .store operand=(%9) payload=(%10)                   ; void
+    ├ %12: i32 = .param_get operand=(%1)                              ; i32{ [runtime] }
+    ├ !%13: number = .constant                                        ; number{ 0 }
+    ├ %14: i32 = .constant                                            ; i32{ 0 }
+    ├ %15: bool = .gt lhs=(%12) rhs=(%14)                             ; bool{ [runtime] }
+    ├ %16: if (%15) then: [%17-%45]
+    │  └ %17: void = .block: [%18-%45]                                ; void
+    │     ├ %18 loop: [%19-%41]
+    │     │  └ %19: void = .block: [%20-%41]                          ; void
+    │     │     ├ %20: i32 = .param_get operand=(%1)                  ; i32{ [runtime] }
+    │     │     ├ !%21: number = .constant                            ; number{ 1 }
+    │     │     ├ %22: i32 = .constant                                ; i32{ 1 }
+    │     │     ├ %23: bool = .gt lhs=(%20) rhs=(%22)                 ; bool{ [runtime] }
+    │     │     └ %24: if (%23) then: [%25-%41]
+    │     │        └ %25: void = .block: [%26-%41]                    ; void
+    │     │           ├ %26: i32 = .load operand=(%4)                 ; i32{ [runtime] }
+    │     │           ├ %27: i32 = .load operand=(%9)                 ; i32{ [runtime] }
+    │     │           ├ %28: i32 = .add lhs=(%26) rhs=(%27)           ; i32{ [runtime] }
+    │     │           ├ !%29: type = .type                            ; type(i32)
+    │     │           ├ %30: *i32 = .alloc type=(i32) mutable=(true)  ; *i32[runtime]
+    │     │           ├ %31: void = .store operand=(%30) payload=(%28); void
+    │     │           ├ %32: i32 = .load operand=(%9)                 ; i32{ [runtime] }
+    │     │           ├ %33: void = .store operand=(%4) payload=(%32) ; void
+    │     │           ├ %34: i32 = .load operand=(%30)                ; i32{ [runtime] }
+    │     │           ├ %35: void = .store operand=(%9) payload=(%34) ; void
+    │     │           ├ %36: i32 = .param_get operand=(%1)            ; i32{ [runtime] }
+    │     │           ├ !%37: number = .constant                      ; number{ 1 }
+    │     │           ├ %38: i32 = .constant                          ; i32{ 1 }
+    │     │           ├ %39: i32 = .sub lhs=(%36) rhs=(%38)           ; i32{ [runtime] }
+    │     │           ├ %40: void = .param_set operand=(%1) payload=(%39); void
+    │     │           └ %41: void = .br operand=(%18)                 ; void
+    │     ├ %42: i32 = .load operand=(%9)                             ; i32{ [runtime] }
+    │     ├ !%43: type = .type                                        ; type(i32)
+    │     ├ %44: i32 = .cast operand=(%42)                            ; i32{ [runtime] }
+    │     └ %45: void = .ret maybe_operand=(%44)                      ; void
+    ├ %46: i32 = .load operand=(%4)                                   ; i32{ [runtime] }
+    ├ !%47: type = .type                                              ; type(i32)
+    ├ %48: i32 = .cast operand=(%46)                                  ; i32{ [runtime] }
+    └ %49: void = .ret maybe_operand=(%48)                            ; void
 

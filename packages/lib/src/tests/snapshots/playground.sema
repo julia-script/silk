@@ -1,11 +1,18 @@
 ;; Sema
-;; 0 declarations
-;; 1 entities
-;; 0 symbols
-;; 0 instructions
-;; 0 values
-;; 0 types
+;; 1 declarations
+;; 3 entities
+;; 1 symbols
+;; 5 instructions
+;; 4 values
+;; 3 types
 ;; 0 lists
-;; 1 strings
-;; 0/0 comptime memory used/allocated bytes
+;; 6 strings
+;; 30/38 comptime memory used/allocated bytes
+
+%0 = fn @"playground.sk::main"() -> void
+ └ %0: void = .block: [%1-%4]                                         ; void
+    ├ %1: [15]bchar = .constant                                       ; todo_complex(1)
+    ├ !%2: type = .typeof operand=(%1)                                ; type([15]bchar)
+    ├ %3: *[15]bchar = .alloc type=([15]bchar) mutable=(false)        ; *[15]bchar@f
+    └ %4: void = .store operand=(%3) payload=(%1)                     ; void
 

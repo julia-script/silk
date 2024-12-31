@@ -46,7 +46,7 @@ pub const Hasher = struct {
         const T = @TypeOf(value);
         switch (@typeInfo(T)) {
             .pointer => {
-                self.hasher.update(std.mem.asBytes(value));
+                self.hasher.update(value);
             },
             else => {
                 self.hasher.update(std.mem.asBytes(&value));
@@ -180,7 +180,7 @@ pub const Builder = struct {
         }
     }
 
-    pub fn getSimpletTypeSize(self: *Builder, simple: Sema.Type.Simple) u32 {
+    pub fn getSimpleTypeSize(self: *Builder, simple: Sema.Type.Simple) u32 {
         _ = self; // autofix
         return switch (simple) {
             .bool => 1,
@@ -203,7 +203,7 @@ pub const Builder = struct {
     }
     pub fn getTypeSize(self: *Builder, key: Sema.Type.Key) u32 {
         switch (key) {
-            .simple => |simple| return self.getSimpletTypeSize(simple),
+            .simple => |simple| return self.getSimpleTypeSize(simple),
             .complex => |complex| return self.sema.types.entries.items(.value)[complex].size,
         }
     }
@@ -320,6 +320,24 @@ pub const Builder = struct {
             },
         }
     }
+    pub fn maybeGetChildType(self: *Builder, type_key: Sema.Type.Key) ?Sema.Type.Key {
+        const ty = self.getType(type_key) orelse return null;
+        return switch (ty.data) {
+            .pointer => |pointer| pointer.child,
+            .slice => |slice| slice.child,
+            // .array => |array| array.child,
+
+            else => null,
+        };
+    }
+    pub fn maybeGetPointer(self: *Builder, typed_value: Sema.TypedValue) ?u32 {
+        const value = self.getValue(typed_value.value) orelse return null;
+        return switch (value.data) {
+            .integer => |integer| @intCast(integer),
+            .slice => |slice| if (slice.ptr.isComptimeKnown()) self.getNumberValueKeyAs(u32, slice.ptr) else null,
+            else => null,
+        };
+    }
 
     fn getTypeKeyHash(self: *Builder, type_key: Sema.Type.Key) u64 {
         switch (type_key) {
@@ -405,7 +423,7 @@ pub const Builder = struct {
                             child_ty.size,
                         };
                     }
-                    const child_alignment = self.getSimpletTypeSize(array.child.simple);
+                    const child_alignment = self.getSimpleTypeSize(array.child.simple);
                     break :blk .{
                         child_alignment,
                         child_alignment,
@@ -423,7 +441,7 @@ pub const Builder = struct {
             .pointer => |pointer| {
                 var hasher = Hasher.new("pointer");
                 hasher.update(self.getTypeKeyHash(pointer.child));
-                const alignment = self.getSimpletTypeSize(.usize);
+                const alignment = self.getSimpleTypeSize(.usize);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -435,7 +453,7 @@ pub const Builder = struct {
                 var hasher = Hasher.new("slice");
                 hasher.update(self.getTypeKeyHash(slice.child));
 
-                const alignment = self.getSimpletTypeSize(.usize);
+                const alignment = self.getSimpleTypeSize(.usize);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -665,6 +683,15 @@ pub const Builder = struct {
                 var hasher = Hasher.new("slice-value");
                 hasher.update(self.getValueKeyHash(slice.ptr));
                 hasher.update(self.getValueKeyHash(slice.len));
+                return try self.internValue(.{
+                    .hash = hasher.final(),
+                    .data = data,
+                });
+            },
+            .string_literal => |string_literal| {
+                var hasher = Hasher.new("string_literal");
+                const slice = self.sema.strings.getSlice(string_literal);
+                hasher.update(slice);
                 return try self.internValue(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -1027,7 +1054,7 @@ pub const Builder = struct {
     }
     pub fn getComplexType(self: *Builder, type_key: anytype) *Sema.Type {
         const index = switch (@TypeOf(type_key)) {
-            Sema.Type.Key => type_key,
+            Sema.Type.Key => type_key.complex,
             usize => type_key,
             else => @compileError("not a complex type"),
         };
@@ -1819,7 +1846,7 @@ pub const Entity = struct {
                 if (self.builder.getType(ty)) |field_ty| {
                     break :blk .{ field_ty.size, field_ty.alignment };
                 } else {
-                    const simple_size = self.builder.getSimpletTypeSize(ty.simple);
+                    const simple_size = self.builder.getSimpleTypeSize(ty.simple);
                     break :blk .{ simple_size, simple_size };
                 }
             };
@@ -2058,8 +2085,8 @@ const Scope = struct {
     pub fn pushInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index, instruction: Sema.Instruction) Error!Sema.Instruction.Index {
         const index = self.instructions.items.len;
         // std.debug.print("pushInstruction: {d} -> {d} {s}\n", .{ hir_inst_index, index, @tagName(instruction.op) });
-        // try self.builder.sema.formatInstruction(std.io.getStdErr().writer().any(), .{ .instruction = instruction });
-        // std.debug.print("\n", .{});
+        try self.builder.sema.formatInstruction(std.io.getStdErr().writer().any(), .{ .instruction = instruction });
+        std.debug.print("\n", .{});
         try self.instructions.append(self.arena.allocator(), instruction);
         try self.instructions_by_hir_inst.put(self.arena.allocator(), hir_inst_index, index);
         return index;
@@ -2129,7 +2156,11 @@ const Scope = struct {
             // .builtin_get => self.handleBuiltinGetInstruction(hir_inst_index),
 
             .builtin_global_get => self.handleBuiltinGlobalGetInstruction(hir_inst_index),
-            .comptime_number, .comptime_boolean, .string_literal => self.handleConstantInstruction(hir_inst_index),
+            .comptime_number,
+            .comptime_boolean,
+            .string_literal,
+            .char_literal,
+            => self.handleConstantInstruction(hir_inst_index),
             // .string_literal => self.handleStringLiteralInstruction(hir_inst_index),
 
             .constant_int => self.handleConstantIntInstruction(hir_inst_index),
@@ -2555,18 +2586,29 @@ const Scope = struct {
                 const slice = self.entity.getHir().ast.getNodeSlice(ast_node.node);
 
                 const pointer = try self.builder.sema.memory.alloc(Sema.Type.simple(.bchar), @intCast(slice.len));
-                self.builder.sema.memory.storeAt([]const u8, pointer, slice);
+                _ = pointer; // autofix
+
                 return self.pushInstruction(hir_inst_index, .{
                     .op = .constant,
-                    .type = try self.builder.internTypeData(.{ .slice = .{
+
+                    .type = try self.builder.internTypeData(.{ .array = .{
                         .child = Sema.Type.simple(.bchar),
+                        .len = @intCast(slice.len),
                     } }),
-                    .value = try self.builder.internValueData(.{
-                        .slice = .{
-                            .ptr = try self.builder.internValueData(.{ .integer = @intCast(pointer) }),
-                            .len = try self.builder.internValueData(.{ .integer = @intCast(slice.len) }),
-                        },
-                    }),
+                    .value = try self.builder.internValueData(.{ .string_literal = try self.builder.internSlice(slice) }),
+                    .data = .void,
+                });
+            },
+            .char_literal => |ast_node| {
+                var slice = self.entity.getHir().ast.getNodeSlice(ast_node.node);
+                slice = slice[0 .. slice.len - 1];
+                const char = std.unicode.utf8Decode(slice[0 .. slice.len - 1]) catch {
+                    std.debug.panic("invalid char literal: {s}", .{slice});
+                };
+                return self.pushInstruction(hir_inst_index, .{
+                    .op = .constant,
+                    .type = Sema.Type.simple(.number),
+                    .value = try self.builder.internValueData(.{ .integer = @intCast(char) }),
                     .data = .void,
                 });
             },
@@ -2808,10 +2850,28 @@ const Scope = struct {
         try writer.writeAll("\n");
         @panic("TODO");
     }
-    pub fn getInstructionAsType(self: *Scope, hir_inst_index: Hir.Inst.Index, type_index: Sema.Type.Key) Error!Sema.Instruction.Index {
+    pub fn getInstructionAsType(self: *Scope, hir_inst_index: Hir.Inst.Index, instruction_index: Sema.Instruction.Index, type_index: Sema.Type.Key) Error!Sema.Instruction.Index {
         const trace = self.builder.tracer.begin(
             @src(),
-            .{ "getInstructionAsType", "Scope.getInstructionAsType({s})", .{
+            .{ "getInstructionAsType", "Scope.getInstructionAsType", .{} },
+            .{
+                .before = self.instructions.items,
+            },
+        );
+        defer trace.end(.{
+            .instructions = self.instructions.items,
+        });
+
+        return (try self.pushMaybeCastInstructionToType(
+            hir_inst_index,
+            instruction_index,
+            type_index,
+        )) orelse instruction_index;
+    }
+    pub fn getInstructionAsTypeByHirInst(self: *Scope, hir_inst_index: Hir.Inst.Index, type_index: Sema.Type.Key) Error!Sema.Instruction.Index {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "getInstructionAsTypeByHirInst", "Scope.getInstructionAsTypeByHirInst({s})", .{
                 try formatHirIndex(self.entity.getHir(), hir_inst_index),
             } },
             .{
@@ -2911,7 +2971,7 @@ const Scope = struct {
                 const ty_array = hir_inst.ty_array;
                 const type_inst_id = self.getInstructionIndex(ty_array.type);
                 const type_inst = self.getInstruction(type_inst_id);
-                const size_inst_id = try self.getInstructionAsType(ty_array.size, Sema.Type.simple(.usize));
+                const size_inst_id = try self.getInstructionAsTypeByHirInst(ty_array.size, Sema.Type.simple(.usize));
                 const size_inst = self.getInstruction(size_inst_id);
                 const size = size_inst.value;
                 // const size_value = self.builder.getValue(size) orelse std.debug.panic("Error: size_value is not a number", .{});
@@ -2983,18 +3043,15 @@ const Scope = struct {
 
         const type_to_alloc = self.builder.unwrapTypeValue(type_inst.value);
 
-        if (self.builder.getType(type_to_alloc)) |type_| {
-            switch (type_.data) {
+        switch (type_to_alloc) {
+            .complex => |complex| switch (self.builder.getComplexType(complex).data) {
                 .array => |array| {
                     const pointer = try self.builder.sema.memory.alloc(array.child, array.len);
-                    const value = try self.builder.internValueData(.{ .slice = .{
-                        .ptr = try self.builder.internValueData(.{ .integer = @intCast(pointer) }),
-                        .len = try self.builder.internValueData(.{ .integer = @intCast(array.len) }),
-                    } });
+                    const value = try self.builder.internValueData(.{ .integer = @intCast(pointer) });
 
                     const ty = try self.builder.internTypeData(.{
-                        .slice = .{
-                            .child = array.child,
+                        .pointer = .{
+                            .child = type_to_alloc,
                         },
                     });
                     return try self.pushInstruction(hir_inst_index, .{
@@ -3002,16 +3059,69 @@ const Scope = struct {
                         .type = ty,
                         .value = value,
                         .data = .{ .alloc = .{
-                            .type = try self.builder.internTypeData(.{ .array = .{
-                                .child = array.child,
-                                .len = array.len,
-                            } }),
+                            .type = type_to_alloc,
                             .mutable = hir_inst.alloc.mutable,
                         } },
                     });
                 },
+                // .slice => |slice| {
+                //     _ = slice; // autofix
+
+                //     return try self.pushInstruction(hir_inst_index, .{
+                //         .op = .alloc,
+                //         .type = type_to_alloc,
+                //         .value = try self.builder.internValueData(.{ .slice = .{
+                //             .ptr = Sema.Value.simple(.exec_time),
+                //             .len = Sema.Value.simple(.exec_time),
+                //         } }),
+                //         .data = .{ .alloc = .{
+                //             .type = type_to_alloc,
+                //             .mutable = hir_inst.alloc.mutable,
+                //         } },
+                //     });
+                // },
+                // .string_literal => |string_literal| {
+                //     const slice = self.builder.sema.strings.getSlice(string_literal);
+                //     const pointer = try self.builder.sema.memory.alloc(slice, slice.len);
+                //     const value = try self.builder.internValueData(.{ .integer = @intCast(pointer) });
+
+                //     const ty = try self.builder.internTypeData(.{
+                //         .pointer = .{
+                //             .child = type_to_alloc,
+                //         },
+                //     });
+                //     return try self.pushInstruction(hir_inst_index, .{
+                //         .op = .alloc,
+                //         .type = ty,
+                //         .value = value,
+                //         .data = .{ .alloc = .{
+                //             .type = type_to_alloc,
+                //             .mutable = hir_inst.alloc.mutable,
+                //         } },
+                //     });
+                // },
                 else => {},
-            }
+            },
+            .simple => |simple| switch (simple) {
+                // .string_literal =>  {
+                //     // const value = self.builder.getComplexValue(in);
+                //     // const slice = self.builder.sema.strings.getSlice(string_literal);
+                //     _ = slice; // autofix
+                //     // const pointer = try self.builder.sema.memory.alloc(slice, slice.len);
+                //     // const value = try self.builder.internValueData(.{ .integer = @intCast(pointer) });
+                //     std.debug.panic("not implemented: handleAllocInstruction string_literal", .{});
+                //     return try self.pushInstruction(hir_inst_index, .{
+                //         .op = .alloc,
+                //         .type = type_to_alloc,
+                //         .value = value,
+                //         .data = .{ .alloc = .{
+                //             .type = try se,
+                //             .mutable = hir_inst.alloc.mutable,
+                //         } },
+                //     });
+                // },
+                else => {},
+            },
         }
 
         return self.pushInstruction(hir_inst_index, .{
@@ -3152,71 +3262,296 @@ const Scope = struct {
 
         const pointer_inst_index = self.getInstructionIndex(hir_inst.store.pointer);
         const pointer_inst = self.getInstruction(pointer_inst_index);
+        const pointer_type = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("unwrapped_pointer_inst is not a type", .{});
+        std.debug.print("pointer_type: {}\n", .{pointer_type});
 
-        const ptr: ?u32 = switch (pointer_inst.value) {
-            .complex => |complex| switch (self.builder.getComplexValue(complex).data) {
-                .integer => |ptr| @intCast(ptr),
-                .slice => |slice| blk: {
-                    if (slice.ptr.isComptimeKnown()) {
-                        break :blk self.builder.getNumberValueKeyAs(u32, slice.ptr);
-                    } else {
-                        break :blk null;
-                    }
+        switch (pointer_type) {
+            .complex => |complex| switch (self.builder.getComplexType(complex).data) {
+                .@"struct" => {
+                    return try self.handleStoreStruct(hir_inst_index);
                 },
-                else => null,
+                .array => {
+                    return try self.handleStoreArray(hir_inst_index);
+                },
+                else => |data| {
+                    std.debug.panic("unhandled store value: {s}", .{@tagName(data)});
+                },
             },
-            else => null,
-        };
+            .simple => |simple| switch (simple) {
+                .i8,
+                .i16,
+                .i32,
+                .i64,
 
-        // const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse {
-        //     std.debug.panic("expected type not found", .{});
+                .u8,
+                .u16,
+                .u32,
+                .u64,
+                .usize,
+
+                .f32,
+                .f64,
+                .number,
+                .bchar,
+                .bool,
+                => {
+                    const value_inst_index = try self.getInstructionAsTypeByHirInst(hir_inst.store.value, pointer_type);
+                    return try self.pushInstruction(hir_inst_index, .{
+                        .op = .store,
+                        .type = Sema.Type.simple(.void),
+                        .value = Sema.Value.simple(.void),
+                        .data = .{ .operand_payload = .{
+                            .operand = pointer_inst_index,
+                            .payload = value_inst_index,
+                        } },
+                    });
+                },
+                // .slice => |slice| {
+                //     _ = slice;
+                // },
+                else => |data| {
+                    std.debug.panic("unhandled store value: {s}", .{@tagName(data)});
+                },
+            },
+        }
+        // if (self.builder.getType(value_inst.type)) |type_| {
+        // })
+        // if (self.builder.getValue(value_inst.value)) |value| switch (value.data) {
+        //     .array_init => |array_init| {
+        //         self.markDead(value_inst_index);
+        //         const list = self.builder.sema.lists.getSlice(array_init.items_list);
+        //         const slice_type = self.builder.getType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
+        //         const element_type = slice_type.data.slice.child;
+
+        //         const element_size = self.builder.getTypeSize(element_type);
+        //         for (list, 0..) |item, i| {
+        //             self.markDead(item);
+        //             const item_inst_index = try self.pushMaybeCastInstructionToType(
+        //                 hir_inst_index,
+        //                 item,
+        //                 element_type,
+        //             ) orelse item;
+
+        //             const offset: u32 = @intCast(i * element_size);
+        //             const index_inst = try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .constant,
+        //                 .type = Sema.Type.simple(.usize),
+        //                 .value = try self.builder.internValueData(.{ .integer = @intCast(i) }),
+        //                 .data = .void,
+        //             });
+
+        //             const get_element_pointer_inst = try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .get_element_pointer,
+        //                 .type = try self.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
+        //                 .value = if (ptr) |ptr_| try self.builder.internValueData(.{ .integer = ptr_ + offset }) else Sema.Value.simple(.exec_time),
+        //                 .data = .{ .get_element_pointer = .{
+        //                     .base = pointer_inst_index,
+        //                     .index = index_inst,
+        //                 } },
+        //             });
+
+        //             _ = try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .store,
+        //                 .type = Sema.Type.simple(.void),
+        //                 .value = Sema.Value.simple(.void),
+        //                 .data = .{ .operand_payload = .{
+        //                     .operand = get_element_pointer_inst,
+        //                     .payload = item_inst_index,
+        //                 } },
+        //             });
+        //             if (ptr) |ptr_| {
+        //                 const item_value_inst = self.getInstruction(item_inst_index);
+        //                 try self.builder.sema.memory.store(element_type, ptr_ + i * element_size, item_value_inst.value);
+        //             }
+        //         }
+        //         return pointer_inst_index;
+        //     },
+        //     .type_init => |type_init| {
+        //         self.markDead(value_inst_index);
+
+        //         const list = self.builder.sema.lists.getSlice(type_init.field_init_list);
+        //         const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
+        //         const type_to_store_type = self.builder.getType(type_to_store) orelse std.debug.panic("type_to_store_type is not a type", .{});
+        //         const module = self.builder.getEntity(type_to_store_type.data.@"struct".entity);
+        //         const struct_fields = self.builder.sema.lists.getSlice(type_to_store_type.data.@"struct".fields);
+
+        //         for (list, 0..) |field_inst_index, i| {
+        //             self.markDead(field_inst_index);
+
+        //             _ = i; // autofix
+        //             const field_inst = self.getInstruction(field_inst_index);
+        //             const field_inst_value = self.builder.getValue(field_inst.value) orelse std.debug.panic("field_inst_value is not a number", .{});
+        //             const property_name_range = field_inst_value.data.field_init.field_name;
+        //             const property = module.data.module_declaration.fields.get(property_name_range) orelse unreachable;
+        //             const field_entity = self.builder.getEntity(property.entity);
+        //             const field_type = try field_entity.resolveType();
+        //             const field_value_inst_index = try self.pushMaybeCastInstructionToType(
+        //                 hir_inst_index,
+        //                 field_inst_value.data.field_init.value_inst,
+        //                 field_type,
+        //             ) orelse field_inst_index;
+
+        //             const field_offset = self.builder.getType(Sema.Type.Key.decode(struct_fields[property.index])).?.data.struct_field.offset;
+
+        //             if (ptr) |ptr_| {
+        //                 const field_value_inst = self.getInstruction(field_value_inst_index);
+        //                 try self.builder.sema.memory.store(field_type, ptr_ + field_offset, field_value_inst.value);
+        //             }
+        //             const element_pointer_inst = try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .get_element_pointer,
+        //                 .type = try self.builder.internTypeData(.{ .pointer = .{ .child = field_type } }),
+        //                 .value = if (ptr) |ptr_| try self.builder.internValueData(.{ .integer = ptr_ + field_offset }) else Sema.Value.simple(.exec_time),
+        //                 .data = .{ .get_element_pointer = .{
+        //                     .base = pointer_inst_index,
+        //                     .index = property.index,
+        //                 } },
+        //             });
+        //             _ = try self.pushInstruction(hir_inst_index, .{
+        //                 .op = .store,
+        //                 .type = Sema.Type.simple(.void),
+        //                 .value = Sema.Value.simple(.void),
+        //                 .data = .{ .operand_payload = .{
+        //                     .operand = element_pointer_inst,
+        //                     .payload = field_value_inst_index,
+        //                 } },
+        //             });
+        //         }
+        //         return pointer_inst_index;
+        //     },
+        //     .slice => {
+        //         // if (ptr) |ptr_| {
+        //         // self.markDead(value_inst_index);
+        //         // const type_to_store = self.builder.getComplexType(type_key: anytype)
+        //         // const ptr_ = try self.builder.sema.memory.dupe(value_inst.getTypedValue());
+
+        //         // liveness = 0;
+        //         return try self.pushInstruction(hir_inst_index, .{
+        //             .op = .memcpy,
+        //             .type = Sema.Type.simple(.void),
+        //             .value = Sema.Value.simple(.void),
+        //             .data = .{ .operand_payload = .{
+        //                 .operand = pointer_inst_index,
+        //                 .payload = value_inst_index,
+        //             } },
+        //         });
+        //         // }
+        //     },
+        //     .integer => {
+        //         // const value_int = self.builder.getNumberValueKeyAs(i64, value.data.integer);
+        //         const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
+        //         if (ptr) |ptr_| {
+        //             self.markDead(value_inst_index);
+        //             try self.builder.sema.memory.store(type_to_store, ptr_, value_inst.value);
+        //             liveness = 0;
+        //         }
+        //     },
+        //     .float => {
+        //         if (ptr) |ptr_| {
+        //             const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
+        //             self.markDead(value_inst_index);
+        //             try self.builder.sema.memory.store(type_to_store, ptr_, value_inst.value);
+        //             liveness = 0;
+        //         }
+        //     },
+
+        //     // .comptime_pointer => {
+        //     //     if (ptr) |ptr_| {
+        //     //         self.markDead(value_inst_index);
+        //     //         try self.builder.sema.memory.storeAt([], ptr_, value_inst.value);
+        //     //         liveness = 0;
+        //     //     }
+        //     // },
+        //     else => {
+        //         std.debug.panic("unhandled store value: {s}", .{@tagName(value.data)});
+        //     },
         // };
-        // const type_to_store = if (self.builder.isComplexValue(pointer_inst.type, .slice))
+
+        // return self.pushInstruction(hir_inst_index, .{
+        //     .op = .store,
+        //     .type = Sema.Type.simple(.void),
+        //     .value = Sema.Value.simple(.void),
+        //     .data = .{ .operand_payload = .{
+        //         .operand = pointer_inst_index,
+        //         .payload = value_inst_index,
+        //     } },
+        //     .liveness = liveness,
+        // });
+    }
+    pub fn handleStoreStruct(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = self.entity.getHirInstruction(hir_inst_index);
+        const pointer_inst_index = self.getInstructionIndex(hir_inst.store.pointer);
 
         const value_inst_index = self.getInstructionIndex(hir_inst.store.value);
         const value_inst = self.getInstruction(value_inst_index);
-        // std.debug.print("{} inst: {} {}\n", .{ hir_inst_index, value_inst, type_to_store });
 
-        // value_inst_index = try self.pushMaybeCastInstructionToType(
-        //     hir_inst_index,
-        //     value_inst_index,
-        //     type_to_store,
-        // ) orelse value_inst_index;
-
-        var liveness: u8 = 1;
-        if (self.builder.getValue(value_inst.value)) |value| switch (value.data) {
-            .array_init => |array_init| {
+        switch (value_inst.op) {
+            .type_init => {
                 self.markDead(value_inst_index);
-                const list = self.builder.sema.lists.getSlice(array_init.items_list);
-                const slice_type = self.builder.getType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
-                const element_type = slice_type.data.slice.child;
-                // const element_type = self.builder.getType(type_to_store).?.data.array.child;
-                const element_size = self.builder.getTypeSize(element_type);
-                for (list, 0..) |item, i| {
-                    self.markDead(item);
-                    const item_inst_index = try self.pushMaybeCastInstructionToType(
-                        hir_inst_index,
-                        item,
-                        element_type,
-                    ) orelse item;
+                const type_init = self.builder.getComplexValue(value_inst.value).data.type_init;
+                const list = self.builder.sema.lists.getSlice(type_init.field_init_list);
+                for (list) |field_inst_index| {
+                    _ = try self.pushSetInstructionField(hir_inst_index, pointer_inst_index, field_inst_index);
+                }
 
+                return pointer_inst_index;
+            },
+            else => {
+                std.debug.panic("unhandled store value: {s}", .{@tagName(value_inst.op)});
+            },
+        }
+    }
+    pub fn handleStoreArray(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
+        const hir_inst = self.entity.getHirInstruction(hir_inst_index);
+        const pointer_inst_index = self.getInstructionIndex(hir_inst.store.pointer);
+        const pointer_inst = self.getInstruction(pointer_inst_index);
+
+        const value_inst_index = self.getInstructionIndex(hir_inst.store.value);
+        const value_inst = self.getInstruction(value_inst_index);
+
+        switch (value_inst.op) {
+            .array_init => {
+                self.markDead(value_inst_index);
+                const array_init = self.builder.getComplexValue(value_inst.value).data.array_init;
+                const array_type = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("array_type is not a type", .{});
+                const element_type = self.builder.getComplexType(array_type).data.array.child;
+                const element_size = self.builder.getTypeSize(element_type);
+
+                const list = self.builder.sema.lists.getSlice(array_init.items_list);
+                for (list, 0..) |item_inst_index, i| {
                     const offset: u32 = @intCast(i * element_size);
                     const index_inst = try self.pushInstruction(hir_inst_index, .{
                         .op = .constant,
                         .type = Sema.Type.simple(.usize),
-                        .value = try self.builder.internValueData(.{ .integer = @intCast(i) }),
+                        .value = try self.builder.internValueData(.{ .integer = offset }),
                         .data = .void,
                     });
 
-                    const get_element_pointer_inst = try self.pushInstruction(hir_inst_index, .{
-                        .op = .get_element_pointer,
-                        .type = try self.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
-                        .value = if (ptr) |ptr_| try self.builder.internValueData(.{ .integer = ptr_ + offset }) else Sema.Value.simple(.exec_time),
-                        .data = .{ .get_element_pointer = .{
+                    const get_element_pointer_inst = blk: {
+                        const ty = try self.builder.internTypeData(.{ .pointer = .{ .child = element_type } });
+                        const data: Sema.Instruction.Data = .{ .get_element_pointer = .{
                             .base = pointer_inst_index,
                             .index = index_inst,
-                        } },
-                    });
+                        } };
+                        if (self.builder.maybeGetPointer(pointer_inst.getTypedValue())) |ptr| {
+                            const element_ptr = ptr + offset;
+
+                            // TODO: store value
+                            // _ = self.builder.sema.memory.store(element_type, element_ptr, item_inst);
+                            break :blk try self.pushInstruction(hir_inst_index, .{
+                                .op = .get_element_pointer,
+                                .type = ty,
+                                .value = try self.builder.internValueData(.{ .integer = element_ptr }),
+                                .data = data,
+                            });
+                        }
+                        break :blk try self.pushInstruction(hir_inst_index, .{
+                            .op = .get_element_pointer,
+                            .type = try self.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
+                            .value = Sema.Value.simple(.exec_time),
+                            .data = data,
+                        });
+                    };
+                    const item_inst = try self.pushMaybeCastInstructionToType(hir_inst_index, item_inst_index, element_type) orelse item_inst_index;
 
                     _ = try self.pushInstruction(hir_inst_index, .{
                         .op = .store,
@@ -3224,106 +3559,103 @@ const Scope = struct {
                         .value = Sema.Value.simple(.void),
                         .data = .{ .operand_payload = .{
                             .operand = get_element_pointer_inst,
-                            .payload = item_inst_index,
+                            .payload = item_inst,
                         } },
                     });
-                    if (ptr) |ptr_| {
-                        const item_value_inst = self.getInstruction(item_inst_index);
-                        try self.builder.sema.memory.store(element_type, ptr_ + i * element_size, item_value_inst.value);
-                    }
                 }
+
                 return pointer_inst_index;
             },
-            .type_init => |type_init| {
-                self.markDead(value_inst_index);
 
-                const list = self.builder.sema.lists.getSlice(type_init.field_init_list);
+            .constant => {
+                // self.markDeadIfComptimeKnown(value_inst_index);
                 const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
-                const type_to_store_type = self.builder.getType(type_to_store) orelse std.debug.panic("type_to_store_type is not a type", .{});
-                const module = self.builder.getEntity(type_to_store_type.data.@"struct".entity);
-                const struct_fields = self.builder.sema.lists.getSlice(type_to_store_type.data.@"struct".fields);
-
-                for (list, 0..) |field_inst_index, i| {
-                    self.markDead(field_inst_index);
-
-                    _ = i; // autofix
-                    const field_inst = self.getInstruction(field_inst_index);
-                    const field_inst_value = self.builder.getValue(field_inst.value) orelse std.debug.panic("field_inst_value is not a number", .{});
-                    const property_name_range = field_inst_value.data.field_init.field_name;
-                    const property = module.data.module_declaration.fields.get(property_name_range) orelse unreachable;
-                    const field_entity = self.builder.getEntity(property.entity);
-                    const field_type = try field_entity.resolveType();
-                    const field_value_inst_index = try self.pushMaybeCastInstructionToType(
-                        hir_inst_index,
-                        field_inst_value.data.field_init.value_inst,
-                        field_type,
-                    ) orelse field_inst_index;
-
-                    const field_offset = self.builder.getType(Sema.Type.Key.decode(struct_fields[property.index])).?.data.struct_field.offset;
-
-                    if (ptr) |ptr_| {
-                        const field_value_inst = self.getInstruction(field_value_inst_index);
-                        try self.builder.sema.memory.store(field_type, ptr_ + field_offset, field_value_inst.value);
-                    }
-                    const element_pointer_inst = try self.pushInstruction(hir_inst_index, .{
-                        .op = .get_element_pointer,
-                        .type = try self.builder.internTypeData(.{ .pointer = .{ .child = field_type } }),
-                        .value = if (ptr) |ptr_| try self.builder.internValueData(.{ .integer = ptr_ + field_offset }) else Sema.Value.simple(.exec_time),
-                        .data = .{ .get_element_pointer = .{
-                            .base = pointer_inst_index,
-                            .index = property.index,
-                        } },
-                    });
-                    _ = try self.pushInstruction(hir_inst_index, .{
-                        .op = .store,
-                        .type = Sema.Type.simple(.void),
-                        .value = Sema.Value.simple(.void),
-                        .data = .{ .operand_payload = .{
-                            .operand = element_pointer_inst,
-                            .payload = field_value_inst_index,
-                        } },
-                    });
-                }
-                return pointer_inst_index;
+                const value_to_store_inst = try self.getInstructionAsTypeByHirInst(hir_inst.store.value, type_to_store);
+                // const value_inst = self.getInstruction(value_inst_index)
+                // const constant_inst_value = self.builder.getValue(constant_inst.value) orelse std.debug.panic("constant_inst_value is not a number", .{});
+                // const constant_inst_value_int = self.builder.getNumberValueKeyAs(i64, constant_inst_value.value);
+                // try self.builder.sema.memory.store(element_type, element_ptr, constant_inst_value_int);
+                // TODO: store values in mem
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .store,
+                    .type = Sema.Type.simple(.void),
+                    .value = Sema.Value.simple(.void),
+                    .data = .{ .operand_payload = .{
+                        .operand = pointer_inst_index,
+                        .payload = value_to_store_inst,
+                    } },
+                });
             },
-            .integer => {
-                // const value_int = self.builder.getNumberValueKeyAs(i64, value.data.integer);
-                const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
-                if (ptr) |ptr_| {
-                    self.markDead(value_inst_index);
-                    try self.builder.sema.memory.store(type_to_store, ptr_, value_inst.value);
-                    liveness = 0;
-                }
-            },
-            .float => {
-                if (ptr) |ptr_| {
-                    const type_to_store = self.builder.unwrapPointerType(pointer_inst.type) orelse std.debug.panic("type_to_store is not a type", .{});
-                    self.markDead(value_inst_index);
-                    try self.builder.sema.memory.store(type_to_store, ptr_, value_inst.value);
-                    liveness = 0;
-                }
-            },
-            // .comptime_pointer => {
-            //     if (ptr) |ptr_| {
-            //         self.markDead(value_inst_index);
-            //         try self.builder.sema.memory.storeAt([], ptr_, value_inst.value);
-            //         liveness = 0;
-            //     }
-            // },
             else => {
-                std.debug.panic("unhandled store value: {s}", .{@tagName(value.data)});
+                std.debug.panic("unhandled store value: {s}", .{@tagName(value_inst.op)});
             },
+        }
+    }
+
+    pub fn pushSetInstructionField(
+        self: *Scope,
+        hir_inst_index: Hir.Inst.Index,
+        struct_inst_index: Sema.Instruction.Index,
+        field_inst_index: Sema.Instruction.Index,
+    ) Error!Sema.Instruction.Index {
+        const struct_inst = self.getInstruction(struct_inst_index);
+
+        const struct_unwrapped_pointer_type_key = self.builder.unwrapPointerType(struct_inst.type) orelse std.debug.panic("struct_unwrapped_pointer_type is not a type", .{});
+        const struct_type = self.builder.getType(struct_unwrapped_pointer_type_key) orelse std.debug.panic("type_to_store is not a type", .{});
+
+        const module = self.builder.getEntity(struct_type.data.@"struct".entity);
+        const field_init_inst = self.getInstruction(field_inst_index);
+        const field_init_inst_value = self.builder.getValue(field_init_inst.value) orelse std.debug.panic("field_init_inst_value is not a number", .{});
+        const property_name_range = field_init_inst_value.data.field_init.field_name;
+        self.markDead(field_inst_index);
+
+        const property = module.data.module_declaration.fields.get(property_name_range) orelse unreachable;
+
+        const field_entity = self.builder.getEntity(property.entity);
+        const field_type = try field_entity.resolveType();
+        const field_value_inst_index = try self.pushMaybeCastInstructionToType(
+            hir_inst_index,
+            field_init_inst_value.data.field_init.value_inst,
+            field_type,
+        ) orelse field_inst_index;
+        const struct_fields = self.builder.sema.lists.getSlice(struct_type.data.@"struct".fields);
+
+        const get_element_pointer_inst_index = blk: {
+            const ty = try self.builder.internTypeData(.{ .pointer = .{ .child = field_type } });
+            const data: Sema.Instruction.Data = .{ .get_element_pointer = .{
+                .base = struct_inst_index,
+                .index = property.index,
+            } };
+
+            // if ptr is comptime known, let's store the value
+
+            if (self.builder.maybeGetPointer(struct_inst.getTypedValue())) |ptr| {
+                const field_offset = self.builder.getType(Sema.Type.Key.decode(struct_fields[property.index])).?.data.struct_field.offset;
+                const field_value_inst = self.getInstruction(field_value_inst_index);
+                try self.builder.sema.memory.store(field_type, ptr + field_offset, field_value_inst.value);
+                break :blk try self.pushInstruction(hir_inst_index, .{
+                    .op = .get_element_pointer,
+                    .type = ty,
+                    .value = try self.builder.internValueData(.{ .integer = ptr + field_offset }),
+                    .data = data,
+                });
+            }
+            break :blk try self.pushInstruction(hir_inst_index, .{
+                .op = .get_element_pointer,
+                .type = try self.builder.internTypeData(.{ .pointer = .{ .child = field_type } }),
+                .value = Sema.Value.simple(.exec_time),
+                .data = data,
+            });
         };
 
-        return self.pushInstruction(hir_inst_index, .{
+        return try self.pushInstruction(hir_inst_index, .{
             .op = .store,
             .type = Sema.Type.simple(.void),
             .value = Sema.Value.simple(.void),
             .data = .{ .operand_payload = .{
-                .operand = pointer_inst_index,
-                .payload = value_inst_index,
+                .operand = get_element_pointer_inst_index,
+                .payload = field_value_inst_index,
             } },
-            .liveness = liveness,
         });
     }
     pub fn handleParamGetInstruction(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
@@ -3758,19 +4090,6 @@ const Scope = struct {
             });
         }
 
-        // switch (base_instruction.type) {
-        //     .array => |array_type| {
-        //         if (!std.mem.eql(u8, property_name_slice, "len")) std.debug.panic("error: array property {s} doesn't exist", .{property_name_slice});
-
-        //         return try self.pushInstruction(hir_inst_index, .{
-        //             .op = .constant,
-        //             .type = Sema.Type.simple(.usize),
-        //             .value = try self.builder.internValueData(.{ .integer = array_type.len }),
-        //             .data = .void,
-        //         });
-        //     },
-        //     else => {},
-        // }
         const unwrapped_base_type_key = self.builder.unwrapPointerType(base_instruction.type) orelse {
             std.debug.panic("unreachable: should get a pointer type {}", .{(base_instruction)});
         };
@@ -3802,16 +4121,15 @@ const Scope = struct {
         const base_index = self.getInstructionIndex(hir_inst.get_element_pointer.base);
         const base_instruction = self.getInstruction(base_index);
 
-        // const base_type_key = self.builder.unwrapPointerType(base_instruction.type) orelse {
-        //     std.debug.panic("unreachable: should get a pointer type {}", .{(base_instruction)});
-        // };
-        // const base_type = self.builder.getType(base_type_key) orelse {
-        //     std.debug.panic("unreachable: should get a base type", .{});
-        // };
-        // const element_type = base_type.data.array.child;
-        const index_inst_index = self.getInstructionIndex(hir_inst.get_element_pointer.index);
+        const index_inst_index = try self.getInstructionAsTypeByHirInst(hir_inst.get_element_pointer.index, Sema.Type.simple(.usize));
 
-        const element_type = if (self.builder.getType(base_instruction.type)) |ty| switch (ty.data) {
+        const type_to_access = if (self.builder.getType(base_instruction.type)) |ty| switch (ty.data) {
+            .array, .slice => ty,
+            .pointer => |pointer_type| self.builder.getComplexType(pointer_type.child).*,
+            else => std.debug.panic("unhandled base type: {s}", .{@tagName(ty.data)}),
+        } else std.debug.panic("unreachable: should get a base type", .{});
+
+        const element_type = switch (type_to_access.data) {
             .slice => |slice_type| {
                 const index_inst = self.getInstruction(index_inst_index);
                 return try self.pushInstruction(hir_inst_index, .{
@@ -3824,9 +4142,20 @@ const Scope = struct {
                     } },
                 });
             },
-            .pointer => |pointer_type| pointer_type.child,
-            else => std.debug.panic("unhandled base type: {s}", .{@tagName(ty.data)}),
-        } else std.debug.panic("unreachable: should get a base type", .{});
+            .array => |array_type| {
+                const index_inst = self.getInstruction(index_inst_index);
+                return try self.pushInstruction(hir_inst_index, .{
+                    .op = .get_element_pointer,
+                    .type = try self.builder.internTypeData(.{ .pointer = .{ .child = array_type.child } }),
+                    .value = index_inst.value,
+                    .data = .{ .get_element_pointer = .{
+                        .base = base_index,
+                        .index = index_inst_index,
+                    } },
+                });
+            },
+            else => std.debug.panic("unhandled base type: {s}", .{@tagName(type_to_access.data)}),
+        };
 
         const value = if (self.builder.isComplexValue(base_instruction.value, .integer)) blk: {
             if (!self.isComptimeKnown(index_inst_index)) {
@@ -3921,7 +4250,7 @@ const Scope = struct {
 
         for (args, param_types) |arg_hir_index, param_type_key| {
             const param_type = Sema.Type.Key.decode(param_type_key);
-            const arg_index = try self.getInstructionAsType(arg_hir_index, param_type);
+            const arg_index = try self.getInstructionAsTypeByHirInst(arg_hir_index, param_type);
             const arg_inst = self.getInstruction(arg_index);
             if (!arg_inst.type.isEqual(param_type) and !param_type.isEqual(try self.builder.internTypeData(.{ .any = .{} }))) {
                 std.debug.panic("error: argument type mismatch: {} != {}", .{ arg_inst.type, param_type });
@@ -4006,7 +4335,7 @@ const Scope = struct {
                 const hir_args_list = self.entity.getHirList(hir_inst.fn_call.args_list);
                 const args_list = self.builder.newList();
                 for (hir_args_list) |arg_hir_index| {
-                    const arg_inst_index = try self.getInstructionAsType(arg_hir_index, Sema.Type.simple(.any));
+                    const arg_inst_index = try self.getInstructionAsTypeByHirInst(arg_hir_index, Sema.Type.simple(.any));
                     try args_list.append(arg_inst_index);
                 }
 
