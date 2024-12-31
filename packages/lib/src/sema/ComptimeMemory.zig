@@ -17,16 +17,14 @@ pub fn deinit(self: *Self) void {
     self.memory.deinit(self.allocator);
 }
 
-// pub fn alloc(self: *ComptimeAllocator, size: usize) Pointer {
-//     const ptr = self.memory.items.len;
-//     // self.memory.items.len += size;
-//     try self.memory.ensureUnusedCapacity(self.builder.allocator, size);
-//     return Pointer{ .ptr = ptr, .len = size };
-// }
-// pub fn dealloc(self: *ComptimeAllocator, ptr: Pointer) void {
-//     self.memory.shrinkRetainingCapacity(self.memory.items.len - ptr.len);
-// }
-pub fn alloc(self: *Self, ty: Sema.Type.Key) !Sema.Value.Key {
+pub fn alloc(self: *Self, ty: Sema.Type.Key, count: u32) !u32 {
+    const pointer = self.memory.items.len;
+    const size = self.sema.builder.getTypeSize(ty);
+    _ = try self.memory.ensureUnusedCapacity(self.allocator, size * count);
+    self.memory.items.len += size * count;
+    return @intCast(pointer);
+}
+pub fn create(self: *Self, ty: Sema.Type.Key) !u32 {
     const pointer = self.memory.items.len;
     const size = self.sema.builder.getTypeSize(ty);
     _ = try self.memory.ensureUnusedCapacity(self.allocator, size);
@@ -35,7 +33,7 @@ pub fn alloc(self: *Self, ty: Sema.Type.Key) !Sema.Value.Key {
 
     // _ = self; // autofix
     // _ = ty; // autofix
-    return .{ .comptime_pointer = pointer };
+    return @intCast(pointer);
 }
 
 pub fn destroy(self: *Self, ty: Sema.Type.Key, ptr: usize) void {
@@ -61,10 +59,17 @@ fn storeType(self: *Self, T: type, ptr: usize, value: Sema.Value.Key) void {
     const bytes = std.mem.asBytes(&self.sema.builder.getNumberValueKeyAs(T, value));
     std.mem.copyForwards(u8, self.memory.items[ptr..], bytes[0..]);
 }
-pub fn store(self: *Self, ty: Sema.Type.Key, ptr: usize, value: Sema.Value.Key) !void {
-    const type_size = self.sema.builder.getTypeSize(ty);
+pub fn storeAt(self: *Self, T: type, ptr: u32, value: T) void {
+    const bytes = switch (T) {
+        []const u8 => value,
+        else => std.mem.asBytes(&value),
+    };
+    std.mem.copyForwards(u8, self.memory.items[ptr..], bytes);
+}
+pub fn store(self: *Self, type_key: Sema.Type.Key, ptr: usize, value: Sema.Value.Key) !void {
+    const type_size = self.sema.builder.getTypeSize(type_key);
     _ = type_size; // autofix
-    switch (ty) {
+    switch (type_key) {
         .simple => |simple| switch (simple) {
             .i8 => self.storeType(i8, ptr, value),
             .i16 => self.storeType(i16, ptr, value),
@@ -78,12 +83,18 @@ pub fn store(self: *Self, ty: Sema.Type.Key, ptr: usize, value: Sema.Value.Key) 
             .f64 => self.storeType(f64, ptr, value),
             .number => self.storeType(i64, ptr, value),
             .usize => self.storeType(u64, ptr, value),
-
+            .str => self.storeType(u8, ptr, value),
             else => std.debug.panic("unsupported type: {any}", .{simple}),
         },
 
-        else => {
-            std.debug.panic("unsupported type: {any}", .{ty});
+        .complex => |complex| switch (self.sema.types.entries.items(.value)[complex].data) {
+            // .string => {
+            //     const ty = self.sema.builder.getType(type_key).?;
+            //     std.debug.panic("unsupported type: {any}", .{ty});
+            // },
+            else => {
+                std.debug.panic("unsupported type: {any}", .{complex});
+            },
         },
     }
 }

@@ -11,244 +11,244 @@
 
 %0 = fn @"folding/comparison-folding.sk::fold_to_true"() -> i32
  └ %0: void = .block: [%1-%117]                                       ; void
-    ├ !%1: number = .constant                                         ; int(1)
-    ├ !%2: number = .constant                                         ; int(1)
+    ├ !%1: number = .constant                                         ; number{ 1 }
+    ├ !%2: number = .constant                                         ; number{ 1 }
     ├ %3: bool = .constant                                            ; true
-    ├ !%4: number = .constant                                         ; int(1)
-    ├ !%5: number = .constant                                         ; int(2)
+    ├ !%4: number = .constant                                         ; number{ 1 }
+    ├ !%5: number = .constant                                         ; number{ 2 }
     ├ %6: bool = .constant                                            ; true
-    ├ !%7: number = .constant                                         ; int(1)
-    ├ !%8: number = .constant                                         ; int(2)
+    ├ !%7: number = .constant                                         ; number{ 1 }
+    ├ !%8: number = .constant                                         ; number{ 2 }
     ├ %9: bool = .constant                                            ; true
-    ├ !%10: number = .constant                                        ; int(1)
-    ├ !%11: number = .constant                                        ; int(1)
+    ├ !%10: number = .constant                                        ; number{ 1 }
+    ├ !%11: number = .constant                                        ; number{ 1 }
     ├ %12: bool = .constant                                           ; true
-    ├ !%13: number = .constant                                        ; int(2)
-    ├ !%14: number = .constant                                        ; int(1)
+    ├ !%13: number = .constant                                        ; number{ 2 }
+    ├ !%14: number = .constant                                        ; number{ 1 }
     ├ %15: bool = .constant                                           ; true
-    ├ !%16: number = .constant                                        ; int(2)
-    ├ !%17: number = .constant                                        ; int(1)
+    ├ !%16: number = .constant                                        ; number{ 2 }
+    ├ !%17: number = .constant                                        ; number{ 1 }
     ├ %18: bool = .constant                                           ; true
-    ├ !%19: number = .constant                                        ; float(2.3)
-    ├ !%20: number = .constant                                        ; float(2.4)
+    ├ !%19: number = .constant                                        ; number{ 2.3 }
+    ├ !%20: number = .constant                                        ; number{ 2.4 }
     ├ %21: bool = .constant                                           ; true
-    ├ !%22: number = .constant                                        ; int(1)
-    ├ !%23: builtin_fn_as = .get_builtin_fn_as operand=(%22)          ; type(builtin_fn_as)
+    ├ !%22: number = .constant                                        ; number{ 1 }
+    ├ !%23: builtin_fn_as = .get_builtin_fn_as operand=(%22)          ; builtin_fn_as
     ├ !%24: type = .type                                              ; type(i32)
-    ├ !%25: i32 = .constant                                           ; int(1)
-    ├ !%26: number = .constant                                        ; int(2)
-    ├ !%27: builtin_fn_as = .get_builtin_fn_as operand=(%26)          ; type(builtin_fn_as)
+    ├ !%25: i32 = .constant                                           ; i32{ 1 }
+    ├ !%26: number = .constant                                        ; number{ 2 }
+    ├ !%27: builtin_fn_as = .get_builtin_fn_as operand=(%26)          ; builtin_fn_as
     ├ !%28: type = .type                                              ; type(i32)
-    ├ !%29: i32 = .constant                                           ; int(2)
+    ├ !%29: i32 = .constant                                           ; i32{ 2 }
     ├ %30: bool = .constant                                           ; true
-    ├ !%31: number = .constant                                        ; int(1)
-    ├ !%32: builtin_fn_as = .get_builtin_fn_as operand=(%31)          ; type(builtin_fn_as)
+    ├ !%31: number = .constant                                        ; number{ 1 }
+    ├ !%32: builtin_fn_as = .get_builtin_fn_as operand=(%31)          ; builtin_fn_as
     ├ !%33: type = .type                                              ; type(i32)
-    ├ !%34: i32 = .constant                                           ; int(1)
-    ├ !%35: number = .constant                                        ; int(1)
-    ├ !%36: builtin_fn_as = .get_builtin_fn_as operand=(%35)          ; type(builtin_fn_as)
+    ├ !%34: i32 = .constant                                           ; i32{ 1 }
+    ├ !%35: number = .constant                                        ; number{ 1 }
+    ├ !%36: builtin_fn_as = .get_builtin_fn_as operand=(%35)          ; builtin_fn_as
     ├ !%37: type = .type                                              ; type(i32)
-    ├ !%38: i32 = .constant                                           ; int(1)
+    ├ !%38: i32 = .constant                                           ; i32{ 1 }
     ├ %39: bool = .constant                                           ; true
-    ├ !%40: number = .constant                                        ; int(2)
-    ├ !%41: builtin_fn_as = .get_builtin_fn_as operand=(%40)          ; type(builtin_fn_as)
+    ├ !%40: number = .constant                                        ; number{ 2 }
+    ├ !%41: builtin_fn_as = .get_builtin_fn_as operand=(%40)          ; builtin_fn_as
     ├ !%42: type = .type                                              ; type(i32)
-    ├ !%43: i32 = .constant                                           ; int(2)
-    ├ !%44: number = .constant                                        ; int(2)
-    ├ !%45: builtin_fn_as = .get_builtin_fn_as operand=(%44)          ; type(builtin_fn_as)
+    ├ !%43: i32 = .constant                                           ; i32{ 2 }
+    ├ !%44: number = .constant                                        ; number{ 2 }
+    ├ !%45: builtin_fn_as = .get_builtin_fn_as operand=(%44)          ; builtin_fn_as
     ├ !%46: type = .type                                              ; type(i32)
-    ├ !%47: i32 = .constant                                           ; int(2)
+    ├ !%47: i32 = .constant                                           ; i32{ 2 }
     ├ %48: bool = .constant                                           ; true
-    ├ !%49: number = .constant                                        ; int(2)
-    ├ !%50: builtin_fn_as = .get_builtin_fn_as operand=(%49)          ; type(builtin_fn_as)
+    ├ !%49: number = .constant                                        ; number{ 2 }
+    ├ !%50: builtin_fn_as = .get_builtin_fn_as operand=(%49)          ; builtin_fn_as
     ├ !%51: type = .type                                              ; type(i32)
-    ├ !%52: i32 = .constant                                           ; int(2)
-    ├ !%53: number = .constant                                        ; int(2)
-    ├ !%54: builtin_fn_as = .get_builtin_fn_as operand=(%53)          ; type(builtin_fn_as)
+    ├ !%52: i32 = .constant                                           ; i32{ 2 }
+    ├ !%53: number = .constant                                        ; number{ 2 }
+    ├ !%54: builtin_fn_as = .get_builtin_fn_as operand=(%53)          ; builtin_fn_as
     ├ !%55: type = .type                                              ; type(i32)
-    ├ !%56: i32 = .constant                                           ; int(2)
+    ├ !%56: i32 = .constant                                           ; i32{ 2 }
     ├ %57: bool = .constant                                           ; true
-    ├ !%58: number = .constant                                        ; int(1)
-    ├ !%59: builtin_fn_as = .get_builtin_fn_as operand=(%58)          ; type(builtin_fn_as)
+    ├ !%58: number = .constant                                        ; number{ 1 }
+    ├ !%59: builtin_fn_as = .get_builtin_fn_as operand=(%58)          ; builtin_fn_as
     ├ !%60: type = .type                                              ; type(i32)
-    ├ !%61: i32 = .constant                                           ; int(1)
-    ├ !%62: number = .constant                                        ; int(2)
-    ├ !%63: builtin_fn_as = .get_builtin_fn_as operand=(%62)          ; type(builtin_fn_as)
+    ├ !%61: i32 = .constant                                           ; i32{ 1 }
+    ├ !%62: number = .constant                                        ; number{ 2 }
+    ├ !%63: builtin_fn_as = .get_builtin_fn_as operand=(%62)          ; builtin_fn_as
     ├ !%64: type = .type                                              ; type(i8)
-    ├ !%65: i8 = .constant                                            ; int(2)
-    ├ !%66: i32 = .constant                                           ; int(2)
+    ├ !%65: i8 = .constant                                            ; i8{ 2 }
+    ├ !%66: i32 = .constant                                           ; i32{ 2 }
     ├ %67: bool = .constant                                           ; true
-    ├ !%68: number = .constant                                        ; int(1)
-    ├ !%69: builtin_fn_as = .get_builtin_fn_as operand=(%68)          ; type(builtin_fn_as)
+    ├ !%68: number = .constant                                        ; number{ 1 }
+    ├ !%69: builtin_fn_as = .get_builtin_fn_as operand=(%68)          ; builtin_fn_as
     ├ !%70: type = .type                                              ; type(i8)
-    ├ !%71: i8 = .constant                                            ; int(1)
-    ├ !%72: number = .constant                                        ; int(2)
-    ├ !%73: builtin_fn_as = .get_builtin_fn_as operand=(%72)          ; type(builtin_fn_as)
+    ├ !%71: i8 = .constant                                            ; i8{ 1 }
+    ├ !%72: number = .constant                                        ; number{ 2 }
+    ├ !%73: builtin_fn_as = .get_builtin_fn_as operand=(%72)          ; builtin_fn_as
     ├ !%74: type = .type                                              ; type(i32)
-    ├ !%75: i32 = .constant                                           ; int(2)
-    ├ !%76: i32 = .constant                                           ; int(1)
+    ├ !%75: i32 = .constant                                           ; i32{ 2 }
+    ├ !%76: i32 = .constant                                           ; i32{ 1 }
     ├ %77: bool = .constant                                           ; true
-    ├ !%78: number = .constant                                        ; int(2)
-    ├ !%79: builtin_fn_as = .get_builtin_fn_as operand=(%78)          ; type(builtin_fn_as)
+    ├ !%78: number = .constant                                        ; number{ 2 }
+    ├ !%79: builtin_fn_as = .get_builtin_fn_as operand=(%78)          ; builtin_fn_as
     ├ !%80: type = .type                                              ; type(i32)
-    ├ !%81: i32 = .constant                                           ; int(2)
-    ├ !%82: number = .constant                                        ; int(1)
-    ├ !%83: builtin_fn_as = .get_builtin_fn_as operand=(%82)          ; type(builtin_fn_as)
+    ├ !%81: i32 = .constant                                           ; i32{ 2 }
+    ├ !%82: number = .constant                                        ; number{ 1 }
+    ├ !%83: builtin_fn_as = .get_builtin_fn_as operand=(%82)          ; builtin_fn_as
     ├ !%84: type = .type                                              ; type(i8)
-    ├ !%85: i8 = .constant                                            ; int(1)
-    ├ !%86: i32 = .constant                                           ; int(1)
+    ├ !%85: i8 = .constant                                            ; i8{ 1 }
+    ├ !%86: i32 = .constant                                           ; i32{ 1 }
     ├ %87: bool = .constant                                           ; true
-    ├ !%88: number = .constant                                        ; int(1)
-    ├ !%89: builtin_fn_as = .get_builtin_fn_as operand=(%88)          ; type(builtin_fn_as)
+    ├ !%88: number = .constant                                        ; number{ 1 }
+    ├ !%89: builtin_fn_as = .get_builtin_fn_as operand=(%88)          ; builtin_fn_as
     ├ !%90: type = .type                                              ; type(i8)
-    ├ !%91: i8 = .constant                                            ; int(1)
-    ├ !%92: number = .constant                                        ; int(2)
-    ├ !%93: builtin_fn_as = .get_builtin_fn_as operand=(%92)          ; type(builtin_fn_as)
+    ├ !%91: i8 = .constant                                            ; i8{ 1 }
+    ├ !%92: number = .constant                                        ; number{ 2 }
+    ├ !%93: builtin_fn_as = .get_builtin_fn_as operand=(%92)          ; builtin_fn_as
     ├ !%94: type = .type                                              ; type(i32)
-    ├ !%95: i32 = .constant                                           ; int(2)
-    ├ !%96: i32 = .constant                                           ; int(1)
+    ├ !%95: i32 = .constant                                           ; i32{ 2 }
+    ├ !%96: i32 = .constant                                           ; i32{ 1 }
     ├ %97: bool = .constant                                           ; true
-    ├ !%98: number = .constant                                        ; int(127)
-    ├ !%99: builtin_fn_as = .get_builtin_fn_as operand=(%98)          ; type(builtin_fn_as)
+    ├ !%98: number = .constant                                        ; number{ 127 }
+    ├ !%99: builtin_fn_as = .get_builtin_fn_as operand=(%98)          ; builtin_fn_as
     ├ !%100: type = .type                                             ; type(i8)
-    ├ !%101: i8 = .constant                                           ; int(127)
-    ├ !%102: number = .constant                                       ; int(128)
-    ├ !%103: builtin_fn_as = .get_builtin_fn_as operand=(%102)        ; type(builtin_fn_as)
+    ├ !%101: i8 = .constant                                           ; i8{ 127 }
+    ├ !%102: number = .constant                                       ; number{ 128 }
+    ├ !%103: builtin_fn_as = .get_builtin_fn_as operand=(%102)        ; builtin_fn_as
     ├ !%104: type = .type                                             ; type(i16)
-    ├ !%105: i16 = .constant                                          ; int(128)
-    ├ !%106: i16 = .constant                                          ; int(127)
+    ├ !%105: i16 = .constant                                          ; i16{ 128 }
+    ├ !%106: i16 = .constant                                          ; i16{ 127 }
     ├ %107: bool = .constant                                          ; true
-    ├ !%108: number = .constant                                       ; int(32767)
-    ├ !%109: builtin_fn_as = .get_builtin_fn_as operand=(%108)        ; type(builtin_fn_as)
+    ├ !%108: number = .constant                                       ; number{ 32767 }
+    ├ !%109: builtin_fn_as = .get_builtin_fn_as operand=(%108)        ; builtin_fn_as
     ├ !%110: type = .type                                             ; type(i16)
-    ├ !%111: i16 = .constant                                          ; int(32767)
-    ├ !%112: number = .constant                                       ; int(32768)
-    ├ !%113: builtin_fn_as = .get_builtin_fn_as operand=(%112)        ; type(builtin_fn_as)
+    ├ !%111: i16 = .constant                                          ; i16{ 32767 }
+    ├ !%112: number = .constant                                       ; number{ 32768 }
+    ├ !%113: builtin_fn_as = .get_builtin_fn_as operand=(%112)        ; builtin_fn_as
     ├ !%114: type = .type                                             ; type(i32)
-    ├ !%115: i32 = .constant                                          ; int(32768)
-    ├ !%116: i32 = .constant                                          ; int(32767)
+    ├ !%115: i32 = .constant                                          ; i32{ 32768 }
+    ├ !%116: i32 = .constant                                          ; i32{ 32767 }
     └ %117: bool = .constant                                          ; true
 
 %1 = fn @"folding/comparison-folding.sk::fold_to_false"() -> i32
  └ %0: void = .block: [%1-%120]                                       ; void
-    ├ !%1: number = .constant                                         ; int(1)
-    ├ !%2: number = .constant                                         ; int(2)
+    ├ !%1: number = .constant                                         ; number{ 1 }
+    ├ !%2: number = .constant                                         ; number{ 2 }
     ├ %3: bool = .constant                                            ; false
-    ├ !%4: number = .constant                                         ; int(1)
-    ├ !%5: number = .constant                                         ; int(1)
+    ├ !%4: number = .constant                                         ; number{ 1 }
+    ├ !%5: number = .constant                                         ; number{ 1 }
     ├ %6: bool = .constant                                            ; false
-    ├ !%7: number = .constant                                         ; int(1)
-    ├ !%8: number = .constant                                         ; int(1)
+    ├ !%7: number = .constant                                         ; number{ 1 }
+    ├ !%8: number = .constant                                         ; number{ 1 }
     ├ %9: bool = .constant                                            ; false
-    ├ !%10: number = .constant                                        ; int(1)
-    ├ !%11: number = .constant                                        ; int(1)
+    ├ !%10: number = .constant                                        ; number{ 1 }
+    ├ !%11: number = .constant                                        ; number{ 1 }
     ├ %12: bool = .constant                                           ; false
-    ├ !%13: number = .constant                                        ; int(2)
-    ├ !%14: number = .constant                                        ; int(1)
+    ├ !%13: number = .constant                                        ; number{ 2 }
+    ├ !%14: number = .constant                                        ; number{ 1 }
     ├ %15: bool = .constant                                           ; false
-    ├ !%16: number = .constant                                        ; int(1)
-    ├ !%17: builtin_fn_as = .get_builtin_fn_as operand=(%16)          ; type(builtin_fn_as)
+    ├ !%16: number = .constant                                        ; number{ 1 }
+    ├ !%17: builtin_fn_as = .get_builtin_fn_as operand=(%16)          ; builtin_fn_as
     ├ !%18: type = .type                                              ; type(i32)
-    ├ !%19: i32 = .constant                                           ; int(1)
-    ├ !%20: number = .constant                                        ; int(2)
-    ├ !%21: builtin_fn_as = .get_builtin_fn_as operand=(%20)          ; type(builtin_fn_as)
+    ├ !%19: i32 = .constant                                           ; i32{ 1 }
+    ├ !%20: number = .constant                                        ; number{ 2 }
+    ├ !%21: builtin_fn_as = .get_builtin_fn_as operand=(%20)          ; builtin_fn_as
     ├ !%22: type = .type                                              ; type(i32)
-    ├ !%23: i32 = .constant                                           ; int(2)
+    ├ !%23: i32 = .constant                                           ; i32{ 2 }
     ├ %24: bool = .constant                                           ; false
-    ├ !%25: number = .constant                                        ; int(1)
-    ├ !%26: builtin_fn_as = .get_builtin_fn_as operand=(%25)          ; type(builtin_fn_as)
+    ├ !%25: number = .constant                                        ; number{ 1 }
+    ├ !%26: builtin_fn_as = .get_builtin_fn_as operand=(%25)          ; builtin_fn_as
     ├ !%27: type = .type                                              ; type(i32)
-    ├ !%28: i32 = .constant                                           ; int(1)
-    ├ !%29: number = .constant                                        ; int(1)
-    ├ !%30: builtin_fn_as = .get_builtin_fn_as operand=(%29)          ; type(builtin_fn_as)
+    ├ !%28: i32 = .constant                                           ; i32{ 1 }
+    ├ !%29: number = .constant                                        ; number{ 1 }
+    ├ !%30: builtin_fn_as = .get_builtin_fn_as operand=(%29)          ; builtin_fn_as
     ├ !%31: type = .type                                              ; type(i32)
-    ├ !%32: i32 = .constant                                           ; int(1)
+    ├ !%32: i32 = .constant                                           ; i32{ 1 }
     ├ %33: bool = .constant                                           ; false
-    ├ !%34: number = .constant                                        ; int(1)
-    ├ !%35: builtin_fn_as = .get_builtin_fn_as operand=(%34)          ; type(builtin_fn_as)
+    ├ !%34: number = .constant                                        ; number{ 1 }
+    ├ !%35: builtin_fn_as = .get_builtin_fn_as operand=(%34)          ; builtin_fn_as
     ├ !%36: type = .type                                              ; type(i32)
-    ├ !%37: i32 = .constant                                           ; int(1)
-    ├ !%38: number = .constant                                        ; int(1)
-    ├ !%39: builtin_fn_as = .get_builtin_fn_as operand=(%38)          ; type(builtin_fn_as)
+    ├ !%37: i32 = .constant                                           ; i32{ 1 }
+    ├ !%38: number = .constant                                        ; number{ 1 }
+    ├ !%39: builtin_fn_as = .get_builtin_fn_as operand=(%38)          ; builtin_fn_as
     ├ !%40: type = .type                                              ; type(i32)
-    ├ !%41: i32 = .constant                                           ; int(1)
+    ├ !%41: i32 = .constant                                           ; i32{ 1 }
     ├ %42: bool = .constant                                           ; false
-    ├ !%43: number = .constant                                        ; int(2)
-    ├ !%44: builtin_fn_as = .get_builtin_fn_as operand=(%43)          ; type(builtin_fn_as)
+    ├ !%43: number = .constant                                        ; number{ 2 }
+    ├ !%44: builtin_fn_as = .get_builtin_fn_as operand=(%43)          ; builtin_fn_as
     ├ !%45: type = .type                                              ; type(i32)
-    ├ !%46: i32 = .constant                                           ; int(2)
-    ├ !%47: number = .constant                                        ; int(1)
-    ├ !%48: builtin_fn_as = .get_builtin_fn_as operand=(%47)          ; type(builtin_fn_as)
+    ├ !%46: i32 = .constant                                           ; i32{ 2 }
+    ├ !%47: number = .constant                                        ; number{ 1 }
+    ├ !%48: builtin_fn_as = .get_builtin_fn_as operand=(%47)          ; builtin_fn_as
     ├ !%49: type = .type                                              ; type(i32)
-    ├ !%50: i32 = .constant                                           ; int(1)
+    ├ !%50: i32 = .constant                                           ; i32{ 1 }
     ├ %51: bool = .constant                                           ; false
-    ├ !%52: number = .constant                                        ; int(1)
-    ├ !%53: builtin_fn_as = .get_builtin_fn_as operand=(%52)          ; type(builtin_fn_as)
+    ├ !%52: number = .constant                                        ; number{ 1 }
+    ├ !%53: builtin_fn_as = .get_builtin_fn_as operand=(%52)          ; builtin_fn_as
     ├ !%54: type = .type                                              ; type(i32)
-    ├ !%55: i32 = .constant                                           ; int(1)
-    ├ !%56: number = .constant                                        ; int(2)
-    ├ !%57: builtin_fn_as = .get_builtin_fn_as operand=(%56)          ; type(builtin_fn_as)
+    ├ !%55: i32 = .constant                                           ; i32{ 1 }
+    ├ !%56: number = .constant                                        ; number{ 2 }
+    ├ !%57: builtin_fn_as = .get_builtin_fn_as operand=(%56)          ; builtin_fn_as
     ├ !%58: type = .type                                              ; type(i32)
-    ├ !%59: i32 = .constant                                           ; int(2)
+    ├ !%59: i32 = .constant                                           ; i32{ 2 }
     ├ %60: bool = .constant                                           ; false
-    ├ !%61: number = .constant                                        ; int(1)
-    ├ !%62: builtin_fn_as = .get_builtin_fn_as operand=(%61)          ; type(builtin_fn_as)
+    ├ !%61: number = .constant                                        ; number{ 1 }
+    ├ !%62: builtin_fn_as = .get_builtin_fn_as operand=(%61)          ; builtin_fn_as
     ├ !%63: type = .type                                              ; type(i32)
-    ├ !%64: i32 = .constant                                           ; int(1)
-    ├ !%65: number = .constant                                        ; int(2)
-    ├ !%66: builtin_fn_as = .get_builtin_fn_as operand=(%65)          ; type(builtin_fn_as)
+    ├ !%64: i32 = .constant                                           ; i32{ 1 }
+    ├ !%65: number = .constant                                        ; number{ 2 }
+    ├ !%66: builtin_fn_as = .get_builtin_fn_as operand=(%65)          ; builtin_fn_as
     ├ !%67: type = .type                                              ; type(i8)
-    ├ !%68: i8 = .constant                                            ; int(2)
-    ├ !%69: i32 = .constant                                           ; int(2)
+    ├ !%68: i8 = .constant                                            ; i8{ 2 }
+    ├ !%69: i32 = .constant                                           ; i32{ 2 }
     ├ %70: bool = .constant                                           ; false
-    ├ !%71: number = .constant                                        ; int(1)
-    ├ !%72: builtin_fn_as = .get_builtin_fn_as operand=(%71)          ; type(builtin_fn_as)
+    ├ !%71: number = .constant                                        ; number{ 1 }
+    ├ !%72: builtin_fn_as = .get_builtin_fn_as operand=(%71)          ; builtin_fn_as
     ├ !%73: type = .type                                              ; type(i8)
-    ├ !%74: i8 = .constant                                            ; int(1)
-    ├ !%75: number = .constant                                        ; int(2)
-    ├ !%76: builtin_fn_as = .get_builtin_fn_as operand=(%75)          ; type(builtin_fn_as)
+    ├ !%74: i8 = .constant                                            ; i8{ 1 }
+    ├ !%75: number = .constant                                        ; number{ 2 }
+    ├ !%76: builtin_fn_as = .get_builtin_fn_as operand=(%75)          ; builtin_fn_as
     ├ !%77: type = .type                                              ; type(i32)
-    ├ !%78: i32 = .constant                                           ; int(2)
-    ├ !%79: i32 = .constant                                           ; int(1)
+    ├ !%78: i32 = .constant                                           ; i32{ 2 }
+    ├ !%79: i32 = .constant                                           ; i32{ 1 }
     ├ %80: bool = .constant                                           ; false
-    ├ !%81: number = .constant                                        ; int(2)
-    ├ !%82: builtin_fn_as = .get_builtin_fn_as operand=(%81)          ; type(builtin_fn_as)
+    ├ !%81: number = .constant                                        ; number{ 2 }
+    ├ !%82: builtin_fn_as = .get_builtin_fn_as operand=(%81)          ; builtin_fn_as
     ├ !%83: type = .type                                              ; type(i8)
-    ├ !%84: i8 = .constant                                            ; int(2)
-    ├ !%85: number = .constant                                        ; int(3)
-    ├ !%86: builtin_fn_as = .get_builtin_fn_as operand=(%85)          ; type(builtin_fn_as)
+    ├ !%84: i8 = .constant                                            ; i8{ 2 }
+    ├ !%85: number = .constant                                        ; number{ 3 }
+    ├ !%86: builtin_fn_as = .get_builtin_fn_as operand=(%85)          ; builtin_fn_as
     ├ !%87: type = .type                                              ; type(i32)
-    ├ !%88: i32 = .constant                                           ; int(3)
-    ├ !%89: i32 = .constant                                           ; int(2)
+    ├ !%88: i32 = .constant                                           ; i32{ 3 }
+    ├ !%89: i32 = .constant                                           ; i32{ 2 }
     ├ %90: bool = .constant                                           ; false
-    ├ !%91: number = .constant                                        ; int(3)
-    ├ !%92: builtin_fn_as = .get_builtin_fn_as operand=(%91)          ; type(builtin_fn_as)
+    ├ !%91: number = .constant                                        ; number{ 3 }
+    ├ !%92: builtin_fn_as = .get_builtin_fn_as operand=(%91)          ; builtin_fn_as
     ├ !%93: type = .type                                              ; type(i32)
-    ├ !%94: i32 = .constant                                           ; int(3)
-    ├ !%95: number = .constant                                        ; int(2)
-    ├ !%96: builtin_fn_as = .get_builtin_fn_as operand=(%95)          ; type(builtin_fn_as)
+    ├ !%94: i32 = .constant                                           ; i32{ 3 }
+    ├ !%95: number = .constant                                        ; number{ 2 }
+    ├ !%96: builtin_fn_as = .get_builtin_fn_as operand=(%95)          ; builtin_fn_as
     ├ !%97: type = .type                                              ; type(i8)
-    ├ !%98: i8 = .constant                                            ; int(2)
-    ├ !%99: i32 = .constant                                           ; int(2)
+    ├ !%98: i8 = .constant                                            ; i8{ 2 }
+    ├ !%99: i32 = .constant                                           ; i32{ 2 }
     ├ %100: bool = .constant                                          ; false
-    ├ !%101: number = .constant                                       ; int(128)
-    ├ !%102: builtin_fn_as = .get_builtin_fn_as operand=(%101)        ; type(builtin_fn_as)
+    ├ !%101: number = .constant                                       ; number{ 128 }
+    ├ !%102: builtin_fn_as = .get_builtin_fn_as operand=(%101)        ; builtin_fn_as
     ├ !%103: type = .type                                             ; type(i16)
-    ├ !%104: i16 = .constant                                          ; int(128)
-    ├ !%105: number = .constant                                       ; int(127)
-    ├ !%106: builtin_fn_as = .get_builtin_fn_as operand=(%105)        ; type(builtin_fn_as)
+    ├ !%104: i16 = .constant                                          ; i16{ 128 }
+    ├ !%105: number = .constant                                       ; number{ 127 }
+    ├ !%106: builtin_fn_as = .get_builtin_fn_as operand=(%105)        ; builtin_fn_as
     ├ !%107: type = .type                                             ; type(i8)
-    ├ !%108: i8 = .constant                                           ; int(127)
-    ├ !%109: i16 = .constant                                          ; int(127)
+    ├ !%108: i8 = .constant                                           ; i8{ 127 }
+    ├ !%109: i16 = .constant                                          ; i16{ 127 }
     ├ %110: bool = .constant                                          ; false
-    ├ !%111: number = .constant                                       ; int(32768)
-    ├ !%112: builtin_fn_as = .get_builtin_fn_as operand=(%111)        ; type(builtin_fn_as)
+    ├ !%111: number = .constant                                       ; number{ 32768 }
+    ├ !%112: builtin_fn_as = .get_builtin_fn_as operand=(%111)        ; builtin_fn_as
     ├ !%113: type = .type                                             ; type(i32)
-    ├ !%114: i32 = .constant                                          ; int(32768)
-    ├ !%115: number = .constant                                       ; int(32767)
-    ├ !%116: builtin_fn_as = .get_builtin_fn_as operand=(%115)        ; type(builtin_fn_as)
+    ├ !%114: i32 = .constant                                          ; i32{ 32768 }
+    ├ !%115: number = .constant                                       ; number{ 32767 }
+    ├ !%116: builtin_fn_as = .get_builtin_fn_as operand=(%115)        ; builtin_fn_as
     ├ !%117: type = .type                                             ; type(i16)
-    ├ !%118: i16 = .constant                                          ; int(32767)
-    ├ !%119: i32 = .constant                                          ; int(32767)
+    ├ !%118: i16 = .constant                                          ; i16{ 32767 }
+    ├ !%119: i32 = .constant                                          ; i32{ 32767 }
     └ %120: bool = .constant                                          ; false
 

@@ -1,0 +1,6 @@
+fn main(): void {
+  // const hello_world = "Hello, World!";
+  @comptime_log("Hello, World!");
+  2;
+  2:as(i32);
+}

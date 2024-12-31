@@ -1,0 +1,35 @@
+;; AST
+;; 16 Nodes
+;; 24 Tokens
+;; 7 Interned Lists
+
+%0 = .struct_decl - tok[0..24]
+ └ members_list: 1 items
+    └ %15 = .fn_decl - tok[0..23]
+       ├ proto: %3 = .fn_proto - tok[1..5]
+       │  ├ name: %1 = .identifier - tok[1..1]
+       │  │  └ token: .identifier 'main'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %2 = .ty_void - tok[5..5]
+       │     └ token: .keyword_void 'void'
+       └ body: %14 = .block - tok[6..22]
+          └ list: 4 items
+             ├ %4 = .comment_line - tok[7..8]
+             │  └ token: .comment '// const hello_world = "Hello, World!";'
+             ├ %7 = .fn_call - tok[8..11]
+             │  ├ callee: %5 = .identifier - tok[8..8]
+             │  │  └ token: .identifier '@comptime_log'
+             │  └ args_list: 1 items
+             │     └ %6 = .string_literal - tok[10..10]
+             │        └ token: .string_literal '"Hello, World!"'
+             ├ %8 = .number_literal - tok[13..13]
+             │  └ token: .number_literal '2'
+             └ %13 = .fn_call - tok[15..20]
+                ├ callee: %11 = .builtin_prop_access - tok[15..17]
+                │  ├ lhs: %9 = .number_literal - tok[15..15]
+                │  │  └ token: .number_literal '2'
+                │  └ rhs: %10 = .identifier - tok[17..17]
+                │     └ token: .identifier 'as'
+                └ args_list: 1 items
+                   └ %12 = .ty_i32 - tok[19..19]
+                      └ token: .keyword_i32 'i32'

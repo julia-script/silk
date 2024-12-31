@@ -33,10 +33,10 @@
 
 %1 = pub fn @"struct/struct-declaration.sk::A::mod::foo"() -> i32
  └ %0: void = .block: [%1-%6]                                         ; void
-    ├ !%1: number = .constant                                         ; int(2)
-    ├ !%2: number = .constant                                         ; int(3)
-    ├ !%3: number = .constant                                         ; float(5)
+    ├ !%1: number = .constant                                         ; number{ 2 }
+    ├ !%2: number = .constant                                         ; number{ 3 }
+    ├ !%3: number = .constant                                         ; number{ 5 }
     ├ !%4: type = .type                                               ; type(i32)
-    ├ %5: i32 = .constant                                             ; int(5)
+    ├ %5: i32 = .constant                                             ; i32{ 5 }
     └ %6: void = .ret maybe_operand=(%5)                              ; void
 

@@ -4,12 +4,18 @@ const Hir = @import("Hir.zig");
 const Mir = @import("Mir.zig");
 const Sema = @import("sema/Sema.zig");
 const ErrorManager = @import("ErrorManager.zig");
+const Hasher = @import("sema/gen.zig").Hasher;
 const options = @import("options");
 const expect = @import("expect").expect;
 
 const CASES_DIR_PATH = "./src/tests/cases";
 const SNAPSHOTS_DIR_PATH = "./src/tests/snapshots";
 const SILK_EXTENSION = ".sk";
+test "test" {
+    const value: f64 = 123;
+    var hasher = Hasher.new(value);
+    std.debug.print("{x}\n", .{hasher.final()});
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

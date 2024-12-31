@@ -444,6 +444,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
         .number_literal => {
             return try scope.pushInstruction(.{ .comptime_number = .{ .node = nav.node } });
         },
+        .string_literal => {
+            return try scope.pushInstruction(.{ .string_literal = .{ .node = nav.node } });
+        },
         .true_literal, .false_literal => {
             return try scope.pushInstruction(.{ .comptime_boolean = .{ .node = nav.node } });
         },

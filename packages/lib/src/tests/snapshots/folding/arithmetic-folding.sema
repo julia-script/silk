@@ -11,18 +11,18 @@
 
 %0 = fn @"folding/arithmetic-folding.sk::folding"() -> i32
  └ %0: void = .block: [%1-%14]                                        ; void
-    ├ !%1: number = .constant                                         ; int(1)
-    ├ !%2: number = .constant                                         ; int(2)
-    ├ !%3: number = .constant                                         ; int(3)
-    ├ !%4: number = .constant                                         ; float(6)
-    ├ !%5: number = .constant                                         ; float(7)
-    ├ !%6: number = .constant                                         ; int(4)
-    ├ !%7: number = .constant                                         ; int(5)
-    ├ !%8: number = .constant                                         ; float(9)
-    ├ !%9: number = .constant                                         ; int(2)
-    ├ !%10: number = .constant                                        ; float(18)
-    ├ !%11: number = .constant                                        ; float(25)
+    ├ !%1: number = .constant                                         ; number{ 1 }
+    ├ !%2: number = .constant                                         ; number{ 2 }
+    ├ !%3: number = .constant                                         ; number{ 3 }
+    ├ !%4: number = .constant                                         ; number{ 6 }
+    ├ !%5: number = .constant                                         ; number{ 7 }
+    ├ !%6: number = .constant                                         ; number{ 4 }
+    ├ !%7: number = .constant                                         ; number{ 5 }
+    ├ !%8: number = .constant                                         ; number{ 9 }
+    ├ !%9: number = .constant                                         ; number{ 2 }
+    ├ !%10: number = .constant                                        ; number{ 18 }
+    ├ !%11: number = .constant                                        ; number{ 25 }
     ├ !%12: type = .type                                              ; type(i32)
-    ├ %13: i32 = .constant                                            ; int(25)
+    ├ %13: i32 = .constant                                            ; i32{ 25 }
     └ %14: void = .ret maybe_operand=(%13)                            ; void
 

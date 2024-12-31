@@ -241,6 +241,7 @@ pub const Type = struct {
 
         bool,
         void,
+        str,
 
         builtin_fn_as,
         builtin_global,
@@ -294,8 +295,12 @@ pub const Type = struct {
         function: Function,
         array: struct {
             child: Type.Key,
-            size: u32,
+            len: u32,
         },
+        slice: struct {
+            child: Type.Key,
+        },
+
         pointer: struct {
             child: Type.Key,
         },
@@ -317,9 +322,14 @@ pub const Value = struct {
         integer: i64,
         float: f64,
         type: Type.Key,
-        pointer: usize,
-        comptime_pointer: usize,
+        // static_string: Strings.Range,
+        // pointer: usize,
+        // comptime_pointer: u32,
         comptime_register: [8]u8,
+        slice: struct {
+            ptr: Value.Key,
+            len: Value.Key,
+        },
 
         struct_instance: struct {
             struct_entity: Entity.Key,
@@ -356,7 +366,6 @@ pub const Value = struct {
     pub const Key = union(enum) {
         simple: Simple,
         complex: usize,
-        comptime_pointer: usize,
 
         pub const SIMPLE_COUNT = std.meta.fields(Value.Simple).len;
         pub fn complexFromIndex(self: usize) Key {
@@ -385,7 +394,6 @@ pub const Value = struct {
             return switch (self) {
                 .simple => |s| s == other,
                 .complex => false,
-                .comptime_pointer => false,
             };
         }
         pub fn isComptimeKnown(self: Key) bool {
@@ -421,6 +429,7 @@ pub const Value = struct {
         type_f32,
         type_f64,
 
+        type_str,
         type_bool,
         type_string,
         type_void,
@@ -585,7 +594,7 @@ pub const Instruction = struct {
     };
 
     pub const Index = usize;
-    pub fn getTypedValue(self: *Self) TypedValue {
+    pub fn getTypedValue(self: *Instruction) TypedValue {
         return .{
             .type = self.type,
             .value = self.value,
@@ -612,7 +621,7 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                 try self.formatType(writer, pointer.child);
             },
             .array => |array| {
-                try writer.print("[{d}]", .{array.size});
+                try writer.print("[{d}]", .{array.len});
                 try self.formatType(writer, array.child);
             },
 
@@ -637,10 +646,34 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                 }
                 try writer.writeAll("}");
             },
-
-            else => {
-                try writer.print("todo({s})", .{@tagName(ty.data)});
+            .slice => |slice| {
+                try writer.writeAll("[..]");
+                try self.formatType(writer, slice.child);
             },
+
+            .function => |function| {
+                try writer.writeAll("fn(");
+                const args = self.lists.getSlice(function.params);
+                for (args, 0..) |arg, i| {
+                    if (i > 0) {
+                        try writer.writeAll(", ");
+                    }
+                    try self.formatType(writer, Type.Key.decode(arg));
+                }
+                try writer.writeAll(") ");
+                try self.formatType(writer, function.ret);
+            },
+            .any => |any| {
+                try writer.writeAll("any");
+                if (!any.concrete.isEqualSimple(.unknown)) {
+                    try writer.writeAll("(");
+                    try self.formatType(writer, any.concrete);
+                    try writer.writeAll(")");
+                }
+            },
+            // else => {
+            //     try writer.print("todo({s})", .{@tagName(ty.data)});
+            // },
         }
         return;
     }
@@ -718,28 +751,83 @@ const FormatTypedValueOptions = struct {
 };
 
 fn formatTypedValueValue(self: *Self, writer: std.io.AnyWriter, typed_value: TypedValue) !void {
-    if (self.builder.getValue(typed_value.value)) |val| {
-        switch (val.data) {
-            .integer => |i| {
-                try writer.print("{d}", .{i});
-            },
-            .float => |f| {
-                try writer.print("{d}", .{f});
-            },
+    // if (self.builder.getValue(typed_value.value)) |val| {
+    //     switch (val.data) {
+    //         .integer => |i| {
+    //             try writer.print("{d}", .{i});
+    //         },
+    //         .float => |f| {
+    //             try writer.print("{d}", .{f});
+    //         },
 
+    //         else => {
+    //             try writer.print("todo({s})", .{@tagName(val.data)});
+    //         },
+    //     }
+    //     return;
+    // }
+    // switch (typed_value.value.simple) {
+    //     .exec_time, .runtime => {
+    //         try writer.print("[{s}]", .{@tagName(typed_value.value.simple)});
+    //     },
+
+    //     else => |simple| {
+    //         try writer.print("{s}", .{@tagName(simple)});
+    //     },
+    // }
+    switch (typed_value.type) {
+        .simple => |simple| switch (simple) {
+            .u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .usize => {
+                const val = self.builder.getNumberValueKeyAs(u64, typed_value.value);
+                try writer.print("{d}", .{val});
+            },
+            .f32, .f64, .number => {
+                const val = self.builder.getNumberValueKeyAs(f64, typed_value.value);
+                try writer.print("{d}", .{val});
+            },
             else => {
-                try writer.print("todo({s})", .{@tagName(val.data)});
+                try writer.print("{s}", .{@tagName(simple)});
             },
-        }
-        return;
-    }
-    switch (typed_value.value.simple) {
-        .exec_time, .runtime => {
-            try writer.print("[{s}]", .{@tagName(typed_value.value.simple)});
         },
+        .complex => |complex| {
+            const ty = self.builder.getComplexType(complex);
+            switch (ty.data) {
+                .slice => |slice| {
+                    _ = slice; // autofix
 
-        else => |simple| {
-            try writer.print("{s}", .{@tagName(simple)});
+                    const value = self.builder.getComplexValue(complex);
+                    const is_ptr_comptime_known = value.data.slice.ptr.isComptimeKnown();
+                    const is_len_comptime_known = value.data.slice.len.isComptimeKnown();
+
+                    try writer.writeAll("[..");
+                    if (is_len_comptime_known) {
+                        const len = self.builder.getNumberValueKeyAs(u32, value.data.slice.len);
+                        try writer.print("{d}", .{len});
+                    } else {
+                        try writer.writeAll("?");
+                    }
+                    try writer.writeAll("]");
+                    if (is_ptr_comptime_known) {
+                        const ptr = self.builder.getNumberValueKeyAs(u32, value.data.slice.ptr);
+                        try writer.print("ptr@{x}", .{ptr});
+                    } else {
+                        try writer.writeAll("?");
+                    }
+                    // _ = value; // autofix
+                    // _ = slice; // autofix
+                    // if (value.data) {
+                    //     try writer.print("[..{d}]ptr@{x}", .{ slice.len, slice.ptr });
+                    // } else {
+                    //     try writer.print("[..{d}]ptr@{x}", .{ slice.len, slice.ptr });
+                    // }
+                    // try writer.print("[..{d}]ptr@{x}", .{ slice.len, slice.ptr });
+                },
+                else => {
+                    // try writer.print("todo({s})", .{@tagName(ty.data)});
+                },
+            }
+            // try writer.print("[..{d}]ptr@{x}", .{ complex.len, complex.ptr });
+            // try writer.print("todo({s})", .{@tagName(complex)});
         },
     }
 }
@@ -749,57 +837,151 @@ pub fn formatTypedValue(
     typed_value: TypedValue,
     options: FormatTypedValueOptions,
 ) !void {
-    _ = options; // autofix
     switch (typed_value.type) {
         .simple => |simple| switch (simple) {
-            .f32, .f64, .number, .u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .usize, .bool => {
+            .u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .usize => {
                 try writer.print("{s}{{ ", .{
                     @tagName(simple),
                 });
-                try self.formatTypedValueValue(writer, typed_value);
+                if (typed_value.value.isComptimeKnown()) {
+                    const val = self.builder.getNumberValueKeyAs(u64, typed_value.value);
+                    try writer.print("{d}", .{val});
+                } else {
+                    try writer.writeAll("[runtime]");
+                }
+
+                try writer.print(" }}", .{});
+            },
+            .f32, .f64, .number => {
+                try writer.print("{s}{{ ", .{
+                    @tagName(simple),
+                });
+                if (typed_value.value.isComptimeKnown()) {
+                    const val = self.builder.getNumberValueKeyAs(f64, typed_value.value);
+                    try writer.print("{d}", .{val});
+                } else {
+                    try writer.writeAll("[runtime]");
+                }
+
                 try writer.print(" }}", .{});
             },
 
-            else => {},
-        },
-        else => {},
-    }
-}
-pub fn formatValue(self: *Self, writer: std.io.AnyWriter, value: Value.Key) !void {
-    if (self.builder.getValue(value)) |val| {
-        switch (val.data) {
-            .float => |f| {
-                try writer.print("float({d})", .{f});
+            .bool => {
+                if (typed_value.value.isComptimeKnown()) {
+                    const val = self.builder.getBooleanValueKeyAsBool(typed_value.value);
+                    if (val) {
+                        try writer.writeAll("true");
+                    } else {
+                        try writer.writeAll("false");
+                    }
+                } else {
+                    try writer.writeAll("bool{ [runtime] }");
+                }
             },
-            .integer => |i| {
-                try writer.print("int({d})", .{i});
-            },
-            .type => |type_key| {
-                try writer.print("type(", .{});
-                try self.formatType(writer, type_key);
-                try writer.print(")", .{});
+            .type => {
+                try writer.writeAll("type(");
+                const value_type = self.builder.unwrapTypeValue(typed_value.value);
+                try self.formatType(writer, value_type);
+                try writer.writeAll(")");
             },
 
             else => {
-                try writer.print("todo({s})", .{@tagName(val.data)});
+                try writer.print("{s}", .{@tagName(simple)});
             },
-        }
-        return;
-    }
-    switch (value) {
-        .comptime_pointer => |comptime_pointer| {
-            try writer.print("comp_ptr({x})", .{comptime_pointer});
         },
-        else => {
-            const tag_name = @tagName(value.simple);
-            if (std.mem.startsWith(u8, tag_name, "type_")) {
-                try writer.print("type({s})", .{tag_name[5..]});
-            } else {
-                try writer.print("{s}", .{tag_name});
+        .complex => |complex| {
+            const ty = self.builder.getComplexType(complex);
+            switch (ty.data) {
+                .any => |any| {
+                    try self.formatTypedValue(writer, .{
+                        .type = any.concrete,
+                        .value = typed_value.value,
+                    }, options);
+                },
+                .function => |function| {
+                    _ = function; // autofix
+                    try self.formatType(writer, typed_value.type);
+                },
+                .pointer => |pointer| {
+                    _ = pointer; // autofix
+                    try self.formatType(writer, typed_value.type);
+                    if (typed_value.value.isComptimeKnown()) {
+                        const val = self.builder.getNumberValueKeyAs(u32, typed_value.value);
+                        try writer.print("@{x}", .{val});
+                    } else {
+                        try writer.writeAll("[runtime]");
+                    }
+                    // try writer.print("@{x}", .{typed_value.value});
+                },
+                .slice => |slice| {
+                    const value = self.builder.getComplexValue(typed_value.value);
+                    if (activeTag(value.data) != .slice) return try writer.print("EXPECTED_SLICE_VALUE({s}@{x})", .{ @tagName(value.data), value.hash });
+                    const is_ptr_comptime_known = value.data.slice.ptr.isComptimeKnown();
+                    const is_len_comptime_known = value.data.slice.len.isComptimeKnown();
+                    try writer.writeAll("[..");
+                    if (is_len_comptime_known) {
+                        const len = self.builder.getNumberValueKeyAs(u32, value.data.slice.len);
+                        try writer.print("{d}", .{len});
+                    } else {
+                        try writer.writeAll("?");
+                    }
+                    try writer.writeAll("]");
+                    try self.formatType(writer, slice.child);
+                    if (is_ptr_comptime_known) {
+                        const ptr = self.builder.getNumberValueKeyAs(u32, value.data.slice.ptr);
+                        try writer.print("@{x}", .{ptr});
+                    } else {
+                        try writer.writeAll("?");
+                    }
+                },
+
+                else => {
+                    try writer.print("todo_complex({d})", .{complex});
+                },
             }
+            // try writer.print("[..{d}]ptr@{x}", .{ complex.len, complex.ptr });
+            // try writer.print("todo({s})", .{@tagName(complex)});
         },
     }
 }
+// pub fn formatValue(self: *Self, writer: std.io.AnyWriter, value: Value.Key) !void {
+//     if (self.builder.getValue(value)) |val| {
+//         switch (val.data) {
+//             .float => |f| {
+//                 try writer.print("float({d})", .{f});
+//             },
+//             .integer => |i| {
+//                 try writer.print("int({d})", .{i});
+//             },
+//             .type => |type_key| {
+//                 try writer.print("type(", .{});
+//                 try self.formatType(writer, type_key);
+//                 try writer.print(")", .{});
+//             },
+//             .slice => |slice| {
+//                 try writer.print("[..{d}]ptr@{x}", .{ slice.len, slice.ptr });
+//             },
+
+//             else => {
+//                 try writer.print("todo({s})", .{@tagName(val.data)});
+//             },
+//         }
+//         return;
+//     }
+//     switch (value) {
+//         .comptime_pointer => |comptime_pointer| {
+//             try writer.print("comp_ptr({x})", .{comptime_pointer});
+//         },
+//         else => {
+//             const tag_name = @tagName(value.simple);
+//             if (std.mem.startsWith(u8, tag_name, "type_")) {
+//                 try writer.print("type({s})", .{tag_name[5..]});
+//             } else {
+//                 try writer.print("{s}", .{tag_name});
+//             }
+//         },
+//     }
+// }
 const InstInput = union(enum) {
     instruction: Instruction,
     index: Instruction.Index,
@@ -807,7 +989,7 @@ const InstInput = union(enum) {
 pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: InstInput) !void {
     var buf = try std.BoundedArray(u8, 1024).init(0);
     const buf_writer = buf.writer().any();
-    const inst = switch (inst_input) {
+    var inst = switch (inst_input) {
         .instruction => |inst| blk: {
             if (inst.liveness == 0) try buf_writer.writeAll("!");
             try buf_writer.print("%i: ", .{});
@@ -891,7 +1073,7 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: Inst
     }
 
     try writer.print("{s: <70}; ", .{buf.slice()});
-    try self.formatValue(writer, inst.value);
+    try self.formatTypedValue(writer, inst.getTypedValue(), .{});
 }
 pub fn formatInstructionRange(
     self: *Self,
@@ -905,7 +1087,7 @@ pub fn formatInstructionRange(
     const buf_writer = buf.writer().any();
     const range_end = range.start + range.len - 1;
     while (i <= range_end) : (i += 1) {
-        const inst = instructions[i];
+        var inst = &instructions[i];
         buf.clear();
 
         switch (inst.data) {
@@ -1016,7 +1198,7 @@ pub fn formatInstructionRange(
                     last_inst,
                 });
                 try writer.print("{s: <70}; ", .{buf.slice()});
-                try self.formatValue(writer, inst.value);
+                try self.formatTypedValue(writer, inst.getTypedValue(), .{});
                 try writer.print("\n", .{});
 
                 try tree_writer.pushDirLine();
@@ -1087,7 +1269,7 @@ pub fn formatInstructionRange(
                     },
                 }
                 try writer.print("{s: <70}; ", .{buf.slice()});
-                try self.formatValue(writer, inst.value);
+                try self.formatTypedValue(writer, inst.getTypedValue(), .{});
                 try writer.print("\n", .{});
             },
         }
@@ -1144,7 +1326,10 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                 try self.formatType(writer, value.data.global.type);
                 try writer.print(" @\"{s}\"", .{name});
                 try writer.print(" ", .{});
-                try self.formatValue(writer, value.data.global.value);
+                try self.formatTypedValue(writer, .{
+                    .value = value.data.global.value,
+                    .type = value.data.global.type,
+                }, .{});
                 try writer.print("\n", .{});
                 // try writer.print("global {}\n", .{value.data.global.value});
             },

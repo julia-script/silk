@@ -447,6 +447,7 @@ pub const Inst = union(enum) {
     decl_ref: AstNode,
     comptime_number: AstNode,
     comptime_boolean: AstNode,
+    string_literal: AstNode,
     ty_number: AstNode,
     ty_boolean: AstNode,
     undefined_value: MaybeAstNode,

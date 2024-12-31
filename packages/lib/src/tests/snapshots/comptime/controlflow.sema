@@ -13,8 +13,8 @@
  └ %0: void = .block: [%1-%6]                                         ; void
     ├ !%1: bool = .constant                                           ; true
     └ %2: void = .block: [%3-%6]                                      ; void
-       ├ !%3: number = .constant                                      ; int(1)
+       ├ !%3: number = .constant                                      ; number{ 1 }
        ├ !%4: type = .type                                            ; type(i32)
-       ├ %5: i32 = .constant                                          ; int(1)
+       ├ %5: i32 = .constant                                          ; i32{ 1 }
        └ %6: void = .ret maybe_operand=(%5)                           ; void
 

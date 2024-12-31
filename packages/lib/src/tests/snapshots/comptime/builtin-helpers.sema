@@ -11,21 +11,21 @@
 
 %0 = fn @"comptime/builtin-helpers.sk::foo"(i32) -> void
  └ %0: void = .block: [%1-%5]                                         ; void
-    ├ %1: i32 = .param index=(%0)                                     ; exec_time
-    ├ %2: todo(function) = .builtin_global_get                        ; todo(builtin_global)
-    ├ %3: i32 = .param_get operand=(%1)                               ; exec_time
-    ├ %4: todo(any) = .cast operand=(%3)                              ; exec_time
+    ├ %1: i32 = .param index=(%0)                                     ; i32{ [runtime] }
+    ├ %2: fn(any) void = .builtin_global_get                          ; fn(any) void
+    ├ %3: i32 = .param_get operand=(%1)                               ; i32{ [runtime] }
+    ├ %4: any(i32) = .cast operand=(%3)                               ; i32{ [runtime] }
     └ %5: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%4}); void
 
 %1 = fn @"comptime/builtin-helpers.sk::main"() -> void
  └ %0: void = .block: [%1-%10]                                        ; void
     ├ %1: void = .block: [%2-%5]                                      ; void
-    │  ├ !%2: number = .constant                                      ; int(123)
-    │  ├ !%3: i32 = .constant                                         ; int(123)
+    │  ├ !%2: number = .constant                                      ; number{ 123 }
+    │  ├ !%3: i32 = .constant                                         ; i32{ 123 }
     │  ├ !%4: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%3}); void
     │  └ !%5: void = .br operand=(%1)                                 ; void
-    ├ !%7: number = .constant                                         ; int(456)
-    ├ !%8: i32 = .constant                                            ; int(456)
+    ├ !%7: number = .constant                                         ; number{ 456 }
+    ├ !%8: i32 = .constant                                            ; i32{ 456 }
     ├ !%9: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%8}); void
     └ !%10: void = .br operand=(%6)                                   ; void
 

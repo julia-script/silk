@@ -11,12 +11,12 @@
 
 %0 = fn @"arithmetic.sk::main"() -> i32
  └ %0: void = .block: [%1-%8]                                         ; void
-    ├ !%1: number = .constant                                         ; int(2)
-    ├ !%2: number = .constant                                         ; int(3)
-    ├ !%3: number = .constant                                         ; int(4)
-    ├ !%4: number = .constant                                         ; float(12)
-    ├ !%5: number = .constant                                         ; float(14)
+    ├ !%1: number = .constant                                         ; number{ 2 }
+    ├ !%2: number = .constant                                         ; number{ 3 }
+    ├ !%3: number = .constant                                         ; number{ 4 }
+    ├ !%4: number = .constant                                         ; number{ 12 }
+    ├ !%5: number = .constant                                         ; number{ 14 }
     ├ !%6: type = .type                                               ; type(i32)
-    ├ %7: i32 = .constant                                             ; int(14)
+    ├ %7: i32 = .constant                                             ; i32{ 14 }
     └ %8: void = .ret maybe_operand=(%7)                              ; void
 

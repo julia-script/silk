@@ -3,7 +3,7 @@
 ;; 11 entities
 ;; 2 symbols
 ;; 28 instructions
-;; 13 values
+;; 16 values
 ;; 8 types
 ;; 2 lists
 ;; 19 strings
@@ -12,28 +12,28 @@
 %0 = fn @"struct/struct-declaration-cross-ref.sk::main"() -> i32
  └ %0: void = .block: [%1-%24]                                        ; void
     ├ !%1: type = .global_get declaration=(%1)                        ; type(struct{i32, i32, i8})
-    ├ !%2: number = .constant                                         ; int(1)
-    ├ !%3: void = .field_init                                         ; todo(field_init)
-    ├ !%4: number = .constant                                         ; int(2)
-    ├ !%5: void = .field_init                                         ; todo(field_init)
-    ├ !%6: number = .constant                                         ; int(3)
-    ├ !%7: void = .field_init                                         ; todo(field_init)
-    ├ !%8: struct{i32, i32, i8} = .type_init                          ; todo(type_init)
+    ├ !%2: number = .constant                                         ; number{ 1 }
+    ├ !%3: void = .field_init                                         ; void
+    ├ !%4: number = .constant                                         ; number{ 2 }
+    ├ !%5: void = .field_init                                         ; void
+    ├ !%6: number = .constant                                         ; number{ 3 }
+    ├ !%7: void = .field_init                                         ; void
+    ├ !%8: struct{i32, i32, i8} = .type_init                          ; todo_complex(4)
     ├ !%9: type = .global_get declaration=(%1)                        ; type(struct{i32, i32, i8})
-    ├ %10: *struct{i32, i32, i8} = .alloc type=(struct{i32, i32, i8}) mutable=(false); comp_ptr(0)
-    ├ %11: i8 = .constant                                             ; int(1)
-    ├ %12: *i8 = .get_element_pointer base=(%10) index=(%2)           ; comp_ptr(8)
+    ├ %10: *struct{i32, i32, i8} = .alloc type=(struct{i32, i32, i8}) mutable=(false); *struct{i32, i32, i8}@0
+    ├ %11: i8 = .constant                                             ; i8{ 1 }
+    ├ %12: *i8 = .get_element_pointer base=(%10) index=(%2)           ; *i8@8
     ├ %13: void = .store operand=(%12) payload=(%11)                  ; void
-    ├ %14: i32 = .constant                                            ; int(2)
-    ├ %15: *i32 = .get_element_pointer base=(%10) index=(%0)          ; comp_ptr(0)
+    ├ %14: i32 = .constant                                            ; i32{ 2 }
+    ├ %15: *i32 = .get_element_pointer base=(%10) index=(%0)          ; *i32@0
     ├ %16: void = .store operand=(%15) payload=(%14)                  ; void
-    ├ %17: i32 = .constant                                            ; int(3)
-    ├ %18: *i32 = .get_element_pointer base=(%10) index=(%1)          ; comp_ptr(4)
+    ├ %17: i32 = .constant                                            ; i32{ 3 }
+    ├ %18: *i32 = .get_element_pointer base=(%10) index=(%1)          ; *i32@4
     ├ %19: void = .store operand=(%18) payload=(%17)                  ; void
-    ├ %20: *i8 = .get_element_pointer base=(%10) index=(%2)           ; comp_ptr(0)
-    ├ !%21: i8 = .load operand=(%20)                                  ; int(2)
+    ├ %20: *i8 = .get_element_pointer base=(%10) index=(%2)           ; *i8@0
+    ├ !%21: i8 = .load operand=(%20)                                  ; i8{ 2 }
     ├ !%22: type = .type                                              ; type(i32)
-    ├ %23: i32 = .constant                                            ; int(2)
+    ├ %23: i32 = .constant                                            ; i32{ 2 }
     └ %24: void = .ret maybe_operand=(%23)                            ; void
 
 %1 = type @"struct/struct-declaration-cross-ref.sk::A" = struct:
