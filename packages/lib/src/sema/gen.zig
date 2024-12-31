@@ -186,7 +186,7 @@ pub const Builder = struct {
             .bool => 1,
             .i8 => 1,
             .u8 => 1,
-            .str => 1,
+            .bchar => 1,
             .i16 => 2,
             .u16 => 2,
             .i32 => 4,
@@ -2553,16 +2553,13 @@ const Scope = struct {
 
             .string_literal => |ast_node| {
                 const slice = self.entity.getHir().ast.getNodeSlice(ast_node.node);
-                // const ty = try self.builder.internTypeData(.{ .array = .{
-                //     .len = @intCast(slice.len),
-                //     .child = Sema.Type.simple(.str),
-                // } });
-                const pointer = try self.builder.sema.memory.alloc(Sema.Type.simple(.str), @intCast(slice.len));
+
+                const pointer = try self.builder.sema.memory.alloc(Sema.Type.simple(.bchar), @intCast(slice.len));
                 self.builder.sema.memory.storeAt([]const u8, pointer, slice);
                 return self.pushInstruction(hir_inst_index, .{
                     .op = .constant,
                     .type = try self.builder.internTypeData(.{ .slice = .{
-                        .child = Sema.Type.simple(.str),
+                        .child = Sema.Type.simple(.bchar),
                     } }),
                     .value = try self.builder.internValueData(.{
                         .slice = .{
@@ -2572,18 +2569,6 @@ const Scope = struct {
                     }),
                     .data = .void,
                 });
-                // const pointer = try self.builder.sema.memory.alloc(try self.builder.internTypeData(data: Sema.Type.Data)));
-                // const interned = try self.builder.sema.memory.store(Sema.Type.simple(.string), slice);
-                // const value_index = try self.builder.internValueData(.{ .slice = .{
-                //     .pointer = slice.ptr,
-                //     .len = slice.len,
-                // } });
-                // return self.pushInstruction(hir_inst_index, .{
-                //     .op = .constant,
-                //     .type = Sema.Type.simple(.string),
-                //     // .value = value_index,
-                //     .data = .void,
-                // });
             },
             else => std.debug.panic("unhandled hir_inst: {s}", .{@tagName(hir_inst)}),
         }

@@ -83,7 +83,7 @@ pub fn store(self: *Self, type_key: Sema.Type.Key, ptr: usize, value: Sema.Value
             .f64 => self.storeType(f64, ptr, value),
             .number => self.storeType(i64, ptr, value),
             .usize => self.storeType(u64, ptr, value),
-            .str => self.storeType(u8, ptr, value),
+            .bchar => self.storeType(u8, ptr, value),
             else => std.debug.panic("unsupported type: {any}", .{simple}),
         },
 

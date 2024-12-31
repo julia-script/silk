@@ -241,7 +241,7 @@ pub const Type = struct {
 
         bool,
         void,
-        str,
+        bchar,
 
         builtin_fn_as,
         builtin_global,

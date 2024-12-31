@@ -12,8 +12,8 @@
 %0 = fn @"strings/simple.sk::main"() -> void
  └ %0: void = .block: [%1-%9]                                         ; void
     ├ %1: fn(any) void = .builtin_global_get                          ; fn(any) void
-    ├ !%2: [..]str = .constant                                        ; [..15]str@0
-    ├ %3: any([..]str) = .constant                                    ; [..15]str@0
+    ├ !%2: [..]bchar = .constant                                      ; [..15]bchar@0
+    ├ %3: any([..]bchar) = .constant                                  ; [..15]bchar@0
     ├ %4: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%3}); void
     ├ %5: number = .constant                                          ; number{ 2 }
     ├ !%6: number = .constant                                         ; number{ 2 }
