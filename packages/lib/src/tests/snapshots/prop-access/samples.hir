@@ -1,0 +1,92 @@
+;; HIR: 43 instructions
+
+%0 = .struct_decl
+ ├ name_node: NONE
+ ├ fields_list: 0 items
+ └ declarations_list: 3 items
+    ├ 0: %1 = .global_decl
+    │  ├ name_node: node(#1: "T")
+    │  ├ extern: false
+    │  ├ is_fn: false
+    │  ├ is_type: true
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: NONE
+    │  └ init: %4 = .inline_block
+    │     ├ %5 = .struct_decl
+    │     │  ├ name_node: NONE
+    │     │  ├ fields_list: 1 items
+    │     │  │  └ 0: %6 = .struct_field
+    │     │  │     ├ name_node: node(#3: "foo")
+    │     │  │     ├ type: %7 = .ty_i32
+    │     │  │     │  └ node: node(#4: "i32")
+    │     │  │     └ init: NONE
+    │     │  └ declarations_list: 1 items
+    │     │     └ 0: %8 = .global_decl
+    │     │        ├ name_node: node(#6: "bar")
+    │     │        ├ extern: false
+    │     │        ├ is_fn: true
+    │     │        ├ is_type: false
+    │     │        ├ visibility: "private"
+    │     │        ├ exported: false
+    │     │        ├ mutable: false
+    │     │        ├ type: %11 = .fn_decl
+    │     │        │  ├ name_node: node(#6: "bar")
+    │     │        │  ├ return_type: %9 = .ty_void
+    │     │        │  │  └ node: node(#7: "void")
+    │     │        │  └ params_list: 0 items
+    │     │        └ init: %10 = .block
+    │     └ %12 = .br operand=(5), target=(%4)
+    ├ 1: %2 = .global_decl
+    │  ├ name_node: node(#23: "struct_static_method_access")
+    │  ├ extern: false
+    │  ├ is_fn: true
+    │  ├ is_type: false
+    │  ├ visibility: "private"
+    │  ├ exported: false
+    │  ├ mutable: false
+    │  ├ type: %18 = .fn_decl
+    │  │  ├ name_node: node(#23: "struct_static_method_access")
+    │  │  ├ return_type: %13 = .ty_void
+    │  │  │  └ node: node(#24: "void")
+    │  │  └ params_list: 0 items
+    │  └ init: %14 = .block
+    │     ├ %15 = .global_get operand=(%1)
+    │     ├ %16 = .get_property_pointer base=(%15), property_name_node=(n[30:"bar"]), is_builtin=(false)
+    │     └ %17 = .fn_call callee=(%16), args_list=({})
+    └ 2: %3 = .global_decl
+       ├ name_node: node(#42: "builtin_method_access")
+       ├ extern: false
+       ├ is_fn: true
+       ├ is_type: false
+       ├ visibility: "private"
+       ├ exported: false
+       ├ mutable: false
+       ├ type: %42 = .fn_decl
+       │  ├ name_node: node(#42: "builtin_method_access")
+       │  ├ return_type: %19 = .ty_void
+       │  │  └ node: node(#43: "void")
+       │  └ params_list: 0 items
+       └ init: %20 = .block
+          ├ %21 = .builtin_global_get builtin=(shared.BuiltinGlobal.as)
+          ├ %22 = .ty_i32 node=(n[47:"i32"])
+          ├ %23 = .comptime_number node=(n[48:"123"])
+          ├ %24 = .fn_call callee=(%21), args_list=({%22, %23})
+          ├ %25 = .typeof operand=(%24)
+          ├ %26 = .alloc mutable=(false), type=(%25)
+          ├ %27 = .store pointer=(%26), value=(%24)
+          ├ %28 = .builtin_global_get builtin=(shared.BuiltinGlobal.as)
+          ├ %29 = .ty_f64 node=(n[53:"f64"])
+          ├ %30 = .comptime_number node=(n[54:"123"])
+          ├ %31 = .fn_call callee=(%28), args_list=({%29, %30})
+          ├ %32 = .typeof operand=(%31)
+          ├ %33 = .alloc mutable=(false), type=(%32)
+          ├ %34 = .store pointer=(%33), value=(%31)
+          ├ %35 = .builtin_global_get builtin=(shared.BuiltinGlobal.float_demote)
+          ├ %36 = .ty_f32 node=(n[59:"f32"])
+          ├ %37 = .load operand=(%33)
+          ├ %38 = .fn_call callee=(%35), args_list=({%36, %37})
+          ├ %39 = .typeof operand=(%38)
+          ├ %40 = .alloc mutable=(false), type=(%39)
+          └ %41 = .store pointer=(%40), value=(%38)

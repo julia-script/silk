@@ -431,6 +431,9 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
                 .param_decl => {
                     return try scope.pushInstruction(.{ .param_get = .{ .operand = inst_index } });
                 },
+                .global_decl => {
+                    return try scope.pushInstruction(.{ .global_get = .{ .operand = inst_index } });
+                },
 
                 .alloc => {
                     return inst_index;

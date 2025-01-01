@@ -1,0 +1,39 @@
+
+type T = struct {
+    foo: i32,
+    fn bar(): void {}
+}
+
+// fn struct_field_access(): void {
+//     // %0 = alloc T                          ; *T@ptr:0
+//     // %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0
+//     // %2 = const 123                        ; 123 int
+//     // %3 = as i32 %2                        ; 123 i32
+//     // %4 = store %1 %3                      ; void
+//     const a = T { foo = 123 };
+
+//     // %5 = alloc i32                        ; *i32@ptr:0
+//     // %6 = get_el_ptr %0 'foo' i=(0)         ; *i32@ptr:0
+//     a.foo;
+// }
+
+fn struct_static_method_access(): void {
+    // %0 = get_global T                   ; T
+    // %1 = get_global_decl %0 'bar'       ; fn() -> void
+    // %2 = call %1                        ; void
+    T.bar();
+}
+
+// fn struct_method_access(): void {
+//     // %0 = alloc T                          ; *T@ptr:0
+//     // %1 = get_el_ptr %0 'bar' i=(0)        ; *fn() -> void@ptr:0
+//     // %2 = call %1                         ; void
+//     const a = T { foo = 123 };
+//     a.bar();
+// }
+
+fn builtin_method_access(): void {
+    const a = @as(i32, 123);
+    const b = @as(f64, 123);
+    const c = @float_demote(f32, b);
+}

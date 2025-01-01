@@ -192,6 +192,17 @@ pub const Type = struct {
                 .complex => |c| c == other.complex,
             };
         }
+        pub fn isOneOfSimple(self: Key, comptime one_of: []const Simple) bool {
+            switch (self) {
+                .simple => |s| {
+                    inline for (one_of) |s2| {
+                        if (s == s2) return true;
+                    }
+                    return false;
+                },
+                .complex => return false,
+            }
+        }
         pub fn isEqualSimple(self: Key, other: Simple) bool {
             return switch (self) {
                 .simple => |s| s == other,
@@ -242,9 +253,6 @@ pub const Type = struct {
         bool,
         void,
         bchar,
-
-        builtin_fn_as,
-        builtin_global,
     };
 
     pub fn simple(self: Simple) Key {
@@ -284,6 +292,9 @@ pub const Type = struct {
         any: struct {
             concrete: Type.Key = .{ .simple = .unknown },
         },
+        typeof: struct {
+            child: Type.Key,
+        },
         @"struct": struct {
             entity: Entity.Key,
             fields: Type.List,
@@ -293,6 +304,7 @@ pub const Type = struct {
             offset: u32,
         },
         function: Function,
+
         array: struct {
             child: Type.Key,
             len: u32,
@@ -304,6 +316,11 @@ pub const Type = struct {
         pointer: struct {
             child: Type.Key,
         },
+        builtin_global: shared.BuiltinGlobal,
+        flat_union: struct {
+            fields: Type.List,
+        },
+
         pub const Ent = struct {
             entity: Entity.Key,
         };
@@ -318,6 +335,10 @@ pub const Type = struct {
 pub const Value = struct {
     hash: u64,
     data: Data,
+    pub const Constant = union(enum) {
+        runtime: Instruction.Index,
+        comp: TypedValue,
+    };
     pub const Data = union(enum) {
         integer: i64,
         float: f64,
@@ -341,9 +362,7 @@ pub const Value = struct {
             type: Type.Key,
             init: ?Instruction.Index,
         },
-        builtin_global: struct {
-            builtin: shared.BuiltinGlobal,
-        },
+
         global: struct {
             type: Type.Key,
             value: Value.Key,
@@ -360,6 +379,9 @@ pub const Value = struct {
         field_init: struct {
             field_name: Strings.Range,
             value_inst: Instruction.Index,
+        },
+        flat_union: struct {
+            active_field: Constant,
         },
     };
 
@@ -580,11 +602,11 @@ pub const Instruction = struct {
 
         get_builtin_fn_as,
 
-        builtin_global_get,
+        builtin_get,
         comptime_log,
 
         cast_promote,
-        cast_demote,
+        float_demote,
         cast_extend,
         cast_truncate,
         cast_convert,
@@ -620,6 +642,10 @@ const TreeWriter = @import("../TreeWriter.zig");
 pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !void {
     if (self.builder.getType(type_key)) |ty| {
         switch (ty.data) {
+            .builtin_global => |builtin_global| {
+                try writer.print("[builtin_{s}]", .{@tagName(builtin_global)});
+                return;
+            },
             .pointer => |pointer| {
                 try writer.writeAll("*");
                 try self.formatType(writer, pointer.child);
@@ -628,7 +654,11 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                 try writer.print("[{d}]", .{array.len});
                 try self.formatType(writer, array.child);
             },
-
+            .typeof => |typeof| {
+                try writer.writeAll("typeof(");
+                try self.formatType(writer, typeof.child);
+                try writer.writeAll(")");
+            },
             // .module => |module| {
             //     try writer.print("mod{{ent{{{d}}}, ", .{module.entity});
             //     try self.formatType(writer, module.struct_type);
@@ -638,6 +668,16 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                 try writer.writeAll("struct_field{");
                 try self.formatType(writer, struct_field.type);
                 try writer.writeAll("}");
+            },
+            .flat_union => |flat_union| {
+                try writer.writeAll("(");
+                for (self.lists.getSlice(flat_union.fields), 0..) |field, i| {
+                    if (i > 0) {
+                        try writer.writeAll(" | ");
+                    }
+                    try self.formatType(writer, Type.Key.decode(field));
+                }
+                try writer.writeAll(")");
             },
             .@"struct" => |struct_type| {
                 try writer.writeAll("struct{");
@@ -897,6 +937,16 @@ pub fn formatTypedValue(
             },
             .type => {
                 try writer.writeAll("type(");
+                // if (self.builder.getValue(typed_value.value)) |value| switch (value.data) {
+                //     .builtin_global => |builtin_global| {
+                //         try writer.print("[builtin_{s}]", .{@tagName(builtin_global.builtin)});
+                //         return;
+                //     },
+                //     else => {
+                //         // try self.formatType(writer, typed_value.type);
+                //     },
+                // };
+
                 const value_type = self.builder.unwrapTypeValue(typed_value.value);
                 try self.formatType(writer, value_type);
                 try writer.writeAll(")");
@@ -952,8 +1002,32 @@ pub fn formatTypedValue(
                     }
                 },
 
+                .flat_union => |flat_union| {
+                    _ = flat_union; // autofix
+                    try self.formatType(writer, typed_value.type);
+                    try writer.writeAll("{ ");
+
+                    const value = self.builder.getComplexValue(typed_value.value);
+
+                    switch (value.data.flat_union.active_field) {
+                        .comp => |comp| {
+                            try self.formatTypedValue(writer, comp, options);
+                        },
+                        .runtime => {
+                            try writer.writeAll("[runtime]");
+                        },
+                    }
+                    try writer.writeAll(" }");
+                },
+                .typeof => |typeof| {
+                    try writer.writeAll("typeof(");
+                    try self.formatType(writer, typeof.child);
+                    try writer.writeAll(")");
+                },
+
                 else => {
-                    try writer.print("todo_complex({d})", .{complex});
+                    const complex_type = self.builder.getComplexType(complex);
+                    try writer.print("todo_complex({s})", .{@tagName(complex_type.data)});
                 },
             }
             // try writer.print("[..{d}]ptr@{x}", .{ complex.len, complex.ptr });

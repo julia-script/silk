@@ -1,0 +1,131 @@
+;; AST
+;; 65 Nodes
+;; 92 Tokens
+;; 36 Interned Lists
+
+%0 = .struct_decl - tok[0..92]
+ └ members_list: 21 items
+    ├ %11 = .type_decl - tok[0..17]
+    │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  └ token: .identifier 'T'
+    │  ├ type: NONE
+    │  └ value: %2 = .struct_decl - tok[3..17]
+    │     └ members_list: 2 items
+    │        ├ %5 = .struct_field - tok[6..8]
+    │        │  ├ name: %3 = .identifier - tok[5..5]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: %4 = .ty_i32 - tok[7..7]
+    │        │  │  └ token: .keyword_i32 'i32'
+    │        │  └ default_value: NONE
+    │        └ %10 = .fn_decl - tok[9..17]
+    │           ├ proto: %8 = .fn_proto - tok[10..14]
+    │           │  ├ name: %6 = .identifier - tok[10..10]
+    │           │  │  └ token: .identifier 'bar'
+    │           │  ├ params_list: 0 items
+    │           │  └ ret_type: %7 = .ty_void - tok[14..14]
+    │           │     └ token: .keyword_void 'void'
+    │           └ body: %9 = .block - tok[15..16]
+    │              └ list: 0 items
+    ├ %12 = .comment_line - tok[18..19]
+    │  └ token: .comment '// fn struct_field_access(): void {'
+    ├ %13 = .comment_line - tok[19..20]
+    │  └ token: .comment '//     // %0 = alloc T                          ; *T@ptr:0'
+    ├ %14 = .comment_line - tok[20..21]
+    │  └ token: .comment '//     // %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    ├ %15 = .comment_line - tok[21..22]
+    │  └ token: .comment '//     // %2 = const 123                        ; 123 int'
+    ├ %16 = .comment_line - tok[22..23]
+    │  └ token: .comment '//     // %3 = as i32 %2                        ; 123 i32'
+    ├ %17 = .comment_line - tok[23..24]
+    │  └ token: .comment '//     // %4 = store %1 %3                      ; void'
+    ├ %18 = .comment_line - tok[24..25]
+    │  └ token: .comment '//     const a = T { foo = 123 };'
+    ├ %19 = .comment_line - tok[25..26]
+    │  └ token: .comment '//     // %5 = alloc i32                        ; *i32@ptr:0'
+    ├ %20 = .comment_line - tok[26..27]
+    │  └ token: .comment '//     // %6 = get_el_ptr %0 'foo' i=(0)         ; *i32@ptr:0'
+    ├ %21 = .comment_line - tok[27..28]
+    │  └ token: .comment '//     a.foo;'
+    ├ %22 = .comment_line - tok[28..29]
+    │  └ token: .comment '// }'
+    ├ %34 = .fn_decl - tok[29..46]
+    │  ├ proto: %25 = .fn_proto - tok[30..34]
+    │  │  ├ name: %23 = .identifier - tok[30..30]
+    │  │  │  └ token: .identifier 'struct_static_method_access'
+    │  │  ├ params_list: 0 items
+    │  │  └ ret_type: %24 = .ty_void - tok[34..34]
+    │  │     └ token: .keyword_void 'void'
+    │  └ body: %33 = .block - tok[35..45]
+    │     └ list: 4 items
+    │        ├ %26 = .comment_line - tok[36..37]
+    │        │  └ token: .comment '// %0 = get_global T                   ; T'
+    │        ├ %27 = .comment_line - tok[37..38]
+    │        │  └ token: .comment '// %1 = get_global_decl %0 'bar'       ; fn() -> void'
+    │        ├ %28 = .comment_line - tok[38..39]
+    │        │  └ token: .comment '// %2 = call %1                        ; void'
+    │        └ %32 = .fn_call - tok[39..43]
+    │           ├ callee: %31 = .prop_access - tok[39..41]
+    │           │  ├ lhs: %29 = .identifier - tok[39..39]
+    │           │  │  └ token: .identifier 'T'
+    │           │  └ rhs: %30 = .identifier - tok[41..41]
+    │           │     └ token: .identifier 'bar'
+    │           └ args_list: 0 items
+    ├ %35 = .comment_line - tok[46..47]
+    │  └ token: .comment '// fn struct_method_access(): void {'
+    ├ %36 = .comment_line - tok[47..48]
+    │  └ token: .comment '//     // %0 = alloc T                          ; *T@ptr:0'
+    ├ %37 = .comment_line - tok[48..49]
+    │  └ token: .comment '//     // %1 = get_el_ptr %0 'bar' i=(0)        ; *fn() -> void@ptr:0'
+    ├ %38 = .comment_line - tok[49..50]
+    │  └ token: .comment '//     // %2 = call %1                         ; void'
+    ├ %39 = .comment_line - tok[50..51]
+    │  └ token: .comment '//     const a = T { foo = 123 };'
+    ├ %40 = .comment_line - tok[51..52]
+    │  └ token: .comment '//     a.bar();'
+    ├ %41 = .comment_line - tok[52..53]
+    │  └ token: .comment '// }'
+    └ %64 = .fn_decl - tok[53..91]
+       ├ proto: %44 = .fn_proto - tok[54..58]
+       │  ├ name: %42 = .identifier - tok[54..54]
+       │  │  └ token: .identifier 'builtin_method_access'
+       │  ├ params_list: 0 items
+       │  └ ret_type: %43 = .ty_void - tok[58..58]
+       │     └ token: .keyword_void 'void'
+       └ body: %63 = .block - tok[59..90]
+          └ list: 3 items
+             ├ %50 = .const_decl - tok[60..68]
+             │  ├ name: %45 = .identifier - tok[61..61]
+             │  │  └ token: .identifier 'a'
+             │  ├ type: NONE
+             │  └ value: %49 = .fn_call - tok[63..68]
+             │     ├ callee: %46 = .identifier - tok[63..63]
+             │     │  └ token: .identifier '@as'
+             │     └ args_list: 2 items
+             │        ├ %47 = .ty_i32 - tok[65..65]
+             │        │  └ token: .keyword_i32 'i32'
+             │        └ %48 = .number_literal - tok[67..67]
+             │           └ token: .number_literal '123'
+             ├ %56 = .const_decl - tok[70..78]
+             │  ├ name: %51 = .identifier - tok[71..71]
+             │  │  └ token: .identifier 'b'
+             │  ├ type: NONE
+             │  └ value: %55 = .fn_call - tok[73..78]
+             │     ├ callee: %52 = .identifier - tok[73..73]
+             │     │  └ token: .identifier '@as'
+             │     └ args_list: 2 items
+             │        ├ %53 = .ty_f64 - tok[75..75]
+             │        │  └ token: .keyword_f64 'f64'
+             │        └ %54 = .number_literal - tok[77..77]
+             │           └ token: .number_literal '123'
+             └ %62 = .const_decl - tok[80..88]
+                ├ name: %57 = .identifier - tok[81..81]
+                │  └ token: .identifier 'c'
+                ├ type: NONE
+                └ value: %61 = .fn_call - tok[83..88]
+                   ├ callee: %58 = .identifier - tok[83..83]
+                   │  └ token: .identifier '@float_demote'
+                   └ args_list: 2 items
+                      ├ %59 = .ty_f32 - tok[85..85]
+                      │  └ token: .keyword_f32 'f32'
+                      └ %60 = .identifier - tok[87..87]
+                         └ token: .identifier 'b'
