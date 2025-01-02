@@ -352,7 +352,7 @@ pub const Value = struct {
         // comptime_pointer: u32,
         comptime_register: [8]u8,
         slice: struct {
-            ptr: Value.Key,
+            ptr: TypedValue,
             len: Constant,
         },
 
@@ -473,6 +473,9 @@ pub const TypedValue = struct {
     type: Type.Key,
     value: Value.Key,
     // pub fn format(self: TypedValue, writer: std.io.AnyWriter, )
+    pub fn isComptimeKnown(self: TypedValue) bool {
+        return self.value.isComptimeKnown();
+    }
 };
 
 pub const Instruction = struct {
@@ -1011,7 +1014,7 @@ pub fn formatTypedValue(
                     try writer.writeAll("]");
                     try self.formatType(writer, slice.child);
                     if (is_ptr_comptime_known) {
-                        const ptr = self.builder.getNumberValueKeyAs(u32, value.data.slice.ptr);
+                        const ptr = self.builder.getNumberValueKeyAs(u32, value.data.slice.ptr.value);
                         try writer.print("@{x}", .{ptr});
                     } else {
                         try writer.writeAll("?");

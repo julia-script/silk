@@ -342,7 +342,7 @@ pub const Builder = struct {
         const value = self.getValue(typed_value.value) orelse return null;
         return switch (value.data) {
             .integer => |integer| @intCast(integer),
-            .slice => |slice| if (slice.ptr.isComptimeKnown()) self.getNumberValueKeyAs(u32, slice.ptr) else null,
+            .slice => |slice| if (slice.ptr.isComptimeKnown()) self.getNumberValueKeyAs(u32, slice.ptr.value) else null,
             else => null,
         };
     }
@@ -804,7 +804,8 @@ pub const Builder = struct {
             // },
             .slice => |slice| {
                 var hasher = Hasher.new("slice-value");
-                hasher.update(self.getValueKeyHash(slice.ptr));
+                hasher.update(self.getTypeKeyHash(slice.ptr.type));
+                hasher.update(self.getValueKeyHash(slice.ptr.value));
                 // hasher.update(self.getValueKeyHash(slice.len));
                 switch (slice.len) {
                     .resolved => |constant| {
