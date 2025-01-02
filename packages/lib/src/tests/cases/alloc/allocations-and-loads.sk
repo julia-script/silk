@@ -182,20 +182,20 @@ fn array_alloc_3() void {
   const foo = [3]i32{1, 2, 3};
 }
 
-// // %mem.data.0: [5]bchar = "Hello"
-// fn str_alloc() void {
-//   // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
-//   // %1 = memcpy %0 %mem.data.0             ; void
-//   const foo = "Hello";
-// }
-// fn str_alloc_2() void {
-//   // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
-//   // %1 = memcpy %0 %mem.data.0             ; void
-//   var foo = "Hello";
+// %mem.data.0: [5]bchar = "Hello"
+fn str_alloc() void {
+  // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
+  // %1 = memcpy %0 %mem.data.0             ; void
+  const foo = "Hello";
+}
+fn str_alloc_2() void {
+  // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
+  // %1 = memcpy %0 %mem.data.0             ; void
+  var foo = "Hello";
 
-//   // %2 = usize.const 0                     ; 0 usize
-//   // %3 = get_el_ptr %0 i=(%2) offset=(0)   ; *bchar@ptr:0
-//   // %4 = bchar.const 'h'                   ; 'h' bchar
-//   // %5 = store %3 %4                       ; void
-//   foo[0] = 'h';
-// }
+  // %2 = usize.const 0                     ; 0 usize
+  // %3 = get_el_ptr %0 i=(%2) offset=(0)   ; *bchar@ptr:0
+  // %4 = bchar.const 'h'                   ; 'h' bchar
+  // %5 = store %3 %4                       ; void
+  foo[0] = 'h';
+}

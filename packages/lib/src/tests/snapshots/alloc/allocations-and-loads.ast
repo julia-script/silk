@@ -1,10 +1,10 @@
 ;; AST
-;; 279 Nodes
-;; 350 Tokens
-;; 175 Interned Lists
+;; 293 Nodes
+;; 374 Tokens
+;; 173 Interned Lists
 
-%0 = .struct_decl - tok[0..350]
- └ members_list: 43 items
+%0 = .struct_decl - tok[0..374]
+ └ members_list: 30 items
     ├ %6 = .type_decl - tok[0..9]
     │  ├ name: %1 = .identifier - tok[1..1]
     │  │  └ token: .identifier 'T'
@@ -511,34 +511,60 @@
     │                 └ %258 = .number_literal - tok[329..329]
     │                    └ token: .number_literal '3'
     ├ %263 = .comment_line - tok[333..334]
-    │  └ token: .comment '// // %mem.data.0: [5]bchar = "Hello"'
-    ├ %264 = .comment_line - tok[334..335]
-    │  └ token: .comment '// fn str_alloc() void {'
-    ├ %265 = .comment_line - tok[335..336]
-    │  └ token: .comment '//   // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0'
-    ├ %266 = .comment_line - tok[336..337]
-    │  └ token: .comment '//   // %1 = memcpy %0 %mem.data.0             ; void'
-    ├ %267 = .comment_line - tok[337..338]
-    │  └ token: .comment '//   const foo = "Hello";'
-    ├ %268 = .comment_line - tok[338..339]
-    │  └ token: .comment '// }'
-    ├ %269 = .comment_line - tok[339..340]
-    │  └ token: .comment '// fn str_alloc_2() void {'
-    ├ %270 = .comment_line - tok[340..341]
-    │  └ token: .comment '//   // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0'
-    ├ %271 = .comment_line - tok[341..342]
-    │  └ token: .comment '//   // %1 = memcpy %0 %mem.data.0             ; void'
-    ├ %272 = .comment_line - tok[342..343]
-    │  └ token: .comment '//   var foo = "Hello";'
-    ├ %273 = .comment_line - tok[343..344]
-    │  └ token: .comment '//   // %2 = usize.const 0                     ; 0 usize'
-    ├ %274 = .comment_line - tok[344..345]
-    │  └ token: .comment '//   // %3 = get_el_ptr %0 i=(%2) offset=(0)   ; *bchar@ptr:0'
-    ├ %275 = .comment_line - tok[345..346]
-    │  └ token: .comment '//   // %4 = bchar.const 'h'                   ; 'h' bchar'
-    ├ %276 = .comment_line - tok[346..347]
-    │  └ token: .comment '//   // %5 = store %3 %4                       ; void'
-    ├ %277 = .comment_line - tok[347..348]
-    │  └ token: .comment '//   foo[0] = 'h';'
-    └ %278 = .comment_line - tok[348..349]
-       └ token: .comment '// }'
+    │  └ token: .comment '// %mem.data.0: [5]bchar = "Hello"'
+    ├ %273 = .fn_decl - tok[334..348]
+    │  ├ proto: %266 = .fn_proto - tok[335..338]
+    │  │  ├ name: %264 = .identifier - tok[335..335]
+    │  │  │  └ token: .identifier 'str_alloc'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %265 = .ty_void - tok[338..338]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %272 = .block - tok[339..347]
+    │     └ list: 3 items
+    │        ├ %267 = .comment_line - tok[340..341]
+    │        │  └ token: .comment '// %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0'
+    │        ├ %268 = .comment_line - tok[341..342]
+    │        │  └ token: .comment '// %1 = memcpy %0 %mem.data.0             ; void'
+    │        └ %271 = .const_decl - tok[342..345]
+    │           ├ name: %269 = .identifier - tok[343..343]
+    │           │  └ token: .identifier 'foo'
+    │           ├ type: NONE
+    │           └ value: %270 = .string_literal - tok[345..345]
+    │              └ token: .string_literal '"Hello"'
+    └ %292 = .fn_decl - tok[348..373]
+       ├ proto: %276 = .fn_proto - tok[349..352]
+       │  ├ name: %274 = .identifier - tok[349..349]
+       │  │  └ token: .identifier 'str_alloc_2'
+       │  ├ params_list: 0 items
+       │  ├ ret_type: %275 = .ty_void - tok[352..352]
+       │  │  └ token: .keyword_void 'void'
+       │  └ is_declaring_builtin: false
+       └ body: %291 = .block - tok[353..372]
+          └ list: 8 items
+             ├ %277 = .comment_line - tok[354..355]
+             │  └ token: .comment '// %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0'
+             ├ %278 = .comment_line - tok[355..356]
+             │  └ token: .comment '// %1 = memcpy %0 %mem.data.0             ; void'
+             ├ %281 = .var_decl - tok[356..359]
+             │  ├ name: %279 = .identifier - tok[357..357]
+             │  │  └ token: .identifier 'foo'
+             │  ├ type: NONE
+             │  └ value: %280 = .string_literal - tok[359..359]
+             │     └ token: .string_literal '"Hello"'
+             ├ %282 = .comment_line - tok[361..362]
+             │  └ token: .comment '// %2 = usize.const 0                     ; 0 usize'
+             ├ %283 = .comment_line - tok[362..363]
+             │  └ token: .comment '// %3 = get_el_ptr %0 i=(%2) offset=(0)   ; *bchar@ptr:0'
+             ├ %284 = .comment_line - tok[363..364]
+             │  └ token: .comment '// %4 = bchar.const 'h'                   ; 'h' bchar'
+             ├ %285 = .comment_line - tok[364..365]
+             │  └ token: .comment '// %5 = store %3 %4                       ; void'
+             └ %290 = .assign - tok[365..370]
+                ├ lhs: %288 = .array_prop_access - tok[365..368]
+                │  ├ lhs: %286 = .identifier - tok[365..365]
+                │  │  └ token: .identifier 'foo'
+                │  └ rhs: %287 = .number_literal - tok[367..367]
+                │     └ token: .number_literal '0'
+                └ rhs: %289 = .char_literal - tok[370..370]
+                   └ token: .char_literal ''h''

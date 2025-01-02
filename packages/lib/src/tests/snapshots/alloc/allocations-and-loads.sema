@@ -1,13 +1,13 @@
 ;; Sema
-;; 10 declarations
-;; 23 entities
-;; 10 symbols
-;; 152 instructions
-;; 47 values
-;; 18 types
+;; 12 declarations
+;; 27 entities
+;; 12 symbols
+;; 168 instructions
+;; 55 values
+;; 23 types
 ;; 3 lists
-;; 37 strings
-;; 56/65 comptime memory used/allocated bytes
+;; 44 strings
+;; 84/105 comptime memory used/allocated bytes
 
 %0 = type @"alloc/allocations-and-loads.sk::T" = struct:
  ├ type: struct{i32}
@@ -187,4 +187,24 @@
     ├ %20: *i32 = .get_element_pointer base=(%10) index=(%19)         ; *i32@34
     ├ %21: i32 = .constant                                            ; i32{ 3 }
     └ %22: void = .store operand=(%20) payload=(%21)                  ; void
+
+%10 = fn @"alloc/allocations-and-loads.sk::str_alloc"() -> void
+ └ %0: void = .block: [%1-%4]                                         ; void
+    ├ %1: [7]bchar = .constant                                        ; todo_complex(array)
+    ├ !%2: type = .typeof operand=(%1)                                ; type([7]bchar)
+    ├ %3: *[7]bchar = .alloc type=([7]bchar) mutable=(false)          ; *[7]bchar@3f
+    └ %4: void = .store operand=(%3) payload=(%1)                     ; void
+
+%11 = fn @"alloc/allocations-and-loads.sk::str_alloc_2"() -> void
+ └ %0: void = .block: [%1-%10]                                        ; void
+    ├ %1: [7]bchar = .constant                                        ; todo_complex(array)
+    ├ !%2: type = .typeof operand=(%1)                                ; type([7]bchar)
+    ├ %3: *[7]bchar = .alloc type=([7]bchar) mutable=(true)           ; *[7]bchar@4d
+    ├ %4: void = .store operand=(%3) payload=(%1)                     ; void
+    ├ !%5: number = .constant                                         ; number{ 0 }
+    ├ %6: usize = .constant                                           ; usize{ 0 }
+    ├ %7: *bchar = .get_element_pointer base=(%3) index=(%6)          ; *bchar@0
+    ├ !%8: number = .constant                                         ; number{ 39 }
+    ├ %9: bchar = .constant                                           ; bchar
+    └ %10: void = .store operand=(%7) payload=(%9)                    ; void
 

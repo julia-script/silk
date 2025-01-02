@@ -805,7 +805,19 @@ pub const Builder = struct {
             .slice => |slice| {
                 var hasher = Hasher.new("slice-value");
                 hasher.update(self.getValueKeyHash(slice.ptr));
-                hasher.update(self.getValueKeyHash(slice.len));
+                // hasher.update(self.getValueKeyHash(slice.len));
+                switch (slice.len) {
+                    .resolved => |constant| {
+                        hasher.update(self.getTypeKeyHash(constant.type));
+                        hasher.update(self.getValueKeyHash(constant.value));
+                    },
+                    .ref => |ref_inst_index| {
+                        _ = ref_inst_index; // autofix
+
+                        // const
+                        // hasher.update(self.getTypeKeyHash(ref.type));
+                    },
+                }
                 return try self.internValue(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -824,14 +836,14 @@ pub const Builder = struct {
                 _ = flat_union; // autofix
                 var hasher = Hasher.new("flat_union");
                 switch (data.flat_union.active_field) {
-                    .runtime => |runtime| {
-                        hasher.update("runtime");
-                        hasher.update(runtime);
+                    .ref => |ref| {
+                        hasher.update("ref");
+                        hasher.update(ref);
                     },
-                    .comp => |comp| {
-                        hasher.update("comp");
-                        hasher.update(self.getTypeKeyHash(comp.type));
-                        hasher.update(self.getValueKeyHash(comp.value));
+                    .resolved => |resolved| {
+                        hasher.update("resolved");
+                        hasher.update(self.getTypeKeyHash(resolved.type));
+                        hasher.update(self.getValueKeyHash(resolved.value));
                     },
                 }
                 return try self.internValue(.{
@@ -3167,7 +3179,7 @@ const Scope = struct {
                             .op = .cast,
                             .type = type_index,
                             .value = try self.builder.internValueData(.{ .flat_union = .{
-                                .active_field = .{ .comp = .{
+                                .active_field = .{ .resolved = .{
                                     .type = field_key,
                                     .value = instruction.value,
                                 } },

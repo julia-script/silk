@@ -339,8 +339,8 @@ pub const Value = struct {
     hash: u64,
     data: Data,
     pub const Constant = union(enum) {
-        runtime: Instruction.Index,
-        comp: TypedValue,
+        ref: Instruction.Index,
+        resolved: TypedValue,
     };
     pub const Data = union(enum) {
         integer: i64,
@@ -353,7 +353,7 @@ pub const Value = struct {
         comptime_register: [8]u8,
         slice: struct {
             ptr: Value.Key,
-            len: Value.Key,
+            len: Constant,
         },
 
         struct_instance: struct {
@@ -991,14 +991,23 @@ pub fn formatTypedValue(
                     const value = self.builder.getComplexValue(typed_value.value);
                     if (activeTag(value.data) != .slice) return try writer.print("EXPECTED_SLICE_VALUE({s}@{x})", .{ @tagName(value.data), value.hash });
                     const is_ptr_comptime_known = value.data.slice.ptr.isComptimeKnown();
-                    const is_len_comptime_known = value.data.slice.len.isComptimeKnown();
+                    // const is_len_comptime_known = value.data.slice.len.isComptimeKnown();
                     try writer.writeAll("[..");
-                    if (is_len_comptime_known) {
-                        const len = self.builder.getNumberValueKeyAs(u32, value.data.slice.len);
-                        try writer.print("{d}", .{len});
-                    } else {
-                        try writer.writeAll("?");
+                    switch (value.data.slice.len) {
+                        .resolved => |constant| {
+                            const len = self.builder.getNumberValueKeyAs(u32, constant.value);
+
+                            try writer.print("{d}", .{len});
+                        },
+                        .ref => |ref| {
+                            try writer.print("ref(%{d})", .{ref});
+                        },
                     }
+                    // if (is_len_comptime_known) {
+                    //     const len = self.builder.getNumberValueKeyAs(u32, value.data.slice.len);
+                    //     try writer.print("{d}", .{len});
+                    // } else {
+                    //     try writer.writeAll("?");
                     try writer.writeAll("]");
                     try self.formatType(writer, slice.child);
                     if (is_ptr_comptime_known) {
@@ -1017,11 +1026,11 @@ pub fn formatTypedValue(
                     const value = self.builder.getComplexValue(typed_value.value);
 
                     switch (value.data.flat_union.active_field) {
-                        .comp => |comp| {
-                            try self.formatTypedValue(writer, comp, options);
+                        .resolved => |resolved| {
+                            try self.formatTypedValue(writer, resolved, options);
                         },
-                        .runtime => {
-                            try writer.writeAll("[runtime]");
+                        .ref => |ref| {
+                            try writer.print("ref(%{d})", .{ref});
                         },
                     }
                     try writer.writeAll(" }");
