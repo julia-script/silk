@@ -3,9 +3,9 @@
 ;; 5 entities
 ;; 2 symbols
 ;; 239 instructions
-;; 21 values
-;; 2 types
-;; 0 lists
+;; 22 values
+;; 15 types
+;; 43 lists
 ;; 9 strings
 ;; 0/0 comptime memory used/allocated bytes
 
@@ -33,98 +33,98 @@
     ├ !%20: number = .constant                                        ; number{ 2.4 }
     ├ %21: bool = .constant                                           ; true
     ├ !%22: number = .constant                                        ; number{ 1 }
-    ├ !%23: builtin_fn_as = .get_builtin_fn_as operand=(%22)          ; builtin_fn_as
-    ├ !%24: type = .type                                              ; type(i32)
+    ├ !%23: [builtin_as] = .constant operand=(%22)                    ; todo_complex(builtin_member)
+    ├ !%24: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%25: i32 = .constant                                           ; i32{ 1 }
     ├ !%26: number = .constant                                        ; number{ 2 }
-    ├ !%27: builtin_fn_as = .get_builtin_fn_as operand=(%26)          ; builtin_fn_as
-    ├ !%28: type = .type                                              ; type(i32)
+    ├ !%27: [builtin_as] = .constant operand=(%26)                    ; todo_complex(builtin_member)
+    ├ !%28: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%29: i32 = .constant                                           ; i32{ 2 }
     ├ %30: bool = .constant                                           ; true
     ├ !%31: number = .constant                                        ; number{ 1 }
-    ├ !%32: builtin_fn_as = .get_builtin_fn_as operand=(%31)          ; builtin_fn_as
-    ├ !%33: type = .type                                              ; type(i32)
+    ├ !%32: [builtin_as] = .constant operand=(%31)                    ; todo_complex(builtin_member)
+    ├ !%33: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%34: i32 = .constant                                           ; i32{ 1 }
     ├ !%35: number = .constant                                        ; number{ 1 }
-    ├ !%36: builtin_fn_as = .get_builtin_fn_as operand=(%35)          ; builtin_fn_as
-    ├ !%37: type = .type                                              ; type(i32)
+    ├ !%36: [builtin_as] = .constant operand=(%35)                    ; todo_complex(builtin_member)
+    ├ !%37: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%38: i32 = .constant                                           ; i32{ 1 }
     ├ %39: bool = .constant                                           ; true
     ├ !%40: number = .constant                                        ; number{ 2 }
-    ├ !%41: builtin_fn_as = .get_builtin_fn_as operand=(%40)          ; builtin_fn_as
-    ├ !%42: type = .type                                              ; type(i32)
+    ├ !%41: [builtin_as] = .constant operand=(%40)                    ; todo_complex(builtin_member)
+    ├ !%42: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%43: i32 = .constant                                           ; i32{ 2 }
     ├ !%44: number = .constant                                        ; number{ 2 }
-    ├ !%45: builtin_fn_as = .get_builtin_fn_as operand=(%44)          ; builtin_fn_as
-    ├ !%46: type = .type                                              ; type(i32)
+    ├ !%45: [builtin_as] = .constant operand=(%44)                    ; todo_complex(builtin_member)
+    ├ !%46: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%47: i32 = .constant                                           ; i32{ 2 }
     ├ %48: bool = .constant                                           ; true
     ├ !%49: number = .constant                                        ; number{ 2 }
-    ├ !%50: builtin_fn_as = .get_builtin_fn_as operand=(%49)          ; builtin_fn_as
-    ├ !%51: type = .type                                              ; type(i32)
+    ├ !%50: [builtin_as] = .constant operand=(%49)                    ; todo_complex(builtin_member)
+    ├ !%51: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%52: i32 = .constant                                           ; i32{ 2 }
     ├ !%53: number = .constant                                        ; number{ 2 }
-    ├ !%54: builtin_fn_as = .get_builtin_fn_as operand=(%53)          ; builtin_fn_as
-    ├ !%55: type = .type                                              ; type(i32)
+    ├ !%54: [builtin_as] = .constant operand=(%53)                    ; todo_complex(builtin_member)
+    ├ !%55: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%56: i32 = .constant                                           ; i32{ 2 }
     ├ %57: bool = .constant                                           ; true
     ├ !%58: number = .constant                                        ; number{ 1 }
-    ├ !%59: builtin_fn_as = .get_builtin_fn_as operand=(%58)          ; builtin_fn_as
-    ├ !%60: type = .type                                              ; type(i32)
+    ├ !%59: [builtin_as] = .constant operand=(%58)                    ; todo_complex(builtin_member)
+    ├ !%60: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%61: i32 = .constant                                           ; i32{ 1 }
     ├ !%62: number = .constant                                        ; number{ 2 }
-    ├ !%63: builtin_fn_as = .get_builtin_fn_as operand=(%62)          ; builtin_fn_as
-    ├ !%64: type = .type                                              ; type(i8)
+    ├ !%63: [builtin_as] = .constant operand=(%62)                    ; todo_complex(builtin_member)
+    ├ !%64: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%65: i8 = .constant                                            ; i8{ 2 }
     ├ !%66: i32 = .constant                                           ; i32{ 2 }
     ├ %67: bool = .constant                                           ; true
     ├ !%68: number = .constant                                        ; number{ 1 }
-    ├ !%69: builtin_fn_as = .get_builtin_fn_as operand=(%68)          ; builtin_fn_as
-    ├ !%70: type = .type                                              ; type(i8)
+    ├ !%69: [builtin_as] = .constant operand=(%68)                    ; todo_complex(builtin_member)
+    ├ !%70: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%71: i8 = .constant                                            ; i8{ 1 }
     ├ !%72: number = .constant                                        ; number{ 2 }
-    ├ !%73: builtin_fn_as = .get_builtin_fn_as operand=(%72)          ; builtin_fn_as
-    ├ !%74: type = .type                                              ; type(i32)
+    ├ !%73: [builtin_as] = .constant operand=(%72)                    ; todo_complex(builtin_member)
+    ├ !%74: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%75: i32 = .constant                                           ; i32{ 2 }
     ├ !%76: i32 = .constant                                           ; i32{ 1 }
     ├ %77: bool = .constant                                           ; true
     ├ !%78: number = .constant                                        ; number{ 2 }
-    ├ !%79: builtin_fn_as = .get_builtin_fn_as operand=(%78)          ; builtin_fn_as
-    ├ !%80: type = .type                                              ; type(i32)
+    ├ !%79: [builtin_as] = .constant operand=(%78)                    ; todo_complex(builtin_member)
+    ├ !%80: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%81: i32 = .constant                                           ; i32{ 2 }
     ├ !%82: number = .constant                                        ; number{ 1 }
-    ├ !%83: builtin_fn_as = .get_builtin_fn_as operand=(%82)          ; builtin_fn_as
-    ├ !%84: type = .type                                              ; type(i8)
+    ├ !%83: [builtin_as] = .constant operand=(%82)                    ; todo_complex(builtin_member)
+    ├ !%84: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%85: i8 = .constant                                            ; i8{ 1 }
     ├ !%86: i32 = .constant                                           ; i32{ 1 }
     ├ %87: bool = .constant                                           ; true
     ├ !%88: number = .constant                                        ; number{ 1 }
-    ├ !%89: builtin_fn_as = .get_builtin_fn_as operand=(%88)          ; builtin_fn_as
-    ├ !%90: type = .type                                              ; type(i8)
+    ├ !%89: [builtin_as] = .constant operand=(%88)                    ; todo_complex(builtin_member)
+    ├ !%90: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%91: i8 = .constant                                            ; i8{ 1 }
     ├ !%92: number = .constant                                        ; number{ 2 }
-    ├ !%93: builtin_fn_as = .get_builtin_fn_as operand=(%92)          ; builtin_fn_as
-    ├ !%94: type = .type                                              ; type(i32)
+    ├ !%93: [builtin_as] = .constant operand=(%92)                    ; todo_complex(builtin_member)
+    ├ !%94: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%95: i32 = .constant                                           ; i32{ 2 }
     ├ !%96: i32 = .constant                                           ; i32{ 1 }
     ├ %97: bool = .constant                                           ; true
     ├ !%98: number = .constant                                        ; number{ 127 }
-    ├ !%99: builtin_fn_as = .get_builtin_fn_as operand=(%98)          ; builtin_fn_as
-    ├ !%100: type = .type                                             ; type(i8)
+    ├ !%99: [builtin_as] = .constant operand=(%98)                    ; todo_complex(builtin_member)
+    ├ !%100: typeof(i8) = .type                                       ; typeof(i8)
     ├ !%101: i8 = .constant                                           ; i8{ 127 }
     ├ !%102: number = .constant                                       ; number{ 128 }
-    ├ !%103: builtin_fn_as = .get_builtin_fn_as operand=(%102)        ; builtin_fn_as
-    ├ !%104: type = .type                                             ; type(i16)
+    ├ !%103: [builtin_as] = .constant operand=(%102)                  ; todo_complex(builtin_member)
+    ├ !%104: typeof(i16) = .type                                      ; typeof(i16)
     ├ !%105: i16 = .constant                                          ; i16{ 128 }
     ├ !%106: i16 = .constant                                          ; i16{ 127 }
     ├ %107: bool = .constant                                          ; true
     ├ !%108: number = .constant                                       ; number{ 32767 }
-    ├ !%109: builtin_fn_as = .get_builtin_fn_as operand=(%108)        ; builtin_fn_as
-    ├ !%110: type = .type                                             ; type(i16)
+    ├ !%109: [builtin_as] = .constant operand=(%108)                  ; todo_complex(builtin_member)
+    ├ !%110: typeof(i16) = .type                                      ; typeof(i16)
     ├ !%111: i16 = .constant                                          ; i16{ 32767 }
     ├ !%112: number = .constant                                       ; number{ 32768 }
-    ├ !%113: builtin_fn_as = .get_builtin_fn_as operand=(%112)        ; builtin_fn_as
-    ├ !%114: type = .type                                             ; type(i32)
+    ├ !%113: [builtin_as] = .constant operand=(%112)                  ; todo_complex(builtin_member)
+    ├ !%114: typeof(i32) = .type                                      ; typeof(i32)
     ├ !%115: i32 = .constant                                          ; i32{ 32768 }
     ├ !%116: i32 = .constant                                          ; i32{ 32767 }
     └ %117: bool = .constant                                          ; true
@@ -147,107 +147,107 @@
     ├ !%14: number = .constant                                        ; number{ 1 }
     ├ %15: bool = .constant                                           ; false
     ├ !%16: number = .constant                                        ; number{ 1 }
-    ├ !%17: builtin_fn_as = .get_builtin_fn_as operand=(%16)          ; builtin_fn_as
-    ├ !%18: type = .type                                              ; type(i32)
+    ├ !%17: [builtin_as] = .constant operand=(%16)                    ; todo_complex(builtin_member)
+    ├ !%18: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%19: i32 = .constant                                           ; i32{ 1 }
     ├ !%20: number = .constant                                        ; number{ 2 }
-    ├ !%21: builtin_fn_as = .get_builtin_fn_as operand=(%20)          ; builtin_fn_as
-    ├ !%22: type = .type                                              ; type(i32)
+    ├ !%21: [builtin_as] = .constant operand=(%20)                    ; todo_complex(builtin_member)
+    ├ !%22: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%23: i32 = .constant                                           ; i32{ 2 }
     ├ %24: bool = .constant                                           ; false
     ├ !%25: number = .constant                                        ; number{ 1 }
-    ├ !%26: builtin_fn_as = .get_builtin_fn_as operand=(%25)          ; builtin_fn_as
-    ├ !%27: type = .type                                              ; type(i32)
+    ├ !%26: [builtin_as] = .constant operand=(%25)                    ; todo_complex(builtin_member)
+    ├ !%27: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%28: i32 = .constant                                           ; i32{ 1 }
     ├ !%29: number = .constant                                        ; number{ 1 }
-    ├ !%30: builtin_fn_as = .get_builtin_fn_as operand=(%29)          ; builtin_fn_as
-    ├ !%31: type = .type                                              ; type(i32)
+    ├ !%30: [builtin_as] = .constant operand=(%29)                    ; todo_complex(builtin_member)
+    ├ !%31: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%32: i32 = .constant                                           ; i32{ 1 }
     ├ %33: bool = .constant                                           ; false
     ├ !%34: number = .constant                                        ; number{ 1 }
-    ├ !%35: builtin_fn_as = .get_builtin_fn_as operand=(%34)          ; builtin_fn_as
-    ├ !%36: type = .type                                              ; type(i32)
+    ├ !%35: [builtin_as] = .constant operand=(%34)                    ; todo_complex(builtin_member)
+    ├ !%36: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%37: i32 = .constant                                           ; i32{ 1 }
     ├ !%38: number = .constant                                        ; number{ 1 }
-    ├ !%39: builtin_fn_as = .get_builtin_fn_as operand=(%38)          ; builtin_fn_as
-    ├ !%40: type = .type                                              ; type(i32)
+    ├ !%39: [builtin_as] = .constant operand=(%38)                    ; todo_complex(builtin_member)
+    ├ !%40: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%41: i32 = .constant                                           ; i32{ 1 }
     ├ %42: bool = .constant                                           ; false
     ├ !%43: number = .constant                                        ; number{ 2 }
-    ├ !%44: builtin_fn_as = .get_builtin_fn_as operand=(%43)          ; builtin_fn_as
-    ├ !%45: type = .type                                              ; type(i32)
+    ├ !%44: [builtin_as] = .constant operand=(%43)                    ; todo_complex(builtin_member)
+    ├ !%45: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%46: i32 = .constant                                           ; i32{ 2 }
     ├ !%47: number = .constant                                        ; number{ 1 }
-    ├ !%48: builtin_fn_as = .get_builtin_fn_as operand=(%47)          ; builtin_fn_as
-    ├ !%49: type = .type                                              ; type(i32)
+    ├ !%48: [builtin_as] = .constant operand=(%47)                    ; todo_complex(builtin_member)
+    ├ !%49: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%50: i32 = .constant                                           ; i32{ 1 }
     ├ %51: bool = .constant                                           ; false
     ├ !%52: number = .constant                                        ; number{ 1 }
-    ├ !%53: builtin_fn_as = .get_builtin_fn_as operand=(%52)          ; builtin_fn_as
-    ├ !%54: type = .type                                              ; type(i32)
+    ├ !%53: [builtin_as] = .constant operand=(%52)                    ; todo_complex(builtin_member)
+    ├ !%54: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%55: i32 = .constant                                           ; i32{ 1 }
     ├ !%56: number = .constant                                        ; number{ 2 }
-    ├ !%57: builtin_fn_as = .get_builtin_fn_as operand=(%56)          ; builtin_fn_as
-    ├ !%58: type = .type                                              ; type(i32)
+    ├ !%57: [builtin_as] = .constant operand=(%56)                    ; todo_complex(builtin_member)
+    ├ !%58: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%59: i32 = .constant                                           ; i32{ 2 }
     ├ %60: bool = .constant                                           ; false
     ├ !%61: number = .constant                                        ; number{ 1 }
-    ├ !%62: builtin_fn_as = .get_builtin_fn_as operand=(%61)          ; builtin_fn_as
-    ├ !%63: type = .type                                              ; type(i32)
+    ├ !%62: [builtin_as] = .constant operand=(%61)                    ; todo_complex(builtin_member)
+    ├ !%63: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%64: i32 = .constant                                           ; i32{ 1 }
     ├ !%65: number = .constant                                        ; number{ 2 }
-    ├ !%66: builtin_fn_as = .get_builtin_fn_as operand=(%65)          ; builtin_fn_as
-    ├ !%67: type = .type                                              ; type(i8)
+    ├ !%66: [builtin_as] = .constant operand=(%65)                    ; todo_complex(builtin_member)
+    ├ !%67: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%68: i8 = .constant                                            ; i8{ 2 }
     ├ !%69: i32 = .constant                                           ; i32{ 2 }
     ├ %70: bool = .constant                                           ; false
     ├ !%71: number = .constant                                        ; number{ 1 }
-    ├ !%72: builtin_fn_as = .get_builtin_fn_as operand=(%71)          ; builtin_fn_as
-    ├ !%73: type = .type                                              ; type(i8)
+    ├ !%72: [builtin_as] = .constant operand=(%71)                    ; todo_complex(builtin_member)
+    ├ !%73: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%74: i8 = .constant                                            ; i8{ 1 }
     ├ !%75: number = .constant                                        ; number{ 2 }
-    ├ !%76: builtin_fn_as = .get_builtin_fn_as operand=(%75)          ; builtin_fn_as
-    ├ !%77: type = .type                                              ; type(i32)
+    ├ !%76: [builtin_as] = .constant operand=(%75)                    ; todo_complex(builtin_member)
+    ├ !%77: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%78: i32 = .constant                                           ; i32{ 2 }
     ├ !%79: i32 = .constant                                           ; i32{ 1 }
     ├ %80: bool = .constant                                           ; false
     ├ !%81: number = .constant                                        ; number{ 2 }
-    ├ !%82: builtin_fn_as = .get_builtin_fn_as operand=(%81)          ; builtin_fn_as
-    ├ !%83: type = .type                                              ; type(i8)
+    ├ !%82: [builtin_as] = .constant operand=(%81)                    ; todo_complex(builtin_member)
+    ├ !%83: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%84: i8 = .constant                                            ; i8{ 2 }
     ├ !%85: number = .constant                                        ; number{ 3 }
-    ├ !%86: builtin_fn_as = .get_builtin_fn_as operand=(%85)          ; builtin_fn_as
-    ├ !%87: type = .type                                              ; type(i32)
+    ├ !%86: [builtin_as] = .constant operand=(%85)                    ; todo_complex(builtin_member)
+    ├ !%87: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%88: i32 = .constant                                           ; i32{ 3 }
     ├ !%89: i32 = .constant                                           ; i32{ 2 }
     ├ %90: bool = .constant                                           ; false
     ├ !%91: number = .constant                                        ; number{ 3 }
-    ├ !%92: builtin_fn_as = .get_builtin_fn_as operand=(%91)          ; builtin_fn_as
-    ├ !%93: type = .type                                              ; type(i32)
+    ├ !%92: [builtin_as] = .constant operand=(%91)                    ; todo_complex(builtin_member)
+    ├ !%93: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%94: i32 = .constant                                           ; i32{ 3 }
     ├ !%95: number = .constant                                        ; number{ 2 }
-    ├ !%96: builtin_fn_as = .get_builtin_fn_as operand=(%95)          ; builtin_fn_as
-    ├ !%97: type = .type                                              ; type(i8)
+    ├ !%96: [builtin_as] = .constant operand=(%95)                    ; todo_complex(builtin_member)
+    ├ !%97: typeof(i8) = .type                                        ; typeof(i8)
     ├ !%98: i8 = .constant                                            ; i8{ 2 }
     ├ !%99: i32 = .constant                                           ; i32{ 2 }
     ├ %100: bool = .constant                                          ; false
     ├ !%101: number = .constant                                       ; number{ 128 }
-    ├ !%102: builtin_fn_as = .get_builtin_fn_as operand=(%101)        ; builtin_fn_as
-    ├ !%103: type = .type                                             ; type(i16)
+    ├ !%102: [builtin_as] = .constant operand=(%101)                  ; todo_complex(builtin_member)
+    ├ !%103: typeof(i16) = .type                                      ; typeof(i16)
     ├ !%104: i16 = .constant                                          ; i16{ 128 }
     ├ !%105: number = .constant                                       ; number{ 127 }
-    ├ !%106: builtin_fn_as = .get_builtin_fn_as operand=(%105)        ; builtin_fn_as
-    ├ !%107: type = .type                                             ; type(i8)
+    ├ !%106: [builtin_as] = .constant operand=(%105)                  ; todo_complex(builtin_member)
+    ├ !%107: typeof(i8) = .type                                       ; typeof(i8)
     ├ !%108: i8 = .constant                                           ; i8{ 127 }
     ├ !%109: i16 = .constant                                          ; i16{ 127 }
     ├ %110: bool = .constant                                          ; false
     ├ !%111: number = .constant                                       ; number{ 32768 }
-    ├ !%112: builtin_fn_as = .get_builtin_fn_as operand=(%111)        ; builtin_fn_as
-    ├ !%113: type = .type                                             ; type(i32)
+    ├ !%112: [builtin_as] = .constant operand=(%111)                  ; todo_complex(builtin_member)
+    ├ !%113: typeof(i32) = .type                                      ; typeof(i32)
     ├ !%114: i32 = .constant                                          ; i32{ 32768 }
     ├ !%115: number = .constant                                       ; number{ 32767 }
-    ├ !%116: builtin_fn_as = .get_builtin_fn_as operand=(%115)        ; builtin_fn_as
-    ├ !%117: type = .type                                             ; type(i16)
+    ├ !%116: [builtin_as] = .constant operand=(%115)                  ; todo_complex(builtin_member)
+    ├ !%117: typeof(i16) = .type                                      ; typeof(i16)
     ├ !%118: i16 = .constant                                          ; i16{ 32767 }
     ├ !%119: i32 = .constant                                          ; i32{ 32767 }
     └ %120: bool = .constant                                          ; false

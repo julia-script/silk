@@ -2,30 +2,31 @@
 ;; 2 declarations
 ;; 7 entities
 ;; 2 symbols
-;; 17 instructions
+;; 18 instructions
 ;; 7 values
-;; 5 types
-;; 5 lists
+;; 4 types
+;; 4 lists
 ;; 12 strings
 ;; 0/0 comptime memory used/allocated bytes
 
 %0 = fn @"comptime/builtin-helpers.sk::foo"(i32) -> void
- └ %0: void = .block: [%1-%5]                                         ; void
+ └ %0: void = .block: [%1-%4]                                         ; void
     ├ %1: i32 = .param index=(%0)                                     ; i32{ [runtime] }
-    ├ %2: fn(any) void = .builtin_global_get                          ; fn(any) void
+    ├ !%2: [builtin_comptime_log] = .constant                         ; todo_complex(builtin_global)
     ├ %3: i32 = .param_get operand=(%1)                               ; i32{ [runtime] }
-    ├ %4: any(i32) = .cast operand=(%3)                               ; i32{ [runtime] }
-    └ %5: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%4}); void
+    └ %4: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%3}); void
 
 %1 = fn @"comptime/builtin-helpers.sk::main"() -> void
- └ %0: void = .block: [%1-%10]                                        ; void
-    ├ %1: void = .block: [%2-%5]                                      ; void
-    │  ├ !%2: number = .constant                                      ; number{ 123 }
-    │  ├ !%3: i32 = .constant                                         ; i32{ 123 }
-    │  ├ !%4: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%3}); void
-    │  └ !%5: void = .br operand=(%1)                                 ; void
-    ├ !%7: number = .constant                                         ; number{ 456 }
-    ├ !%8: i32 = .constant                                            ; i32{ 456 }
-    ├ !%9: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%8}); void
-    └ !%10: void = .br operand=(%6)                                   ; void
+ └ %0: void = .block: [%1-%12]                                        ; void
+    ├ %1: void = .block: [%2-%6]                                      ; void
+    │  ├ %2: fn(i32) void = .global_get declaration=(%0)              ; fn(i32) void
+    │  ├ !%3: number = .constant                                      ; number{ 123 }
+    │  ├ !%4: i32 = .constant                                         ; i32{ 123 }
+    │  ├ !%5: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%4}); void
+    │  └ !%6: void = .br operand=(%1)                                 ; void
+    ├ %8: fn(i32) void = .global_get declaration=(%0)                 ; fn(i32) void
+    ├ !%9: number = .constant                                         ; number{ 456 }
+    ├ !%10: i32 = .constant                                           ; i32{ 456 }
+    ├ !%11: void = .fn_call callee_entity=(%1) callee=(%0) args_list=({%10}); void
+    └ !%12: void = .br operand=(%7)                                   ; void
 

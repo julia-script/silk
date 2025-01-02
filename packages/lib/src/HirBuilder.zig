@@ -288,6 +288,11 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index) Hi
             _ = try struct_scope.commit();
             return inst;
         },
+        .impl_decl => {
+            const inst_index = try self.genImplDecl(scope, node_index);
+            try scope.instructions.append(inst_index);
+            return inst_index;
+        },
         .block => {
             const inst_index = try Block.fromNode(self, scope, node_index);
 
@@ -838,6 +843,98 @@ const WipDef = struct {
     init_node: ?Ast.Node.Index,
     ty_node: ?Ast.Node.Index,
 };
+
+pub fn genImplDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
+    const trace = self.tracer.begin(
+        @src(),
+        .{ "genImplDecl", "HirBuilder.genImplDecl", .{} },
+        .{node_index},
+    );
+    defer trace.end(.{});
+    const index = try scope.reserveInstruction();
+    const nav = Ast.Navigator.init(self.hir.ast, node_index);
+    const type_inst = try self.genInstruction(scope, nav.data.impl_decl.type);
+    var wip_declarations_list = std.ArrayList(WipDef).init(self.arena.allocator());
+    defer wip_declarations_list.deinit();
+    //  var wip_declarations_list = std.ArrayList(WipDef).init(self.arena.allocator());
+    defer wip_declarations_list.deinit();
+
+    // var fields_list = self.newList();
+    var decl_list = self.newList();
+
+    const members_list = self.hir.ast.interned_lists.getSlice(nav.data.impl_decl.members_list);
+
+    for (members_list) |child_index| {
+        const child = self.hir.ast.getNode(child_index);
+        switch (child.data) {
+            .comment_line => {
+                continue;
+            },
+            // .struct_field => {
+            //     const field = child.data.struct_field;
+            //     if (decl_list.len() > 0) {
+            //         std.debug.panic("error for: struct field declared after struct declaration", .{});
+            //     }
+
+            //     const inst_index = try self.reserveInstruction();
+
+            //     const inline_block_inst = if (field.default_value != 0) try Block.fromNode(self, scope, field.default_value) else null;
+            //     const type_inst = if (field.type != 0) try self.genInstruction(scope, field.type) else null;
+            //     self.setInstruction(inst_index, .{
+            //         .struct_field = .{
+            //             .name_node = field.name,
+            //             // .ty = if (field.type != 0) try self.genInstruction(scope, field.type) else null,
+            //             .type = type_inst,
+            //             .init = inline_block_inst,
+            //         },
+            //     });
+            //     try fields_list.append(inst_index);
+            // },
+            else => {
+                if (child_index == 0) std.debug.panic("root struct declaration should not have fields", .{});
+                const wip = try self.genDef(scope, child_index);
+                try decl_list.append(wip.inst);
+                try wip_declarations_list.append(wip);
+            },
+        }
+    }
+
+    for (wip_declarations_list.items) |def| {
+        const inst = &self.hir.insts.items[def.inst];
+        switch (inst.*) {
+            .global_decl => {
+                if (inst.global_decl.is_fn) {
+                    const fn_decl_inst = try self.genFnDeclInstruction(
+                        scope,
+                        def.ty_node orelse unreachable,
+                    );
+                    self.hir.insts.items[def.inst].global_decl.init = fn_decl_inst.init;
+                    self.hir.insts.items[def.inst].global_decl.type = fn_decl_inst.index;
+                    continue;
+                }
+
+                if (def.init_node) |init_node| {
+                    const inline_block = try Block.fromNode(self, scope, init_node);
+                    self.hir.insts.items[def.inst].global_decl.init = inline_block;
+                }
+                if (def.ty_node) |ty_node| {
+                    const ty_inst = try self.genInstruction(scope, ty_node);
+                    self.hir.insts.items[def.inst].global_decl.type = ty_inst;
+                }
+            },
+            else => unreachable,
+        }
+    }
+    self.setInstruction(index, .{
+        .impl_decl = .{
+            .type = type_inst,
+            .declarations_list = try decl_list.commit(),
+            // .fields_list = try fields_list.commit(),
+        },
+    });
+    return index;
+}
+
 pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hir.Inst.Index {
     const trace = self.tracer.begin(
         @src(),
@@ -854,6 +951,7 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
 
     var fields_list = self.newList();
     var decl_list = self.newList();
+    var impl_block_list = self.newList();
 
     const members_list = self.hir.ast.interned_lists.getSlice(nav.data.struct_decl.members_list);
 
@@ -882,6 +980,11 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
                     },
                 });
                 try fields_list.append(inst_index);
+            },
+
+            .impl_decl => {
+                const impl_decl_inst = try self.genImplDecl(scope, child_index);
+                try impl_block_list.append(impl_decl_inst);
             },
             else => {
                 if (child_index == 0) std.debug.panic("root struct declaration should not have fields", .{});
@@ -924,6 +1027,7 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
             .name_node = null,
             .declarations_list = try decl_list.commit(),
             .fields_list = try fields_list.commit(),
+            .impl_block_list = try impl_block_list.commit(),
         },
     });
     return index;
@@ -1054,6 +1158,7 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
     );
     defer trace.end(.{});
     var ast = Ast.Navigator.init(self.hir.ast, node_index);
+
     const visibility: shared.Visibility = visibility: {
         if (ast.is(.@"pub")) {
             ast.move(ast.data.@"pub".node);
@@ -1095,6 +1200,7 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
                 .is_type = false,
                 .init = null,
                 .type = null,
+                .is_declaring_builtin = proto_data.is_declaring_builtin,
             },
         });
         ast.move(proto_data.name);
@@ -1118,6 +1224,7 @@ pub fn genDef(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !WipDef {
         .mutable = ast.is(.var_decl),
         .init = null,
         .type = null,
+        .is_declaring_builtin = false,
     };
     const decl = switch (ast.tag) {
         .const_decl => ast.data.const_decl,

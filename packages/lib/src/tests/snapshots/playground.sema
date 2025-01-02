@@ -11,7 +11,7 @@
 
 %0 = fn @"playground.sk::main"() -> void
  └ %0: void = .block: [%1-%4]                                         ; void
-    ├ %1: [15]bchar = .constant                                       ; todo_complex(1)
+    ├ %1: [15]bchar = .constant                                       ; todo_complex(array)
     ├ !%2: type = .typeof operand=(%1)                                ; type([15]bchar)
     ├ %3: *[15]bchar = .alloc type=([15]bchar) mutable=(false)        ; *[15]bchar@f
     └ %4: void = .store operand=(%3) payload=(%1)                     ; void

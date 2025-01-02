@@ -10,8 +10,9 @@
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  └ ret_type: %2 = .ty_i32 - tok[4..4]
-       │     └ token: .keyword_i32 'i32'
+       │  ├ ret_type: %2 = .ty_i32 - tok[4..4]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
        └ body: %10 = .block - tok[5..13]
           └ list: 1 items
              └ %9 = .ret_expression - tok[6..11]

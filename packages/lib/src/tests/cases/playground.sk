@@ -1,4 +1,4 @@
-fn main(): void { 
+fn main() void { 
   const hello_world = "Hello, World!";
   // @comptime_log(hello_world[0]);
 

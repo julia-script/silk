@@ -4,7 +4,7 @@
 ;; 1 symbols
 ;; 3 instructions
 ;; 1 values
-;; 4 types
+;; 5 types
 ;; 1 lists
 ;; 15 strings
 ;; 0/0 comptime memory used/allocated bytes

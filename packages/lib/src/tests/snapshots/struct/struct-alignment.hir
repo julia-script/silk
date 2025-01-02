@@ -1,209 +1,225 @@
-;; HIR: 64 instructions
+;; HIR: 65 instructions
 
 %0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
- └ declarations_list: 6 items
-    ├ 0: %1 = .global_decl
-    │  ├ name_node: node(#3: "A")
-    │  ├ extern: false
-    │  ├ is_fn: false
-    │  ├ is_type: true
-    │  ├ visibility: "private"
-    │  ├ exported: false
-    │  ├ mutable: false
-    │  ├ type: NONE
-    │  └ init: %7 = .inline_block
-    │     ├ %8 = .struct_decl
-    │     │  ├ name_node: NONE
-    │     │  ├ fields_list: 3 items
-    │     │  │  ├ 0: %9 = .struct_field
-    │     │  │  │  ├ name_node: node(#5: "a")
-    │     │  │  │  ├ type: %10 = .ty_i8
-    │     │  │  │  │  └ node: node(#6: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 1: %11 = .struct_field
-    │     │  │  │  ├ name_node: node(#8: "b")
-    │     │  │  │  ├ type: %12 = .ty_i32
-    │     │  │  │  │  └ node: node(#9: "i32")
-    │     │  │  │  └ init: NONE
-    │     │  │  └ 2: %13 = .struct_field
-    │     │  │     ├ name_node: node(#11: "c")
-    │     │  │     ├ type: %14 = .ty_i32
-    │     │  │     │  └ node: node(#12: "i32")
-    │     │  │     └ init: NONE
-    │     │  └ declarations_list: 0 items
-    │     └ %15 = .br operand=(8), target=(%7)
-    ├ 1: %2 = .global_decl
-    │  ├ name_node: node(#17: "B")
-    │  ├ extern: false
-    │  ├ is_fn: false
-    │  ├ is_type: true
-    │  ├ visibility: "private"
-    │  ├ exported: false
-    │  ├ mutable: false
-    │  ├ type: NONE
-    │  └ init: %16 = .inline_block
-    │     ├ %17 = .struct_decl
-    │     │  ├ name_node: NONE
-    │     │  ├ fields_list: 5 items
-    │     │  │  ├ 0: %18 = .struct_field
-    │     │  │  │  ├ name_node: node(#19: "a")
-    │     │  │  │  ├ type: %19 = .ty_i8
-    │     │  │  │  │  └ node: node(#20: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 1: %20 = .struct_field
-    │     │  │  │  ├ name_node: node(#22: "b")
-    │     │  │  │  ├ type: %21 = .ty_i16
-    │     │  │  │  │  └ node: node(#23: "i16")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 2: %22 = .struct_field
-    │     │  │  │  ├ name_node: node(#25: "c")
-    │     │  │  │  ├ type: %23 = .ty_i8
-    │     │  │  │  │  └ node: node(#26: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 3: %24 = .struct_field
-    │     │  │  │  ├ name_node: node(#28: "d")
-    │     │  │  │  ├ type: %25 = .ty_i64
-    │     │  │  │  │  └ node: node(#29: "i64")
-    │     │  │  │  └ init: NONE
-    │     │  │  └ 4: %26 = .struct_field
-    │     │  │     ├ name_node: node(#31: "e")
-    │     │  │     ├ type: %27 = .ty_i32
-    │     │  │     │  └ node: node(#32: "i32")
-    │     │  │     └ init: NONE
-    │     │  └ declarations_list: 0 items
-    │     └ %28 = .br operand=(17), target=(%16)
-    ├ 2: %3 = .global_decl
-    │  ├ name_node: node(#37: "C")
-    │  ├ extern: false
-    │  ├ is_fn: false
-    │  ├ is_type: true
-    │  ├ visibility: "private"
-    │  ├ exported: false
-    │  ├ mutable: false
-    │  ├ type: NONE
-    │  └ init: %29 = .inline_block
-    │     ├ %30 = .struct_decl
-    │     │  ├ name_node: NONE
-    │     │  ├ fields_list: 3 items
-    │     │  │  ├ 0: %31 = .struct_field
-    │     │  │  │  ├ name_node: node(#39: "a")
-    │     │  │  │  ├ type: %32 = .ty_i8
-    │     │  │  │  │  └ node: node(#40: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 1: %33 = .struct_field
-    │     │  │  │  ├ name_node: node(#42: "b")
-    │     │  │  │  ├ type: %34 = .ty_i16
-    │     │  │  │  │  └ node: node(#43: "i16")
-    │     │  │  │  └ init: NONE
-    │     │  │  └ 2: %35 = .struct_field
-    │     │  │     ├ name_node: node(#45: "c")
-    │     │  │     ├ type: %36 = .ty_i8
-    │     │  │     │  └ node: node(#46: "i8")
-    │     │  │     └ init: NONE
-    │     │  └ declarations_list: 0 items
-    │     └ %37 = .br operand=(30), target=(%29)
-    ├ 3: %4 = .global_decl
-    │  ├ name_node: node(#51: "D")
-    │  ├ extern: false
-    │  ├ is_fn: false
-    │  ├ is_type: true
-    │  ├ visibility: "private"
-    │  ├ exported: false
-    │  ├ mutable: false
-    │  ├ type: NONE
-    │  └ init: %38 = .inline_block
-    │     ├ %39 = .struct_decl
-    │     │  ├ name_node: NONE
-    │     │  ├ fields_list: 4 items
-    │     │  │  ├ 0: %40 = .struct_field
-    │     │  │  │  ├ name_node: node(#53: "a")
-    │     │  │  │  ├ type: %41 = .ty_i8
-    │     │  │  │  │  └ node: node(#54: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 1: %42 = .struct_field
-    │     │  │  │  ├ name_node: node(#56: "b")
-    │     │  │  │  ├ type: %43 = .ty_i8
-    │     │  │  │  │  └ node: node(#57: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  ├ 2: %44 = .struct_field
-    │     │  │  │  ├ name_node: node(#59: "c")
-    │     │  │  │  ├ type: %45 = .ty_i16
-    │     │  │  │  │  └ node: node(#60: "i16")
-    │     │  │  │  └ init: NONE
-    │     │  │  └ 3: %46 = .struct_field
-    │     │  │     ├ name_node: node(#62: "d")
-    │     │  │     ├ type: %47 = .ty_i32
-    │     │  │     │  └ node: node(#63: "i32")
-    │     │  │     └ init: NONE
-    │     │  └ declarations_list: 0 items
-    │     └ %48 = .br operand=(39), target=(%38)
-    ├ 4: %5 = .global_decl
-    │  ├ name_node: node(#68: "E")
-    │  ├ extern: false
-    │  ├ is_fn: false
-    │  ├ is_type: true
-    │  ├ visibility: "private"
-    │  ├ exported: false
-    │  ├ mutable: false
-    │  ├ type: NONE
-    │  └ init: %49 = .inline_block
-    │     ├ %50 = .struct_decl
-    │     │  ├ name_node: NONE
-    │     │  ├ fields_list: 2 items
-    │     │  │  ├ 0: %51 = .struct_field
-    │     │  │  │  ├ name_node: node(#70: "a")
-    │     │  │  │  ├ type: %52 = .ty_i8
-    │     │  │  │  │  └ node: node(#71: "i8")
-    │     │  │  │  └ init: NONE
-    │     │  │  └ 1: %53 = .struct_field
-    │     │  │     ├ name_node: node(#73: "b")
-    │     │  │     ├ type: %54 = .ty_i32
-    │     │  │     │  └ node: node(#74: "i32")
-    │     │  │     └ init: NONE
-    │     │  └ declarations_list: 0 items
-    │     └ %55 = .br operand=(50), target=(%49)
-    └ 5: %6 = .global_decl
-       ├ name_node: node(#79: "F")
-       ├ extern: false
-       ├ is_fn: false
-       ├ is_type: true
-       ├ visibility: "private"
-       ├ exported: false
-       ├ mutable: false
-       ├ type: NONE
-       └ init: %56 = .inline_block
-          ├ %57 = .struct_decl
-          │  ├ name_node: NONE
-          │  ├ fields_list: 3 items
-          │  │  ├ 0: %58 = .struct_field
-          │  │  │  ├ name_node: node(#81: "a")
-          │  │  │  ├ type: %59 = .ty_i8
-          │  │  │  │  └ node: node(#82: "i8")
-          │  │  │  └ init: NONE
-          │  │  ├ 1: %60 = .struct_field
-          │  │  │  ├ name_node: node(#84: "b")
-          │  │  │  ├ type: %5 = .global_decl
-          │  │  │  │  ├ name_node: node(#68: "E")
-          │  │  │  │  ├ extern: false
-          │  │  │  │  ├ is_fn: false
-          │  │  │  │  ├ is_type: true
-          │  │  │  │  ├ visibility: "private"
-          │  │  │  │  ├ exported: false
-          │  │  │  │  ├ mutable: false
-          │  │  │  │  ├ type: NONE
-          │  │  │  │  └ init: %49 = .inline_block
-          │  │  │  │     ├ %50 = .struct_decl
-          │  │  │  │     │  ├ name_node: NONE
-          │  │  │  │     │  ├ fields_list: 2 items
-          │  │  │  │     │  │  ├ 0:           │  │  │  │     │  │  └ 1:           │  │  │  │     │  └ declarations_list: 0 items
-          │  │  │  │     └ %55 = .br operand=(50), target=(%49)
-          │  │  │  └ init: NONE
-          │  │  └ 2: %61 = .struct_field
-          │  │     ├ name_node: node(#87: "c")
-          │  │     ├ type: %62 = .ty_i32
-          │  │     │  └ node: node(#88: "i32")
-          │  │     └ init: NONE
-          │  └ declarations_list: 0 items
-          └ %63 = .br operand=(57), target=(%56)
+ ├ declarations_list: 6 items
+ │  ├ 0: %1 = .global_decl
+ │  │  ├ name_node: node(#3: "A")
+ │  │  ├ extern: false
+ │  │  ├ is_fn: false
+ │  │  ├ is_type: true
+ │  │  ├ visibility: "private"
+ │  │  ├ exported: false
+ │  │  ├ mutable: false
+ │  │  ├ type: NONE
+ │  │  ├ init: %7 = .inline_block
+ │  │  │  ├ %8 = .struct_decl
+ │  │  │  │  ├ name_node: NONE
+ │  │  │  │  ├ fields_list: 3 items
+ │  │  │  │  │  ├ 0: %9 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#5: "a")
+ │  │  │  │  │  │  ├ type: %10 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#6: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 1: %11 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#8: "b")
+ │  │  │  │  │  │  ├ type: %12 = .ty_i32
+ │  │  │  │  │  │  │  └ node: node(#9: "i32")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  └ 2: %13 = .struct_field
+ │  │  │  │  │     ├ name_node: node(#11: "c")
+ │  │  │  │  │     ├ type: %14 = .ty_i32
+ │  │  │  │  │     │  └ node: node(#12: "i32")
+ │  │  │  │  │     └ init: NONE
+ │  │  │  │  ├ declarations_list: 0 items
+ │  │  │  │  └ impl_block_list: 0 items
+ │  │  │  └ %15 = .br operand=(8), target=(%7)
+ │  │  └ is_declaring_builtin: false
+ │  ├ 1: %2 = .global_decl
+ │  │  ├ name_node: node(#17: "B")
+ │  │  ├ extern: false
+ │  │  ├ is_fn: false
+ │  │  ├ is_type: true
+ │  │  ├ visibility: "private"
+ │  │  ├ exported: false
+ │  │  ├ mutable: false
+ │  │  ├ type: NONE
+ │  │  ├ init: %16 = .inline_block
+ │  │  │  ├ %17 = .struct_decl
+ │  │  │  │  ├ name_node: NONE
+ │  │  │  │  ├ fields_list: 5 items
+ │  │  │  │  │  ├ 0: %18 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#19: "a")
+ │  │  │  │  │  │  ├ type: %19 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#20: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 1: %20 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#22: "b")
+ │  │  │  │  │  │  ├ type: %21 = .ty_i16
+ │  │  │  │  │  │  │  └ node: node(#23: "i16")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 2: %22 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#25: "c")
+ │  │  │  │  │  │  ├ type: %23 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#26: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 3: %24 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#28: "d")
+ │  │  │  │  │  │  ├ type: %25 = .ty_i64
+ │  │  │  │  │  │  │  └ node: node(#29: "i64")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  └ 4: %26 = .struct_field
+ │  │  │  │  │     ├ name_node: node(#31: "e")
+ │  │  │  │  │     ├ type: %27 = .ty_i32
+ │  │  │  │  │     │  └ node: node(#32: "i32")
+ │  │  │  │  │     └ init: NONE
+ │  │  │  │  ├ declarations_list: 0 items
+ │  │  │  │  └ impl_block_list: 0 items
+ │  │  │  └ %28 = .br operand=(17), target=(%16)
+ │  │  └ is_declaring_builtin: false
+ │  ├ 2: %3 = .global_decl
+ │  │  ├ name_node: node(#37: "C")
+ │  │  ├ extern: false
+ │  │  ├ is_fn: false
+ │  │  ├ is_type: true
+ │  │  ├ visibility: "private"
+ │  │  ├ exported: false
+ │  │  ├ mutable: false
+ │  │  ├ type: NONE
+ │  │  ├ init: %29 = .inline_block
+ │  │  │  ├ %30 = .struct_decl
+ │  │  │  │  ├ name_node: NONE
+ │  │  │  │  ├ fields_list: 3 items
+ │  │  │  │  │  ├ 0: %31 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#39: "a")
+ │  │  │  │  │  │  ├ type: %32 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#40: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 1: %33 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#42: "b")
+ │  │  │  │  │  │  ├ type: %34 = .ty_i16
+ │  │  │  │  │  │  │  └ node: node(#43: "i16")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  └ 2: %35 = .struct_field
+ │  │  │  │  │     ├ name_node: node(#45: "c")
+ │  │  │  │  │     ├ type: %36 = .ty_i8
+ │  │  │  │  │     │  └ node: node(#46: "i8")
+ │  │  │  │  │     └ init: NONE
+ │  │  │  │  ├ declarations_list: 0 items
+ │  │  │  │  └ impl_block_list: 0 items
+ │  │  │  └ %37 = .br operand=(30), target=(%29)
+ │  │  └ is_declaring_builtin: false
+ │  ├ 3: %4 = .global_decl
+ │  │  ├ name_node: node(#51: "D")
+ │  │  ├ extern: false
+ │  │  ├ is_fn: false
+ │  │  ├ is_type: true
+ │  │  ├ visibility: "private"
+ │  │  ├ exported: false
+ │  │  ├ mutable: false
+ │  │  ├ type: NONE
+ │  │  ├ init: %38 = .inline_block
+ │  │  │  ├ %39 = .struct_decl
+ │  │  │  │  ├ name_node: NONE
+ │  │  │  │  ├ fields_list: 4 items
+ │  │  │  │  │  ├ 0: %40 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#53: "a")
+ │  │  │  │  │  │  ├ type: %41 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#54: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 1: %42 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#56: "b")
+ │  │  │  │  │  │  ├ type: %43 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#57: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  ├ 2: %44 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#59: "c")
+ │  │  │  │  │  │  ├ type: %45 = .ty_i16
+ │  │  │  │  │  │  │  └ node: node(#60: "i16")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  └ 3: %46 = .struct_field
+ │  │  │  │  │     ├ name_node: node(#62: "d")
+ │  │  │  │  │     ├ type: %47 = .ty_i32
+ │  │  │  │  │     │  └ node: node(#63: "i32")
+ │  │  │  │  │     └ init: NONE
+ │  │  │  │  ├ declarations_list: 0 items
+ │  │  │  │  └ impl_block_list: 0 items
+ │  │  │  └ %48 = .br operand=(39), target=(%38)
+ │  │  └ is_declaring_builtin: false
+ │  ├ 4: %5 = .global_decl
+ │  │  ├ name_node: node(#68: "E")
+ │  │  ├ extern: false
+ │  │  ├ is_fn: false
+ │  │  ├ is_type: true
+ │  │  ├ visibility: "private"
+ │  │  ├ exported: false
+ │  │  ├ mutable: false
+ │  │  ├ type: NONE
+ │  │  ├ init: %49 = .inline_block
+ │  │  │  ├ %50 = .struct_decl
+ │  │  │  │  ├ name_node: NONE
+ │  │  │  │  ├ fields_list: 2 items
+ │  │  │  │  │  ├ 0: %51 = .struct_field
+ │  │  │  │  │  │  ├ name_node: node(#70: "a")
+ │  │  │  │  │  │  ├ type: %52 = .ty_i8
+ │  │  │  │  │  │  │  └ node: node(#71: "i8")
+ │  │  │  │  │  │  └ init: NONE
+ │  │  │  │  │  └ 1: %53 = .struct_field
+ │  │  │  │  │     ├ name_node: node(#73: "b")
+ │  │  │  │  │     ├ type: %54 = .ty_i32
+ │  │  │  │  │     │  └ node: node(#74: "i32")
+ │  │  │  │  │     └ init: NONE
+ │  │  │  │  ├ declarations_list: 0 items
+ │  │  │  │  └ impl_block_list: 0 items
+ │  │  │  └ %55 = .br operand=(50), target=(%49)
+ │  │  └ is_declaring_builtin: false
+ │  └ 5: %6 = .global_decl
+ │     ├ name_node: node(#79: "F")
+ │     ├ extern: false
+ │     ├ is_fn: false
+ │     ├ is_type: true
+ │     ├ visibility: "private"
+ │     ├ exported: false
+ │     ├ mutable: false
+ │     ├ type: NONE
+ │     ├ init: %56 = .inline_block
+ │     │  ├ %57 = .struct_decl
+ │     │  │  ├ name_node: NONE
+ │     │  │  ├ fields_list: 3 items
+ │     │  │  │  ├ 0: %58 = .struct_field
+ │     │  │  │  │  ├ name_node: node(#81: "a")
+ │     │  │  │  │  ├ type: %59 = .ty_i8
+ │     │  │  │  │  │  └ node: node(#82: "i8")
+ │     │  │  │  │  └ init: NONE
+ │     │  │  │  ├ 1: %60 = .struct_field
+ │     │  │  │  │  ├ name_node: node(#84: "b")
+ │     │  │  │  │  ├ type: %61 = .global_get
+ │     │  │  │  │  │  └ operand: %5 = .global_decl
+ │     │  │  │  │  │     ├ name_node: node(#68: "E")
+ │     │  │  │  │  │     ├ extern: false
+ │     │  │  │  │  │     ├ is_fn: false
+ │     │  │  │  │  │     ├ is_type: true
+ │     │  │  │  │  │     ├ visibility: "private"
+ │     │  │  │  │  │     ├ exported: false
+ │     │  │  │  │  │     ├ mutable: false
+ │     │  │  │  │  │     ├ type: NONE
+ │     │  │  │  │  │     ├ init: %49 = .inline_block
+ │     │  │  │  │  │     │  ├ %50 = .struct_decl
+ │     │  │  │  │  │     │  │  ├ name_node: NONE
+ │     │  │  │  │  │     │  │  ├ fields_list: 2 items
+ │     │  │  │  │  │     │  │  │  ├ 0:  │     │  │  │  │  │     │  │  │  └ 1:  │     │  │  │  │  │     │  │  ├ declarations_list: 0 items
+ │     │  │  │  │  │     │  │  └ impl_block_list: 0 items
+ │     │  │  │  │  │     │  └ %55 = .br operand=(50), target=(%49)
+ │     │  │  │  │  │     └ is_declaring_builtin: false
+ │     │  │  │  │  └ init: NONE
+ │     │  │  │  └ 2: %62 = .struct_field
+ │     │  │  │     ├ name_node: node(#87: "c")
+ │     │  │  │     ├ type: %63 = .ty_i32
+ │     │  │  │     │  └ node: node(#88: "i32")
+ │     │  │  │     └ init: NONE
+ │     │  │  ├ declarations_list: 0 items
+ │     │  │  └ impl_block_list: 0 items
+ │     │  └ %64 = .br operand=(57), target=(%56)
+ │     └ is_declaring_builtin: false
+ └ impl_block_list: 0 items

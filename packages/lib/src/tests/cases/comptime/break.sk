@@ -1,5 +1,5 @@
 
 
-fn main(): void {
+fn main() void {
   comp 1 == 1;
 }

@@ -1,30 +1,30 @@
-fn var_array(): void {
+fn var_array() void {
  const arr: [1]i32 = [1]i32 {33};
 }
-fn var_array_infer_type(): void {
+fn var_array_infer_type() void {
   // TODO: the first element init doesn't need to return a "get_element_pointer" instruction 
   // since it's the same as the array init instruction
   var arr = [3]i32 {1, 2, 3};
 }
-fn var_int(): void {
+fn var_int() void {
   var a:i32 = 2;
 }
-fn var_int_infer_type(): void {
+fn var_int_infer_type() void {
   var a = 2:as(i32);
 }
 
 
-fn const_array(): void {
+fn const_array() void {
   const arr: [1]i32 = [1]i32 {1};
 }
 
-fn const_array_infer_type(): void {
+fn const_array_infer_type() void {
   const arr = [1]i32 {1};
 }
-fn const_int(): void {
+fn const_int() void {
   const a:i32 = 2;
 }
 
-fn const_int_infer_type(): void {
+fn const_int_infer_type() void {
   const a = 2;
 }

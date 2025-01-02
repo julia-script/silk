@@ -40,3 +40,8 @@ pub const BuiltinGlobal = enum {
         return null;
     }
 };
+
+pub const BuiltinMember = enum {
+    len,
+    as,
+};

@@ -3,57 +3,61 @@
 %0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
- └ declarations_list: 2 items
-    ├ 0: %1 = .global_decl
-    │  ├ name_node: node(#1: "main")
-    │  ├ extern: false
-    │  ├ is_fn: true
-    │  ├ is_type: false
-    │  ├ visibility: "private"
-    │  ├ exported: false
-    │  ├ mutable: false
-    │  ├ type: %19 = .fn_decl
-    │  │  ├ name_node: node(#1: "main")
-    │  │  ├ return_type: %3 = .ty_i32
-    │  │  │  └ node: node(#2: "i32")
-    │  │  └ params_list: 0 items
-    │  └ init: %4 = .block
-    │     ├ %5 = .global_get operand=(%2)
-    │     ├ %6 = .comptime_number node=(n[8:"22"])
-    │     ├ %7 = .field_init name_node=(n[7:"a"]), value=(%6)
-    │     ├ %8 = .comptime_number node=(n[11:"33"])
-    │     ├ %9 = .field_init name_node=(n[10:"b"]), value=(%8)
-    │     ├ %10 = .type_init type=(%5), field_init_list=({%7, %9})
-    │     ├ %11 = .global_get operand=(%2)
-    │     ├ %12 = .alloc mutable=(false), type=(%11)
-    │     ├ %13 = .store pointer=(%12), value=(%10)
-    │     ├ %14 = .get_property_pointer base=(%12), property_name_node=(n[16:"a"]), is_builtin=(false)
-    │     ├ %15 = .load operand=(%14)
-    │     ├ %16 = .ty_i32 node=(n[2:"i32"])
-    │     ├ %17 = .as lhs=(%15), rhs=(%16)
-    │     └ %18 = .ret operand=(17)
-    └ 1: %2 = .global_decl
-       ├ name_node: node(#21: "A")
-       ├ extern: false
-       ├ is_fn: false
-       ├ is_type: true
-       ├ visibility: "private"
-       ├ exported: false
-       ├ mutable: false
-       ├ type: NONE
-       └ init: %20 = .inline_block
-          ├ %21 = .struct_decl
-          │  ├ name_node: NONE
-          │  ├ fields_list: 2 items
-          │  │  ├ 0: %22 = .struct_field
-          │  │  │  ├ name_node: node(#23: "a")
-          │  │  │  ├ type: %23 = .ty_i32
-          │  │  │  │  └ node: node(#24: "i32")
-          │  │  │  └ init: NONE
-          │  │  └ 1: %24 = .struct_field
-          │  │     ├ name_node: node(#26: "b")
-          │  │     ├ type: %25 = .ty_i32
-          │  │     │  └ node: node(#27: "i32")
-          │  │     └ init: NONE
-          │  └ declarations_list: 0 items
-          └ %26 = .br operand=(21), target=(%20)
+ ├ declarations_list: 2 items
+ │  ├ 0: %1 = .global_decl
+ │  │  ├ name_node: node(#1: "main")
+ │  │  ├ extern: false
+ │  │  ├ is_fn: true
+ │  │  ├ is_type: false
+ │  │  ├ visibility: "private"
+ │  │  ├ exported: false
+ │  │  ├ mutable: false
+ │  │  ├ type: %19 = .fn_decl
+ │  │  │  ├ name_node: node(#1: "main")
+ │  │  │  ├ return_type: %3 = .ty_i32
+ │  │  │  │  └ node: node(#2: "i32")
+ │  │  │  └ params_list: 0 items
+ │  │  ├ init: %4 = .block
+ │  │  │  ├ %5 = .global_get operand=(%2)
+ │  │  │  ├ %6 = .comptime_number node=(n[8:"22"])
+ │  │  │  ├ %7 = .field_init name_node=(n[7:"a"]), value=(%6)
+ │  │  │  ├ %8 = .comptime_number node=(n[11:"33"])
+ │  │  │  ├ %9 = .field_init name_node=(n[10:"b"]), value=(%8)
+ │  │  │  ├ %10 = .type_init type=(%5), field_init_list=({%7, %9})
+ │  │  │  ├ %11 = .global_get operand=(%2)
+ │  │  │  ├ %12 = .alloc mutable=(false), type=(%11)
+ │  │  │  ├ %13 = .store pointer=(%12), value=(%10)
+ │  │  │  ├ %14 = .get_property_pointer base=(%12), property_name_node=(n[16:"a"]), is_builtin=(false)
+ │  │  │  ├ %15 = .load operand=(%14)
+ │  │  │  ├ %16 = .ty_i32 node=(n[2:"i32"])
+ │  │  │  ├ %17 = .as lhs=(%15), rhs=(%16)
+ │  │  │  └ %18 = .ret operand=(17)
+ │  │  └ is_declaring_builtin: false
+ │  └ 1: %2 = .global_decl
+ │     ├ name_node: node(#21: "A")
+ │     ├ extern: false
+ │     ├ is_fn: false
+ │     ├ is_type: true
+ │     ├ visibility: "private"
+ │     ├ exported: false
+ │     ├ mutable: false
+ │     ├ type: NONE
+ │     ├ init: %20 = .inline_block
+ │     │  ├ %21 = .struct_decl
+ │     │  │  ├ name_node: NONE
+ │     │  │  ├ fields_list: 2 items
+ │     │  │  │  ├ 0: %22 = .struct_field
+ │     │  │  │  │  ├ name_node: node(#23: "a")
+ │     │  │  │  │  ├ type: %23 = .ty_i32
+ │     │  │  │  │  │  └ node: node(#24: "i32")
+ │     │  │  │  │  └ init: NONE
+ │     │  │  │  └ 1: %24 = .struct_field
+ │     │  │  │     ├ name_node: node(#26: "b")
+ │     │  │  │     ├ type: %25 = .ty_i32
+ │     │  │  │     │  └ node: node(#27: "i32")
+ │     │  │  │     └ init: NONE
+ │     │  │  ├ declarations_list: 0 items
+ │     │  │  └ impl_block_list: 0 items
+ │     │  └ %26 = .br operand=(21), target=(%20)
+ │     └ is_declaring_builtin: false
+ └ impl_block_list: 0 items

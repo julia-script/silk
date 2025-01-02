@@ -1,4 +1,4 @@
-fn return_inference(lhs: R , rhs: R): R is i32 | f32  { 
+fn return_inference(lhs: R , rhs: R) R is i32 | f32  { 
   if (R == i32) {
     return lhs + rhs;
   } else {

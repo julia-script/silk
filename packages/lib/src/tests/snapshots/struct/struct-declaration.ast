@@ -1,15 +1,15 @@
 ;; AST
 ;; 25 Nodes
-;; 37 Tokens
+;; 36 Tokens
 ;; 6 Interned Lists
 
-%0 = .struct_decl - tok[0..37]
+%0 = .struct_decl - tok[0..36]
  └ members_list: 1 items
-    └ %24 = .type_decl - tok[0..35]
+    └ %24 = .type_decl - tok[0..34]
        ├ name: %1 = .identifier - tok[1..1]
        │  └ token: .identifier 'A'
        ├ type: NONE
-       └ value: %2 = .struct_decl - tok[3..35]
+       └ value: %2 = .struct_decl - tok[3..34]
           └ members_list: 4 items
              ├ %5 = .struct_field - tok[6..8]
              │  ├ name: %3 = .identifier - tok[5..5]
@@ -31,19 +31,20 @@
              │  │  └ token: .keyword_i32 'i32'
              │  └ default_value: %12 = .number_literal - tok[19..19]
              │     └ token: .number_literal '3'
-             └ %23 = .pub - tok[21..35]
-                └ node: %22 = .fn_decl - tok[22..35]
-                   ├ proto: %16 = .fn_proto - tok[23..27]
+             └ %23 = .pub - tok[21..34]
+                └ node: %22 = .fn_decl - tok[22..34]
+                   ├ proto: %16 = .fn_proto - tok[23..26]
                    │  ├ name: %14 = .identifier - tok[23..23]
                    │  │  └ token: .identifier 'foo'
                    │  ├ params_list: 0 items
-                   │  └ ret_type: %15 = .ty_i32 - tok[27..27]
-                   │     └ token: .keyword_i32 'i32'
-                   └ body: %21 = .block - tok[28..34]
+                   │  ├ ret_type: %15 = .ty_i32 - tok[26..26]
+                   │  │  └ token: .keyword_i32 'i32'
+                   │  └ is_declaring_builtin: false
+                   └ body: %21 = .block - tok[27..33]
                       └ list: 1 items
-                         └ %20 = .ret_expression - tok[29..32]
-                            └ node: %19 = .add - tok[30..32]
-                               ├ lhs: %17 = .number_literal - tok[30..30]
+                         └ %20 = .ret_expression - tok[28..31]
+                            └ node: %19 = .add - tok[29..31]
+                               ├ lhs: %17 = .number_literal - tok[29..29]
                                │  └ token: .number_literal '2'
-                               └ rhs: %18 = .number_literal - tok[32..32]
+                               └ rhs: %18 = .number_literal - tok[31..31]
                                   └ token: .number_literal '3'

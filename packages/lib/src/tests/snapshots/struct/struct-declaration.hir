@@ -3,58 +3,62 @@
 %0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
- └ declarations_list: 1 items
-    └ 0: %1 = .global_decl
-       ├ name_node: node(#1: "A")
-       ├ extern: false
-       ├ is_fn: false
-       ├ is_type: true
-       ├ visibility: "private"
-       ├ exported: false
-       ├ mutable: false
-       ├ type: NONE
-       └ init: %2 = .inline_block
-          ├ %3 = .struct_decl
-          │  ├ name_node: NONE
-          │  ├ fields_list: 3 items
-          │  │  ├ 0: %4 = .struct_field
-          │  │  │  ├ name_node: node(#3: "a")
-          │  │  │  ├ type: %5 = .ty_i32
-          │  │  │  │  └ node: node(#4: "i32")
-          │  │  │  └ init: NONE
-          │  │  ├ 1: %6 = .struct_field
-          │  │  │  ├ name_node: node(#6: "b")
-          │  │  │  ├ type: %10 = .ty_i64
-          │  │  │  │  └ node: node(#7: "i64")
-          │  │  │  └ init: %7 = .inline_block
-          │  │  │     ├ %8 = .comptime_number node=(n[8:"2"])
-          │  │  │     └ %9 = .br operand=(8), target=(%7)
-          │  │  └ 2: %11 = .struct_field
-          │  │     ├ name_node: node(#10: "c")
-          │  │     ├ type: %15 = .ty_i32
-          │  │     │  └ node: node(#11: "i32")
-          │  │     └ init: %12 = .inline_block
-          │  │        ├ %13 = .comptime_number node=(n[12:"3"])
-          │  │        └ %14 = .br operand=(13), target=(%12)
-          │  └ declarations_list: 1 items
-          │     └ 0: %16 = .global_decl
-          │        ├ name_node: node(#14: "foo")
-          │        ├ extern: false
-          │        ├ is_fn: true
-          │        ├ is_type: false
-          │        ├ visibility: "public"
-          │        ├ exported: false
-          │        ├ mutable: false
-          │        ├ type: %25 = .fn_decl
-          │        │  ├ name_node: node(#14: "foo")
-          │        │  ├ return_type: %17 = .ty_i32
-          │        │  │  └ node: node(#15: "i32")
-          │        │  └ params_list: 0 items
-          │        └ init: %18 = .block
-          │           ├ %19 = .comptime_number node=(n[17:"2"])
-          │           ├ %20 = .comptime_number node=(n[18:"3"])
-          │           ├ %21 = .add lhs=(%19), rhs=(%20)
-          │           ├ %22 = .ty_i32 node=(n[15:"i32"])
-          │           ├ %23 = .as lhs=(%21), rhs=(%22)
-          │           └ %24 = .ret operand=(23)
-          └ %26 = .br operand=(3), target=(%2)
+ ├ declarations_list: 1 items
+ │  └ 0: %1 = .global_decl
+ │     ├ name_node: node(#1: "A")
+ │     ├ extern: false
+ │     ├ is_fn: false
+ │     ├ is_type: true
+ │     ├ visibility: "private"
+ │     ├ exported: false
+ │     ├ mutable: false
+ │     ├ type: NONE
+ │     ├ init: %2 = .inline_block
+ │     │  ├ %3 = .struct_decl
+ │     │  │  ├ name_node: NONE
+ │     │  │  ├ fields_list: 3 items
+ │     │  │  │  ├ 0: %4 = .struct_field
+ │     │  │  │  │  ├ name_node: node(#3: "a")
+ │     │  │  │  │  ├ type: %5 = .ty_i32
+ │     │  │  │  │  │  └ node: node(#4: "i32")
+ │     │  │  │  │  └ init: NONE
+ │     │  │  │  ├ 1: %6 = .struct_field
+ │     │  │  │  │  ├ name_node: node(#6: "b")
+ │     │  │  │  │  ├ type: %10 = .ty_i64
+ │     │  │  │  │  │  └ node: node(#7: "i64")
+ │     │  │  │  │  └ init: %7 = .inline_block
+ │     │  │  │  │     ├ %8 = .comptime_number node=(n[8:"2"])
+ │     │  │  │  │     └ %9 = .br operand=(8), target=(%7)
+ │     │  │  │  └ 2: %11 = .struct_field
+ │     │  │  │     ├ name_node: node(#10: "c")
+ │     │  │  │     ├ type: %15 = .ty_i32
+ │     │  │  │     │  └ node: node(#11: "i32")
+ │     │  │  │     └ init: %12 = .inline_block
+ │     │  │  │        ├ %13 = .comptime_number node=(n[12:"3"])
+ │     │  │  │        └ %14 = .br operand=(13), target=(%12)
+ │     │  │  ├ declarations_list: 1 items
+ │     │  │  │  └ 0: %16 = .global_decl
+ │     │  │  │     ├ name_node: node(#14: "foo")
+ │     │  │  │     ├ extern: false
+ │     │  │  │     ├ is_fn: true
+ │     │  │  │     ├ is_type: false
+ │     │  │  │     ├ visibility: "public"
+ │     │  │  │     ├ exported: false
+ │     │  │  │     ├ mutable: false
+ │     │  │  │     ├ type: %25 = .fn_decl
+ │     │  │  │     │  ├ name_node: node(#14: "foo")
+ │     │  │  │     │  ├ return_type: %17 = .ty_i32
+ │     │  │  │     │  │  └ node: node(#15: "i32")
+ │     │  │  │     │  └ params_list: 0 items
+ │     │  │  │     ├ init: %18 = .block
+ │     │  │  │     │  ├ %19 = .comptime_number node=(n[17:"2"])
+ │     │  │  │     │  ├ %20 = .comptime_number node=(n[18:"3"])
+ │     │  │  │     │  ├ %21 = .add lhs=(%19), rhs=(%20)
+ │     │  │  │     │  ├ %22 = .ty_i32 node=(n[15:"i32"])
+ │     │  │  │     │  ├ %23 = .as lhs=(%21), rhs=(%22)
+ │     │  │  │     │  └ %24 = .ret operand=(23)
+ │     │  │  │     └ is_declaring_builtin: false
+ │     │  │  └ impl_block_list: 0 items
+ │     │  └ %26 = .br operand=(3), target=(%2)
+ │     └ is_declaring_builtin: false
+ └ impl_block_list: 0 items

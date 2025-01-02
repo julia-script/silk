@@ -1,46 +1,47 @@
 ;; AST
 ;; 23 Nodes
-;; 31 Tokens
+;; 30 Tokens
 ;; 6 Interned Lists
 
-%0 = .struct_decl - tok[0..31]
+%0 = .struct_decl - tok[0..30]
  └ members_list: 1 items
-    └ %22 = .fn_decl - tok[0..30]
-       ├ proto: %3 = .fn_proto - tok[1..5]
+    └ %22 = .fn_decl - tok[0..29]
+       ├ proto: %3 = .fn_proto - tok[1..4]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'explicit_casting'
        │  ├ params_list: 0 items
-       │  └ ret_type: %2 = .ty_i32 - tok[5..5]
-       │     └ token: .keyword_i32 'i32'
-       └ body: %21 = .block - tok[6..29]
+       │  ├ ret_type: %2 = .ty_i32 - tok[4..4]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
+       └ body: %21 = .block - tok[5..28]
           └ list: 1 items
-             └ %20 = .fn_call - tok[7..27]
-                ├ callee: %18 = .builtin_prop_access - tok[7..24]
-                │  ├ lhs: %16 = .fn_call - tok[7..22]
-                │  │  ├ callee: %14 = .builtin_prop_access - tok[7..19]
-                │  │  │  ├ lhs: %12 = .fn_call - tok[7..17]
-                │  │  │  │  ├ callee: %10 = .builtin_prop_access - tok[7..14]
-                │  │  │  │  │  ├ lhs: %8 = .fn_call - tok[7..12]
-                │  │  │  │  │  │  ├ callee: %6 = .builtin_prop_access - tok[7..9]
-                │  │  │  │  │  │  │  ├ lhs: %4 = .number_literal - tok[7..7]
+             └ %20 = .fn_call - tok[6..26]
+                ├ callee: %18 = .builtin_prop_access - tok[6..23]
+                │  ├ lhs: %16 = .fn_call - tok[6..21]
+                │  │  ├ callee: %14 = .builtin_prop_access - tok[6..18]
+                │  │  │  ├ lhs: %12 = .fn_call - tok[6..16]
+                │  │  │  │  ├ callee: %10 = .builtin_prop_access - tok[6..13]
+                │  │  │  │  │  ├ lhs: %8 = .fn_call - tok[6..11]
+                │  │  │  │  │  │  ├ callee: %6 = .builtin_prop_access - tok[6..8]
+                │  │  │  │  │  │  │  ├ lhs: %4 = .number_literal - tok[6..6]
                 │  │  │  │  │  │  │  │  └ token: .number_literal '123'
-                │  │  │  │  │  │  │  └ rhs: %5 = .identifier - tok[9..9]
+                │  │  │  │  │  │  │  └ rhs: %5 = .identifier - tok[8..8]
                 │  │  │  │  │  │  │     └ token: .identifier 'as'
                 │  │  │  │  │  │  └ args_list: 1 items
-                │  │  │  │  │  │     └ %7 = .ty_i32 - tok[11..11]
+                │  │  │  │  │  │     └ %7 = .ty_i32 - tok[10..10]
                 │  │  │  │  │  │        └ token: .keyword_i32 'i32'
-                │  │  │  │  │  └ rhs: %9 = .identifier - tok[14..14]
+                │  │  │  │  │  └ rhs: %9 = .identifier - tok[13..13]
                 │  │  │  │  │     └ token: .identifier 'as'
                 │  │  │  │  └ args_list: 1 items
-                │  │  │  │     └ %11 = .ty_u8 - tok[16..16]
+                │  │  │  │     └ %11 = .ty_u8 - tok[15..15]
                 │  │  │  │        └ token: .keyword_u8 'u8'
-                │  │  │  └ rhs: %13 = .identifier - tok[19..19]
+                │  │  │  └ rhs: %13 = .identifier - tok[18..18]
                 │  │  │     └ token: .identifier 'as'
                 │  │  └ args_list: 1 items
-                │  │     └ %15 = .ty_f32 - tok[21..21]
+                │  │     └ %15 = .ty_f32 - tok[20..20]
                 │  │        └ token: .keyword_f32 'f32'
-                │  └ rhs: %17 = .identifier - tok[24..24]
+                │  └ rhs: %17 = .identifier - tok[23..23]
                 │     └ token: .identifier 'as'
                 └ args_list: 1 items
-                   └ %19 = .ty_i32 - tok[26..26]
+                   └ %19 = .ty_i32 - tok[25..25]
                       └ token: .keyword_i32 'i32'

@@ -1,7 +1,7 @@
-fn foo(a: i32): void {
+fn foo(a: i32) void {
   @comptime_log(a);
 }
-fn main(): void {
+fn main() void {
   comp foo(123);
   comp foo(456);
 }

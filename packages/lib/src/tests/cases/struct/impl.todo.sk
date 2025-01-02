@@ -1,0 +1,48 @@
+
+
+
+// type A = struct {
+//   a: i32,
+//   b: i32,
+//   c: i32,
+
+//   impl i32 {
+//     pub fn :foo() void {
+//         // const a: i32 = 1;
+//         // a.foo;
+//     }
+//   }
+// }
+// fn B() type(_) {
+//   return struct {
+//     a: i32,
+//     b: i32,
+//     c: C,
+
+//     type C = struct {
+//       a: i32,
+//       b: i32,
+//       c: i32,
+//     }
+//   }
+// }
+
+// type C = impl u32 {
+//   pub fn :foo() void {
+//       // const a: i32 = 1;
+//       // a.foo;
+//   }
+// }
+
+// type u32 = impl B() {
+//   pub fn :foo() void {
+//       // const a: i32 = 1;
+//       // a.foo;
+//   }
+// }
+// impl A {
+//   pub fn foo() void {
+//     const a: i32 = 1;
+//     a.foo;
+//   }
+// }

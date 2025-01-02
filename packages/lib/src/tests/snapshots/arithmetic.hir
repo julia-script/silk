@@ -3,26 +3,28 @@
 %0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
- └ declarations_list: 1 items
-    └ 0: %1 = .global_decl
-       ├ name_node: node(#1: "main")
-       ├ extern: false
-       ├ is_fn: true
-       ├ is_type: false
-       ├ visibility: "private"
-       ├ exported: false
-       ├ mutable: false
-       ├ type: %12 = .fn_decl
-       │  ├ name_node: node(#1: "main")
-       │  ├ return_type: %2 = .ty_i32
-       │  │  └ node: node(#2: "i32")
-       │  └ params_list: 0 items
-       └ init: %3 = .block
-          ├ %4 = .comptime_number node=(n[4:"2"])
-          ├ %5 = .comptime_number node=(n[5:"3"])
-          ├ %6 = .comptime_number node=(n[6:"4"])
-          ├ %7 = .mul lhs=(%5), rhs=(%6)
-          ├ %8 = .add lhs=(%4), rhs=(%7)
-          ├ %9 = .ty_i32 node=(n[2:"i32"])
-          ├ %10 = .as lhs=(%8), rhs=(%9)
-          └ %11 = .ret operand=(10)
+ ├ declarations_list: 1 items
+ │  └ 0: %1 = .global_decl
+ │     ├ name_node: node(#1: "main")
+ │     ├ extern: false
+ │     ├ is_fn: true
+ │     ├ is_type: false
+ │     ├ visibility: "private"
+ │     ├ exported: false
+ │     ├ mutable: false
+ │     ├ type: %12 = .fn_decl
+ │     │  ├ name_node: node(#1: "main")
+ │     │  ├ return_type: %2 = .ty_i32
+ │     │  │  └ node: node(#2: "i32")
+ │     │  └ params_list: 0 items
+ │     ├ init: %3 = .block
+ │     │  ├ %4 = .comptime_number node=(n[4:"2"])
+ │     │  ├ %5 = .comptime_number node=(n[5:"3"])
+ │     │  ├ %6 = .comptime_number node=(n[6:"4"])
+ │     │  ├ %7 = .mul lhs=(%5), rhs=(%6)
+ │     │  ├ %8 = .add lhs=(%4), rhs=(%7)
+ │     │  ├ %9 = .ty_i32 node=(n[2:"i32"])
+ │     │  ├ %10 = .as lhs=(%8), rhs=(%9)
+ │     │  └ %11 = .ret operand=(10)
+ │     └ is_declaring_builtin: false
+ └ impl_block_list: 0 items

@@ -24,7 +24,7 @@ type ExplicitTag = enum(u8) {
 }
 
 
-fn main():void {
+fn main()void {
   const a: Message = _.Position{ x = 1, y = 2 };
   const b: Message = _.Message("hello");
   const c: Message = _.NestedEnum.a;

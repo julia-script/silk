@@ -1,61 +1,62 @@
 ;; AST
 ;; 32 Nodes
-;; 44 Tokens
+;; 43 Tokens
 ;; 14 Interned Lists
 
-%0 = .struct_decl - tok[0..44]
+%0 = .struct_decl - tok[0..43]
  └ members_list: 9 items
-    ├ %23 = .fn_decl - tok[0..35]
-    │  ├ proto: %3 = .fn_proto - tok[1..5]
+    ├ %23 = .fn_decl - tok[0..34]
+    │  ├ proto: %3 = .fn_proto - tok[1..4]
     │  │  ├ name: %1 = .identifier - tok[1..1]
     │  │  │  └ token: .identifier 'unfold'
     │  │  ├ params_list: 0 items
-    │  │  └ ret_type: %2 = .ty_i32 - tok[5..5]
-    │  │     └ token: .keyword_i32 'i32'
-    │  └ body: %22 = .block - tok[6..34]
+    │  │  ├ ret_type: %2 = .ty_i32 - tok[4..4]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %22 = .block - tok[5..33]
     │     └ list: 1 items
-    │        └ %21 = .comp_block - tok[7..34]
-    │           └ node: %20 = .block - tok[8..33]
+    │        └ %21 = .comp_block - tok[6..33]
+    │           └ node: %20 = .block - tok[7..32]
     │              └ list: 3 items
-    │                 ├ %7 = .var_decl - tok[9..14]
-    │                 │  ├ name: %4 = .identifier - tok[10..10]
+    │                 ├ %7 = .var_decl - tok[8..13]
+    │                 │  ├ name: %4 = .identifier - tok[9..9]
     │                 │  │  └ token: .identifier 'i'
-    │                 │  ├ type: %5 = .ty_i32 - tok[12..12]
+    │                 │  ├ type: %5 = .ty_i32 - tok[11..11]
     │                 │  │  └ token: .keyword_i32 'i32'
-    │                 │  └ value: %6 = .number_literal - tok[14..14]
+    │                 │  └ value: %6 = .number_literal - tok[13..13]
     │                 │     └ token: .number_literal '0'
-    │                 ├ %17 = .while_loop - tok[16..29]
-    │                 │  ├ condition: %10 = .lt - tok[18..20]
-    │                 │  │  ├ lhs: %8 = .identifier - tok[18..18]
+    │                 ├ %17 = .while_loop - tok[15..28]
+    │                 │  ├ condition: %10 = .lt - tok[17..19]
+    │                 │  │  ├ lhs: %8 = .identifier - tok[17..17]
     │                 │  │  │  └ token: .identifier 'i'
-    │                 │  │  └ rhs: %9 = .number_literal - tok[20..20]
+    │                 │  │  └ rhs: %9 = .number_literal - tok[19..19]
     │                 │  │     └ token: .number_literal '3'
-    │                 │  └ body: %16 = .block - tok[22..29]
+    │                 │  └ body: %16 = .block - tok[21..28]
     │                 │     └ list: 1 items
-    │                 │        └ %15 = .assign - tok[23..27]
-    │                 │           ├ lhs: %11 = .identifier - tok[23..23]
+    │                 │        └ %15 = .assign - tok[22..26]
+    │                 │           ├ lhs: %11 = .identifier - tok[22..22]
     │                 │           │  └ token: .identifier 'i'
-    │                 │           └ rhs: %14 = .add - tok[25..27]
-    │                 │              ├ lhs: %12 = .identifier - tok[25..25]
+    │                 │           └ rhs: %14 = .add - tok[24..26]
+    │                 │              ├ lhs: %12 = .identifier - tok[24..24]
     │                 │              │  └ token: .identifier 'i'
-    │                 │              └ rhs: %13 = .number_literal - tok[27..27]
+    │                 │              └ rhs: %13 = .number_literal - tok[26..26]
     │                 │                 └ token: .number_literal '1'
-    │                 └ %19 = .ret_expression - tok[30..31]
-    │                    └ node: %18 = .identifier - tok[31..31]
+    │                 └ %19 = .ret_expression - tok[29..30]
+    │                    └ node: %18 = .identifier - tok[30..30]
     │                       └ token: .identifier 'i'
-    ├ %24 = .comment_line - tok[35..36]
+    ├ %24 = .comment_line - tok[34..35]
     │  └ token: .comment '// should be equivalent to '
-    ├ %25 = .comment_line - tok[36..37]
-    │  └ token: .comment '// fn unfolded(): i32 {'
-    ├ %26 = .comment_line - tok[37..38]
+    ├ %25 = .comment_line - tok[35..36]
+    │  └ token: .comment '// fn unfolded() i32 {'
+    ├ %26 = .comment_line - tok[36..37]
     │  └ token: .comment '//   comp var i:i32 = 0;'
-    ├ %27 = .comment_line - tok[38..39]
+    ├ %27 = .comment_line - tok[37..38]
     │  └ token: .comment '//   i = i + 1;'
-    ├ %28 = .comment_line - tok[39..40]
+    ├ %28 = .comment_line - tok[38..39]
     │  └ token: .comment '//   i = i + 1;'
-    ├ %29 = .comment_line - tok[40..41]
+    ├ %29 = .comment_line - tok[39..40]
     │  └ token: .comment '//   i = i + 1;'
-    ├ %30 = .comment_line - tok[41..42]
+    ├ %30 = .comment_line - tok[40..41]
     │  └ token: .comment '//   return i;'
-    └ %31 = .comment_line - tok[42..43]
+    └ %31 = .comment_line - tok[41..42]
        └ token: .comment '// }'

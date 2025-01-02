@@ -1,35 +1,36 @@
 ;; AST
 ;; 16 Nodes
-;; 24 Tokens
+;; 23 Tokens
 ;; 7 Interned Lists
 
-%0 = .struct_decl - tok[0..24]
+%0 = .struct_decl - tok[0..23]
  └ members_list: 1 items
-    └ %15 = .fn_decl - tok[0..23]
-       ├ proto: %3 = .fn_proto - tok[1..5]
+    └ %15 = .fn_decl - tok[0..22]
+       ├ proto: %3 = .fn_proto - tok[1..4]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  └ ret_type: %2 = .ty_void - tok[5..5]
-       │     └ token: .keyword_void 'void'
-       └ body: %14 = .block - tok[6..22]
+       │  ├ ret_type: %2 = .ty_void - tok[4..4]
+       │  │  └ token: .keyword_void 'void'
+       │  └ is_declaring_builtin: false
+       └ body: %14 = .block - tok[5..21]
           └ list: 4 items
-             ├ %4 = .comment_line - tok[7..8]
+             ├ %4 = .comment_line - tok[6..7]
              │  └ token: .comment '// const hello_world = "Hello, World!";'
-             ├ %7 = .fn_call - tok[8..11]
-             │  ├ callee: %5 = .identifier - tok[8..8]
+             ├ %7 = .fn_call - tok[7..10]
+             │  ├ callee: %5 = .identifier - tok[7..7]
              │  │  └ token: .identifier '@comptime_log'
              │  └ args_list: 1 items
-             │     └ %6 = .string_literal - tok[10..10]
+             │     └ %6 = .string_literal - tok[9..9]
              │        └ token: .string_literal '"Hello, World!"'
-             ├ %8 = .number_literal - tok[13..13]
+             ├ %8 = .number_literal - tok[12..12]
              │  └ token: .number_literal '2'
-             └ %13 = .fn_call - tok[15..20]
-                ├ callee: %11 = .builtin_prop_access - tok[15..17]
-                │  ├ lhs: %9 = .number_literal - tok[15..15]
+             └ %13 = .fn_call - tok[14..19]
+                ├ callee: %11 = .builtin_prop_access - tok[14..16]
+                │  ├ lhs: %9 = .number_literal - tok[14..14]
                 │  │  └ token: .number_literal '2'
-                │  └ rhs: %10 = .identifier - tok[17..17]
+                │  └ rhs: %10 = .identifier - tok[16..16]
                 │     └ token: .identifier 'as'
                 └ args_list: 1 items
-                   └ %12 = .ty_i32 - tok[19..19]
+                   └ %12 = .ty_i32 - tok[18..18]
                       └ token: .keyword_i32 'i32'

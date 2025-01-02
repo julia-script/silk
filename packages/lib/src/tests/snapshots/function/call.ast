@@ -1,18 +1,18 @@
 ;; AST
 ;; 70 Nodes
-;; 103 Tokens
+;; 98 Tokens
 ;; 20 Interned Lists
 
-%0 = .struct_decl - tok[0..103]
+%0 = .struct_decl - tok[0..98]
  └ members_list: 5 items
-    ├ %18 = .type_decl - tok[0..25]
+    ├ %18 = .type_decl - tok[0..24]
     │  ├ name: %1 = .identifier - tok[1..1]
     │  │  └ token: .identifier 'T'
     │  ├ type: NONE
-    │  └ value: %2 = .struct_decl - tok[3..25]
+    │  └ value: %2 = .struct_decl - tok[3..24]
     │     └ members_list: 1 items
-    │        └ %17 = .fn_decl - tok[5..25]
-    │           ├ proto: %11 = .fn_proto - tok[6..17]
+    │        └ %17 = .fn_decl - tok[5..24]
+    │           ├ proto: %11 = .fn_proto - tok[6..16]
     │           │  ├ name: %3 = .identifier - tok[6..6]
     │           │  │  └ token: .identifier 'foo_add'
     │           │  ├ params_list: 2 items
@@ -26,105 +26,110 @@
     │           │  │     │  └ token: .identifier 'b'
     │           │  │     └ type: %9 = .ty_i32 - tok[14..14]
     │           │  │        └ token: .keyword_i32 'i32'
-    │           │  └ ret_type: %10 = .ty_i32 - tok[17..17]
-    │           │     └ token: .keyword_i32 'i32'
-    │           └ body: %16 = .block - tok[18..24]
+    │           │  ├ ret_type: %10 = .ty_i32 - tok[16..16]
+    │           │  │  └ token: .keyword_i32 'i32'
+    │           │  └ is_declaring_builtin: false
+    │           └ body: %16 = .block - tok[17..23]
     │              └ list: 1 items
-    │                 └ %15 = .ret_expression - tok[19..22]
-    │                    └ node: %14 = .add - tok[20..22]
-    │                       ├ lhs: %12 = .identifier - tok[20..20]
+    │                 └ %15 = .ret_expression - tok[18..21]
+    │                    └ node: %14 = .add - tok[19..21]
+    │                       ├ lhs: %12 = .identifier - tok[19..19]
     │                       │  └ token: .identifier 'a'
-    │                       └ rhs: %13 = .identifier - tok[22..22]
+    │                       └ rhs: %13 = .identifier - tok[21..21]
     │                          └ token: .identifier 'b'
-    ├ %33 = .fn_decl - tok[26..46]
-    │  ├ proto: %27 = .fn_proto - tok[27..38]
-    │  │  ├ name: %19 = .identifier - tok[27..27]
+    ├ %33 = .fn_decl - tok[25..44]
+    │  ├ proto: %27 = .fn_proto - tok[26..36]
+    │  │  ├ name: %19 = .identifier - tok[26..26]
     │  │  │  └ token: .identifier 'bar_add'
     │  │  ├ params_list: 2 items
-    │  │  │  ├ %20 = .fn_param - tok[29..31]
-    │  │  │  │  ├ name: %21 = .identifier - tok[29..29]
+    │  │  │  ├ %20 = .fn_param - tok[28..30]
+    │  │  │  │  ├ name: %21 = .identifier - tok[28..28]
     │  │  │  │  │  └ token: .identifier 'a'
-    │  │  │  │  └ type: %22 = .ty_i32 - tok[31..31]
+    │  │  │  │  └ type: %22 = .ty_i32 - tok[30..30]
     │  │  │  │     └ token: .keyword_i32 'i32'
-    │  │  │  └ %23 = .fn_param - tok[33..35]
-    │  │  │     ├ name: %24 = .identifier - tok[33..33]
+    │  │  │  └ %23 = .fn_param - tok[32..34]
+    │  │  │     ├ name: %24 = .identifier - tok[32..32]
     │  │  │     │  └ token: .identifier 'b'
-    │  │  │     └ type: %25 = .ty_i32 - tok[35..35]
+    │  │  │     └ type: %25 = .ty_i32 - tok[34..34]
     │  │  │        └ token: .keyword_i32 'i32'
-    │  │  └ ret_type: %26 = .ty_i32 - tok[38..38]
-    │  │     └ token: .keyword_i32 'i32'
-    │  └ body: %32 = .block - tok[39..45]
+    │  │  ├ ret_type: %26 = .ty_i32 - tok[36..36]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %32 = .block - tok[37..43]
     │     └ list: 1 items
-    │        └ %31 = .ret_expression - tok[40..43]
-    │           └ node: %30 = .add - tok[41..43]
-    │              ├ lhs: %28 = .identifier - tok[41..41]
+    │        └ %31 = .ret_expression - tok[38..41]
+    │           └ node: %30 = .add - tok[39..41]
+    │              ├ lhs: %28 = .identifier - tok[39..39]
     │              │  └ token: .identifier 'a'
-    │              └ rhs: %29 = .identifier - tok[43..43]
+    │              └ rhs: %29 = .identifier - tok[41..41]
     │                 └ token: .identifier 'b'
-    ├ %46 = .fn_decl - tok[46..66]
-    │  ├ proto: %36 = .fn_proto - tok[47..51]
-    │  │  ├ name: %34 = .identifier - tok[47..47]
+    ├ %46 = .fn_decl - tok[44..63]
+    │  ├ proto: %36 = .fn_proto - tok[45..48]
+    │  │  ├ name: %34 = .identifier - tok[45..45]
     │  │  │  └ token: .identifier 'namespaced'
     │  │  ├ params_list: 0 items
-    │  │  └ ret_type: %35 = .ty_void - tok[51..51]
-    │  │     └ token: .keyword_void 'void'
-    │  └ body: %45 = .block - tok[52..65]
+    │  │  ├ ret_type: %35 = .ty_void - tok[48..48]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %45 = .block - tok[49..62]
     │     └ list: 1 items
-    │        └ %44 = .const_decl - tok[53..63]
-    │           ├ name: %37 = .identifier - tok[54..54]
+    │        └ %44 = .const_decl - tok[50..60]
+    │           ├ name: %37 = .identifier - tok[51..51]
     │           │  └ token: .identifier 'a'
     │           ├ type: NONE
-    │           └ value: %43 = .fn_call - tok[56..63]
-    │              ├ callee: %40 = .prop_access - tok[56..58]
-    │              │  ├ lhs: %38 = .identifier - tok[56..56]
+    │           └ value: %43 = .fn_call - tok[53..60]
+    │              ├ callee: %40 = .prop_access - tok[53..55]
+    │              │  ├ lhs: %38 = .identifier - tok[53..53]
     │              │  │  └ token: .identifier 'T'
-    │              │  └ rhs: %39 = .identifier - tok[58..58]
+    │              │  └ rhs: %39 = .identifier - tok[55..55]
     │              │     └ token: .identifier 'foo_add'
     │              └ args_list: 2 items
-    │                 ├ %41 = .number_literal - tok[60..60]
+    │                 ├ %41 = .number_literal - tok[57..57]
     │                 │  └ token: .number_literal '1'
-    │                 └ %42 = .number_literal - tok[62..62]
+    │                 └ %42 = .number_literal - tok[59..59]
     │                    └ token: .number_literal '2'
-    ├ %57 = .fn_decl - tok[66..84]
-    │  ├ proto: %49 = .fn_proto - tok[67..71]
-    │  │  ├ name: %47 = .identifier - tok[67..67]
+    ├ %57 = .fn_decl - tok[63..80]
+    │  ├ proto: %49 = .fn_proto - tok[64..67]
+    │  │  ├ name: %47 = .identifier - tok[64..64]
     │  │  │  └ token: .identifier 'global'
     │  │  ├ params_list: 0 items
-    │  │  └ ret_type: %48 = .ty_void - tok[71..71]
-    │  │     └ token: .keyword_void 'void'
-    │  └ body: %56 = .block - tok[72..83]
+    │  │  ├ ret_type: %48 = .ty_void - tok[67..67]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %56 = .block - tok[68..79]
     │     └ list: 1 items
-    │        └ %55 = .const_decl - tok[73..81]
-    │           ├ name: %50 = .identifier - tok[74..74]
+    │        └ %55 = .const_decl - tok[69..77]
+    │           ├ name: %50 = .identifier - tok[70..70]
     │           │  └ token: .identifier 'b'
     │           ├ type: NONE
-    │           └ value: %54 = .fn_call - tok[76..81]
-    │              ├ callee: %51 = .identifier - tok[76..76]
+    │           └ value: %54 = .fn_call - tok[72..77]
+    │              ├ callee: %51 = .identifier - tok[72..72]
     │              │  └ token: .identifier 'bar_add'
     │              └ args_list: 2 items
-    │                 ├ %52 = .number_literal - tok[78..78]
+    │                 ├ %52 = .number_literal - tok[74..74]
     │                 │  └ token: .number_literal '1'
-    │                 └ %53 = .number_literal - tok[80..80]
+    │                 └ %53 = .number_literal - tok[76..76]
     │                    └ token: .number_literal '2'
-    └ %69 = .fn_decl - tok[84..102]
-       ├ proto: %60 = .fn_proto - tok[85..89]
-       │  ├ name: %58 = .identifier - tok[85..85]
+    └ %69 = .fn_decl - tok[80..97]
+       ├ proto: %60 = .fn_proto - tok[81..84]
+       │  ├ name: %58 = .identifier - tok[81..81]
        │  │  └ token: .identifier 'builtin'
        │  ├ params_list: 0 items
-       │  └ ret_type: %59 = .ty_void - tok[89..89]
-       │     └ token: .keyword_void 'void'
-       └ body: %68 = .block - tok[90..101]
+       │  ├ ret_type: %59 = .ty_void - tok[84..84]
+       │  │  └ token: .keyword_void 'void'
+       │  └ is_declaring_builtin: false
+       └ body: %68 = .block - tok[85..96]
           └ list: 1 items
-             └ %67 = .const_decl - tok[91..99]
-                ├ name: %61 = .identifier - tok[92..92]
+             └ %67 = .const_decl - tok[86..94]
+                ├ name: %61 = .identifier - tok[87..87]
                 │  └ token: .identifier 'c'
                 ├ type: NONE
-                └ value: %66 = .fn_call - tok[94..99]
-                   ├ callee: %64 = .builtin_prop_access - tok[94..96]
-                   │  ├ lhs: %62 = .number_literal - tok[94..94]
+                └ value: %66 = .fn_call - tok[89..94]
+                   ├ callee: %64 = .builtin_prop_access - tok[89..91]
+                   │  ├ lhs: %62 = .number_literal - tok[89..89]
                    │  │  └ token: .number_literal '2'
-                   │  └ rhs: %63 = .identifier - tok[96..96]
+                   │  └ rhs: %63 = .identifier - tok[91..91]
                    │     └ token: .identifier 'as'
                    └ args_list: 1 items
-                      └ %65 = .ty_i32 - tok[98..98]
+                      └ %65 = .ty_i32 - tok[93..93]
                          └ token: .keyword_i32 'i32'

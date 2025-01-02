@@ -1,498 +1,500 @@
 ;; AST
 ;; 285 Nodes
-;; 366 Tokens
+;; 364 Tokens
 ;; 84 Interned Lists
 
-%0 = .struct_decl - tok[0..366]
+%0 = .struct_decl - tok[0..364]
  └ members_list: 2 items
-    ├ %140 = .fn_decl - tok[0..180]
-    │  ├ proto: %3 = .fn_proto - tok[1..5]
+    ├ %140 = .fn_decl - tok[0..179]
+    │  ├ proto: %3 = .fn_proto - tok[1..4]
     │  │  ├ name: %1 = .identifier - tok[1..1]
     │  │  │  └ token: .identifier 'fold_to_true'
     │  │  ├ params_list: 0 items
-    │  │  └ ret_type: %2 = .ty_i32 - tok[5..5]
-    │  │     └ token: .keyword_i32 'i32'
-    │  └ body: %139 = .block - tok[6..179]
+    │  │  ├ ret_type: %2 = .ty_i32 - tok[4..4]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %139 = .block - tok[5..178]
     │     └ list: 21 items
-    │        ├ %4 = .comment_line - tok[7..8]
+    │        ├ %4 = .comment_line - tok[6..7]
     │        │  └ token: .comment '// untyped (type number)'
-    │        ├ %7 = .eq - tok[8..10]
-    │        │  ├ lhs: %5 = .number_literal - tok[8..8]
+    │        ├ %7 = .eq - tok[7..9]
+    │        │  ├ lhs: %5 = .number_literal - tok[7..7]
     │        │  │  └ token: .number_literal '1'
-    │        │  └ rhs: %6 = .number_literal - tok[10..10]
+    │        │  └ rhs: %6 = .number_literal - tok[9..9]
     │        │     └ token: .number_literal '1'
-    │        ├ %10 = .ne - tok[12..14]
-    │        │  ├ lhs: %8 = .number_literal - tok[12..12]
+    │        ├ %10 = .ne - tok[11..13]
+    │        │  ├ lhs: %8 = .number_literal - tok[11..11]
     │        │  │  └ token: .number_literal '1'
-    │        │  └ rhs: %9 = .number_literal - tok[14..14]
+    │        │  └ rhs: %9 = .number_literal - tok[13..13]
     │        │     └ token: .number_literal '2'
-    │        ├ %13 = .lt - tok[16..18]
-    │        │  ├ lhs: %11 = .number_literal - tok[16..16]
+    │        ├ %13 = .lt - tok[15..17]
+    │        │  ├ lhs: %11 = .number_literal - tok[15..15]
     │        │  │  └ token: .number_literal '1'
-    │        │  └ rhs: %12 = .number_literal - tok[18..18]
+    │        │  └ rhs: %12 = .number_literal - tok[17..17]
     │        │     └ token: .number_literal '2'
-    │        ├ %16 = .le - tok[20..22]
-    │        │  ├ lhs: %14 = .number_literal - tok[20..20]
+    │        ├ %16 = .le - tok[19..21]
+    │        │  ├ lhs: %14 = .number_literal - tok[19..19]
     │        │  │  └ token: .number_literal '1'
-    │        │  └ rhs: %15 = .number_literal - tok[22..22]
+    │        │  └ rhs: %15 = .number_literal - tok[21..21]
     │        │     └ token: .number_literal '1'
-    │        ├ %19 = .gt - tok[24..26]
-    │        │  ├ lhs: %17 = .number_literal - tok[24..24]
+    │        ├ %19 = .gt - tok[23..25]
+    │        │  ├ lhs: %17 = .number_literal - tok[23..23]
     │        │  │  └ token: .number_literal '2'
-    │        │  └ rhs: %18 = .number_literal - tok[26..26]
+    │        │  └ rhs: %18 = .number_literal - tok[25..25]
     │        │     └ token: .number_literal '1'
-    │        ├ %22 = .ge - tok[28..30]
-    │        │  ├ lhs: %20 = .number_literal - tok[28..28]
+    │        ├ %22 = .ge - tok[27..29]
+    │        │  ├ lhs: %20 = .number_literal - tok[27..27]
     │        │  │  └ token: .number_literal '2'
-    │        │  └ rhs: %21 = .number_literal - tok[30..30]
+    │        │  └ rhs: %21 = .number_literal - tok[29..29]
     │        │     └ token: .number_literal '1'
-    │        ├ %25 = .lt - tok[32..34]
-    │        │  ├ lhs: %23 = .number_literal - tok[32..32]
+    │        ├ %25 = .lt - tok[31..33]
+    │        │  ├ lhs: %23 = .number_literal - tok[31..31]
     │        │  │  └ token: .number_literal '2.3'
-    │        │  └ rhs: %24 = .number_literal - tok[34..34]
+    │        │  └ rhs: %24 = .number_literal - tok[33..33]
     │        │     └ token: .number_literal '2.4'
-    │        ├ %26 = .comment_line - tok[36..37]
+    │        ├ %26 = .comment_line - tok[35..36]
     │        │  └ token: .comment '// Same type'
-    │        ├ %37 = .lt - tok[37..49]
-    │        │  ├ lhs: %31 = .fn_call - tok[37..42]
-    │        │  │  ├ callee: %29 = .builtin_prop_access - tok[37..39]
-    │        │  │  │  ├ lhs: %27 = .number_literal - tok[37..37]
+    │        ├ %37 = .lt - tok[36..48]
+    │        │  ├ lhs: %31 = .fn_call - tok[36..41]
+    │        │  │  ├ callee: %29 = .builtin_prop_access - tok[36..38]
+    │        │  │  │  ├ lhs: %27 = .number_literal - tok[36..36]
     │        │  │  │  │  └ token: .number_literal '1'
-    │        │  │  │  └ rhs: %28 = .identifier - tok[39..39]
+    │        │  │  │  └ rhs: %28 = .identifier - tok[38..38]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %30 = .ty_i32 - tok[41..41]
+    │        │  │     └ %30 = .ty_i32 - tok[40..40]
     │        │  │        └ token: .keyword_i32 'i32'
-    │        │  └ rhs: %36 = .fn_call - tok[44..49]
-    │        │     ├ callee: %34 = .builtin_prop_access - tok[44..46]
-    │        │     │  ├ lhs: %32 = .number_literal - tok[44..44]
+    │        │  └ rhs: %36 = .fn_call - tok[43..48]
+    │        │     ├ callee: %34 = .builtin_prop_access - tok[43..45]
+    │        │     │  ├ lhs: %32 = .number_literal - tok[43..43]
     │        │     │  │  └ token: .number_literal '2'
-    │        │     │  └ rhs: %33 = .identifier - tok[46..46]
+    │        │     │  └ rhs: %33 = .identifier - tok[45..45]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %35 = .ty_i32 - tok[48..48]
+    │        │        └ %35 = .ty_i32 - tok[47..47]
     │        │           └ token: .keyword_i32 'i32'
-    │        ├ %48 = .le - tok[51..63]
-    │        │  ├ lhs: %42 = .fn_call - tok[51..56]
-    │        │  │  ├ callee: %40 = .builtin_prop_access - tok[51..53]
-    │        │  │  │  ├ lhs: %38 = .number_literal - tok[51..51]
+    │        ├ %48 = .le - tok[50..62]
+    │        │  ├ lhs: %42 = .fn_call - tok[50..55]
+    │        │  │  ├ callee: %40 = .builtin_prop_access - tok[50..52]
+    │        │  │  │  ├ lhs: %38 = .number_literal - tok[50..50]
     │        │  │  │  │  └ token: .number_literal '1'
-    │        │  │  │  └ rhs: %39 = .identifier - tok[53..53]
+    │        │  │  │  └ rhs: %39 = .identifier - tok[52..52]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %41 = .ty_i32 - tok[55..55]
+    │        │  │     └ %41 = .ty_i32 - tok[54..54]
     │        │  │        └ token: .keyword_i32 'i32'
-    │        │  └ rhs: %47 = .fn_call - tok[58..63]
-    │        │     ├ callee: %45 = .builtin_prop_access - tok[58..60]
-    │        │     │  ├ lhs: %43 = .number_literal - tok[58..58]
+    │        │  └ rhs: %47 = .fn_call - tok[57..62]
+    │        │     ├ callee: %45 = .builtin_prop_access - tok[57..59]
+    │        │     │  ├ lhs: %43 = .number_literal - tok[57..57]
     │        │     │  │  └ token: .number_literal '1'
-    │        │     │  └ rhs: %44 = .identifier - tok[60..60]
+    │        │     │  └ rhs: %44 = .identifier - tok[59..59]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %46 = .ty_i32 - tok[62..62]
+    │        │        └ %46 = .ty_i32 - tok[61..61]
     │        │           └ token: .keyword_i32 'i32'
-    │        ├ %59 = .ge - tok[65..77]
-    │        │  ├ lhs: %53 = .fn_call - tok[65..70]
-    │        │  │  ├ callee: %51 = .builtin_prop_access - tok[65..67]
-    │        │  │  │  ├ lhs: %49 = .number_literal - tok[65..65]
+    │        ├ %59 = .ge - tok[64..76]
+    │        │  ├ lhs: %53 = .fn_call - tok[64..69]
+    │        │  │  ├ callee: %51 = .builtin_prop_access - tok[64..66]
+    │        │  │  │  ├ lhs: %49 = .number_literal - tok[64..64]
     │        │  │  │  │  └ token: .number_literal '2'
-    │        │  │  │  └ rhs: %50 = .identifier - tok[67..67]
+    │        │  │  │  └ rhs: %50 = .identifier - tok[66..66]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %52 = .ty_i32 - tok[69..69]
+    │        │  │     └ %52 = .ty_i32 - tok[68..68]
     │        │  │        └ token: .keyword_i32 'i32'
-    │        │  └ rhs: %58 = .fn_call - tok[72..77]
-    │        │     ├ callee: %56 = .builtin_prop_access - tok[72..74]
-    │        │     │  ├ lhs: %54 = .number_literal - tok[72..72]
+    │        │  └ rhs: %58 = .fn_call - tok[71..76]
+    │        │     ├ callee: %56 = .builtin_prop_access - tok[71..73]
+    │        │     │  ├ lhs: %54 = .number_literal - tok[71..71]
     │        │     │  │  └ token: .number_literal '2'
-    │        │     │  └ rhs: %55 = .identifier - tok[74..74]
+    │        │     │  └ rhs: %55 = .identifier - tok[73..73]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %57 = .ty_i32 - tok[76..76]
+    │        │        └ %57 = .ty_i32 - tok[75..75]
     │        │           └ token: .keyword_i32 'i32'
-    │        ├ %70 = .eq - tok[79..91]
-    │        │  ├ lhs: %64 = .fn_call - tok[79..84]
-    │        │  │  ├ callee: %62 = .builtin_prop_access - tok[79..81]
-    │        │  │  │  ├ lhs: %60 = .number_literal - tok[79..79]
+    │        ├ %70 = .eq - tok[78..90]
+    │        │  ├ lhs: %64 = .fn_call - tok[78..83]
+    │        │  │  ├ callee: %62 = .builtin_prop_access - tok[78..80]
+    │        │  │  │  ├ lhs: %60 = .number_literal - tok[78..78]
     │        │  │  │  │  └ token: .number_literal '2'
-    │        │  │  │  └ rhs: %61 = .identifier - tok[81..81]
+    │        │  │  │  └ rhs: %61 = .identifier - tok[80..80]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %63 = .ty_i32 - tok[83..83]
+    │        │  │     └ %63 = .ty_i32 - tok[82..82]
     │        │  │        └ token: .keyword_i32 'i32'
-    │        │  └ rhs: %69 = .fn_call - tok[86..91]
-    │        │     ├ callee: %67 = .builtin_prop_access - tok[86..88]
-    │        │     │  ├ lhs: %65 = .number_literal - tok[86..86]
+    │        │  └ rhs: %69 = .fn_call - tok[85..90]
+    │        │     ├ callee: %67 = .builtin_prop_access - tok[85..87]
+    │        │     │  ├ lhs: %65 = .number_literal - tok[85..85]
     │        │     │  │  └ token: .number_literal '2'
-    │        │     │  └ rhs: %66 = .identifier - tok[88..88]
+    │        │     │  └ rhs: %66 = .identifier - tok[87..87]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %68 = .ty_i32 - tok[90..90]
+    │        │        └ %68 = .ty_i32 - tok[89..89]
     │        │           └ token: .keyword_i32 'i32'
-    │        ├ %71 = .comment_line - tok[93..94]
+    │        ├ %71 = .comment_line - tok[92..93]
     │        │  └ token: .comment '// Different type, same sign (should coerce to the type with more bits)'
-    │        ├ %82 = .lt - tok[94..106]
-    │        │  ├ lhs: %76 = .fn_call - tok[94..99]
-    │        │  │  ├ callee: %74 = .builtin_prop_access - tok[94..96]
-    │        │  │  │  ├ lhs: %72 = .number_literal - tok[94..94]
+    │        ├ %82 = .lt - tok[93..105]
+    │        │  ├ lhs: %76 = .fn_call - tok[93..98]
+    │        │  │  ├ callee: %74 = .builtin_prop_access - tok[93..95]
+    │        │  │  │  ├ lhs: %72 = .number_literal - tok[93..93]
     │        │  │  │  │  └ token: .number_literal '1'
-    │        │  │  │  └ rhs: %73 = .identifier - tok[96..96]
+    │        │  │  │  └ rhs: %73 = .identifier - tok[95..95]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %75 = .ty_i32 - tok[98..98]
+    │        │  │     └ %75 = .ty_i32 - tok[97..97]
     │        │  │        └ token: .keyword_i32 'i32'
-    │        │  └ rhs: %81 = .fn_call - tok[101..106]
-    │        │     ├ callee: %79 = .builtin_prop_access - tok[101..103]
-    │        │     │  ├ lhs: %77 = .number_literal - tok[101..101]
+    │        │  └ rhs: %81 = .fn_call - tok[100..105]
+    │        │     ├ callee: %79 = .builtin_prop_access - tok[100..102]
+    │        │     │  ├ lhs: %77 = .number_literal - tok[100..100]
     │        │     │  │  └ token: .number_literal '2'
-    │        │     │  └ rhs: %78 = .identifier - tok[103..103]
+    │        │     │  └ rhs: %78 = .identifier - tok[102..102]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %80 = .ty_i8 - tok[105..105]
+    │        │        └ %80 = .ty_i8 - tok[104..104]
     │        │           └ token: .keyword_i8 'i8'
-    │        ├ %93 = .lt - tok[108..120]
-    │        │  ├ lhs: %87 = .fn_call - tok[108..113]
-    │        │  │  ├ callee: %85 = .builtin_prop_access - tok[108..110]
-    │        │  │  │  ├ lhs: %83 = .number_literal - tok[108..108]
+    │        ├ %93 = .lt - tok[107..119]
+    │        │  ├ lhs: %87 = .fn_call - tok[107..112]
+    │        │  │  ├ callee: %85 = .builtin_prop_access - tok[107..109]
+    │        │  │  │  ├ lhs: %83 = .number_literal - tok[107..107]
     │        │  │  │  │  └ token: .number_literal '1'
-    │        │  │  │  └ rhs: %84 = .identifier - tok[110..110]
+    │        │  │  │  └ rhs: %84 = .identifier - tok[109..109]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %86 = .ty_i8 - tok[112..112]
+    │        │  │     └ %86 = .ty_i8 - tok[111..111]
     │        │  │        └ token: .keyword_i8 'i8'
-    │        │  └ rhs: %92 = .fn_call - tok[115..120]
-    │        │     ├ callee: %90 = .builtin_prop_access - tok[115..117]
-    │        │     │  ├ lhs: %88 = .number_literal - tok[115..115]
+    │        │  └ rhs: %92 = .fn_call - tok[114..119]
+    │        │     ├ callee: %90 = .builtin_prop_access - tok[114..116]
+    │        │     │  ├ lhs: %88 = .number_literal - tok[114..114]
     │        │     │  │  └ token: .number_literal '2'
-    │        │     │  └ rhs: %89 = .identifier - tok[117..117]
+    │        │     │  └ rhs: %89 = .identifier - tok[116..116]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %91 = .ty_i32 - tok[119..119]
+    │        │        └ %91 = .ty_i32 - tok[118..118]
     │        │           └ token: .keyword_i32 'i32'
-    │        ├ %104 = .ge - tok[122..134]
-    │        │  ├ lhs: %98 = .fn_call - tok[122..127]
-    │        │  │  ├ callee: %96 = .builtin_prop_access - tok[122..124]
-    │        │  │  │  ├ lhs: %94 = .number_literal - tok[122..122]
+    │        ├ %104 = .ge - tok[121..133]
+    │        │  ├ lhs: %98 = .fn_call - tok[121..126]
+    │        │  │  ├ callee: %96 = .builtin_prop_access - tok[121..123]
+    │        │  │  │  ├ lhs: %94 = .number_literal - tok[121..121]
     │        │  │  │  │  └ token: .number_literal '2'
-    │        │  │  │  └ rhs: %95 = .identifier - tok[124..124]
+    │        │  │  │  └ rhs: %95 = .identifier - tok[123..123]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %97 = .ty_i32 - tok[126..126]
+    │        │  │     └ %97 = .ty_i32 - tok[125..125]
     │        │  │        └ token: .keyword_i32 'i32'
-    │        │  └ rhs: %103 = .fn_call - tok[129..134]
-    │        │     ├ callee: %101 = .builtin_prop_access - tok[129..131]
-    │        │     │  ├ lhs: %99 = .number_literal - tok[129..129]
+    │        │  └ rhs: %103 = .fn_call - tok[128..133]
+    │        │     ├ callee: %101 = .builtin_prop_access - tok[128..130]
+    │        │     │  ├ lhs: %99 = .number_literal - tok[128..128]
     │        │     │  │  └ token: .number_literal '1'
-    │        │     │  └ rhs: %100 = .identifier - tok[131..131]
+    │        │     │  └ rhs: %100 = .identifier - tok[130..130]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %102 = .ty_i8 - tok[133..133]
+    │        │        └ %102 = .ty_i8 - tok[132..132]
     │        │           └ token: .keyword_i8 'i8'
-    │        ├ %115 = .le - tok[136..148]
-    │        │  ├ lhs: %109 = .fn_call - tok[136..141]
-    │        │  │  ├ callee: %107 = .builtin_prop_access - tok[136..138]
-    │        │  │  │  ├ lhs: %105 = .number_literal - tok[136..136]
+    │        ├ %115 = .le - tok[135..147]
+    │        │  ├ lhs: %109 = .fn_call - tok[135..140]
+    │        │  │  ├ callee: %107 = .builtin_prop_access - tok[135..137]
+    │        │  │  │  ├ lhs: %105 = .number_literal - tok[135..135]
     │        │  │  │  │  └ token: .number_literal '1'
-    │        │  │  │  └ rhs: %106 = .identifier - tok[138..138]
+    │        │  │  │  └ rhs: %106 = .identifier - tok[137..137]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %108 = .ty_i8 - tok[140..140]
+    │        │  │     └ %108 = .ty_i8 - tok[139..139]
     │        │  │        └ token: .keyword_i8 'i8'
-    │        │  └ rhs: %114 = .fn_call - tok[143..148]
-    │        │     ├ callee: %112 = .builtin_prop_access - tok[143..145]
-    │        │     │  ├ lhs: %110 = .number_literal - tok[143..143]
+    │        │  └ rhs: %114 = .fn_call - tok[142..147]
+    │        │     ├ callee: %112 = .builtin_prop_access - tok[142..144]
+    │        │     │  ├ lhs: %110 = .number_literal - tok[142..142]
     │        │     │  │  └ token: .number_literal '2'
-    │        │     │  └ rhs: %111 = .identifier - tok[145..145]
+    │        │     │  └ rhs: %111 = .identifier - tok[144..144]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %113 = .ty_i32 - tok[147..147]
+    │        │        └ %113 = .ty_i32 - tok[146..146]
     │        │           └ token: .keyword_i32 'i32'
-    │        ├ %116 = .comment_line - tok[150..151]
+    │        ├ %116 = .comment_line - tok[149..150]
     │        │  └ token: .comment '// Different sizes, different values'
-    │        ├ %127 = .lt - tok[151..163]
-    │        │  ├ lhs: %121 = .fn_call - tok[151..156]
-    │        │  │  ├ callee: %119 = .builtin_prop_access - tok[151..153]
-    │        │  │  │  ├ lhs: %117 = .number_literal - tok[151..151]
+    │        ├ %127 = .lt - tok[150..162]
+    │        │  ├ lhs: %121 = .fn_call - tok[150..155]
+    │        │  │  ├ callee: %119 = .builtin_prop_access - tok[150..152]
+    │        │  │  │  ├ lhs: %117 = .number_literal - tok[150..150]
     │        │  │  │  │  └ token: .number_literal '127'
-    │        │  │  │  └ rhs: %118 = .identifier - tok[153..153]
+    │        │  │  │  └ rhs: %118 = .identifier - tok[152..152]
     │        │  │  │     └ token: .identifier 'as'
     │        │  │  └ args_list: 1 items
-    │        │  │     └ %120 = .ty_i8 - tok[155..155]
+    │        │  │     └ %120 = .ty_i8 - tok[154..154]
     │        │  │        └ token: .keyword_i8 'i8'
-    │        │  └ rhs: %126 = .fn_call - tok[158..163]
-    │        │     ├ callee: %124 = .builtin_prop_access - tok[158..160]
-    │        │     │  ├ lhs: %122 = .number_literal - tok[158..158]
+    │        │  └ rhs: %126 = .fn_call - tok[157..162]
+    │        │     ├ callee: %124 = .builtin_prop_access - tok[157..159]
+    │        │     │  ├ lhs: %122 = .number_literal - tok[157..157]
     │        │     │  │  └ token: .number_literal '128'
-    │        │     │  └ rhs: %123 = .identifier - tok[160..160]
+    │        │     │  └ rhs: %123 = .identifier - tok[159..159]
     │        │     │     └ token: .identifier 'as'
     │        │     └ args_list: 1 items
-    │        │        └ %125 = .ty_i16 - tok[162..162]
+    │        │        └ %125 = .ty_i16 - tok[161..161]
     │        │           └ token: .keyword_i16 'i16'
-    │        └ %138 = .lt - tok[165..177]
-    │           ├ lhs: %132 = .fn_call - tok[165..170]
-    │           │  ├ callee: %130 = .builtin_prop_access - tok[165..167]
-    │           │  │  ├ lhs: %128 = .number_literal - tok[165..165]
+    │        └ %138 = .lt - tok[164..176]
+    │           ├ lhs: %132 = .fn_call - tok[164..169]
+    │           │  ├ callee: %130 = .builtin_prop_access - tok[164..166]
+    │           │  │  ├ lhs: %128 = .number_literal - tok[164..164]
     │           │  │  │  └ token: .number_literal '32767'
-    │           │  │  └ rhs: %129 = .identifier - tok[167..167]
+    │           │  │  └ rhs: %129 = .identifier - tok[166..166]
     │           │  │     └ token: .identifier 'as'
     │           │  └ args_list: 1 items
-    │           │     └ %131 = .ty_i16 - tok[169..169]
+    │           │     └ %131 = .ty_i16 - tok[168..168]
     │           │        └ token: .keyword_i16 'i16'
-    │           └ rhs: %137 = .fn_call - tok[172..177]
-    │              ├ callee: %135 = .builtin_prop_access - tok[172..174]
-    │              │  ├ lhs: %133 = .number_literal - tok[172..172]
+    │           └ rhs: %137 = .fn_call - tok[171..176]
+    │              ├ callee: %135 = .builtin_prop_access - tok[171..173]
+    │              │  ├ lhs: %133 = .number_literal - tok[171..171]
     │              │  │  └ token: .number_literal '32768'
-    │              │  └ rhs: %134 = .identifier - tok[174..174]
+    │              │  └ rhs: %134 = .identifier - tok[173..173]
     │              │     └ token: .identifier 'as'
     │              └ args_list: 1 items
-    │                 └ %136 = .ty_i32 - tok[176..176]
+    │                 └ %136 = .ty_i32 - tok[175..175]
     │                    └ token: .keyword_i32 'i32'
-    └ %284 = .fn_decl - tok[180..365]
-       ├ proto: %143 = .fn_proto - tok[181..185]
-       │  ├ name: %141 = .identifier - tok[181..181]
+    └ %284 = .fn_decl - tok[179..363]
+       ├ proto: %143 = .fn_proto - tok[180..183]
+       │  ├ name: %141 = .identifier - tok[180..180]
        │  │  └ token: .identifier 'fold_to_false'
        │  ├ params_list: 0 items
-       │  └ ret_type: %142 = .ty_i32 - tok[185..185]
-       │     └ token: .keyword_i32 'i32'
-       └ body: %283 = .block - tok[186..364]
+       │  ├ ret_type: %142 = .ty_i32 - tok[183..183]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
+       └ body: %283 = .block - tok[184..362]
           └ list: 19 items
-             ├ %146 = .eq - tok[187..189]
-             │  ├ lhs: %144 = .number_literal - tok[187..187]
+             ├ %146 = .eq - tok[185..187]
+             │  ├ lhs: %144 = .number_literal - tok[185..185]
              │  │  └ token: .number_literal '1'
-             │  └ rhs: %145 = .number_literal - tok[189..189]
+             │  └ rhs: %145 = .number_literal - tok[187..187]
              │     └ token: .number_literal '2'
-             ├ %149 = .ne - tok[191..193]
-             │  ├ lhs: %147 = .number_literal - tok[191..191]
+             ├ %149 = .ne - tok[189..191]
+             │  ├ lhs: %147 = .number_literal - tok[189..189]
              │  │  └ token: .number_literal '1'
-             │  └ rhs: %148 = .number_literal - tok[193..193]
+             │  └ rhs: %148 = .number_literal - tok[191..191]
              │     └ token: .number_literal '1'
-             ├ %152 = .lt - tok[195..197]
-             │  ├ lhs: %150 = .number_literal - tok[195..195]
+             ├ %152 = .lt - tok[193..195]
+             │  ├ lhs: %150 = .number_literal - tok[193..193]
              │  │  └ token: .number_literal '1'
-             │  └ rhs: %151 = .number_literal - tok[197..197]
+             │  └ rhs: %151 = .number_literal - tok[195..195]
              │     └ token: .number_literal '1'
-             ├ %155 = .gt - tok[199..201]
-             │  ├ lhs: %153 = .number_literal - tok[199..199]
+             ├ %155 = .gt - tok[197..199]
+             │  ├ lhs: %153 = .number_literal - tok[197..197]
              │  │  └ token: .number_literal '1'
-             │  └ rhs: %154 = .number_literal - tok[201..201]
+             │  └ rhs: %154 = .number_literal - tok[199..199]
              │     └ token: .number_literal '1'
-             ├ %158 = .le - tok[203..205]
-             │  ├ lhs: %156 = .number_literal - tok[203..203]
+             ├ %158 = .le - tok[201..203]
+             │  ├ lhs: %156 = .number_literal - tok[201..201]
              │  │  └ token: .number_literal '2'
-             │  └ rhs: %157 = .number_literal - tok[205..205]
+             │  └ rhs: %157 = .number_literal - tok[203..203]
              │     └ token: .number_literal '1'
-             ├ %159 = .comment_line - tok[207..208]
+             ├ %159 = .comment_line - tok[205..206]
              │  └ token: .comment '// Same type'
-             ├ %170 = .eq - tok[208..220]
-             │  ├ lhs: %164 = .fn_call - tok[208..213]
-             │  │  ├ callee: %162 = .builtin_prop_access - tok[208..210]
-             │  │  │  ├ lhs: %160 = .number_literal - tok[208..208]
+             ├ %170 = .eq - tok[206..218]
+             │  ├ lhs: %164 = .fn_call - tok[206..211]
+             │  │  ├ callee: %162 = .builtin_prop_access - tok[206..208]
+             │  │  │  ├ lhs: %160 = .number_literal - tok[206..206]
              │  │  │  │  └ token: .number_literal '1'
-             │  │  │  └ rhs: %161 = .identifier - tok[210..210]
+             │  │  │  └ rhs: %161 = .identifier - tok[208..208]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %163 = .ty_i32 - tok[212..212]
+             │  │     └ %163 = .ty_i32 - tok[210..210]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %169 = .fn_call - tok[215..220]
-             │     ├ callee: %167 = .builtin_prop_access - tok[215..217]
-             │     │  ├ lhs: %165 = .number_literal - tok[215..215]
+             │  └ rhs: %169 = .fn_call - tok[213..218]
+             │     ├ callee: %167 = .builtin_prop_access - tok[213..215]
+             │     │  ├ lhs: %165 = .number_literal - tok[213..213]
              │     │  │  └ token: .number_literal '2'
-             │     │  └ rhs: %166 = .identifier - tok[217..217]
+             │     │  └ rhs: %166 = .identifier - tok[215..215]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %168 = .ty_i32 - tok[219..219]
+             │        └ %168 = .ty_i32 - tok[217..217]
              │           └ token: .keyword_i32 'i32'
-             ├ %181 = .ne - tok[222..234]
-             │  ├ lhs: %175 = .fn_call - tok[222..227]
-             │  │  ├ callee: %173 = .builtin_prop_access - tok[222..224]
-             │  │  │  ├ lhs: %171 = .number_literal - tok[222..222]
+             ├ %181 = .ne - tok[220..232]
+             │  ├ lhs: %175 = .fn_call - tok[220..225]
+             │  │  ├ callee: %173 = .builtin_prop_access - tok[220..222]
+             │  │  │  ├ lhs: %171 = .number_literal - tok[220..220]
              │  │  │  │  └ token: .number_literal '1'
-             │  │  │  └ rhs: %172 = .identifier - tok[224..224]
+             │  │  │  └ rhs: %172 = .identifier - tok[222..222]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %174 = .ty_i32 - tok[226..226]
+             │  │     └ %174 = .ty_i32 - tok[224..224]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %180 = .fn_call - tok[229..234]
-             │     ├ callee: %178 = .builtin_prop_access - tok[229..231]
-             │     │  ├ lhs: %176 = .number_literal - tok[229..229]
+             │  └ rhs: %180 = .fn_call - tok[227..232]
+             │     ├ callee: %178 = .builtin_prop_access - tok[227..229]
+             │     │  ├ lhs: %176 = .number_literal - tok[227..227]
              │     │  │  └ token: .number_literal '1'
-             │     │  └ rhs: %177 = .identifier - tok[231..231]
+             │     │  └ rhs: %177 = .identifier - tok[229..229]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %179 = .ty_i32 - tok[233..233]
+             │        └ %179 = .ty_i32 - tok[231..231]
              │           └ token: .keyword_i32 'i32'
-             ├ %192 = .gt - tok[236..248]
-             │  ├ lhs: %186 = .fn_call - tok[236..241]
-             │  │  ├ callee: %184 = .builtin_prop_access - tok[236..238]
-             │  │  │  ├ lhs: %182 = .number_literal - tok[236..236]
+             ├ %192 = .gt - tok[234..246]
+             │  ├ lhs: %186 = .fn_call - tok[234..239]
+             │  │  ├ callee: %184 = .builtin_prop_access - tok[234..236]
+             │  │  │  ├ lhs: %182 = .number_literal - tok[234..234]
              │  │  │  │  └ token: .number_literal '1'
-             │  │  │  └ rhs: %183 = .identifier - tok[238..238]
+             │  │  │  └ rhs: %183 = .identifier - tok[236..236]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %185 = .ty_i32 - tok[240..240]
+             │  │     └ %185 = .ty_i32 - tok[238..238]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %191 = .fn_call - tok[243..248]
-             │     ├ callee: %189 = .builtin_prop_access - tok[243..245]
-             │     │  ├ lhs: %187 = .number_literal - tok[243..243]
+             │  └ rhs: %191 = .fn_call - tok[241..246]
+             │     ├ callee: %189 = .builtin_prop_access - tok[241..243]
+             │     │  ├ lhs: %187 = .number_literal - tok[241..241]
              │     │  │  └ token: .number_literal '1'
-             │     │  └ rhs: %188 = .identifier - tok[245..245]
+             │     │  └ rhs: %188 = .identifier - tok[243..243]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %190 = .ty_i32 - tok[247..247]
+             │        └ %190 = .ty_i32 - tok[245..245]
              │           └ token: .keyword_i32 'i32'
-             ├ %203 = .lt - tok[250..262]
-             │  ├ lhs: %197 = .fn_call - tok[250..255]
-             │  │  ├ callee: %195 = .builtin_prop_access - tok[250..252]
-             │  │  │  ├ lhs: %193 = .number_literal - tok[250..250]
+             ├ %203 = .lt - tok[248..260]
+             │  ├ lhs: %197 = .fn_call - tok[248..253]
+             │  │  ├ callee: %195 = .builtin_prop_access - tok[248..250]
+             │  │  │  ├ lhs: %193 = .number_literal - tok[248..248]
              │  │  │  │  └ token: .number_literal '2'
-             │  │  │  └ rhs: %194 = .identifier - tok[252..252]
+             │  │  │  └ rhs: %194 = .identifier - tok[250..250]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %196 = .ty_i32 - tok[254..254]
+             │  │     └ %196 = .ty_i32 - tok[252..252]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %202 = .fn_call - tok[257..262]
-             │     ├ callee: %200 = .builtin_prop_access - tok[257..259]
-             │     │  ├ lhs: %198 = .number_literal - tok[257..257]
+             │  └ rhs: %202 = .fn_call - tok[255..260]
+             │     ├ callee: %200 = .builtin_prop_access - tok[255..257]
+             │     │  ├ lhs: %198 = .number_literal - tok[255..255]
              │     │  │  └ token: .number_literal '1'
-             │     │  └ rhs: %199 = .identifier - tok[259..259]
+             │     │  └ rhs: %199 = .identifier - tok[257..257]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %201 = .ty_i32 - tok[261..261]
+             │        └ %201 = .ty_i32 - tok[259..259]
              │           └ token: .keyword_i32 'i32'
-             ├ %214 = .ge - tok[264..276]
-             │  ├ lhs: %208 = .fn_call - tok[264..269]
-             │  │  ├ callee: %206 = .builtin_prop_access - tok[264..266]
-             │  │  │  ├ lhs: %204 = .number_literal - tok[264..264]
+             ├ %214 = .ge - tok[262..274]
+             │  ├ lhs: %208 = .fn_call - tok[262..267]
+             │  │  ├ callee: %206 = .builtin_prop_access - tok[262..264]
+             │  │  │  ├ lhs: %204 = .number_literal - tok[262..262]
              │  │  │  │  └ token: .number_literal '1'
-             │  │  │  └ rhs: %205 = .identifier - tok[266..266]
+             │  │  │  └ rhs: %205 = .identifier - tok[264..264]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %207 = .ty_i32 - tok[268..268]
+             │  │     └ %207 = .ty_i32 - tok[266..266]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %213 = .fn_call - tok[271..276]
-             │     ├ callee: %211 = .builtin_prop_access - tok[271..273]
-             │     │  ├ lhs: %209 = .number_literal - tok[271..271]
+             │  └ rhs: %213 = .fn_call - tok[269..274]
+             │     ├ callee: %211 = .builtin_prop_access - tok[269..271]
+             │     │  ├ lhs: %209 = .number_literal - tok[269..269]
              │     │  │  └ token: .number_literal '2'
-             │     │  └ rhs: %210 = .identifier - tok[273..273]
+             │     │  └ rhs: %210 = .identifier - tok[271..271]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %212 = .ty_i32 - tok[275..275]
+             │        └ %212 = .ty_i32 - tok[273..273]
              │           └ token: .keyword_i32 'i32'
-             ├ %215 = .comment_line - tok[278..279]
+             ├ %215 = .comment_line - tok[276..277]
              │  └ token: .comment '// Different type, same sign (should coerce to the type with more bits)'
-             ├ %226 = .gt - tok[279..291]
-             │  ├ lhs: %220 = .fn_call - tok[279..284]
-             │  │  ├ callee: %218 = .builtin_prop_access - tok[279..281]
-             │  │  │  ├ lhs: %216 = .number_literal - tok[279..279]
+             ├ %226 = .gt - tok[277..289]
+             │  ├ lhs: %220 = .fn_call - tok[277..282]
+             │  │  ├ callee: %218 = .builtin_prop_access - tok[277..279]
+             │  │  │  ├ lhs: %216 = .number_literal - tok[277..277]
              │  │  │  │  └ token: .number_literal '1'
-             │  │  │  └ rhs: %217 = .identifier - tok[281..281]
+             │  │  │  └ rhs: %217 = .identifier - tok[279..279]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %219 = .ty_i32 - tok[283..283]
+             │  │     └ %219 = .ty_i32 - tok[281..281]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %225 = .fn_call - tok[286..291]
-             │     ├ callee: %223 = .builtin_prop_access - tok[286..288]
-             │     │  ├ lhs: %221 = .number_literal - tok[286..286]
+             │  └ rhs: %225 = .fn_call - tok[284..289]
+             │     ├ callee: %223 = .builtin_prop_access - tok[284..286]
+             │     │  ├ lhs: %221 = .number_literal - tok[284..284]
              │     │  │  └ token: .number_literal '2'
-             │     │  └ rhs: %222 = .identifier - tok[288..288]
+             │     │  └ rhs: %222 = .identifier - tok[286..286]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %224 = .ty_i8 - tok[290..290]
+             │        └ %224 = .ty_i8 - tok[288..288]
              │           └ token: .keyword_i8 'i8'
-             ├ %237 = .gt - tok[293..305]
-             │  ├ lhs: %231 = .fn_call - tok[293..298]
-             │  │  ├ callee: %229 = .builtin_prop_access - tok[293..295]
-             │  │  │  ├ lhs: %227 = .number_literal - tok[293..293]
+             ├ %237 = .gt - tok[291..303]
+             │  ├ lhs: %231 = .fn_call - tok[291..296]
+             │  │  ├ callee: %229 = .builtin_prop_access - tok[291..293]
+             │  │  │  ├ lhs: %227 = .number_literal - tok[291..291]
              │  │  │  │  └ token: .number_literal '1'
-             │  │  │  └ rhs: %228 = .identifier - tok[295..295]
+             │  │  │  └ rhs: %228 = .identifier - tok[293..293]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %230 = .ty_i8 - tok[297..297]
+             │  │     └ %230 = .ty_i8 - tok[295..295]
              │  │        └ token: .keyword_i8 'i8'
-             │  └ rhs: %236 = .fn_call - tok[300..305]
-             │     ├ callee: %234 = .builtin_prop_access - tok[300..302]
-             │     │  ├ lhs: %232 = .number_literal - tok[300..300]
+             │  └ rhs: %236 = .fn_call - tok[298..303]
+             │     ├ callee: %234 = .builtin_prop_access - tok[298..300]
+             │     │  ├ lhs: %232 = .number_literal - tok[298..298]
              │     │  │  └ token: .number_literal '2'
-             │     │  └ rhs: %233 = .identifier - tok[302..302]
+             │     │  └ rhs: %233 = .identifier - tok[300..300]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %235 = .ty_i32 - tok[304..304]
+             │        └ %235 = .ty_i32 - tok[302..302]
              │           └ token: .keyword_i32 'i32'
-             ├ %248 = .ge - tok[307..319]
-             │  ├ lhs: %242 = .fn_call - tok[307..312]
-             │  │  ├ callee: %240 = .builtin_prop_access - tok[307..309]
-             │  │  │  ├ lhs: %238 = .number_literal - tok[307..307]
+             ├ %248 = .ge - tok[305..317]
+             │  ├ lhs: %242 = .fn_call - tok[305..310]
+             │  │  ├ callee: %240 = .builtin_prop_access - tok[305..307]
+             │  │  │  ├ lhs: %238 = .number_literal - tok[305..305]
              │  │  │  │  └ token: .number_literal '2'
-             │  │  │  └ rhs: %239 = .identifier - tok[309..309]
+             │  │  │  └ rhs: %239 = .identifier - tok[307..307]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %241 = .ty_i8 - tok[311..311]
+             │  │     └ %241 = .ty_i8 - tok[309..309]
              │  │        └ token: .keyword_i8 'i8'
-             │  └ rhs: %247 = .fn_call - tok[314..319]
-             │     ├ callee: %245 = .builtin_prop_access - tok[314..316]
-             │     │  ├ lhs: %243 = .number_literal - tok[314..314]
+             │  └ rhs: %247 = .fn_call - tok[312..317]
+             │     ├ callee: %245 = .builtin_prop_access - tok[312..314]
+             │     │  ├ lhs: %243 = .number_literal - tok[312..312]
              │     │  │  └ token: .number_literal '3'
-             │     │  └ rhs: %244 = .identifier - tok[316..316]
+             │     │  └ rhs: %244 = .identifier - tok[314..314]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %246 = .ty_i32 - tok[318..318]
+             │        └ %246 = .ty_i32 - tok[316..316]
              │           └ token: .keyword_i32 'i32'
-             ├ %259 = .le - tok[321..333]
-             │  ├ lhs: %253 = .fn_call - tok[321..326]
-             │  │  ├ callee: %251 = .builtin_prop_access - tok[321..323]
-             │  │  │  ├ lhs: %249 = .number_literal - tok[321..321]
+             ├ %259 = .le - tok[319..331]
+             │  ├ lhs: %253 = .fn_call - tok[319..324]
+             │  │  ├ callee: %251 = .builtin_prop_access - tok[319..321]
+             │  │  │  ├ lhs: %249 = .number_literal - tok[319..319]
              │  │  │  │  └ token: .number_literal '3'
-             │  │  │  └ rhs: %250 = .identifier - tok[323..323]
+             │  │  │  └ rhs: %250 = .identifier - tok[321..321]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %252 = .ty_i32 - tok[325..325]
+             │  │     └ %252 = .ty_i32 - tok[323..323]
              │  │        └ token: .keyword_i32 'i32'
-             │  └ rhs: %258 = .fn_call - tok[328..333]
-             │     ├ callee: %256 = .builtin_prop_access - tok[328..330]
-             │     │  ├ lhs: %254 = .number_literal - tok[328..328]
+             │  └ rhs: %258 = .fn_call - tok[326..331]
+             │     ├ callee: %256 = .builtin_prop_access - tok[326..328]
+             │     │  ├ lhs: %254 = .number_literal - tok[326..326]
              │     │  │  └ token: .number_literal '2'
-             │     │  └ rhs: %255 = .identifier - tok[330..330]
+             │     │  └ rhs: %255 = .identifier - tok[328..328]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %257 = .ty_i8 - tok[332..332]
+             │        └ %257 = .ty_i8 - tok[330..330]
              │           └ token: .keyword_i8 'i8'
-             ├ %260 = .comment_line - tok[335..336]
+             ├ %260 = .comment_line - tok[333..334]
              │  └ token: .comment '// Different sizes, different values'
-             ├ %271 = .lt - tok[336..348]
-             │  ├ lhs: %265 = .fn_call - tok[336..341]
-             │  │  ├ callee: %263 = .builtin_prop_access - tok[336..338]
-             │  │  │  ├ lhs: %261 = .number_literal - tok[336..336]
+             ├ %271 = .lt - tok[334..346]
+             │  ├ lhs: %265 = .fn_call - tok[334..339]
+             │  │  ├ callee: %263 = .builtin_prop_access - tok[334..336]
+             │  │  │  ├ lhs: %261 = .number_literal - tok[334..334]
              │  │  │  │  └ token: .number_literal '128'
-             │  │  │  └ rhs: %262 = .identifier - tok[338..338]
+             │  │  │  └ rhs: %262 = .identifier - tok[336..336]
              │  │  │     └ token: .identifier 'as'
              │  │  └ args_list: 1 items
-             │  │     └ %264 = .ty_i16 - tok[340..340]
+             │  │     └ %264 = .ty_i16 - tok[338..338]
              │  │        └ token: .keyword_i16 'i16'
-             │  └ rhs: %270 = .fn_call - tok[343..348]
-             │     ├ callee: %268 = .builtin_prop_access - tok[343..345]
-             │     │  ├ lhs: %266 = .number_literal - tok[343..343]
+             │  └ rhs: %270 = .fn_call - tok[341..346]
+             │     ├ callee: %268 = .builtin_prop_access - tok[341..343]
+             │     │  ├ lhs: %266 = .number_literal - tok[341..341]
              │     │  │  └ token: .number_literal '127'
-             │     │  └ rhs: %267 = .identifier - tok[345..345]
+             │     │  └ rhs: %267 = .identifier - tok[343..343]
              │     │     └ token: .identifier 'as'
              │     └ args_list: 1 items
-             │        └ %269 = .ty_i8 - tok[347..347]
+             │        └ %269 = .ty_i8 - tok[345..345]
              │           └ token: .keyword_i8 'i8'
-             └ %282 = .lt - tok[350..362]
-                ├ lhs: %276 = .fn_call - tok[350..355]
-                │  ├ callee: %274 = .builtin_prop_access - tok[350..352]
-                │  │  ├ lhs: %272 = .number_literal - tok[350..350]
+             └ %282 = .lt - tok[348..360]
+                ├ lhs: %276 = .fn_call - tok[348..353]
+                │  ├ callee: %274 = .builtin_prop_access - tok[348..350]
+                │  │  ├ lhs: %272 = .number_literal - tok[348..348]
                 │  │  │  └ token: .number_literal '32768'
-                │  │  └ rhs: %273 = .identifier - tok[352..352]
+                │  │  └ rhs: %273 = .identifier - tok[350..350]
                 │  │     └ token: .identifier 'as'
                 │  └ args_list: 1 items
-                │     └ %275 = .ty_i32 - tok[354..354]
+                │     └ %275 = .ty_i32 - tok[352..352]
                 │        └ token: .keyword_i32 'i32'
-                └ rhs: %281 = .fn_call - tok[357..362]
-                   ├ callee: %279 = .builtin_prop_access - tok[357..359]
-                   │  ├ lhs: %277 = .number_literal - tok[357..357]
+                └ rhs: %281 = .fn_call - tok[355..360]
+                   ├ callee: %279 = .builtin_prop_access - tok[355..357]
+                   │  ├ lhs: %277 = .number_literal - tok[355..355]
                    │  │  └ token: .number_literal '32767'
-                   │  └ rhs: %278 = .identifier - tok[359..359]
+                   │  └ rhs: %278 = .identifier - tok[357..357]
                    │     └ token: .identifier 'as'
                    └ args_list: 1 items
-                      └ %280 = .ty_i16 - tok[361..361]
+                      └ %280 = .ty_i16 - tok[359..359]
                          └ token: .keyword_i16 'i16'

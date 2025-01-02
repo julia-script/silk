@@ -1,12 +1,12 @@
 ;; AST
 ;; 25 Nodes
-;; 37 Tokens
+;; 35 Tokens
 ;; 9 Interned Lists
 
-%0 = .struct_decl - tok[0..37]
+%0 = .struct_decl - tok[0..35]
  └ members_list: 2 items
-    ├ %11 = .fn_decl - tok[0..16]
-    │  ├ proto: %6 = .fn_proto - tok[1..8]
+    ├ %11 = .fn_decl - tok[0..15]
+    │  ├ proto: %6 = .fn_proto - tok[1..7]
     │  │  ├ name: %1 = .identifier - tok[1..1]
     │  │  │  └ token: .identifier 'foo'
     │  │  ├ params_list: 1 items
@@ -15,36 +15,38 @@
     │  │  │     │  └ token: .identifier 'a'
     │  │  │     └ type: %4 = .ty_i32 - tok[5..5]
     │  │  │        └ token: .keyword_i32 'i32'
-    │  │  └ ret_type: %5 = .ty_void - tok[8..8]
-    │  │     └ token: .keyword_void 'void'
-    │  └ body: %10 = .block - tok[9..15]
+    │  │  ├ ret_type: %5 = .ty_void - tok[7..7]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %10 = .block - tok[8..14]
     │     └ list: 1 items
-    │        └ %9 = .fn_call - tok[10..13]
-    │           ├ callee: %7 = .identifier - tok[10..10]
+    │        └ %9 = .fn_call - tok[9..12]
+    │           ├ callee: %7 = .identifier - tok[9..9]
     │           │  └ token: .identifier '@comptime_log'
     │           └ args_list: 1 items
-    │              └ %8 = .identifier - tok[12..12]
+    │              └ %8 = .identifier - tok[11..11]
     │                 └ token: .identifier 'a'
-    └ %24 = .fn_decl - tok[16..36]
-       ├ proto: %14 = .fn_proto - tok[17..21]
-       │  ├ name: %12 = .identifier - tok[17..17]
+    └ %24 = .fn_decl - tok[15..34]
+       ├ proto: %14 = .fn_proto - tok[16..19]
+       │  ├ name: %12 = .identifier - tok[16..16]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  └ ret_type: %13 = .ty_void - tok[21..21]
-       │     └ token: .keyword_void 'void'
-       └ body: %23 = .block - tok[22..35]
+       │  ├ ret_type: %13 = .ty_void - tok[19..19]
+       │  │  └ token: .keyword_void 'void'
+       │  └ is_declaring_builtin: false
+       └ body: %23 = .block - tok[20..33]
           └ list: 2 items
-             ├ %18 = .comp_block - tok[23..28]
-             │  └ node: %17 = .fn_call - tok[24..27]
-             │     ├ callee: %15 = .identifier - tok[24..24]
+             ├ %18 = .comp_block - tok[21..26]
+             │  └ node: %17 = .fn_call - tok[22..25]
+             │     ├ callee: %15 = .identifier - tok[22..22]
              │     │  └ token: .identifier 'foo'
              │     └ args_list: 1 items
-             │        └ %16 = .number_literal - tok[26..26]
+             │        └ %16 = .number_literal - tok[24..24]
              │           └ token: .number_literal '123'
-             └ %22 = .comp_block - tok[29..34]
-                └ node: %21 = .fn_call - tok[30..33]
-                   ├ callee: %19 = .identifier - tok[30..30]
+             └ %22 = .comp_block - tok[27..32]
+                └ node: %21 = .fn_call - tok[28..31]
+                   ├ callee: %19 = .identifier - tok[28..28]
                    │  └ token: .identifier 'foo'
                    └ args_list: 1 items
-                      └ %20 = .number_literal - tok[32..32]
+                      └ %20 = .number_literal - tok[30..30]
                          └ token: .number_literal '456'

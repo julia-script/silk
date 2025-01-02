@@ -518,15 +518,21 @@ pub fn parseIdentifier(self: *AstGen) AstGenError!Node.Index {
     defer trace.end(.{
         .current_token = self.token_index,
     });
-    const token = self.peekToken() orelse return 0;
-    if (token.tag != .identifier) return 0;
-    // assert(token.tag == .identifier);
-    defer self.consumeToken();
+
+    const token_index = self.token_index;
+    self.consumeToken();
+
     return try self.pushNode(.{
-        .data = .{ .identifier = .{ .token = self.token_index } },
-        .start_token = self.token_index,
-        .end_token = self.token_index,
+        .data = .{
+            .identifier = .{
+                .token = token_index,
+            },
+        },
+        .start_token = token_index,
+        .end_token = token_index,
     });
+
+    // return index;
 }
 
 pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
@@ -612,7 +618,13 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 });
             },
 
-            .identifier => return try self.parseIdentifier(),
+            .identifier => {
+                const identifier = try self.parseIdentifier();
+                // if (self.tokenIs(.l_parenthesis)) {
+                //     return try self.parseFunctionCall(identifier);
+                // }
+                return identifier;
+            },
             .l_bracket => {
                 const start_token = self.token_index;
                 self.consumeToken();
@@ -745,6 +757,9 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             },
             .keyword_struct => {
                 return try self.parseStructDecl();
+            },
+            .keyword_impl => {
+                return try self.parseImplDecl();
             },
             else => {
                 // self.logger.panic("unexpected {s}", .{@tagName(token.tag)});
@@ -1167,6 +1182,7 @@ pub fn parseFnDecl(self: *AstGen) AstGenError!Node.Index {
         });
         return 0;
     }
+
     const proto = try self.parseFnProto();
     if (proto == 0) {
         return 0;
@@ -1201,6 +1217,7 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
     });
     assert(self.tokenIs(.keyword_fn));
     self.consumeToken();
+    const is_declaring_builtin = self.accept(.colon);
     if (!self.tokenIs(.identifier)) {
         try self.errors.addError(.{
             .tag = .expected_token,
@@ -1239,7 +1256,7 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
         }
         break;
     }
-    if (self.accept(.r_parenthesis)) {} else {
+    if (!self.accept(.r_parenthesis)) {
         try self.errors.addError(.{
             .tag = .expected_token,
             .start = self.token_index,
@@ -1247,14 +1264,14 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             .payload = @intFromEnum(Token.Tag.r_parenthesis),
         });
     }
-    if (self.accept(.colon)) {} else {
-        try self.errors.addError(.{
-            .tag = .expected_token,
-            .start = self.token_index,
-            .end = self.token_index,
-            .payload = @intFromEnum(Token.Tag.colon),
-        });
-    }
+    // if (self.accept(.colon)) {} else {
+    //     try self.errors.addError(.{
+    //         .tag = .expected_token,
+    //         .start = self.token_index,
+    //         .end = self.token_index,
+    //         .payload = @intFromEnum(Token.Tag.colon),
+    //     });
+    // }
     const ret_ty = try self.parsePrimary();
 
     return try self.pushNode(.{
@@ -1262,6 +1279,7 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
             .name = name,
             .params_list = try params.commit(),
             .ret_type = ret_ty,
+            .is_declaring_builtin = is_declaring_builtin,
         } },
         .start_token = start_token,
         .end_token = self.token_index - 1,
@@ -1881,6 +1899,76 @@ pub fn parseWhileLoop(self: *AstGen) AstGenError!Node.Index {
         .start_token = start_token,
         .end_token = self.token_index - 1,
     });
+}
+pub fn parseImplDecl(self: *AstGen) AstGenError!Node.Index {
+    const trace = self.tracer.begin(
+        @src(),
+        .{ "parseImplDecl", "AstGen.parseImplDecl", .{} },
+        .{
+            .begin_at_token = self.token_index,
+        },
+    );
+    defer trace.end(.{
+        .end_at_token = self.token_index,
+        .snapshot = self.ast.nodes.items,
+        .current_token = self.token_index,
+    });
+
+    const index = try self.reserveNodeIndex();
+    const start_token = self.token_index;
+    self.consumeToken();
+    const impl_type = try self.parsePrimary();
+    if (!self.accept(.l_brace)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.l_brace.toInt(),
+        });
+        return 0;
+    }
+    var members_list = self.ast.interned_lists.new();
+
+    while (!self.tokenIs(.r_brace) and !self.tokenIs(.eof)) {
+        const before_parsing_token_index = self.token_index;
+        const decl_trace = self.tracer.begin(@src(), .{
+            "parsePrimary", "[PARSE_DECLARATION]", .{},
+        }, .{});
+        defer decl_trace.end(.{
+            .end_at_token = self.token_index,
+            .snapshot = self.ast.nodes.items,
+            .current_token = self.token_index,
+        });
+        // Probably a declaration
+        const declaration = try self.parsePrimary();
+        if (declaration != 0)
+            try members_list.append(declaration);
+        // to be sure we don't get stuck in infinite loops
+        // assert(self.token_index > before_parsing_token_index);
+        if (self.accept(.eof)) break;
+        if (self.token_index == before_parsing_token_index) {
+            self.consumeToken();
+        }
+    }
+    self.setNode(index, .{
+        .data = .{ .impl_decl = .{
+            .type = impl_type,
+            .members_list = try members_list.commit(),
+        } },
+        .start_token = start_token,
+        .end_token = self.token_index,
+    });
+
+    if (!self.accept(.r_brace)) {
+        try self.errors.addError(.{
+            .tag = .expected_token,
+            .start = self.token_index,
+            .end = self.token_index,
+            .payload = Token.Tag.r_brace.toInt(),
+        });
+    }
+
+    return index;
 }
 pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
     const trace = self.tracer.begin(

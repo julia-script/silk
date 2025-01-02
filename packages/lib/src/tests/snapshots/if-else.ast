@@ -20,8 +20,9 @@
     │  │  │     │  └ token: .identifier 'b'
     │  │  │     └ type: %7 = .ty_i32 - tok[9..9]
     │  │  │        └ token: .keyword_i32 'i32'
-    │  │  └ ret_type: %8 = .ty_i32 - tok[11..11]
-    │  │     └ token: .keyword_i32 'i32'
+    │  │  ├ ret_type: %8 = .ty_i32 - tok[11..11]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
     │  └ body: %20 = .block - tok[12..30]
     │     └ list: 1 items
     │        └ %19 = .if_expr - tok[13..29]
@@ -55,8 +56,9 @@
        │  │     │  └ token: .identifier 'b'
        │  │     └ type: %28 = .ty_i32 - tok[40..40]
        │  │        └ token: .keyword_i32 'i32'
-       │  └ ret_type: %29 = .ty_i32 - tok[42..42]
-       │     └ token: .keyword_i32 'i32'
+       │  ├ ret_type: %29 = .ty_i32 - tok[42..42]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
        └ body: %38 = .block - tok[43..54]
           └ list: 1 items
              └ %37 = .ret_expression - tok[44..53]

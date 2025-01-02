@@ -127,6 +127,7 @@ pub const Node = struct {
             name: Index,
             params_list: ChildList,
             ret_type: Index,
+            is_declaring_builtin: bool,
         },
         fn_param: FnParam,
         fn_call: struct {
@@ -187,10 +188,15 @@ pub const Node = struct {
             // fields_list: NodeListsIndex,
             // declarations_list: NodeListsIndex,
         },
+
         struct_field: struct {
             name: Index,
             type: Index,
             default_value: Index,
+        },
+        impl_decl: struct {
+            type: Index,
+            members_list: ChildList,
         },
         comment_line: TokenIndex,
 
@@ -364,6 +370,7 @@ pub const Node = struct {
 
         struct_decl,
         struct_field,
+        impl_decl,
 
         comment_line,
 
@@ -863,9 +870,11 @@ pub fn formatNode(
                     }
                     try tree_writer.pop();
                     // try tree_writer.writeIndent(true, j == children.len - 1);
-                } else if (std.mem.eql(u8, field.name, "token")) {
+                } else if (comptime std.mem.eql(u8, field.name, "token")) {
                     const token = self.tokens.items[value];
                     try writer.print(".{s} '{s}'\n", .{ @tagName(token.tag), self.getTokenSlice(value) });
+                } else if (field.type == bool) {
+                    try writer.print("{}\n", .{value});
                 } else {
                     // try writer.print("\n", .{});
                     try self.formatNode(writer, value, tree_writer, options);

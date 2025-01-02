@@ -1,22 +1,23 @@
 ;; AST
 ;; 10 Nodes
-;; 14 Tokens
+;; 13 Tokens
 ;; 2 Interned Lists
 
-%0 = .struct_decl - tok[0..14]
+%0 = .struct_decl - tok[0..13]
  └ members_list: 1 items
-    └ %9 = .fn_decl - tok[0..13]
-       ├ proto: %3 = .fn_proto - tok[1..5]
+    └ %9 = .fn_decl - tok[0..12]
+       ├ proto: %3 = .fn_proto - tok[1..4]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  └ ret_type: %2 = .ty_void - tok[5..5]
-       │     └ token: .keyword_void 'void'
-       └ body: %8 = .block - tok[6..12]
+       │  ├ ret_type: %2 = .ty_void - tok[4..4]
+       │  │  └ token: .keyword_void 'void'
+       │  └ is_declaring_builtin: false
+       └ body: %8 = .block - tok[5..11]
           └ list: 1 items
-             └ %7 = .comp_block - tok[7..11]
-                └ node: %6 = .eq - tok[8..10]
-                   ├ lhs: %4 = .number_literal - tok[8..8]
+             └ %7 = .comp_block - tok[6..10]
+                └ node: %6 = .eq - tok[7..9]
+                   ├ lhs: %4 = .number_literal - tok[7..7]
                    │  └ token: .number_literal '1'
-                   └ rhs: %5 = .number_literal - tok[10..10]
+                   └ rhs: %5 = .number_literal - tok[9..9]
                       └ token: .number_literal '1'

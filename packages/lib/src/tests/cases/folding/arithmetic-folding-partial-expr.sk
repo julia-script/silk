@@ -1,5 +1,5 @@
 
-fn folding(n: i32): i32 {
+fn folding(n: i32) i32 {
   // TODO: this should simplify to "n + 25".
   // For this to happen we need to be sure the ast give higher precedence to expressions that can be computed at compile time.
   // (ex, generate (n + (1 + 2)) instead of ((n + 1) + 2))

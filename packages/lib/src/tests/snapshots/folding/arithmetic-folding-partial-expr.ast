@@ -1,12 +1,12 @@
 ;; AST
 ;; 27 Nodes
-;; 31 Tokens
+;; 30 Tokens
 ;; 6 Interned Lists
 
-%0 = .struct_decl - tok[0..31]
+%0 = .struct_decl - tok[0..30]
  └ members_list: 1 items
-    └ %26 = .fn_decl - tok[0..30]
-       ├ proto: %6 = .fn_proto - tok[1..8]
+    └ %26 = .fn_decl - tok[0..29]
+       ├ proto: %6 = .fn_proto - tok[1..7]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'folding'
        │  ├ params_list: 1 items
@@ -15,35 +15,36 @@
        │  │     │  └ token: .identifier 'n'
        │  │     └ type: %4 = .ty_i32 - tok[5..5]
        │  │        └ token: .keyword_i32 'i32'
-       │  └ ret_type: %5 = .ty_i32 - tok[8..8]
-       │     └ token: .keyword_i32 'i32'
-       └ body: %25 = .block - tok[9..29]
+       │  ├ ret_type: %5 = .ty_i32 - tok[7..7]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
+       └ body: %25 = .block - tok[8..28]
           └ list: 4 items
-             ├ %7 = .comment_line - tok[10..11]
+             ├ %7 = .comment_line - tok[9..10]
              │  └ token: .comment '// TODO: this should simplify to "n + 25".'
-             ├ %8 = .comment_line - tok[11..12]
+             ├ %8 = .comment_line - tok[10..11]
              │  └ token: .comment '// For this to happen we need to be sure the ast give higher precedence to expressions that can be computed at compile time.'
-             ├ %9 = .comment_line - tok[12..13]
+             ├ %9 = .comment_line - tok[11..12]
              │  └ token: .comment '// (ex, generate (n + (1 + 2)) instead of ((n + 1) + 2))'
-             └ %24 = .ret_expression - tok[13..28]
-                └ node: %23 = .add - tok[14..28]
-                   ├ lhs: %16 = .add - tok[14..20]
-                   │  ├ lhs: %12 = .add - tok[14..16]
-                   │  │  ├ lhs: %10 = .identifier - tok[14..14]
+             └ %24 = .ret_expression - tok[12..27]
+                └ node: %23 = .add - tok[13..27]
+                   ├ lhs: %16 = .add - tok[13..19]
+                   │  ├ lhs: %12 = .add - tok[13..15]
+                   │  │  ├ lhs: %10 = .identifier - tok[13..13]
                    │  │  │  └ token: .identifier 'n'
-                   │  │  └ rhs: %11 = .number_literal - tok[16..16]
+                   │  │  └ rhs: %11 = .number_literal - tok[15..15]
                    │  │     └ token: .number_literal '1'
-                   │  └ rhs: %15 = .mul - tok[18..20]
-                   │     ├ lhs: %13 = .number_literal - tok[18..18]
+                   │  └ rhs: %15 = .mul - tok[17..19]
+                   │     ├ lhs: %13 = .number_literal - tok[17..17]
                    │     │  └ token: .number_literal '2'
-                   │     └ rhs: %14 = .number_literal - tok[20..20]
+                   │     └ rhs: %14 = .number_literal - tok[19..19]
                    │        └ token: .number_literal '3'
-                   └ rhs: %22 = .mul - tok[22..28]
-                      ├ lhs: %20 = .group - tok[22..26]
-                      │  └ node: %19 = .add - tok[23..25]
-                      │     ├ lhs: %17 = .number_literal - tok[23..23]
+                   └ rhs: %22 = .mul - tok[21..27]
+                      ├ lhs: %20 = .group - tok[21..25]
+                      │  └ node: %19 = .add - tok[22..24]
+                      │     ├ lhs: %17 = .number_literal - tok[22..22]
                       │     │  └ token: .number_literal '4'
-                      │     └ rhs: %18 = .number_literal - tok[25..25]
+                      │     └ rhs: %18 = .number_literal - tok[24..24]
                       │        └ token: .number_literal '5'
-                      └ rhs: %21 = .number_literal - tok[28..28]
+                      └ rhs: %21 = .number_literal - tok[27..27]
                          └ token: .number_literal '2'

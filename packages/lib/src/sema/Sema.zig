@@ -317,6 +317,9 @@ pub const Type = struct {
             child: Type.Key,
         },
         builtin_global: shared.BuiltinGlobal,
+        builtin_member: struct {
+            member: shared.BuiltinMember,
+        },
         flat_union: struct {
             fields: Type.List,
         },
@@ -605,13 +608,13 @@ pub const Instruction = struct {
         builtin_get,
         comptime_log,
 
-        cast_promote,
+        float_promote,
         float_demote,
-        cast_extend,
-        cast_truncate,
-        cast_convert,
-        cast_wrap,
-        cast_reinterpret,
+        int_extend,
+        truncate_float_to_int,
+        convert_int_to_float,
+        int_wrap,
+        reinterpret,
 
         max,
         min,
@@ -644,6 +647,10 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
         switch (ty.data) {
             .builtin_global => |builtin_global| {
                 try writer.print("[builtin_{s}]", .{@tagName(builtin_global)});
+                return;
+            },
+            .builtin_member => |builtin_member| {
+                try writer.print("[builtin_{s}]", .{@tagName(builtin_member.member)});
                 return;
             },
             .pointer => |pointer| {

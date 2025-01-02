@@ -1,59 +1,60 @@
 ;; AST
 ;; 30 Nodes
-;; 44 Tokens
+;; 43 Tokens
 ;; 8 Interned Lists
 
-%0 = .struct_decl - tok[0..44]
+%0 = .struct_decl - tok[0..43]
  └ members_list: 2 items
-    ├ %20 = .fn_decl - tok[0..29]
-    │  ├ proto: %3 = .fn_proto - tok[1..5]
+    ├ %20 = .fn_decl - tok[0..28]
+    │  ├ proto: %3 = .fn_proto - tok[1..4]
     │  │  ├ name: %1 = .identifier - tok[1..1]
     │  │  │  └ token: .identifier 'main'
     │  │  ├ params_list: 0 items
-    │  │  └ ret_type: %2 = .ty_i32 - tok[5..5]
-    │  │     └ token: .keyword_i32 'i32'
-    │  └ body: %19 = .block - tok[6..28]
+    │  │  ├ ret_type: %2 = .ty_i32 - tok[4..4]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %19 = .block - tok[5..27]
     │     └ list: 2 items
-    │        ├ %14 = .const_decl - tok[7..22]
-    │        │  ├ name: %4 = .identifier - tok[8..8]
+    │        ├ %14 = .const_decl - tok[6..21]
+    │        │  ├ name: %4 = .identifier - tok[7..7]
     │        │  │  └ token: .identifier 'a'
-    │        │  ├ type: %5 = .identifier - tok[10..10]
+    │        │  ├ type: %5 = .identifier - tok[9..9]
     │        │  │  └ token: .identifier 'A'
-    │        │  └ value: %13 = .type_init - tok[12..23]
-    │        │     ├ type: %6 = .identifier - tok[12..12]
+    │        │  └ value: %13 = .type_init - tok[11..22]
+    │        │     ├ type: %6 = .identifier - tok[11..11]
     │        │     │  └ token: .identifier 'A'
     │        │     └ field_init_list: 2 items
-    │        │        ├ %9 = .field_init - tok[14..16]
-    │        │        │  ├ name: %7 = .identifier - tok[14..14]
+    │        │        ├ %9 = .field_init - tok[13..15]
+    │        │        │  ├ name: %7 = .identifier - tok[13..13]
     │        │        │  │  └ token: .identifier 'a'
-    │        │        │  └ value: %8 = .number_literal - tok[16..16]
+    │        │        │  └ value: %8 = .number_literal - tok[15..15]
     │        │        │     └ token: .number_literal '22'
-    │        │        └ %12 = .field_init - tok[18..20]
-    │        │           ├ name: %10 = .identifier - tok[18..18]
+    │        │        └ %12 = .field_init - tok[17..19]
+    │        │           ├ name: %10 = .identifier - tok[17..17]
     │        │           │  └ token: .identifier 'b'
-    │        │           └ value: %11 = .number_literal - tok[20..20]
+    │        │           └ value: %11 = .number_literal - tok[19..19]
     │        │              └ token: .number_literal '33'
-    │        └ %18 = .ret_expression - tok[23..26]
-    │           └ node: %17 = .prop_access - tok[24..26]
-    │              ├ lhs: %15 = .identifier - tok[24..24]
+    │        └ %18 = .ret_expression - tok[22..25]
+    │           └ node: %17 = .prop_access - tok[23..25]
+    │              ├ lhs: %15 = .identifier - tok[23..23]
     │              │  └ token: .identifier 'a'
-    │              └ rhs: %16 = .identifier - tok[26..26]
+    │              └ rhs: %16 = .identifier - tok[25..25]
     │                 └ token: .identifier 'a'
-    └ %29 = .type_decl - tok[29..42]
-       ├ name: %21 = .identifier - tok[30..30]
+    └ %29 = .type_decl - tok[28..41]
+       ├ name: %21 = .identifier - tok[29..29]
        │  └ token: .identifier 'A'
        ├ type: NONE
-       └ value: %22 = .struct_decl - tok[32..42]
+       └ value: %22 = .struct_decl - tok[31..41]
           └ members_list: 2 items
-             ├ %25 = .struct_field - tok[35..37]
-             │  ├ name: %23 = .identifier - tok[34..34]
+             ├ %25 = .struct_field - tok[34..36]
+             │  ├ name: %23 = .identifier - tok[33..33]
              │  │  └ token: .identifier 'a'
-             │  ├ type: %24 = .ty_i32 - tok[36..36]
+             │  ├ type: %24 = .ty_i32 - tok[35..35]
              │  │  └ token: .keyword_i32 'i32'
              │  └ default_value: NONE
-             └ %28 = .struct_field - tok[39..41]
-                ├ name: %26 = .identifier - tok[38..38]
+             └ %28 = .struct_field - tok[38..40]
+                ├ name: %26 = .identifier - tok[37..37]
                 │  └ token: .identifier 'b'
-                ├ type: %27 = .ty_i32 - tok[40..40]
+                ├ type: %27 = .ty_i32 - tok[39..39]
                 │  └ token: .keyword_i32 'i32'
                 └ default_value: NONE

@@ -1,10 +1,10 @@
 
 type T = struct {
     foo: i32,
-    fn bar(): void {}
+    fn bar() void {}
 }
 
-// fn struct_field_access(): void {
+// fn struct_field_access() void {
 //     // %0 = alloc T                          ; *T@ptr:0
 //     // %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0
 //     // %2 = const 123                        ; 123 int
@@ -17,14 +17,14 @@ type T = struct {
 //     a.foo;
 // }
 
-fn struct_static_method_access(): void {
+fn struct_static_method_access() void {
     // %0 = get_global T                   ; T
     // %1 = get_global_decl %0 'bar'       ; fn() -> void
     // %2 = call %1                        ; void
     T.bar();
 }
 
-// fn struct_method_access(): void {
+// fn struct_method_access() void {
 //     // %0 = alloc T                          ; *T@ptr:0
 //     // %1 = get_el_ptr %0 'bar' i=(0)        ; *fn() -> void@ptr:0
 //     // %2 = call %1                         ; void
@@ -32,7 +32,7 @@ fn struct_static_method_access(): void {
 //     a.bar();
 // }
 
-fn builtin_method_access(): void {
+fn builtin_method_access() void {
     const a = @as(i32, 123);
     const b = @as(f64, 123);
     const c = @float_demote(f32, b);

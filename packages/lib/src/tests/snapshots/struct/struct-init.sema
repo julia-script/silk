@@ -4,20 +4,20 @@
 ;; 2 symbols
 ;; 23 instructions
 ;; 12 values
-;; 6 types
+;; 8 types
 ;; 2 lists
 ;; 16 strings
 ;; 8/8 comptime memory used/allocated bytes
 
 %0 = fn @"struct/struct-init.sk::main"() -> i32
  └ %0: void = .block: [%1-%19]                                        ; void
-    ├ !%1: type = .global_get declaration=(%1)                        ; type(struct{i32, i32})
+    ├ !%1: typeof(struct{i32, i32}) = .global_get declaration=(%1)    ; typeof(struct{i32, i32})
     ├ !%2: number = .constant                                         ; number{ 22 }
     ├ !%3: void = .field_init                                         ; void
     ├ !%4: number = .constant                                         ; number{ 33 }
     ├ !%5: void = .field_init                                         ; void
-    ├ !%6: struct{i32, i32} = .type_init                              ; todo_complex(3)
-    ├ !%7: type = .global_get declaration=(%1)                        ; type(struct{i32, i32})
+    ├ !%6: struct{i32, i32} = .type_init                              ; todo_complex(struct)
+    ├ !%7: typeof(struct{i32, i32}) = .global_get declaration=(%1)    ; typeof(struct{i32, i32})
     ├ %8: *struct{i32, i32} = .alloc type=(struct{i32, i32}) mutable=(false); *struct{i32, i32}@0
     ├ %9: i32 = .constant                                             ; i32{ 22 }
     ├ %10: *i32 = .get_element_pointer base=(%8) index=(%0)           ; *i32@0
@@ -27,7 +27,7 @@
     ├ %14: void = .store operand=(%13) payload=(%12)                  ; void
     ├ %15: *i32 = .get_element_pointer base=(%8) index=(%0)           ; *i32@0
     ├ !%16: i32 = .load operand=(%15)                                 ; i32{ 22 }
-    ├ !%17: type = .type                                              ; type(i32)
+    ├ !%17: typeof(i32) = .type                                       ; typeof(i32)
     ├ %18: i32 = .constant                                            ; i32{ 22 }
     └ %19: void = .ret maybe_operand=(%18)                            ; void
 

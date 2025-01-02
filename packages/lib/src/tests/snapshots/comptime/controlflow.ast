@@ -1,29 +1,30 @@
 ;; AST
 ;; 14 Nodes
-;; 24 Tokens
+;; 23 Tokens
 ;; 4 Interned Lists
 
-%0 = .struct_decl - tok[0..24]
+%0 = .struct_decl - tok[0..23]
  └ members_list: 1 items
-    └ %13 = .fn_decl - tok[0..23]
-       ├ proto: %3 = .fn_proto - tok[1..5]
+    └ %13 = .fn_decl - tok[0..22]
+       ├ proto: %3 = .fn_proto - tok[1..4]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  └ ret_type: %2 = .ty_i32 - tok[5..5]
-       │     └ token: .keyword_i32 'i32'
-       └ body: %12 = .block - tok[6..22]
+       │  ├ ret_type: %2 = .ty_i32 - tok[4..4]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
+       └ body: %12 = .block - tok[5..21]
           └ list: 1 items
-             └ %11 = .if_expr - tok[7..21]
-                ├ condition: %4 = .true_literal - tok[9..9]
+             └ %11 = .if_expr - tok[6..20]
+                ├ condition: %4 = .true_literal - tok[8..8]
                 │  └ token: .keyword_true 'true'
-                ├ then_branch: %7 = .block - tok[11..15]
+                ├ then_branch: %7 = .block - tok[10..14]
                 │  └ list: 1 items
-                │     └ %6 = .ret_expression - tok[12..13]
-                │        └ node: %5 = .number_literal - tok[13..13]
+                │     └ %6 = .ret_expression - tok[11..12]
+                │        └ node: %5 = .number_literal - tok[12..12]
                 │           └ token: .number_literal '1'
-                └ else_branch: %10 = .block - tok[17..21]
+                └ else_branch: %10 = .block - tok[16..20]
                    └ list: 1 items
-                      └ %9 = .ret_expression - tok[18..19]
-                         └ node: %8 = .number_literal - tok[19..19]
+                      └ %9 = .ret_expression - tok[17..18]
+                         └ node: %8 = .number_literal - tok[18..18]
                             └ token: .number_literal '2'

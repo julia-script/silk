@@ -4,7 +4,7 @@
 ;; 1 symbols
 ;; 9 instructions
 ;; 8 values
-;; 1 types
+;; 2 types
 ;; 0 lists
 ;; 5 strings
 ;; 0/0 comptime memory used/allocated bytes
@@ -16,7 +16,7 @@
     ├ !%3: number = .constant                                         ; number{ 4 }
     ├ !%4: number = .constant                                         ; number{ 12 }
     ├ !%5: number = .constant                                         ; number{ 14 }
-    ├ !%6: type = .type                                               ; type(i32)
+    ├ !%6: typeof(i32) = .type                                        ; typeof(i32)
     ├ %7: i32 = .constant                                             ; i32{ 14 }
     └ %8: void = .ret maybe_operand=(%7)                              ; void
 

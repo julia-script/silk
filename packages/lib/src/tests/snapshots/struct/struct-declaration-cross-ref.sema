@@ -4,22 +4,22 @@
 ;; 2 symbols
 ;; 28 instructions
 ;; 16 values
-;; 8 types
+;; 10 types
 ;; 2 lists
 ;; 19 strings
 ;; 12/20 comptime memory used/allocated bytes
 
 %0 = fn @"struct/struct-declaration-cross-ref.sk::main"() -> i32
  └ %0: void = .block: [%1-%24]                                        ; void
-    ├ !%1: type = .global_get declaration=(%1)                        ; type(struct{i32, i32, i8})
+    ├ !%1: typeof(struct{i32, i32, i8}) = .global_get declaration=(%1); typeof(struct{i32, i32, i8})
     ├ !%2: number = .constant                                         ; number{ 1 }
     ├ !%3: void = .field_init                                         ; void
     ├ !%4: number = .constant                                         ; number{ 2 }
     ├ !%5: void = .field_init                                         ; void
     ├ !%6: number = .constant                                         ; number{ 3 }
     ├ !%7: void = .field_init                                         ; void
-    ├ !%8: struct{i32, i32, i8} = .type_init                          ; todo_complex(4)
-    ├ !%9: type = .global_get declaration=(%1)                        ; type(struct{i32, i32, i8})
+    ├ !%8: struct{i32, i32, i8} = .type_init                          ; todo_complex(struct)
+    ├ !%9: typeof(struct{i32, i32, i8}) = .global_get declaration=(%1); typeof(struct{i32, i32, i8})
     ├ %10: *struct{i32, i32, i8} = .alloc type=(struct{i32, i32, i8}) mutable=(false); *struct{i32, i32, i8}@0
     ├ %11: i8 = .constant                                             ; i8{ 1 }
     ├ %12: *i8 = .get_element_pointer base=(%10) index=(%2)           ; *i8@8
@@ -32,7 +32,7 @@
     ├ %19: void = .store operand=(%18) payload=(%17)                  ; void
     ├ %20: *i8 = .get_element_pointer base=(%10) index=(%2)           ; *i8@0
     ├ !%21: i8 = .load operand=(%20)                                  ; i8{ 2 }
-    ├ !%22: type = .type                                              ; type(i32)
+    ├ !%22: typeof(i32) = .type                                       ; typeof(i32)
     ├ %23: i32 = .constant                                            ; i32{ 2 }
     └ %24: void = .ret maybe_operand=(%23)                            ; void
 

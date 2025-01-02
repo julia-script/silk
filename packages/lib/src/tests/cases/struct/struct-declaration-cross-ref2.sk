@@ -4,7 +4,7 @@ type A = struct {
   a: usize,
   b: i32 = 2,
   c: i32 = 3,
-  pub fn foo(): void {
+  pub fn foo() void {
     const b: B = B{
       d = 4,
       e = 5,
@@ -23,7 +23,7 @@ type B = struct {
   d: usize,
   e: i32 = 2,
   f: i32 = 3,
-  pub fn bar(): void {
+  pub fn bar() void {
     const a: A = A{
       a = 1,
       b = 2,

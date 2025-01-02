@@ -1,12 +1,12 @@
 ;; Sema
 ;; 6 declarations
-;; 52 entities
+;; 53 entities
 ;; 6 symbols
 ;; 18 instructions
 ;; 6 values
-;; 23 types
+;; 29 types
 ;; 6 lists
-;; 65 strings
+;; 66 strings
 ;; 0/0 comptime memory used/allocated bytes
 
 %0 = type @"struct/struct-alignment.sk::A" = struct:

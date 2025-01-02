@@ -1,30 +1,31 @@
 ;; AST
 ;; 13 Nodes
-;; 18 Tokens
+;; 17 Tokens
 ;; 6 Interned Lists
 
-%0 = .struct_decl - tok[0..18]
+%0 = .struct_decl - tok[0..17]
  └ members_list: 1 items
-    └ %12 = .fn_decl - tok[0..17]
-       ├ proto: %3 = .fn_proto - tok[1..5]
+    └ %12 = .fn_decl - tok[0..16]
+       ├ proto: %3 = .fn_proto - tok[1..4]
        │  ├ name: %1 = .identifier - tok[1..1]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  └ ret_type: %2 = .ty_void - tok[5..5]
-       │     └ token: .keyword_void 'void'
-       └ body: %11 = .block - tok[6..16]
+       │  ├ ret_type: %2 = .ty_void - tok[4..4]
+       │  │  └ token: .keyword_void 'void'
+       │  └ is_declaring_builtin: false
+       └ body: %11 = .block - tok[5..15]
           └ list: 5 items
-             ├ %6 = .const_decl - tok[7..10]
-             │  ├ name: %4 = .identifier - tok[8..8]
+             ├ %6 = .const_decl - tok[6..9]
+             │  ├ name: %4 = .identifier - tok[7..7]
              │  │  └ token: .identifier 'hello_world'
              │  ├ type: NONE
-             │  └ value: %5 = .string_literal - tok[10..10]
+             │  └ value: %5 = .string_literal - tok[9..9]
              │     └ token: .string_literal '"Hello, World!"'
-             ├ %7 = .comment_line - tok[12..13]
+             ├ %7 = .comment_line - tok[11..12]
              │  └ token: .comment '// @comptime_log(hello_world[0]);'
-             ├ %8 = .comment_line - tok[13..14]
+             ├ %8 = .comment_line - tok[12..13]
              │  └ token: .comment '// hello_world.* = A {};'
-             ├ %9 = .comment_line - tok[14..15]
+             ├ %9 = .comment_line - tok[13..14]
              │  └ token: .comment '// const test = (A {}).add(B{});'
-             └ %10 = .comment_line - tok[15..16]
+             └ %10 = .comment_line - tok[14..15]
                 └ token: .comment '// const first_char = hello_world[0];'

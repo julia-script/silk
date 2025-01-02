@@ -3,23 +3,25 @@
 %0 = .struct_decl
  ├ name_node: NONE
  ├ fields_list: 0 items
- └ declarations_list: 1 items
-    └ 0: %1 = .global_decl
-       ├ name_node: node(#1: "main")
-       ├ extern: false
-       ├ is_fn: true
-       ├ is_type: false
-       ├ visibility: "private"
-       ├ exported: false
-       ├ mutable: false
-       ├ type: %9 = .fn_decl
-       │  ├ name_node: node(#1: "main")
-       │  ├ return_type: %2 = .ty_void
-       │  │  └ node: node(#2: "void")
-       │  └ params_list: 0 items
-       └ init: %3 = .block
-          └ %4 = comptime .inline_block
-             ├ %5 = .comptime_number node=(n[4:"1"])
-             ├ %6 = .comptime_number node=(n[5:"1"])
-             ├ %7 = .eq lhs=(%5), rhs=(%6)
-             └ %8 = .br operand=(7), target=(%4)
+ ├ declarations_list: 1 items
+ │  └ 0: %1 = .global_decl
+ │     ├ name_node: node(#1: "main")
+ │     ├ extern: false
+ │     ├ is_fn: true
+ │     ├ is_type: false
+ │     ├ visibility: "private"
+ │     ├ exported: false
+ │     ├ mutable: false
+ │     ├ type: %9 = .fn_decl
+ │     │  ├ name_node: node(#1: "main")
+ │     │  ├ return_type: %2 = .ty_void
+ │     │  │  └ node: node(#2: "void")
+ │     │  └ params_list: 0 items
+ │     ├ init: %3 = .block
+ │     │  └ %4 = comptime .inline_block
+ │     │     ├ %5 = .comptime_number node=(n[4:"1"])
+ │     │     ├ %6 = .comptime_number node=(n[5:"1"])
+ │     │     ├ %7 = .eq lhs=(%5), rhs=(%6)
+ │     │     └ %8 = .br operand=(7), target=(%4)
+ │     └ is_declaring_builtin: false
+ └ impl_block_list: 0 items

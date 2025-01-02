@@ -1,18 +1,18 @@
-fn foo(a: i32): i32 {
+fn foo(a: i32) i32 {
   return a;
 }
 
-fn bar(a: i32): i32 {
+fn bar(a: i32) i32 {
   return rec(a);
 }
 
-fn rec(a: i32): i32 {
+fn rec(a: i32) i32 {
   if (a < 10) {
     return bar(2 * a);
   }
   return a;
 }
 
-fn main(): void {
+fn main() void {
   comp rec(1) == 16;
 }

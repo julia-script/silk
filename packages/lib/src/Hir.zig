@@ -392,6 +392,7 @@ pub const Inst = union(enum) {
     fn_decl: FnDecl,
     fn_call: FnCall,
     struct_decl: StructDecl,
+    impl_decl: ImplDecl,
     struct_field: StructField,
     param_decl: Param,
     param: UnaryOp,
@@ -592,10 +593,16 @@ pub const Inst = union(enum) {
         mutable: bool,
         type: ?Inst.Index,
         init: ?Inst.Index,
+        is_declaring_builtin: bool,
     };
     pub const StructDecl = struct {
         name_node: ?Ast.Node.Index,
         fields_list: List,
+        declarations_list: List,
+        impl_block_list: List,
+    };
+    pub const ImplDecl = struct {
+        type: Inst.Index,
         declarations_list: List,
     };
     pub const StructField = struct {

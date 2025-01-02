@@ -2,22 +2,21 @@
 ;; 1 declarations
 ;; 3 entities
 ;; 1 symbols
-;; 10 instructions
-;; 6 values
-;; 5 types
-;; 2 lists
+;; 9 instructions
+;; 7 values
+;; 17 types
+;; 3 lists
 ;; 7 strings
 ;; 15/20 comptime memory used/allocated bytes
 
 %0 = fn @"strings/simple.sk::main"() -> void
- └ %0: void = .block: [%1-%9]                                         ; void
-    ├ %1: fn(any) void = .builtin_global_get                          ; fn(any) void
-    ├ !%2: [15]bchar = .constant                                      ; todo_complex(3)
-    ├ %3: any([15]bchar) = .constant                                  ; todo_complex(3)
-    ├ %4: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%3}); void
-    ├ %5: number = .constant                                          ; number{ 2 }
-    ├ !%6: number = .constant                                         ; number{ 2 }
-    ├ !%7: builtin_fn_as = .get_builtin_fn_as operand=(%6)            ; builtin_fn_as
-    ├ !%8: type = .type                                               ; type(i32)
-    └ %9: i32 = .constant                                             ; i32{ 2 }
+ └ %0: void = .block: [%1-%8]                                         ; void
+    ├ !%1: [builtin_comptime_log] = .constant                         ; todo_complex(builtin_global)
+    ├ %2: [15]bchar = .constant                                       ; todo_complex(array)
+    ├ %3: void = .fn_call builtin=(shared.BuiltinGlobal.comptime_log) args_list=({%2}); void
+    ├ %4: number = .constant                                          ; number{ 2 }
+    ├ !%5: number = .constant                                         ; number{ 2 }
+    ├ !%6: [builtin_as] = .constant operand=(%5)                      ; todo_complex(builtin_member)
+    ├ !%7: typeof(i32) = .type                                        ; typeof(i32)
+    └ %8: i32 = .constant                                             ; i32{ 2 }
 
