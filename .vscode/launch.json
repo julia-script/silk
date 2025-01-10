@@ -5,10 +5,9 @@
 			"type": "lldb",
 			"request": "launch",
 			"name": "Zig debug lang",
-			"program": "${workspaceFolder}/zig-out/debug/test",
+			"program": "${workspaceFolder}/packages/lib/zig-out/bin/snapshots",
 			"args": [],
-			"cwd": "${workspaceFolder}",
-			"preLaunchTask": "test"
+			"cwd": "${workspaceFolder}/packages/lib"
 		},
 		{
 			"name": "Extension",

@@ -61,10 +61,10 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
     const condition_result = ctx.builder.getBooleanValueKeyAsBool(condition_value.value);
 
     if (condition_result) {
-        ctx.goTo(inst.data.@"if".then_block);
+        ctx.execInstruction(inst.data.@"if".then_block);
     } else {
         if (inst.data.@"if".else_block) |else_block_inst_index| {
-            ctx.goTo(else_block_inst_index);
+            ctx.execInstruction(else_block_inst_index);
         }
     }
 }

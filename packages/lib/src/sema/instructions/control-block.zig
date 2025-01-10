@@ -36,9 +36,15 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     });
     const hir_inst_list = scope.entity.getHir().lists.getSlice(block_hir_data.instructions_list);
     var instructions_list = scope.builder.newList();
+    const parent_active_node = ctx.active_node;
     scope.active_block_instructions = &instructions_list;
+    ctx.active_node = index;
+
     for (hir_inst_list) |child_hir_inst_index| {
         _ = try Index.gen(ctx, scope, child_hir_inst_index);
+        if (index != ctx.active_node) {
+            break;
+        }
     }
     // @panic("not implemented");
 
@@ -48,24 +54,30 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             .is_comptime = is_comptime,
         },
     });
-    // ctx.execInstruction(index);
 
     ctx.is_comptime = parent_is_comptime;
     scope.active_block_instructions = parent_working_list;
+    if (ctx.active_node == index) {
+        ctx.active_node = parent_active_node;
+    }
     return index;
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
     const inst = ctx.getInstruction(inst_index);
     if (!ctx.is_comptime) return;
     const instructions_list = ctx.builder.sema.lists.getSlice(inst.data.block.instructions_list);
+    const parent_active_node = ctx.active_node;
+    ctx.active_node = inst_index;
     // std.debug.print("executing block {d} with {d} instructions\n", .{ inst_index, instructions_list.len });
     for (instructions_list) |child_inst_index| {
-        const child_inst = ctx.getInstruction(child_inst_index);
-        _ = child_inst; // autofix
+        // const child_inst = ctx.getInstruction(child_inst_index);
         // try Index.Block.exec(ctx, child_inst_index);
         // std.debug.print("executing '{s}'\n", .{@tagName(child_inst.op)});
         try Index.exec(ctx, child_inst_index);
+        if (ctx.active_node != inst_index) {
+            return;
+        }
     }
-    std.debug.print("{}\n\n\n", .{inst});
     // @panic("not implemented");
+    ctx.active_node = parent_active_node;
 }

@@ -14,6 +14,8 @@ goToFn: *const fn (context: *anyopaque, index: Sema.Instruction.Index) void,
 is_comptime: bool = false,
 indent: usize = 0,
 pushInstructionFn: *const fn (context: *anyopaque, id: ?u32, instruction: Sema.Instruction) Sema.Instruction.Index,
+active_node: ?Sema.Instruction.Index = 0,
+// returned: bool = false,
 
 const Self = @This();
 
@@ -49,8 +51,10 @@ pub fn pushInstruction(self: *@This(), id: ?u32, instruction: Sema.Instruction) 
     const index = self.pushInstructionFn(self.context, id, instruction);
     const stderr = std.io.getStdErr().writer();
     stderr.writeBytesNTimes("  ", self.indent + 1) catch {};
-    stderr.print("[PUSH] %{d}: {s} ", .{ index, @tagName(instruction.op) }) catch {};
-    stderr.print("({s})\n", .{self.builder.getFormattableTypedValue(instruction.typed_value)}) catch {};
+    stderr.print("[PUSH] %{d}:", .{index}) catch {};
+    self.builder.sema.formatInstruction(stderr.any(), .{ .instruction = instruction }) catch {};
+    // stderr.print("({s})\n", .{self.builder.getFormattableTypedValue(instruction.typed_value)}) catch {};
+    stderr.print("\n", .{}) catch {};
     // self.execInstruction(index);
 
     return index;
@@ -62,14 +66,15 @@ pub fn goTo(self: *@This(), index: Sema.Instruction.Index) void {
     stderr.writeBytesNTimes("  ", self.indent + 1) catch {};
     const instruction = self.getInstruction(index);
     stderr.print("[GOTO] %{d}: {s}\n", .{ index, @tagName(instruction.op) }) catch {};
+    self.active_node = index;
     self.depth += 1;
     if (self.depth >= 30) {
         @panic("reached max depth");
     }
 
-    if (self.is_comptime) {
-        self.execInstruction(index);
-    }
+    // if (self.is_comptime) {
+    //     self.execInstruction(index);
+    // }
 }
 
 pub fn setValue(self: *@This(), index: Sema.Instruction.Index, value: Sema.TypedValue) void {

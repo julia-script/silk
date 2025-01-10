@@ -1,13 +1,13 @@
 ;; Sema
-;; 19 declarations
-;; 49 entities
-;; 19 symbols
-;; 365 instructions
-;; 92 values
-;; 46 types
-;; 35 lists
-;; 75 strings
-;; 1048750/1347968 comptime memory used/allocated bytes
+;; 20 declarations
+;; 51 entities
+;; 20 symbols
+;; 586 instructions
+;; 108 values
+;; 47 types
+;; 56 lists
+;; 78 strings
+;; 1048846/1347968 comptime memory used/allocated bytes
 
 %0 = type @"playground.sk::T" = struct:
  ├ type: struct{i32}
@@ -355,7 +355,230 @@
  ├ %65: i32 = .cast operand=(%63)                                        ; i32{ [runtime] }
  └ %66: void = .ret maybe_operand=(%65)                                  ; void
 
-%17 = pub fn @"playground.sk::fib"(i32) -> i32
+%17 = pub fn @"playground.sk::fib2"() -> i32
+%0: i32 = .block (1 insts)
+ └ %1: typeof(i32) = comptime .block (20 insts)
+    ├ !%2: int = .constant                                                  ; int{ 10 }
+    ├ !%3: typeof(i32) = .type                                              ; typeof(i32)
+    ├ %4: *i32 = .alloc type=(i32) mutable=(true)                           ; *i32@fff88
+    ├ %5: i32 = .cast operand=(%2)                                          ; i32{ 10 }
+    ├ %6: void = .store operand=(%4) payload=(%5)                           ; void
+    ├ !%7: int = .constant                                                  ; int{ 0 }
+    ├ !%8: typeof(i32) = .type                                              ; typeof(i32)
+    ├ %9: *i32 = .alloc type=(i32) mutable=(true)                           ; *i32@fff80
+    ├ %10: i32 = .cast operand=(%7)                                         ; i32{ 0 }
+    ├ %11: void = .store operand=(%9) payload=(%10)                         ; void
+    ├ !%12: int = .constant                                                 ; int{ 1 }
+    ├ !%13: typeof(i32) = .type                                             ; typeof(i32)
+    ├ %14: *i32 = .alloc type=(i32) mutable=(true)                          ; *i32@fff78
+    ├ %15: i32 = .cast operand=(%12)                                        ; i32{ 1 }
+    ├ %16: void = .store operand=(%14) payload=(%15)                        ; void
+    ├ !%17: i32 = .load operand=(%4)                                        ; i32{ 10 }
+    ├ !%18: int = .constant                                                 ; int{ 0 }
+    ├ !%19: i32 = .cast operand=(%18)                                       ; i32{ 0 }
+    ├ !%20: bool = .gt lhs=(%17) rhs=(%19)                                  ; true
+    └ %21: typeof(i32) = comptime .block (5 insts)
+       ├ %22: void = comptime .block (5 insts)
+       │  ├ !%23: i32 = .load operand=(%4)                                        ; i32{ 10 }
+       │  ├ !%24: int = .constant                                                 ; int{ 1 }
+       │  ├ !%25: i32 = .cast operand=(%24)                                       ; i32{ 1 }
+       │  ├ !%26: bool = .gt lhs=(%23) rhs=(%25)                                  ; true
+       │  └ %27: typeof(i32) = comptime .block (16 insts)
+       │     ├ !%28: i32 = .load operand=(%9)                                        ; i32{ 0 }
+       │     ├ !%29: i32 = .load operand=(%14)                                       ; i32{ 1 }
+       │     ├ %30: i32 = .add lhs=(%28) rhs=(%29)                                   ; i32{ 1 }
+       │     ├ !%31: typeof(i32) = .type                                             ; typeof(i32)
+       │     ├ %32: *i32 = .alloc type=(i32) mutable=(true)                          ; *i32@fff70
+       │     ├ %33: void = .store operand=(%32) payload=(%30)                        ; void
+       │     ├ %34: i32 = .load operand=(%14)                                        ; i32{ 1 }
+       │     ├ %35: void = .store operand=(%9) payload=(%34)                         ; void
+       │     ├ %36: i32 = .load operand=(%32)                                        ; i32{ 1 }
+       │     ├ %37: void = .store operand=(%14) payload=(%36)                        ; void
+       │     ├ !%38: i32 = .load operand=(%4)                                        ; i32{ 10 }
+       │     ├ !%39: int = .constant                                                 ; int{ 1 }
+       │     ├ !%40: i32 = .cast operand=(%39)                                       ; i32{ 1 }
+       │     ├ %41: i32 = .sub lhs=(%38) rhs=(%40)                                   ; i32{ 9 }
+       │     ├ %42: void = .store operand=(%4) payload=(%41)                         ; void
+       │     └ %43: void = comptime .block (5 insts)
+       │        ├ !%44: i32 = .load operand=(%4)                                        ; i32{ 9 }
+       │        ├ !%45: int = .constant                                                 ; int{ 1 }
+       │        ├ !%46: i32 = .cast operand=(%45)                                       ; i32{ 1 }
+       │        ├ !%47: bool = .gt lhs=(%44) rhs=(%46)                                  ; true
+       │        └ %48: typeof(i32) = comptime .block (16 insts)
+       │           ├ !%49: i32 = .load operand=(%9)                                        ; i32{ 1 }
+       │           ├ !%50: i32 = .load operand=(%14)                                       ; i32{ 1 }
+       │           ├ %51: i32 = .add lhs=(%49) rhs=(%50)                                   ; i32{ 2 }
+       │           ├ !%52: typeof(i32) = .type                                             ; typeof(i32)
+       │           ├ %53: *i32 = .alloc type=(i32) mutable=(true)                          ; *i32@fff68
+       │           ├ %54: void = .store operand=(%53) payload=(%51)                        ; void
+       │           ├ %55: i32 = .load operand=(%14)                                        ; i32{ 1 }
+       │           ├ %56: void = .store operand=(%9) payload=(%55)                         ; void
+       │           ├ %57: i32 = .load operand=(%53)                                        ; i32{ 2 }
+       │           ├ %58: void = .store operand=(%14) payload=(%57)                        ; void
+       │           ├ !%59: i32 = .load operand=(%4)                                        ; i32{ 9 }
+       │           ├ !%60: int = .constant                                                 ; int{ 1 }
+       │           ├ !%61: i32 = .cast operand=(%60)                                       ; i32{ 1 }
+       │           ├ %62: i32 = .sub lhs=(%59) rhs=(%61)                                   ; i32{ 8 }
+       │           ├ %63: void = .store operand=(%4) payload=(%62)                         ; void
+       │           └ %64: void = comptime .block (5 insts)
+       │              ├ !%65: i32 = .load operand=(%4)                                        ; i32{ 8 }
+       │              ├ !%66: int = .constant                                                 ; int{ 1 }
+       │              ├ !%67: i32 = .cast operand=(%66)                                       ; i32{ 1 }
+       │              ├ !%68: bool = .gt lhs=(%65) rhs=(%67)                                  ; true
+       │              └ %69: typeof(i32) = comptime .block (16 insts)
+       │                 ├ !%70: i32 = .load operand=(%9)                                        ; i32{ 1 }
+       │                 ├ !%71: i32 = .load operand=(%14)                                       ; i32{ 2 }
+       │                 ├ %72: i32 = .add lhs=(%70) rhs=(%71)                                   ; i32{ 3 }
+       │                 ├ !%73: typeof(i32) = .type                                             ; typeof(i32)
+       │                 ├ %74: *i32 = .alloc type=(i32) mutable=(true)                          ; *i32@fff60
+       │                 ├ %75: void = .store operand=(%74) payload=(%72)                        ; void
+       │                 ├ %76: i32 = .load operand=(%14)                                        ; i32{ 2 }
+       │                 ├ %77: void = .store operand=(%9) payload=(%76)                         ; void
+       │                 ├ %78: i32 = .load operand=(%74)                                        ; i32{ 3 }
+       │                 ├ %79: void = .store operand=(%14) payload=(%78)                        ; void
+       │                 ├ !%80: i32 = .load operand=(%4)                                        ; i32{ 8 }
+       │                 ├ !%81: int = .constant                                                 ; int{ 1 }
+       │                 ├ !%82: i32 = .cast operand=(%81)                                       ; i32{ 1 }
+       │                 ├ %83: i32 = .sub lhs=(%80) rhs=(%82)                                   ; i32{ 7 }
+       │                 ├ %84: void = .store operand=(%4) payload=(%83)                         ; void
+       │                 └ %85: void = comptime .block (5 insts)
+       │                    ├ !%86: i32 = .load operand=(%4)                                        ; i32{ 7 }
+       │                    ├ !%87: int = .constant                                                 ; int{ 1 }
+       │                    ├ !%88: i32 = .cast operand=(%87)                                       ; i32{ 1 }
+       │                    ├ !%89: bool = .gt lhs=(%86) rhs=(%88)                                  ; true
+       │                    └ %90: typeof(i32) = comptime .block (16 insts)
+       │                       ├ !%91: i32 = .load operand=(%9)                                        ; i32{ 2 }
+       │                       ├ !%92: i32 = .load operand=(%14)                                       ; i32{ 3 }
+       │                       ├ %93: i32 = .add lhs=(%91) rhs=(%92)                                   ; i32{ 5 }
+       │                       ├ !%94: typeof(i32) = .type                                             ; typeof(i32)
+       │                       ├ %95: *i32 = .alloc type=(i32) mutable=(true)                          ; *i32@fff58
+       │                       ├ %96: void = .store operand=(%95) payload=(%93)                        ; void
+       │                       ├ %97: i32 = .load operand=(%14)                                        ; i32{ 3 }
+       │                       ├ %98: void = .store operand=(%9) payload=(%97)                         ; void
+       │                       ├ %99: i32 = .load operand=(%95)                                        ; i32{ 5 }
+       │                       ├ %100: void = .store operand=(%14) payload=(%99)                       ; void
+       │                       ├ !%101: i32 = .load operand=(%4)                                       ; i32{ 7 }
+       │                       ├ !%102: int = .constant                                                ; int{ 1 }
+       │                       ├ !%103: i32 = .cast operand=(%102)                                     ; i32{ 1 }
+       │                       ├ %104: i32 = .sub lhs=(%101) rhs=(%103)                                ; i32{ 6 }
+       │                       ├ %105: void = .store operand=(%4) payload=(%104)                       ; void
+       │                       └ %106: void = comptime .block (5 insts)
+       │                          ├ !%107: i32 = .load operand=(%4)                                       ; i32{ 6 }
+       │                          ├ !%108: int = .constant                                                ; int{ 1 }
+       │                          ├ !%109: i32 = .cast operand=(%108)                                     ; i32{ 1 }
+       │                          ├ !%110: bool = .gt lhs=(%107) rhs=(%109)                               ; true
+       │                          └ %111: typeof(i32) = comptime .block (16 insts)
+       │                             ├ !%112: i32 = .load operand=(%9)                                       ; i32{ 3 }
+       │                             ├ !%113: i32 = .load operand=(%14)                                      ; i32{ 5 }
+       │                             ├ %114: i32 = .add lhs=(%112) rhs=(%113)                                ; i32{ 8 }
+       │                             ├ !%115: typeof(i32) = .type                                            ; typeof(i32)
+       │                             ├ %116: *i32 = .alloc type=(i32) mutable=(true)                         ; *i32@fff50
+       │                             ├ %117: void = .store operand=(%116) payload=(%114)                     ; void
+       │                             ├ %118: i32 = .load operand=(%14)                                       ; i32{ 5 }
+       │                             ├ %119: void = .store operand=(%9) payload=(%118)                       ; void
+       │                             ├ %120: i32 = .load operand=(%116)                                      ; i32{ 8 }
+       │                             ├ %121: void = .store operand=(%14) payload=(%120)                      ; void
+       │                             ├ !%122: i32 = .load operand=(%4)                                       ; i32{ 6 }
+       │                             ├ !%123: int = .constant                                                ; int{ 1 }
+       │                             ├ !%124: i32 = .cast operand=(%123)                                     ; i32{ 1 }
+       │                             ├ %125: i32 = .sub lhs=(%122) rhs=(%124)                                ; i32{ 5 }
+       │                             ├ %126: void = .store operand=(%4) payload=(%125)                       ; void
+       │                             └ %127: void = comptime .block (5 insts)
+       │                                ├ !%128: i32 = .load operand=(%4)                                       ; i32{ 5 }
+       │                                ├ !%129: int = .constant                                                ; int{ 1 }
+       │                                ├ !%130: i32 = .cast operand=(%129)                                     ; i32{ 1 }
+       │                                ├ !%131: bool = .gt lhs=(%128) rhs=(%130)                               ; true
+       │                                └ %132: typeof(i32) = comptime .block (16 insts)
+       │                                   ├ !%133: i32 = .load operand=(%9)                                       ; i32{ 5 }
+       │                                   ├ !%134: i32 = .load operand=(%14)                                      ; i32{ 8 }
+       │                                   ├ %135: i32 = .add lhs=(%133) rhs=(%134)                                ; i32{ 13 }
+       │                                   ├ !%136: typeof(i32) = .type                                            ; typeof(i32)
+       │                                   ├ %137: *i32 = .alloc type=(i32) mutable=(true)                         ; *i32@fff48
+       │                                   ├ %138: void = .store operand=(%137) payload=(%135)                     ; void
+       │                                   ├ %139: i32 = .load operand=(%14)                                       ; i32{ 8 }
+       │                                   ├ %140: void = .store operand=(%9) payload=(%139)                       ; void
+       │                                   ├ %141: i32 = .load operand=(%137)                                      ; i32{ 13 }
+       │                                   ├ %142: void = .store operand=(%14) payload=(%141)                      ; void
+       │                                   ├ !%143: i32 = .load operand=(%4)                                       ; i32{ 5 }
+       │                                   ├ !%144: int = .constant                                                ; int{ 1 }
+       │                                   ├ !%145: i32 = .cast operand=(%144)                                     ; i32{ 1 }
+       │                                   ├ %146: i32 = .sub lhs=(%143) rhs=(%145)                                ; i32{ 4 }
+       │                                   ├ %147: void = .store operand=(%4) payload=(%146)                       ; void
+       │                                   └ %148: void = comptime .block (5 insts)
+       │                                      ├ !%149: i32 = .load operand=(%4)                                       ; i32{ 4 }
+       │                                      ├ !%150: int = .constant                                                ; int{ 1 }
+       │                                      ├ !%151: i32 = .cast operand=(%150)                                     ; i32{ 1 }
+       │                                      ├ !%152: bool = .gt lhs=(%149) rhs=(%151)                               ; true
+       │                                      └ %153: typeof(i32) = comptime .block (16 insts)
+       │                                         ├ !%154: i32 = .load operand=(%9)                                       ; i32{ 8 }
+       │                                         ├ !%155: i32 = .load operand=(%14)                                      ; i32{ 13 }
+       │                                         ├ %156: i32 = .add lhs=(%154) rhs=(%155)                                ; i32{ 21 }
+       │                                         ├ !%157: typeof(i32) = .type                                            ; typeof(i32)
+       │                                         ├ %158: *i32 = .alloc type=(i32) mutable=(true)                         ; *i32@fff40
+       │                                         ├ %159: void = .store operand=(%158) payload=(%156)                     ; void
+       │                                         ├ %160: i32 = .load operand=(%14)                                       ; i32{ 13 }
+       │                                         ├ %161: void = .store operand=(%9) payload=(%160)                       ; void
+       │                                         ├ %162: i32 = .load operand=(%158)                                      ; i32{ 21 }
+       │                                         ├ %163: void = .store operand=(%14) payload=(%162)                      ; void
+       │                                         ├ !%164: i32 = .load operand=(%4)                                       ; i32{ 4 }
+       │                                         ├ !%165: int = .constant                                                ; int{ 1 }
+       │                                         ├ !%166: i32 = .cast operand=(%165)                                     ; i32{ 1 }
+       │                                         ├ %167: i32 = .sub lhs=(%164) rhs=(%166)                                ; i32{ 3 }
+       │                                         ├ %168: void = .store operand=(%4) payload=(%167)                       ; void
+       │                                         └ %169: void = comptime .block (5 insts)
+       │                                            ├ !%170: i32 = .load operand=(%4)                                       ; i32{ 3 }
+       │                                            ├ !%171: int = .constant                                                ; int{ 1 }
+       │                                            ├ !%172: i32 = .cast operand=(%171)                                     ; i32{ 1 }
+       │                                            ├ !%173: bool = .gt lhs=(%170) rhs=(%172)                               ; true
+       │                                            └ %174: typeof(i32) = comptime .block (16 insts)
+       │                                               ├ !%175: i32 = .load operand=(%9)                                       ; i32{ 13 }
+       │                                               ├ !%176: i32 = .load operand=(%14)                                      ; i32{ 21 }
+       │                                               ├ %177: i32 = .add lhs=(%175) rhs=(%176)                                ; i32{ 34 }
+       │                                               ├ !%178: typeof(i32) = .type                                            ; typeof(i32)
+       │                                               ├ %179: *i32 = .alloc type=(i32) mutable=(true)                         ; *i32@fff38
+       │                                               ├ %180: void = .store operand=(%179) payload=(%177)                     ; void
+       │                                               ├ %181: i32 = .load operand=(%14)                                       ; i32{ 21 }
+       │                                               ├ %182: void = .store operand=(%9) payload=(%181)                       ; void
+       │                                               ├ %183: i32 = .load operand=(%179)                                      ; i32{ 34 }
+       │                                               ├ %184: void = .store operand=(%14) payload=(%183)                      ; void
+       │                                               ├ !%185: i32 = .load operand=(%4)                                       ; i32{ 3 }
+       │                                               ├ !%186: int = .constant                                                ; int{ 1 }
+       │                                               ├ !%187: i32 = .cast operand=(%186)                                     ; i32{ 1 }
+       │                                               ├ %188: i32 = .sub lhs=(%185) rhs=(%187)                                ; i32{ 2 }
+       │                                               ├ %189: void = .store operand=(%4) payload=(%188)                       ; void
+       │                                               └ %190: void = comptime .block (5 insts)
+       │                                                  ├ !%191: i32 = .load operand=(%4)                                       ; i32{ 2 }
+       │                                                  ├ !%192: int = .constant                                                ; int{ 1 }
+       │                                                  ├ !%193: i32 = .cast operand=(%192)                                     ; i32{ 1 }
+       │                                                  ├ !%194: bool = .gt lhs=(%191) rhs=(%193)                               ; true
+       │                                                  └ %195: typeof(i32) = comptime .block (16 insts)
+       │                                                     ├ !%196: i32 = .load operand=(%9)                                       ; i32{ 21 }
+       │                                                     ├ !%197: i32 = .load operand=(%14)                                      ; i32{ 34 }
+       │                                                     ├ %198: i32 = .add lhs=(%196) rhs=(%197)                                ; i32{ 55 }
+       │                                                     ├ !%199: typeof(i32) = .type                                            ; typeof(i32)
+       │                                                     ├ %200: *i32 = .alloc type=(i32) mutable=(true)                         ; *i32@fff30
+       │                                                     ├ %201: void = .store operand=(%200) payload=(%198)                     ; void
+       │                                                     ├ %202: i32 = .load operand=(%14)                                       ; i32{ 34 }
+       │                                                     ├ %203: void = .store operand=(%9) payload=(%202)                       ; void
+       │                                                     ├ %204: i32 = .load operand=(%200)                                      ; i32{ 55 }
+       │                                                     ├ %205: void = .store operand=(%14) payload=(%204)                      ; void
+       │                                                     ├ !%206: i32 = .load operand=(%4)                                       ; i32{ 2 }
+       │                                                     ├ !%207: int = .constant                                                ; int{ 1 }
+       │                                                     ├ !%208: i32 = .cast operand=(%207)                                     ; i32{ 1 }
+       │                                                     ├ %209: i32 = .sub lhs=(%206) rhs=(%208)                                ; i32{ 1 }
+       │                                                     ├ %210: void = .store operand=(%4) payload=(%209)                       ; void
+       │                                                     └ %211: void = comptime .block (5 insts)
+       │                                                        ├ !%212: i32 = .load operand=(%4)                                       ; i32{ 1 }
+       │                                                        ├ !%213: int = .constant                                                ; int{ 1 }
+       │                                                        ├ !%214: i32 = .cast operand=(%213)                                     ; i32{ 1 }
+       │                                                        ├ !%215: bool = .gt lhs=(%212) rhs=(%214)                               ; false
+       │                                                        └ !%216: void = .block                                                  ; void
+       ├ !%217: i32 = .load operand=(%14)                                      ; i32{ 55 }
+       ├ !%218: typeof(i32) = .type                                            ; typeof(i32)
+       ├ %219: i32 = .cast operand=(%217)                                      ; i32{ 55 }
+       └ %220: void = .ret maybe_operand=(%219)                                ; void
+
+%18 = pub fn @"playground.sk::fib"(i32) -> i32
 %0: i32 = .block (20 insts)
  ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
  ├ !%2: int = .constant                                                  ; int{ 0 }
@@ -407,15 +630,15 @@
  ├ %48: i32 = .cast operand=(%46)                                        ; i32{ [runtime] }
  └ %49: void = .ret maybe_operand=(%48)                                  ; void
 
-%18 = fn @"playground.sk::main"() -> void
+%19 = fn @"playground.sk::main"() -> void
 %0: typeof(void) = .block (4 insts)
  ├ %1: i32 = comptime .block (5 insts)
- │  ├ %2: fn(i32) i32 = .global_get entity=(%18) declaration=(%17)          ; fn(i32) i32
+ │  ├ %2: fn(i32) i32 = .global_get entity=(%19) declaration=(%18)          ; fn(i32) i32
  │  ├ !%3: int = .constant                                                  ; int{ 10 }
  │  ├ %4: i32 = .cast operand=(%3)                                          ; i32{ 10 }
- │  ├ %5: i32 = .fn_call callee=(%2) callee_entity=(%18) callee_declaration=(%17) args_list=({%4}); i32{ 34 }
+ │  ├ %5: i32 = .fn_call callee=(%2) callee_entity=(%19) callee_declaration=(%18) args_list=({%4}); i32{ 55 }
  │  └ %6: void = .br target=(%1) payload=(5)                                ; void
  ├ !%7: type = .typeof operand=(%1)                                      ; type(i32)
- ├ %8: *i32 = .alloc type=(i32) mutable=(false)                          ; *i32@fff5c
+ ├ %8: *i32 = .alloc type=(i32) mutable=(false)                          ; *i32@ffefc
  └ %9: void = .store operand=(%8) payload=(%1)                           ; void
 

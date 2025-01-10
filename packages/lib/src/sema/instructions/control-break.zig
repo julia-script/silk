@@ -32,40 +32,34 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             },
         },
     });
+    if (ctx.is_comptime) {
+        ctx.active_node = target_index;
+    }
     try maybeInline(ctx, index);
     return index;
 }
 fn maybeInline(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    // _ = hir_inst_index; // autofix
     const inst = ctx.getInstruction(inst_index);
-    // const target_inst = ctx.getInstruction(inst.data.br.target);
-    // const hir_inst = ctx.builder.getHirInstruction(hir_inst_index);
-    // if (ctx.is_comptime and target_inst.op == .loop) {}
     if (inst.data.br.payload) |payload| {
         const operand_inst_value = ctx.getTypedValue(payload);
         ctx.setValue(inst.data.br.target, operand_inst_value);
+        std.debug.print("inline {d} {}\n", .{ payload, ctx.builder.getFormattableTypedValue(operand_inst_value) });
     }
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    // @panic("not implemented");
     const inst = ctx.getInstruction(inst_index);
     if (inst.data.br.payload) |payload| {
         const operand_inst_value = ctx.getTypedValue(payload);
         ctx.setValue(inst.data.br.target, operand_inst_value);
     }
 
+    ctx.active_node = inst.data.br.target;
     const target_inst = ctx.getInstruction(inst.data.br.target);
-    if (ctx.is_comptime) {
-        switch (target_inst.op) {
-            // .block => inst.data.br.target + target_inst.data.block.instructions_list.len,
-            .loop => ctx.goTo(inst.data.br.target),
-            else => unreachable,
-        }
-        // ctx.goTo(goto);
-    }
-
-    // return .{
-    //     .type = Sema.Type.simple(.void),
-    //     .value = Sema.Value.simple(.void),
-    // };
+    _ = target_inst; // autofix
+    // switch (target_inst.op) {
+    //     // .loop => ctx.execInstruction(inst.data.br.target),
+    //     else => unreachable,
+    // }
+    // if (ctx.is_comptime) {
+    // }
 }

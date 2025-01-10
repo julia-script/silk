@@ -18,6 +18,9 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         const operand_inst_value = ctx.getTypedValue(operand_inst_index);
         ctx.setValue(0, operand_inst_value);
     }
+    if (ctx.is_comptime) {
+        ctx.active_node = null;
+    }
 
     return index;
 }
@@ -28,4 +31,5 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
         const operand_inst_value = ctx.getTypedValue(operand_inst_index);
         ctx.setValue(0, operand_inst_value);
     }
+    ctx.active_node = null;
 }

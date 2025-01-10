@@ -1228,7 +1228,7 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: Inst
     const inst = switch (inst_input) {
         .instruction => |inst| blk: {
             if (inst.liveness == 0) try buf_writer.writeAll("!");
-            try buf_writer.print("%i: ", .{});
+            // try buf_writer.print("%i: ", .{});
             break :blk inst;
         },
         .index => |index| blk: {
@@ -1250,7 +1250,7 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: Inst
         },
         .block => {
             try buf_writer.print("block({d} insts)", .{
-                inst.data.block.instructions_count,
+                inst.data.block.instructions_list.len,
             });
         },
         inline else => |data| {

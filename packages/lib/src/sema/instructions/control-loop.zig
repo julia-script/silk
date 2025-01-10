@@ -8,20 +8,6 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     if (ctx.is_comptime) {
         return try Index.gen(ctx, scope, hir_inst.loop.body);
-        //     const index = ctx.pushWithoutExec(hir_inst_index, .{
-        //         .op = .block,
-        //         .typed_value = Sema.TypedValue.VOID,
-        //         .data = .void,
-        //     });
-        //     const body_block_index = try Index.gen(ctx, scope, hir_inst.loop.body);
-        //     ctx.markDead(body_block_index);
-        //     const body_block_inst = ctx.getInstruction(body_block_index);
-        //     ctx.setInstruction(index, .{
-        //         .op = .block,
-        //         .typed_value = body_block_inst.typed_value,
-        //         .data = body_block_inst.data,
-        //     });
-        //     return index;
     }
 
     const index = ctx.pushWithoutExec(hir_inst_index, .{
@@ -53,8 +39,14 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
 }
 
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    if (ctx.is_comptime) {
-        const inst = ctx.getInstruction(inst_index);
-        ctx.goTo(inst.data.loop.body_block);
+    const inst = ctx.getInstruction(inst_index);
+    const parent_active_node = ctx.active_node;
+    // ctx.goTo(inst.data.loop.body_block);
+    ctx.execInstruction(inst.data.loop.body_block);
+    while (ctx.active_node == inst_index) {
+        std.debug.print("active_block: {?} loop_inst_index: {}\n", .{ ctx.active_node, inst_index });
+        ctx.active_node = parent_active_node;
+        ctx.execInstruction(inst.data.loop.body_block);
     }
+    // ctx.active_block = inst_index;
 }

@@ -1,10 +1,10 @@
 ;; AST
-;; 471 Nodes
-;; 626 Tokens
-;; 219 Interned Lists
+;; 522 Nodes
+;; 694 Tokens
+;; 232 Interned Lists
 
-%0 = .struct_decl - tok[0..626]
- └ members_list: 26 items
+%0 = .struct_decl - tok[0..694]
+ └ members_list: 27 items
     ├ %6 = .type_decl - tok[0..9]
     │  ├ name: %1 = .identifier - tok[1..1]
     │  │  └ token: .identifier 'T'
@@ -778,105 +778,191 @@
     │        └ %409 = .ret_expression - tok[543..544]
     │           └ node: %408 = .identifier - tok[544..544]
     │              └ token: .identifier 'sum'
-    ├ %459 = .pub - tok[547..609]
-    │  └ node: %458 = .fn_decl - tok[548..609]
-    │     ├ proto: %417 = .fn_proto - tok[549..555]
+    ├ %462 = .pub - tok[547..615]
+    │  └ node: %461 = .fn_decl - tok[548..615]
+    │     ├ proto: %414 = .fn_proto - tok[549..552]
     │     │  ├ name: %412 = .identifier - tok[549..549]
-    │     │  │  └ token: .identifier 'fib'
-    │     │  ├ params_list: 1 items
-    │     │  │  └ %413 = .fn_param - tok[551..553]
-    │     │  │     ├ name: %414 = .identifier - tok[551..551]
-    │     │  │     │  └ token: .identifier 'n'
-    │     │  │     └ type: %415 = .ty_i32 - tok[553..553]
-    │     │  │        └ token: .keyword_i32 'i32'
-    │     │  ├ ret_type: %416 = .ty_i32 - tok[555..555]
+    │     │  │  └ token: .identifier 'fib2'
+    │     │  ├ params_list: 0 items
+    │     │  ├ ret_type: %413 = .ty_i32 - tok[552..552]
     │     │  │  └ token: .keyword_i32 'i32'
     │     │  └ is_declaring_builtin: false
-    │     └ body: %457 = .block - tok[556..608]
+    │     └ body: %460 = .block - tok[553..614]
+    │        └ list: 1 items
+    │           └ %459 = .comp_block - tok[554..614]
+    │              └ node: %458 = .block - tok[555..613]
+    │                 └ list: 5 items
+    │                    ├ %418 = .var_decl - tok[556..561]
+    │                    │  ├ name: %415 = .identifier - tok[557..557]
+    │                    │  │  └ token: .identifier 'n'
+    │                    │  ├ type: %416 = .ty_i32 - tok[559..559]
+    │                    │  │  └ token: .keyword_i32 'i32'
+    │                    │  └ value: %417 = .number_literal - tok[561..561]
+    │                    │     └ token: .number_literal '10'
+    │                    ├ %422 = .var_decl - tok[562..567]
+    │                    │  ├ name: %419 = .identifier - tok[563..563]
+    │                    │  │  └ token: .identifier 'a'
+    │                    │  ├ type: %420 = .ty_i32 - tok[565..565]
+    │                    │  │  └ token: .keyword_i32 'i32'
+    │                    │  └ value: %421 = .number_literal - tok[567..567]
+    │                    │     └ token: .number_literal '0'
+    │                    ├ %426 = .var_decl - tok[568..573]
+    │                    │  ├ name: %423 = .identifier - tok[569..569]
+    │                    │  │  └ token: .identifier 'b'
+    │                    │  ├ type: %424 = .ty_i32 - tok[571..571]
+    │                    │  │  └ token: .keyword_i32 'i32'
+    │                    │  └ value: %425 = .number_literal - tok[573..573]
+    │                    │     └ token: .number_literal '1'
+    │                    ├ %455 = .if_expr - tok[574..610]
+    │                    │  ├ condition: %429 = .gt - tok[576..578]
+    │                    │  │  ├ lhs: %427 = .identifier - tok[576..576]
+    │                    │  │  │  └ token: .identifier 'n'
+    │                    │  │  └ rhs: %428 = .number_literal - tok[578..578]
+    │                    │  │     └ token: .number_literal '0'
+    │                    │  ├ then_branch: %454 = .block - tok[580..610]
+    │                    │  │  └ list: 2 items
+    │                    │  │     ├ %451 = .while_loop - tok[581..607]
+    │                    │  │     │  ├ condition: %432 = .gt - tok[583..585]
+    │                    │  │     │  │  ├ lhs: %430 = .identifier - tok[583..583]
+    │                    │  │     │  │  │  └ token: .identifier 'n'
+    │                    │  │     │  │  └ rhs: %431 = .number_literal - tok[585..585]
+    │                    │  │     │  │     └ token: .number_literal '1'
+    │                    │  │     │  └ body: %450 = .block - tok[587..607]
+    │                    │  │     │     └ list: 4 items
+    │                    │  │     │        ├ %438 = .var_decl - tok[588..595]
+    │                    │  │     │        │  ├ name: %433 = .identifier - tok[589..589]
+    │                    │  │     │        │  │  └ token: .identifier 't'
+    │                    │  │     │        │  ├ type: %434 = .ty_i32 - tok[591..591]
+    │                    │  │     │        │  │  └ token: .keyword_i32 'i32'
+    │                    │  │     │        │  └ value: %437 = .add - tok[593..595]
+    │                    │  │     │        │     ├ lhs: %435 = .identifier - tok[593..593]
+    │                    │  │     │        │     │  └ token: .identifier 'a'
+    │                    │  │     │        │     └ rhs: %436 = .identifier - tok[595..595]
+    │                    │  │     │        │        └ token: .identifier 'b'
+    │                    │  │     │        ├ %441 = .assign - tok[596..598]
+    │                    │  │     │        │  ├ lhs: %439 = .identifier - tok[596..596]
+    │                    │  │     │        │  │  └ token: .identifier 'a'
+    │                    │  │     │        │  └ rhs: %440 = .identifier - tok[598..598]
+    │                    │  │     │        │     └ token: .identifier 'b'
+    │                    │  │     │        ├ %444 = .assign - tok[599..601]
+    │                    │  │     │        │  ├ lhs: %442 = .identifier - tok[599..599]
+    │                    │  │     │        │  │  └ token: .identifier 'b'
+    │                    │  │     │        │  └ rhs: %443 = .identifier - tok[601..601]
+    │                    │  │     │        │     └ token: .identifier 't'
+    │                    │  │     │        └ %449 = .assign - tok[602..606]
+    │                    │  │     │           ├ lhs: %445 = .identifier - tok[602..602]
+    │                    │  │     │           │  └ token: .identifier 'n'
+    │                    │  │     │           └ rhs: %448 = .sub - tok[604..606]
+    │                    │  │     │              ├ lhs: %446 = .identifier - tok[604..604]
+    │                    │  │     │              │  └ token: .identifier 'n'
+    │                    │  │     │              └ rhs: %447 = .number_literal - tok[606..606]
+    │                    │  │     │                 └ token: .number_literal '1'
+    │                    │  │     └ %453 = .ret_expression - tok[608..609]
+    │                    │  │        └ node: %452 = .identifier - tok[609..609]
+    │                    │  │           └ token: .identifier 'b'
+    │                    │  └ else_branch: NONE
+    │                    └ %457 = .ret_expression - tok[611..612]
+    │                       └ node: %456 = .identifier - tok[612..612]
+    │                          └ token: .identifier 'a'
+    ├ %510 = .pub - tok[615..677]
+    │  └ node: %509 = .fn_decl - tok[616..677]
+    │     ├ proto: %468 = .fn_proto - tok[617..623]
+    │     │  ├ name: %463 = .identifier - tok[617..617]
+    │     │  │  └ token: .identifier 'fib'
+    │     │  ├ params_list: 1 items
+    │     │  │  └ %464 = .fn_param - tok[619..621]
+    │     │  │     ├ name: %465 = .identifier - tok[619..619]
+    │     │  │     │  └ token: .identifier 'n'
+    │     │  │     └ type: %466 = .ty_i32 - tok[621..621]
+    │     │  │        └ token: .keyword_i32 'i32'
+    │     │  ├ ret_type: %467 = .ty_i32 - tok[623..623]
+    │     │  │  └ token: .keyword_i32 'i32'
+    │     │  └ is_declaring_builtin: false
+    │     └ body: %508 = .block - tok[624..676]
     │        └ list: 4 items
-    │           ├ %421 = .var_decl - tok[557..562]
-    │           │  ├ name: %418 = .identifier - tok[558..558]
+    │           ├ %472 = .var_decl - tok[625..630]
+    │           │  ├ name: %469 = .identifier - tok[626..626]
     │           │  │  └ token: .identifier 'a'
-    │           │  ├ type: %419 = .ty_i32 - tok[560..560]
+    │           │  ├ type: %470 = .ty_i32 - tok[628..628]
     │           │  │  └ token: .keyword_i32 'i32'
-    │           │  └ value: %420 = .number_literal - tok[562..562]
+    │           │  └ value: %471 = .number_literal - tok[630..630]
     │           │     └ token: .number_literal '0'
-    │           ├ %425 = .var_decl - tok[563..568]
-    │           │  ├ name: %422 = .identifier - tok[564..564]
+    │           ├ %476 = .var_decl - tok[631..636]
+    │           │  ├ name: %473 = .identifier - tok[632..632]
     │           │  │  └ token: .identifier 'b'
-    │           │  ├ type: %423 = .ty_i32 - tok[566..566]
+    │           │  ├ type: %474 = .ty_i32 - tok[634..634]
     │           │  │  └ token: .keyword_i32 'i32'
-    │           │  └ value: %424 = .number_literal - tok[568..568]
+    │           │  └ value: %475 = .number_literal - tok[636..636]
     │           │     └ token: .number_literal '1'
-    │           ├ %454 = .if_expr - tok[569..605]
-    │           │  ├ condition: %428 = .gt - tok[571..573]
-    │           │  │  ├ lhs: %426 = .identifier - tok[571..571]
+    │           ├ %505 = .if_expr - tok[637..673]
+    │           │  ├ condition: %479 = .gt - tok[639..641]
+    │           │  │  ├ lhs: %477 = .identifier - tok[639..639]
     │           │  │  │  └ token: .identifier 'n'
-    │           │  │  └ rhs: %427 = .number_literal - tok[573..573]
+    │           │  │  └ rhs: %478 = .number_literal - tok[641..641]
     │           │  │     └ token: .number_literal '0'
-    │           │  ├ then_branch: %453 = .block - tok[575..605]
+    │           │  ├ then_branch: %504 = .block - tok[643..673]
     │           │  │  └ list: 2 items
-    │           │  │     ├ %450 = .while_loop - tok[576..602]
-    │           │  │     │  ├ condition: %431 = .gt - tok[578..580]
-    │           │  │     │  │  ├ lhs: %429 = .identifier - tok[578..578]
+    │           │  │     ├ %501 = .while_loop - tok[644..670]
+    │           │  │     │  ├ condition: %482 = .gt - tok[646..648]
+    │           │  │     │  │  ├ lhs: %480 = .identifier - tok[646..646]
     │           │  │     │  │  │  └ token: .identifier 'n'
-    │           │  │     │  │  └ rhs: %430 = .number_literal - tok[580..580]
+    │           │  │     │  │  └ rhs: %481 = .number_literal - tok[648..648]
     │           │  │     │  │     └ token: .number_literal '1'
-    │           │  │     │  └ body: %449 = .block - tok[582..602]
+    │           │  │     │  └ body: %500 = .block - tok[650..670]
     │           │  │     │     └ list: 4 items
-    │           │  │     │        ├ %437 = .var_decl - tok[583..590]
-    │           │  │     │        │  ├ name: %432 = .identifier - tok[584..584]
+    │           │  │     │        ├ %488 = .var_decl - tok[651..658]
+    │           │  │     │        │  ├ name: %483 = .identifier - tok[652..652]
     │           │  │     │        │  │  └ token: .identifier 't'
-    │           │  │     │        │  ├ type: %433 = .ty_i32 - tok[586..586]
+    │           │  │     │        │  ├ type: %484 = .ty_i32 - tok[654..654]
     │           │  │     │        │  │  └ token: .keyword_i32 'i32'
-    │           │  │     │        │  └ value: %436 = .add - tok[588..590]
-    │           │  │     │        │     ├ lhs: %434 = .identifier - tok[588..588]
+    │           │  │     │        │  └ value: %487 = .add - tok[656..658]
+    │           │  │     │        │     ├ lhs: %485 = .identifier - tok[656..656]
     │           │  │     │        │     │  └ token: .identifier 'a'
-    │           │  │     │        │     └ rhs: %435 = .identifier - tok[590..590]
+    │           │  │     │        │     └ rhs: %486 = .identifier - tok[658..658]
     │           │  │     │        │        └ token: .identifier 'b'
-    │           │  │     │        ├ %440 = .assign - tok[591..593]
-    │           │  │     │        │  ├ lhs: %438 = .identifier - tok[591..591]
+    │           │  │     │        ├ %491 = .assign - tok[659..661]
+    │           │  │     │        │  ├ lhs: %489 = .identifier - tok[659..659]
     │           │  │     │        │  │  └ token: .identifier 'a'
-    │           │  │     │        │  └ rhs: %439 = .identifier - tok[593..593]
+    │           │  │     │        │  └ rhs: %490 = .identifier - tok[661..661]
     │           │  │     │        │     └ token: .identifier 'b'
-    │           │  │     │        ├ %443 = .assign - tok[594..596]
-    │           │  │     │        │  ├ lhs: %441 = .identifier - tok[594..594]
+    │           │  │     │        ├ %494 = .assign - tok[662..664]
+    │           │  │     │        │  ├ lhs: %492 = .identifier - tok[662..662]
     │           │  │     │        │  │  └ token: .identifier 'b'
-    │           │  │     │        │  └ rhs: %442 = .identifier - tok[596..596]
+    │           │  │     │        │  └ rhs: %493 = .identifier - tok[664..664]
     │           │  │     │        │     └ token: .identifier 't'
-    │           │  │     │        └ %448 = .assign - tok[597..601]
-    │           │  │     │           ├ lhs: %444 = .identifier - tok[597..597]
+    │           │  │     │        └ %499 = .assign - tok[665..669]
+    │           │  │     │           ├ lhs: %495 = .identifier - tok[665..665]
     │           │  │     │           │  └ token: .identifier 'n'
-    │           │  │     │           └ rhs: %447 = .sub - tok[599..601]
-    │           │  │     │              ├ lhs: %445 = .identifier - tok[599..599]
+    │           │  │     │           └ rhs: %498 = .sub - tok[667..669]
+    │           │  │     │              ├ lhs: %496 = .identifier - tok[667..667]
     │           │  │     │              │  └ token: .identifier 'n'
-    │           │  │     │              └ rhs: %446 = .number_literal - tok[601..601]
+    │           │  │     │              └ rhs: %497 = .number_literal - tok[669..669]
     │           │  │     │                 └ token: .number_literal '1'
-    │           │  │     └ %452 = .ret_expression - tok[603..604]
-    │           │  │        └ node: %451 = .identifier - tok[604..604]
+    │           │  │     └ %503 = .ret_expression - tok[671..672]
+    │           │  │        └ node: %502 = .identifier - tok[672..672]
     │           │  │           └ token: .identifier 'b'
     │           │  └ else_branch: NONE
-    │           └ %456 = .ret_expression - tok[606..607]
-    │              └ node: %455 = .identifier - tok[607..607]
+    │           └ %507 = .ret_expression - tok[674..675]
+    │              └ node: %506 = .identifier - tok[675..675]
     │                 └ token: .identifier 'a'
-    └ %470 = .fn_decl - tok[609..625]
-       ├ proto: %462 = .fn_proto - tok[610..613]
-       │  ├ name: %460 = .identifier - tok[610..610]
+    └ %521 = .fn_decl - tok[677..693]
+       ├ proto: %513 = .fn_proto - tok[678..681]
+       │  ├ name: %511 = .identifier - tok[678..678]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  ├ ret_type: %461 = .ty_void - tok[613..613]
+       │  ├ ret_type: %512 = .ty_void - tok[681..681]
        │  │  └ token: .keyword_void 'void'
        │  └ is_declaring_builtin: false
-       └ body: %469 = .block - tok[614..624]
+       └ body: %520 = .block - tok[682..692]
           └ list: 1 items
-             └ %468 = .const_decl - tok[615..622]
-                ├ name: %463 = .identifier - tok[616..616]
+             └ %519 = .const_decl - tok[683..690]
+                ├ name: %514 = .identifier - tok[684..684]
                 │  └ token: .identifier 'sum'
                 ├ type: NONE
-                └ value: %467 = .comp_block - tok[618..623]
-                   └ node: %466 = .fn_call - tok[619..622]
-                      ├ callee: %464 = .identifier - tok[619..619]
+                └ value: %518 = .comp_block - tok[686..691]
+                   └ node: %517 = .fn_call - tok[687..690]
+                      ├ callee: %515 = .identifier - tok[687..687]
                       │  └ token: .identifier 'fib'
                       └ args_list: 1 items
-                         └ %465 = .number_literal - tok[621..621]
+                         └ %516 = .number_literal - tok[689..689]
                             └ token: .number_literal '10'

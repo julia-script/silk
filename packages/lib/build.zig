@@ -145,11 +145,11 @@ pub fn build(b: *std.Build) void {
     // test_cases.root_module.addImport("cmd", cmd_module);
     test_cases.root_module.addOptions("options", options);
 
-    b.installArtifact(test_cases);
-
     test_cases.root_module.addImport("expect", expect_module);
+    b.installArtifact(test_cases);
     queue(.{
         &test_cases.step,
+        &b.addInstallArtifact(test_cases, .{}).step,
         &b.addRunArtifact(test_cases).step,
         b.step("snapshots", "Run snapshots"),
     });
