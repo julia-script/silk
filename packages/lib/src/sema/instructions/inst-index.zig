@@ -26,6 +26,7 @@ pub const GetElementPtr = @import("./get-element-ptr.zig");
 pub const StructDecl = @import("./struct-decl.zig");
 pub const ArrayInit = @import("./array-init.zig");
 pub const Constant = @import("./constant.zig");
+pub const Reinterpret = @import("./reinterpret.zig");
 const InstContext = @import("./InstContext.zig");
 const Sema = @import("../sema.zig");
 const Error = @import("../gen.zig").Error;
@@ -35,7 +36,7 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) Error!void {
 
     const stderr = std.io.getStdErr().writer();
     const indent = ctx.indent;
-    if (indent > 30) {
+    if (indent > 1000) {
         std.debug.panic("indent too deep: {d}", .{indent});
     }
     ctx.indent += 1;
@@ -69,6 +70,7 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) Error!void {
         .type_init => try TypeInit.exec(ctx, inst_index),
         .field_init => try FieldInit.exec(ctx, inst_index),
         .get_element_pointer => try GetElementPtr.exec(ctx, inst_index),
+        .reinterpret => try Reinterpret.exec(ctx, inst_index),
 
         else => |op| {
             std.debug.panic("unhandled op: {s}", .{@tagName(op)});

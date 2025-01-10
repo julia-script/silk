@@ -41,13 +41,15 @@ pub fn genGlobalGetInstruction(ctx: *InstContext, scope: *GenScope, hir_inst_ind
     switch (entity.data) {
         .function_declaration => |fn_decl| {
             // global_entity.data.function_declaration.declaration_index,
+            const val = try scope.maybeResolveDependency(entity_key);
+            std.debug.print("genGlobalGetInstruction: {d} {}\n", .{ entity_key, val });
             return ctx.pushInstruction(hir_inst_index, .{
                 .op = .global_get,
                 .typed_value = .{
                     .type = global_type,
-                    .value = try scope.maybeResolveDependency(entity_key),
+                    .value = val,
                 },
-                .data = .{ .declaration = fn_decl.declaration_index },
+                .data = .{ .global_get = .{ .entity = entity_key, .declaration = fn_decl.declaration_index } },
             });
         },
         .global_type_declaration => |type_decl| {
@@ -57,7 +59,7 @@ pub fn genGlobalGetInstruction(ctx: *InstContext, scope: *GenScope, hir_inst_ind
                     .type = global_type,
                     .value = try scope.maybeResolveDependency(entity_key),
                 },
-                .data = .{ .declaration = type_decl.declaration_index },
+                .data = .{ .global_get = .{ .entity = entity_key, .declaration = type_decl.declaration_index } },
             });
         },
         else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(entity.data)}),
@@ -70,7 +72,10 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     return try genGlobalGetInstruction(ctx, scope, hir_inst_index, global_entity.key);
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    _ = ctx; // autofix
-    _ = inst_index; // autofix
-    // @panic("not implemented");
+    const inst = ctx.getInstruction(inst_index);
+    const entity = ctx.builder.getEntity(inst.data.global_get.entity);
+    ctx.setValue(inst_index, .{
+        .type = try entity.resolveType(),
+        .value = try entity.resolveValue(),
+    });
 }

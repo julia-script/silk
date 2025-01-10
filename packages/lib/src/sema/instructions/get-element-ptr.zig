@@ -8,15 +8,15 @@ const genGlobalGetInstruction = @import("./global-get.zig").genGlobalGetInstruct
 pub fn genFromBuiltinPropertyAccess(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     _ = ctx; // autofix
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
-    _ = hir_inst; // autofix
-    @panic("todo");
+    // @panic("todo");
 
-    // const base_hir_index = hir_inst.get_property_pointer.base;
+    const base_hir_index = hir_inst.get_property_pointer.base;
+    _ = base_hir_index; // autofix
     // _ = base_hir_index; // autofix
 
-    // const property_name_range = try self.entity.internNode(hir_inst.get_property_pointer.property_name_node);
+    const property_name_range = try scope.entity.internNode(hir_inst.get_property_pointer.property_name_node);
     // // const property_name_slice = self.builder.getSlice(property_name_range);
-    // return try self.getPropertyByName(hir_inst_index, property_name_range);
+    return try scope.getPropertyByName(hir_inst_index, property_name_range);
 
     // const base_index = self.getInstructionIndex(base_hir_index);
     // const base_instruction = self.getInstruction(base_index);
@@ -269,7 +269,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     switch (hir_inst) {
         .get_element_pointer => return try genFromGetElementPointer(ctx, scope, hir_inst_index),
         .get_property_pointer => |get_property| {
-            if (get_property.is_builtin) return try genFromBuiltinPropertyAccess(ctx, scope, hir_inst_index);
+            _ = get_property; // autofix
+            // if (get_property.is_builtin) return try genFromBuiltinPropertyAccess(ctx, scope, hir_inst_index);
             const base_hir_index = hir_inst.get_property_pointer.base;
 
             const base_inst_index = scope.getInstructionIndex(base_hir_index);
@@ -330,7 +331,39 @@ pub fn maybeInline(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void 
     }
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    _ = ctx; // autofix
-    _ = inst_index; // autofix
-    // @panic("not implemented");
+    const inst = ctx.getInstruction(inst_index);
+    const base = inst.data.get_element_pointer.base;
+    const index = inst.data.get_element_pointer.index;
+    const base_inst = ctx.getInstruction(base);
+    const index_inst = ctx.getInstruction(index);
+    if (!base_inst.typed_value.isComptimeKnown()) @panic("base_inst is not a comptime known value");
+    if (!index_inst.typed_value.isComptimeKnown()) @panic("index_inst is not a comptime known value");
+    const index_int = try ctx.builder.readNumberAsType(usize, index_inst.typed_value);
+    const base_type_key = ctx.builder.unwrapPointerType(base_inst.typed_value.type) orelse std.debug.panic("base_type is not a pointer type", .{});
+
+    const base_type = ctx.builder.getComplexType(base_type_key);
+    const base_ptr = try ctx.builder.readNumberAsType(usize, base_inst.typed_value);
+    switch (base_type.data) {
+        .@"struct" => {
+            const fields = ctx.builder.sema.lists.getSlice(base_type.data.@"struct".fields);
+
+            const field_type = ctx.builder.getComplexType(Sema.Type.Key.decode(fields[index_int])).data.struct_field.offset;
+            // const ptr = base_int + field_type;
+            const ptr = base_ptr + field_type;
+            ctx.setValue(inst_index, .{
+                .type = inst.typed_value.type,
+                .value = try ctx.builder.numberAsBytesValueKey(ptr),
+            });
+        },
+        .array => {
+            const array_type = ctx.builder.getComplexType(base_type_key).data.array;
+            const element_size = ctx.builder.getTypeSize(array_type.child);
+            const ptr = base_ptr + index_int * element_size;
+            ctx.setValue(inst_index, .{
+                .type = inst.typed_value.type,
+                .value = try ctx.builder.numberAsBytesValueKey(ptr),
+            });
+        },
+        else => std.debug.panic("unhandled base type: {s}", .{@tagName(base_type.data)}),
+    }
 }

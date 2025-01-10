@@ -10,6 +10,7 @@ const Ast = @import("../Ast.zig");
 const Source = @import("../Compilation.zig").Source;
 const InstContext = @import("./instructions/InstContext.zig");
 const Index = @import("./instructions/inst-index.zig");
+const Box = @import("../pointer.zig").Box;
 
 inline fn formatHirIndex(hir: *Hir, index: Hir.Inst.Index) ![]const u8 {
     const hir_inst = getHirInst(hir, index);
@@ -74,7 +75,7 @@ pub const Hasher = struct {
 };
 pub const Builder = struct {
     // sema: *Sema,
-    entities: ChunkedArray(Entity, 1024),
+    entities: std.ArrayListUnmanaged(Box(Entity)) = .{},
 
     // strings: Sema.Strings,
     arena: std.heap.ArenaAllocator,
@@ -111,8 +112,6 @@ pub const Builder = struct {
         writer.print("Declarations: {d} items\n", .{self.sema.declarations.items.len}) catch {};
 
         writer.print("\n", .{}) catch {};
-
-        var entities_iter = self.entities.iterator();
         var symbols_iter = self.symbols.iterator();
 
         writer.print("Symbols: {d} items\n\n", .{self.symbols.count()}) catch {};
@@ -128,23 +127,24 @@ pub const Builder = struct {
         // }
 
         writer.print("\n", .{}) catch {};
-        writer.print("Entities: {d} items\n\n", .{self.entities.len}) catch unreachable;
-        while (entities_iter.next()) |entry| {
-            writer.print("- {s}\n", .{entry.formatKey() catch unreachable}) catch unreachable;
+        writer.print("Entities: {d} items\n\n", .{self.entities.items.len}) catch unreachable;
+        for (self.entities.items) |entity_box| {
+            var entity = entity_box.ptr.*;
+            writer.print("- {s}\n", .{entity.formatKey() catch unreachable}) catch unreachable;
 
-            writer.print("  symbols = .{s}\n ", .{@tagName(entry.symbols)}) catch unreachable;
-            switch (entry.type) {
+            writer.print("  symbols = .{s}\n ", .{@tagName(entity.symbols)}) catch unreachable;
+            switch (entity.type) {
                 .resolved => |resolved| {
-                    writer.print("  type = .{s} ", .{@tagName(entry.type)}) catch unreachable;
+                    writer.print("  type = .{s} ", .{@tagName(entity.type)}) catch unreachable;
                     self.sema.formatType(writer, resolved) catch unreachable;
                     writer.print("\n", .{}) catch unreachable;
                 },
                 else => {
-                    writer.print("  type = .{s}\n", .{@tagName(entry.type)}) catch unreachable;
+                    writer.print("  type = .{s}\n", .{@tagName(entity.type)}) catch unreachable;
                 },
             }
 
-            switch (entry.value) {
+            switch (entity.value) {
                 .resolved => |resolved| {
                     _ = resolved; // autofix
                     // writer.print("  value = {s} ", .{@tagName(entry.value)}) catch unreachable;
@@ -152,7 +152,7 @@ pub const Builder = struct {
                     // writer.print("\n", .{}) catch unreachable;
                 },
                 else => {
-                    writer.print("  value = {s}\n", .{@tagName(entry.value)}) catch unreachable;
+                    writer.print("  value = {s}\n", .{@tagName(entity.value)}) catch unreachable;
                 },
             }
             // writer.print("data = {s}\n", .{@tagName(entry.data.data)}) catch unreachable;
@@ -256,7 +256,7 @@ pub const Builder = struct {
         return self.getEntity(entity_key);
     }
     pub fn getEntity(self: *Builder, key: Entity.Key) *Entity {
-        return self.entities.getPtr(key);
+        return self.entities.items[key].ptr;
     }
     pub fn getEntityBySymbol(self: *Builder, name: []const u8) ?*Entity {
         const range = self.strings.getRange(name) orelse return null;
@@ -905,7 +905,6 @@ pub const Builder = struct {
     pub inline fn build(allocator: std.mem.Allocator, sema: *Sema, errors_manager: *ErrorManager, options: BuildOptions) Error!Builder {
         return Builder{
             // .strings = Sema.Strings.init(allocator),
-            .entities = ChunkedArray(Entity, 1024).init(allocator),
             .errors_manager = errors_manager,
             // .memory = ComptimeMemory.init(allocator, self),
             .sema = sema,
@@ -1257,7 +1256,7 @@ pub const Builder = struct {
     pub fn deinit(self: *Builder) void {
         // self.strings.deinit();
         // self.lists.deinit();
-        self.entities.deinit();
+        // self.entities.deinit();
         self.arena.deinit();
         // self.values.deinit(self.allocator);
         // self.types.deinit(self.allocator);
@@ -1282,15 +1281,17 @@ pub const Builder = struct {
                 // .input = input,
             },
         );
-        const key = self.entities.len;
+        const key = self.entities.items.len;
         defer trace.end(.{ .key = key, .post_state = self.getState() });
         if (self.symbols_by_hir_inst.contains(input.hir_inst_index)) {
             std.debug.panic("Symbol already exists", .{
                 // try formatHirIndex(self.hir, input.hir_inst_index),
             });
         }
-        const entity = try Entity.init(self, key, input);
-        try self.entities.append(entity);
+        const entity_box = try Box(Entity).init(self.arena.allocator());
+        entity_box.ptr.* = try Entity.init(self, key, input);
+        const entity = entity_box.ptr.*;
+        try self.entities.append(self.arena.allocator(), entity_box);
         switch (input.data) {
             .global_declaration, .global_type_declaration, .function_declaration => {
                 self.tracer.trace(
@@ -1348,7 +1349,7 @@ pub const Builder = struct {
         var i: usize = 0;
         var j: usize = 0;
         while (true) : (i += 1) {
-            if (i >= self.entities.len) {
+            if (i >= self.entities.items.len) {
                 // var symbols_iter = self.symbols.iterator();
                 const symbols = self.symbols.entries.items(.value);
                 while (j < symbols.len) : (j += 1) {
@@ -1357,9 +1358,9 @@ pub const Builder = struct {
                     _ = declaration; // autofix
                 }
 
-                if (i >= self.entities.len) break;
+                if (i >= self.entities.items.len) break;
             }
-            var entity = self.entities.get(i);
+            var entity = self.entities.items[i].ptr.*;
             try entity.collectEntities();
         }
     }
@@ -2080,11 +2081,19 @@ pub const Entity = struct {
         const slice = hir.ast.getNodeSlice(node);
         return try self.builder.sema.strings.internSlice(slice);
     }
+    pub fn pushDependency(self: *Entity, key: Entity.Key) !void {
+        try self.dependencies.put(self.builder.arena.allocator(), key, {});
+        try self.builder.queueEntity(key);
+    }
     pub fn resolveDependencies(self: *Entity) Error!void {
-        while (self.dependencies.popOrNull()) |entity_key| {
-            const entity = self.builder.getEntity(entity_key.key);
+        while (self.dependencies.popOrNull()) |kv| {
+            std.debug.print("resolveDependencies: {}\n", .{kv.key == self.key});
+            const is_self = kv.key == self.key;
+            _ = is_self; // autofix
+            const entity = self.builder.getEntity(kv.key);
             _ = try entity.resolveType();
-            _ = try entity.resolveValue();
+            const val = try entity.resolveValue();
+            std.debug.print("resolveDependencies: {}\n", .{val});
         }
     }
     pub fn init(builder: *Builder, key: Key, input: EntityInput) !Entity {
@@ -2555,6 +2564,7 @@ pub const Entity = struct {
         );
         defer trace.end(.{ .value = self.value, .post_state = self.builder.getState() });
         const key = self.key;
+        _ = key; // autofix
         switch (self.value) {
             .idle => {
                 //         const value = switch (self.data) {
@@ -2578,13 +2588,12 @@ pub const Entity = struct {
             .module_declaration => try self.resolveModuleValue(),
             else => std.debug.panic("unhandled value: {s}", .{@tagName(self.data)}),
         };
-        // self.value = .{ .resolved = value };
-        self.builder.getEntity(key).value = .{ .resolved = value };
-        if (self.builder.getEntity(key).dependencies.count() > 0) {
-            try self.builder.getEntity(key).resolveDependencies();
-            _ = try self.builder.getEntity(key).resolveValue();
+        self.value = .{ .resolved = value };
+        if (self.dependencies.count() > 0) {
+            try self.resolveDependencies();
+            _ = try self.resolveValue();
         }
-        return self.builder.getEntity(key).value.resolved;
+        return self.value.resolved;
     }
 
     pub fn resolveTypeValue(self: *Entity) Error!Sema.Value.Key {
@@ -2954,8 +2963,6 @@ pub const Scope = struct {
     instructions_by_hir_inst: std.AutoArrayHashMapUnmanaged(Hir.Inst.Index, Sema.Instruction.Index) = .{},
     arena: std.heap.ArenaAllocator,
 
-    dependencies: std.AutoArrayHashMapUnmanaged(Entity.Key, void) = .{},
-
     entity: *Entity,
     builder: *Builder,
     trace: Tracer.EndTrace,
@@ -3030,15 +3037,6 @@ pub const Scope = struct {
 
         self.arena.deinit();
     }
-
-    pub fn resolveDependencies(self: *Scope) Error!void {
-        for (self.dependencies.keys()) |entity_key| {
-            const entity = self.builder.getEntity(entity_key);
-            _ = try entity.resolveType();
-            _ = try entity.resolveValue();
-        }
-    }
-
     // pub fn makeBlock(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Block {
     //     const trace = self.builder.tracer.begin(
     //         @src(),
@@ -3146,11 +3144,6 @@ pub const Scope = struct {
         if (self.isComptimeKnown(index)) {
             inst.liveness = 0;
         }
-    }
-
-    pub fn pushDependency(self: *Scope, key: Entity.Key) !void {
-        try self.entity.dependencies.put(self.arena.allocator(), key, {});
-        try self.builder.queueEntity(key);
     }
 
     pub fn genRootBlock(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
@@ -3557,7 +3550,7 @@ pub const Scope = struct {
         const val = entity.resolveValue() catch |e| {
             switch (e) {
                 error.CircularDependency => {
-                    try self.pushDependency(entity_key);
+                    try self.entity.pushDependency(entity_key);
                     return Sema.Value.simple(.exec_time);
                 },
                 else => return e,

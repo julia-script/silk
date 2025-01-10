@@ -26,29 +26,3 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
         .value = value.value,
     });
 }
-const ErrorManager = @import("../../ErrorManager.zig");
-const TreeWriter = @import("../../TreeWriter.zig");
-test "instas" {
-    const allocator = std.testing.allocator;
-    var errors_manager = try ErrorManager.init(allocator);
-    defer errors_manager.deinit();
-    const source =
-        \\ pub fn main() void {
-        \\   const a:i32 = 1
-        \\ }
-        \\
-    ;
-
-    var sema = try Sema.init(allocator, &errors_manager, .{});
-    defer sema.deinit();
-    const root = try sema.makeRootSource(source, "root.sk");
-    try sema.compileAll(root);
-    const stderr = std.io.getStdErr().writer().any();
-    // var tree_writer = TreeWriter.init(stderr);
-    try sema.formatDeclaration(
-        stderr,
-        // &tree_writer,
-        // sema.instructions.items,
-        0,
-    );
-}

@@ -18,10 +18,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     });
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    if (!ctx.is_comptime) return;
-
     const inst = ctx.getInstruction(inst_index);
-    // @panic("not implemented");
+
     ctx.setValue(inst_index, .{
         .type = inst.typed_value.type,
         .value = ctx.getParamValue(@intCast(inst.data.param.index)),

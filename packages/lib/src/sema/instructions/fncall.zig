@@ -478,6 +478,7 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
     }
 
     const callee = ctx.getInstruction(inst.data.fn_call.callee);
+    std.debug.print("callee: {}\n", .{callee});
 
     // const init_block = ctx.builder
     // const fn_value: Sema.Value = ctx.builder.getValue(inst.typed_value.value) orelse {

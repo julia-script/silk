@@ -217,12 +217,40 @@ fn bar(a: i32) i32 {
 
 fn rec(a: i32) i32 {
   if (a < 10) {
-    // return rec(2 * a);
-    return 2 * a;
+    return bar(2 * a);
+    // return 2 * a;
   }
   return a;
 }
 
+
+fn sum_array() i32 {
+    const arr :[4]i32 = [4]i32 {1, 2, 3, 4}
+    var i: i32 = 0;
+    var sum: i32 = 0;
+    while (i < arr.len:as(i32)) {
+        sum = sum + arr[i];
+        i = i + 1;
+    }
+    return sum;
+}
+
+
+
+pub fn fib(n: i32) i32 {
+var a:i32 = 0
+  var b:i32 = 1
+  if (n > 0) {
+    while (n > 1) {
+      var t:i32 = a + b
+      a = b
+      b = t
+      n = n - 1
+    }
+    return b
+  }
+  return a
+}
 fn main() void {
-  comp rec(2) == 16;
+    const sum = comp fib(10);
 }

@@ -562,7 +562,11 @@ pub const Instruction = struct {
             operand: Instruction.Index,
             payload: Instruction.Index,
         },
-        declaration: Declaration.Index,
+        // declaration: Declaration.Index,
+        global_get: struct {
+            entity: Entity.Key,
+            declaration: Declaration.Index,
+        },
         @"if": struct {
             condition: Instruction.Index,
             then_block: Instruction.Index,
@@ -1607,7 +1611,7 @@ pub fn format(self: *Self, writer: std.io.AnyWriter) !void {
     try writer.print(";; Sema\n", .{});
 
     try writer.print(";; {d} declarations\n", .{len});
-    try writer.print(";; {d} entities\n", .{builder.entities.len});
+    try writer.print(";; {d} entities\n", .{builder.entities.items.len});
     try writer.print(";; {d} symbols\n", .{builder.symbols.count()});
     try writer.print(";; {d} instructions\n", .{self.instructions.items.len});
     try writer.print(";; {d} values\n", .{self.values.count()});
