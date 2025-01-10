@@ -83,7 +83,6 @@ pub fn build(b: *std.Build) void {
             }
             break :optimize optimize;
         },
-        .unwind_tables = true,
     });
 
     wasm_exe.root_module.addImport("cmd", cmd_module);
@@ -117,7 +116,6 @@ pub fn build(b: *std.Build) void {
             }
             break :optimize optimize;
         },
-        .unwind_tables = true,
     });
     wasi_exe.root_module.addOptions("options", options);
     wasi_exe.root_module.addImport("cmd", cmd_module);

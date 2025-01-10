@@ -210,7 +210,13 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, tree_writer: *TreeWrite
 
     switch (instruction) {
         .block, .inline_block => |data| {
-            try writer.print("%{} = {s}.{s}", .{ inst_index, if (data.is_comptime) "comptime " else "", @tagName(instruction) });
+            try writer.print("%{} ", .{inst_index});
+            if (data.type) |type_inst| {
+                try writer.print("[type=(%{d})]", .{type_inst});
+            } else {
+                try writer.print("[type=(infer)]", .{});
+            }
+            try writer.print(" = {s}.{s} ", .{ if (data.is_comptime) "comptime " else "", @tagName(instruction) });
 
             try writer.print("\n", .{});
             const instructions_list = self.lists.getSlice(data.instructions_list);
@@ -354,7 +360,7 @@ pub const Value = struct {
     // tag: Tag,
     // data: Data,
     data: union(enum) {
-        comptime_number: InternedSlice,
+        number_literal: InternedSlice,
     },
     pub const Index = enum(u32) {
         true,
@@ -447,13 +453,13 @@ pub const Inst = union(enum) {
 
     decl_ref: AstNode,
     char_literal: AstNode,
-    comptime_number: AstNode,
-    comptime_boolean: AstNode,
+    number_literal: AstNode,
+    boolean_literal: AstNode,
     string_literal: AstNode,
-    ty_number: AstNode,
-    ty_boolean: AstNode,
     undefined_value: MaybeAstNode,
 
+    ty_number: AstNode,
+    ty_boolean: AstNode,
     ty_i8: AstNode,
     ty_i16: AstNode,
     ty_i32: AstNode,
@@ -493,6 +499,7 @@ pub const Inst = union(enum) {
         mutable: bool,
 
         type: Inst.Index,
+        init: Inst.Index,
     };
     pub const ArrayInit = struct {
         type: Inst.Index,
@@ -582,6 +589,7 @@ pub const Inst = union(enum) {
         name_node: ?Ast.Node.Index,
         instructions_list: InternedLists.Range,
         is_comptime: bool = false,
+        type: ?Inst.Index = null,
     };
     pub const GlobalDecl = struct {
         name_node: Ast.Node.Index,
@@ -743,7 +751,7 @@ test "Hir" {
         \\       │        └ ty: %9 = ty_u32 {
         \\       │           └ node: node(#13: "u32")
         \\       └ init: %14 = block
-        \\          ├ %12 = comptime_number node=(16)
+        \\          ├ %12 = number_literal node=(16)
         \\          └ %13 = ret value=(12)
         \\
     );
@@ -779,7 +787,7 @@ test "Hir" {
         \\             │     ├ name_node: node(#6: "b")
         \\             │     ├ ty: %5 = ty_u32 {
         \\             │     │  └ node: node(#7: "u32")
-        \\             │     └ init: %6 = comptime_number {
+        \\             │     └ init: %6 = number_literal {
         \\             │        └ node: node(#8: "3")
         \\             └ declarations_list: 0 items
         \\
@@ -818,7 +826,7 @@ test "Hir" {
         \\             │     ├ name_node: node(#6: "b")
         \\             │     ├ ty: %5 = ty_u32 {
         \\             │     │  └ node: node(#7: "u32")
-        \\             │     └ init: %6 = comptime_number {
+        \\             │     └ init: %6 = number_literal {
         \\             │        └ node: node(#8: "3")
         \\             └ declarations_list: 1 items
         \\                └ 0: %8 = global_decl {

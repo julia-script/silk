@@ -23,23 +23,23 @@
  │     │           └ node: node(#5: "i32")
  │     ├ init: %5 = .block
  │     │  ├ %6 = .param operand=(%3)
- │     │  ├ %7 = .comptime_number node=(n[10:"0"])
+ │     │  ├ %7 = .number_literal node=(n[10:"0"])
  │     │  ├ %8 = .ty_i32 node=(n[9:"i32"])
  │     │  ├ %9 = .alloc mutable=(true), type=(%8)
  │     │  ├ %10 = .store pointer=(%9), value=(%7)
- │     │  ├ %11 = .comptime_number node=(n[14:"1"])
+ │     │  ├ %11 = .number_literal node=(n[14:"1"])
  │     │  ├ %12 = .ty_i32 node=(n[13:"i32"])
  │     │  ├ %13 = .alloc mutable=(true), type=(%12)
  │     │  ├ %14 = .store pointer=(%13), value=(%11)
  │     │  ├ %15 = .param_get operand=(%6)
- │     │  ├ %16 = .comptime_number node=(n[17:"0"])
+ │     │  ├ %16 = .number_literal node=(n[17:"0"])
  │     │  ├ %17 = .gt lhs=(%15), rhs=(%16)
  │     │  ├ %18 = .if_expr cond (%17)
  │     │  │  └ then: %19 = .block
  │     │  │     ├ %20 = .loop
  │     │  │     │  └ body: %21 = .block
  │     │  │     │     ├ %22 = .param_get operand=(%6)
- │     │  │     │     ├ %23 = .comptime_number node=(n[20:"1"])
+ │     │  │     │     ├ %23 = .number_literal node=(n[20:"1"])
  │     │  │     │     ├ %24 = .gt lhs=(%22), rhs=(%23)
  │     │  │     │     └ %25 = .if_expr cond (%24)
  │     │  │     │        └ then: %26 = .block
@@ -54,7 +54,7 @@
  │     │  │     │           ├ %35 = .load operand=(%31)
  │     │  │     │           ├ %36 = .store pointer=(%13), value=(%35)
  │     │  │     │           ├ %37 = .param_get operand=(%6)
- │     │  │     │           ├ %38 = .comptime_number node=(n[36:"1"])
+ │     │  │     │           ├ %38 = .number_literal node=(n[36:"1"])
  │     │  │     │           ├ %39 = .sub lhs=(%37), rhs=(%38)
  │     │  │     │           ├ %40 = .param_set lhs=(%6), rhs=(%39)
  │     │  │     │           └ %41 = .br operand=(null), target=(%20)

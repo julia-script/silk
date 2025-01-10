@@ -1,31 +1,709 @@
 ;; AST
-;; 13 Nodes
-;; 17 Tokens
-;; 6 Interned Lists
+;; 370 Nodes
+;; 485 Tokens
+;; 193 Interned Lists
 
-%0 = .struct_decl - tok[0..17]
- └ members_list: 1 items
-    └ %12 = .fn_decl - tok[0..16]
-       ├ proto: %3 = .fn_proto - tok[1..4]
-       │  ├ name: %1 = .identifier - tok[1..1]
+%0 = .struct_decl - tok[0..485]
+ └ members_list: 24 items
+    ├ %6 = .type_decl - tok[0..9]
+    │  ├ name: %1 = .identifier - tok[1..1]
+    │  │  └ token: .identifier 'T'
+    │  ├ type: NONE
+    │  └ value: %2 = .struct_decl - tok[3..9]
+    │     └ members_list: 1 items
+    │        └ %5 = .struct_field - tok[6..8]
+    │           ├ name: %3 = .identifier - tok[5..5]
+    │           │  └ token: .identifier 'bar'
+    │           ├ type: %4 = .ty_i32 - tok[7..7]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ default_value: NONE
+    ├ %23 = .fn_decl - tok[11..33]
+    │  ├ proto: %9 = .fn_proto - tok[12..15]
+    │  │  ├ name: %7 = .identifier - tok[12..12]
+    │  │  │  └ token: .identifier 'struct_alloc'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %8 = .ty_void - tok[15..15]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %22 = .block - tok[16..32]
+    │     └ list: 6 items
+    │        ├ %10 = .comment_line - tok[17..18]
+    │        │  └ token: .comment '// %0 = alloc T                          ; *T@ptr:0'
+    │        ├ %11 = .comment_line - tok[18..19]
+    │        │  └ token: .comment '// %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    │        ├ %12 = .comment_line - tok[19..20]
+    │        │  └ token: .comment '// %2 = const 123                        ; 123 int'
+    │        ├ %13 = .comment_line - tok[20..21]
+    │        │  └ token: .comment '// %3 = as i32 %2                        ; 123 i32'
+    │        ├ %14 = .comment_line - tok[21..22]
+    │        │  └ token: .comment '// %4 = store %1 %3                      ; void'
+    │        └ %21 = .const_decl - tok[22..30]
+    │           ├ name: %15 = .identifier - tok[23..23]
+    │           │  └ token: .identifier 'foo'
+    │           ├ type: NONE
+    │           └ value: %20 = .type_init - tok[25..31]
+    │              ├ type: %16 = .identifier - tok[25..25]
+    │              │  └ token: .identifier 'T'
+    │              └ field_init_list: 1 items
+    │                 └ %19 = .field_init - tok[27..29]
+    │                    ├ name: %17 = .identifier - tok[27..27]
+    │                    │  └ token: .identifier 'bar'
+    │                    └ value: %18 = .number_literal - tok[29..29]
+    │                       └ token: .number_literal '123'
+    ├ %49 = .fn_decl - tok[33..65]
+    │  ├ proto: %26 = .fn_proto - tok[34..37]
+    │  │  ├ name: %24 = .identifier - tok[34..34]
+    │  │  │  └ token: .identifier 'struct_alloc_2'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %25 = .ty_void - tok[37..37]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %48 = .block - tok[38..64]
+    │     └ list: 11 items
+    │        ├ %27 = .comment_line - tok[39..40]
+    │        │  └ token: .comment '// %0 = alloc T                          ; *T@ptr:0'
+    │        ├ %28 = .comment_line - tok[40..41]
+    │        │  └ token: .comment '// %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    │        ├ %29 = .comment_line - tok[41..42]
+    │        │  └ token: .comment '// %2 = const 123                        ; 123 int'
+    │        ├ %30 = .comment_line - tok[42..43]
+    │        │  └ token: .comment '// %3 = as i32 %2                        ; 123 i32'
+    │        ├ %31 = .comment_line - tok[43..44]
+    │        │  └ token: .comment '// %4 = store %1 %3                      ; void'
+    │        ├ %38 = .var_decl - tok[44..52]
+    │        │  ├ name: %32 = .identifier - tok[45..45]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: NONE
+    │        │  └ value: %37 = .type_init - tok[47..53]
+    │        │     ├ type: %33 = .identifier - tok[47..47]
+    │        │     │  └ token: .identifier 'T'
+    │        │     └ field_init_list: 1 items
+    │        │        └ %36 = .field_init - tok[49..51]
+    │        │           ├ name: %34 = .identifier - tok[49..49]
+    │        │           │  └ token: .identifier 'bar'
+    │        │           └ value: %35 = .number_literal - tok[51..51]
+    │        │              └ token: .number_literal '123'
+    │        ├ %39 = .comment_line - tok[54..55]
+    │        │  └ token: .comment '// %5 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    │        ├ %40 = .comment_line - tok[55..56]
+    │        │  └ token: .comment '// %6 = const 3                          ; 3 int'
+    │        ├ %41 = .comment_line - tok[56..57]
+    │        │  └ token: .comment '// %7 = as i32 %6                        ; 3 i32'
+    │        ├ %42 = .comment_line - tok[57..58]
+    │        │  └ token: .comment '// %8 = store %5 %7                    ; void'
+    │        └ %47 = .assign - tok[58..62]
+    │           ├ lhs: %45 = .prop_access - tok[58..60]
+    │           │  ├ lhs: %43 = .identifier - tok[58..58]
+    │           │  │  └ token: .identifier 'foo'
+    │           │  └ rhs: %44 = .identifier - tok[60..60]
+    │           │     └ token: .identifier 'bar'
+    │           └ rhs: %46 = .number_literal - tok[62..62]
+    │              └ token: .number_literal '3'
+    ├ %71 = .fn_decl - tok[65..94]
+    │  ├ proto: %52 = .fn_proto - tok[66..69]
+    │  │  ├ name: %50 = .identifier - tok[66..66]
+    │  │  │  └ token: .identifier 'struct_alloc_3'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %51 = .ty_void - tok[69..69]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %70 = .block - tok[70..93]
+    │     └ list: 9 items
+    │        ├ %53 = .comment_line - tok[71..72]
+    │        │  └ token: .comment '// %0 = alloc T                          ; *T@ptr:0'
+    │        ├ %54 = .comment_line - tok[72..73]
+    │        │  └ token: .comment '// %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    │        ├ %55 = .comment_line - tok[73..74]
+    │        │  └ token: .comment '// %2 = const 123                        ; 123 int'
+    │        ├ %56 = .comment_line - tok[74..75]
+    │        │  └ token: .comment '// %3 = as i32 %2                        ; 123 i32'
+    │        ├ %57 = .comment_line - tok[75..76]
+    │        │  └ token: .comment '// %4 = store %1 %3                      ; void'
+    │        ├ %64 = .var_decl - tok[76..84]
+    │        │  ├ name: %58 = .identifier - tok[77..77]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: NONE
+    │        │  └ value: %63 = .type_init - tok[79..85]
+    │        │     ├ type: %59 = .identifier - tok[79..79]
+    │        │     │  └ token: .identifier 'T'
+    │        │     └ field_init_list: 1 items
+    │        │        └ %62 = .field_init - tok[81..83]
+    │        │           ├ name: %60 = .identifier - tok[81..81]
+    │        │           │  └ token: .identifier 'bar'
+    │        │           └ value: %61 = .number_literal - tok[83..83]
+    │        │              └ token: .number_literal '123'
+    │        ├ %65 = .comment_line - tok[86..87]
+    │        │  └ token: .comment '// %5 = alloc T                          ; *T@ptr:4'
+    │        ├ %66 = .comment_line - tok[87..88]
+    │        │  └ token: .comment '// %6 = memcpy %5 %0                     ; void'
+    │        └ %69 = .const_decl - tok[88..91]
+    │           ├ name: %67 = .identifier - tok[89..89]
+    │           │  └ token: .identifier 'foo2'
+    │           ├ type: NONE
+    │           └ value: %68 = .identifier - tok[91..91]
+    │              └ token: .identifier 'foo'
+    ├ %97 = .fn_decl - tok[94..127]
+    │  ├ proto: %74 = .fn_proto - tok[95..98]
+    │  │  ├ name: %72 = .identifier - tok[95..95]
+    │  │  │  └ token: .identifier 'struct_load'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %73 = .ty_void - tok[98..98]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %96 = .block - tok[99..126]
+    │     └ list: 11 items
+    │        ├ %75 = .comment_line - tok[100..101]
+    │        │  └ token: .comment '// %0 = alloc T                          ; *T@ptr:0'
+    │        ├ %76 = .comment_line - tok[101..102]
+    │        │  └ token: .comment '// %1 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    │        ├ %77 = .comment_line - tok[102..103]
+    │        │  └ token: .comment '// %2 = const 123                        ; 123 int'
+    │        ├ %78 = .comment_line - tok[103..104]
+    │        │  └ token: .comment '// %3 = as i32 %2                        ; 123 i32'
+    │        ├ %79 = .comment_line - tok[104..105]
+    │        │  └ token: .comment '// %4 = store %1 %3                      ; void'
+    │        ├ %86 = .const_decl - tok[105..113]
+    │        │  ├ name: %80 = .identifier - tok[106..106]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: NONE
+    │        │  └ value: %85 = .type_init - tok[108..114]
+    │        │     ├ type: %81 = .identifier - tok[108..108]
+    │        │     │  └ token: .identifier 'T'
+    │        │     └ field_init_list: 1 items
+    │        │        └ %84 = .field_init - tok[110..112]
+    │        │           ├ name: %82 = .identifier - tok[110..110]
+    │        │           │  └ token: .identifier 'bar'
+    │        │           └ value: %83 = .number_literal - tok[112..112]
+    │        │              └ token: .number_literal '123'
+    │        ├ %87 = .comment_line - tok[115..116]
+    │        │  └ token: .comment '// %5 = get_el_ptr %0 'bar' i=(0)        ; *i32@ptr:0'
+    │        ├ %88 = .comment_line - tok[116..117]
+    │        │  └ token: .comment '// %6 = load %5                          ; 123 i32'
+    │        ├ %89 = .comment_line - tok[117..118]
+    │        │  └ token: .comment '// %7 = alloc i32                        ; *i32@ptr:4'
+    │        ├ %90 = .comment_line - tok[118..119]
+    │        │  └ token: .comment '// %8 = store %7 %6                      ; void'
+    │        └ %95 = .const_decl - tok[119..124]
+    │           ├ name: %91 = .identifier - tok[120..120]
+    │           │  └ token: .identifier 'bar'
+    │           ├ type: NONE
+    │           └ value: %94 = .prop_access - tok[122..124]
+    │              ├ lhs: %92 = .identifier - tok[122..122]
+    │              │  └ token: .identifier 'foo'
+    │              └ rhs: %93 = .identifier - tok[124..124]
+    │                 └ token: .identifier 'bar'
+    ├ %98 = .comment_line - tok[127..128]
+    │  └ token: .comment '// const global_foo = T { bar = 123 };'
+    ├ %99 = .comment_line - tok[128..129]
+    │  └ token: .comment '// fn struct_from_global() void {'
+    ├ %100 = .comment_line - tok[129..130]
+    │  └ token: .comment '//   // %0 = alloc T                          ; *T@ptr:0'
+    ├ %101 = .comment_line - tok[130..131]
+    │  └ token: .comment '//   // %1 = memcpy %0 %global_foo            ; void'
+    ├ %102 = .comment_line - tok[131..132]
+    │  └ token: .comment '//   const bar = global_foo;'
+    ├ %103 = .comment_line - tok[132..133]
+    │  └ token: .comment '// }'
+    ├ %116 = .fn_decl - tok[133..151]
+    │  ├ proto: %106 = .fn_proto - tok[134..137]
+    │  │  ├ name: %104 = .identifier - tok[134..134]
+    │  │  │  └ token: .identifier 'int_alloc'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %105 = .ty_void - tok[137..137]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %115 = .block - tok[138..150]
+    │     └ list: 5 items
+    │        ├ %107 = .comment_line - tok[139..140]
+    │        │  └ token: .comment '// %0 = alloc i32                        ; *i32@ptr:0'
+    │        ├ %108 = .comment_line - tok[140..141]
+    │        │  └ token: .comment '// %1 = const 10                         ; 10 int'
+    │        ├ %109 = .comment_line - tok[141..142]
+    │        │  └ token: .comment '// %2 = as i32 %1                        ; 10 i32'
+    │        ├ %110 = .comment_line - tok[142..143]
+    │        │  └ token: .comment '// %3 = store %0 %2                      ; void'
+    │        └ %114 = .const_decl - tok[143..148]
+    │           ├ name: %111 = .identifier - tok[144..144]
+    │           │  └ token: .identifier 'foo'
+    │           ├ type: %112 = .ty_i32 - tok[146..146]
+    │           │  └ token: .keyword_i32 'i32'
+    │           └ value: %113 = .number_literal - tok[148..148]
+    │              └ token: .number_literal '10'
+    ├ %135 = .fn_decl - tok[151..176]
+    │  ├ proto: %119 = .fn_proto - tok[152..155]
+    │  │  ├ name: %117 = .identifier - tok[152..152]
+    │  │  │  └ token: .identifier 'int_alloc_2'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %118 = .ty_void - tok[155..155]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %134 = .block - tok[156..175]
+    │     └ list: 9 items
+    │        ├ %120 = .comment_line - tok[157..158]
+    │        │  └ token: .comment '// %0 = alloc i32                        ; *i32@ptr:0'
+    │        ├ %121 = .comment_line - tok[158..159]
+    │        │  └ token: .comment '// %1 = const 10                         ; 10 int'
+    │        ├ %122 = .comment_line - tok[159..160]
+    │        │  └ token: .comment '// %2 = as i32 %1                        ; 10 i32'
+    │        ├ %123 = .comment_line - tok[160..161]
+    │        │  └ token: .comment '// %3 = store %0 %2                      ; void'
+    │        ├ %127 = .var_decl - tok[161..166]
+    │        │  ├ name: %124 = .identifier - tok[162..162]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: %125 = .ty_i32 - tok[164..164]
+    │        │  │  └ token: .keyword_i32 'i32'
+    │        │  └ value: %126 = .number_literal - tok[166..166]
+    │        │     └ token: .number_literal '10'
+    │        ├ %128 = .comment_line - tok[168..169]
+    │        │  └ token: .comment '// %4 = const 123                        ; 123 int'
+    │        ├ %129 = .comment_line - tok[169..170]
+    │        │  └ token: .comment '// %5 = as i32 %4                        ; 123 i32'
+    │        ├ %130 = .comment_line - tok[170..171]
+    │        │  └ token: .comment '// %6 = store %0 %5                      ; void'
+    │        └ %133 = .assign - tok[171..173]
+    │           ├ lhs: %131 = .identifier - tok[171..171]
+    │           │  └ token: .identifier 'foo'
+    │           └ rhs: %132 = .number_literal - tok[173..173]
+    │              └ token: .number_literal '123'
+    ├ %154 = .fn_decl - tok[176..202]
+    │  ├ proto: %138 = .fn_proto - tok[177..180]
+    │  │  ├ name: %136 = .identifier - tok[177..177]
+    │  │  │  └ token: .identifier 'int_load'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %137 = .ty_void - tok[180..180]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %153 = .block - tok[181..201]
+    │     └ list: 9 items
+    │        ├ %139 = .comment_line - tok[182..183]
+    │        │  └ token: .comment '// %0 = alloc i32                        ; *i32@ptr:0'
+    │        ├ %140 = .comment_line - tok[183..184]
+    │        │  └ token: .comment '// %1 = const 10                         ; 10 int'
+    │        ├ %141 = .comment_line - tok[184..185]
+    │        │  └ token: .comment '// %2 = as i32 %1                        ; 10 i32'
+    │        ├ %142 = .comment_line - tok[185..186]
+    │        │  └ token: .comment '// %3 = store %0 %2                      ; void'
+    │        ├ %146 = .const_decl - tok[186..191]
+    │        │  ├ name: %143 = .identifier - tok[187..187]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: %144 = .ty_i32 - tok[189..189]
+    │        │  │  └ token: .keyword_i32 'i32'
+    │        │  └ value: %145 = .number_literal - tok[191..191]
+    │        │     └ token: .number_literal '10'
+    │        ├ %147 = .comment_line - tok[193..194]
+    │        │  └ token: .comment '// %4 = load i32 %0                      ; 10 i32'
+    │        ├ %148 = .comment_line - tok[194..195]
+    │        │  └ token: .comment '// %5 = alloc i32                        ; *i32@ptr:4'
+    │        ├ %149 = .comment_line - tok[195..196]
+    │        │  └ token: .comment '// %6 = store i32 %5 %4                  ; void'
+    │        └ %152 = .const_decl - tok[196..199]
+    │           ├ name: %150 = .identifier - tok[197..197]
+    │           │  └ token: .identifier 'bar'
+    │           ├ type: NONE
+    │           └ value: %151 = .identifier - tok[199..199]
+    │              └ token: .identifier 'foo'
+    ├ %190 = .fn_decl - tok[202..248]
+    │  ├ proto: %157 = .fn_proto - tok[203..206]
+    │  │  ├ name: %155 = .identifier - tok[203..203]
+    │  │  │  └ token: .identifier 'array_alloc'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %156 = .ty_void - tok[206..206]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %189 = .block - tok[207..247]
+    │     └ list: 20 items
+    │        ├ %158 = .comment_line - tok[208..209]
+    │        │  └ token: .comment '// %0 = alloc [3]i32                        ; *[3]i32@ptr:0'
+    │        ├ %159 = .comment_line - tok[209..210]
+    │        │  └ token: .comment '// %1 = const 0                             ; 0 int'
+    │        ├ %160 = .comment_line - tok[210..211]
+    │        │  └ token: .comment '// %2 = as usize %1                         ; 0 usize'
+    │        ├ %161 = .comment_line - tok[211..212]
+    │        │  └ token: .comment '// %3 = get_el_ptr %0 i=(%2) offset=(0)     ; *i32@ptr:0'
+    │        ├ %162 = .comment_line - tok[212..213]
+    │        │  └ token: .comment '// %4 = const 1                             ; 1 int'
+    │        ├ %163 = .comment_line - tok[213..214]
+    │        │  └ token: .comment '// %5 = as i32 %4                           ; 1 i32'
+    │        ├ %164 = .comment_line - tok[214..215]
+    │        │  └ token: .comment '// %6 = store %3 %5                         ; void'
+    │        ├ %165 = .comment_line - tok[215..216]
+    │        │  └ token: .comment '// %7 = const 1                             ; 1 int'
+    │        ├ %166 = .comment_line - tok[216..217]
+    │        │  └ token: .comment '// %8 = as usize %7                         ; 1 usize'
+    │        ├ %167 = .comment_line - tok[217..218]
+    │        │  └ token: .comment '// %9 = get_el_ptr %0 i=(%8) offset=(4)     ; *i32@ptr:4'
+    │        ├ %168 = .comment_line - tok[218..219]
+    │        │  └ token: .comment '// %10 = const 2                            ; 2 int'
+    │        ├ %169 = .comment_line - tok[219..220]
+    │        │  └ token: .comment '// %11 = as i32 %10                         ; 2 i32'
+    │        ├ %170 = .comment_line - tok[220..221]
+    │        │  └ token: .comment '// %12 = store %9 %11                       ; void'
+    │        ├ %171 = .comment_line - tok[221..222]
+    │        │  └ token: .comment '// %13 = const 2                            ; 2 int'
+    │        ├ %172 = .comment_line - tok[222..223]
+    │        │  └ token: .comment '// %14 = as usize %13                       ; 2 usize'
+    │        ├ %173 = .comment_line - tok[223..224]
+    │        │  └ token: .comment '// %15 = get_el_ptr %0 i=(%14) offset=(8)   ; *i32@ptr:8'
+    │        ├ %174 = .comment_line - tok[224..225]
+    │        │  └ token: .comment '// %16 = const 3                            ; 3 int'
+    │        ├ %175 = .comment_line - tok[225..226]
+    │        │  └ token: .comment '// %17 = as i32 %16                         ; 3 i32'
+    │        ├ %176 = .comment_line - tok[226..227]
+    │        │  └ token: .comment '// %18 = store %15 %17                      ; void'
+    │        └ %188 = .const_decl - tok[227..245]
+    │           ├ name: %177 = .identifier - tok[228..228]
+    │           │  └ token: .identifier 'foo'
+    │           ├ type: %180 = .ty_array - tok[230..234]
+    │           │  ├ size_expr: %178 = .number_literal - tok[231..231]
+    │           │  │  └ token: .number_literal '3'
+    │           │  └ type: %179 = .ty_i32 - tok[233..233]
+    │           │     └ token: .keyword_i32 'i32'
+    │           └ value: %187 = .array_init - tok[235..246]
+    │              ├ type: %183 = .ty_array - tok[235..239]
+    │              │  ├ size_expr: %181 = .number_literal - tok[236..236]
+    │              │  │  └ token: .number_literal '3'
+    │              │  └ type: %182 = .ty_i32 - tok[238..238]
+    │              │     └ token: .keyword_i32 'i32'
+    │              └ items_list: 3 items
+    │                 ├ %184 = .number_literal - tok[240..240]
+    │                 │  └ token: .number_literal '1'
+    │                 ├ %185 = .number_literal - tok[242..242]
+    │                 │  └ token: .number_literal '2'
+    │                 └ %186 = .number_literal - tok[244..244]
+    │                    └ token: .number_literal '3'
+    ├ %237 = .fn_decl - tok[248..307]
+    │  ├ proto: %193 = .fn_proto - tok[249..252]
+    │  │  ├ name: %191 = .identifier - tok[249..249]
+    │  │  │  └ token: .identifier 'array_alloc_2'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %192 = .ty_void - tok[252..252]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %236 = .block - tok[253..306]
+    │     └ list: 27 items
+    │        ├ %194 = .comment_line - tok[254..255]
+    │        │  └ token: .comment '// %0 = alloc [3]i32                        ; *[3]i32@ptr:0'
+    │        ├ %195 = .comment_line - tok[255..256]
+    │        │  └ token: .comment '// %1 = const 0                             ; 0 int'
+    │        ├ %196 = .comment_line - tok[256..257]
+    │        │  └ token: .comment '// %2 = as usize %1                         ; 0 usize'
+    │        ├ %197 = .comment_line - tok[257..258]
+    │        │  └ token: .comment '// %3 = get_el_ptr %0 i=(%2) offset=(0)     ; *i32@ptr:0'
+    │        ├ %198 = .comment_line - tok[258..259]
+    │        │  └ token: .comment '// %4 = const 1                             ; 1 int'
+    │        ├ %199 = .comment_line - tok[259..260]
+    │        │  └ token: .comment '// %5 = as i32 %4                           ; 1 i32'
+    │        ├ %200 = .comment_line - tok[260..261]
+    │        │  └ token: .comment '// %6 = store %3 %5                         ; void'
+    │        ├ %201 = .comment_line - tok[261..262]
+    │        │  └ token: .comment '// %7 = const 1                             ; 1 int'
+    │        ├ %202 = .comment_line - tok[262..263]
+    │        │  └ token: .comment '// %8 = as usize %7                         ; 1 usize'
+    │        ├ %203 = .comment_line - tok[263..264]
+    │        │  └ token: .comment '// %9 = get_el_ptr %0 i=(%8) offset=(4)     ; *i32@ptr:4'
+    │        ├ %204 = .comment_line - tok[264..265]
+    │        │  └ token: .comment '// %10 = const 2                            ; 2 int'
+    │        ├ %205 = .comment_line - tok[265..266]
+    │        │  └ token: .comment '// %11 = as i32 %10                         ; 2 i32'
+    │        ├ %206 = .comment_line - tok[266..267]
+    │        │  └ token: .comment '// %12 = store %9 %11                       ; void'
+    │        ├ %207 = .comment_line - tok[267..268]
+    │        │  └ token: .comment '// %13 = const 2                            ; 2 int'
+    │        ├ %208 = .comment_line - tok[268..269]
+    │        │  └ token: .comment '// %14 = as usize %13                       ; 2 usize'
+    │        ├ %209 = .comment_line - tok[269..270]
+    │        │  └ token: .comment '// %15 = get_el_ptr %0 i=(%14) offset=(8)   ; *i32@ptr:8'
+    │        ├ %210 = .comment_line - tok[270..271]
+    │        │  └ token: .comment '// %16 = const 3                            ; 3 int'
+    │        ├ %211 = .comment_line - tok[271..272]
+    │        │  └ token: .comment '// %17 = as i32 %16                         ; 3 i32'
+    │        ├ %212 = .comment_line - tok[272..273]
+    │        │  └ token: .comment '// %18 = store %15 %17                      ; void'
+    │        ├ %224 = .var_decl - tok[273..291]
+    │        │  ├ name: %213 = .identifier - tok[274..274]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: %216 = .ty_array - tok[276..280]
+    │        │  │  ├ size_expr: %214 = .number_literal - tok[277..277]
+    │        │  │  │  └ token: .number_literal '3'
+    │        │  │  └ type: %215 = .ty_i32 - tok[279..279]
+    │        │  │     └ token: .keyword_i32 'i32'
+    │        │  └ value: %223 = .array_init - tok[281..292]
+    │        │     ├ type: %219 = .ty_array - tok[281..285]
+    │        │     │  ├ size_expr: %217 = .number_literal - tok[282..282]
+    │        │     │  │  └ token: .number_literal '3'
+    │        │     │  └ type: %218 = .ty_i32 - tok[284..284]
+    │        │     │     └ token: .keyword_i32 'i32'
+    │        │     └ items_list: 3 items
+    │        │        ├ %220 = .number_literal - tok[286..286]
+    │        │        │  └ token: .number_literal '1'
+    │        │        ├ %221 = .number_literal - tok[288..288]
+    │        │        │  └ token: .number_literal '2'
+    │        │        └ %222 = .number_literal - tok[290..290]
+    │        │           └ token: .number_literal '3'
+    │        ├ %225 = .comment_line - tok[293..294]
+    │        │  └ token: .comment '// %19 = const 0                            ; 0 int'
+    │        ├ %226 = .comment_line - tok[294..295]
+    │        │  └ token: .comment '// %20 = as usize %19                       ; 0 usize'
+    │        ├ %227 = .comment_line - tok[295..296]
+    │        │  └ token: .comment '// %21 = get_el_ptr %0 i=(%20) offset=(0)   ; *i32@ptr:0'
+    │        ├ %228 = .comment_line - tok[296..297]
+    │        │  └ token: .comment '// %22 = const 4                            ; 4 int'
+    │        ├ %229 = .comment_line - tok[297..298]
+    │        │  └ token: .comment '// %23 = as i32 %22                         ; 4 i32'
+    │        ├ %230 = .comment_line - tok[298..299]
+    │        │  └ token: .comment '// %24 = store %21 %23                      ; void'
+    │        └ %235 = .assign - tok[299..304]
+    │           ├ lhs: %233 = .array_prop_access - tok[299..302]
+    │           │  ├ lhs: %231 = .identifier - tok[299..299]
+    │           │  │  └ token: .identifier 'foo'
+    │           │  └ rhs: %232 = .number_literal - tok[301..301]
+    │           │     └ token: .number_literal '0'
+    │           └ rhs: %234 = .number_literal - tok[304..304]
+    │              └ token: .number_literal '4'
+    ├ %273 = .fn_decl - tok[307..353]
+    │  ├ proto: %240 = .fn_proto - tok[308..311]
+    │  │  ├ name: %238 = .identifier - tok[308..308]
+    │  │  │  └ token: .identifier 'array_alloc_3'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %239 = .ty_void - tok[311..311]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %272 = .block - tok[312..352]
+    │     └ list: 21 items
+    │        ├ %241 = .comment_line - tok[313..314]
+    │        │  └ token: .comment '// %0 = alloc [3]i32                        ; *[3]i32@ptr:0'
+    │        ├ %242 = .comment_line - tok[314..315]
+    │        │  └ token: .comment '// %1 = const 0                             ; 0 int'
+    │        ├ %243 = .comment_line - tok[315..316]
+    │        │  └ token: .comment '// %2 = as usize %1                         ; 0 usize'
+    │        ├ %244 = .comment_line - tok[316..317]
+    │        │  └ token: .comment '// %3 = get_el_ptr %0 i=(%2) offset=(0)     ; *i32@ptr:0'
+    │        ├ %245 = .comment_line - tok[317..318]
+    │        │  └ token: .comment '// %4 = const 1                             ; 1 int'
+    │        ├ %246 = .comment_line - tok[318..319]
+    │        │  └ token: .comment '// %5 = as i32 %4                           ; 1 i32'
+    │        ├ %247 = .comment_line - tok[319..320]
+    │        │  └ token: .comment '// %6 = store %3 %5                         ; void'
+    │        ├ %248 = .comment_line - tok[320..321]
+    │        │  └ token: .comment '// %7 = const 1                             ; 1 int'
+    │        ├ %249 = .comment_line - tok[321..322]
+    │        │  └ token: .comment '// %8 = as usize %7                         ; 1 usize'
+    │        ├ %250 = .comment_line - tok[322..323]
+    │        │  └ token: .comment '// %9 = get_el_ptr %0 i=(%8) offset=(4)     ; *i32@ptr:4'
+    │        ├ %251 = .comment_line - tok[323..324]
+    │        │  └ token: .comment '// %10 = const 2                            ; 2 int'
+    │        ├ %252 = .comment_line - tok[324..325]
+    │        │  └ token: .comment '// %11 = as i32 %10                         ; 2 i32'
+    │        ├ %253 = .comment_line - tok[325..326]
+    │        │  └ token: .comment '// %12 = store %9 %11                       ; void'
+    │        ├ %254 = .comment_line - tok[326..327]
+    │        │  └ token: .comment '// %13 = const 2                            ; 2 int'
+    │        ├ %255 = .comment_line - tok[327..328]
+    │        │  └ token: .comment '// %14 = as usize %13                       ; 2 usize'
+    │        ├ %256 = .comment_line - tok[328..329]
+    │        │  └ token: .comment '// %15 = get_el_ptr %0 i=(%14) offset=(8)   ; *i32@ptr:8'
+    │        ├ %257 = .comment_line - tok[329..330]
+    │        │  └ token: .comment '// %16 = const 3                            ; 3 int'
+    │        ├ %258 = .comment_line - tok[330..331]
+    │        │  └ token: .comment '// %17 = as i32 %16                         ; 3 i32'
+    │        ├ %259 = .comment_line - tok[331..332]
+    │        │  └ token: .comment '// %18 = store %15 %17                      ; void'
+    │        ├ %268 = .const_decl - tok[332..345]
+    │        │  ├ name: %260 = .identifier - tok[333..333]
+    │        │  │  └ token: .identifier 'foo'
+    │        │  ├ type: NONE
+    │        │  └ value: %267 = .array_init - tok[335..346]
+    │        │     ├ type: %263 = .ty_array - tok[335..339]
+    │        │     │  ├ size_expr: %261 = .number_literal - tok[336..336]
+    │        │     │  │  └ token: .number_literal '3'
+    │        │     │  └ type: %262 = .ty_i32 - tok[338..338]
+    │        │     │     └ token: .keyword_i32 'i32'
+    │        │     └ items_list: 3 items
+    │        │        ├ %264 = .number_literal - tok[340..340]
+    │        │        │  └ token: .number_literal '1'
+    │        │        ├ %265 = .number_literal - tok[342..342]
+    │        │        │  └ token: .number_literal '2'
+    │        │        └ %266 = .number_literal - tok[344..344]
+    │        │           └ token: .number_literal '3'
+    │        └ %271 = .const_decl - tok[347..350]
+    │           ├ name: %269 = .identifier - tok[348..348]
+    │           │  └ token: .identifier 'bar'
+    │           ├ type: NONE
+    │           └ value: %270 = .identifier - tok[350..350]
+    │              └ token: .identifier 'foo'
+    ├ %274 = .comment_line - tok[353..354]
+    │  └ token: .comment '// %mem.data.0: [5]bchar = "Hello"'
+    ├ %284 = .fn_decl - tok[354..368]
+    │  ├ proto: %277 = .fn_proto - tok[355..358]
+    │  │  ├ name: %275 = .identifier - tok[355..355]
+    │  │  │  └ token: .identifier 'str_alloc'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %276 = .ty_void - tok[358..358]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %283 = .block - tok[359..367]
+    │     └ list: 3 items
+    │        ├ %278 = .comment_line - tok[360..361]
+    │        │  └ token: .comment '// %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0'
+    │        ├ %279 = .comment_line - tok[361..362]
+    │        │  └ token: .comment '// %1 = memcpy %0 %mem.data.0             ; void'
+    │        └ %282 = .const_decl - tok[362..365]
+    │           ├ name: %280 = .identifier - tok[363..363]
+    │           │  └ token: .identifier 'foo'
+    │           ├ type: NONE
+    │           └ value: %281 = .string_literal - tok[365..365]
+    │              └ token: .string_literal '"Hello"'
+    ├ %316 = .fn_decl - tok[368..413]
+    │  ├ proto: %287 = .fn_proto - tok[369..372]
+    │  │  ├ name: %285 = .identifier - tok[369..369]
+    │  │  │  └ token: .identifier 'str_alloc_2'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %286 = .ty_void - tok[372..372]
+    │  │  │  └ token: .keyword_void 'void'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %315 = .block - tok[373..412]
+    │     └ list: 4 items
+    │        ├ %288 = .comment_line - tok[374..375]
+    │        │  └ token: .comment '// %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0'
+    │        ├ %289 = .comment_line - tok[375..376]
+    │        │  └ token: .comment '// %1 = memcpy %0 %mem.data.0             ; void'
+    │        ├ %313 = .comp_block - tok[376..411]
+    │        │  └ node: %312 = .block - tok[377..410]
+    │        │     └ list: 8 items
+    │        │        ├ %292 = .var_decl - tok[378..381]
+    │        │        │  ├ name: %290 = .identifier - tok[379..379]
+    │        │        │  │  └ token: .identifier 'foo'
+    │        │        │  ├ type: NONE
+    │        │        │  └ value: %291 = .string_literal - tok[381..381]
+    │        │        │     └ token: .string_literal '"Hello"'
+    │        │        ├ %293 = .comment_line - tok[383..384]
+    │        │        │  └ token: .comment '// %2 = usize.const 0                     ; 0 usize'
+    │        │        ├ %294 = .comment_line - tok[384..385]
+    │        │        │  └ token: .comment '// %3 = get_el_ptr %0 i=(%2) offset=(0)   ; *bchar@ptr:0'
+    │        │        ├ %295 = .comment_line - tok[385..386]
+    │        │        │  └ token: .comment '// %4 = bchar.const 'h'                   ; 'h' bchar'
+    │        │        ├ %296 = .comment_line - tok[386..387]
+    │        │        │  └ token: .comment '// %5 = store %3 %4                       ; void'
+    │        │        ├ %301 = .const_decl - tok[387..393]
+    │        │        │  ├ name: %297 = .identifier - tok[388..388]
+    │        │        │  │  └ token: .identifier 'a'
+    │        │        │  ├ type: NONE
+    │        │        │  └ value: %300 = .array_prop_access - tok[390..393]
+    │        │        │     ├ lhs: %298 = .identifier - tok[390..390]
+    │        │        │     │  └ token: .identifier 'foo'
+    │        │        │     └ rhs: %299 = .number_literal - tok[392..392]
+    │        │        │        └ token: .number_literal '0'
+    │        │        ├ %306 = .assign - tok[395..400]
+    │        │        │  ├ lhs: %304 = .array_prop_access - tok[395..398]
+    │        │        │  │  ├ lhs: %302 = .identifier - tok[395..395]
+    │        │        │  │  │  └ token: .identifier 'foo'
+    │        │        │  │  └ rhs: %303 = .number_literal - tok[397..397]
+    │        │        │  │     └ token: .number_literal '0'
+    │        │        │  └ rhs: %305 = .char_literal - tok[400..400]
+    │        │        │     └ token: .char_literal ''h''
+    │        │        └ %311 = .const_decl - tok[402..408]
+    │        │           ├ name: %307 = .identifier - tok[403..403]
+    │        │           │  └ token: .identifier 'b'
+    │        │           ├ type: NONE
+    │        │           └ value: %310 = .array_prop_access - tok[405..408]
+    │        │              ├ lhs: %308 = .identifier - tok[405..405]
+    │        │              │  └ token: .identifier 'foo'
+    │        │              └ rhs: %309 = .number_literal - tok[407..407]
+    │        │                 └ token: .number_literal '0'
+    │        └ %314 = .comment_line - tok[411..412]
+    │           └ token: .comment '//  = 'h';'
+    ├ %326 = .fn_decl - tok[413..426]
+    │  ├ proto: %322 = .fn_proto - tok[414..420]
+    │  │  ├ name: %317 = .identifier - tok[414..414]
+    │  │  │  └ token: .identifier 'foo'
+    │  │  ├ params_list: 1 items
+    │  │  │  └ %318 = .fn_param - tok[416..418]
+    │  │  │     ├ name: %319 = .identifier - tok[416..416]
+    │  │  │     │  └ token: .identifier 'a'
+    │  │  │     └ type: %320 = .ty_i32 - tok[418..418]
+    │  │  │        └ token: .keyword_i32 'i32'
+    │  │  ├ ret_type: %321 = .ty_i32 - tok[420..420]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %325 = .block - tok[421..425]
+    │     └ list: 1 items
+    │        └ %324 = .ret_expression - tok[422..423]
+    │           └ node: %323 = .identifier - tok[423..423]
+    │              └ token: .identifier 'a'
+    ├ %338 = .fn_decl - tok[426..442]
+    │  ├ proto: %332 = .fn_proto - tok[427..433]
+    │  │  ├ name: %327 = .identifier - tok[427..427]
+    │  │  │  └ token: .identifier 'bar'
+    │  │  ├ params_list: 1 items
+    │  │  │  └ %328 = .fn_param - tok[429..431]
+    │  │  │     ├ name: %329 = .identifier - tok[429..429]
+    │  │  │     │  └ token: .identifier 'a'
+    │  │  │     └ type: %330 = .ty_i32 - tok[431..431]
+    │  │  │        └ token: .keyword_i32 'i32'
+    │  │  ├ ret_type: %331 = .ty_i32 - tok[433..433]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %337 = .block - tok[434..441]
+    │     └ list: 1 items
+    │        └ %336 = .ret_expression - tok[435..439]
+    │           └ node: %335 = .fn_call - tok[436..439]
+    │              ├ callee: %333 = .identifier - tok[436..436]
+    │              │  └ token: .identifier 'rec'
+    │              └ args_list: 1 items
+    │                 └ %334 = .identifier - tok[438..438]
+    │                    └ token: .identifier 'a'
+    ├ %358 = .fn_decl - tok[442..469]
+    │  ├ proto: %344 = .fn_proto - tok[443..449]
+    │  │  ├ name: %339 = .identifier - tok[443..443]
+    │  │  │  └ token: .identifier 'rec'
+    │  │  ├ params_list: 1 items
+    │  │  │  └ %340 = .fn_param - tok[445..447]
+    │  │  │     ├ name: %341 = .identifier - tok[445..445]
+    │  │  │     │  └ token: .identifier 'a'
+    │  │  │     └ type: %342 = .ty_i32 - tok[447..447]
+    │  │  │        └ token: .keyword_i32 'i32'
+    │  │  ├ ret_type: %343 = .ty_i32 - tok[449..449]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %357 = .block - tok[450..468]
+    │     └ list: 2 items
+    │        ├ %354 = .if_expr - tok[451..464]
+    │        │  ├ condition: %347 = .lt - tok[453..455]
+    │        │  │  ├ lhs: %345 = .identifier - tok[453..453]
+    │        │  │  │  └ token: .identifier 'a'
+    │        │  │  └ rhs: %346 = .number_literal - tok[455..455]
+    │        │  │     └ token: .number_literal '10'
+    │        │  ├ then_branch: %353 = .block - tok[457..464]
+    │        │  │  └ list: 2 items
+    │        │  │     ├ %348 = .comment_line - tok[458..459]
+    │        │  │     │  └ token: .comment '// return rec(2 * a);'
+    │        │  │     └ %352 = .ret_expression - tok[459..462]
+    │        │  │        └ node: %351 = .mul - tok[460..462]
+    │        │  │           ├ lhs: %349 = .number_literal - tok[460..460]
+    │        │  │           │  └ token: .number_literal '2'
+    │        │  │           └ rhs: %350 = .identifier - tok[462..462]
+    │        │  │              └ token: .identifier 'a'
+    │        │  └ else_branch: NONE
+    │        └ %356 = .ret_expression - tok[465..466]
+    │           └ node: %355 = .identifier - tok[466..466]
+    │              └ token: .identifier 'a'
+    └ %369 = .fn_decl - tok[469..484]
+       ├ proto: %361 = .fn_proto - tok[470..473]
+       │  ├ name: %359 = .identifier - tok[470..470]
        │  │  └ token: .identifier 'main'
        │  ├ params_list: 0 items
-       │  ├ ret_type: %2 = .ty_void - tok[4..4]
+       │  ├ ret_type: %360 = .ty_void - tok[473..473]
        │  │  └ token: .keyword_void 'void'
        │  └ is_declaring_builtin: false
-       └ body: %11 = .block - tok[5..15]
-          └ list: 5 items
-             ├ %6 = .const_decl - tok[6..9]
-             │  ├ name: %4 = .identifier - tok[7..7]
-             │  │  └ token: .identifier 'hello_world'
-             │  ├ type: NONE
-             │  └ value: %5 = .string_literal - tok[9..9]
-             │     └ token: .string_literal '"Hello, World!"'
-             ├ %7 = .comment_line - tok[11..12]
-             │  └ token: .comment '// @comptime_log(hello_world[0]);'
-             ├ %8 = .comment_line - tok[12..13]
-             │  └ token: .comment '// hello_world.* = A {};'
-             ├ %9 = .comment_line - tok[13..14]
-             │  └ token: .comment '// const test = (A {}).add(B{});'
-             └ %10 = .comment_line - tok[14..15]
-                └ token: .comment '// const first_char = hello_world[0];'
+       └ body: %368 = .block - tok[474..483]
+          └ list: 1 items
+             └ %367 = .comp_block - tok[475..482]
+                └ node: %366 = .eq - tok[476..481]
+                   ├ lhs: %364 = .fn_call - tok[476..479]
+                   │  ├ callee: %362 = .identifier - tok[476..476]
+                   │  │  └ token: .identifier 'rec'
+                   │  └ args_list: 1 items
+                   │     └ %363 = .number_literal - tok[478..478]
+                   │        └ token: .number_literal '2'
+                   └ rhs: %365 = .number_literal - tok[481..481]
+                      └ token: .number_literal '16'

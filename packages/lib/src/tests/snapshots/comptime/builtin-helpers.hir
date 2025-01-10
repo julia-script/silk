@@ -43,12 +43,12 @@
  │     ├ init: %13 = .block
  │     │  ├ %14 = comptime .inline_block
  │     │  │  ├ %15 = .global_get operand=(%1)
- │     │  │  ├ %16 = .comptime_number node=(n[16:"123"])
+ │     │  │  ├ %16 = .number_literal node=(n[16:"123"])
  │     │  │  ├ %17 = .fn_call callee=(%15), args_list=({%16})
  │     │  │  └ %18 = .br operand=(17), target=(%14)
  │     │  └ %19 = comptime .inline_block
  │     │     ├ %20 = .global_get operand=(%1)
- │     │     ├ %21 = .comptime_number node=(n[20:"456"])
+ │     │     ├ %21 = .number_literal node=(n[20:"456"])
  │     │     ├ %22 = .fn_call callee=(%20), args_list=({%21})
  │     │     └ %23 = .br operand=(22), target=(%19)
  │     └ is_declaring_builtin: false

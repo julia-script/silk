@@ -39,7 +39,7 @@
     │  │  └ params_list: 0 items
     │  └ init: %11 = .block
     │     ├ %12 = .global_get operand=(%1)
-    │     ├ %13 = .comptime_number node=(n[13:"1"])
+    │     ├ %13 = .number_literal node=(n[13:"1"])
     │     ├ %14 = .field_init name_node=(n[12:"a"]), value=(%13)
     │     ├ %15 = .type_init type=(%12), field_init_list=({%14})
     │     ├ %16 = .typeof operand=(%15)
@@ -60,7 +60,7 @@
     │  │  └ params_list: 0 items
     │  └ init: %21 = .block
     │     ├ %22 = .global_get operand=(%1)
-    │     ├ %23 = .comptime_number node=(n[25:"2"])
+    │     ├ %23 = .number_literal node=(n[25:"2"])
     │     ├ %24 = .field_init name_node=(n[24:"a"]), value=(%23)
     │     ├ %25 = .type_init type=(%22), field_init_list=({%24})
     │     ├ %26 = .typeof operand=(%25)
@@ -80,7 +80,7 @@
        │  │  └ node: node(#32: "void")
        │  └ params_list: 0 items
        └ init: %31 = .block
-          ├ %32 = .comptime_number node=(n[36:"10"])
+          ├ %32 = .number_literal node=(n[36:"10"])
           ├ %33 = .ty_i32 node=(n[35:"i32"])
           ├ %34 = .alloc mutable=(false), type=(%33)
           └ %35 = .store pointer=(%34), value=(%32)

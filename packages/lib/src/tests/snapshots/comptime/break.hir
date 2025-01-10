@@ -19,8 +19,8 @@
  │     │  └ params_list: 0 items
  │     ├ init: %3 = .block
  │     │  └ %4 = comptime .inline_block
- │     │     ├ %5 = .comptime_number node=(n[4:"1"])
- │     │     ├ %6 = .comptime_number node=(n[5:"1"])
+ │     │     ├ %5 = .number_literal node=(n[4:"1"])
+ │     │     ├ %6 = .number_literal node=(n[5:"1"])
  │     │     ├ %7 = .eq lhs=(%5), rhs=(%6)
  │     │     └ %8 = .br operand=(7), target=(%4)
  │     └ is_declaring_builtin: false

@@ -1,28 +1,43 @@
-struct T {
-  int a;
-};
+// C Program to illustrate the dereferencing of pointer
+#include <stdio.h>
 
-// fn should_alloc_1(): void {
-//   const a = T { a = 1 };
-// }
+int main() {
+  // Declare integer variable number
+  int num = 10;
+  int numb = num;
+  printf("numb: %d\n", &numb);
+  printf("num: %d\n", &num);
 
-// fn should_alloc_2(): void {
-//   var b = T { a = 2 };
-// }
+  // Declare pointer to store address of number
+  // int* ptr = &num;
 
-// fn should_alloc_3(): void {
-//   const c: i32 = 10;
-// }
+  // Print the value of number
+  // printf("Value of num = %d \n", num);
 
-// fn should_not_alloc_1(b: T): void {
-//   b.a = 3;
-// }
+  // // Print Address of the number using & operator
+  // printf("Address of num = %d \n", &num);
+  // printf("Address of num = %d \n", &num);
 
-// fn should_not_alloc_2(b: T): void {
-//   b = T { a = 4 };
-// }
+  // // Print Address stored in the pointer
+  // printf("Address stored in the ptr = %p \n\n", ptr);
 
-// fn should_not_alloc_3(a: T): void {
-//   const b = a;
-// }
-void playground() { char greetings[] = "Hello World!"; }
+  // printf("Dereference content in ptr using *ptr\n\n");
+
+  // // Access the content using * operator
+  // printf("Value of *ptr = %d \n", *ptr);
+
+  // printf("Now, *ptr is same as number\n\n");
+
+  // printf("Modify the value using pointer to 6 \n\n");
+
+  // // Modify the content in the address to 6 using pointer
+  // *ptr = 6;
+
+  // // Print the modified value using pointer
+  // printf("Value of *ptr = %d \n", *ptr);
+
+  // // Print the modified value using variable
+  // printf("Value of number = %d \n", num);
+
+  return 0;
+}

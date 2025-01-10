@@ -271,7 +271,7 @@ test Type {
     // @compileLog(std.meta.tags(Type.Index).len);
 }
 pub const Value = union(enum) {
-    comptime_number: struct {
+    number_literal: struct {
         val: InternedSlice,
     },
     number: struct {
@@ -381,8 +381,8 @@ fn formatValue(self: *Ir, writer: std.io.AnyWriter, options: FormatOptions, valu
     }
     const value: Value = self.values.items[value_index.toArrayIndex()];
     switch (value) {
-        .comptime_number => |comptime_number| {
-            try writer.print("{s}", .{self.strings.getSlice(comptime_number.val)});
+        .number_literal => |number_literal| {
+            try writer.print("{s}", .{self.strings.getSlice(number_literal.val)});
         },
         .number => |number| {
             try writer.print("{d}", .{number.val});

@@ -18,7 +18,7 @@
  │     │  │  └ node: node(#2: "i32")
  │     │  └ params_list: 0 items
  │     ├ init: %3 = .block
- │     │  ├ %4 = .comptime_number node=(n[4:"123"])
+ │     │  ├ %4 = .number_literal node=(n[4:"123"])
  │     │  ├ %5 = .get_property_pointer base=(%4), property_name_node=(n[5:"as"]), is_builtin=(true)
  │     │  ├ %6 = .ty_i32 node=(n[7:"i32"])
  │     │  ├ %7 = .fn_call callee=(%5), args_list=({%6})

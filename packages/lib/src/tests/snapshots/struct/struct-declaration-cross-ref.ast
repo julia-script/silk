@@ -44,7 +44,7 @@
     │              ├ lhs: %18 = .identifier - tok[27..27]
     │              │  └ token: .identifier 'a'
     │              └ rhs: %19 = .identifier - tok[29..29]
-    │                 └ token: .identifier 'a'
+    │                 └ token: .identifier 'b'
     └ %37 = .type_decl - tok[32..53]
        ├ name: %24 = .identifier - tok[33..33]
        │  └ token: .identifier 'A'

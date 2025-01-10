@@ -99,8 +99,8 @@
  │  │  ├ init: %41 = .block
  │  │  │  ├ %42 = .global_get operand=(%1)
  │  │  │  ├ %43 = .get_property_pointer base=(%42), property_name_node=(n[39:"foo_add"]), is_builtin=(false)
- │  │  │  ├ %44 = .comptime_number node=(n[41:"1"])
- │  │  │  ├ %45 = .comptime_number node=(n[42:"2"])
+ │  │  │  ├ %44 = .number_literal node=(n[41:"1"])
+ │  │  │  ├ %45 = .number_literal node=(n[42:"2"])
  │  │  │  ├ %46 = .fn_call callee=(%43), args_list=({%44, %45})
  │  │  │  ├ %47 = .typeof operand=(%46)
  │  │  │  ├ %48 = .alloc mutable=(false), type=(%47)
@@ -121,8 +121,8 @@
  │  │  │  └ params_list: 0 items
  │  │  ├ init: %52 = .block
  │  │  │  ├ %53 = .global_get operand=(%2)
- │  │  │  ├ %54 = .comptime_number node=(n[52:"1"])
- │  │  │  ├ %55 = .comptime_number node=(n[53:"2"])
+ │  │  │  ├ %54 = .number_literal node=(n[52:"1"])
+ │  │  │  ├ %55 = .number_literal node=(n[53:"2"])
  │  │  │  ├ %56 = .fn_call callee=(%53), args_list=({%54, %55})
  │  │  │  ├ %57 = .typeof operand=(%56)
  │  │  │  ├ %58 = .alloc mutable=(false), type=(%57)
@@ -142,7 +142,7 @@
  │     │  │  └ node: node(#59: "void")
  │     │  └ params_list: 0 items
  │     ├ init: %62 = .block
- │     │  ├ %63 = .comptime_number node=(n[62:"2"])
+ │     │  ├ %63 = .number_literal node=(n[62:"2"])
  │     │  ├ %64 = .get_property_pointer base=(%63), property_name_node=(n[63:"as"]), is_builtin=(true)
  │     │  ├ %65 = .ty_i32 node=(n[65:"i32"])
  │     │  ├ %66 = .fn_call callee=(%64), args_list=({%65})

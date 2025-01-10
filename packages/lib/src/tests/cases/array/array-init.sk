@@ -1,5 +1,5 @@
 fn var_array() void {
- const arr: [1]i32 = [1]i32 {33};
+ const arr: [3]i32 = [3]i32 {11, 22, 33};
 }
 fn var_array_infer_type() void {
   // TODO: the first element init doesn't need to return a "get_element_pointer" instruction 

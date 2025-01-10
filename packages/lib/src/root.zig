@@ -23,4 +23,6 @@ test {
     _ = @import("Tracer.zig");
     _ = @import("Tracer2.zig");
     _ = @import("sema/Sema.zig");
+    _ = @import("sema/instructions/InstContext.zig");
+    _ = @import("sema/instructions/inst-index.zig");
 }

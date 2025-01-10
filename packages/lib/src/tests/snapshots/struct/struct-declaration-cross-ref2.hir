@@ -27,14 +27,14 @@
  │  │  │  │  │  │  ├ type: %11 = .ty_i32
  │  │  │  │  │  │  │  └ node: node(#7: "i32")
  │  │  │  │  │  │  └ init: %8 = .inline_block
- │  │  │  │  │  │     ├ %9 = .comptime_number node=(n[8:"2"])
+ │  │  │  │  │  │     ├ %9 = .number_literal node=(n[8:"2"])
  │  │  │  │  │  │     └ %10 = .br operand=(9), target=(%8)
  │  │  │  │  │  └ 2: %12 = .struct_field
  │  │  │  │  │     ├ name_node: node(#10: "c")
  │  │  │  │  │     ├ type: %16 = .ty_i32
  │  │  │  │  │     │  └ node: node(#11: "i32")
  │  │  │  │  │     └ init: %13 = .inline_block
- │  │  │  │  │        ├ %14 = .comptime_number node=(n[12:"3"])
+ │  │  │  │  │        ├ %14 = .number_literal node=(n[12:"3"])
  │  │  │  │  │        └ %15 = .br operand=(14), target=(%13)
  │  │  │  │  ├ declarations_list: 1 items
  │  │  │  │  │  └ 0: %17 = .global_decl
@@ -52,22 +52,22 @@
  │  │  │  │  │     │  └ params_list: 0 items
  │  │  │  │  │     ├ init: %19 = .block
  │  │  │  │  │     │  ├ %20 = .global_get operand=(%2)
- │  │  │  │  │     │  ├ %21 = .comptime_number node=(n[21:"4"])
+ │  │  │  │  │     │  ├ %21 = .number_literal node=(n[21:"4"])
  │  │  │  │  │     │  ├ %22 = .field_init name_node=(n[20:"d"]), value=(%21)
- │  │  │  │  │     │  ├ %23 = .comptime_number node=(n[24:"5"])
+ │  │  │  │  │     │  ├ %23 = .number_literal node=(n[24:"5"])
  │  │  │  │  │     │  ├ %24 = .field_init name_node=(n[23:"e"]), value=(%23)
- │  │  │  │  │     │  ├ %25 = .comptime_number node=(n[27:"6"])
+ │  │  │  │  │     │  ├ %25 = .number_literal node=(n[27:"6"])
  │  │  │  │  │     │  ├ %26 = .field_init name_node=(n[26:"f"]), value=(%25)
  │  │  │  │  │     │  ├ %27 = .type_init type=(%20), field_init_list=({%22, %24, %26})
  │  │  │  │  │     │  ├ %28 = .global_get operand=(%2)
  │  │  │  │  │     │  ├ %29 = .alloc mutable=(false), type=(%28)
  │  │  │  │  │     │  ├ %30 = .store pointer=(%29), value=(%27)
  │  │  │  │  │     │  ├ %31 = .global_get operand=(%1)
- │  │  │  │  │     │  ├ %32 = .comptime_number node=(n[35:"1"])
+ │  │  │  │  │     │  ├ %32 = .number_literal node=(n[35:"1"])
  │  │  │  │  │     │  ├ %33 = .field_init name_node=(n[34:"a"]), value=(%32)
- │  │  │  │  │     │  ├ %34 = .comptime_number node=(n[38:"2"])
+ │  │  │  │  │     │  ├ %34 = .number_literal node=(n[38:"2"])
  │  │  │  │  │     │  ├ %35 = .field_init name_node=(n[37:"b"]), value=(%34)
- │  │  │  │  │     │  ├ %36 = .comptime_number node=(n[41:"3"])
+ │  │  │  │  │     │  ├ %36 = .number_literal node=(n[41:"3"])
  │  │  │  │  │     │  ├ %37 = .field_init name_node=(n[40:"c"]), value=(%36)
  │  │  │  │  │     │  ├ %38 = .type_init type=(%31), field_init_list=({%33, %35, %37})
  │  │  │  │  │     │  ├ %39 = .global_get operand=(%1)
@@ -102,14 +102,14 @@
  │     │  │  │  │  ├ type: %54 = .ty_i32
  │     │  │  │  │  │  └ node: node(#58: "i32")
  │     │  │  │  │  └ init: %51 = .inline_block
- │     │  │  │  │     ├ %52 = .comptime_number node=(n[59:"2"])
+ │     │  │  │  │     ├ %52 = .number_literal node=(n[59:"2"])
  │     │  │  │  │     └ %53 = .br operand=(52), target=(%51)
  │     │  │  │  └ 2: %55 = .struct_field
  │     │  │  │     ├ name_node: node(#61: "f")
  │     │  │  │     ├ type: %59 = .ty_i32
  │     │  │  │     │  └ node: node(#62: "i32")
  │     │  │  │     └ init: %56 = .inline_block
- │     │  │  │        ├ %57 = .comptime_number node=(n[63:"3"])
+ │     │  │  │        ├ %57 = .number_literal node=(n[63:"3"])
  │     │  │  │        └ %58 = .br operand=(57), target=(%56)
  │     │  │  ├ declarations_list: 1 items
  │     │  │  │  └ 0: %60 = .global_decl
@@ -127,22 +127,22 @@
  │     │  │  │     │  └ params_list: 0 items
  │     │  │  │     ├ init: %62 = .block
  │     │  │  │     │  ├ %63 = .global_get operand=(%1)
- │     │  │  │     │  ├ %64 = .comptime_number node=(n[72:"1"])
+ │     │  │  │     │  ├ %64 = .number_literal node=(n[72:"1"])
  │     │  │  │     │  ├ %65 = .field_init name_node=(n[71:"a"]), value=(%64)
- │     │  │  │     │  ├ %66 = .comptime_number node=(n[75:"2"])
+ │     │  │  │     │  ├ %66 = .number_literal node=(n[75:"2"])
  │     │  │  │     │  ├ %67 = .field_init name_node=(n[74:"b"]), value=(%66)
- │     │  │  │     │  ├ %68 = .comptime_number node=(n[78:"3"])
+ │     │  │  │     │  ├ %68 = .number_literal node=(n[78:"3"])
  │     │  │  │     │  ├ %69 = .field_init name_node=(n[77:"c"]), value=(%68)
  │     │  │  │     │  ├ %70 = .type_init type=(%63), field_init_list=({%65, %67, %69})
  │     │  │  │     │  ├ %71 = .global_get operand=(%1)
  │     │  │  │     │  ├ %72 = .alloc mutable=(false), type=(%71)
  │     │  │  │     │  ├ %73 = .store pointer=(%72), value=(%70)
  │     │  │  │     │  ├ %74 = .global_get operand=(%2)
- │     │  │  │     │  ├ %75 = .comptime_number node=(n[86:"4"])
+ │     │  │  │     │  ├ %75 = .number_literal node=(n[86:"4"])
  │     │  │  │     │  ├ %76 = .field_init name_node=(n[85:"d"]), value=(%75)
- │     │  │  │     │  ├ %77 = .comptime_number node=(n[89:"5"])
+ │     │  │  │     │  ├ %77 = .number_literal node=(n[89:"5"])
  │     │  │  │     │  ├ %78 = .field_init name_node=(n[88:"e"]), value=(%77)
- │     │  │  │     │  ├ %79 = .comptime_number node=(n[92:"6"])
+ │     │  │  │     │  ├ %79 = .number_literal node=(n[92:"6"])
  │     │  │  │     │  ├ %80 = .field_init name_node=(n[91:"f"]), value=(%79)
  │     │  │  │     │  ├ %81 = .type_init type=(%74), field_init_list=({%76, %78, %80})
  │     │  │  │     │  ├ %82 = .global_get operand=(%2)

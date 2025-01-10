@@ -567,7 +567,7 @@ export type HirInstruction =
 			};
 	  }
 	| {
-			comptime_number: number;
+			number_literal: number;
 	  }
 	| {
 			ty_number: number;

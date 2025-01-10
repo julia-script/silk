@@ -4,7 +4,7 @@ fn main() i32 {
     b = 2,
     c = 3,
   }
-  return a.a;
+  return a.b;
 }
 
 type A = struct {

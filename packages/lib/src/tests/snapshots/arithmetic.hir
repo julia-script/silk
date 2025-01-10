@@ -18,9 +18,9 @@
  │     │  │  └ node: node(#2: "i32")
  │     │  └ params_list: 0 items
  │     ├ init: %3 = .block
- │     │  ├ %4 = .comptime_number node=(n[4:"2"])
- │     │  ├ %5 = .comptime_number node=(n[5:"3"])
- │     │  ├ %6 = .comptime_number node=(n[6:"4"])
+ │     │  ├ %4 = .number_literal node=(n[4:"2"])
+ │     │  ├ %5 = .number_literal node=(n[5:"3"])
+ │     │  ├ %6 = .number_literal node=(n[6:"4"])
  │     │  ├ %7 = .mul lhs=(%5), rhs=(%6)
  │     │  ├ %8 = .add lhs=(%4), rhs=(%7)
  │     │  ├ %9 = .ty_i32 node=(n[2:"i32"])

@@ -3,7 +3,7 @@
 ;; 5 entities
 ;; 2 symbols
 ;; 73 instructions
-;; 19 values
+;; 23 values
 ;; 19 types
 ;; 3 lists
 ;; 10 strings
@@ -13,43 +13,43 @@
  └ %0: void = .block: [%1-%66]                                        ; void
     ├ !%1: typeof(i32) = .type                                        ; typeof(i32)
     ├ !%2: number = .constant                                         ; number{ 4 }
-    ├ !%3: usize = .constant                                          ; usize{ 4 }
+    ├ !%3: usize = .cast operand=(%2)                                 ; usize{ 4 }
     ├ !%4: typeof([4]i32) = .type                                     ; typeof([4]i32)
     ├ !%5: number = .constant                                         ; number{ 1 }
     ├ !%6: number = .constant                                         ; number{ 2 }
     ├ !%7: number = .constant                                         ; number{ 3 }
     ├ !%8: number = .constant                                         ; number{ 4 }
-    ├ !%9: [4]i32 = .array_init                                       ; todo_complex(array)
+    ├ !%9: [4]i32 = .array_init                                       ; [4]i32
     ├ !%10: typeof(i32) = .type                                       ; typeof(i32)
     ├ !%11: number = .constant                                        ; number{ 4 }
-    ├ !%12: usize = .constant                                         ; usize{ 4 }
+    ├ !%12: usize = .cast operand=(%11)                               ; usize{ 4 }
     ├ !%13: typeof([4]i32) = .type                                    ; typeof([4]i32)
     ├ %14: *[4]i32 = .alloc type=([4]i32) mutable=(false)             ; *[4]i32@0
     ├ %15: usize = .constant                                          ; usize{ 0 }
     ├ %16: *i32 = .get_element_pointer base=(%14) index=(%15)         ; *i32@0
-    ├ %17: i32 = .constant                                            ; i32{ 1 }
+    ├ %17: i32 = .cast operand=(%5)                                   ; i32{ 1 }
     ├ %18: void = .store operand=(%16) payload=(%17)                  ; void
-    ├ %19: usize = .constant                                          ; usize{ 4 }
+    ├ %19: usize = .constant                                          ; usize{ 1 }
     ├ %20: *i32 = .get_element_pointer base=(%14) index=(%19)         ; *i32@4
-    ├ %21: i32 = .constant                                            ; i32{ 2 }
+    ├ %21: i32 = .cast operand=(%6)                                   ; i32{ 2 }
     ├ %22: void = .store operand=(%20) payload=(%21)                  ; void
-    ├ %23: usize = .constant                                          ; usize{ 8 }
-    ├ %24: *i32 = .get_element_pointer base=(%14) index=(%23)         ; *i32[runtime]
-    ├ %25: i32 = .constant                                            ; i32{ 3 }
+    ├ %23: usize = .constant                                          ; usize{ 2 }
+    ├ %24: *i32 = .get_element_pointer base=(%14) index=(%23)         ; *i32@8
+    ├ %25: i32 = .cast operand=(%7)                                   ; i32{ 3 }
     ├ %26: void = .store operand=(%24) payload=(%25)                  ; void
-    ├ %27: usize = .constant                                          ; usize{ 12 }
-    ├ %28: *i32 = .get_element_pointer base=(%14) index=(%27)         ; *i32[runtime]
-    ├ %29: i32 = .constant                                            ; i32{ 4 }
+    ├ %27: usize = .constant                                          ; usize{ 3 }
+    ├ %28: *i32 = .get_element_pointer base=(%14) index=(%27)         ; *i32@c
+    ├ %29: i32 = .cast operand=(%8)                                   ; i32{ 4 }
     ├ %30: void = .store operand=(%28) payload=(%29)                  ; void
     ├ !%31: number = .constant                                        ; number{ 0 }
     ├ !%32: typeof(i32) = .type                                       ; typeof(i32)
     ├ %33: *i32 = .alloc type=(i32) mutable=(true)                    ; *i32[runtime]
-    ├ %34: i32 = .constant                                            ; i32{ 0 }
+    ├ %34: i32 = .cast operand=(%31)                                  ; i32{ 0 }
     ├ %35: void = .store operand=(%33) payload=(%34)                  ; void
     ├ !%36: number = .constant                                        ; number{ 0 }
     ├ !%37: typeof(i32) = .type                                       ; typeof(i32)
     ├ %38: *i32 = .alloc type=(i32) mutable=(true)                    ; *i32[runtime]
-    ├ %39: i32 = .constant                                            ; i32{ 0 }
+    ├ %39: i32 = .cast operand=(%36)                                  ; i32{ 0 }
     ├ %40: void = .store operand=(%38) payload=(%39)                  ; void
     ├ %41 loop: [%42-%62]
     │  └ %42: void = .block: [%43-%62]                                ; void
@@ -69,7 +69,7 @@
     │           ├ %56: void = .store operand=(%38) payload=(%55)      ; void
     │           ├ %57: i32 = .load operand=(%33)                      ; i32{ [runtime] }
     │           ├ !%58: number = .constant                            ; number{ 1 }
-    │           ├ %59: i32 = .constant                                ; i32{ 1 }
+    │           ├ %59: i32 = .cast operand=(%58)                      ; i32{ 1 }
     │           ├ %60: i32 = .add lhs=(%57) rhs=(%59)                 ; i32{ [runtime] }
     │           ├ %61: void = .store operand=(%33) payload=(%60)      ; void
     │           └ %62: void = .br operand=(%41)                       ; void

@@ -558,6 +558,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .keyword_false,
             .keyword_number,
             .keyword_boolean,
+            .keyword_bool,
             .keyword_string,
             .keyword_void,
 
@@ -587,6 +588,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .keyword_true => .true_literal,
                     .keyword_number => .ty_number,
                     .keyword_boolean => .ty_boolean,
+                    .keyword_bool => .ty_boolean,
                     .keyword_string => .ty_string,
                     .keyword_void => .ty_void,
 
@@ -1824,6 +1826,7 @@ pub fn parseIfExpression(self: *AstGen) AstGenError!Node.Index {
         }
         break :blk 0;
     };
+
     return try self.pushNode(.{
         .data = .{ .if_expr = .{
             .condition = condition,

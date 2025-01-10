@@ -1555,7 +1555,7 @@ pub const Wip = struct {
         defer self.builder.tracer.end(event_id);
         switch (hir_inst) {
             .local => |local| return try self.resolveLocalInstruction(hir_inst_index, local),
-            .comptime_number => return try self.resolveConstantInstruction(hir_inst_index, hir_inst.comptime_number.node),
+            .number_literal => return try self.resolveConstantInstruction(hir_inst_index, hir_inst.number_literal.node),
 
             .ty_i8,
             .ty_i16,

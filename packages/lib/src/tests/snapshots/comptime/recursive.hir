@@ -74,12 +74,12 @@
  │  │  ├ init: %30 = .block
  │  │  │  ├ %31 = .param operand=(%28)
  │  │  │  ├ %32 = .param_get operand=(%31)
- │  │  │  ├ %33 = .comptime_number node=(n[30:"10"])
+ │  │  │  ├ %33 = .number_literal node=(n[30:"10"])
  │  │  │  ├ %34 = .lt lhs=(%32), rhs=(%33)
  │  │  │  ├ %35 = .if_expr cond (%34)
  │  │  │  │  └ then: %36 = .block
  │  │  │  │     ├ %37 = .global_get operand=(%2)
- │  │  │  │     ├ %38 = .comptime_number node=(n[33:"2"])
+ │  │  │  │     ├ %38 = .number_literal node=(n[33:"2"])
  │  │  │  │     ├ %39 = .param_get operand=(%31)
  │  │  │  │     ├ %40 = .mul lhs=(%38), rhs=(%39)
  │  │  │  │     ├ %41 = .fn_call callee=(%37), args_list=({%40})
@@ -107,9 +107,9 @@
  │     ├ init: %51 = .block
  │     │  └ %52 = comptime .inline_block
  │     │     ├ %53 = .global_get operand=(%3)
- │     │     ├ %54 = .comptime_number node=(n[48:"1"])
+ │     │     ├ %54 = .number_literal node=(n[48:"1"])
  │     │     ├ %55 = .fn_call callee=(%53), args_list=({%54})
- │     │     ├ %56 = .comptime_number node=(n[50:"16"])
+ │     │     ├ %56 = .number_literal node=(n[50:"16"])
  │     │     ├ %57 = .eq lhs=(%55), rhs=(%56)
  │     │     └ %58 = .br operand=(57), target=(%52)
  │     └ is_declaring_builtin: false
