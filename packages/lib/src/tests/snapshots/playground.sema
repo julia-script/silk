@@ -1,13 +1,13 @@
 ;; Sema
-;; 20 declarations
-;; 51 entities
-;; 20 symbols
-;; 586 instructions
-;; 108 values
-;; 47 types
-;; 56 lists
-;; 78 strings
-;; 1048846/1347968 comptime memory used/allocated bytes
+;; 33 declarations
+;; 105 entities
+;; 33 symbols
+;; 738 instructions
+;; 117 values
+;; 60 types
+;; 59 lists
+;; 145 strings
+;; 1048810/1347968 comptime memory used/allocated bytes
 
 %0 = type @"playground.sk::T" = struct:
  ├ type: struct{i32}
@@ -630,15 +630,190 @@
  ├ %48: i32 = .cast operand=(%46)                                        ; i32{ [runtime] }
  └ %49: void = .ret maybe_operand=(%48)                                  ; void
 
-%19 = fn @"playground.sk::main"() -> void
-%0: typeof(void) = .block (4 insts)
- ├ %1: i32 = comptime .block (5 insts)
- │  ├ %2: fn(i32) i32 = .global_get entity=(%19) declaration=(%18)          ; fn(i32) i32
- │  ├ !%3: int = .constant                                                  ; int{ 10 }
- │  ├ %4: i32 = .cast operand=(%3)                                          ; i32{ 10 }
- │  ├ %5: i32 = .fn_call callee=(%2) callee_entity=(%19) callee_declaration=(%18) args_list=({%4}); i32{ 55 }
- │  └ %6: void = .br target=(%1) payload=(5)                                ; void
- ├ !%7: type = .typeof operand=(%1)                                      ; type(i32)
- ├ %8: *i32 = .alloc type=(i32) mutable=(false)                          ; *i32@ffefc
- └ %9: void = .store operand=(%8) payload=(%1)                           ; void
+%19 = fn @"playground.sk::explicit_casting"() -> i32
+%0: typeof(i32) = .block (13 insts)
+ ├ !%1: float = .constant                                                ; float{ 123.2 }
+ ├ !%2: [builtin_as] = .constant operand=(%1)                            ; todo_complex(builtin_member)
+ ├ !%3: typeof(i32) = .type                                              ; typeof(i32)
+ ├ !%4: i32 = .cast operand=(%1)                                         ; i32{ 123 }
+ ├ !%5: [builtin_as] = .constant operand=(%4)                            ; todo_complex(builtin_member)
+ ├ !%6: typeof(u8) = .type                                               ; typeof(u8)
+ ├ !%7: u8 = .reinterpret operand=(%4)                                   ; u8{ 123 }
+ ├ !%8: [builtin_as] = .constant operand=(%7)                            ; todo_complex(builtin_member)
+ ├ !%9: typeof(f32) = .type                                              ; typeof(f32)
+ ├ !%10: f32 = .convert_int_to_float operand=(%7)                        ; f32{ 123 }
+ ├ !%11: [builtin_as] = .constant operand=(%10)                          ; todo_complex(builtin_member)
+ ├ !%12: typeof(i32) = .type                                             ; typeof(i32)
+ └ %13: i32 = .truncate_float_to_int operand=(%10)                       ; i32{ 123 }
+
+%20 = type @"playground.sk::K" = struct:
+ ├ type: struct{}
+ ├ alignment: 0
+ ├ size: 0
+ └ fields: 0
+
+
+%21 = fn @"playground.sk::bar_add"(i32, i32) -> i32
+%0: i32 = .block (8 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ %2: i32 = .param index=(%1)                                           ; i32{ [runtime] }
+ ├ %3: i32 = .param_get operand=(%1)                                     ; i32{ [runtime] }
+ ├ %4: i32 = .param_get operand=(%2)                                     ; i32{ [runtime] }
+ ├ %5: i32 = .add lhs=(%3) rhs=(%4)                                      ; i32{ [runtime] }
+ ├ !%6: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %7: i32 = .cast operand=(%5)                                          ; i32{ [runtime] }
+ └ %8: void = .ret maybe_operand=(%7)                                    ; void
+
+%22 = fn @"playground.sk::namespaced"() -> void
+%0: typeof(void) = .block (10 insts)
+ ├ %1: typeof(struct{}) = .global_get entity=(%21) declaration=(%20)     ; typeof(struct{})
+ ├ %2: fn(i32, i32) i32 = .global_get entity=(%99) declaration=(%32)     ; fn(i32, i32) i32
+ ├ !%3: int = .constant                                                  ; int{ 1 }
+ ├ !%4: int = .constant                                                  ; int{ 2 }
+ ├ %5: i32 = .cast operand=(%3)                                          ; i32{ 1 }
+ ├ %6: i32 = .cast operand=(%4)                                          ; i32{ 2 }
+ ├ %7: i32 = .fn_call callee=(%2) callee_entity=(%99) callee_declaration=(%32) args_list=({%5, %6}); i32{ [runtime] }
+ ├ !%8: type = .typeof operand=(%7)                                      ; type(i32)
+ ├ %9: *i32 = .alloc type=(i32) mutable=(false)                          ; *i32[runtime]
+ └ %10: void = .store operand=(%9) payload=(%7)                          ; void
+
+%23 = fn @"playground.sk::global"() -> void
+%0: typeof(void) = .block (9 insts)
+ ├ %1: fn(i32, i32) i32 = .global_get entity=(%22) declaration=(%21)     ; fn(i32, i32) i32
+ ├ !%2: int = .constant                                                  ; int{ 1 }
+ ├ !%3: int = .constant                                                  ; int{ 2 }
+ ├ %4: i32 = .cast operand=(%2)                                          ; i32{ 1 }
+ ├ %5: i32 = .cast operand=(%3)                                          ; i32{ 2 }
+ ├ %6: i32 = .fn_call callee=(%1) callee_entity=(%22) callee_declaration=(%21) args_list=({%4, %5}); i32{ [runtime] }
+ ├ !%7: type = .typeof operand=(%6)                                      ; type(i32)
+ ├ %8: *i32 = .alloc type=(i32) mutable=(false)                          ; *i32@fff28
+ └ %9: void = .store operand=(%8) payload=(%6)                           ; void
+
+%24 = fn @"playground.sk::builtin"() -> void
+%0: typeof(void) = .block (7 insts)
+ ├ !%1: int = .constant                                                  ; int{ 2 }
+ ├ !%2: [builtin_as] = .constant operand=(%1)                            ; todo_complex(builtin_member)
+ ├ !%3: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %4: i32 = .cast operand=(%1)                                          ; i32{ 2 }
+ ├ !%5: type = .typeof operand=(%4)                                      ; type(i32)
+ ├ %6: *i32 = .alloc type=(i32) mutable=(false)                          ; *i32@fff20
+ └ %7: void = .store operand=(%6) payload=(%4)                           ; void
+
+%25 = fn @"playground.sk::main"(i32) -> i32
+%0: i32 = .block (20 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ !%2: int = .constant                                                  ; int{ 0 }
+ ├ !%3: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %4: *i32 = .alloc type=(i32) mutable=(true)                           ; *i32[runtime]
+ ├ %5: i32 = .cast operand=(%2)                                          ; i32{ 0 }
+ ├ %6: void = .store operand=(%4) payload=(%5)                           ; void
+ ├ !%7: int = .constant                                                  ; int{ 1 }
+ ├ !%8: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %9: *i32 = .alloc type=(i32) mutable=(true)                           ; *i32[runtime]
+ ├ %10: i32 = .cast operand=(%7)                                         ; i32{ 1 }
+ ├ %11: void = .store operand=(%9) payload=(%10)                         ; void
+ ├ %12: i32 = .param_get operand=(%1)                                    ; i32{ [runtime] }
+ ├ !%13: int = .constant                                                 ; int{ 0 }
+ ├ %14: i32 = .cast operand=(%13)                                        ; i32{ 0 }
+ ├ %15: bool = .gt lhs=(%12) rhs=(%14)                                   ; bool{ [runtime] }
+ ├ %16: if (%15)
+ │  └ then: %17: typeof(i32) = .block (5 insts)
+ │     ├ %18 loop
+ │     │  └ %19: void = .block (5 insts)
+ │     │     ├ %20: i32 = .param_get operand=(%1)                                    ; i32{ [runtime] }
+ │     │     ├ !%21: int = .constant                                                 ; int{ 1 }
+ │     │     ├ %22: i32 = .cast operand=(%21)                                        ; i32{ 1 }
+ │     │     ├ %23: bool = .gt lhs=(%20) rhs=(%22)                                   ; bool{ [runtime] }
+ │     │     └ %24: if (%23)
+ │     │        └ then: %25: typeof(i32) = .block (16 insts)
+ │     │           ├ %26: i32 = .load operand=(%4)                                         ; i32{ [runtime] }
+ │     │           ├ %27: i32 = .load operand=(%9)                                         ; i32{ [runtime] }
+ │     │           ├ %28: i32 = .add lhs=(%26) rhs=(%27)                                   ; i32{ [runtime] }
+ │     │           ├ !%29: typeof(i32) = .type                                             ; typeof(i32)
+ │     │           ├ %30: *i32 = .alloc type=(i32) mutable=(true)                          ; *i32[runtime]
+ │     │           ├ %31: void = .store operand=(%30) payload=(%28)                        ; void
+ │     │           ├ %32: i32 = .load operand=(%9)                                         ; i32{ [runtime] }
+ │     │           ├ %33: void = .store operand=(%4) payload=(%32)                         ; void
+ │     │           ├ %34: i32 = .load operand=(%30)                                        ; i32{ [runtime] }
+ │     │           ├ %35: void = .store operand=(%9) payload=(%34)                         ; void
+ │     │           ├ %36: i32 = .param_get operand=(%1)                                    ; i32{ [runtime] }
+ │     │           ├ !%37: int = .constant                                                 ; int{ 1 }
+ │     │           ├ %38: i32 = .cast operand=(%37)                                        ; i32{ 1 }
+ │     │           ├ %39: i32 = .sub lhs=(%36) rhs=(%38)                                   ; i32{ [runtime] }
+ │     │           ├ %40: void = .param_set operand=(%1) payload=(%39)                     ; void
+ │     │           └ %41: void = .br target=(%18) payload=(null)                           ; void
+ │     ├ %42: i32 = .load operand=(%9)                                         ; i32{ [runtime] }
+ │     ├ !%43: typeof(i32) = .type                                             ; typeof(i32)
+ │     ├ %44: i32 = .cast operand=(%42)                                        ; i32{ [runtime] }
+ │     └ %45: void = .ret maybe_operand=(%44)                                  ; void
+ ├ %46: i32 = .load operand=(%4)                                         ; i32{ [runtime] }
+ ├ !%47: typeof(i32) = .type                                             ; typeof(i32)
+ ├ %48: i32 = .cast operand=(%46)                                        ; i32{ [runtime] }
+ └ %49: void = .ret maybe_operand=(%48)                                  ; void
+
+%26 = fn @"playground.sk::aaaa"(i32) -> void
+%0: typeof(void) = .block (1 insts)
+ └ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+
+%27 = fn @"playground.sk::foo_addd"(i32, i32) -> i32
+%0: i32 = .block (8 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ %2: i32 = .param index=(%1)                                           ; i32{ [runtime] }
+ ├ %3: i32 = .param_get operand=(%1)                                     ; i32{ [runtime] }
+ ├ %4: i32 = .param_get operand=(%2)                                     ; i32{ [runtime] }
+ ├ %5: i32 = .add lhs=(%3) rhs=(%4)                                      ; i32{ [runtime] }
+ ├ !%6: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %7: i32 = .cast operand=(%5)                                          ; i32{ [runtime] }
+ └ %8: void = .ret maybe_operand=(%7)                                    ; void
+
+%28 = fn @"playground.sk::foo_ad3d"(i32, i32) -> i32
+%0: i32 = .block (8 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ %2: i32 = .param index=(%1)                                           ; i32{ [runtime] }
+ ├ %3: i32 = .param_get operand=(%1)                                     ; i32{ [runtime] }
+ ├ %4: i32 = .param_get operand=(%2)                                     ; i32{ [runtime] }
+ ├ %5: i32 = .add lhs=(%3) rhs=(%4)                                      ; i32{ [runtime] }
+ ├ !%6: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %7: i32 = .cast operand=(%5)                                          ; i32{ [runtime] }
+ └ %8: void = .ret maybe_operand=(%7)                                    ; void
+
+%29 = fn @"playground.sk::fdsdss"(i32, i32) -> i32
+%0: i32 = .block (8 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ %2: i32 = .param index=(%1)                                           ; i32{ [runtime] }
+ ├ %3: i32 = .param_get operand=(%1)                                     ; i32{ [runtime] }
+ ├ %4: i32 = .param_get operand=(%2)                                     ; i32{ [runtime] }
+ ├ %5: i32 = .add lhs=(%3) rhs=(%4)                                      ; i32{ [runtime] }
+ ├ !%6: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %7: i32 = .cast operand=(%5)                                          ; i32{ [runtime] }
+ └ %8: void = .ret maybe_operand=(%7)                                    ; void
+
+%30 = fn @"playground.sk::f"(i32, i32) -> i32
+%0: i32 = .block (8 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ %2: i32 = .param index=(%1)                                           ; i32{ [runtime] }
+ ├ %3: i32 = .param_get operand=(%1)                                     ; i32{ [runtime] }
+ ├ %4: i32 = .param_get operand=(%2)                                     ; i32{ [runtime] }
+ ├ %5: i32 = .add lhs=(%3) rhs=(%4)                                      ; i32{ [runtime] }
+ ├ !%6: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %7: i32 = .cast operand=(%5)                                          ; i32{ [runtime] }
+ └ %8: void = .ret maybe_operand=(%7)                                    ; void
+
+%31 = global @"playground.sk::a" i32{ 1 } 
+%0: i32 = .block (4 insts)
+ ├ !%1: int = .constant                                                  ; int{ 1 }
+ ├ !%2: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %3: i32 = .cast operand=(%1)                                          ; i32{ 1 }
+ └ %4: void = .br target=(%0) payload=(3)                                ; void
+
+%32 = fn @"playground.sk::K::mod::foo_add"(i32, i32) -> i32
+%0: i32 = .block (8 insts)
+ ├ %1: i32 = .param index=(%0)                                           ; i32{ [runtime] }
+ ├ %2: i32 = .param index=(%1)                                           ; i32{ [runtime] }
+ ├ %3: i32 = .param_get operand=(%1)                                     ; i32{ [runtime] }
+ ├ %4: i32 = .param_get operand=(%2)                                     ; i32{ [runtime] }
+ ├ %5: i32 = .add lhs=(%3) rhs=(%4)                                      ; i32{ [runtime] }
+ ├ !%6: typeof(i32) = .type                                              ; typeof(i32)
+ ├ %7: i32 = .cast operand=(%5)                                          ; i32{ [runtime] }
+ └ %8: void = .ret maybe_operand=(%7)                                    ; void
 

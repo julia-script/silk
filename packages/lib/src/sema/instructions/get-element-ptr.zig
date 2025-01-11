@@ -136,7 +136,7 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
     const base_inst = scope.getInstruction(base_inst_index);
     const base_type = scope.maybeUnwrapPointerType(base_inst.typed_value.type);
     const name_slice = scope.builder.getSlice(property_name_range);
-    if (base_type.isOneOfSimple(&.{ .number, .usize, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64 })) {
+    if (base_type.isOneOfSimple(&.{ .int, .float, .usize, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64 })) {
         if (scope.builder.isSliceEqual(property_name_range, "as")) {
             const ty = try scope.builder.internTypeData(.{ .builtin_member = .{ .member = .as } });
             return ctx.pushInstruction(hir_inst_index, .{

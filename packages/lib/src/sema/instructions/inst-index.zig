@@ -27,6 +27,7 @@ pub const StructDecl = @import("./struct-decl.zig");
 pub const ArrayInit = @import("./array-init.zig");
 pub const Constant = @import("./constant.zig");
 pub const Reinterpret = @import("./reinterpret.zig");
+pub const BuiltinGlobalGet = @import("./builtin-global-get.zig");
 const InstContext = @import("./InstContext.zig");
 const Sema = @import("../sema.zig");
 const Error = @import("../gen.zig").Error;
@@ -107,6 +108,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         .br => try Break.gen(ctx, scope, hir_inst_index),
         .ret => try Return.gen(ctx, scope, hir_inst_index),
         .global_get => try GlobalGet.gen(ctx, scope, hir_inst_index),
+        .builtin_global_get => try BuiltinGlobalGet.gen(ctx, scope, hir_inst_index),
         .fn_call => try FnCall.gen(ctx, scope, hir_inst_index),
         .if_expr => try If.gen(ctx, scope, hir_inst_index),
         .param => try Param.gen(ctx, scope, hir_inst_index),

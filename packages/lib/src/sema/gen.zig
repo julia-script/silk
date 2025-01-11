@@ -770,16 +770,17 @@ pub const Builder = struct {
                 // };
             },
             .global => |global| {
-                var hasher = Hasher.new("global");
-                const type_hash = self.getTypeKeyHash(global.type);
-                const value_hash = self.getValueKeyHash(global.value);
-                hasher.update(type_hash);
-                hasher.update(value_hash);
-                if (global.init) |init| {
-                    hasher.update(init);
-                }
+                _ = global; // autofix
+                // var hasher = Hasher.new("global");
+                // const type_hash = self.getTypeKeyHash(global.typed_value.type);
+                // const value_hash = self.getValueKeyHash(global.typed_value.value);
+                // hasher.update(type_hash);
+                // hasher.update(value_hash);
+                // if (global.init) |init| {
+                //     hasher.update(init);
+                // }
                 return try self.internValue(.{
-                    .hash = hasher.final(),
+                    .hash = Hasher.unique(),
                     .data = data,
                 });
             },
@@ -1068,8 +1069,8 @@ pub const Builder = struct {
         }
         var bytes: [8]u8 = undefined;
         switch (typed_value.type.simple) {
-            inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .usize, .float, .int, .bchar => |src_tag| switch (target_type.simple) {
-                inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .usize, .float, .int, .bchar => |dst_tag| {
+            inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64, .usize, .float, .int, .bchar => |src_tag| switch (target_type.simple) {
+                inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64, .usize, .float, .int, .bchar => |dst_tag| {
                     const Src = src_tag.getNativeType();
                     const Dst = dst_tag.getNativeType();
                     const src_bytes = try self.readBytes(typed_value);
@@ -2027,7 +2028,10 @@ pub const Entity = struct {
             }) = .{},
             declarations: std.AutoArrayHashMapUnmanaged(Sema.Strings.Range, Entity.Key) = .{},
         },
-        global_declaration: void,
+        global_declaration: struct {
+            type: Entity.Key,
+            declaration_index: Sema.Declaration.Index,
+        },
         global_type_declaration: struct {
             declaration_index: Sema.Declaration.Index,
         },
@@ -2189,6 +2193,7 @@ pub const Entity = struct {
             .module_declaration => try self.collectModuleSymbols(),
             .function_declaration => try self.collectFunctionSymbols(),
             .field_declaration => try self.collectFieldSymbols(),
+            .global_declaration => {},
             // .function_declaration => {},
             .parameter_declaration => {},
             .global_type_declaration => {},
@@ -2319,7 +2324,25 @@ pub const Entity = struct {
                             .parent = self.key,
                             .name = name_slice_range,
                             .hir_inst_index = declaration_inst_index,
-                            .data = .global_declaration,
+                            .data = .{
+                                .global_declaration = .{
+                                    .declaration_index = try self.builder.pushDeclaration(.{
+                                        .name = name_slice_range,
+                                        .is_pub = global_decl_inst.visibility == .public,
+                                        .is_export = global_decl_inst.exported,
+                                        .type = Sema.Type.simple(.unknown),
+                                        .value = Sema.Value.simple(.unknown),
+                                    }),
+                                    .type = undefined,
+                                },
+                            },
+                        });
+                        // const type_entity = ;
+                        self.builder.getEntity(global_entity_key).data.global_declaration.type = try self.builder.makeEntity(.{
+                            .parent = global_entity_key,
+                            .name = try self.builder.internSlice("%type"),
+                            .hir_inst_index = global_decl_inst.type orelse @panic("global declaration needs explicit type"),
+                            .data = .{ .type = {} },
                         });
                         try self.data.module_declaration.declarations.put(
                             self.builder.arena.allocator(),
@@ -2432,6 +2455,47 @@ pub const Entity = struct {
             });
         }
     }
+    pub fn collectGlobalSymbols(self: *Entity) Error!void {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "collectGlobalSymbols", "{s}.collectGlobalSymbols", .{
+                try self.formatKey(),
+            } },
+            .{},
+        );
+        defer trace.end(.{});
+
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).global_decl;
+        const name_slice_range = try self.internNode(hir_inst.name_node);
+        const name_slice = self.builder.getSlice(name_slice_range);
+        _ = name_slice; // autofix
+
+        const type_hir_inst = hir_inst.type orelse std.debug.panic("field type not resolved: {any}", .{hir_inst.type});
+
+        // const type_hir_inst = hir_inst.type orelse std.debug.panic("field type not resolved: {any}", .{hir_inst.type});
+        if (self.builder.getEntityKeyByHirInst(type_hir_inst)) |field_type_entity_key| {
+            self.data.field_declaration.type = field_type_entity_key;
+        } else {
+            self.data.field_declaration.type = try self.builder.makeEntity(.{
+                .parent = self.key,
+                .name = try self.builder.internSlice("%type"),
+                .hir_inst_index = type_hir_inst,
+                .data = .{ .type = {} },
+            });
+        }
+        // if (self.builder.getEntityKeyByHirInst(type_hir_inst)) |type_entity_key| {
+
+        //     self.data.global_declaration.type = type_entity_key;
+        // } else {
+        //     self.data.global_declaration.type = try self.builder.makeEntity(.{
+        //         .parent = self.key,
+        //         .name = try self.builder.internSlice("%type"),
+        //         .hir_inst_index = type_hir_inst,
+        //         .data = .{ .type = {} },
+        //     });
+        // }
+
+    }
     pub fn collectParameterSymbols(self: *Entity) Error!void {
         const trace = self.builder.tracer.begin(
             @src(),
@@ -2470,15 +2534,26 @@ pub const Entity = struct {
                 .function_declaration => try self.resolveFunctionType(),
                 .parameter_declaration => try self.resolveParameterType(),
                 .field_declaration => try self.resolveFieldType(),
+                .global_declaration => try self.resolveGlobalType(),
                 //noop, type of type is always 'type'..the actual type is the type values
                 .module_declaration,
                 .type,
                 .global_type_declaration,
                 => {
                     // self.type = .{ .resolved = Sema.Type.simple(.type) };
-                    self.type = .{ .resolved = try self.builder.internTypeData(.{ .typeof = .{ .child = self.builder.unwrapTypeValue(try self.resolveValue()) } }) };
+                    self.type = .{
+                        .resolved = try self.builder.internTypeData(.{
+                            .typeof = .{
+                                .child = self.builder.unwrapTypeValue(try self.resolveValue()),
+                            },
+                        }),
+                    };
                     return self.type.resolved;
                 },
+
+                // .global_declaration => {
+                //     return self.builder.unwrapTypeValue(try self.resolveValue());
+                // },
                 else => std.debug.panic("unhandled data: {s}", .{@tagName(self.data)}),
             },
         };
@@ -2554,6 +2629,20 @@ pub const Entity = struct {
         const field_type_value = try field_type_entity.resolveValue();
         return self.builder.unwrapTypeValue(field_type_value);
     }
+    pub fn resolveGlobalType(self: *Entity) Error!Sema.Type.Key {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "resolveGlobalType", "{s}.resolveGlobalType", .{
+                try self.formatKey(),
+            } },
+            .{},
+        );
+        defer trace.end(.{});
+        // const field_type_entity = self.builder.getEntity(self.data.field_declaration);
+        const field_type_entity = self.builder.getEntity(self.data.global_declaration.type);
+        const field_type_value = try field_type_entity.resolveValue();
+        return self.builder.unwrapTypeValue(field_type_value);
+    }
     pub fn resolveValue(self: *Entity) Error!Sema.Value.Key {
         const trace = self.builder.tracer.begin(
             @src(),
@@ -2586,6 +2675,7 @@ pub const Entity = struct {
             .function_declaration => try self.resolveFunctionValue(),
             .global_type_declaration => try self.resolveGlobalTypeValue(),
             .module_declaration => try self.resolveModuleValue(),
+            .global_declaration => try self.resolveGlobalValue(),
             else => std.debug.panic("unhandled value: {s}", .{@tagName(self.data)}),
         };
         self.value = .{ .resolved = value };
@@ -2737,13 +2827,36 @@ pub const Entity = struct {
         defer scope.deinit();
         // scope.is_comptime = true;
         const block_inst = try scope.genRootBlock(init_inst);
-        // var block = try scope.genRootBlock(init_inst);
-        // type blocks are always comptime
-        // try block.handleBlockInstructionInner(init_inst);
-        // const block_inst = try block.commit();
 
         const inst = self.builder.sema.instructions.items[block_inst];
         return inst.typed_value.value;
+    }
+    pub fn resolveGlobalValue(self: *Entity) Error!Sema.Value.Key {
+        const trace = self.builder.tracer.begin(
+            @src(),
+            .{ "resolveGlobalValue", "{s}.resolveGlobalValue", .{
+                try self.formatKey(),
+            } },
+            .{},
+        );
+        defer trace.end(.{});
+
+        const hir_inst = self.getHirInstruction(self.hir_inst_index).global_decl;
+
+        const init_inst = hir_inst.init orelse std.debug.panic("global type declaration has no init", .{});
+        var scope = Scope.init(self, self.builder.allocator);
+        defer scope.deinit();
+        // scope.is_comptime = true;
+        const block_inst = try scope.genRootBlock(init_inst);
+
+        const inst = self.builder.sema.instructions.items[block_inst];
+        // return inst.typed_value.value;
+        return try self.builder.internValueData(.{
+            .global = .{
+                .typed_value = inst.typed_value,
+                .init = block_inst,
+            },
+        });
     }
     const SortByAlignmentContext = struct {
         values: []const Sema.Type,
@@ -2919,6 +3032,16 @@ pub const Entity = struct {
                 }
                 return self.data.global_type_declaration.declaration_index;
             },
+            .global_declaration => {
+                self.builder.setDeclaration(self.data.global_declaration.declaration_index, .{
+                    .name = self.name,
+                    .is_export = self.is_export,
+                    .is_pub = self.is_pub,
+                    .type = try self.resolveType(),
+                    .value = try self.resolveGlobalValue(),
+                });
+                return self.data.global_declaration.declaration_index;
+            },
             // .parameter_declaration => {
             //     // noop
 
@@ -2971,6 +3094,7 @@ pub const Scope = struct {
     // is_comptime: bool = false,
     is_inline: bool = false,
     active_block_instructions: ?*Sema.Lists.WorkingList = null,
+
     // inst_context: InstContext,
     pub fn init(entity: *Entity, allocator: std.mem.Allocator) Scope {
         return Scope{
@@ -5699,7 +5823,7 @@ pub const Scope = struct {
                 }
 
                 switch (lhs_type.simple) {
-                    .number => {
+                    .int, .float => {
                         return try self.pushMaybeCastInstruction(hir_inst_index, lhs_inst_index, rhs_inst_index);
                     },
                     .f32, .f64 => {

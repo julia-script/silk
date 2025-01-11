@@ -268,6 +268,69 @@ pub fn fib(n: i32) i32 {
   }
   return a
 }
-fn main() void {
-    const sum = comp fib(10);
+
+
+fn explicit_casting() i32 {
+  123.2:as(i32):as(u8):as(f32):as(i32);
 }
+
+type K = struct {
+  fn foo_add(a: i32, b: i32) i32 {
+    return a + b;
+  }
+}
+
+fn bar_add(a: i32, b: i32) i32 {
+  return a + b;
+}
+  // fn foo_add(a: i32, b: i32) i32 {
+  //   return a + b;
+  // }
+fn namespaced() void {
+  const a = K.foo_add(1, 2);
+}
+fn global() void {
+  const b = bar_add(1, 2);
+}
+
+fn builtin() void {
+  const c = 2:as(i32);
+}
+fn main(n: i32) i32 {
+ var a:i32 = 0
+  var b:i32 = 1
+  if (n > 0) {
+    while (n > 1) {
+      var t:i32 = a + b
+      a = b
+      b = t
+      n = n - 1
+    }
+    return b
+  }
+  return a
+
+}
+fn aaaa(a: i32) void {
+//   @comptime_log(a);
+}
+// fn main() void {
+//   comp foo(123);
+//   comp foo(456);
+// }
+
+  fn foo_addd(a: i32, b: i32) i32 {
+    return a + b;
+  }
+  fn foo_ad3d(a: i32, b: i32) i32 {
+    return a + b;
+  }
+
+    fn fdsdss(a: i32, b: i32) i32 {
+    return a + b;
+  }
+  fn f(a: i32, b: i32) i32 {
+    return a + b;
+  }
+
+  var a: i32 = 1;

@@ -97,7 +97,6 @@ const Scope = struct {
     parent: ?*Scope,
     builder: *Self,
     instructions: Hir.InternedLists.WorkingList,
-
     symbols_table: std.StringHashMapUnmanaged(Hir.Inst.Index) = .{},
     trace: Tracer.EndTrace,
     ret_type: ?Hir.Inst.Index = null,
@@ -712,6 +711,7 @@ const Block = struct {
     is_inline: bool,
     scope: Scope,
     expected_return_type: ?Hir.Inst.Index = null,
+    expected_type: ?Hir.Inst.Index = null,
 
     pub fn init(builder: *Self, parent_scope: *Scope, gen_ctx: GenContext) !Block {
         const inst_index = try builder.reserveInstruction();
@@ -721,6 +721,7 @@ const Block = struct {
             .is_inline = false,
             .scope = Scope.init(builder, parent_scope, .block, "block"),
             .expected_return_type = gen_ctx.expected_type,
+            .expected_type = gen_ctx.expected_type,
         };
     }
     pub fn fromNode(builder: *Self, parent_scope: *Scope, node_index: Ast.Node.Index, gen_ctx: GenContext) !Hir.Inst.Index {
@@ -750,7 +751,12 @@ const Block = struct {
     pub fn commit(self: *Block) !Hir.Inst.Index {
         if (self.is_inline) {
             if (self.scope.instructions.list.items.len > 0) {
-                const last_inst = self.scope.instructions.list.items[self.scope.instructions.list.items.len - 1];
+                var last_inst = self.scope.instructions.list.items[self.scope.instructions.list.items.len - 1];
+                if (self.expected_type) |expected_type| {
+                    const type_inst_src = self.scope.builder.hir.insts.items[expected_type];
+                    const type_inst = try self.pushInstruction(type_inst_src);
+                    last_inst = try self.pushInstruction(.{ .as = .{ .lhs = last_inst, .rhs = type_inst } });
+                }
                 _ = try self.pushInstruction(.{ .br = .{ .operand = last_inst, .target = self.inst } });
             }
             const instructions = try self.scope.commit();
@@ -992,18 +998,28 @@ pub fn genStructDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !Hi
                         scope,
                         def.ty_node orelse unreachable,
                     );
+
                     self.hir.insts.items[def.inst].global_decl.init = fn_decl_inst.init;
                     self.hir.insts.items[def.inst].global_decl.type = fn_decl_inst.index;
                     continue;
                 }
-
-                if (def.init_node) |init_node| {
-                    const inline_block = try Block.fromNode(self, scope, init_node, .{});
-                    self.hir.insts.items[def.inst].global_decl.init = inline_block;
-                }
                 if (def.ty_node) |ty_node| {
                     const ty_inst = try self.genInstruction(scope, ty_node, .{});
                     self.hir.insts.items[def.inst].global_decl.type = ty_inst;
+                }
+                if (def.init_node) |init_node| {
+                    const inline_block = try Block.fromNode(self, scope, init_node, .{
+                        .expected_type = self.hir.insts.items[def.inst].global_decl.type,
+                    });
+
+                    // const expected_type = self.hir.insts.items[def.inst].global_decl.type;
+                    // const expected_type = null;
+                    // var block = try Block.init(self, scope, .{ .expected_type = expected_type });
+                    // try block.pushInstructionsFromBlock(init_node, .{
+                    //     .expected_type = expected_type,
+                    // });
+
+                    self.hir.insts.items[def.inst].global_decl.init = inline_block;
                 }
             },
             else => unreachable,
@@ -1047,17 +1063,19 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
     index: Hir.Inst.Index,
     init: ?Hir.Inst.Index,
 } {
-    const trace = self.tracer.begin(
-        @src(),
-        .{ "genFnDeclInstruction", "HirBuilder.genFnDeclInstruction", .{} },
-        .{},
-    );
-    defer trace.end(.{});
     var nav = Ast.Navigator.init(self.hir.ast, node_index);
     const fn_decl = nav.data.fn_decl;
     const proto = fn_decl.proto;
-    // var proto_scope = Scope.init(self, scope);
     const proto_data = nav.getDataOf(proto).fn_proto;
+    const name_slice = self.hir.ast.getNodeSlice(proto_data.name);
+    const trace = self.tracer.begin(
+        @src(),
+        .{ "genFnDeclInstruction", "HirBuilder.genFnDeclInstruction({s})", .{name_slice} },
+        .{},
+    );
+    defer trace.end(.{});
+    // var proto_scope = Scope.init(self, scope);
+
     const body = fn_decl.body;
     var fn_scope = Scope.init(self, scope, .block, "fn_decl");
     const params = try self.genFnParams(&fn_scope, proto);

@@ -413,8 +413,7 @@ pub const Value = struct {
         },
 
         global: struct {
-            type: Type.Key,
-            value: Value.Key,
+            typed_value: TypedValue,
             init: ?Instruction.Index,
         },
         // array_init: struct {
@@ -1536,6 +1535,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
     if (declaration.is_export) {
         try writer.print("export ", .{});
     }
+    // switch (declaration.type)
 
     if (self.builder.getValue(declaration.value)) |value| {
         switch (value.data) {
@@ -1557,40 +1557,64 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                 try writer.print("\n", .{});
                 const func_value = self.builder.getValue(declaration.value) orelse unreachable;
                 if (func_value.data.function.init) |init_inst_index| {
-
-                    // try tree_writer.pushDirLine();
-                    try self.formatInstructionRange(writer, &tree_writer, self.instructions.items[init_inst_index..],
-                    // .{ .start = 0, .len = count },
-                    0);
-
-                    // try tree_writer.pop();
+                    try self.formatInstructionRange(
+                        writer,
+                        &tree_writer,
+                        self.instructions.items[init_inst_index..],
+                        0,
+                    );
                 }
             },
             .global => {
                 try writer.print("global ", .{});
-                try self.formatType(writer, value.data.global.type);
-                try writer.print(" @\"{s}\"", .{name});
+                try writer.print("@\"{s}\" ", .{name});
+                try self.formatTypedValue(writer, value.data.global.typed_value, .{});
                 try writer.print(" ", .{});
-                try self.formatTypedValue(writer, .{
-                    .value = value.data.global.value,
-                    .type = value.data.global.type,
-                }, .{});
+                // try self.formatTypedValue(writer, .{
+                //     .value = value.data.global.value,
+                //     .type = value.data.global.type,
+                // }, .{});
                 try writer.print("\n", .{});
                 // try writer.print("global {}\n", .{value.data.global.value});
+                const func_value = self.builder.getValue(declaration.value) orelse unreachable;
+                if (func_value.data.global.init) |init_inst_index| {
+                    try self.formatInstructionRange(
+                        writer,
+                        &tree_writer,
+                        self.instructions.items[init_inst_index..],
+                        0,
+                    );
+                }
             },
             .type => {
                 try writer.print("type @\"{s}\" = ", .{name});
                 try self.formatTypeLong(writer, &tree_writer, value.data.type);
                 try writer.print("\n", .{});
             },
+            // .global_declaration => |global_declaration| {
+            //     _ = global_declaration; // autofix
+
+            //     try writer.print("declare {s} = ", .{name});
+            //     try self.formatTypedValue(writer, .{
+            //         .value = value.data.global.value,
+            //         .type = value.data.global.type,
+            //     }, .{});
+            //     try writer.print("\n", .{});
+            // },
+
             else => {
-                try writer.print("todo_decl({s})\n", .{@tagName(value.data)});
+                try writer.print("declare @\"{s}\" = ", .{name});
+                try self.formatTypedValue(writer, .{
+                    .value = declaration.value,
+                    .type = declaration.type,
+                }, .{});
+                try writer.print("\n", .{});
             },
             // try formatType(writer, builder, ty);
         }
     } else {
-        try writer.print("todo({s})\n", .{@tagName(declaration.value.simple)});
-        try writer.print("todo({})\n", .{declaration});
+        // try writer.print("todo({s})\n", .{@tagName(declaration.value.simple)});
+        // try writer.print("todo({})\n", .{declaration});
     }
     // switch (declaration.type) {
     //     .simple => |simple| {},
