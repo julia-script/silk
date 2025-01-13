@@ -9,13 +9,13 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
 
     const type_inst_index = scope.getInstructionIndex(hir_inst.alloc.type);
-    const type_inst = scope.getInstruction(type_inst_index);
+    const type_inst = ctx.getInstruction(type_inst_index);
     const type_to_alloc = ctx.builder.unwrapTypeValue(type_inst.typed_value.value);
     // const type_to_alloc = ctx.builder.unwrapPointerType(pointer_type_to_alloc) orelse std.debug.panic("type_to_alloc is not a pointer type", .{});
     const value_inst_index = scope.getInstructionIndex(hir_inst.alloc.init);
-    const value_inst = scope.getInstruction(value_inst_index);
+    const value_inst = ctx.getInstruction(value_inst_index);
     // const value_to_alloc = ctx.builder.unwrapTypeValue(value_inst.typed_value.value);
-    scope.markDead(type_inst_index);
+    ctx.markDead(type_inst_index);
     // This means that the allocation is already done on a LOAD instruction
     // Ex.
     // const a = T {};
@@ -83,7 +83,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     });
     switch (value_inst.op) {
         .type_init => {
-            scope.markDead(value_inst_index);
+            ctx.markDead(value_inst_index);
             try maybeInline(ctx, index);
             // const type_init = ctx.builder.getComplexValue(value_inst.typed_value.value).data.type_init;
             const list = ctx.builder.sema.lists.getSlice(value_inst.data.type_init.field_init_list);
@@ -96,7 +96,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             return index;
         },
         .array_init => {
-            scope.markDead(value_inst_index);
+            ctx.markDead(value_inst_index);
             try maybeInline(ctx, index);
             return try handleArrayInit(ctx, scope, index, value_inst_index);
         },
@@ -185,16 +185,24 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             .void,
             => {
                 // const value_inst_index = try scope.getInstructionAsTypeByHirInst(hir_inst.store.value, pointer_type);
+                const instruction_index = scope.getInstructionIndex(hir_inst.alloc.init);
+                const store_value_inst_index = (try ctx.pushMaybeCastInstructionToType(
+                    hir_inst.alloc.init,
+                    instruction_index,
+                    type_to_alloc,
+                )) orelse instruction_index;
                 const store_index = ctx.pushInstruction(null, .{
                     .op = .store,
                     .typed_value = .{
                         .type = Sema.Type.simple(.void),
                         .value = Sema.Value.simple(.void),
                     },
-                    .data = .{ .operand_payload = .{
-                        .operand = index,
-                        .payload = try scope.getInstructionAsTypeByHirInst(hir_inst.alloc.init, type_to_alloc),
-                    } },
+                    .data = .{
+                        .operand_payload = .{
+                            .operand = index,
+                            .payload = store_value_inst_index, //try ctx.getInstructionAsTypeByHirInst(hir_inst.alloc.init, type_to_alloc),
+                        },
+                    },
                 });
                 try Index.Store.maybeInline(ctx, store_index);
                 // try maybeInline(ctx, store_index);
@@ -308,16 +316,17 @@ fn pushSetInstructionField(
     return store_inst_index;
 }
 pub fn handleArrayInit(ctx: *InstContext, scope: *GenScope, pointer_inst_index: Sema.Instruction.Index, value_inst_index: Sema.Instruction.Index) !Sema.Instruction.Index {
-    const pointer_inst = scope.getInstruction(pointer_inst_index);
+    _ = scope; // autofix
+    const pointer_inst = ctx.getInstruction(pointer_inst_index);
 
-    const value_inst = scope.getInstruction(value_inst_index);
+    const value_inst = ctx.getInstruction(value_inst_index);
 
     // switch (value_inst.op) {
     //     .array_init => {
-    scope.markDead(value_inst_index);
+    ctx.markDead(value_inst_index);
     const array_init = value_inst.data.array_init;
-    const array_type = scope.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse std.debug.panic("array_type is not a type", .{});
-    const element_type = scope.builder.getComplexType(array_type).data.array.child;
+    const array_type = ctx.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse std.debug.panic("array_type is not a type", .{});
+    const element_type = ctx.builder.getComplexType(array_type).data.array.child;
 
     const list = ctx.builder.sema.lists.getSlice(array_init.items_list);
     for (list, 0..) |item_inst_index, i| {

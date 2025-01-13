@@ -5,10 +5,78 @@ const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 const Index = @import("./inst-index.zig");
 const Error = @import("../gen.zig").Error;
+const Scope = @import("../gen.zig").Scope;
+
+pub const SignatureCheckResult = struct {
+    args_list: Sema.Instruction.List,
+    all_args_comptime_known: bool,
+    ctx: *InstContext,
+
+    pub fn getArg(self: *SignatureCheckResult, arg_index: usize) Sema.Instruction.Index {
+        const list = self.ctx.builder.sema.lists.getSlice(self.args_list);
+        return list[arg_index];
+    }
+    pub fn getArgInstruction(self: *SignatureCheckResult, arg_index: usize) Sema.Instruction {
+        return self.ctx.getInstruction(self.getArg(arg_index));
+    }
+};
+pub fn checkSignaturae(ctx: *InstContext, scope: *GenScope, type_params: []const Sema.Type.Key, hir_args_list_range: Hir.Inst.List, comptime cast_if_needed: bool) Error!SignatureCheckResult {
+    if (type_params.len != hir_args_list_range.len) {
+        std.debug.panic("error: function has {d} params but {d} args were provided", .{ type_params.len, hir_args_list_range.len });
+    }
+    const hir_args_list = scope.entity.getHirList(hir_args_list_range);
+
+    var args_list = ctx.builder.newList();
+    var all_args_comptime_known = true;
+    for (type_params, hir_args_list) |type_param, hir_arg_index| {
+        var arg_inst_index: Sema.Instruction.Index = undefined;
+
+        if (cast_if_needed) {
+            const instruction_index = scope.getInstructionIndex(hir_arg_index);
+            arg_inst_index = (try ctx.pushMaybeCastInstructionToType(
+                hir_arg_index,
+                instruction_index,
+                type_param,
+            )) orelse instruction_index;
+            try args_list.append(arg_inst_index);
+        } else {
+            arg_inst_index = scope.getInstructionIndex(hir_arg_index);
+            const arg_inst = ctx.getInstruction(arg_inst_index);
+            const can_cast = scope.builder.canCastImplicitly(arg_inst.typed_value.type, type_param) catch |err| {
+                std.debug.panic("{s}", .{@errorName(err)});
+            };
+            // std.debug.print("{} {} {}\n", .{ arg_inst.type, type_param, can_cast });
+
+            if (can_cast == .not_allowed) {
+                const writer = std.io.getStdErr().writer().any();
+                try writer.print("error: argument type mismatch: ", .{});
+                try scope.builder.sema.formatType(writer, arg_inst.typed_value.type);
+                try writer.print(" != ", .{});
+                try scope.builder.sema.formatType(writer, type_param);
+                try writer.print("\n", .{});
+                @panic("Type mismatch");
+            }
+            try args_list.append(arg_inst_index);
+        }
+
+        const arg_inst = ctx.getInstruction(arg_inst_index);
+
+        if (!arg_inst.typed_value.isComptimeKnown()) {
+            all_args_comptime_known = false;
+        }
+    }
+
+    return .{
+        .args_list = try args_list.commit(),
+        .all_args_comptime_known = all_args_comptime_known,
+        .ctx = ctx,
+    };
+}
+
 fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const callee_inst_index = scope.getInstructionIndex(hir_inst.fn_call.callee);
-    const callee_inst = scope.getInstruction(callee_inst_index);
+    const callee_inst = ctx.getInstruction(callee_inst_index);
     // const callee_value: Sema.Value = self.builder.getValue(callee_inst.value) orelse {
     //     std.debug.panic("error: builtin call value is not a builtin global", .{});
     // };
@@ -22,12 +90,8 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             //     const arg_inst_index = try self.getInstructionAsTypeByHirInst(arg_hir_index, any_type);
             //     try args_list.append(arg_inst_index);
             // }
-            const signature_check_result = try scope.checkSignature(
-                &.{any_type},
-                hir_inst.fn_call.args_list,
-                false,
-            );
-            scope.markDead(callee_inst_index);
+            const signature_check_result = try checkSignaturae(ctx, scope, &.{any_type}, hir_inst.fn_call.args_list, false);
+            ctx.markDead(callee_inst_index);
 
             return ctx.pushInstruction(hir_inst_index, .{
                 .op = .fn_call,
@@ -39,7 +103,9 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             });
         },
         .as => {
-            var signature_check_result = try scope.checkSignature(
+            var signature_check_result = try checkSignaturae(
+                ctx,
+                scope,
                 &.{
                     Sema.Type.simple(.type),
                     any_type,
@@ -52,7 +118,9 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             return ctx.pushMaybeCastInstruction(hir_inst_index, value_arg_inst_index, type_arg_inst_index);
         },
         .float_demote => {
-            var signature_check_result = try scope.checkSignature(
+            var signature_check_result = try checkSignaturae(
+                ctx,
+                scope,
                 &.{
                     try scope.builder.internFlatUnionTypeData(&.{
                         try scope.builder.internTypeData(.{ .typeof = .{
@@ -71,8 +139,8 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
                 false,
             );
 
-            scope.markDeadIfComptimeKnown(signature_check_result.getArg(0));
-            scope.markDeadIfComptimeKnown(signature_check_result.getArg(1));
+            ctx.markDeadIfComptimeKnown(signature_check_result.getArg(0));
+            ctx.markDeadIfComptimeKnown(signature_check_result.getArg(1));
 
             return ctx.pushInstruction(hir_inst_index, .{
                 .op = .float_demote,
@@ -92,7 +160,7 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
 fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const callee_inst_index = scope.getInstructionIndex(hir_inst.fn_call.callee);
-    const callee_inst = scope.getInstruction(callee_inst_index);
+    const callee_inst = ctx.getInstruction(callee_inst_index);
     // const callee_value: Sema.Value = self.builder.getValue(callee_inst.value) orelse {
     //     std.debug.panic("error: builtin call value is not a builtin global", .{});
     // };
@@ -103,10 +171,12 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
     switch (scope.builder.getComplexType(builtin_global_key).data.builtin_member.member) {
         .as => {
             const lhs_inst_index = callee_inst.data.operand;
-            const lhs_inst = scope.getInstruction(lhs_inst_index);
+            const lhs_inst = ctx.getInstruction(lhs_inst_index);
             const lhs_type = lhs_inst.typed_value.type;
 
-            var signature_check_result = try scope.checkSignature(
+            var signature_check_result = try checkSignaturae(
+                ctx,
+                scope,
                 &.{
                     try scope.builder.internFlatUnionTypeData(&.{
                         try scope.builder.internTypeData(.{ .typeof = .{
@@ -154,7 +224,7 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
                 false,
             );
             const rhs_inst_index = signature_check_result.getArg(0);
-            const rhs_inst = scope.getInstruction(rhs_inst_index);
+            const rhs_inst = ctx.getInstruction(rhs_inst_index);
             const rhs_type = scope.builder.unwrapTypeValue(rhs_inst.typed_value.value);
 
             if (lhs_type.isEqual(rhs_type)) {
@@ -165,12 +235,12 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
 
             const lhs_is_float = scope.builder.isFloat(lhs_type);
             const rhs_is_float = scope.builder.isFloat(rhs_type);
-            scope.markDead(callee_inst_index);
-            scope.markDeadIfComptimeKnown(lhs_inst_index);
-            scope.markDead(rhs_inst_index);
+            ctx.markDead(callee_inst_index);
+            ctx.markDeadIfComptimeKnown(lhs_inst_index);
+            ctx.markDead(rhs_inst_index);
 
             if (lhs_is_float != rhs_is_float) {
-                const typed_value = try scope.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
+                const typed_value = try ctx.builder.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
                 if (lhs_is_float) {
                     return ctx.pushInstruction(hir_inst_index, .{
                         .op = .truncate_float_to_int,
@@ -187,13 +257,13 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
             }
 
             switch (lhs_type.simple) {
-                .number => {
+                .float, .int => {
                     return ctx.pushMaybeCastInstruction(hir_inst_index, lhs_inst_index, rhs_inst_index);
                 },
                 .f32, .f64 => {
                     // const lhs_bits = self.builder.numberBits(lhs_type);
                     // const rhs_bits = self.builder.numberBits(rhs_type);
-                    const typed_value = try scope.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
+                    const typed_value = try ctx.builder.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
                     if (rhs_bits > lhs_bits) {
                         return ctx.pushInstruction(hir_inst_index, .{
                             .op = .float_promote,
@@ -211,7 +281,7 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
                 .u8, .u16, .u32, .u64, .usize => {
                     // const lhs_bits = self.builder.numberBits(lhs_type);
                     // const rhs_bits = self.builder.numberBits(rhs_type);
-                    const typed_value = try scope.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
+                    const typed_value = try ctx.builder.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
                     const rhs_signed = scope.builder.isSigned(rhs_type);
                     if (rhs_signed) {
                         return ctx.pushInstruction(hir_inst_index, .{
@@ -238,7 +308,7 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
                 .i8, .i16, .i32, .i64 => {
                     // const lhs_bits = self.builder.numberBits(lhs_type);
                     // const rhs_bits = self.builder.numberBits(rhs_type);
-                    const typed_value = try scope.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
+                    const typed_value = try ctx.builder.maybeCoerceValue(lhs_inst.typed_value, rhs_type);
                     const rhs_signed = scope.builder.isSigned(rhs_type);
                     if (!rhs_signed) {
                         return ctx.pushInstruction(hir_inst_index, .{
@@ -277,14 +347,14 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
 
     const callee_inst_index = scope.getInstructionIndex(hir_inst.fn_call.callee);
-    const callee_inst = scope.getInstruction(callee_inst_index);
+    const callee_inst = ctx.getInstruction(callee_inst_index);
 
     const callee_fn_type_key = callee_inst.typed_value.type;
     const callee_fn_type = scope.builder.getComplexType(callee_fn_type_key);
 
     const fn_entity = switch (callee_fn_type.data) {
         .builtin_global => return try genBuiltinCall(ctx, scope, hir_inst_index),
-        .builtin_member => return try scope.handleBuiltinMemberCallInstruction(hir_inst_index),
+        .builtin_member => return try genBuiltinMemberCall(ctx, scope, hir_inst_index),
         .function => |function| scope.builder.getEntity(function.entity),
         else => std.debug.panic("error: not callable {s}", .{@tagName(callee_fn_type.data)}),
     };
@@ -303,14 +373,21 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
 
     for (hir_args_list, params_list) |arg_hir_index, param_type_key| {
         const param_type = Sema.Type.Key.decode(param_type_key);
-        const arg_index = try scope.getInstructionAsTypeByHirInst(arg_hir_index, param_type);
-        const arg_inst = scope.getInstruction(arg_index);
+        const instruction_index = scope.getInstructionIndex(arg_hir_index);
+        const arg_index = (try ctx.pushMaybeCastInstructionToType(
+            arg_hir_index,
+            instruction_index,
+            param_type,
+        )) orelse instruction_index;
+
+        const arg_inst = ctx.getInstruction(arg_index);
         if (!arg_inst.typed_value.type.isEqual(param_type) and !param_type.isEqual(try scope.builder.internTypeData(.{ .any = .{} }))) {
             std.debug.panic("error: argument type mismatch: {} != {}", .{ arg_inst.typed_value.type, param_type });
         }
 
         try args_list.append(arg_index);
-        if (!scope.isComptimeKnown(arg_index)) {
+        // const arg_inst = ctx.getInstruction(arg_index);
+        if (!arg_inst.typed_value.isComptimeKnown()) {
             all_args_resolved = false;
         }
     }

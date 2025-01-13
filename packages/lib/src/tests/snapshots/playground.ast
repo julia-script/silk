@@ -1,10 +1,10 @@
 ;; AST
-;; 729 Nodes
-;; 966 Tokens
-;; 294 Interned Lists
+;; 749 Nodes
+;; 994 Tokens
+;; 299 Interned Lists
 
-%0 = .struct_decl - tok[0..965]
- └ members_list: 46 items
+%0 = .struct_decl - tok[0..994]
+ └ members_list: 48 items
     ├ %6 = .type_decl - tok[0..9]
     │  ├ name: %1 = .identifier - tok[1..1]
     │  │  └ token: .identifier 'T'
@@ -1328,10 +1328,46 @@
     │              │  └ token: .identifier 'a'
     │              └ rhs: %720 = .identifier - tok[955..955]
     │                 └ token: .identifier 'b'
-    └ %728 = .var_decl - tok[958..963]
-       ├ name: %725 = .identifier - tok[959..959]
-       │  └ token: .identifier 'a'
-       ├ type: %726 = .ty_i32 - tok[961..961]
-       │  └ token: .keyword_i32 'i32'
-       └ value: %727 = .number_literal - tok[963..963]
-          └ token: .number_literal '1'
+    ├ %728 = .var_decl - tok[958..963]
+    │  ├ name: %725 = .identifier - tok[959..959]
+    │  │  └ token: .identifier 'a'
+    │  ├ type: %726 = .ty_i32 - tok[961..961]
+    │  │  └ token: .keyword_i32 'i32'
+    │  └ value: %727 = .number_literal - tok[963..963]
+    │     └ token: .number_literal '1'
+    ├ %739 = .fn_decl - tok[965..981]
+    │  ├ proto: %731 = .fn_proto - tok[966..969]
+    │  │  ├ name: %729 = .identifier - tok[966..966]
+    │  │  │  └ token: .identifier 'foo_adddd'
+    │  │  ├ params_list: 0 items
+    │  │  ├ ret_type: %730 = .ty_i32 - tok[969..969]
+    │  │  │  └ token: .keyword_i32 'i32'
+    │  │  └ is_declaring_builtin: false
+    │  └ body: %738 = .block - tok[970..980]
+    │     └ list: 2 items
+    │        ├ %736 = .const_decl - tok[971..977]
+    │        │  ├ name: %732 = .identifier - tok[972..972]
+    │        │  │  └ token: .identifier 'c'
+    │        │  ├ type: %733 = .ty_i32 - tok[974..974]
+    │        │  │  └ token: .keyword_i32 'i32'
+    │        │  └ value: %735 = .comp_block - tok[976..978]
+    │        │     └ node: %734 = .number_literal - tok[977..977]
+    │        │        └ token: .number_literal '2'
+    │        └ %737 = .comment_line - tok[979..980]
+    │           └ token: .comment '// return a + b;'
+    └ %748 = .fn_decl - tok[981..993]
+       ├ proto: %742 = .fn_proto - tok[982..985]
+       │  ├ name: %740 = .identifier - tok[982..982]
+       │  │  └ token: .identifier 'woop'
+       │  ├ params_list: 0 items
+       │  ├ ret_type: %741 = .ty_i32 - tok[985..985]
+       │  │  └ token: .keyword_i32 'i32'
+       │  └ is_declaring_builtin: false
+       └ body: %747 = .block - tok[986..992]
+          └ list: 1 items
+             └ %746 = .ret_expression - tok[987..990]
+                └ node: %745 = .add - tok[988..990]
+                   ├ lhs: %743 = .identifier - tok[988..988]
+                   │  └ token: .identifier 'a'
+                   └ rhs: %744 = .number_literal - tok[990..990]
+                      └ token: .number_literal '2'

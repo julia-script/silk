@@ -7,10 +7,12 @@ const GenScope = @import("../gen.zig").Scope;
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const type_inst_index = scope.getInstructionIndex(hir_inst.type_init.type);
-    const type_inst = scope.getInstruction(type_inst_index);
+    const type_inst = ctx.getInstruction(type_inst_index);
     const type_key = scope.builder.unwrapTypeValue(type_inst.typed_value.value);
     var field_init_list = scope.builder.newList();
-    scope.markDead(type_inst_index);
+    // std.debug.print("genTypeInitInstruction: {d} {}\n", .{ hir_inst_index, ctx.builder.getFormattableType(type_key) });
+    // ctx.markDead(global_type_inst_index);
+
     for (scope.entity.getHir().lists.getSlice(hir_inst.type_init.field_init_list)) |field_init_hir_index| {
         const field_init_inst_index = scope.getInstructionIndex(field_init_hir_index);
         // scope.markDead(field_init_inst_index);

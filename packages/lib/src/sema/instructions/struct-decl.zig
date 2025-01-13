@@ -5,7 +5,6 @@ const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    _ = ctx; // autofix
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     _ = hir_inst; // autofix
 
@@ -22,7 +21,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
 
     const ty = try entity.resolveType();
     const value = try entity.resolveValue();
-    return scope.pushInstruction(hir_inst_index, .{
+    return ctx.pushInstruction(hir_inst_index, .{
         .op = .type,
         .typed_value = .{
             .type = ty,

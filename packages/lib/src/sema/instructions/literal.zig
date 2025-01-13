@@ -34,7 +34,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         .boolean_literal => |ast_node| {
             const slice = scope.entity.getHir().ast.getNodeSlice(ast_node.node);
             const is_true = std.mem.eql(u8, slice, "true");
-            return scope.pushInstruction(hir_inst_index, .{
+            return ctx.pushInstruction(hir_inst_index, .{
                 .op = .constant,
                 .typed_value = .{
                     .type = Sema.Type.simple(.bool),
@@ -64,7 +64,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             // try ctx.builder.sema.memory.store(ty, pointer, .{ .bytes = slice });
             ctx.builder.sema.memory.storeAt([]const u8, pointer, slice);
 
-            return scope.pushInstruction(hir_inst_index, .{
+            return ctx.pushInstruction(hir_inst_index, .{
                 .op = .constant,
                 .typed_value = .{
                     .type = ty,
@@ -87,7 +87,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             };
             const char_float: f64 = @floatFromInt(char);
 
-            return scope.pushInstruction(hir_inst_index, .{
+            return ctx.pushInstruction(hir_inst_index, .{
                 .op = .constant,
                 .typed_value = .{
                     .type = Sema.Type.simple(.float),

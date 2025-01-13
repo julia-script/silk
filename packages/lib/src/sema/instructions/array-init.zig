@@ -8,7 +8,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
 
     const type_inst_index = scope.getInstructionIndex(hir_inst.array_init.type);
-    const type_inst = scope.getInstruction(type_inst_index);
+    const type_inst = ctx.getInstruction(type_inst_index);
     const type_key = scope.builder.unwrapTypeValue(type_inst.typed_value.value);
     var items_list = scope.builder.newList();
 
@@ -17,7 +17,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         try items_list.append(item_inst_index);
     }
 
-    scope.markDead(type_inst_index);
+    ctx.markDead(type_inst_index);
     return ctx.pushInstruction(hir_inst_index, .{
         .op = .array_init,
         .typed_value = .{

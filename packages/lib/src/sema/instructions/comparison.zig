@@ -4,6 +4,7 @@ const std = @import("std");
 const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 const Index = @import("./inst-index.zig");
+
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const op: Sema.Instruction.Op, const bin_op = switch (hir_inst) {
@@ -17,8 +18,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     };
     var lhs_index = scope.getInstructionIndex(bin_op.lhs);
     var rhs_index = scope.getInstructionIndex(bin_op.rhs);
-    const lhs_inst = scope.getInstruction(lhs_index);
-    const rhs_inst = scope.getInstruction(rhs_index);
+    const lhs_inst = ctx.getInstruction(lhs_index);
+    const rhs_inst = ctx.getInstruction(rhs_index);
 
     const lhs_is_float = lhs_inst.typed_value.type.isEqualSimple(.float);
     const rhs_is_float = rhs_inst.typed_value.type.isEqualSimple(.float);

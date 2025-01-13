@@ -5,8 +5,6 @@ const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    _ = ctx; // autofix
-
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const type_value_index = switch (std.meta.activeTag(hir_inst)) {
         .ty_i8 => Sema.Type.simple(.i8),
@@ -48,15 +46,21 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         .ty_array => ty: {
             const ty_array = hir_inst.ty_array;
             const type_inst_id = scope.getInstructionIndex(ty_array.type);
-            const type_inst = scope.getInstruction(type_inst_id);
-            const size_inst_id = try scope.getInstructionAsTypeByHirInst(ty_array.size, Sema.Type.simple(.usize));
-            const size_inst = scope.getInstruction(size_inst_id);
+            const type_inst = ctx.getInstruction(type_inst_id);
+            const uncasted_size_inst_id = scope.getInstructionIndex(ty_array.size);
+            const size_inst_id = (try ctx.pushMaybeCastInstructionToType(
+                ty_array.size,
+                uncasted_size_inst_id,
+                Sema.Type.simple(.usize),
+            )) orelse uncasted_size_inst_id;
+            // const size_inst_id = try scope.getInstructionAsTypeByHirInst(ty_array.size, Sema.Type.simple(.usize));
+            const size_inst = ctx.getInstruction(size_inst_id);
             // const size = size_inst.value;
             // const size_value = self.builder.getValue(size) orelse std.debug.panic("Error: size_value is not a number", .{});
             const size_int = try scope.builder.readNumberAsType(usize, size_inst.typed_value);
             const type_value_index = type_inst.typed_value.value;
-            scope.markDead(type_inst_id);
-            scope.markDead(size_inst_id);
+            ctx.markDead(type_inst_id);
+            ctx.markDead(size_inst_id);
 
             const type_index = try scope.builder.internTypeData(.{ .array = .{
                 .child = scope.builder.unwrapTypeValue(type_value_index),
@@ -67,8 +71,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         },
         .ty_pointer => ty: {
             const ty_pointer = hir_inst.ty_pointer;
-            const type_inst = scope.getInstructionByHirIndex(ty_pointer.operand);
-            // const type_inst = self.getInstruction(type_inst_id);
+            const type_inst_id = scope.getInstructionIndex(ty_pointer.operand);
+            const type_inst = ctx.getInstruction(type_inst_id);
             // const type_value_index = type_inst.value;
             const type_index = try scope.builder.internTypeData(.{ .pointer = .{
                 .child = scope.builder.unwrapTypeValue(type_inst.typed_value.value),
@@ -80,7 +84,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
 
     const value = try scope.builder.internValueData(.{ .type = type_value_index });
     // std.debug.print("value: {} type {}\n", .{ value, type_value_index });
-    return scope.pushInstruction(
+    return ctx.pushInstruction(
         hir_inst_index,
         .{
             .op = .type,

@@ -8,7 +8,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const param_entity = scope.builder.getEntityByHirInst(hir_inst.param.operand);
     const param_index = param_entity.data.parameter_declaration.index;
-    return scope.pushInstruction(hir_inst_index, .{
+    return ctx.pushInstruction(hir_inst_index, .{
         .op = .param,
         .typed_value = .{
             .type = try param_entity.resolveType(),

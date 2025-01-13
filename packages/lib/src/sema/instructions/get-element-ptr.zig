@@ -62,7 +62,7 @@ fn genFromGetTypeProperty(ctx: *InstContext, scope: *GenScope, hir_inst_index: H
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const base_hir_index = hir_inst.get_property_pointer.base;
     const base_inst_index = scope.getInstructionIndex(base_hir_index);
-    const base_inst = scope.getInstruction(base_inst_index);
+    const base_inst = ctx.getInstruction(base_inst_index);
     const base_type = scope.builder.unwrapTypeValue(base_inst.typed_value.value);
 
     switch (base_type) {
@@ -133,8 +133,8 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
     const property_name_range = try scope.entity.internNode(hir_inst.get_property_pointer.property_name_node);
     const base_hir_index = hir_inst.get_property_pointer.base;
     const base_inst_index = scope.getInstructionIndex(base_hir_index);
-    const base_inst = scope.getInstruction(base_inst_index);
-    const base_type = scope.maybeUnwrapPointerType(base_inst.typed_value.type);
+    const base_inst = ctx.getInstruction(base_inst_index);
+    const base_type = ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
     const name_slice = scope.builder.getSlice(property_name_range);
     if (base_type.isOneOfSimple(&.{ .int, .float, .usize, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64 })) {
         if (scope.builder.isSliceEqual(property_name_range, "as")) {
@@ -236,8 +236,14 @@ pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_in
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const base_index = scope.getInstructionIndex(hir_inst.get_element_pointer.base);
     const base_instruction = ctx.getInstruction(base_index);
+    const instruction_index = scope.getInstructionIndex(hir_inst.get_element_pointer.index);
 
-    const index_inst_index = try scope.getInstructionAsTypeByHirInst(hir_inst.get_element_pointer.index, Sema.Type.simple(.usize));
+    const index_inst_index = (try ctx.pushMaybeCastInstructionToType(
+        hir_inst.get_element_pointer.index,
+        instruction_index,
+        Sema.Type.simple(.usize),
+    )) orelse instruction_index;
+    // const index_inst_index = try scope.getInstructionAsTypeByHirInst(hir_inst.get_element_pointer.index, Sema.Type.simple(.usize));
 
     const type_to_access = if (ctx.builder.getType(base_instruction.typed_value.type)) |ty| switch (ty.data) {
         .array, .slice => ty,
@@ -274,8 +280,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             const base_hir_index = hir_inst.get_property_pointer.base;
 
             const base_inst_index = scope.getInstructionIndex(base_hir_index);
-            const base_inst = scope.getInstruction(base_inst_index);
-            const base_type = scope.maybeUnwrapPointerType(base_inst.typed_value.type);
+            const base_inst = ctx.getInstruction(base_inst_index);
+            const base_type = ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
             switch (base_type) {
                 .simple => |simple_type| switch (simple_type) {
                     .type => return try genFromGetTypeProperty(ctx, scope, hir_inst_index),

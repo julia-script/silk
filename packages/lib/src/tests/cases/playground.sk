@@ -334,3 +334,12 @@ fn aaaa(a: i32) void {
   }
 
   var a: i32 = 1;
+
+  fn foo_adddd() i32 {
+    const c: i32 = comp 2;
+    // return a + b;
+  }
+
+fn woop() i32 {
+  return a + 2;
+}

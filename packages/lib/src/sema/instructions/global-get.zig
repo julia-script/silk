@@ -4,62 +4,54 @@ const std = @import("std");
 const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 
-// pub fn pushGlobalGetInstruction(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index, entity_key: Entity.Key) Error!Sema.Instruction.Index {
-//     const entity = self.builder.getEntity(entity_key);
-//     // try self.scope.pushDependency(entity_key);
-//     const global_type = try entity.resolveType();
-//     switch (entity.data) {
-//         .function_declaration => |fn_decl| {
-//             // global_entity.data.function_declaration.declaration_index,
-//             return self.pushInstruction(hir_inst_index, .{
-//                 .op = .global_get,
-//                 .typed_value = .{
-//                     .type = global_type,
-//                     .value = try self.maybeResolveDependency(entity_key),
-//                 },
-//                 .data = .{ .declaration = fn_decl.declaration_index },
-//             });
-//         },
-//         .global_type_declaration => |type_decl| {
-//             return self.pushInstruction(hir_inst_index, .{
-//                 .op = .global_get,
-//                 .typed_value = .{
-//                     .type = global_type,
-//                     .value = try self.maybeResolveDependency(entity_key),
-//                 },
-//                 .data = .{ .declaration = type_decl.declaration_index },
-//             });
-//         },
-//         else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(entity.data)}),
-//     }
-// }
 const Entity = @import("../gen.zig").Entity;
+
 pub fn genGlobalGetInstruction(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index, entity_key: Entity.Key) !Sema.Instruction.Index {
     const entity = scope.builder.getEntity(entity_key);
     // try self.scope.pushDependency(entity_key);
-    const global_type = try entity.resolveType();
+    const global_type_key = try entity.resolveType();
     switch (entity.data) {
         .function_declaration => |fn_decl| {
             // global_entity.data.function_declaration.declaration_index,
             const val = try scope.maybeResolveDependency(entity_key);
-            std.debug.print("genGlobalGetInstruction: {d} {}\n", .{ entity_key, val });
+
             return ctx.pushInstruction(hir_inst_index, .{
                 .op = .global_get,
                 .typed_value = .{
-                    .type = global_type,
+                    .type = global_type_key,
                     .value = val,
                 },
-                .data = .{ .global_get = .{ .entity = entity_key, .declaration = fn_decl.declaration_index } },
+                .data = .{ .global_get = .{ .declaration = fn_decl.declaration_index } },
             });
         },
+
         .global_type_declaration => |type_decl| {
+            const global_type = ctx.builder.getComplexType(global_type_key);
+            const global_typeof_type = ctx.builder.getComplexType(global_type.data.global.type);
+            const global_value_key = try scope.maybeResolveDependency(entity_key);
+
+            const typed_value = Sema.TypedValue{
+                .type = global_type.data.global.type,
+                .value = if (global_value_key.isComptimeKnown()) try ctx.builder.internValueData(.{ .type = global_typeof_type.data.typeof.child }) else global_value_key,
+            };
+            return ctx.pushInstruction(hir_inst_index, .{
+                .op = .global_get,
+                .typed_value = typed_value,
+                .data = .{ .global_get = .{ .declaration = type_decl.declaration_index } },
+            });
+        },
+        .global_declaration => |global_decl| {
+            const global_type = ctx.builder.getComplexType(global_type_key);
+            const global_value_key = try scope.maybeResolveDependency(entity_key);
+
+            // TODO: handle mutable declarations
             return ctx.pushInstruction(hir_inst_index, .{
                 .op = .global_get,
                 .typed_value = .{
-                    .type = global_type,
-                    .value = try scope.maybeResolveDependency(entity_key),
+                    .type = global_type.data.global.type,
+                    .value = if (global_value_key.isComptimeKnown()) ctx.builder.getComplexValue(global_value_key).data.global.value.value else global_value_key,
                 },
-                .data = .{ .global_get = .{ .entity = entity_key, .declaration = type_decl.declaration_index } },
+                .data = .{ .global_get = .{ .declaration = global_decl.declaration_index } },
             });
         },
         else => std.debug.panic("unhandled global_entity: {s}", .{@tagName(entity.data)}),
@@ -73,7 +65,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
     const inst = ctx.getInstruction(inst_index);
-    const entity = ctx.builder.getEntity(inst.data.global_get.entity);
+    const declaration = ctx.builder.sema.declarations.items[inst.data.global_get.declaration];
+    const entity = ctx.builder.getEntity(declaration.entity);
     ctx.setValue(inst_index, .{
         .type = try entity.resolveType(),
         .value = try entity.resolveValue(),

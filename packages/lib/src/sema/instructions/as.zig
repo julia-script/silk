@@ -8,10 +8,10 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const lhs_inst_index = scope.getInstructionIndex(hir_inst.as.lhs);
     const rhs_inst_index = scope.getInstructionIndex(hir_inst.as.rhs);
-    const rhs_inst = scope.getInstruction(rhs_inst_index);
+    const rhs_inst = ctx.getInstruction(rhs_inst_index);
 
-    scope.markDeadIfComptimeKnown(rhs_inst_index);
-    scope.markDeadIfComptimeKnown(lhs_inst_index);
+    ctx.markDeadIfComptimeKnown(rhs_inst_index);
+    ctx.markDeadIfComptimeKnown(lhs_inst_index);
     const rhs_type = scope.builder.unwrapTypeValue(rhs_inst.typed_value.value);
 
     return ctx.pushCastInstruction(hir_inst_index, lhs_inst_index, rhs_type);

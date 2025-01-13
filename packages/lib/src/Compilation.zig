@@ -9,6 +9,7 @@ const MirBuilder = @import("MirBuilder.zig");
 const WasmBackend = @import("backend/wasm/Backend.zig");
 const dir = @import("./dir.zig");
 const Sema = @import("./sema/Sema.zig");
+
 errors: ErrorManager,
 sources: std.StringHashMapUnmanaged(Source),
 root: []const u8,
@@ -134,15 +135,6 @@ pub fn addSourceFromFilePath(self: *Self, path: []const u8) !void {
     });
 }
 
-test "Compilation2" {
-    // const test_allocator = std.testing.allocator;
-    // var compilation = try Self.init(test_allocator, .{ .root = "./playground.zig", .output_dir = "./.tmp" });
-    // defer compilation.deinit();
-    // var output_dir = try compilation.openOutputDir("bin/bash", true);
-    // defer output_dir.close();
-    // const file_a = try output_dir.createFile("hello.txt", .{});
-    // defer file_a.close();
-}
 test "Compilation" {
     const test_allocator = std.testing.allocator;
     var compilation = try Self.init(test_allocator, .{ .root = "./playground.zig", .output_dir = "./.tmp" });

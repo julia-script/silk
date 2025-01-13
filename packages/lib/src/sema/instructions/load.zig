@@ -7,7 +7,7 @@ const GenScope = @import("../gen.zig").Scope;
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const pointer_inst_index = scope.getInstructionIndex(hir_inst.load.operand);
-    const pointer_inst = scope.getInstruction(pointer_inst_index);
+    const pointer_inst = ctx.getInstruction(pointer_inst_index);
     const type_to_load = ctx.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse {
         std.debug.panic("expected pointer type, got {any}", .{ctx.builder.getFormattableType(pointer_inst.typed_value.type)});
     };

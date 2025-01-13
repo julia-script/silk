@@ -10,7 +10,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
 
     const pointer_inst_index = scope.getInstructionIndex(hir_inst.store.pointer);
-    const pointer_inst = scope.getInstruction(pointer_inst_index);
+    const pointer_inst = ctx.getInstruction(pointer_inst_index);
     const pointer_type = ctx.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse std.debug.panic("unwrapped_pointer_inst is not a type {d}", .{pointer_inst_index});
 
     switch (pointer_type) {
@@ -46,7 +46,13 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             .float,
             .void,
             => {
-                const value_inst_index = try scope.getInstructionAsTypeByHirInst(hir_inst.store.value, pointer_type);
+                const instruction_index = scope.getInstructionIndex(hir_inst.store.value);
+
+                const value_inst_index = (try ctx.pushMaybeCastInstructionToType(
+                    hir_inst.store.value,
+                    instruction_index,
+                    pointer_type,
+                )) orelse instruction_index;
                 const index = ctx.pushInstruction(hir_inst_index, .{
                     .op = .store,
                     .typed_value = .{
@@ -136,11 +142,11 @@ pub fn handleStoreStruct(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hi
     const pointer_inst_index = scope.getInstructionIndex(hir_inst.store.pointer);
 
     const value_inst_index = scope.getInstructionIndex(hir_inst.store.value);
-    const value_inst = scope.getInstruction(value_inst_index);
+    const value_inst = ctx.getInstruction(value_inst_index);
 
     switch (value_inst.op) {
         .type_init => {
-            scope.markDead(value_inst_index);
+            ctx.markDead(value_inst_index);
             // const type_init = ctx.builder.getComplexValue(value_inst.typed_value.value).data.type_init;
             const list = ctx.builder.sema.lists.getSlice(value_inst.data.type_init.field_init_list);
             for (list) |field_inst_index| {
@@ -172,14 +178,14 @@ pub fn handleStoreStruct(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hi
 pub fn handleStoreArray(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const pointer_inst_index = scope.getInstructionIndex(hir_inst.store.pointer);
-    const pointer_inst = scope.getInstruction(pointer_inst_index);
+    const pointer_inst = ctx.getInstruction(pointer_inst_index);
 
     const value_inst_index = scope.getInstructionIndex(hir_inst.store.value);
-    const value_inst = scope.getInstruction(value_inst_index);
+    const value_inst = ctx.getInstruction(value_inst_index);
 
     switch (value_inst.op) {
         .array_init => {
-            scope.markDead(value_inst_index);
+            ctx.markDead(value_inst_index);
             const array_init = value_inst.data.array_init;
             const array_type = scope.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse std.debug.panic("array_type is not a type", .{});
             const element_type = scope.builder.getComplexType(array_type).data.array.child;

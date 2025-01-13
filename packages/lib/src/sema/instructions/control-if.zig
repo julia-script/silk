@@ -10,7 +10,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const condition_index = scope.getInstructionIndex(hir_inst.if_expr.cond);
     const condition_inst = ctx.getInstruction(condition_index);
 
-    if (scope.isComptimeKnown(condition_index)) {
+    if (condition_inst.typed_value.isComptimeKnown()) {
         const condition_result = scope.builder.getBooleanValueKeyAsBool(condition_inst.typed_value.value);
         ctx.markDead(condition_index);
         if (condition_result) {

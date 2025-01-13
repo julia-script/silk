@@ -5,12 +5,11 @@ const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    _ = ctx; // autofix
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const operand_inst_index = scope.getInstructionIndex(hir_inst.param_get.operand);
-    const operand_inst = scope.getInstruction(operand_inst_index);
+    const operand_inst = ctx.getInstruction(operand_inst_index);
 
-    return scope.pushInstruction(hir_inst_index, .{
+    return ctx.pushInstruction(hir_inst_index, .{
         .op = .param_get,
         .typed_value = operand_inst.typed_value,
         .data = .{ .operand = operand_inst_index },

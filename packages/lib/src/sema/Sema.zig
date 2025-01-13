@@ -366,11 +366,16 @@ pub const Type = struct {
         flat_union: struct {
             fields: Type.List,
         },
+        global: struct {
+            type: Type.Key,
+            declaration_index: Declaration.Index,
+        },
 
         pub const Ent = struct {
             entity: Entity.Key,
         };
         pub const Function = struct {
+            declaration_index: Declaration.Index,
             is_builtin: bool,
             entity: Entity.Key,
             params: Type.List,
@@ -408,13 +413,15 @@ pub const Value = struct {
         },
 
         function: struct {
-            type: Type.Key,
+            declaration_index: Declaration.Index,
             init: ?Instruction.Index,
         },
 
         global: struct {
-            typed_value: TypedValue,
+            declaration_index: Declaration.Index,
             init: ?Instruction.Index,
+            value: TypedValue,
+            // typed_value: TypedValue,
         },
         // array_init: struct {
         //     items_list: Value.List,
@@ -563,7 +570,6 @@ pub const Instruction = struct {
         },
         // declaration: Declaration.Index,
         global_get: struct {
-            entity: Entity.Key,
             declaration: Declaration.Index,
         },
         @"if": struct {
@@ -704,10 +710,12 @@ pub const Instruction = struct {
 
 pub const Declaration = struct {
     name: Strings.Range,
-    is_pub: bool,
-    is_export: bool,
-    type: Type.Key,
-    value: Value.Key,
+    visibility: shared.Visibility,
+    exported: bool,
+    external: bool,
+    typed_value: TypedValue,
+    entity: Entity.Key,
+    mutable: bool,
     pub const Index = usize;
 };
 
@@ -742,6 +750,11 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
             //     try self.formatType(writer, module.struct_type);
             //     try writer.writeAll("}");
             // },
+            .global => |global| {
+                try writer.writeAll("global{");
+                try self.formatType(writer, global.type);
+                try writer.writeAll("}");
+            },
             .struct_field => |struct_field| {
                 try writer.writeAll("struct_field{");
                 try self.formatType(writer, struct_field.type);
@@ -1529,18 +1542,20 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
 
     // try tree_writer.pushDirLine();
     const name = self.strings.getSlice(declaration.name);
-    if (declaration.is_pub) {
+    if (declaration.visibility == .public) {
         try writer.print("pub ", .{});
     }
-    if (declaration.is_export) {
+    if (declaration.exported) {
         try writer.print("export ", .{});
     }
+
     // switch (declaration.type)
 
-    if (self.builder.getValue(declaration.value)) |value| {
+    if (self.builder.getValue(declaration.typed_value.value)) |value| {
         switch (value.data) {
             .function => |func| {
-                const ty = self.builder.getType(func.type) orelse unreachable;
+                _ = func; // autofix
+                const ty = self.builder.getType(declaration.typed_value.type) orelse unreachable;
                 try writer.print("fn @\"{s}\"", .{name});
                 const params_iter = self.lists.getSlice(ty.data.function.params);
                 try writer.print("(", .{});
@@ -1555,7 +1570,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                 try writer.print(") -> ", .{});
                 try self.formatType(writer, ty.data.function.ret);
                 try writer.print("\n", .{});
-                const func_value = self.builder.getValue(declaration.value) orelse unreachable;
+                const func_value = self.builder.getValue(declaration.typed_value.value) orelse unreachable;
                 if (func_value.data.function.init) |init_inst_index| {
                     try self.formatInstructionRange(
                         writer,
@@ -1568,7 +1583,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
             .global => {
                 try writer.print("global ", .{});
                 try writer.print("@\"{s}\" ", .{name});
-                try self.formatTypedValue(writer, value.data.global.typed_value, .{});
+                try self.formatTypedValue(writer, declaration.typed_value, .{});
                 try writer.print(" ", .{});
                 // try self.formatTypedValue(writer, .{
                 //     .value = value.data.global.value,
@@ -1576,7 +1591,7 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
                 // }, .{});
                 try writer.print("\n", .{});
                 // try writer.print("global {}\n", .{value.data.global.value});
-                const func_value = self.builder.getValue(declaration.value) orelse unreachable;
+                const func_value = self.builder.getValue(declaration.typed_value.value) orelse unreachable;
                 if (func_value.data.global.init) |init_inst_index| {
                     try self.formatInstructionRange(
                         writer,
@@ -1604,15 +1619,13 @@ pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_inde
 
             else => {
                 try writer.print("declare @\"{s}\" = ", .{name});
-                try self.formatTypedValue(writer, .{
-                    .value = declaration.value,
-                    .type = declaration.type,
-                }, .{});
+                try self.formatTypedValue(writer, declaration.typed_value, .{});
                 try writer.print("\n", .{});
             },
             // try formatType(writer, builder, ty);
         }
     } else {
+        try self.formatTypedValue(writer, declaration.typed_value, .{});
         // try writer.print("todo({s})\n", .{@tagName(declaration.value.simple)});
         // try writer.print("todo({})\n", .{declaration});
     }

@@ -93,6 +93,12 @@ pub fn markDead(self: *@This(), index: Sema.Instruction.Index) void {
     instruction.liveness = 0;
     self.setInstruction(index, instruction);
 }
+pub fn markDeadIfComptimeKnown(self: *@This(), index: Sema.Instruction.Index) void {
+    const instruction = self.getInstruction(index);
+    if (instruction.typed_value.isComptimeKnown()) {
+        self.markDead(index);
+    }
+}
 
 // pub fn gen(hir_inst_index: Hir.Inst.Index) !usize {
 //     _ = hir_inst_index; // autofix
@@ -221,6 +227,27 @@ pub fn maybeCoerceValue(self: *@This(), typed_value: Sema.TypedValue, type_index
     return try self.builder.convertNumberType(typed_value, type_index);
 }
 
+// pub fn getInstructionAsTypeByHirInst(self: *@This(), hir_inst_index: Hir.Inst.Index, type_index: Sema.Type.Key) Error!Sema.Instruction.Index {
+//     // const trace = self.builder.tracer.begin(
+//     //     @src(),
+//     //         .{ "getInstructionAsTypeByHirInst", "Scope.getInstructionAsTypeByHirInst({s})", .{
+//     //             try formatHirIndex(self.entity.getHir(), hir_inst_index),
+//     //         } },
+//     //         .{
+//     //             .before = self.instructions.items,
+//     //         },
+//     //     );
+//     //     defer trace.end(.{
+//     //         .instructions = self.instructions.items,
+//     //     });
+//     const instruction_index = self.getInstructionIndex(hir_inst_index);
+
+//     return (try self.pushMaybeCastInstructionToType(
+//         hir_inst_index,
+//         instruction_index,
+//         type_index,
+//     )) orelse instruction_index;
+// }
 test "InstContext" {
     // const CustomBuilder = struct {
     //     a: u32 = 1,
