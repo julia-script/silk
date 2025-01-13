@@ -86,6 +86,7 @@ pub const Token = struct {
         keyword_export,
         keyword_module,
         keyword_type,
+        keyword_anytype,
         keyword_struct,
         keyword_enum,
         keyword_union,

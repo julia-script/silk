@@ -151,6 +151,36 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
                 .data = .{ .operand = signature_check_result.getArg(1) },
             });
         },
+        .Result => {
+            var signature_check_result = try checkSignaturae(
+                ctx,
+                scope,
+                &.{any_type},
+                hir_inst.fn_call.args_list,
+                false,
+            );
+            const type_arg_inst = signature_check_result.getArgInstruction(0);
+            const ty = try scope.builder.internTypeData(.{
+                .result = .{
+                    .ok = type_arg_inst.typed_value.type,
+                    .err = Sema.Type.simple(.unknown),
+                },
+            });
+            return ctx.pushInstruction(hir_inst_index, .{
+                .op = .type,
+                .typed_value = .{
+                    .type = try scope.builder.internTypeData(.{
+                        .typeof = .{ .child = ty },
+                    }),
+                    .value = try scope.builder.internValueData(.{
+                        .type = ty,
+                    }),
+                },
+                .data = .void,
+                // .data = .{ .operand = signature_check_result.getArg(0) },
+                //     .data = .{ .operand = signature_check_result.getArg(0) },
+            });
+        },
 
         else => |builtin| {
             std.debug.panic("unimplemented builtin: @{s}", .{@tagName(builtin)});

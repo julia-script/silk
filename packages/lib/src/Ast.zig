@@ -126,7 +126,7 @@ pub const Node = struct {
         fn_proto: struct {
             name: Index,
             params_list: ChildList,
-            ret_type: Index,
+            return_type: Index,
             is_declaring_builtin: bool,
         },
         fn_param: FnParam,
@@ -164,6 +164,8 @@ pub const Node = struct {
             name: Index,
             value: Index,
         },
+
+        ty_type: TokenIndex,
 
         ty_i8: TokenIndex,
         ty_i16: TokenIndex,
@@ -349,6 +351,8 @@ pub const Node = struct {
         while_loop,
         type_init,
         field_init,
+
+        ty_type,
 
         ty_i8,
         ty_i16,

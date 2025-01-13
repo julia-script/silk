@@ -23,6 +23,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         .ty_f64 => Sema.Type.simple(.f64),
         .ty_f32 => Sema.Type.simple(.f32),
         .ty_boolean => Sema.Type.simple(.bool),
+        .ty_void => Sema.Type.simple(.void),
 
         // inline .ty_i8,
         // .ty_i16,

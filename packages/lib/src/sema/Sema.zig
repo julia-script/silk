@@ -338,6 +338,10 @@ pub const Type = struct {
         typeof: struct {
             child: Type.Key,
         },
+        result: struct {
+            ok: Type.Key,
+            err: Type.Key,
+        },
         @"struct": struct {
             entity: Entity.Key,
             fields: Type.List,
@@ -506,6 +510,7 @@ pub const Value = struct {
 
         type_f32,
         type_f64,
+        type_type,
 
         type_str,
         type_boolean,
@@ -805,6 +810,13 @@ pub fn formatType(self: *Self, writer: std.io.AnyWriter, type_key: Type.Key) !vo
                     try self.formatType(writer, any.concrete);
                     try writer.writeAll(")");
                 }
+            },
+            .result => |result| {
+                try writer.writeAll("Result(");
+                try self.formatType(writer, result.ok);
+                try writer.writeAll(", ");
+                try self.formatType(writer, result.err);
+                try writer.writeAll(")");
             },
             // else => {
             //     try writer.print("todo({s})", .{@tagName(ty.data)});

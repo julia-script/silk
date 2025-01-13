@@ -14,6 +14,7 @@ fn foo() -> Result<(), MyError> {
 // 3. `bar` propagates any error from `foo` using the `?` operator.
 fn bar() -> Result<(), MyError> {
     foo()?;  // If `foo()` returns an error, `bar()` returns it immediately.
+
     Ok(())
 }
 

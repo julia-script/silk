@@ -269,6 +269,7 @@ pub fn genBinaryExpression(self: *Self, comptime tag: Ast.Node.Tag, scope: *Scop
 }
 const GenContext = struct {
     expected_type: ?Hir.Inst.Index = null,
+    is_comptime: bool = false,
 };
 pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index, ctx: GenContext) HirBuilderError!Hir.Inst.Index {
     const trace = self.tracer.begin(
@@ -452,14 +453,14 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index, ct
                     },
                 });
             }
-            var operand_inst = try self.genLoadedInstruction(scope, ret_expr.node);
-            if (scope.ret_type) |ret_type| {
-                const ret_type_src_inst = self.hir.insts.items[ret_type];
-                const ret_type_inst = try scope.pushInstruction(ret_type_src_inst);
-                operand_inst = try scope.pushInstruction(.{
-                    .as = .{ .lhs = operand_inst, .rhs = ret_type_inst },
-                });
-            }
+            const operand_inst = try self.genLoadedInstruction(scope, ret_expr.node);
+            // if (scope.ret_type) |ret_type| {
+            //     const ret_type_src_inst = self.hir.insts.items[ret_type];
+            //     const ret_type_inst = try scope.pushInstruction(ret_type_src_inst);
+            //     operand_inst = try scope.pushInstruction(.{
+            //         .as = .{ .lhs = operand_inst, .rhs = ret_type_inst },
+            //     });
+            // }
             return try scope.pushInstruction(.{
                 .ret = .{
                     .operand = operand_inst,
@@ -671,6 +672,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index, ct
                 .ty_f64,
                 .ty_void,
                 .ty_boolean,
+                .ty_type,
                 => |tag| {
                     const tag_name = comptime @tagName(tag);
                     const data = @unionInit(Hir.Inst, tag_name, .{ .node = nav.node });
@@ -712,6 +714,7 @@ const Block = struct {
     scope: Scope,
     expected_return_type: ?Hir.Inst.Index = null,
     expected_type: ?Hir.Inst.Index = null,
+    is_comptime: bool = false,
 
     pub fn init(builder: *Self, parent_scope: *Scope, gen_ctx: GenContext) !Block {
         const inst_index = try builder.reserveInstruction();
@@ -730,6 +733,8 @@ const Block = struct {
             .block => false,
             else => true,
         };
+        block_inst.is_comptime = gen_ctx.is_comptime;
+
         try block_inst.pushInstructionsFromBlock(node_index, gen_ctx);
         return try block_inst.commit();
     }
@@ -765,6 +770,7 @@ const Block = struct {
                     .name_node = null,
                     .instructions_list = instructions,
                     .type = self.expected_return_type,
+                    .is_comptime = self.is_comptime,
                 },
             });
             return self.inst;
@@ -775,6 +781,7 @@ const Block = struct {
                 .name_node = null,
                 .instructions_list = instructions,
                 .type = self.expected_return_type,
+                .is_comptime = self.is_comptime,
             },
         });
         return self.inst;
@@ -1079,7 +1086,10 @@ pub fn genFnDeclInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Ind
     const body = fn_decl.body;
     var fn_scope = Scope.init(self, scope, .block, "fn_decl");
     const params = try self.genFnParams(&fn_scope, proto);
-    const return_type = try self.genInstruction(scope, proto_data.ret_type, .{});
+
+    const return_type = try Block.fromNode(self, &fn_scope, proto_data.return_type, .{
+        .is_comptime = true,
+    });
     fn_scope.ret_type = return_type;
     // const init_inst = if
     const init_inst = blk: {

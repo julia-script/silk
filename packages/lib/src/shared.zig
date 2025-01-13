@@ -22,6 +22,7 @@ pub const BuiltinNameSpace = enum {
 pub const BuiltinGlobal = enum {
     comptime_log,
     as,
+    Result,
 
     float_demote, // Convert (demote) f64 to f32.
     int_extend, // Convert (extend) i32 to i64.

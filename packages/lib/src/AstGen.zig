@@ -23,6 +23,12 @@ ast: *Ast,
 errors: *ErrorManager,
 token_index: Token.Index = 0,
 tracer: Tracer,
+mode: ParseMode = .declarations,
+const ParseMode = enum {
+    declarations,
+    expression,
+    type_expression,
+};
 
 const AstGenError = error{
     OutOfMemory,
@@ -258,6 +264,13 @@ pub fn parse(self: *AstGen) AstGenError!void {
     // });
 }
 
+pub fn parseTypeExpression(self: *AstGen) AstGenError!Node.Index {
+    const prev_mode = self.mode;
+    self.mode = .type_expression;
+    const res = try self.parseExpression();
+    self.mode = prev_mode;
+    return res;
+}
 pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
     const trace = self.tracer.begin(@src(), .{
         "parseExpression",
@@ -282,7 +295,10 @@ pub fn parseExpression(self: *AstGen) AstGenError!Node.Index {
 
     if (lhs == 0) return 0;
 
-    const expr = try self.parseBinaryRhs(0, lhs);
+    const expr = try self.parseBinaryRhs(
+        0,
+        lhs,
+    );
     return expr;
 }
 
@@ -701,9 +717,50 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                     .end_token = self.token_index,
                 });
             },
+            .keyword_type => {
+                // if (type_)
+                if (self.mode == .type_expression) {
+                    const start_token = self.token_index;
+                    self.consumeToken();
+                    return try self.pushNode(.{
+                        .data = .{ .ty_type = .{ .token = start_token } },
+                        .start_token = start_token,
+                        .end_token = start_token,
+                    });
+                }
+                const start_token = self.token_index;
+
+                self.consumeToken();
+                const name = try self.parseIdentifier();
+
+                const ty: Node.Index = blk: {
+                    if (self.accept(.colon)) {
+                        break :blk try self.parsePrimary();
+                    }
+                    break :blk 0;
+                };
+
+                const value = blk: {
+                    if (self.tokenIs(.equal)) {
+                        self.consumeToken();
+                        break :blk try self.parseExpression();
+                    }
+                    break :blk 0;
+                };
+                return try self.pushNode(.{
+                    .data = .{ .type_decl = .{
+                        .name = name,
+                        .type = ty,
+                        .value = value,
+                    } },
+
+                    .start_token = start_token,
+                    .end_token = self.token_index - 1,
+                });
+            },
             inline .keyword_const,
             .keyword_var,
-            .keyword_type,
+            // .keyword_type,
             => |token_tag| {
                 const start_token = self.token_index;
                 self.consumeToken();
@@ -787,7 +844,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
 //     });
 // }
 
-fn getTokenPrecedence(tag: Token.Tag) i32 {
+fn getTokenPrecedence(tag: Token.Tag, is_type_expression: bool) i32 {
     return switch (tag) {
         .equal => 0,
         // .colon => 0,
@@ -828,8 +885,8 @@ fn getTokenPrecedence(tag: Token.Tag) i32 {
         // .l_parenthesis => 13,
 
         .l_parenthesis,
-        .l_brace,
         => 130,
+        .l_brace => if (is_type_expression) 0 else 130,
 
         .l_bracket, .dot, .colon => 140,
         else => -1,
@@ -866,7 +923,7 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) A
             }
         }
 
-        const tok_prec = getTokenPrecedence(token.tag);
+        const tok_prec = getTokenPrecedence(token.tag, self.mode == .type_expression);
 
         if (tok_prec < expression_precedence) return lhs;
 
@@ -880,6 +937,7 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) A
                 continue;
             },
             .l_brace => {
+                if (self.mode == .type_expression) return lhs;
                 lhs = try self.parseTypeInit(lhs);
                 continue;
             },
@@ -897,6 +955,7 @@ fn parseBinaryRhs(self: *AstGen, expression_precedence: i32, lhs_: Node.Index) A
 
         const next_precedence = getTokenPrecedence(
             next_tok.tag,
+            self.mode == .type_expression,
         );
         if (tok_prec < next_precedence) {
             rhs = try self.parseBinaryRhs(tok_prec + 1, rhs);
@@ -1274,13 +1333,14 @@ pub fn parseFnProto(self: *AstGen) AstGenError!Node.Index {
     //         .payload = @intFromEnum(Token.Tag.colon),
     //     });
     // }
-    const ret_ty = try self.parsePrimary();
+
+    const ret_ty = try self.parseTypeExpression();
 
     return try self.pushNode(.{
         .data = .{ .fn_proto = .{
             .name = name,
             .params_list = try params.commit(),
-            .ret_type = ret_ty,
+            .return_type = ret_ty,
             .is_declaring_builtin = is_declaring_builtin,
         } },
         .start_token = start_token,
@@ -1336,7 +1396,7 @@ pub fn parseFnParam(self: *AstGen) AstGenError!Node.Index {
     }
     // self.consumeToken();
 
-    data.type = try self.parseExpression();
+    data.type = try self.parseTypeExpression();
     self.setNode(index, .{
         .data = .{ .fn_param = data },
         .start_token = start_token,
@@ -2031,7 +2091,7 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
             defer trace_field.end(.{
                 .current_token = self.token_index,
             });
-            const identifier = try self.parsePrimary();
+            const identifier = try self.parseIdentifier();
             const field_start_token = self.token_index;
             if (!self.nodeIs(identifier, .identifier)) {
                 try self.errors.addError(.{

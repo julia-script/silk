@@ -458,6 +458,8 @@ pub const Inst = union(enum) {
     string_literal: AstNode,
     undefined_value: MaybeAstNode,
 
+    ty_type: AstNode,
+
     ty_number: AstNode,
     ty_boolean: AstNode,
     ty_i8: AstNode,

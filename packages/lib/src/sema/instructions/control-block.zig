@@ -23,7 +23,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         break :blk try type_entity.resolveType();
         // scope.builder.getEntityByHirInst(type_inst_index) else null;
     };
-    const index = ctx.pushWithoutExec(hir_inst_index, .{
+    const index = ctx.pushInstruction(hir_inst_index, .{
         .op = .block,
         .typed_value = .{
             .type = block_type orelse Sema.Type.simple(.void),
@@ -46,7 +46,6 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             break;
         }
     }
-    // @panic("not implemented");
 
     ctx.setData(index, .{
         .block = .{

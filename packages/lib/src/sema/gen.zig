@@ -452,6 +452,17 @@ pub const Builder = struct {
                     .size = 0,
                 });
             },
+            .result => |result| {
+                var hasher = Hasher.new("result");
+                hasher.update(self.getTypeKeyHash(result.ok));
+                hasher.update(self.getTypeKeyHash(result.err));
+                return try self.internType(.{
+                    .hash = hasher.final(),
+                    .data = data,
+                    .alignment = 0,
+                    .size = 0,
+                });
+            },
             .array => |array| {
                 var hasher = Hasher.new("array");
                 hasher.update(self.getTypeKeyHash(array.child));
@@ -2838,42 +2849,41 @@ pub const Entity = struct {
                 // return try self.resolveValue();
             },
         }
+        var scope = Scope.init(self, self.builder.allocator);
 
-        switch (std.meta.activeTag(hir_inst)) {
-            // .global_get => |global_get_inst| {
-            //     var xien = self.builder.getEntityByHirInst(hir_inst.) orelse std.debug.panic("global_get_inst is not a number", .{});
+        defer scope.deinit();
+        const type_inst_index = try scope.genRootBlock(self.hir_inst_index);
+        const inst = self.builder.sema.instructions.items[type_inst_index];
+        const type_inst_value = inst.typed_value;
+        const typeof = self.builder.getComplexType(type_inst_value.type);
+        std.debug.print("resolveTypeValue {s}\n", .{self.builder.getFormattableType(typeof.data.typeof.child)});
+        return try self.builder.internValueData(.{ .type = typeof.data.typeof.child });
+        // return typeof;
+        // switch (std.meta.activeTag(hir_inst)) {
+        //     inline else => |tag| {
+        //         const tag_name = @tagName(tag);
+        //         if (comptime std.mem.startsWith(u8, tag_name, "ty_")) {
+        //             const value_tag_name = "type_" ++ tag_name[3..];
+        //             return Sema.Value.simple(
+        //                 std.meta.stringToEnum(Sema.Value.Simple, value_tag_name) orelse std.debug.panic(
+        //                     "TODO: resolveTypeValue {s}",
+        //                     .{value_tag_name},
+        //                 ),
+        //             );
+        //         }
 
-            //     // const global_get_inst = self.getInstruction(self.hir_inst_index);
-            //     // const global_get_inst_value = self.builder.getValue(global_get_inst.value) orelse std.debug.panic("global_get_inst_value is not a number", .{});
-            //     // const global_get_inst_value_int = self.builder.getNumberValueKeyAs(i64, global_get_inst_value.value);
-            //     // return try self.pushInstruction(hir_inst_index, .{
-            //     //     .op = .store,
-            //     //     .type = Sema.Type.simple(.void),
-            //     //     .value = Sema.Value.simple(.void),
-            //     //     .data = .{ .operand_payload = .{
-            //     //         .operand = pointer_inst_index,
-            //     //         .payload = load_inst_value_int,
-            //     //     } },
-            //     // });
-            //     return try global_get_inst.resolveValue();
-            // },
-            inline else => |tag| {
-                const tag_name = @tagName(tag);
-                if (comptime std.mem.startsWith(u8, tag_name, "ty_")) {
-                    const value_tag_name = "type_" ++ tag_name[3..];
-                    return Sema.Value.simple(
-                        std.meta.stringToEnum(Sema.Value.Simple, value_tag_name) orelse std.debug.panic(
-                            "TODO: resolveTypeValue {s}",
-                            .{value_tag_name},
-                        ),
-                    );
-                }
-                // const type_entity = self.builder.getEntityByHirInst(self.hir_inst_index);
+        //         var scope = Scope.init(self, self.builder.allocator);
+        //         defer scope.deinit();
+        //         const type_inst_index = try scope.genRootBlock(hir_inst);
+        //         const inst = self.builder.sema.instructions.items[type_inst_index];
+        //         const type_inst_value = inst.typed_value;
 
-                // return self.builder.internValueData(.{ .type = try self.resolveType() });
-                std.debug.panic("TODO: resolveTypeValue {d} {s}", .{ self.hir_inst_index, tag_name });
-            },
-        }
+        //         // return self.builder.internValueData(.{ .type = try self.resolveType() });
+        //         // std.debug.panic("TODO: resolveTypeValue {d} {s}", .{ self.hir_inst_index, tag_name });
+        //         // return try self.builder.internValueData(.{ .type = type_inst_value.type });
+        //         return type_inst_value.value;
+        //     },
+        // }
     }
     pub fn resolveFunctionValue(self: *Entity) Error!Sema.Value.Key {
         const trace = self.builder.tracer.begin(
@@ -2893,6 +2903,9 @@ pub const Entity = struct {
         const init_inst_index = blk: {
             const init_inst = hir_inst.init orelse break :blk null;
             var scope = Scope.init(self, self.builder.allocator);
+            const return_type_entity = self.builder.getEntity(self.data.function_declaration.return_type);
+            const ret_type_value = try return_type_entity.resolveValue();
+            scope.return_type = self.builder.unwrapTypeValue(ret_type_value);
             defer scope.deinit();
             const block_inst = try scope.genRootBlock(init_inst);
             break :blk block_inst;
@@ -3197,6 +3210,7 @@ pub const Scope = struct {
     // is_comptime: bool = false,
     is_inline: bool = false,
     active_block_instructions: ?*Sema.Lists.WorkingList = null,
+    return_type: ?Sema.Type.Key,
 
     // inst_context: InstContext,
     pub fn init(entity: *Entity, allocator: std.mem.Allocator) Scope {
@@ -3210,6 +3224,7 @@ pub const Scope = struct {
                 .{ "newScope", "Scope.newScope", .{} },
                 .{},
             ),
+            .return_type = null,
         };
     }
 
@@ -3268,6 +3283,7 @@ pub const Scope = struct {
     }
     pub fn genRootBlock(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = self.entity.getHirInstruction(hir_inst_index);
+        _ = hir_inst; // autofix
         var inst_context = InstContext{
             .builder = self.builder,
             .depth = 0,
@@ -3279,12 +3295,14 @@ pub const Scope = struct {
             .goToFn = goToFn,
             .setIdMapFn = setIdMapFn,
         };
-        _ = switch (hir_inst) {
-            .block, .inline_block => try Index.gen(&inst_context, self, hir_inst_index),
-            else => |inst| {
-                std.debug.panic("unhandled hir_inst: {s}", .{@tagName(inst)});
-            },
-        };
+        _ = try Index.gen(&inst_context, self, hir_inst_index);
+        // _ = switch (hir_inst) {
+        //     .block, .inline_block => try Index.gen(&inst_context, self, hir_inst_index),
+
+        //     else => |inst| {
+        //         std.debug.panic("unhandled hir_inst: {s}", .{@tagName(inst)});
+        //     },
+        // };
         // _ = try self.resolveInstruction(hir_inst_index);
         const index: Sema.Instruction.Index = self.builder.sema.instructions.items.len;
         try self.builder.sema.instructions.appendSlice(self.builder.allocator, self.instructions.items);
