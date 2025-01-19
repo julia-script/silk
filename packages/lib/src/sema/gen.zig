@@ -7,7 +7,6 @@ const Array = std.ArrayListUnmanaged;
 const ArrayHashMap = std.AutoArrayHashMapUnmanaged;
 const ChunkedArray = @import("../chunked_array.zig").ChunkedArray;
 const Ast = @import("../Ast.zig");
-const Source = @import("../Compilation.zig").Source;
 const InstContext = @import("./instructions/InstContext.zig");
 const Index = @import("./instructions/inst-index.zig");
 const Box = @import("../pointer.zig").Box;

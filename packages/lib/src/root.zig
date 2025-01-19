@@ -12,8 +12,6 @@ test {
     _ = @import("Mir.zig");
     _ = @import("MirBuilder.zig");
     // _ = @import("WasmWriter.zig");
-    _ = @import("./backend/wasm/WasmBuilder.zig");
-    _ = @import("Compilation.zig");
     _ = @import("serializer.zig");
     _ = @import("dir.zig");
     _ = @import("chunked_array.zig");

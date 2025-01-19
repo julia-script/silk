@@ -4,7 +4,7 @@ const Sema = @import("../sema/Sema.zig");
 const ErrorManager = @import("../ErrorManager.zig");
 const Self = @This();
 const Target = @import("./Target.zig");
-const Wasm32Backend = @import("../backend/wasm32/Backend.zig");
+const WasmBackend = @import("../backend/wasm/Backend.zig");
 
 allocator: std.mem.Allocator,
 os: Os,
@@ -58,7 +58,7 @@ pub fn compile(self: *Self) !void {
 
     var codegen = switch (self.target.arch) {
         .wasm32 => blk: {
-            var backend = Wasm32Backend.init(self, self.allocator);
+            var backend = WasmBackend.init(self, self.allocator);
             break :blk backend.codegen();
         },
         else => @panic("Unsupported target architecture"),
