@@ -97,7 +97,10 @@ pub fn translateFunctionType(self: *Self, global_index: Mir.Global.Index) !void 
     try self.declaration_map.put(.{ .global = global_index }, @intCast(func_wip.index));
     func_wip.name = name_slice;
     func_wip.@"export" = true; //export all for now
-    _ = try self.builder.pushMemory(.{ .initial = 1, .maximum = null });
+    _ = try self.builder.pushMemory(.{
+        .initial = 1,
+        .maximum = null,
+    });
 
     // const local_index = try func_wip.pushLocal(.i32);
     // const array_size = 2;

@@ -23,7 +23,6 @@ fn writeAllVarUInt32(writer: std.io.AnyWriter, values: anytype) !void {
 pub const Type = enum(u8) {
     function = 0x60,
     empty = 0x40,
-
     i32 = 0x7F,
     i64 = 0x7E,
     f32 = 0x7D,
@@ -34,68 +33,82 @@ pub const Type = enum(u8) {
 };
 
 pub const Instruction = union(enum) {
+    formatting: Formatting,
+
     @"return": void,
-    local_get: u32,
-    local_set: u32,
-    local_tee: u32,
-    global_get: u32,
-    global_set: u32,
+    @"local.get": u32,
+    @"local.set": u32,
+    @"local.tee": u32,
+    @"global.get": u32,
+    @"global.set": u32,
     end: void,
     call: u32,
     drop: void,
 
     // Arithmetic Operations
-    i32_add: void,
-    i64_add: void,
-    f32_add: void,
-    f64_add: void,
+    @"i32.add": void,
+    @"i64.add": void,
+    @"f32.add": void,
+    @"f64.add": void,
 
-    i32_sub: void,
-    i64_sub: void,
-    f32_sub: void,
-    f64_sub: void,
+    @"i32.sub": void,
+    @"i64.sub": void,
+    @"f32.sub": void,
+    @"f64.sub": void,
 
-    i32_mul: void,
-    i64_mul: void,
-    f32_mul: void,
-    f64_mul: void,
+    @"i32.mul": void,
+    @"i64.mul": void,
+    @"f32.mul": void,
+    @"f64.mul": void,
 
-    i32_div_s: void,
-    i64_div_s: void,
-    i32_div_u: void,
-    i64_div_u: void,
-    f32_div: void,
-    f64_div: void,
+    @"i32.div_s": void,
+    @"i64.div_s": void,
+    @"i32.div_u": void,
+    @"i64.div_u": void,
+    @"f32.div": void,
+    @"f64.div": void,
 
     // Comparison Operations
-    i32_eq: void,
-    i32_ne: void,
-    i32_lt_s: void,
-    i32_lt_u: void,
-    i32_gt_s: void,
-    i32_gt_u: void,
+    @"i32.eq": void,
+    @"i32.ne": void,
+    @"i32.lt_s": void,
+    @"i32.lt_u": void,
+    @"i32.gt_s": void,
+    @"i32.gt_u": void,
+    @"i32.le_s": void,
+    @"i32.le_u": void,
+    @"i32.ge_s": void,
+    @"i32.ge_u": void,
 
-    i64_eq: void,
-    i64_ne: void,
-    i64_lt_s: void,
-    i64_lt_u: void,
-    i64_gt_s: void,
-    i64_gt_u: void,
+    @"i64.eq": void,
+    @"i64.ne": void,
+    @"i64.lt_s": void,
+    @"i64.lt_u": void,
+    @"i64.le_s": void,
+    @"i64.le_u": void,
+    @"i64.gt_s": void,
+    @"i64.gt_u": void,
+    @"i64.ge_s": void,
+    @"i64.ge_u": void,
 
-    f32_eq: void,
-    f32_ne: void,
-    f32_lt: void,
-    f32_gt: void,
+    @"f32.eq": void,
+    @"f32.ne": void,
+    @"f32.lt": void,
+    @"f32.le": void,
+    @"f32.gt": void,
+    @"f32.ge": void,
 
-    f64_eq: void,
-    f64_ne: void,
-    f64_lt: void,
-    f64_gt: void,
+    @"f64.eq": void,
+    @"f64.ne": void,
+    @"f64.lt": void,
+    @"f64.le": void,
+    @"f64.gt": void,
+    @"f64.ge": void,
 
-    i32_const: i32,
-    i64_const: i64,
-    f32_const: f32,
-    f64_const: f64,
+    @"i32.const": i32,
+    @"i64.const": i64,
+    @"f32.const": f32,
+    @"f64.const": f64,
 
     @"if": Type,
     @"else": void,
@@ -103,62 +116,71 @@ pub const Instruction = union(enum) {
 
     loop: Type,
 
-    i32_store: MemOp,
-    i64_store: MemOp,
-    f32_store: MemOp,
-    f64_store: MemOp,
-    i32_store8: MemOp,
-    i32_store16: MemOp,
-    i64_store8: MemOp,
-    i64_store16: MemOp,
-    i64_store32: MemOp,
+    @"i32.store": MemOp,
+    @"i64.store": MemOp,
+    @"f32.store": MemOp,
+    @"f64.store": MemOp,
+    @"i32.store8": MemOp,
+    @"i32.store16": MemOp,
+    @"i64.store8": MemOp,
+    @"i64.store16": MemOp,
+    @"i64.store32": MemOp,
 
-    i32_load: MemOp,
-    i64_load: MemOp,
-    f32_load: MemOp,
-    f64_load: MemOp,
-    i32_load8_s: MemOp,
-    i32_load8_u: MemOp,
-    i32_load16_s: MemOp,
-    i32_load16_u: MemOp,
-    i64_load8_s: MemOp,
-    i64_load8_u: MemOp,
-    i64_load16_s: MemOp,
-    i64_load16_u: MemOp,
-    i64_load32_s: MemOp,
-    i64_load32_u: MemOp,
+    @"i32.load": MemOp,
+    @"i64.load": MemOp,
+    @"f32.load": MemOp,
+    @"f64.load": MemOp,
+    @"i32.load8_s": MemOp,
+    @"i32.load8_u": MemOp,
+    @"i32.load16_s": MemOp,
+    @"i32.load16_u": MemOp,
+    @"i64.load8_s": MemOp,
+    @"i64.load8_u": MemOp,
+    @"i64.load16_s": MemOp,
+    @"i64.load16_u": MemOp,
+    @"i64.load32_s": MemOp,
+    @"i64.load32_u": MemOp,
+
+    pub const Formatting = union(enum) {
+        linebreak: void,
+        comment: []const u8,
+        inline_comment: []const u8,
+    };
 
     // Memory instructions
 
     pub const BinOp = enum { add, sub, mul, div, mod };
 
     pub const MemOp = struct {
+        memory: u32,
         offset: u8 = 0,
         alignment: ?u8 = null,
     };
     pub const END: Instruction = .{ .end = {} };
     pub fn writeInto(self: Instruction, section: *Section) !void {
         switch (self) {
+            .formatting => {},
+
             .@"return" => {
                 try section.write(0x0f);
             },
-            .local_get => |index| {
+            .@"local.get" => |index| {
                 try section.writeByte(0x20);
                 try section.write(index);
             },
-            .local_set => |index| {
+            .@"local.set" => |index| {
                 try section.writeByte(0x21);
                 try section.write(index);
             },
-            .local_tee => |index| {
+            .@"local.tee" => |index| {
                 try section.writeByte(0x22);
                 try section.write(index);
             },
-            .global_get => |index| {
+            .@"global.get" => |index| {
                 try section.writeByte(0x23);
                 try section.write(index);
             },
-            .global_set => |index| {
+            .@"global.set" => |index| {
                 try section.writeByte(0x24);
                 try section.write(index);
             },
@@ -169,67 +191,79 @@ pub const Instruction = union(enum) {
             .drop => try section.writeByte(0x1A),
 
             // Arithmetic Operations
-            .i32_add => try section.writeByte(0x6A), // i32.add
-            .i64_add => try section.writeByte(0x7C), // i64.add
-            .f32_add => try section.writeByte(0x92), // f32.add
-            .f64_add => try section.writeByte(0xA0), // f64.add
+            .@"i32.add" => try section.writeByte(0x6A), // i32.add
+            .@"i64.add" => try section.writeByte(0x7C), // i64.add
+            .@"f32.add" => try section.writeByte(0x92), // f32.add
+            .@"f64.add" => try section.writeByte(0xA0), // f64.add
 
-            .i32_sub => try section.writeByte(0x6B), // i32.sub
-            .i64_sub => try section.writeByte(0x7D), // i64.sub
-            .f32_sub => try section.writeByte(0x93), // f32.sub
-            .f64_sub => try section.writeByte(0xA1), // f64.sub
+            .@"i32.sub" => try section.writeByte(0x6B), // i32.sub
+            .@"i64.sub" => try section.writeByte(0x7D), // i64.sub
+            .@"f32.sub" => try section.writeByte(0x93), // f32.sub
+            .@"f64.sub" => try section.writeByte(0xA1), // f64.sub
 
-            .i32_mul => try section.writeByte(0x6C), // i32.mul
-            .i64_mul => try section.writeByte(0x7E), // i64.mul
-            .f32_mul => try section.writeByte(0x94), // f32.mul
-            .f64_mul => try section.writeByte(0xA2), // f64.mul
+            .@"i32.mul" => try section.writeByte(0x6C), // i32.mul
+            .@"i64.mul" => try section.writeByte(0x7E), // i64.mul
+            .@"f32.mul" => try section.writeByte(0x94), // f32.mul
+            .@"f64.mul" => try section.writeByte(0xA2), // f64.mul
 
-            .i32_div_s => try section.writeByte(0x6D), // i32.div_s
-            .i64_div_s => try section.writeByte(0x7F), // i64.div_s
-            .i32_div_u => try section.writeByte(0x6E), // i32.div_u
-            .i64_div_u => try section.writeByte(0x80), // i64.div_u
-            .f32_div => try section.writeByte(0x95), // f32.div
-            .f64_div => try section.writeByte(0xA3), // f64.div
+            .@"i32.div_s" => try section.writeByte(0x6D), // i32.div_s
+            .@"i64.div_s" => try section.writeByte(0x7F), // i64.div_s
+            .@"i32.div_u" => try section.writeByte(0x6E), // i32.div_u
+            .@"i64.div_u" => try section.writeByte(0x80), // i64.div_u
+            .@"f32.div" => try section.writeByte(0x95), // f32.div
+            .@"f64.div" => try section.writeByte(0xA3),
 
-            // Comparison Operations
-            .i32_eq => try section.writeByte(0x46), // i32.eq
-            .i32_ne => try section.writeByte(0x47), // i32.ne
-            .i32_lt_s => try section.writeByte(0x48), // i32.lt_s
-            .i32_lt_u => try section.writeByte(0x49), // i32.lt_u
-            .i32_gt_s => try section.writeByte(0x4A), // i32.gt_s
-            .i32_gt_u => try section.writeByte(0x4B), // i32.gt_u
+            .@"i32.eq" => try section.writeByte(0x46),
+            .@"i64.eq" => try section.writeByte(0x51),
+            .@"i32.ne" => try section.writeByte(0x47),
+            .@"i64.ne" => try section.writeByte(0x52),
+            .@"i32.lt_s" => try section.writeByte(0x48),
+            .@"i64.lt_s" => try section.writeByte(0x53),
+            .@"i32.lt_u" => try section.writeByte(0x49),
+            .@"i64.lt_u" => try section.writeByte(0x54),
 
-            .i64_eq => try section.writeByte(0x51), // i64.eq
-            .i64_ne => try section.writeByte(0x52), // i64.ne
-            .i64_lt_s => try section.writeByte(0x53), // i64.lt_s
-            .i64_lt_u => try section.writeByte(0x54), // i64.lt_u
-            .i64_gt_s => try section.writeByte(0x55), // i64.gt_s
-            .i64_gt_u => try section.writeByte(0x56), // i64.gt_u
+            .@"i32.le_s" => try section.writeByte(0x4c),
+            .@"i64.le_s" => try section.writeByte(0x57),
+            .@"i32.le_u" => try section.writeByte(0x4d),
+            .@"i64.le_u" => try section.writeByte(0x58),
 
-            .f32_eq => try section.writeByte(0x5B), // f32.eq
-            .f32_ne => try section.writeByte(0x5C), // f32.ne
-            .f32_lt => try section.writeByte(0x5D), // f32.lt
-            .f32_gt => try section.writeByte(0x5E), // f32.gt
+            .@"i32.gt_s" => try section.writeByte(0x4a),
+            .@"i64.gt_s" => try section.writeByte(0x55),
+            .@"i32.gt_u" => try section.writeByte(0x4b),
+            .@"i64.gt_u" => try section.writeByte(0x56),
 
-            .f64_eq => try section.writeByte(0x61), // f64.eq
-            .f64_ne => try section.writeByte(0x62), // f64.ne
-            .f64_lt => try section.writeByte(0x63), // f64.lt
-            .f64_gt => try section.writeByte(0x64), // f64.gt
+            .@"i32.ge_s" => try section.writeByte(0x4e),
+            .@"i64.ge_s" => try section.writeByte(0x59),
+            .@"i32.ge_u" => try section.writeByte(0x4f),
+            .@"i64.ge_u" => try section.writeByte(0x5a),
 
-            .i32_const => |value| {
+            .@"f32.eq" => try section.writeByte(0x5b),
+            .@"f64.eq" => try section.writeByte(0x61),
+            .@"f32.ne" => try section.writeByte(0x5c),
+            .@"f64.ne" => try section.writeByte(0x62),
+            .@"f32.lt" => try section.writeByte(0x5d),
+            .@"f64.lt" => try section.writeByte(0x63),
+            .@"f32.le" => try section.writeByte(0x5f),
+            .@"f64.le" => try section.writeByte(0x65),
+            .@"f32.gt" => try section.writeByte(0x5e),
+            .@"f64.gt" => try section.writeByte(0x64),
+            .@"f32.ge" => try section.writeByte(0x60),
+            .@"f64.ge" => try section.writeByte(0x66),
+
+            .@"i32.const" => |value| {
                 try section.writeByte(0x41);
                 try section.write(value);
             },
-            .i64_const => |value| {
+            .@"i64.const" => |value| {
                 try section.writeByte(0x42);
                 try section.write(value);
             },
 
-            .f32_const => |value| {
+            .@"f32.const" => |value| {
                 try section.writeByte(0x43);
                 try section.write(value);
             },
-            .f64_const => |value| {
+            .@"f64.const" => |value| {
                 try section.writeByte(0x44);
                 try section.write(value);
             },
@@ -248,118 +282,118 @@ pub const Instruction = union(enum) {
                 try section.write(index);
             },
 
-            .i32_store => |mem| {
+            .@"i32.store" => |mem| {
                 try section.writeByte(0x36);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
             },
-            .i64_store => |mem| {
+            .@"i64.store" => |mem| {
                 try section.writeByte(0x37);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 8);
             },
-            .f32_store => |mem| {
+            .@"f32.store" => |mem| {
                 try section.writeByte(0x38);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
             },
-            .f64_store => |mem| {
+            .@"f64.store" => |mem| {
                 try section.writeByte(0x39);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 8);
             },
-            .i32_store8 => |mem| {
+            .@"i32.store8" => |mem| {
                 try section.writeByte(0x3a);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 1);
             },
-            .i32_store16 => |mem| {
+            .@"i32.store16" => |mem| {
                 try section.writeByte(0x3b);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 2);
             },
-            .i64_store8 => |mem| {
+            .@"i64.store8" => |mem| {
                 try section.writeByte(0x3c);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 1);
             },
-            .i64_store16 => |mem| {
+            .@"i64.store16" => |mem| {
                 try section.writeByte(0x3d);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 2);
             },
-            .i64_store32 => |mem| {
+            .@"i64.store32" => |mem| {
                 try section.writeByte(0x3e);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
             },
 
-            .i32_load => |mem| {
+            .@"i32.load" => |mem| {
                 try section.writeByte(0x28);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
             },
-            .i64_load => |mem| {
+            .@"i64.load" => |mem| {
                 try section.writeByte(0x29);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 8);
             },
-            .f32_load => |mem| {
+            .@"f32.load" => |mem| {
                 try section.writeByte(0x2a);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
             },
-            .f64_load => |mem| {
+            .@"f64.load" => |mem| {
                 try section.writeByte(0x2b);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 8);
             },
-            .i32_load8_s => |mem| {
+            .@"i32.load8_s" => |mem| {
                 try section.writeByte(0x2c);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 1);
             },
-            .i32_load8_u => |mem| {
+            .@"i32.load8_u" => |mem| {
                 try section.writeByte(0x2d);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 1);
             },
-            .i32_load16_s => |mem| {
+            .@"i32.load16_s" => |mem| {
                 try section.writeByte(0x2e);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 2);
             },
-            .i32_load16_u => |mem| {
+            .@"i32.load16_u" => |mem| {
                 try section.writeByte(0x2f);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 2);
             },
-            .i64_load8_s => |mem| {
+            .@"i64.load8_s" => |mem| {
                 try section.writeByte(0x30);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 1);
             },
-            .i64_load8_u => |mem| {
+            .@"i64.load8_u" => |mem| {
                 try section.writeByte(0x31);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 1);
             },
-            .i64_load16_s => |mem| {
+            .@"i64.load16_s" => |mem| {
                 try section.writeByte(0x32);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 2);
             },
-            .i64_load16_u => |mem| {
+            .@"i64.load16_u" => |mem| {
                 try section.writeByte(0x33);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 2);
             },
-            .i64_load32_s => |mem| {
+            .@"i64.load32_s" => |mem| {
                 try section.writeByte(0x34);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
             },
-            .i64_load32_u => |mem| {
+            .@"i64.load32_u" => |mem| {
                 try section.writeByte(0x35);
                 try section.writeByte(mem.offset);
                 try section.writeByte(mem.alignment orelse 4);
@@ -368,75 +402,91 @@ pub const Instruction = union(enum) {
     }
     pub fn toWat(self: Instruction, writer: *WatWriter) !void {
         switch (self) {
-            .local_get => |index| try writer.print("local.get {d}", .{index}),
-            .local_set => |index| try writer.print("local.set {d}", .{index}),
-            .local_tee => |index| try writer.print("local.tee {d}", .{index}),
+            // .@"local.get" => |index| try writer.print("local.get {d}", .{index}),
+            // .@"local.set" => |index| try writer.print("local.set {d}", .{index}),
+            // .@"local.tee" => |index| try writer.print("local.tee {d}", .{index}),
+            // .@"global.get" => |index| try writer.print("global.get {d}", .{index}),
+            // .@"global.set" => |index| try writer.print("global.set {d}", .{index}),
 
-            .global_get => |index| try writer.print("global.get {d}", .{index}),
-            .global_set => |index| try writer.print("global.set {d}", .{index}),
-            .i32_const => |value| try writer.print("i32.const {d}", .{value}),
-            .i64_const => |value| try writer.print("i64.const {d}", .{value}),
-            .f32_const => |value| try writer.print("f32.const {d}", .{value}),
-            .f64_const => |value| try writer.print("f64.const {d}", .{value}),
+            // .@"i32.const" => |value| try writer.print("i32.const {d}", .{value}),
+            // .@"i64.const" => |value| try writer.print("i64.const {d}", .{value}),
+            // .@"f32.const" => |value| try writer.print("f32.const {d}", .{value}),
+            // .@"f64.const" => |value| try writer.print("f64.const {d}", .{value}),
             .@"if" => unreachable,
             .@"else" => unreachable,
             .end => unreachable,
             .loop => unreachable,
-            .br => unreachable,
-            .i32_add => try writer.write("i32.add"),
-            .i64_add => try writer.write("i64.add"),
-            .f32_add => try writer.write("f32.add"),
-            .f64_add => try writer.write("f64.add"),
-            .i32_sub => try writer.write("i32.sub"),
-            .i64_sub => try writer.write("i64.sub"),
-            .f32_sub => try writer.write("f32.sub"),
-            .f64_sub => try writer.write("f64.sub"),
-            .i32_mul => try writer.write("i32.mul"),
-            .i64_mul => try writer.write("i64.mul"),
-            .f32_mul => try writer.write("f32.mul"),
-            .f64_mul => try writer.write("f64.mul"),
-            .i32_div_s => try writer.write("i32.div_s"),
-            .i64_div_s => try writer.write("i64.div_s"),
-            .i32_div_u => try writer.write("i32.div_u"),
-            .i64_div_u => try writer.write("i64.div_u"),
-            .f32_div => try writer.write("f32.div"),
-            .f64_div => try writer.write("f64.div"),
-            .i32_eq => try writer.write("i32.eq"),
-            .i32_ne => try writer.write("i32.ne"),
-            .i32_lt_s => try writer.write("i32.lt_s"),
-            .i32_lt_u => try writer.write("i32.lt_u"),
-            .i32_gt_s => try writer.write("i32.gt_s"),
-            .i32_gt_u => try writer.write("i32.gt_u"),
-            .i64_eq => try writer.write("i64.eq"),
-            .i64_ne => try writer.write("i64.ne"),
-            .i64_lt_s => try writer.write("i64.lt_s"),
-            .i64_lt_u => try writer.write("i64.lt_u"),
-            .i64_gt_s => try writer.write("i64.gt_s"),
-            .i64_gt_u => try writer.write("i64.gt_u"),
+            // .br => |index| try writer.print("br {d}", .{index}),
 
-            .f32_eq => try writer.write("f32.eq"),
-            .f32_ne => try writer.write("f32.ne"),
-            .f32_lt => try writer.write("f32.lt"),
-            .f32_gt => try writer.write("f32.gt"),
+            // .@"return" => try writer.write("return"),
+            // .i32_add => try writer.write("i32.add"),
+            // .i64_add => try writer.write("i64.add"),
+            // .f32_add => try writer.write("f32.add"),
+            // .f64_add => try writer.write("f64.add"),
+            // .i32_sub => try writer.write("i32.sub"),
+            // .i64_sub => try writer.write("i64.sub"),
+            // .f32_sub => try writer.write("f32.sub"),
+            // .f64_sub => try writer.write("f64.sub"),
+            // .i32_mul => try writer.write("i32.mul"),
+            // .i64_mul => try writer.write("i64.mul"),
+            // .f32_mul => try writer.write("f32.mul"),
+            // .f64_mul => try writer.write("f64.mul"),
+            // .i32_div_s => try writer.write("i32.div_s"),
+            // .i64_div_s => try writer.write("i64.div_s"),
+            // .i32_div_u => try writer.write("i32.div_u"),
+            // .i64_div_u => try writer.write("i64.div_u"),
+            // .f32_div => try writer.write("f32.div"),
+            // .f64_div => try writer.write("f64.div"),
+            // .i32_eq => try writer.write("i32.eq"),
+            // .i32_ne => try writer.write("i32.ne"),
+            // .i32_lt_s => try writer.write("i32.lt_s"),
+            // .i32_lt_u => try writer.write("i32.lt_u"),
+            // .i32_gt_s => try writer.write("i32.gt_s"),
+            // .i32_gt_u => try writer.write("i32.gt_u"),
+            // .i64_eq => try writer.write("i64.eq"),
+            // .i64_ne => try writer.write("i64.ne"),
+            // .i64_lt_s => try writer.write("i64.lt_s"),
+            // .i64_lt_u => try writer.write("i64.lt_u"),
+            // .i64_gt_s => try writer.write("i64.gt_s"),
+            // .i64_gt_u => try writer.write("i64.gt_u"),
 
-            .f64_eq => try writer.write("f64.eq"),
+            // .f32_eq => try writer.write("f32.eq"),
+            // .f32_ne => try writer.write("f32.ne"),
+            // .f32_lt => try writer.write("f32.lt"),
+            // .f32_gt => try writer.write("f32.gt"),
 
-            .i32_store => try writer.write("i32.store"),
-            .i64_store => try writer.write("i64.store"),
-            .f32_store => try writer.write("f32.store"),
-            .f64_store => try writer.write("f64.store"),
-            .i32_store8 => try writer.write("i32.store8"),
-            .i32_store16 => try writer.write("i32.store16"),
-            .i64_store8 => try writer.write("i64.store8"),
-            .i64_store16 => try writer.write("i64.store16"),
-            .i64_store32 => try writer.write("i64.store32"),
+            // .f64_eq => try writer.write("f64.eq"),
 
-            else => try writer.print("UNIMPLEMENTED: {s}", .{@tagName(self)}),
+            // .i32_store => try writer.write("i32.store"),
+            // .i64_store => try writer.write("i64.store"),
+            // .f32_store => try writer.write("f32.store"),
+            // .f64_store => try writer.write("f64.store"),
+            // .i32_store8 => try writer.write("i32.store8"),
+            // .i32_store16 => try writer.write("i32.store16"),
+            // .i64_store8 => try writer.write("i64.store8"),
+            // .i64_store16 => try writer.write("i64.store16"),
+            // .i64_store32 => try writer.write("i64.store32"),
+            inline else => |payload| {
+                const T = @TypeOf(payload);
+                switch (T) {
+                    void => {
+                        try writer.write(@tagName(self));
+                        return;
+                    },
+                    u32 => {
+                        try writer.print("{s} {d}", .{ @tagName(self), payload });
+                        return;
+                    },
+                    else => {
+                        try writer.print("UNIMPLEMENTED: {s}", .{@tagName(self)});
+                    },
+                }
+            },
         }
     }
 };
 const Local = struct {
-    count: u32,
+    name: []const u8,
     type: Type,
     pub fn toBytes(self: Local, writer: std.io.AnyWriter) !void {
         try writeVarUInt32(writer, self.count);
@@ -446,58 +496,98 @@ const Local = struct {
 pub const Function = struct {
     index: usize,
     name: []const u8 = "",
-    params: Array(Type),
+    // params: Array(Local),
+    param_count: usize = 0,
     results: Array(Type),
+    prologue: Array(Instruction),
+
     instructions: Array(Instruction),
     module: *Module,
     locals: Array(Local),
     @"export": bool = false,
-    local_count: u32 = 0,
 
     pub fn init(module: *Module, index: usize) Function {
         return .{
             .index = index,
-            .params = Array(Type).init(module.arena.allocator()),
             .results = Array(Type).init(module.arena.allocator()),
+            .prologue = Array(Instruction).init(module.arena.allocator()),
             .instructions = Array(Instruction).init(module.arena.allocator()),
             .locals = Array(Local).init(module.arena.allocator()),
             .module = module,
         };
     }
-    pub fn pushParam(self: *Function, param: Type) !void {
-        self.local_count += 1;
-        try self.params.append(param);
+    pub fn getParams(self: Function) []const Local {
+        return self.locals.items[0..self.param_count];
     }
+    pub fn getLocals(self: Function) []const Local {
+        return self.locals.items[self.param_count..];
+    }
+    pub fn pushParam(self: *Function, name: []const u8, param_type: Type) !u32 {
+        const index = try self.pushLocal(name, param_type);
+        std.debug.print("pushParam: {any}\n", .{self.locals.items});
+        self.param_count += 1;
+        return index;
+    }
+
     pub fn pushInstruction(self: *Function, instruction: Instruction) !void {
         std.debug.print("pushInstruction: {}\n", .{(instruction)});
         try self.instructions.append(instruction);
-        // self.hasher.update("instruction");
-        // try instruction.toBytes(self.instructions.writer().any());
+    }
+    pub fn pushPrologue(self: *Function, instruction: Instruction) !void {
+        try self.prologue.append(instruction);
+    }
+
+    pub fn pushFormatting(self: *Function, formatting: Instruction.Formatting) !void {
+        switch (formatting) {
+            .comment => |comment| {
+                try self.instructions.append(.{ .formatting = .{ .comment = try self.module.arena.allocator().dupe(u8, comment) } });
+            },
+            .inline_comment => |comment| {
+                try self.instructions.append(.{ .formatting = .{ .inline_comment = try self.module.arena.allocator().dupe(u8, comment) } });
+            },
+            else => {
+                try self.instructions.append(.{ .formatting = formatting });
+            },
+        }
+    }
+    pub fn pushPrologueFormatting(self: *Function, formatting: Instruction.Formatting) !void {
+        switch (formatting) {
+            .comment => |comment| {
+                try self.prologue.append(.{ .formatting = .{ .comment = try self.module.arena.allocator().dupe(u8, comment) } });
+            },
+            .inline_comment => |comment| {
+                try self.prologue.append(.{ .formatting = .{ .inline_comment = try self.module.arena.allocator().dupe(u8, comment) } });
+            },
+            else => {
+                try self.prologue.append(.{ .formatting = formatting });
+            },
+        }
     }
     pub fn pushResult(self: *Function, result: Type) !void {
         try self.results.append(result);
     }
-    pub fn pushLocal(self: *Function, value_type: Type) !u32 {
-        const prev = self.locals.items.len;
-        defer self.local_count += 1;
-        if (self.locals.items.len > 0) {
-            const last = self.locals.items[prev - 1];
-            if (last.type == value_type) {
-                self.locals.items[prev - 1].count += 1;
-                return self.local_count;
-            }
-        }
-        const local_count: u32 = 1;
-        const local = Local{ .count = local_count, .type = value_type };
-        try self.locals.append(local);
-        return self.local_count;
+    pub fn pushLocal(self: *Function, name: []const u8, value_type: Type) !u32 {
+        const local_count: u32 = @intCast(self.locals.items.len);
+        // const prev = self.locals.items.len;
+        // defer self.local_count += 1;
+        // if (self.locals.items.len > 0) {
+        //     const last = self.locals.items[prev - 1];
+        //     if (last.type == value_type) {
+        //         self.locals.items[prev - 1].count += 1;
+        //         return self.local_count;
+        //     }
+        // }
+
+        // const local = Local{ .name = name, .type = value_type };
+        try self.locals.append(Local{ .name = name, .type = value_type });
+        return local_count;
     }
     pub fn getFunctionType(self: Function) FunctionType {
-        return .{ .params = self.params.items, .results = self.results.items };
+        return .{ .params = self.getParams(), .results = self.results.items };
     }
 };
 const FunctionType = struct {
-    params: []Type,
+    params: []const Local,
     results: []Type,
     pub fn toBytes(self: FunctionType, writer: std.io.AnyWriter) !void {
         try writeVarUInt32(writer, 0x60);
@@ -552,6 +642,8 @@ pub const Global = struct {
 const Memory = struct {
     initial: u32,
     maximum: ?u32 = null,
+    name: []const u8,
+    is_exported: bool = true,
 };
 
 const Array = std.ArrayList;
@@ -568,7 +660,7 @@ pub const Module = struct {
     arena: std.heap.ArenaAllocator,
     scratch: std.ArrayListUnmanaged(u8) = .{},
     start: ?u32 = null,
-    pub fn init(allocator: std.mem.Allocator) !Module {
+    pub fn init(allocator: std.mem.Allocator) Module {
         return Module{
             .arena = std.heap.ArenaAllocator.init(allocator),
             .allocator = allocator,
@@ -596,9 +688,15 @@ pub const Module = struct {
         try self.globals.append(self.arena.allocator(), undefined);
         return Global.init(self, index, name, ty);
     }
-    pub fn pushMemory(self: *Module, memory: Memory) !u32 {
+    pub fn makeMemory(self: *Module, name: []const u8, initial: u32, maximum: ?u32) !u32 {
         const index = self.memories.items.len;
-        try self.memories.append(self.arena.allocator(), memory);
+        const allocator = self.arena.allocator();
+
+        try self.memories.append(allocator, .{
+            .name = try allocator.dupe(u8, name),
+            .initial = initial,
+            .maximum = maximum,
+        });
         return @intCast(index);
     }
     pub fn toBytes(self: *Module, writer: std.io.AnyWriter) !void {
@@ -632,7 +730,10 @@ pub const Module = struct {
                 try types_section.write(Type.function);
 
                 try types_section.write(func_type.params.len);
-                try types_section.write(func_type.params);
+                // try types_section.write(func_type.params);
+                for (func_type.params) |param| {
+                    try types_section.write(param.type);
+                }
 
                 try types_section.write(func_type.results.len);
                 try types_section.write(func_type.results);
@@ -793,12 +894,24 @@ pub const Module = struct {
                 // Locals
                 try function_body_section.write(function.locals.items.len);
 
+                var prev_type: ?Type = null;
+                var local_count: u8 = 0;
                 for (function.locals.items) |local| {
-                    try function_body_section.write(local.count);
-                    try function_body_section.write(local.type);
+                    if (local.type != prev_type or local_count == 255) {
+                        try function_body_section.write(1);
+                        try function_body_section.write(local.type);
+                        local_count = 1;
+                    } else {
+                        local_count += 1;
+                        function_body_section.bytes.items[function_body_section.bytes.items.len - 2] = local_count;
+                    }
+                    prev_type = local.type;
                 }
 
                 // Instructions
+                for (function.prologue.items) |instruction| {
+                    try instruction.writeInto(&function_body_section);
+                }
                 for (function.instructions.items) |instruction| {
                     try instruction.writeInto(&function_body_section);
                 }
@@ -811,9 +924,109 @@ pub const Module = struct {
         }
     }
 
+    fn writeWatInstruction(self: *Module, wat_writer: *WatWriter, instruction: Instruction, locals: []const Local) !void {
+        switch (instruction) {
+            .formatting => |formatting| {
+                switch (formatting) {
+                    .comment, .inline_comment => |comment| {
+                        try wat_writer.write(";; ");
+                        try wat_writer.write(comment);
+                        // try wat_writer.breakLine();
+                    },
+                    .linebreak => {
+                        try wat_writer.breakLine();
+                    },
+                }
+            },
+            .@"if" => {
+                try wat_writer.write("if");
+                // try wat_writer.breakLine();
+                wat_writer.indent += 1;
+            },
+            .end => {
+                wat_writer.indent -= 1;
+                try wat_writer.write("end");
+                // try wat_writer.breakLine();
+            },
+            .loop => {
+                try wat_writer.write("loop");
+                // try wat_writer.breakLine();
+                wat_writer.indent += 1;
+            },
+            // .@"i32.store",
+            // .@"i64.store",
+            // .@"f32.store",
+            // .@"f64.store",
+            // .@"i32.store8",
+            // .@"i32.store16",
+            // .@"i64.store8",
+            // .@"i64.store16",
+            // .@"i64.store32",
+            // .@"i32.load",
+            // .@"i64.load",
+            // .@"f32.load",
+            // .@"f64.load",
+            // .@"i32.load8_s",
+            // .@"i32.load8_u",
+            // .@"i32.load16_s",
+            // .@"i32.load16_u",
+            // .@"i64.load8_s",
+            // .@"i64.load8_u",
+            // .@"i64.load16_s",
+            // .@"i64.load16_u",
+            // .@"i64.load32_s",
+            // .@"i64.load32_u",
+            // => |mem_op| {
+            //     _ = mem_op; // autofix
+            //     const tag = @tagName(instruction);
+            //     try wat_writer.write(tag);
+            // },
+            .@"local.get", .@"local.set", .@"local.tee" => |local_index| {
+                const name = locals[local_index].name;
+                try wat_writer.print("{s} ${s}", .{ @tagName(instruction), name });
+            },
+            .@"global.get", .@"global.set" => |global_index| {
+                const global = self.globals.items[global_index];
+                try wat_writer.print("{s} ${s}", .{ @tagName(instruction), global.name });
+            },
+            inline else => |_payload| {
+                const T = @TypeOf(_payload);
+                switch (T) {
+                    u32, i32, i64, f32, f64 => {
+                        try wat_writer.print("{s} {d}", .{ @tagName(instruction), _payload });
+                    },
+                    Instruction.MemOp => {
+                        const mem_op: Instruction.MemOp = _payload;
+                        const mem = self.memories.items[mem_op.memory];
+                        try wat_writer.print("{s} (memory ${s})", .{ @tagName(instruction), mem.name });
+                    },
+                    else => {
+                        try instruction.toWat(wat_writer);
+                    },
+                }
+                // try wat_writer.breakLine();
+            },
+        }
+    }
     pub fn toWat(self: *Module, writer: std.io.AnyWriter) !void {
         var wat_writer = WatWriter{ .writer = writer };
         try wat_writer.open("module");
+        // Memory section
+        for (self.memories.items) |memory| {
+            try wat_writer.writeIndent();
+            //   (memory $memory (export "memory") 1 2)
+            if (memory.is_exported) {
+                try wat_writer.print("(memory ${s} (export \"{s}\") {d}", .{ memory.name, memory.name, memory.initial });
+            } else {
+                try wat_writer.print("(memory ${s} {d})", .{ memory.name, memory.initial });
+            }
+            if (memory.maximum) |max| {
+                try wat_writer.print(" ${d}", .{max});
+            }
+            try wat_writer.write(")");
+            try wat_writer.breakLine();
+        }
+
         // Type section
         for (self.function_types.values(), 0..) |entry, i| {
             const entry_fn: FunctionType = entry[1];
@@ -822,7 +1035,7 @@ pub const Module = struct {
             try wat_writer.write("(func");
             if (entry_fn.params.len > 0 or entry_fn.results.len > 0) {
                 for (entry_fn.params) |param| {
-                    try wat_writer.print(" (param {s})", .{@tagName(param)});
+                    try wat_writer.print(" (param {s})", .{@tagName(param.type)});
                 }
                 for (entry_fn.results) |result| {
                     try wat_writer.print(" (result {s})", .{@tagName(result)});
@@ -833,61 +1046,99 @@ pub const Module = struct {
             try wat_writer.write(")\n");
         }
 
+        // Memory section
+        // for (self.memories.items) |memory| {
+        //     try wat_writer.writeIndent();
+        //     try wat_writer.print("(export \"{s}\" (memory ${s})", .{ memory.name, memory.name });
+        //     try wat_writer.print(" {d}", .{memory.initial});
+        //     if (memory.maximum) |max| {
+        //         try wat_writer.print(" {d})", .{max});
+        //     } else {
+        //         try wat_writer.write(")\n");
+        //     }
+        // }
+
         // Function section
         // for (self.functions.items, 0..) |function, i| {
-        for (self.functions.items, 0..) |function, i| {
+        for (self.functions.items) |function| {
             const index = self.function_types.get(function.getFunctionType().hash()) orelse {
                 @panic("Function type not found");
             };
             try wat_writer.writeIndent();
-            try wat_writer.print("(func (;{d};) ", .{i});
+            try wat_writer.print("(func ${s}", .{function.name});
+            if (function.@"export") {
+                try wat_writer.print(" (export \"{s}\")", .{function.name});
+            }
             // try wat_writer.write(function.name);
-            try wat_writer.print("(type {d})", .{index[0]});
-            for (function.params.items) |param| {
-                try wat_writer.print(" (param {s})", .{@tagName(param)});
+            try wat_writer.print(" (type {d})", .{index[0]});
+            // std.debug.print("params: {any}\n", .{function.getParams()});
+            for (function.getParams()) |param| {
+                try wat_writer.print(" (param ${s} {s})", .{ param.name, @tagName(param.type) });
             }
             for (function.results.items) |result| {
                 try wat_writer.print(" (result {s})", .{@tagName(result)});
             }
             wat_writer.indent += 1;
             try wat_writer.breakLine();
-            try wat_writer.writeIndent();
-            if (function.locals.items.len > 0) {
-                try wat_writer.write("(locals");
-                for (function.locals.items) |local| {
-                    for (0..local.count) |_| {
-                        try wat_writer.print(" {s}", .{@tagName(local.type)});
+            const locals = function.getLocals();
+            if (locals.len > 0) {
+                for (locals) |local| {
+                    try wat_writer.writeIndent();
+                    try wat_writer.print("(local ${s} {s})\n", .{ local.name, @tagName(local.type) });
+                }
+            }
+
+            // for (function.prolo)
+
+            inline for (&.{ function.prologue.items, function.instructions.items }) |instructions| {
+                for (instructions, 0..) |instruction, i| {
+                    try wat_writer.writeIndent();
+
+                    try self.writeWatInstruction(&wat_writer, instruction, function.locals.items);
+                    if (i + 1 < instructions.len) {
+                        const next_i = instructions[i + 1];
+                        switch (next_i) {
+                            .formatting => |formatting| {
+                                if (std.meta.activeTag(formatting) == .inline_comment) {
+                                    continue;
+                                }
+                            },
+                            else => {},
+                        }
                     }
-                }
-                try wat_writer.write(")\n");
-            }
-            for (function.instructions.items) |instruction| {
-                switch (instruction) {
-                    .@"if" => {
-                        try wat_writer.writeIndent();
-                        try wat_writer.write("if");
-                        try wat_writer.breakLine();
-                        wat_writer.indent += 1;
-                    },
-                    .end => {
-                        wat_writer.indent -= 1;
-                        try wat_writer.writeIndent();
-                        try wat_writer.write("end");
-                        try wat_writer.breakLine();
-                    },
-                    else => {
-                        try wat_writer.writeIndent();
-                        try instruction.toWat(&wat_writer);
-                        try wat_writer.breakLine();
-                    },
+                    try wat_writer.breakLine();
                 }
             }
-            wat_writer.indent -= 1;
+        }
+
+        wat_writer.indent -= 1;
+        try wat_writer.writeIndent();
+        try wat_writer.write(")\n");
+
+        // Global section
+        for (self.globals.items) |global| {
             try wat_writer.writeIndent();
+            try wat_writer.print("(global ${s} ", .{global.name});
+            if (global.mutable) {
+                try wat_writer.print("(mut {s})", .{@tagName(global.type)});
+            } else {
+                try wat_writer.print("{s}", .{@tagName(global.type)});
+            }
+            std.debug.assert(global.instructions.items.len <= 1);
+            try wat_writer.write(" (");
+            for (global.instructions.items) |instruction| {
+                try self.writeWatInstruction(&wat_writer, instruction, &.{});
+            }
+            try wat_writer.closeInline();
             try wat_writer.write(")\n");
         }
 
+        // wat_writer.indent -= 1;
+        // try wat_writer.writeIndent();
+        // try wat_writer.write(")\n");
+
         try wat_writer.close(); //module
+        try wat_writer.breakLine();
     }
     pub fn dumpBytes(self: *Module) !void {
         const buffer_capacity = 1024;
@@ -1126,7 +1377,6 @@ test "wasm" {
     try output.writeAll(buf.slice());
     var section = Section.init(std.testing.allocator, &module, .custom);
     defer section.deinit();
-    // try section.writeSlice(u32, &.{ 1, 2, 3, 254 });
 
     try module.toWat(std.io.getStdErr().writer().any());
     var sec = Section.init(std.testing.allocator, &module, .custom);

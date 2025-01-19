@@ -275,7 +275,7 @@ fn explicit_casting() i32 {
 }
 
 type K = struct {
-  fn foo_add(a: i32, b: i32) i32 {
+  fn foo_add_child(a: i32, b: i32) i32 {
     return a + b;
   }
 }
@@ -287,7 +287,7 @@ fn bar_add(a: i32, b: i32) i32 {
   //   return a + b;
   // }
 fn namespaced() void {
-  const a = K.foo_add(1, 2);
+  const a = K.foo_add_child(1, 2);
 }
 fn global() void {
   const b = bar_add(1, 2);
@@ -296,20 +296,34 @@ fn global() void {
 fn builtin() void {
   const c = 2:as(i32);
 }
-fn main(n: i32) i32 {
- var a:i32 = 0
-  var b:i32 = 1
-  if (n > 0) {
-    while (n > 1) {
-      var t:i32 = a + b
-      a = b
-      b = t
-      n = n - 1
-    }
-    return b
-  }
-  return a
+// export fn main(n: i32) i32 {
+//  var a:i32 = 0
+//   var b:i32 = 1
+//   if (n > 0) {
+//     while (n > 1) {
+//       var t:i32 = a + b
+//       a = b
+//       b = t
+//       n = n - 1
+//     }
+//     return b
+//   }
+//   return a
 
+// }
+
+type R = struct {
+  a: i8,
+  b: i32,
+}
+export fn main() void {
+   const foo: [2]i32 = [2]i32{1, 2};
+   const bar: [3]i32 = [3]i32{3, 4, 5};
+   const st = R{
+    a = 1,
+    b = 2,
+   };
+   const n:i32 = 2;
 }
 fn aaaa(a: i32) void {
 //   @comptime_log(a);

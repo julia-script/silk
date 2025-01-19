@@ -36,7 +36,36 @@ trace_dir: []const u8 = "",
 pub const Settings = struct {
     // we can skip dead branches on compilation but keep them for debugging or LSP for example
     compute_dead_branches: bool = true,
+    pointer_size: u8 = 8,
 };
+pub fn getInstruction(self: *Self, offset: usize, index: Instruction.Index) *Instruction {
+    return &self.instructions.items[index + offset];
+}
+pub fn getInitInstruction(self: *Self, index: Instruction.Index) *Instruction {
+    return &self.instructions.items[index];
+}
+pub fn getList(self: *Self, index: Lists.Range) []const usize {
+    return self.lists.getSlice(index);
+}
+pub fn getSlice(self: *Self, range: Strings.Range) []const u8 {
+    return self.strings.getSlice(range);
+}
+pub fn getComplexValue(self: *Self, value_key: anytype) *Value {
+    const index = switch (@TypeOf(value_key)) {
+        Value.Key => value_key.complex,
+        usize => value_key,
+        else => @compileError("not a complex value"),
+    };
+    return &self.values.entries.items(.value)[index];
+}
+pub fn getComplexType(self: *Self, type_key: anytype) *Type {
+    const index = switch (@TypeOf(type_key)) {
+        Type.Key => type_key.complex,
+        usize => type_key,
+        else => @compileError("not a complex type"),
+    };
+    return &self.types.entries.items(.value)[index];
+}
 pub fn init(allocator: std.mem.Allocator, error_manager: *ErrorManager, options: Builder.BuildOptions) !Self {
     return Self{
         .allocator = allocator,
@@ -45,10 +74,102 @@ pub fn init(allocator: std.mem.Allocator, error_manager: *ErrorManager, options:
         .strings = Strings.init(allocator),
         .builder = try Builder.build(allocator, undefined, error_manager, .{
             .trace_dir = options.trace_dir,
+            .pointer_size = options.pointer_size,
         }),
         .memory = undefined,
         .trace_dir = options.trace_dir orelse "./.tmp/trace",
     };
+}
+pub inline fn readBytes(self: *Self, typed_value: TypedValue) []const u8 {
+    switch (typed_value.value) {
+        .simple => |simple| switch (simple) {
+            // .bytes => |bytes| bytes,
+            .exec_time, .runtime => unreachable,
+            // .runtime, .comptime => unreachable,
+            else => unreachable,
+        },
+        .complex => |complex| switch (self.getComplexValue(complex).data) {
+            // .slice => |slice| slice.ptr.value,
+            .bytes => |bytes| return bytes[0..self.getTypeSize(typed_value.type)],
+            else => unreachable,
+        },
+    }
+}
+pub fn getSimpleTypeSize(self: *Self, simple: Type.Simple) u8 {
+    return switch (simple) {
+        .bool => @sizeOf(bool),
+        .boolean => @sizeOf(bool),
+        .i8 => @sizeOf(i8),
+        .u8 => @sizeOf(u8),
+        .bchar => @sizeOf(u8),
+        .i16 => @sizeOf(i16),
+        .u16 => @sizeOf(u16),
+        .i32 => @sizeOf(i32),
+        .u32 => @sizeOf(u32),
+        .i64 => @sizeOf(i64),
+        .u64 => @sizeOf(u64),
+        .usize => self.settings.pointer_size,
+        .f32 => @sizeOf(f32),
+        .f64 => @sizeOf(f64),
+        .number => @sizeOf(f64),
+        .int => @sizeOf(i64),
+        .float => @sizeOf(f64),
+        .void => 0,
+        .unknown,
+        .type,
+        .infer,
+        => 0,
+        // else => unreachable,
+    };
+}
+pub fn getTypeSize(self: *Self, key: Type.Key) usize {
+    switch (key) {
+        .simple => |simple| return self.getSimpleTypeSize(simple),
+        .complex => |complex| return self.types.entries.items(.value)[complex].size,
+    }
+}
+pub fn castBytesToType(bytes: []const u8, From: type, To: type) To {
+    const value = std.mem.bytesToValue(From, bytes);
+    if (From == To) return value;
+    const lhs_is_float = From == f64 or From == f32;
+    const rhs_is_float = To == f64 or To == f32;
+    if (lhs_is_float and rhs_is_float) {
+        return @floatCast(value);
+    }
+    if (lhs_is_float and !rhs_is_float) {
+        return @intFromFloat(value);
+    }
+    if (!lhs_is_float and rhs_is_float) {
+        return @floatFromInt(value);
+    }
+    if (!lhs_is_float and !rhs_is_float) {
+        return @intCast(value);
+    }
+    // return @intCast(value);
+    // if (From == f64 or From == f32 and (To ))
+}
+pub fn readNumberAsType(self: *Self, T: type, typed_value: TypedValue) T {
+    const bytes = self.readBytes(typed_value);
+    switch (typed_value.type) {
+        .simple => |simple| switch (simple) {
+            .i8 => return castBytesToType(bytes, i8, T),
+            .i16 => return castBytesToType(bytes, i16, T),
+            .i32 => return castBytesToType(bytes, i32, T),
+            .i64 => return castBytesToType(bytes, i64, T),
+            .u8, .bchar => return castBytesToType(bytes, u8, T),
+            .u16 => return castBytesToType(bytes, u16, T),
+            .u32 => return castBytesToType(bytes, u32, T),
+            .u64 => return castBytesToType(bytes, u64, T),
+            .usize => return castBytesToType(bytes, usize, T),
+            .f32 => return castBytesToType(bytes, f32, T),
+            .f64 => return castBytesToType(bytes, f64, T),
+            .number => return castBytesToType(bytes, f64, T),
+            .float => return castBytesToType(bytes, f64, T),
+            .int => return castBytesToType(bytes, i64, T),
+            else => @panic("TODO"),
+        },
+        .complex => return castBytesToType(bytes, usize, T),
+    }
 }
 
 pub fn makeRootSource(self: *Self, source: []const u8, path: []const u8) !Strings.Range {
@@ -71,10 +192,12 @@ pub fn makeSource(self: *Self, source: []const u8, path: []const u8) !Strings.Ra
         source,
         self.trace_dir,
     );
+    try self.builder.collectSource(source_range);
     return source_range;
 }
-pub fn compileAll(self: *Self, source: Strings.Range) !void {
-    try self.builder.compileAll(source);
+
+pub fn analyzeAll(self: *Self, source: Strings.Range) !void {
+    try self.builder.analyzeAll(source);
 }
 
 pub fn getSource(self: *Self, source: Strings.Range) *Source {
@@ -556,10 +679,12 @@ pub const Instruction = struct {
         // },
         param: struct {
             index: usize,
+            name: Strings.Range,
         },
         alloc: struct {
             type: Type.Key,
             mutable: bool,
+            name: Strings.Range,
         },
 
         bin_op: struct {
@@ -599,7 +724,7 @@ pub const Instruction = struct {
         },
         get_element_pointer: struct {
             base: Instruction.Index,
-            index: Instruction.Index,
+            index: Ref,
         },
         fn_call: struct {
             callee: Instruction.Index,
@@ -635,6 +760,10 @@ pub const Instruction = struct {
             src: Instruction.Index,
             dest: Instruction.Index,
         },
+    };
+    pub const Ref = union(enum) {
+        instruction: Instruction.Index,
+        constant: TypedValue,
     };
     pub const InstRange = struct {
         start: Instruction.Index,
@@ -721,7 +850,12 @@ pub const Declaration = struct {
     typed_value: TypedValue,
     entity: Entity.Key,
     mutable: bool,
+    metadata: Metadata = .{},
     pub const Index = usize;
+    pub const Metadata = struct {
+        calls: bool = false,
+        stack_alloc_bytes: u32 = 0,
+    };
 };
 
 const TreeWriter = @import("../TreeWriter.zig");
@@ -1243,25 +1377,21 @@ pub fn formatTypedValue(
 //     }
 // }
 const InstInput = union(enum) {
-    instruction: Instruction,
+    instruction: struct {
+        data: Instruction,
+        index: Instruction.Index,
+    },
     index: Instruction.Index,
 };
 pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: InstInput) !void {
     var buf = try std.BoundedArray(u8, 1024).init(0);
     const buf_writer = buf.writer().any();
-    const inst = switch (inst_input) {
-        .instruction => |inst| blk: {
-            if (inst.liveness == 0) try buf_writer.writeAll("!");
-            // try buf_writer.print("%i: ", .{});
-            break :blk inst;
-        },
-        .index => |index| blk: {
-            const inst = self.instructions.items[index];
-            if (inst.liveness == 0) try buf_writer.writeAll("!");
-            try buf_writer.print("%{d}: ", .{index});
-            break :blk inst;
-        },
+    const inst, const inst_index = switch (inst_input) {
+        .instruction => |inst| .{ inst.data, inst.index },
+        .index => |i| .{ self.instructions.items[i], i },
     };
+
+    try buf_writer.print("%{d}: ", .{inst_index});
     switch (inst.data) {
         .@"if" => {
             try buf_writer.print("if (%{d}) then block(%{d})", .{
@@ -1309,6 +1439,20 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: Inst
                             try buf_writer.writeAll("})");
                         } else if (field.type == Instruction.Index) {
                             try buf_writer.print("(%{d})", .{value});
+                        } else if (field.type == Instruction.Ref) {
+                            switch (value) {
+                                .instruction => |i| {
+                                    try buf_writer.print("(%{d})", .{i});
+                                },
+                                .constant => |index| {
+                                    try buf_writer.print("(", .{});
+                                    try self.formatTypedValue(buf_writer, index, .{});
+                                    try buf_writer.print(")", .{});
+                                },
+                            }
+                        } else if (field.type == Strings.Range) {
+                            const range = self.strings.getSlice(value);
+                            try buf_writer.print("(\"{s}\")", .{range});
                         } else {
                             try buf_writer.print("({any})", .{value});
                         }
@@ -1329,11 +1473,13 @@ pub fn formatInstruction(self: *Self, writer: std.io.AnyWriter, inst_input: Inst
                     }
                 },
             }
+            try writer.print("{s: <70}; ", .{buf.slice()});
+            try self.formatTypedValue(writer, inst.typed_value, .{});
         },
     }
 
-    try writer.print("{s: <70}; ", .{buf.slice()});
-    try self.formatTypedValue(writer, inst.typed_value, .{});
+    // try writer.print("{s: <70}; ", .{buf.slice()});
+    // try self.formatTypedValue(writer, inst.typed_value, .{});
 }
 pub fn formatInstructionRange(
     self: *Self,
@@ -1342,11 +1488,9 @@ pub fn formatInstructionRange(
     instructions: []Instruction,
     inst_index: Instruction.Index,
 ) !void {
-    // var i: usize = range.start;
     var buf = try std.BoundedArray(u8, 1024).init(0);
     const buf_writer = buf.writer().any();
-    // const range_end = range.start + range.len - 1;
-    // while (i <= range_end) : (i += 1) {
+
     const inst = &instructions[inst_index];
     buf.clear();
 
@@ -1354,15 +1498,6 @@ pub fn formatInstructionRange(
         .@"if" => |if_expr| {
             const index = inst_index;
             {
-                // const inner_range: Instruction.InstRange = .{
-                //     .start = if_expr.then_block,
-                //     .len = then_block.data.block.instructions_count,
-                // };
-                // const last_inst = inner_range.start + inner_range.len - 1;
-                // _ = last_inst; // autofix
-                // try tree_writer.writeIndent(true,
-                // // last_inst == range_end,
-                // false);
                 if (inst.liveness == 0) {
                     try writer.writeAll("!");
                 }
@@ -1379,24 +1514,8 @@ pub fn formatInstructionRange(
                     instructions,
                     if_expr.then_block,
                 );
-                // const then_block = instructions[if_expr.then_block];
-
-                // try self.formatInstructionRange(
-                //     writer,
-                //     tree_writer,
-                //     instructions,
-                //     inner_range,
-                // );
-                // i += then_block.data.block.instructions_count;
             }
             if (if_expr.else_block) |else_block_index| {
-                // const else_block = instructions[else_block_index];
-                // const inner_range: Instruction.InstRange = .{
-                //     .start = else_block_index,
-                //     .len = else_block.data.block.instructions_count,
-                // };
-                // const last_inst = inner_range.start + inner_range.len - 1;
-                // try tree_writer.writeIndent(true, last_inst == range_end);
                 try tree_writer.writeIndent(true, true);
                 if (inst.liveness == 0) {
                     try writer.writeAll("!");
@@ -1404,14 +1523,12 @@ pub fn formatInstructionRange(
 
                 try writer.print("else: ", .{});
 
-                // try tree_writer.writeIndent(true, true);
                 try self.formatInstructionRange(
                     writer,
                     tree_writer,
                     instructions,
                     else_block_index,
                 );
-                // i += else_block.data.block.instructions_count;
             }
             try tree_writer.pop();
         },
@@ -1441,12 +1558,6 @@ pub fn formatInstructionRange(
         .block => |block| {
             const instructions_list = self.builder.sema.lists.getSlice(block.instructions_list);
 
-            // const inner_range: Instruction.InstRange = .{
-            //     .start = i + 1,
-            //     .len = block.instructions_count - 1,
-            // };
-            // const last_inst = inner_range.start + inner_range.len - 1;
-            // try tree_writer.writeIndentTo(buf_writer, true, false);
             if (inst.liveness == 0) {
                 try writer.writeAll("!");
             }
@@ -1456,8 +1567,6 @@ pub fn formatInstructionRange(
                 if (block.is_comptime) "comptime " else "",
                 @tagName(inst.op),
                 instructions_list.len,
-                // inner_range.start,
-                // last_inst,
             });
             try tree_writer.pushDirLine();
             for (instructions_list, 0..) |child_inst, i| {
@@ -1470,19 +1579,6 @@ pub fn formatInstructionRange(
                 );
             }
             try tree_writer.pop();
-            // try writer.print("{s: <70}; ", .{buf.slice()});
-            // try self.formatTypedValue(writer, inst.getTypedValue(), .{});
-            // try writer.print("\n", .{});
-
-            // try tree_writer.pushDirLine();
-            // try self.formatInstructionRange(
-            //     writer,
-            //     tree_writer,
-            //     instructions,
-            //     inner_range,
-            // );
-            // try tree_writer.pop();
-            // i += block.instructions_count;
         },
         inline else => |data| {
             // try tree_writer.writeIndentTo(buf_writer, true, i == range_end);
@@ -1521,6 +1617,20 @@ pub fn formatInstructionRange(
                             try buf_writer.writeAll("})");
                         } else if (field.type == Instruction.Index) {
                             try buf_writer.print("(%{d})", .{value});
+                        } else if (field.type == Instruction.Ref) {
+                            switch (value) {
+                                .instruction => |i| {
+                                    try buf_writer.print("(%{d})", .{i});
+                                },
+                                .constant => |index| {
+                                    try buf_writer.print("(", .{});
+                                    try self.formatTypedValue(buf_writer, index, .{});
+                                    try buf_writer.print(")", .{});
+                                },
+                            }
+                        } else if (field.type == Strings.Range) {
+                            const range = self.strings.getSlice(value);
+                            try buf_writer.print("(\"{s}\")", .{range});
                         } else {
                             try buf_writer.print("({any})", .{value});
                         }
@@ -1546,7 +1656,6 @@ pub fn formatInstructionRange(
             try writer.print("\n", .{});
         },
     }
-    // }
 }
 pub fn formatDeclaration(self: *Self, writer: std.io.AnyWriter, declaration_index: Declaration.Index) !void {
     var tree_writer = TreeWriter.init(writer);

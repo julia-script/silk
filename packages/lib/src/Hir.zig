@@ -502,6 +502,7 @@ pub const Inst = union(enum) {
 
         type: Inst.Index,
         init: Inst.Index,
+        name_node: Ast.Node.Index,
     };
     pub const ArrayInit = struct {
         type: Inst.Index,

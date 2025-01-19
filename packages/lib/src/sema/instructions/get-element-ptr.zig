@@ -185,14 +185,15 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
 
                     field_value = try scope.builder.numberAsBytesValueKey(ptr + field.offset);
                 }
-                const index_inst_index = ctx.pushInstruction(hir_inst_index, .{
-                    .op = .constant,
-                    .typed_value = .{
-                        .type = Sema.Type.simple(.usize),
-                        .value = try scope.builder.numberAsBytesValueKey(field.index),
-                    },
-                    .data = .void,
-                });
+                // const index_inst_index = ctx.pushInstruction(hir_inst_index, .{
+                //     .op = .constant,
+                //     .typed_value = .{
+                //         .type = Sema.Type.simple(.usize),
+                //         .value = try scope.builder.numberAsBytesValueKey(field.index),
+                //     },
+                //     .data = .void,
+                // });
+                // _ = index_inst_index; // autofix
 
                 const get_element_pointer_inst = ctx.pushInstruction(hir_inst_index, .{
                     .op = .get_element_pointer,
@@ -204,7 +205,12 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
                     // .value = field_value,
                     .data = .{ .get_element_pointer = .{
                         .base = base_inst_index,
-                        .index = index_inst_index,
+                        .index = .{
+                            .constant = .{
+                                .type = Sema.Type.simple(.usize),
+                                .value = try scope.builder.numberAsBytesValueKey(field.index),
+                            },
+                        },
                     } },
                 });
                 // std.debug.panic("todo {s}", .{self.builder.getSlice(name_range)});
@@ -256,6 +262,7 @@ pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_in
         .array => |array_type| array_type.child,
         else => std.debug.panic("unhandled base type: {s}", .{@tagName(type_to_access.data)}),
     };
+    const index_typed_value = ctx.getTypedValue(index_inst_index);
     const index = ctx.pushInstruction(hir_inst_index, .{
         .op = .get_element_pointer,
         .typed_value = .{
@@ -264,7 +271,13 @@ pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_in
         },
         .data = .{ .get_element_pointer = .{
             .base = base_index,
-            .index = index_inst_index,
+            .index = if (index_typed_value.isComptimeKnown()) blk: {
+                ctx.markDead(index_inst_index);
+
+                break :blk .{ .constant = index_typed_value };
+            } else .{
+                .instruction = index_inst_index,
+            },
         } },
     });
     try maybeInline(ctx, index);
@@ -303,10 +316,13 @@ pub fn maybeInline(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void 
     const base = inst.data.get_element_pointer.base;
     const index = inst.data.get_element_pointer.index;
     const base_inst = ctx.getInstruction(base);
-    const index_inst = ctx.getInstruction(index);
+    const index_typed_value = switch (index) {
+        .instruction => |index_inst_index| ctx.getInstruction(index_inst_index).typed_value,
+        .constant => |constant| constant,
+    };
     if (!base_inst.typed_value.isComptimeKnown()) return;
-    if (!index_inst.typed_value.isComptimeKnown()) return;
-    const index_int = try ctx.builder.readNumberAsType(usize, index_inst.typed_value);
+    if (!index_typed_value.isComptimeKnown()) return;
+    const index_int = try ctx.builder.readNumberAsType(usize, index_typed_value);
     const base_type_key = ctx.builder.unwrapPointerType(base_inst.typed_value.type) orelse std.debug.panic("base_type is not a pointer type", .{});
     std.debug.print("base_type_key: {any}\n", .{base_type_key});
 
@@ -341,10 +357,13 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
     const base = inst.data.get_element_pointer.base;
     const index = inst.data.get_element_pointer.index;
     const base_inst = ctx.getInstruction(base);
-    const index_inst = ctx.getInstruction(index);
+    const index_typed_value = switch (index) {
+        .instruction => |index_inst_index| ctx.getInstruction(index_inst_index).typed_value,
+        .constant => |constant| constant,
+    };
     if (!base_inst.typed_value.isComptimeKnown()) @panic("base_inst is not a comptime known value");
-    if (!index_inst.typed_value.isComptimeKnown()) @panic("index_inst is not a comptime known value");
-    const index_int = try ctx.builder.readNumberAsType(usize, index_inst.typed_value);
+    if (!index_typed_value.isComptimeKnown()) @panic("index_inst is not a comptime known value");
+    const index_int = try ctx.builder.readNumberAsType(usize, index_typed_value);
     const base_type_key = ctx.builder.unwrapPointerType(base_inst.typed_value.type) orelse std.debug.panic("base_type is not a pointer type", .{});
 
     const base_type = ctx.builder.getComplexType(base_type_key);

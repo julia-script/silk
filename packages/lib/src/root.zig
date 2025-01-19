@@ -25,4 +25,6 @@ test {
     _ = @import("sema/Sema.zig");
     _ = @import("sema/instructions/InstContext.zig");
     _ = @import("sema/instructions/inst-index.zig");
+    _ = @import("program/Program.zig");
+    _ = @import("program/Os.zig");
 }

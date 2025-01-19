@@ -7,6 +7,7 @@ const GenScope = @import("../gen.zig").Scope;
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const param_entity = scope.builder.getEntityByHirInst(hir_inst.param.operand);
+
     const param_index = param_entity.data.parameter_declaration.index;
     return ctx.pushInstruction(hir_inst_index, .{
         .op = .param,
@@ -14,7 +15,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             .type = try param_entity.resolveType(),
             .value = ctx.getParamValue(@intCast(param_index)),
         },
-        .data = .{ .param = .{ .index = param_index } },
+        .data = .{ .param = .{ .index = param_index, .name = param_entity.name } },
     });
 }
 pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {

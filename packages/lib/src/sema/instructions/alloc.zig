@@ -16,56 +16,8 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const value_inst = ctx.getInstruction(value_inst_index);
     // const value_to_alloc = ctx.builder.unwrapTypeValue(value_inst.typed_value.value);
     ctx.markDead(type_inst_index);
-    // This means that the allocation is already done on a LOAD instruction
-    // Ex.
-    // const a = T {};
-    // const b = a;
-    // will translate to HIR
-    // %1 = alloc T {};
-    // %2 = load %1;
-    // %3 = alloc T {};
-    // %4 = store %3, %2;
-    // if it's a primitive value, this will translate 1 to 1 with the hir instructions at the sema level, for example
-    // %1 = alloc i32
-    // %2 = load %1;
-    // %2 = alloc i32
-    // %3 = store %2, %1;
-    //
-    // but if it's a complex value, we need to do a memcpy
-    // %1 = alloc T {};
-    // %2 = alloc T {};
-    // %3 = memcpy %2, %1;
-    //
 
-    // if (value_inst.op == .memdupe) {
-    //     ctx.markDead(value_inst_index);
-    //     ctx.setIdMap(hir_inst_index, value_inst_index);
-    //     const index = ctx.pushInstruction(hir_inst_index, .{
-    //         .op = .alloc,
-    //         .typed_value = .{
-    //             .type = type_to_alloc,
-    //             .value = value_inst.typed_value.value,
-    //         },
-    //         .data = .{ .alloc = .{
-    //             .type = type_to_alloc,
-    //             .mutable = hir_inst.alloc.mutable,
-    //         } },
-    //     });
-
-    //     _ = ctx.pushInstruction(null, .{
-    //         .op = .memcpy,
-    //         .typed_value = .{
-    //             .type = Sema.Type.simple(.void),
-    //             .value = Sema.Value.simple(.void),
-    //         },
-    //         .data = .{ .memcpy = .{
-    //             .src = value_inst.data.operand,
-    //             .dest = index,
-    //         } },
-    //     });
-    //     return index;
-    // }
-
+    const name = try scope.entity.internNode(hir_inst.alloc.name_node);
     const index = ctx.pushInstruction(hir_inst_index, .{
         .op = .alloc,
         .typed_value = .{
@@ -76,10 +28,13 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             }),
             .value = Sema.Value.simple(.exec_time),
         },
-        .data = .{ .alloc = .{
-            .type = type_to_alloc,
-            .mutable = hir_inst.alloc.mutable,
-        } },
+        .data = .{
+            .alloc = .{
+                .type = type_to_alloc,
+                .mutable = hir_inst.alloc.mutable,
+                .name = name,
+            },
+        },
     });
     switch (value_inst.op) {
         .type_init => {
@@ -274,20 +229,7 @@ fn pushSetInstructionField(
 
     const field_entity = ctx.builder.getEntity(property.entity);
     const field_type = try field_entity.resolveType();
-    const field_value_inst_index = try ctx.pushMaybeCastInstructionToType(
-        null,
-        field_init_inst.data.field_init.value_inst,
-        field_type,
-    ) orelse field_inst_index;
 
-    const index_inst_index = ctx.pushInstruction(null, .{
-        .op = .constant,
-        .typed_value = .{
-            .type = Sema.Type.simple(.usize),
-            .value = try ctx.builder.numberAsBytesValueKey(property.index),
-        },
-        .data = .void,
-    });
     const get_element_pointer_inst_index = ctx.pushInstruction(null, .{
         .op = .get_element_pointer,
         .typed_value = .{
@@ -296,10 +238,18 @@ fn pushSetInstructionField(
         },
         .data = .{ .get_element_pointer = .{
             .base = struct_inst_index,
-            .index = index_inst_index,
+            .index = .{ .constant = .{
+                .type = Sema.Type.simple(.usize),
+                .value = try ctx.builder.numberAsBytesValueKey(property.index),
+            } },
         } },
     });
     try Index.GetElementPtr.maybeInline(ctx, get_element_pointer_inst_index);
+    const field_value_inst_index = try ctx.pushMaybeCastInstructionToType(
+        null,
+        field_init_inst.data.field_init.value_inst,
+        field_type,
+    ) orelse field_inst_index;
 
     const store_inst_index = ctx.pushInstruction(null, .{
         .op = .store,
@@ -330,19 +280,22 @@ pub fn handleArrayInit(ctx: *InstContext, scope: *GenScope, pointer_inst_index: 
 
     const list = ctx.builder.sema.lists.getSlice(array_init.items_list);
     for (list, 0..) |item_inst_index, i| {
-        const index_inst = ctx.pushInstruction(null, .{
-            .op = .constant,
-            .typed_value = .{
-                .type = Sema.Type.simple(.usize),
-                .value = try ctx.builder.numberAsBytesValueKey(i),
-            },
-            .data = .void,
-        });
+        // const index_inst = ctx.pushInstruction(null, .{
+        //     .op = .constant,
+        //     .typed_value = .{
+        //         .type = Sema.Type.simple(.usize),
+        //         .value = try ctx.builder.numberAsBytesValueKey(i),
+        //     },
+        //     .data = .void,
+        // });
 
         const get_element_pointer_inst = blk: {
             const data: Sema.Instruction.Data = .{ .get_element_pointer = .{
                 .base = pointer_inst_index,
-                .index = index_inst,
+                .index = .{ .constant = .{
+                    .type = Sema.Type.simple(.usize),
+                    .value = try ctx.builder.numberAsBytesValueKey(i),
+                } },
             } };
 
             break :blk ctx.pushInstruction(null, .{

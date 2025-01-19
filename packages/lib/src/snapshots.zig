@@ -69,7 +69,7 @@ fn runTestCases(allocator: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
     const root_path = try sema.makeRootSource(source, path);
 
     const start = std.time.nanoTimestamp();
-    try sema.compileAll(root_path);
+    try sema.analyzeAll(root_path);
     const end = std.time.nanoTimestamp();
     std.debug.print("Sema compile took: {}\n", .{std.fmt.fmtDurationSigned(@intCast(end - start))});
     const root = sema.getSource(root_path);

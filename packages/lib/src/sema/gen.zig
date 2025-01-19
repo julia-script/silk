@@ -94,11 +94,12 @@ pub const Builder = struct {
     // declarations: std.ArrayListUnmanaged(Sema.Declaration) = .{},
     declarations_by_hir_inst: std.AutoArrayHashMapUnmanaged(Hir.Inst.Index, Sema.Declaration.Index) = .{},
     queue: std.AutoArrayHashMapUnmanaged(Entity.Key, void) = .{},
-
+    pointer_size: u8 = 8,
     pub const BuildOptions = struct {
         tracer: bool = false,
         trace_dir: ?[]const u8 = null,
         trace_name: ?[]const u8 = null,
+        pointer_size: u8 = 8,
     };
     const BuilderState = struct {
         // symbols: *std.meta.FieldType(Builder, .symbols),
@@ -182,8 +183,7 @@ pub const Builder = struct {
         }
     }
 
-    pub fn getSimpleTypeSize(self: *Builder, simple: Sema.Type.Simple) usize {
-        _ = self; // autofix
+    pub fn getSimpleTypeSize(self: *Builder, simple: Sema.Type.Simple) u8 {
         return switch (simple) {
             .bool => @sizeOf(bool),
             .boolean => @sizeOf(bool),
@@ -196,7 +196,7 @@ pub const Builder = struct {
             .u32 => @sizeOf(u32),
             .i64 => @sizeOf(i64),
             .u64 => @sizeOf(u64),
-            .usize => @sizeOf(u64), // TODO: this is platform dependent,
+            .usize => self.pointer_size,
             .f32 => @sizeOf(f32),
             .f64 => @sizeOf(f64),
             .number => @sizeOf(f64),
@@ -270,7 +270,8 @@ pub const Builder = struct {
     pub fn internSlice(self: *Builder, slice: []const u8) Error!Sema.Strings.Range {
         return self.sema.strings.internSlice(slice);
     }
-    inline fn internMultipleSlices(self: *Builder, slices: anytype) Error!Sema.Strings.Range {
+
+    inline fn internConcatSlices(self: *Builder, slices: anytype) Error!Sema.Strings.Range {
         var list = self.sema.strings.new();
         inline for (slices) |slice| {
             if (@TypeOf(slice) == Sema.Strings.Range) {
@@ -944,6 +945,7 @@ pub const Builder = struct {
             // .lists = Sema.Lists.init(allocator),
             .arena = std.heap.ArenaAllocator.init(allocator),
             .allocator = allocator,
+            .pointer_size = options.pointer_size,
             .tracer = Tracer.init(
                 allocator,
                 .sema,
@@ -984,25 +986,8 @@ pub const Builder = struct {
     }
 
     pub fn numberBits(self: *Builder, type_key: Sema.Type.Key) u8 {
-        _ = self; // autofix
         switch (type_key) {
-            .simple => |simple| {
-                return switch (simple) {
-                    .i8, .u8 => 8,
-                    .i16, .u16 => 16,
-                    .i32, .u32 => 32,
-                    .i64, .u64 => 64,
-                    .usize => 64, // TODO: platform dependent
-                    .number => 64,
-                    .float => 64,
-                    .int => 64,
-                    .f32 => 32,
-                    .f64 => 64,
-                    .bool => 1,
-                    .bchar => 8,
-                    else => std.debug.panic("TODO: numberBits {s}", .{@tagName(simple)}),
-                };
-            },
+            .simple => |simple| return self.getSimpleTypeSize(simple) * 8,
             else => unreachable,
         }
     }
@@ -1381,14 +1366,25 @@ pub const Builder = struct {
         var root_entity = self.getEntity(root_entity_key);
         try root_entity.collectEntities();
     }
-    pub fn compileAll(self: *Builder, source: Sema.Strings.Range) !void {
+    pub fn analyzeSourceEntrypoint(
+        self: *Builder,
+        source: Sema.Strings.Range,
+        entrypoint: []const u8,
+    ) !void {
+        _ = self; // autofix
+        _ = source; // autofix
+        _ = entrypoint; // autofix
+    }
+
+    pub fn analyzeAll(self: *Builder, source: Sema.Strings.Range) !void {
+        _ = source; // autofix
         const trace = self.tracer.begin(
             @src(),
-            .{ "compileAll", "Builder.compileAll", .{} },
+            .{ "analyzeAll", "Builder.analyzeAll", .{} },
             .{},
         );
         defer trace.end(.{ .post_state = self.getState() });
-        try self.collectSource(source);
+        // try self.collectSource(source);
 
         var i: usize = 0;
         var j: usize = 0;
@@ -2146,7 +2142,7 @@ pub const Entity = struct {
     }
     pub fn init(builder: *Builder, key: Key, input: EntityInput) !Entity {
         var ent = Entity{
-            .name = if (input.parent) |parent| try builder.internMultipleSlices(&.{ builder.getEntity(parent).name, "::", input.name }) else input.name,
+            .name = if (input.parent) |parent| try builder.internConcatSlices(&.{ builder.getEntity(parent).name, "::", input.name }) else input.name,
             .key = key,
             .hir_inst_index = input.hir_inst_index,
             .builder = builder,
@@ -2347,10 +2343,11 @@ pub const Entity = struct {
                         .hir_inst_index = declaration_inst_index,
                         .data = data,
                     });
+                    var entity = self.builder.getEntity(entity_key);
 
                     switch (data) {
                         .global_declaration => {
-                            self.builder.getEntity(entity_key).data.global_declaration.type = try self.builder.makeEntity(.{
+                            entity.data.global_declaration.type = try self.builder.makeEntity(.{
                                 .parent = entity_key,
                                 .name = try self.builder.internSlice("%type"),
                                 .hir_inst_index = global_decl_inst.type orelse @panic("global declaration needs explicit type"),
@@ -2363,7 +2360,7 @@ pub const Entity = struct {
                     // self.builder.getEntity(entity_key).data = data;
 
                     self.builder.setDeclaration(declaration_index, .{
-                        .name = name_slice_range,
+                        .name = entity.name,
                         .visibility = global_decl_inst.visibility,
                         .exported = global_decl_inst.exported,
                         .external = global_decl_inst.@"extern",
@@ -5761,7 +5758,7 @@ pub const Scope = struct {
     //     }
     // };
 
-    // pub fn checkSignaturae(self: *Scope, type_params: []const Sema.Type.Key, hir_args_list_range: Hir.Inst.List, comptime cast_if_needed: bool) Error!SignatureCheckResult {
+    // pub fn checkSignature(self: *Scope, type_params: []const Sema.Type.Key, hir_args_list_range: Hir.Inst.List, comptime cast_if_needed: bool) Error!SignatureCheckResult {
     //     if (type_params.len != hir_args_list_range.len) {
     //         std.debug.panic("error: function has {d} params but {d} args were provided", .{ type_params.len, hir_args_list_range.len });
     //     }

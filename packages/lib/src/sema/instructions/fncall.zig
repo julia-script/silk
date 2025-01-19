@@ -20,7 +20,7 @@ pub const SignatureCheckResult = struct {
         return self.ctx.getInstruction(self.getArg(arg_index));
     }
 };
-pub fn checkSignaturae(ctx: *InstContext, scope: *GenScope, type_params: []const Sema.Type.Key, hir_args_list_range: Hir.Inst.List, comptime cast_if_needed: bool) Error!SignatureCheckResult {
+pub fn checkSignature(ctx: *InstContext, scope: *GenScope, type_params: []const Sema.Type.Key, hir_args_list_range: Hir.Inst.List, comptime cast_if_needed: bool) Error!SignatureCheckResult {
     if (type_params.len != hir_args_list_range.len) {
         std.debug.panic("error: function has {d} params but {d} args were provided", .{ type_params.len, hir_args_list_range.len });
     }
@@ -90,7 +90,7 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             //     const arg_inst_index = try self.getInstructionAsTypeByHirInst(arg_hir_index, any_type);
             //     try args_list.append(arg_inst_index);
             // }
-            const signature_check_result = try checkSignaturae(ctx, scope, &.{any_type}, hir_inst.fn_call.args_list, false);
+            const signature_check_result = try checkSignature(ctx, scope, &.{any_type}, hir_inst.fn_call.args_list, false);
             ctx.markDead(callee_inst_index);
 
             return ctx.pushInstruction(hir_inst_index, .{
@@ -103,7 +103,7 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             });
         },
         .as => {
-            var signature_check_result = try checkSignaturae(
+            var signature_check_result = try checkSignature(
                 ctx,
                 scope,
                 &.{
@@ -118,7 +118,7 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             return ctx.pushMaybeCastInstruction(hir_inst_index, value_arg_inst_index, type_arg_inst_index);
         },
         .float_demote => {
-            var signature_check_result = try checkSignaturae(
+            var signature_check_result = try checkSignature(
                 ctx,
                 scope,
                 &.{
@@ -152,7 +152,7 @@ fn genBuiltinCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.
             });
         },
         .Result => {
-            var signature_check_result = try checkSignaturae(
+            var signature_check_result = try checkSignature(
                 ctx,
                 scope,
                 &.{any_type},
@@ -204,7 +204,7 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
             const lhs_inst = ctx.getInstruction(lhs_inst_index);
             const lhs_type = lhs_inst.typed_value.type;
 
-            var signature_check_result = try checkSignaturae(
+            var signature_check_result = try checkSignature(
                 ctx,
                 scope,
                 &.{
@@ -534,6 +534,7 @@ const ExecContext = struct {
     pub fn goToFn(context: *anyopaque, index: Sema.Instruction.Index) void {
         _ = index; // autofix
         const self: *ExecContext = @alignCast(@ptrCast(context));
+
         _ = self; // autofix
         // self.exec(index);
     }

@@ -102,14 +102,14 @@ pub fn pushSetInstructionField(
         field_type,
     ) orelse field_inst_index;
 
-    const index_inst_index = ctx.pushInstruction(hir_inst_index, .{
-        .op = .constant,
-        .typed_value = .{
-            .type = Sema.Type.simple(.usize),
-            .value = try ctx.builder.numberAsBytesValueKey(property.index),
-        },
-        .data = .void,
-    });
+    // const index_inst_index = ctx.pushInstruction(hir_inst_index, .{
+    //     .op = .constant,
+    //     .typed_value = .{
+    //         .type = Sema.Type.simple(.usize),
+    //         .value = try ctx.builder.numberAsBytesValueKey(property.index),
+    //     },
+    //     .data = .void,
+    // });
     const get_element_pointer_inst_index = ctx.pushInstruction(hir_inst_index, .{
         .op = .get_element_pointer,
         .typed_value = .{
@@ -118,7 +118,12 @@ pub fn pushSetInstructionField(
         },
         .data = .{ .get_element_pointer = .{
             .base = struct_inst_index,
-            .index = index_inst_index,
+            .index = .{
+                .constant = .{
+                    .type = Sema.Type.simple(.usize),
+                    .value = try ctx.builder.numberAsBytesValueKey(property.index),
+                },
+            },
         } },
     });
     try Index.GetElementPtr.maybeInline(ctx, get_element_pointer_inst_index);
@@ -192,14 +197,14 @@ pub fn handleStoreArray(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
 
             const list = ctx.builder.sema.lists.getSlice(array_init.items_list);
             for (list, 0..) |item_inst_index, i| {
-                const index_inst = ctx.pushInstruction(hir_inst_index, .{
-                    .op = .constant,
-                    .typed_value = .{
-                        .type = Sema.Type.simple(.usize),
-                        .value = try ctx.builder.numberAsBytesValueKey(i),
-                    },
-                    .data = .void,
-                });
+                // const index_inst = ctx.pushInstruction(hir_inst_index, .{
+                //     .op = .constant,
+                //     .typed_value = .{
+                //         .type = Sema.Type.simple(.usize),
+                //         .value = try ctx.builder.numberAsBytesValueKey(i),
+                //     },
+                //     .data = .void,
+                // });
 
                 const get_element_pointer_inst = ctx.pushInstruction(hir_inst_index, .{
                     .op = .get_element_pointer,
@@ -209,7 +214,10 @@ pub fn handleStoreArray(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
                     },
                     .data = .{ .get_element_pointer = .{
                         .base = pointer_inst_index,
-                        .index = index_inst,
+                        .index = .{ .constant = .{
+                            .type = Sema.Type.simple(.usize),
+                            .value = try ctx.builder.numberAsBytesValueKey(i),
+                        } },
                     } },
                 });
                 try Index.GetElementPtr.maybeInline(ctx, get_element_pointer_inst);

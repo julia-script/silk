@@ -51,8 +51,8 @@ pub fn pushInstruction(self: *@This(), id: ?u32, instruction: Sema.Instruction) 
     const index = self.pushInstructionFn(self.context, id, instruction);
     const stderr = std.io.getStdErr().writer();
     stderr.writeBytesNTimes("  ", self.indent + 1) catch {};
-    stderr.print("[PUSH] %{d}:", .{index}) catch {};
-    self.builder.sema.formatInstruction(stderr.any(), .{ .instruction = instruction }) catch {};
+    stderr.print("[PUSH]", .{}) catch {};
+    self.builder.sema.formatInstruction(stderr.any(), .{ .instruction = .{ .data = instruction, .index = index } }) catch {};
     // stderr.print("({s})\n", .{self.builder.getFormattableTypedValue(instruction.typed_value)}) catch {};
     stderr.print("\n", .{}) catch {};
     // self.execInstruction(index);

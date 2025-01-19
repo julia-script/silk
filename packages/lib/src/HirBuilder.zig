@@ -83,13 +83,13 @@ pub fn genRoot(self: *Self) !void {
 pub fn newList(self: *Self) Hir.InternedLists.WorkingList {
     return self.hir.lists.new();
 }
-pub fn internNodeSlice(self: *Self, node_index: Ast.Node.Index) !InternedSlice {
-    const tag = self.hir.ast.getNodeTag(node_index);
-    assert.fmt(tag == .identifier or tag == .number_literal or tag == .string_literal, "expected identifier or number_literal or string_literal, got {}", .{tag});
-    const token = self.hir.ast.getNodeStartToken(node_index);
-    const slice = self.hir.ast.getTokenSlice(token);
-    return try self.hir.strings.intern(slice);
-}
+// pub fn internNodeSlice(self: *Self, node_index: Ast.Node.Index) !InternedSlice {
+//     const tag = self.hir.ast.getNodeTag(node_index);
+//     assert.fmt(tag == .identifier or tag == .number_literal or tag == .string_literal, "expected identifier or number_literal or string_literal, got {}", .{tag});
+//     const token = self.hir.ast.getNodeStartToken(node_index);
+//     const slice = self.hir.ast.getTokenSlice(token);
+//     return try self.hir.strings.intern(slice);
+// }
 const Scope = struct {
     index: usize,
     label: []const u8,
@@ -342,6 +342,7 @@ pub fn genInstruction(self: *Self, scope: *Scope, node_index: Ast.Node.Index, ct
                     .type = ty_inst,
                     .mutable = mutable,
                     .init = value_inst_index,
+                    .name_node = name_node,
                     // .value = value_inst_index,
                     // .data = .{ .operand = ty_inst },
                 },

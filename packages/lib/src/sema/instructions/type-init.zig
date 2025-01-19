@@ -8,6 +8,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const type_inst_index = scope.getInstructionIndex(hir_inst.type_init.type);
     const type_inst = ctx.getInstruction(type_inst_index);
+    ctx.markDead(type_inst_index);
     const type_key = scope.builder.unwrapTypeValue(type_inst.typed_value.value);
     var field_init_list = scope.builder.newList();
     // std.debug.print("genTypeInitInstruction: {d} {}\n", .{ hir_inst_index, ctx.builder.getFormattableType(type_key) });
