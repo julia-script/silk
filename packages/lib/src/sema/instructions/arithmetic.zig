@@ -130,7 +130,7 @@ fn maybeInline(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
 
     const op = inst.op;
     switch (inst.typed_value.type.simple) {
-        inline .float, .int, .number, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .usize => |type_| {
+        inline .float, .int, .number, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bchar => |type_| {
             const result = try ctx.builder.doArithmetic(
                 type_.getNativeType(),
                 op,
@@ -151,7 +151,7 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
 
     const op = inst.op;
     switch (inst.typed_value.type.simple) {
-        inline .float, .int, .number, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .usize => |type_| {
+        inline .float, .int, .number, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bchar => |type_| {
             const result = try ctx.builder.doArithmetic(
                 type_.getNativeType(),
                 op,

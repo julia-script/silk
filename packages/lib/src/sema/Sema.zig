@@ -96,6 +96,7 @@ pub inline fn readBytes(self: *Self, typed_value: TypedValue) []const u8 {
     }
 }
 pub fn getSimpleTypeSize(self: *Self, simple: Type.Simple) u8 {
+    _ = self; // autofix
     return switch (simple) {
         .bool => @sizeOf(bool),
         .boolean => @sizeOf(bool),
@@ -108,7 +109,6 @@ pub fn getSimpleTypeSize(self: *Self, simple: Type.Simple) u8 {
         .u32 => @sizeOf(u32),
         .i64 => @sizeOf(i64),
         .u64 => @sizeOf(u64),
-        .usize => self.settings.pointer_size,
         .f32 => @sizeOf(f32),
         .f64 => @sizeOf(f64),
         .number => @sizeOf(f64),
@@ -160,7 +160,6 @@ pub fn readNumberAsType(self: *Self, T: type, typed_value: TypedValue) T {
             .u16 => return castBytesToType(bytes, u16, T),
             .u32 => return castBytesToType(bytes, u32, T),
             .u64 => return castBytesToType(bytes, u64, T),
-            .usize => return castBytesToType(bytes, usize, T),
             .f32 => return castBytesToType(bytes, f32, T),
             .f64 => return castBytesToType(bytes, f64, T),
             .number => return castBytesToType(bytes, f64, T),
@@ -288,6 +287,10 @@ pub const Type = struct {
     size: usize = 0,
     alignment: usize = 0,
 
+    pub const Signedness = enum {
+        signed,
+        unsigned,
+    };
     pub const Key = union(enum) {
         simple: Simple,
         complex: usize,
@@ -390,7 +393,6 @@ pub const Type = struct {
         u16,
         u32,
         u64,
-        usize,
 
         f32,
         f64,
@@ -409,7 +411,6 @@ pub const Type = struct {
                 .u16 => u16,
                 .u32 => u32,
                 .u64 => u64,
-                .usize => usize,
                 .f32 => f32,
                 .f64 => f64,
                 .int => i64,
@@ -440,7 +441,6 @@ pub const Type = struct {
                 .u32 => 4,
                 .i64 => 8,
                 .u64 => 8,
-                .usize => 8,
                 .f32 => 4,
                 .f64 => 8,
                 .void => 0,
@@ -1131,7 +1131,7 @@ pub fn formatTypedValue(
 ) !void {
     switch (typed_value.type) {
         .simple => |simple| switch (simple) {
-            .u8, .u16, .u32, .u64, .usize => {
+            .u8, .u16, .u32, .u64 => {
                 try writer.print("{s}{{ ", .{
                     @tagName(simple),
                 });
@@ -1239,7 +1239,7 @@ pub fn formatTypedValue(
                     if (typed_value.value.isComptimeKnown()) {
                         // std.debug.print("\n\ncomptime known {any}\n", .{typed_value});
                         const val = try self.builder.readNumberAsType(usize, .{
-                            .type = Type.simple(.usize),
+                            .type = self.builder.getPointerType(.unsigned),
                             .value = typed_value.value,
                         });
                         try writer.print("@{x}", .{val});
@@ -1308,7 +1308,7 @@ pub fn formatTypedValue(
                     if (typed_value.value.isComptimeKnown()) {
                         // std.debug.print("\n\ncomptime known {any}\n", .{typed_value});
                         const val = try self.builder.readNumberAsType(usize, .{
-                            .type = Type.simple(.usize),
+                            .type = self.builder.getPointerType(.unsigned),
                             .value = typed_value.value,
                         });
                         try writer.print("@{x}", .{val});

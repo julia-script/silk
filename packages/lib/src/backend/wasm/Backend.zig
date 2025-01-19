@@ -115,11 +115,6 @@ fn emitFunctionDeclaration(self: *Self, declaration_index: Sema.Declaration.Inde
             .i64, .u64 => try func.pushResult(.i64),
             .f32 => try func.pushResult(.f32),
             .f64 => try func.pushResult(.f64),
-            .usize => switch (self.program.target.arch) {
-                .wasm32 => try func.pushResult(.i32),
-                .wasm64 => try func.pushResult(.i64),
-                // else => unreachable,
-            },
             .void => {},
             else => unreachable,
         },

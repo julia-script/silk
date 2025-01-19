@@ -308,7 +308,7 @@ fn genBuiltinMemberCall(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
                         .data = .{ .operand = lhs_inst_index },
                     });
                 },
-                .u8, .u16, .u32, .u64, .usize => {
+                .u8, .u16, .u32, .u64, .bchar => {
                     // const lhs_bits = self.builder.numberBits(lhs_type);
                     // const rhs_bits = self.builder.numberBits(rhs_type);
                     const typed_value = try ctx.builder.maybeCoerceValue(lhs_inst.typed_value, rhs_type);

@@ -12,9 +12,7 @@ pub fn emit(scope: *Scope, index: Sema.Instruction.Index) !void {
             .i8, .i16, .i32 => {
                 _ = try scope.pushLocal(index, name, .i32);
             },
-            .usize => {
-                _ = try scope.pushLocal(index, name, scope.backend.pointer_type);
-            },
+
             else => {
                 std.debug.panic("unimplemented alloc type: {s}", .{@tagName(simple)});
             },

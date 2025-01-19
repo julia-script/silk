@@ -183,6 +183,7 @@ pub const Builder = struct {
     }
 
     pub fn getSimpleTypeSize(self: *Builder, simple: Sema.Type.Simple) u8 {
+        _ = self; // autofix
         return switch (simple) {
             .bool => @sizeOf(bool),
             .boolean => @sizeOf(bool),
@@ -195,7 +196,6 @@ pub const Builder = struct {
             .u32 => @sizeOf(u32),
             .i64 => @sizeOf(i64),
             .u64 => @sizeOf(u64),
-            .usize => self.pointer_size,
             .f32 => @sizeOf(f32),
             .f64 => @sizeOf(f64),
             .number => @sizeOf(f64),
@@ -416,6 +416,19 @@ pub const Builder = struct {
             },
         });
     }
+    pub fn getPointerType(self: *Builder, signedness: Sema.Type.Signedness) Sema.Type.Key {
+        return switch (self.pointer_size) {
+            4 => switch (signedness) {
+                .signed => Sema.Type.simple(.i32),
+                .unsigned => Sema.Type.simple(.u32),
+            },
+            8 => switch (signedness) {
+                .signed => Sema.Type.simple(.i64),
+                .unsigned => Sema.Type.simple(.u64),
+            },
+            else => unreachable,
+        };
+    }
     pub fn internTypeData(self: *Builder, data: Sema.Type.Data) Error!Sema.Type.Key {
         const trace = self.tracer.begin(
             @src(),
@@ -493,7 +506,7 @@ pub const Builder = struct {
             .pointer => |pointer| {
                 var hasher = Hasher.new("pointer");
                 hasher.update(self.getTypeKeyHash(pointer.child));
-                const alignment = self.getSimpleTypeSize(.usize);
+                const alignment = self.getSimpleTypeSize(self.getPointerType(.unsigned).simple);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -505,7 +518,7 @@ pub const Builder = struct {
                 var hasher = Hasher.new("slice");
                 hasher.update(self.getTypeKeyHash(slice.child));
 
-                const alignment = self.getSimpleTypeSize(.usize);
+                const alignment = self.getSimpleTypeSize(self.getPointerType(.unsigned).simple);
                 return try self.internType(.{
                     .hash = hasher.final(),
                     .data = data,
@@ -976,7 +989,7 @@ pub const Builder = struct {
             .simple => |simple| {
                 return switch (simple) {
                     .float, .int, .number, .i8, .i16, .i32, .i64 => true,
-                    .u8, .u16, .u32, .u64, .usize => false,
+                    .u8, .u16, .u32, .u64, .bchar => false,
                     else => unreachable,
                 };
             },
@@ -1067,7 +1080,6 @@ pub const Builder = struct {
                 .u16 => return castBytesToType(bytes, u16, T),
                 .u32 => return castBytesToType(bytes, u32, T),
                 .u64 => return castBytesToType(bytes, u64, T),
-                .usize => return castBytesToType(bytes, usize, T),
                 .f32 => return castBytesToType(bytes, f32, T),
                 .f64 => return castBytesToType(bytes, f64, T),
                 .number => return castBytesToType(bytes, f64, T),
@@ -1084,8 +1096,8 @@ pub const Builder = struct {
         }
         var bytes: [8]u8 = undefined;
         switch (typed_value.type.simple) {
-            inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64, .usize, .float, .int, .bchar => |src_tag| switch (target_type.simple) {
-                inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64, .usize, .float, .int, .bchar => |dst_tag| {
+            inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64, .float, .int, .bchar => |src_tag| switch (target_type.simple) {
+                inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64, .float, .int, .bchar => |dst_tag| {
                     const Src = src_tag.getNativeType();
                     const Dst = dst_tag.getNativeType();
                     const src_bytes = try self.readBytes(typed_value);
@@ -1121,7 +1133,7 @@ pub const Builder = struct {
     }
     pub fn doComparison(self: *Builder, op: Sema.Instruction.Op, lhs: Sema.TypedValue, rhs: Sema.TypedValue) !Sema.TypedValue {
         switch (lhs.type.simple) {
-            inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .usize, .int => |t| {
+            inline .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bchar, .int => |t| {
                 _ = t; // autofix
 
                 const lhs_value = try self.readNumberAsType(i64, lhs);
@@ -1442,7 +1454,6 @@ pub const Builder = struct {
                 .u16,
                 .u32,
                 .u64,
-                .usize,
                 .f32,
                 .f64,
                 .bchar,
@@ -1457,7 +1468,7 @@ pub const Builder = struct {
             const rhs_bits = self.numberBits(to_type);
             return if (lhs_bits <= rhs_bits) .allowed else .not_allowed;
         }
-        const unsigned_types = &.{ .u8, .u16, .u32, .u64, .usize };
+        const unsigned_types = &.{ .u8, .u16, .u32, .u64 };
         if (from_type.isOneOfSimple(unsigned_types) and to_type.isOneOfSimple(unsigned_types)) {
             const lhs_bits = self.numberBits(from_type);
             const rhs_bits = self.numberBits(to_type);

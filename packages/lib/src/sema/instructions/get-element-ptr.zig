@@ -136,7 +136,7 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
     const base_inst = ctx.getInstruction(base_inst_index);
     const base_type = ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
     const name_slice = scope.builder.getSlice(property_name_range);
-    if (base_type.isOneOfSimple(&.{ .int, .float, .usize, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64 })) {
+    if (base_type.isOneOfSimple(&.{ .int, .float, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64 })) {
         if (scope.builder.isSliceEqual(property_name_range, "as")) {
             const ty = try scope.builder.internTypeData(.{ .builtin_member = .{ .member = .as } });
             return ctx.pushInstruction(hir_inst_index, .{
@@ -207,7 +207,7 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
                         .base = base_inst_index,
                         .index = .{
                             .constant = .{
-                                .type = Sema.Type.simple(.usize),
+                                .type = ctx.builder.getPointerType(.unsigned),
                                 .value = try scope.builder.numberAsBytesValueKey(field.index),
                             },
                         },
@@ -223,7 +223,7 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
                     return ctx.pushInstruction(hir_inst_index, .{
                         .op = .constant,
                         .typed_value = .{
-                            .type = Sema.Type.simple(.usize),
+                            .type = ctx.builder.getPointerType(.unsigned),
                             .value = try scope.builder.numberAsBytesValueKey(array_type.len),
                         },
                         .data = .void,
@@ -247,7 +247,7 @@ pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_in
     const index_inst_index = (try ctx.pushMaybeCastInstructionToType(
         hir_inst.get_element_pointer.index,
         instruction_index,
-        Sema.Type.simple(.usize),
+        ctx.builder.getPointerType(.unsigned),
     )) orelse instruction_index;
     // const index_inst_index = try scope.getInstructionAsTypeByHirInst(hir_inst.get_element_pointer.index, Sema.Type.simple(.usize));
 

@@ -35,7 +35,6 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             .u16,
             .u32,
             .u64,
-            .usize,
 
             .f32,
             .f64,
@@ -120,7 +119,7 @@ pub fn pushSetInstructionField(
             .base = struct_inst_index,
             .index = .{
                 .constant = .{
-                    .type = Sema.Type.simple(.usize),
+                    .type = ctx.builder.getPointerType(.unsigned),
                     .value = try ctx.builder.numberAsBytesValueKey(property.index),
                 },
             },
@@ -215,7 +214,7 @@ pub fn handleStoreArray(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir
                     .data = .{ .get_element_pointer = .{
                         .base = pointer_inst_index,
                         .index = .{ .constant = .{
-                            .type = Sema.Type.simple(.usize),
+                            .type = ctx.builder.getPointerType(.unsigned),
                             .value = try ctx.builder.numberAsBytesValueKey(i),
                         } },
                     } },

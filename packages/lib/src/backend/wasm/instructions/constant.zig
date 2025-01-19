@@ -12,17 +12,7 @@ pub fn emit(scope: *Scope, index: Sema.Instruction.Index) !void {
                     .@"i32.const" = scope.program.sema.readNumberAsType(i32, instruction.typed_value),
                 });
             },
-            .usize => {
-                switch (scope.backend.pointer_type) {
-                    .i32 => try scope.function.pushInstruction(.{
-                        .@"i32.const" = scope.program.sema.readNumberAsType(i32, instruction.typed_value),
-                    }),
-                    .i64 => try scope.function.pushInstruction(.{
-                        .@"i64.const" = scope.program.sema.readNumberAsType(i64, instruction.typed_value),
-                    }),
-                    else => unreachable,
-                }
-            },
+
             else => {
                 std.debug.panic("unimplemented alloc type: {s}", .{@tagName(simple)});
             },

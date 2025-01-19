@@ -44,27 +44,7 @@ pub fn emit(scope: *Scope, index: Sema.Instruction.Index) !void {
                     .ne => .@"i64.ne",
                     else => @panic("TODO"),
                 },
-                .usize => switch (scope.program.target.getPointerSize()) {
-                    4 => switch (instruction.op) {
-                        .eq => .@"i32.eq",
-                        .ne => .@"i32.ne",
-                        .lt => .@"i32.lt_u",
-                        .le => .@"i32.le_u",
-                        .gt => .@"i32.gt_u",
-                        .ge => .@"i32.ge_u",
-                        else => @panic("TODO"),
-                    },
-                    8 => switch (instruction.op) {
-                        .eq => .@"i64.eq",
-                        .ne => .@"i64.ne",
-                        .lt => .@"i64.lt_u",
-                        .le => .@"i64.le_u",
-                        .gt => .@"i64.gt_u",
-                        .ge => .@"i64.ge_u",
-                        else => @panic("TODO"),
-                    },
-                    else => @panic("TODO"),
-                },
+
                 .f32 => switch (instruction.op) {
                     .eq => .@"f32.eq",
                     .ne => .@"f32.ne",

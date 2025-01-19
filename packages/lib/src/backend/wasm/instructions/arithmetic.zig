@@ -35,23 +35,7 @@ pub fn emit(scope: *Scope, index: Sema.Instruction.Index) !void {
                     .div => .@"i64.div_u",
                     else => @panic("TODO"),
                 },
-                .usize => switch (scope.program.target.getPointerSize()) {
-                    4 => switch (instruction.op) {
-                        .add => .@"i32.add",
-                        .sub => .@"i32.sub",
-                        .mul => .@"i32.mul",
-                        .div => .@"i32.div_u",
-                        else => @panic("TODO"),
-                    },
-                    8 => switch (instruction.op) {
-                        .add => .@"i64.add",
-                        .sub => .@"i64.sub",
-                        .mul => .@"i64.mul",
-                        .div => .@"i64.div_u",
-                        else => @panic("TODO"),
-                    },
-                    else => @panic("TODO"),
-                },
+
                 .f32 => switch (instruction.op) {
                     .add => .@"f32.add",
                     .sub => .@"f32.sub",

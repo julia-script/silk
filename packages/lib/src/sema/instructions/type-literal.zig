@@ -7,6 +7,8 @@ const GenScope = @import("../gen.zig").Scope;
 pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
     const type_value_index = switch (std.meta.activeTag(hir_inst)) {
+        .ty_usize => scope.builder.getPointerType(.unsigned),
+
         .ty_i8 => Sema.Type.simple(.i8),
         .ty_i16 => Sema.Type.simple(.i16),
         .ty_i32 => Sema.Type.simple(.i32),
@@ -19,7 +21,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         .ty_u64 => Sema.Type.simple(.u64),
         // .ty_u128 => Sema.Type.simple(.u128),
         // .ty_u256 => Sema.Type.simple(.u256),
-        .ty_usize => Sema.Type.simple(.usize),
+
         .ty_f64 => Sema.Type.simple(.f64),
         .ty_f32 => Sema.Type.simple(.f32),
         .ty_boolean => Sema.Type.simple(.bool),
@@ -52,7 +54,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
             const size_inst_id = (try ctx.pushMaybeCastInstructionToType(
                 ty_array.size,
                 uncasted_size_inst_id,
-                Sema.Type.simple(.usize),
+                ctx.builder.getPointerType(.unsigned),
             )) orelse uncasted_size_inst_id;
             // const size_inst_id = try scope.getInstructionAsTypeByHirInst(ty_array.size, Sema.Type.simple(.usize));
             const size_inst = ctx.getInstruction(size_inst_id);
