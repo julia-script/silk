@@ -10,7 +10,9 @@
 		"locale": "cpp",
 		"ostream": "cpp",
 		"print": "cpp",
-		"*.def": "cpp"
+		"*.def": "cpp",
+		"cstdlib": "cpp"
 	},
-	"typescript.tsdk": "node_modules/typescript/lib"
+	"typescript.tsdk": "node_modules/typescript/lib",
+	"rust-analyzer.linkedProjects": ["packages/craneliftbindings/Cargo.toml"]
 }

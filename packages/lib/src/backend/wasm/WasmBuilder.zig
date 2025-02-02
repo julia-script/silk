@@ -938,6 +938,10 @@ pub const Module = struct {
                     },
                 }
             },
+            .call => |index| {
+                const function = self.functions.items[index];
+                try wat_writer.print("{s} ${s}", .{ @tagName(instruction), function.name });
+            },
             .@"if" => {
                 try wat_writer.write("if");
                 // try wat_writer.breakLine();
@@ -1109,11 +1113,11 @@ pub const Module = struct {
                     try wat_writer.breakLine();
                 }
             }
-        }
 
-        wat_writer.indent -= 1;
-        try wat_writer.writeIndent();
-        try wat_writer.write(")\n");
+            wat_writer.indent -= 1;
+            try wat_writer.writeIndent();
+            try wat_writer.write(")\n");
+        }
 
         // Global section
         for (self.globals.items) |global| {

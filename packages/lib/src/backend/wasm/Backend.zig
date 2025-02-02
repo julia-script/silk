@@ -12,6 +12,11 @@ module: WasmBuilder.Module,
 pointer_type: WasmBuilder.Type,
 stack_pointer: ?u32 = null,
 main_memory: ?u32 = null,
+declarations: std.AutoArrayHashMapUnmanaged(Sema.Declaration.Index, Declaration) = .{},
+const Declaration = union(enum) {
+    function: usize,
+    global: usize,
+};
 
 pub fn init(program: *Program, allocator: std.mem.Allocator) Self {
     return Self{
@@ -26,6 +31,7 @@ pub fn init(program: *Program, allocator: std.mem.Allocator) Self {
 }
 pub fn deinit(self: *Self) void {
     self.module.deinit();
+    self.declarations.deinit(self.allocator);
 }
 pub fn getStackPointer(self: *Self) !u32 {
     if (self.stack_pointer) |stack_pointer| return stack_pointer;
@@ -54,23 +60,31 @@ pub fn codegen(self: *Self) Codegen {
         .program = self.program,
         .emitDeclarationFn = emitDeclarationFn,
         .deinitFn = deinitFn,
+        .dumpFn = dumpFn,
     };
 }
 fn deinitFn(ctx: *anyopaque) void {
     const self: *Self = @alignCast(@ptrCast(ctx));
     self.deinit();
 }
+fn dumpFn(ctx: *anyopaque) void {
+    const self: *Self = @alignCast(@ptrCast(ctx));
+    // self.module.dumpBytes();
+    const stderr = std.io.getStdErr().writer().any();
+    self.module.toWat(stderr) catch {};
+}
 
-fn emitDeclarationFn(ctx: *anyopaque, declaration_index: Sema.Declaration.Index) !void {
+fn emitDeclarationFn(ctx: *anyopaque, declaration_index: Sema.Declaration.Index) !usize {
     std.debug.print("emitting {}\n", .{declaration_index});
     const self: *Self = @alignCast(@ptrCast(ctx));
-    try self.emitDeclaration(declaration_index);
+    return try self.emitDeclaration(declaration_index);
 }
-pub fn emitDeclaration(self: *Self, declaration_index: Sema.Declaration.Index) !void {
+
+pub fn emitDeclaration(self: *Self, declaration_index: Sema.Declaration.Index) anyerror!usize {
     const declaration = self.program.getDeclaration(declaration_index);
 
     const value = declaration.typed_value;
-    switch (value.type) {
+    return switch (value.type) {
         .complex => |complex| switch (self.program.sema.builder.getComplexType(complex).data) {
             .function => try self.emitFunctionDeclaration(declaration_index),
             else => {
@@ -82,10 +96,13 @@ pub fn emitDeclaration(self: *Self, declaration_index: Sema.Declaration.Index) !
                 @panic("TODO: emit simple declaration");
             },
         },
-    }
+    };
 }
 
-fn emitFunctionDeclaration(self: *Self, declaration_index: Sema.Declaration.Index) !void {
+fn emitFunctionDeclaration(self: *Self, declaration_index: Sema.Declaration.Index) !usize {
+    if (self.declarations.get(declaration_index)) |decl| {
+        return decl.function;
+    }
     const declaration = self.program.getDeclaration(declaration_index);
 
     var sema = self.program.sema;
@@ -98,7 +115,8 @@ fn emitFunctionDeclaration(self: *Self, declaration_index: Sema.Declaration.Inde
     _ = init_instruction_list; // autofix
     var func = try self.module.makeFunction();
     func.@"export" = declaration.exported;
-
+    try self.declarations.put(self.allocator, declaration_index, .{ .function = func.index });
+    std.debug.print("emitting wasm decl {d}\n", .{func.index});
     func.name = name;
     var scope = Scope.init(
         self.allocator,
@@ -131,12 +149,8 @@ fn emitFunctionDeclaration(self: *Self, declaration_index: Sema.Declaration.Inde
     // }
 
     try scope.emitRoot();
-    const func_a_index = try self.module.putFunction(&func);
-    const stderr = std.io.getStdErr().writer().any();
-    try self.module.toWat(stderr);
-    try self.module.dumpBytes();
+    return try self.module.putFunction(&func);
 
-    _ = func_a_index; // autofix
     // for (init_instruction_list) |instruction_index| {
     //     const instruction = self.program.sema.getInstruction(fn_init_instruction_index, instruction_index);
     //     if (instruction.liveness == 0) continue;

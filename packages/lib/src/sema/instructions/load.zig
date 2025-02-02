@@ -4,12 +4,13 @@ const std = @import("std");
 const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 
-pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
-    const pointer_inst_index = scope.getInstructionIndex(hir_inst.load.operand);
-    const pointer_inst = ctx.getInstruction(pointer_inst_index);
-    const type_to_load = ctx.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse {
-        std.debug.panic("expected pointer type, got {any}", .{ctx.builder.getFormattableType(pointer_inst.typed_value.type)});
+pub fn emit(block: *InstContext.Block, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
+    const entity = block.ctx.getEntity();
+    const hir_inst = entity.getHirInstruction(hir_inst_index);
+    const pointer_inst_index = block.ctx.getInstructionByHirIndex(hir_inst.load.operand);
+    const pointer_inst = block.ctx.getInstruction(pointer_inst_index);
+    const type_to_load = block.ctx.builder.unwrapPointerType(pointer_inst.typed_value.type) orelse {
+        std.debug.panic("expected pointer type, got {any}", .{block.ctx.builder.getFormattableType(pointer_inst.typed_value.type)});
     };
     // switch (type_to_load) {
     //     .complex => |complex| {
@@ -44,7 +45,7 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
     //     },
     //     .simple => {},
     // }
-    const index = ctx.pushInstruction(hir_inst_index, .{
+    const index = try block.appendInstruction(hir_inst_index, .{
         .op = .load,
         .typed_value = .{
             .type = type_to_load,
@@ -52,35 +53,36 @@ pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) 
         },
         .data = .{ .operand = pointer_inst_index },
     });
-    if (pointer_inst.typed_value.isComptimeKnown()) try maybeInline(ctx, index);
+    if (pointer_inst.typed_value.isComptimeKnown()) try maybeInline(block, index);
     return index;
 }
-pub fn maybeInline(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    const inst = ctx.getInstruction(inst_index);
-    const ptr_inst_value = ctx.getTypedValue(inst.data.operand);
+pub fn maybeInline(block: *InstContext.Block, inst_index: Sema.Instruction.Index) !void {
+    const inst = block.ctx.getInstruction(inst_index);
+    const ptr_inst_value = block.ctx.getTypedValue(inst.data.operand);
     if (!ptr_inst_value.isComptimeKnown()) return;
 
-    const ptr = try ctx.builder.readNumberAsType(usize, ptr_inst_value);
+    const ptr = try block.ctx.builder.readNumberAsType(usize, ptr_inst_value);
 
-    const type_to_load = ctx.builder.unwrapPointerType(ptr_inst_value.type) orelse std.debug.panic("not a pointer type", .{});
-    ctx.setValue(inst_index, .{
+    const type_to_load = block.ctx.builder.unwrapPointerType(ptr_inst_value.type) orelse std.debug.panic("not a pointer type", .{});
+    block.ctx.setValue(inst_index, .{
         .type = inst.typed_value.type,
         .value = switch (type_to_load) {
-            .simple => try ctx.builder.sema.memory.load(type_to_load, ptr),
+            .simple => try block.ctx.builder.sema.memory.load(type_to_load, ptr),
             .complex => ptr_inst_value.value,
         },
     });
 }
 
-pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
+const ExecContext = @import("./ExecContext.zig");
+pub fn exec(ctx: *ExecContext, inst_index: Sema.Instruction.Index) !void {
     const inst = ctx.getInstruction(inst_index);
-    var ptr_inst_value = ctx.getTypedValue(inst.data.operand);
+    var ptr_inst_value = ctx.getInstruction(inst.data.operand).typed_value;
     if (!ptr_inst_value.isComptimeKnown()) @panic("not a comptime known value");
     const ptr = try ctx.builder.readNumberAsType(usize, ptr_inst_value);
 
     const type_to_load = ctx.builder.unwrapPointerType(ptr_inst_value.type) orelse std.debug.panic("not a pointer type", .{});
     const loaded = try ctx.builder.sema.memory.load(type_to_load, ptr);
-    ctx.setValue(inst_index, .{
+    try ctx.setValue(inst_index, .{
         .type = inst.typed_value.type,
         .value = loaded,
     });

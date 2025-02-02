@@ -25,4 +25,7 @@ test {
     _ = @import("sema/instructions/inst-index.zig");
     _ = @import("program/Program.zig");
     _ = @import("program/Os.zig");
+    _ = @import("cranelift/builder.zig");
+    _ = @import("ir/Dfg.zig");
+    _ = @import("ir/Module.zig");
 }

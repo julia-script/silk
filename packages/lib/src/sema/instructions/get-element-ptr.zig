@@ -4,6 +4,7 @@ const std = @import("std");
 const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 const genGlobalGetInstruction = @import("./global-get.zig").genGlobalGetInstruction;
+const ExecContext = @import("./ExecContext.zig");
 
 pub fn genFromBuiltinPropertyAccess(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     _ = ctx; // autofix
@@ -58,12 +59,12 @@ pub fn genFromBuiltinPropertyAccess(ctx: *InstContext, scope: *GenScope, hir_ins
     // }
     // std.debug.panic("unhandled base type", .{});
 }
-fn genFromGetTypeProperty(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
+fn genFromGetTypeProperty(block: *InstContext.Block, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
+    const hir_inst = block.ctx.getHirInstruction(hir_inst_index);
     const base_hir_index = hir_inst.get_property_pointer.base;
-    const base_inst_index = scope.getInstructionIndex(base_hir_index);
-    const base_inst = ctx.getInstruction(base_inst_index);
-    const base_type = scope.builder.unwrapTypeValue(base_inst.typed_value.value);
+    const base_inst_index = block.ctx.getInstructionByHirIndex(base_hir_index);
+    const base_inst = block.ctx.getInstruction(base_inst_index);
+    const base_type = block.ctx.builder.unwrapTypeValue(base_inst.typed_value.value);
 
     switch (base_type) {
         .simple => |simple_type| switch (simple_type) {
@@ -74,20 +75,20 @@ fn genFromGetTypeProperty(ctx: *InstContext, scope: *GenScope, hir_inst_index: H
                 std.debug.panic("getTypePropertyByName: unhandled base type: {s}", .{@tagName(simple_type)});
             },
         },
-        .complex => |complex_type| switch (scope.builder.getComplexType(complex_type).data) {
+        .complex => |complex_type| switch (block.ctx.builder.getComplexType(complex_type).data) {
             .@"struct" => |struct_type| {
-                const entity = scope.builder.getEntity(struct_type.entity);
-                const name_range = try scope.entity.internNode(hir_inst.get_property_pointer.property_name_node);
+                const entity = block.ctx.builder.getEntity(struct_type.entity);
+                const name_range = try entity.internNode(hir_inst.get_property_pointer.property_name_node);
                 const declaration_entity_index = entity.data.module_declaration.declarations.get(name_range) orelse {
                     std.debug.panic("error: property '{s}' not found in struct '{s}'", .{
-                        scope.builder.getSlice(name_range),
-                        scope.builder.getSlice(entity.name),
+                        block.ctx.builder.getSlice(name_range),
+                        block.ctx.builder.getSlice(entity.name),
                     });
                 };
-                return genGlobalGetInstruction(ctx, scope, hir_inst_index, declaration_entity_index);
+                return genGlobalGetInstruction(block, hir_inst_index, declaration_entity_index);
             },
             else => {
-                const ty = scope.builder.getComplexType(complex_type);
+                const ty = block.ctx.builder.getComplexType(complex_type);
                 std.debug.panic("getTypePropertyByName: unhandled complex type: {s}", .{@tagName(ty.data)});
             },
         },
@@ -124,26 +125,24 @@ fn genFromGetTypeProperty(ctx: *InstContext, scope: *GenScope, hir_inst_index: H
 //     }
 // }
 
-fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
+fn genFromGetPropertyPointer(block: *InstContext.Block, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     // @panic("todo");
-    const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
+    const hir_inst = block.ctx.getHirInstruction(hir_inst_index);
     //
-    // const base_hir_index = hir_inst.get_property_pointer.base;
-    // _ = base_hir_index; // autofix
-    const property_name_range = try scope.entity.internNode(hir_inst.get_property_pointer.property_name_node);
+    const property_name_range = try block.ctx.getEntity().internNode(hir_inst.get_property_pointer.property_name_node);
     const base_hir_index = hir_inst.get_property_pointer.base;
-    const base_inst_index = scope.getInstructionIndex(base_hir_index);
-    const base_inst = ctx.getInstruction(base_inst_index);
-    const base_type = ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
-    const name_slice = scope.builder.getSlice(property_name_range);
+    const base_inst_index = block.ctx.getInstructionByHirIndex(base_hir_index);
+    const base_inst = block.ctx.getInstruction(base_inst_index);
+    const base_type = block.ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
+    const name_slice = block.ctx.builder.getSlice(property_name_range);
     if (base_type.isOneOfSimple(&.{ .int, .float, .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .f32, .f64 })) {
-        if (scope.builder.isSliceEqual(property_name_range, "as")) {
-            const ty = try scope.builder.internTypeData(.{ .builtin_member = .{ .member = .as } });
-            return ctx.pushInstruction(hir_inst_index, .{
+        if (block.ctx.builder.isSliceEqual(property_name_range, "as")) {
+            const ty = try block.ctx.builder.internTypeData(.{ .builtin_member = .{ .member = .as } });
+            return try block.appendInstruction(hir_inst_index, .{
                 .op = .constant,
                 .typed_value = .{
                     .type = ty,
-                    .value = try scope.builder.internValueData(.{ .type = ty }),
+                    .value = try block.ctx.builder.internValueData(.{ .type = ty }),
                 },
                 .data = .{ .operand = base_inst_index },
             });
@@ -159,31 +158,31 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
                 });
             },
         },
-        .complex => |complex_type| switch (scope.builder.getComplexType(complex_type).data) {
+        .complex => |complex_type| switch (block.ctx.builder.getComplexType(complex_type).data) {
             .@"struct" => |struct_type| {
-                const entity = scope.builder.getEntity(struct_type.entity);
+                const entity = block.ctx.builder.getEntity(struct_type.entity);
 
                 if (entity.data.module_declaration.declarations.get(property_name_range)) |declaration| {
-                    return genGlobalGetInstruction(ctx, scope, hir_inst_index, declaration);
+                    return genGlobalGetInstruction(block, hir_inst_index, declaration);
                 }
 
                 const field = entity.data.module_declaration.fields.get(property_name_range) orelse {
                     std.debug.panic("error: property '{s}' not found in struct '{s}'", .{
-                        scope.builder.getSlice(property_name_range),
-                        scope.builder.getSlice(entity.name),
+                        block.ctx.builder.getSlice(property_name_range),
+                        block.ctx.builder.getSlice(entity.name),
                     });
                 };
-                const field_entity = scope.builder.getEntity(field.entity);
+                const field_entity = block.ctx.builder.getEntity(field.entity);
                 // const field_index = field
                 std.debug.print("pushing index instruction\n", .{});
                 // const base
                 var field_value: Sema.Value.Key = Sema.Value.simple(.exec_time);
                 // const field_type = try field_entity.resolveType();
-                std.debug.print("field_type: {any}\n", .{scope.builder.getFormattableTypedValue(base_inst.typed_value)});
-                if (try scope.builder.maybeGetPointer(base_inst.typed_value)) |ptr| {
+                std.debug.print("field_type: {any}\n", .{block.ctx.builder.getFormattableTypedValue(base_inst.typed_value)});
+                if (try block.ctx.builder.maybeGetPointer(base_inst.typed_value)) |ptr| {
                     // const offset = self.builder.getComplexType(field_type).data.struct_field.offset;
 
-                    field_value = try scope.builder.numberAsBytesValueKey(ptr + field.offset);
+                    field_value = try block.ctx.builder.numberAsBytesValueKey(ptr + field.offset);
                 }
                 // const index_inst_index = ctx.pushInstruction(hir_inst_index, .{
                 //     .op = .constant,
@@ -195,10 +194,10 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
                 // });
                 // _ = index_inst_index; // autofix
 
-                const get_element_pointer_inst = ctx.pushInstruction(hir_inst_index, .{
+                const get_element_pointer_inst = try block.appendInstruction(hir_inst_index, .{
                     .op = .get_element_pointer,
                     .typed_value = .{
-                        .type = try scope.builder.internTypeData(.{ .pointer = .{ .child = try field_entity.resolveType() } }),
+                        .type = try block.ctx.builder.internTypeData(.{ .pointer = .{ .child = try field_entity.resolveType() } }),
                         .value = field_value,
                     },
                     // .value = base_inst.value,
@@ -207,53 +206,53 @@ fn genFromGetPropertyPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index
                         .base = base_inst_index,
                         .index = .{
                             .constant = .{
-                                .type = ctx.builder.getPointerType(.unsigned),
-                                .value = try scope.builder.numberAsBytesValueKey(field.index),
+                                .type = block.ctx.builder.getPointerType(.unsigned),
+                                .value = try block.ctx.builder.numberAsBytesValueKey(field.index),
                             },
                         },
                     } },
                 });
                 // std.debug.panic("todo {s}", .{self.builder.getSlice(name_range)});
                 // return try self.pushGlobalGetInstruction(hir_inst_index, field.entity);
-                try maybeInline(ctx, get_element_pointer_inst);
+                try maybeInline(block, get_element_pointer_inst);
                 return get_element_pointer_inst;
             },
             .array => |array_type| {
-                if (scope.builder.isSliceEqual(property_name_range, "len")) {
-                    return ctx.pushInstruction(hir_inst_index, .{
+                if (block.ctx.builder.isSliceEqual(property_name_range, "len")) {
+                    return try block.appendInstruction(hir_inst_index, .{
                         .op = .constant,
                         .typed_value = .{
-                            .type = ctx.builder.getPointerType(.unsigned),
-                            .value = try scope.builder.numberAsBytesValueKey(array_type.len),
+                            .type = block.ctx.builder.getPointerType(.unsigned),
+                            .value = try block.ctx.builder.numberAsBytesValueKey(array_type.len),
                         },
                         .data = .void,
                     });
                 }
-                std.debug.panic("todo {s}", .{scope.builder.getSlice(property_name_range)});
+                std.debug.panic("todo {s}", .{block.ctx.builder.getSlice(property_name_range)});
             },
             else => {
-                const ty = scope.builder.getComplexType(complex_type);
+                const ty = block.ctx.builder.getComplexType(complex_type);
                 std.debug.panic("getPropertyByName: unhandled complex type: {s}", .{@tagName(ty.data)});
             },
         },
     }
 }
-pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
-    const base_index = scope.getInstructionIndex(hir_inst.get_element_pointer.base);
-    const base_instruction = ctx.getInstruction(base_index);
-    const instruction_index = scope.getInstructionIndex(hir_inst.get_element_pointer.index);
+pub fn genFromGetElementPointer(block: *InstContext.Block, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
+    const hir_inst = block.ctx.getHirInstruction(hir_inst_index);
+    const base_index = block.ctx.getInstructionByHirIndex(hir_inst.get_element_pointer.base);
+    const base_instruction = block.ctx.getInstruction(base_index);
+    const instruction_index = block.ctx.getInstructionByHirIndex(hir_inst.get_element_pointer.index);
 
-    const index_inst_index = (try ctx.pushMaybeCastInstructionToType(
+    const index_inst_index = (try block.pushMaybeCastInstructionToType(
         hir_inst.get_element_pointer.index,
         instruction_index,
-        ctx.builder.getPointerType(.unsigned),
+        block.ctx.builder.getPointerType(.unsigned),
     )) orelse instruction_index;
     // const index_inst_index = try scope.getInstructionAsTypeByHirInst(hir_inst.get_element_pointer.index, Sema.Type.simple(.usize));
 
-    const type_to_access = if (ctx.builder.getType(base_instruction.typed_value.type)) |ty| switch (ty.data) {
+    const type_to_access = if (block.ctx.builder.getType(base_instruction.typed_value.type)) |ty| switch (ty.data) {
         .array, .slice => ty,
-        .pointer => |pointer_type| ctx.builder.getComplexType(pointer_type.child).*,
+        .pointer => |pointer_type| block.ctx.builder.getComplexType(pointer_type.child).*,
         else => std.debug.panic("unhandled base type: {s}", .{@tagName(ty.data)}),
     } else std.debug.panic("unreachable: should get a base type", .{});
 
@@ -262,17 +261,17 @@ pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_in
         .array => |array_type| array_type.child,
         else => std.debug.panic("unhandled base type: {s}", .{@tagName(type_to_access.data)}),
     };
-    const index_typed_value = ctx.getTypedValue(index_inst_index);
-    const index = ctx.pushInstruction(hir_inst_index, .{
+    const index_typed_value = block.ctx.getTypedValue(index_inst_index);
+    const index = try block.appendInstruction(hir_inst_index, .{
         .op = .get_element_pointer,
         .typed_value = .{
-            .type = try ctx.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
+            .type = try block.ctx.builder.internTypeData(.{ .pointer = .{ .child = element_type } }),
             .value = Sema.Value.simple(.exec_time),
         },
         .data = .{ .get_element_pointer = .{
             .base = base_index,
             .index = if (index_typed_value.isComptimeKnown()) blk: {
-                ctx.markDead(index_inst_index);
+                block.ctx.markDead(index_inst_index);
 
                 break :blk .{ .constant = index_typed_value };
             } else .{
@@ -280,79 +279,79 @@ pub fn genFromGetElementPointer(ctx: *InstContext, scope: *GenScope, hir_inst_in
             },
         } },
     });
-    try maybeInline(ctx, index);
+    try maybeInline(block, index);
     return index;
 }
-pub fn gen(ctx: *InstContext, scope: *GenScope, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
-    const hir_inst = scope.entity.getHirInstruction(hir_inst_index);
+pub fn emit(block: *InstContext.Block, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
+    const hir_inst = block.ctx.getHirInstruction(hir_inst_index);
     switch (hir_inst) {
-        .get_element_pointer => return try genFromGetElementPointer(ctx, scope, hir_inst_index),
+        .get_element_pointer => return try genFromGetElementPointer(block, hir_inst_index),
         .get_property_pointer => |get_property| {
             _ = get_property; // autofix
             // if (get_property.is_builtin) return try genFromBuiltinPropertyAccess(ctx, scope, hir_inst_index);
             const base_hir_index = hir_inst.get_property_pointer.base;
 
-            const base_inst_index = scope.getInstructionIndex(base_hir_index);
-            const base_inst = ctx.getInstruction(base_inst_index);
-            const base_type = ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
+            const base_inst_index = block.ctx.getInstructionByHirIndex(base_hir_index);
+            const base_inst = block.ctx.getInstruction(base_inst_index);
+            const base_type = block.ctx.builder.maybeUnwrapPointerType(base_inst.typed_value.type);
             switch (base_type) {
                 .simple => |simple_type| switch (simple_type) {
-                    .type => return try genFromGetTypeProperty(ctx, scope, hir_inst_index),
+                    .type => return try genFromGetTypeProperty(block, hir_inst_index),
                     else => {},
                 },
-                .complex => |complex_type| switch (scope.builder.getComplexType(complex_type).data) {
-                    .typeof => return try genFromGetTypeProperty(ctx, scope, hir_inst_index),
+                .complex => |complex_type| switch (block.ctx.builder.getComplexType(complex_type).data) {
+                    .typeof => return try genFromGetTypeProperty(block, hir_inst_index),
                     else => {},
                 },
             }
             // if (base_type.isOneOfSimple(&.{ .type, .typeof })) return try genFromGetTypeProperty(ctx, scope, hir_inst_index);
-            return try genFromGetPropertyPointer(ctx, scope, hir_inst_index);
+            return try genFromGetPropertyPointer(block, hir_inst_index);
         },
         else => unreachable,
     }
 }
-pub fn maybeInline(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
-    const inst = ctx.getInstruction(inst_index);
+pub fn maybeInline(block: *InstContext.Block, inst_index: Sema.Instruction.Index) !void {
+    const inst = block.ctx.getInstruction(inst_index);
     const base = inst.data.get_element_pointer.base;
     const index = inst.data.get_element_pointer.index;
-    const base_inst = ctx.getInstruction(base);
+    const base_inst = block.ctx.getInstruction(base);
     const index_typed_value = switch (index) {
-        .instruction => |index_inst_index| ctx.getInstruction(index_inst_index).typed_value,
+        .instruction => |index_inst_index| block.ctx.getInstruction(index_inst_index).typed_value,
         .constant => |constant| constant,
     };
     if (!base_inst.typed_value.isComptimeKnown()) return;
     if (!index_typed_value.isComptimeKnown()) return;
-    const index_int = try ctx.builder.readNumberAsType(usize, index_typed_value);
-    const base_type_key = ctx.builder.unwrapPointerType(base_inst.typed_value.type) orelse std.debug.panic("base_type is not a pointer type", .{});
+    const index_int = try block.ctx.builder.readNumberAsType(usize, index_typed_value);
+    const base_type_key = block.ctx.builder.unwrapPointerType(base_inst.typed_value.type) orelse std.debug.panic("base_type is not a pointer type", .{});
     std.debug.print("base_type_key: {any}\n", .{base_type_key});
 
-    const base_type = ctx.builder.getComplexType(base_type_key);
-    const base_ptr = try ctx.builder.readNumberAsType(usize, base_inst.typed_value);
+    const base_type = block.ctx.builder.getComplexType(base_type_key);
+    const base_ptr = try block.ctx.builder.readNumberAsType(usize, base_inst.typed_value);
     switch (base_type.data) {
         .@"struct" => {
-            const fields = ctx.builder.sema.lists.getSlice(base_type.data.@"struct".fields);
+            const fields = block.ctx.builder.sema.lists.getSlice(base_type.data.@"struct".fields);
 
-            const field_type = ctx.builder.getComplexType(Sema.Type.Key.decode(fields[index_int])).data.struct_field.offset;
+            const field_type = block.ctx.builder.getComplexType(Sema.Type.Key.decode(fields[index_int])).data.struct_field.offset;
             // const ptr = base_int + field_type;
             const ptr = base_ptr + field_type;
-            ctx.setValue(inst_index, .{
+            block.ctx.setValue(inst_index, .{
                 .type = inst.typed_value.type,
-                .value = try ctx.builder.numberAsBytesValueKey(ptr),
+                .value = try block.ctx.builder.numberAsBytesValueKey(ptr),
             });
         },
         .array => {
-            const array_type = ctx.builder.getComplexType(base_type_key).data.array;
-            const element_size = ctx.builder.getTypeSize(array_type.child);
+            const array_type = block.ctx.builder.getComplexType(base_type_key).data.array;
+            const element_size = block.ctx.builder.getTypeSize(array_type.child);
             const ptr = base_ptr + index_int * element_size;
-            ctx.setValue(inst_index, .{
+            block.ctx.setValue(inst_index, .{
                 .type = inst.typed_value.type,
-                .value = try ctx.builder.numberAsBytesValueKey(ptr),
+                .value = try block.ctx.builder.numberAsBytesValueKey(ptr),
             });
         },
         else => std.debug.panic("unhandled base type: {s}", .{@tagName(base_type.data)}),
     }
 }
-pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
+pub fn exec(ctx: *ExecContext, inst_index: Sema.Instruction.Index) !void {
     const inst = ctx.getInstruction(inst_index);
     const base = inst.data.get_element_pointer.base;
     const index = inst.data.get_element_pointer.index;
@@ -375,7 +374,7 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
             const field_type = ctx.builder.getComplexType(Sema.Type.Key.decode(fields[index_int])).data.struct_field.offset;
             // const ptr = base_int + field_type;
             const ptr = base_ptr + field_type;
-            ctx.setValue(inst_index, .{
+            try ctx.setValue(inst_index, .{
                 .type = inst.typed_value.type,
                 .value = try ctx.builder.numberAsBytesValueKey(ptr),
             });
@@ -384,7 +383,7 @@ pub fn exec(ctx: *InstContext, inst_index: Sema.Instruction.Index) !void {
             const array_type = ctx.builder.getComplexType(base_type_key).data.array;
             const element_size = ctx.builder.getTypeSize(array_type.child);
             const ptr = base_ptr + index_int * element_size;
-            ctx.setValue(inst_index, .{
+            try ctx.setValue(inst_index, .{
                 .type = inst.typed_value.type,
                 .value = try ctx.builder.numberAsBytesValueKey(ptr),
             });

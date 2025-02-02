@@ -20,9 +20,8 @@ const Load = @import("./load.zig");
 const Return = @import("./return.zig");
 const Break = @import("./break.zig");
 const GetElementPointer = @import("./get-element-pointer.zig");
-
+const Fncall = @import("./fncall.zig");
 const Backend = @import("../Backend.zig");
-
 function: *WasmBuilder.Function,
 program: *Program,
 locals: std.AutoArrayHashMapUnmanaged(u64, Local) = .{},
@@ -67,7 +66,7 @@ pub fn getLocal(self: *Self, index: Sema.Instruction.Index) Local {
     return self.locals.get(index).?;
 }
 
-pub fn emitRoot(self: *Self) Error!void {
+pub fn emitRoot(self: *Self) anyerror!void {
     try self.function.pushFormatting(.{ .comment = "-- Body --" });
     try self.emit(0);
     // Emit the prologue
@@ -96,7 +95,7 @@ pub fn emitRoot(self: *Self) Error!void {
 }
 
 const Error = error{} || std.mem.Allocator.Error;
-pub fn emit(self: *Self, index: Sema.Instruction.Index) Error!void {
+pub fn emit(self: *Self, index: Sema.Instruction.Index) anyerror!void {
     const instruction = self.getInstruction(index);
     if (instruction.liveness == 0) return;
     const stderr = std.io.getStdErr().writer().any();
@@ -139,6 +138,8 @@ pub fn emit(self: *Self, index: Sema.Instruction.Index) Error!void {
         .add, .sub, .mul, .div => try Arithmetic.emit(self, index),
         .br => try Break.emit(self, index),
         .get_element_pointer => try GetElementPointer.emit(self, index),
+        .fn_call => try Fncall.emit(self, index),
+        // .global_get => try GlobalGet.emit(self, index),
         else => |op| {
             std.debug.panic("unsupported instruction: {}\n", .{op});
         },

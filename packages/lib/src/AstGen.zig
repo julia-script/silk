@@ -2110,7 +2110,7 @@ pub fn parseStructDecl(self: *AstGen) AstGenError!Node.Index {
                     .payload = Token.Tag.colon.toInt(),
                 });
             }
-            const ty = try self.parsePrimary();
+            const ty = try self.parseTypeExpression();
 
             const default_value = blk: {
                 if (self.accept(.equal)) {

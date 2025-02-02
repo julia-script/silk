@@ -77,8 +77,12 @@ pub fn compile(self: *Self) !void {
         // try self.sema.emitDeclaration(declaration_index);
         // try self.emitDeclaration(declaration_index);
         std.debug.print("Compiling '{s}'\n", .{entrypoint});
-        try codegen.emitDeclaration(declaration_index);
+        _ = try codegen.emitDeclaration(declaration_index);
     }
+    codegen.dump();
+    // const stderr = std.io.getStdErr().writer().any();
+    // try self.module.toWat(stderr);
+    // try self.module.dumpBytes();
 }
 
 pub fn deinit(self: *Self) void {
@@ -110,6 +114,7 @@ test "Program" {
     );
     defer program.deinit();
     try program.compile();
+
     // const declarations = program.sema.declarations.items;
 
     // for (declarations) |declaration| {

@@ -1,0 +1,13 @@
+[package]
+name = "craneliftbindings"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cranelift = { version = "0.116.1", features = ["module", "native", "object"] }
+
+[build-dependencies]
+cbindgen = "0.28.0"
+
+[lib]
+crate-type = ["cdylib"]

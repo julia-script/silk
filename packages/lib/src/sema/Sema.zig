@@ -41,6 +41,9 @@ pub const Settings = struct {
 pub fn getInstruction(self: *Self, offset: usize, index: Instruction.Index) *Instruction {
     return &self.instructions.items[index + offset];
 }
+pub fn getDeclaration(self: *Self, index: Declaration.Index) *Declaration {
+    return &self.declarations.items[index];
+}
 pub fn getInitInstruction(self: *Self, index: Instruction.Index) *Instruction {
     return &self.instructions.items[index];
 }

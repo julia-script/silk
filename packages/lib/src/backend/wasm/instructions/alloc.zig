@@ -7,6 +7,7 @@ pub fn emit(scope: *Scope, index: Sema.Instruction.Index) !void {
     _ = type;
     // instruction.data.alloc.type
     const name = scope.program.sema.getSlice(instruction.data.alloc.name);
+
     switch (instruction.data.alloc.type) {
         .simple => |simple| switch (simple) {
             .i8, .i16, .i32 => {
@@ -37,7 +38,7 @@ pub fn emit(scope: *Scope, index: Sema.Instruction.Index) !void {
                 else => unreachable,
             }
 
-            try scope.function.pushInstruction(.{ .@"i32.add" = {} });
+            try scope.function.pushInstruction(.@"i32.add");
             try scope.function.pushInstruction(.{ .@"local.set" = pointer });
         },
     }

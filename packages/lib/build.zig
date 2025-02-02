@@ -44,6 +44,9 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addImport("cmd", cmd_module);
     lib.root_module.addImport("expect", expect_module);
     lib.root_module.addOptions("options", options);
+    lib.root_module.addIncludePath(b.path("../craneliftbindings/headers"));
+    lib.root_module.addLibraryPath(b.path("../craneliftbindings/target/debug"));
+    lib.root_module.linkSystemLibrary("craneliftbindings", .{});
     b.installArtifact(lib);
 
     const lib_unit_tests = b.addTest(.{
@@ -52,10 +55,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .filter = test_filter,
+        .test_runner = .{ .mode = .simple, .path = b.path("test_runner.zig") },
     });
     lib_unit_tests.root_module.addImport("cmd", cmd_module);
+
     b.installArtifact(lib_unit_tests);
     lib_unit_tests.root_module.addOptions("options", options);
+
+    lib_unit_tests.root_module.addIncludePath(b.path("../craneliftbindings/headers"));
+    lib_unit_tests.root_module.addLibraryPath(b.path("../craneliftbindings/target/debug"));
+    lib_unit_tests.root_module.linkSystemLibrary("craneliftbindings", .{});
 
     queue(.{
         &lib_unit_tests.step,

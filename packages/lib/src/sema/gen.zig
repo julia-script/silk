@@ -309,6 +309,7 @@ pub const Builder = struct {
                                 ),
                             );
                         }
+
                         std.debug.panic("not a type value: {s}", .{value_tag_name});
                     },
                 }
@@ -1403,9 +1404,9 @@ pub const Builder = struct {
         while (true) : (i += 1) {
             if (i >= self.entities.items.len) {
                 const symbols = self.symbols.entries.items(.value);
-                std.debug.print("symbols: {d}\n", .{symbols.len});
+                // std.debug.print("symbols: {d}\n", .{symbols.len});
                 while (j < symbols.len) : (j += 1) {
-                    const entity = self.getEntity(symbols[j]);
+                    const entity = self.getEntity(self.symbols.entries.items(.value)[j]);
                     const declaration = try entity.resolveDeclaration();
                     _ = declaration; // autofix
                 }
@@ -2863,6 +2864,7 @@ pub const Entity = struct {
         const inst = self.builder.sema.instructions.items[type_inst_index];
         const type_inst_value = inst.typed_value;
         const typeof = self.builder.getComplexType(type_inst_value.type);
+
         std.debug.print("resolveTypeValue {s}\n", .{self.builder.getFormattableType(typeof.data.typeof.child)});
         return try self.builder.internValueData(.{ .type = typeof.data.typeof.child });
         // return typeof;
@@ -3201,6 +3203,29 @@ pub const Entity = struct {
 
     //     @panic("not implemented");
     // }
+    pub fn maybeResolveDependency(self: *Entity, entity_key: Entity.Key) Error!Sema.Value.Key {
+        const entity = self.builder.getEntity(entity_key);
+
+        const val = entity.resolveValue() catch |e| {
+            switch (e) {
+                error.CircularDependency => {
+                    std.debug.print("circular dependency: {} {}\n", .{ self.key, entity_key });
+                    try self.pushDependency(entity_key);
+                    return Sema.Value.simple(.exec_time);
+                },
+                else => return e,
+            }
+        };
+        switch (val) {
+            .complex => |complex| switch (self.builder.sema.getComplexValue(complex).data) {
+                .global => |global| {
+                    return global.value.value;
+                },
+                else => return val,
+            },
+            else => return val,
+        }
+    }
 };
 
 pub const Scope = struct {
@@ -3291,8 +3316,13 @@ pub const Scope = struct {
     pub fn genRootBlock(self: *Scope, hir_inst_index: Hir.Inst.Index) Error!Sema.Instruction.Index {
         const hir_inst = self.entity.getHirInstruction(hir_inst_index);
         _ = hir_inst; // autofix
+        var arena = std.heap.ArenaAllocator.init(self.builder.allocator);
+        const allocator = arena.allocator();
+        defer arena.deinit();
         var inst_context = InstContext{
+            .allocator = allocator,
             .builder = self.builder,
+            .entity_key = self.entity.key,
             .depth = 0,
             .context = @ptrCast(self),
             .getInstructionFn = getInstructionFn,
@@ -3301,8 +3331,11 @@ pub const Scope = struct {
             .pushInstructionFn = pushInstructionFn,
             .goToFn = goToFn,
             .setIdMapFn = setIdMapFn,
+            .root_hir_index = hir_inst_index,
         };
-        _ = try Index.gen(&inst_context, self, hir_inst_index);
+        // _ = try Index.gen(&inst_context, self, hir_inst_index);
+        return try inst_context.emitRoot(hir_inst_index);
+
         // _ = switch (hir_inst) {
         //     .block, .inline_block => try Index.gen(&inst_context, self, hir_inst_index),
 
@@ -3311,9 +3344,8 @@ pub const Scope = struct {
         //     },
         // };
         // _ = try self.resolveInstruction(hir_inst_index);
-        const index: Sema.Instruction.Index = self.builder.sema.instructions.items.len;
-        try self.builder.sema.instructions.appendSlice(self.builder.allocator, self.instructions.items);
-        return index;
+        // const index: Sema.Instruction.Index = self.builder.sema.instructions.items.len;
+        // try self.builder.sema.instructions.appendSlice(self.builder.allocator, self.instructions.items);
     }
     pub fn maybeResolveDependency(self: *Scope, entity_key: Entity.Key) Error!Sema.Value.Key {
         const entity = self.builder.getEntity(entity_key);

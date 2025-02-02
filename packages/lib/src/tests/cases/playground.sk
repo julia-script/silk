@@ -184,12 +184,12 @@ fn array_alloc_3() void {
   const bar = foo;
 }
 
-// %mem.data.0: [5]bchar = "Hello"
-fn str_alloc() void {
-  // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
-  // %1 = memcpy %0 %mem.data.0             ; void
-  const foo = "Hello";
-}
+// // // %mem.data.0: [5]bchar = "Hello"
+// // fn str_alloc() void {
+// //   // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
+// //   // %1 = memcpy %0 %mem.data.0             ; void
+// //   const foo = "Hello";
+// // }
 
 fn str_alloc_2() void {
   // %0 = alloc [5]bchar                    ; [..5]bchar@ptr:0
@@ -236,23 +236,137 @@ fn sum_array() i32 {
 }
 
 
-pub fn fib2() i32 {
- comp {
-  var n: i32 = 10
- var a:i32 = 0
-  var b:i32 = 1
-  if (n > 0) {
-    while (n > 1) {
-      var t:i32 = a + b
-      a = b
-      b = t
-      n = n - 1
-    }
-    return b
-  }
-  return a
- }
+// pub fn fib2() i32 {
+//  comp {
+//   var n: i32 = 10
+//  var a:i32 = 0
+//   var b:i32 = 1
+//   if (n > 0) {
+//     while (n > 1) {
+//       var t:i32 = a + b
+//       a = b
+//       b = t
+//       n = n - 1
+//     }
+//     return b
+//   }
+//   return a
+//  }
+// }
+
+
+
+fn explicit_casting() i32 {
+  123.2:as(i32):as(u8):as(f32);
 }
+
+// type K = struct {
+//  pub fn foo_add_child(a: i32, b: i32) i32 {
+//     return a + b;
+//   }
+// }
+
+// fn bar_add(a: i32, b: i32) i32 {
+//   return a + b;
+// }
+
+// // fn foo_add(a: i32, b: i32) i32 {
+// //   return a + b;
+// // }
+// fn namespaced() void {
+//   const a = K.foo_add_child(1, 2);
+// }
+// fn global() void {
+//   const b = bar_add(1, 2);
+// }
+
+// fn builtin() void {
+//   const c = 2:as(i32);
+// }
+// export fn fib(n: i32) i32 {
+//  var a:i32 = 0
+//   var b:i32 = 1
+//   if (n > 0) {
+//     while (n > 1) {
+//       var t:i32 = a + b
+//       a = b
+//       b = t
+//       n = n - 1
+//     }
+//     return b
+//   }
+// //   return a
+
+// }
+
+// type R = struct {
+//   a: i8,
+//   b: i32,
+// }
+// export fn main() void {
+//    const foo: [2]i32 = [2]i32{1, 2};
+//    const bar: [3]i32 = [3]i32{3, 4, 5};
+//    const st = R{
+//     a = 1,
+//     b = 2,
+//    };
+//    const n:i32 = 2;
+// }
+// // fn aaaa(a: i32) void {
+// // //   @comptime_log(a);
+// // }
+// // // fn main() void {
+// // //   comp foo(123);
+// // //   comp foo(456);
+// // // }
+
+// //   fn foo_addd(a: i32, b: i32) i32 {
+// //     return a + b;
+// //   }
+// //   fn foo_ad3d(a: i32, b: i32) i32 {
+// //     return a + b;
+// //   }
+
+// //     fn fdsdss(a: i32, b: i32) i32 {
+// //     return a + b;
+// //   }
+// //   fn f(a: i32, b: i32) i32 {
+// //     return a + b;
+// //   }
+
+// //   var a: i32 = 1;
+
+//   fn foo_adddd() i32 {
+//     const c: i32 = comp 2;
+//     // return a + b;
+//   }
+
+// // fn woop() i32 {
+// //   return  2;
+// // }
+
+
+// // fn throws() @Result(i32) {
+// //   // return !SomeError;
+
+// // }
+// pub fn fib2() i32 {
+//  comp {
+//   var n: i32 = 10
+//  var a:i32 = 0
+//   var b:i32 = 1
+//   if (n > 0) {
+//     while (n > 1) {
+//       const t:i32 = a + b
+//       a = b
+//       b = t
+//       n = n - 1
+//     }
+//     return b
+//   }
+//   return a
+//  }
+// }
 
 pub fn fib(n: i32) i32 {
  var a:i32 = 0
@@ -268,98 +382,6 @@ pub fn fib(n: i32) i32 {
   }
   return a
 }
-
-
-fn explicit_casting() i32 {
-  123.2:as(i32):as(u8):as(f32);
-}
-
-type K = struct {
-  fn foo_add_child(a: i32, b: i32) i32 {
-    return a + b;
-  }
-}
-
-fn bar_add(a: i32, b: i32) i32 {
-  return a + b;
-}
-  // fn foo_add(a: i32, b: i32) i32 {
-  //   return a + b;
-  // }
-fn namespaced() void {
-  const a = K.foo_add_child(1, 2);
-}
-fn global() void {
-  const b = bar_add(1, 2);
-}
-
-fn builtin() void {
-  const c = 2:as(i32);
-}
-// export fn main(n: i32) i32 {
-//  var a:i32 = 0
-//   var b:i32 = 1
-//   if (n > 0) {
-//     while (n > 1) {
-//       var t:i32 = a + b
-//       a = b
-//       b = t
-//       n = n - 1
-//     }
-//     return b
-//   }
-//   return a
-
-// }
-
-type R = struct {
-  a: i8,
-  b: i32,
-}
-export fn main() void {
-   const foo: [2]i32 = [2]i32{1, 2};
-   const bar: [3]i32 = [3]i32{3, 4, 5};
-   const st = R{
-    a = 1,
-    b = 2,
-   };
-   const n:i32 = 2;
-}
-fn aaaa(a: i32) void {
-//   @comptime_log(a);
-}
-// fn main() void {
-//   comp foo(123);
-//   comp foo(456);
-// }
-
-  fn foo_addd(a: i32, b: i32) i32 {
-    return a + b;
-  }
-  fn foo_ad3d(a: i32, b: i32) i32 {
-    return a + b;
-  }
-
-    fn fdsdss(a: i32, b: i32) i32 {
-    return a + b;
-  }
-  fn f(a: i32, b: i32) i32 {
-    return a + b;
-  }
-
-  var a: i32 = 1;
-
-  fn foo_adddd() i32 {
-    const c: i32 = comp 2;
-    // return a + b;
-  }
-
-fn woop() i32 {
-  return  2;
-}
-
-
-fn throws() @Result(i32) {
-  // return !SomeError;
-
+fn main() void {
+  const a =  fib(10);
 }
