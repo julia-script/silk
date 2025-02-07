@@ -1,5 +1,6 @@
 const Ty = @import("./tyval.zig").Ty;
 const std = @import("std");
+const Module = @import("./Module.zig");
 pub const Value = union(enum) {
     local: Data,
     global: Data,
@@ -146,7 +147,7 @@ pub const Value = union(enum) {
     ) !void {
         switch (self) {
             .global => |global| {
-                try writer.print("g{}", .{global.index});
+                try writer.print("{}", .{Module.Decl.Ref.from(global.index)});
             },
             // .param => |local| {
             //     try writer.print("p{}", .{local.index});

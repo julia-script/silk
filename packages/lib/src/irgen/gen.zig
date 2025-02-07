@@ -276,7 +276,7 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             };
             switch (symbol) {
                 .global => |global| {
-                    return scope.block.definition_builder.useGlobal(self.mod, global);
+                    return scope.block.definition_builder.useGlobal(self.mod, global, false);
                 },
                 .local => |local| {
                     return scope.block.definition_builder.useLocal(local);
@@ -525,11 +525,7 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
                 const value = try self.parseExpression(scope, builder, arg);
                 try args_list.append(value);
             }
-            // return try builder.call(callee, args_list.items);
-            // return Module.Value.Imm(.void, .void);
-            // const args = try self.parseExpression(scope, builder, fn_call.args);
-            // _ = callee; // autofix
-            // _ = args; // autofix
+            _ = try builder.call(callee, args_list.items);
         },
         else => {
             std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});

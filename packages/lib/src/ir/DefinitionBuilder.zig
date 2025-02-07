@@ -67,15 +67,34 @@ pub fn useLocal(self: *Self, ref: Dfg.Local.Ref) Value {
     //     },
     // };
 }
-pub fn useGlobal(self: *Self, module: *Module, ref: Module.Decl.Ref) Value {
-    _ = module; // autofix
-    _ = ref; // autofix
+pub fn useGlobal(self: *Self, module: *Module, ref: Module.Decl.Ref, is_comptime: bool) Value {
     _ = self; // autofix
-    // return .{ .global = .{
-    //     .index = ref.ref,
-    //     .ty = module.getFunctionDeclaration(ref).signature.ret,
-    // } };
-    std.debug.panic("not implemented", .{});
+    const decl = module.getDeclaration(ref);
+    switch (decl.*) {
+        .func => {
+            const ty = .{
+                .func = .{
+                    .signature = decl.func.signature,
+                    .declaration = ref,
+                },
+            };
+            _ = ty; // autofix
+            return .{ .global = .{
+                .index = ref.ref,
+                .is_comptime = is_comptime,
+                .ty = .{
+                    .func = .{
+                        .signature = decl.func.signature,
+                        .declaration = ref,
+                    },
+                },
+                .data = .runtime,
+            } };
+        },
+        // else => {
+        //     @panic("not implemented");
+        // },
+    }
 }
 
 pub fn consumeValue(self: *Self, val: Value) void {
@@ -231,7 +250,7 @@ pub fn ge(self: *Self, ty: Ty, a: Value, b: Value, is_comptime: bool) !Value {
 pub fn makeBranch(self: *Self, cond: Value) !InstData.Ref {
     return try self.dfg.pushBranch(self.active_block, cond, [3]?Block.Ref{ null, null, null });
 }
-pub fn call(self: *Self, callee: FunctionDeclaration.Ref, args: []Value) !Value {
+pub fn call(self: *Self, callee: Value, args: []Value) !Value {
     return try self.dfg.pushCall(self.module, self.active_block, callee, args);
 }
 

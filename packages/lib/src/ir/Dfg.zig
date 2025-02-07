@@ -13,6 +13,7 @@ const debug = @import("../debug.zig");
 const Value = @import("./val.zig").Value;
 const FunctionDeclaration = @import("./FunctionDeclaration.zig");
 const Module = @import("./Module.zig");
+const Set = @import("../data_structures.zig").AutoSet;
 
 bytes: Array(u8),
 instructions: InstData.Ref.List(InstData),
@@ -23,6 +24,7 @@ local_values: Local.Ref.List(Local),
 blocks: Block.Ref.List(Block),
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
+dependencies: Set(Module.Decl.Ref),
 
 pub const Local = struct {
     is_param: bool = false,
@@ -52,6 +54,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .types = InstData.Ref.Map(Ty).init(allocator),
         .values = InstData.Ref.Map(Value).init(allocator),
         .local_values = Local.Ref.List(Local).init(allocator),
+        .dependencies = Set(Module.Decl.Ref).init(allocator),
     };
 
     // Fixes weird zig memory leak bug
@@ -185,7 +188,7 @@ pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value:
     });
 }
 
-pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: FunctionDeclaration.Ref, args: []Value) !Value {
+pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Value, args: []Value) !Value {
     const ref = try self.pushInst(block_ref, .{
         .call = .{
             .callee = callee,
@@ -193,10 +196,16 @@ pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Func
         },
     });
 
-    const callee_decl = module.getFunctionDeclaration(callee);
+    const callee_ty = callee.getTy();
+    const signature = switch (callee_ty) {
+        .func => |func_ty| module.getSignature(func_ty.signature),
+        else => {
+            std.debug.panic("{} is not callable", .{callee_ty});
+        },
+    };
     const val = Value.Inst(
         ref.ref,
-        callee_decl.return_type,
+        signature.ret,
         .runtime,
         false,
     );
@@ -239,8 +248,14 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, inst_ref: InstData.Ref)
         },
         .call => |call| {
             try writer.print("call {}", .{call.callee});
-            for (call.args) |arg| {
-                try writer.print(" {}", .{arg});
+            if (call.args.len > 0) {
+                try writer.print(" with ", .{});
+            }
+            for (call.args, 0..) |arg, i| {
+                if (i > 0) {
+                    try writer.print(", ", .{});
+                }
+                try writer.print("{}", .{arg});
             }
         },
 

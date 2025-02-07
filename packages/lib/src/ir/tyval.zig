@@ -6,6 +6,7 @@ const utils = @import("./utils.zig");
 const Block = @import("./Block.zig");
 const Definition = @import("./Definition.zig");
 const InstData = @import("./inst.zig").InstData;
+const Module = @import("./Module.zig");
 
 pub const Val = union(ValKind) {
     /// Can represent any value that fits in 8 bytes,
@@ -267,10 +268,21 @@ pub const Ty = union(enum) {
     unresolved,
 
     typeof: InstData.Ref,
+    func: struct {
+        signature: Module.Signature.Ref,
+        declaration: Module.Decl.Ref,
+    },
 
     ref: Ref,
 
     pub const Ref = utils.MakeRef(.ty, Ty);
+    pub const TyData = union(enum) {
+        func: Function,
+        decl: Module.Decl.Ref,
+        pub const Function = struct {
+            declaration: Module.Decl.Ref,
+        };
+    };
 
     pub fn eql(self: Ty, other: Ty) bool {
         const self_tag = std.meta.activeTag(self);

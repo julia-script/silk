@@ -35,6 +35,7 @@ signatures: Signature.Ref.List(Signature),
 functions: Map(Decl.Ref, Function),
 function_definitions_map: Map(Decl.Ref, Definition.Ref),
 definitions: Definition.Ref.List(Definition),
+tys: Ty.Ref.List(Ty.TyData),
 decls: Decl.Ref.List(Decl),
 const Self = @This();
 pub fn init(allocator: std.mem.Allocator) Self {
@@ -47,11 +48,13 @@ pub fn init(allocator: std.mem.Allocator) Self {
         .definitions = Definition.Ref.List(Definition).init(allocator),
         .namespaces = Namespace.Ref.List(Namespace).init(allocator),
         .decls = Decl.Ref.List(Decl).init(allocator),
+        .tys = Ty.Ref.List(Ty.TyData).init(allocator),
     };
 }
 pub fn deinit(self: *Self) void {
     self.arena.deinit();
     self.signatures.deinitRecursive();
+    self.tys.deinitRecursive();
     // self.function_declarations.deinitRecursive();
     self.definitions.deinitRecursive();
     self.functions.deinit();
@@ -101,6 +104,10 @@ pub fn setFunctionDeclaration(
     ) };
 }
 
+pub fn declareTy(self: *Self, ty: Ty.TyData) !Ty.Ref {
+    const ref = try self.tys.append(ty);
+    return .{ .ref = ref };
+}
 pub fn modString(self: *Self, str: []const u8) []const u8 {
     return self.arena.allocator.dupe(u8, str);
 }
@@ -110,6 +117,9 @@ pub fn getSignature(self: *Self, ref: Signature.Ref) Signature {
 }
 pub fn getFunctionDeclaration(self: *Self, ref: Decl.Ref) *FunctionDeclaration {
     return &self.decls.getPtr(ref).func;
+}
+pub fn getDeclaration(self: *Self, ref: Decl.Ref) *Decl {
+    return self.decls.getPtr(ref);
 }
 pub fn getFunction(self: *Self, ref: Decl.Ref) Function {
     return self.functions.get(ref) orelse debug.assertPrint("Function not found: {}", .{ref});
@@ -133,7 +143,8 @@ pub fn format(
 
                 // var sig = self.signatures.getPtr(func_decl.signature);
                 var sig = self.signatures.getPtr(func_decl.signature);
-                try writer.print("function {s} {}\n", .{ func_decl.name, sig.formatable(@constCast(&self)) });
+
+                try writer.print("{}: function {s} {}\n", .{ ref, func_decl.name, sig.formatable(@constCast(&self)) });
                 const def_ref = self.function_definitions_map.get(ref) orelse continue;
                 var def = self.definitions.getPtr(def_ref);
                 try writer.print("{}", .{def.formatable(&self)});

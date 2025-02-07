@@ -42,7 +42,7 @@ pub const InstData = union(enum) {
         value: Value,
     },
     call: struct {
-        callee: Module.Decl.Ref,
+        callee: Value,
         args: []Value,
     },
 
