@@ -60,7 +60,7 @@ pub fn MakeRef(label: anytype, comptime T: type) type {
                 pub fn set(self: *@This(), ref: Ref, item: K) void {
                     self.items.items[@intCast(ref.ref)] = item;
                 }
-                pub fn len(self: @This()) usize {
+                pub fn count(self: @This()) usize {
                     return self.items.items.len;
                 }
             };
@@ -95,36 +95,65 @@ test "MakeRef" {
     try std.testing.expect(A != B);
     try std.testing.expect(A == AnotherA);
 }
-// pub fn RefList(comptime Ref: type, comptime T: type) type {
+// pub fn List(comptime K: type) type {
 //     return struct {
-//         items: std.ArrayList(T),
+//         items: std.ArrayList(K),
 //         pub fn init(allocator: std.mem.Allocator) @This() {
-//             return .{ .items = std.ArrayList(T).init(allocator) };
+//             return .{ .items = std.ArrayList(K).init(allocator) };
 //         }
 //         pub fn deinit(self: *@This()) void {
 //             self.items.deinit();
 //         }
-//         pub fn reserve(self: *@This(), n: usize) !Ref {
-//             _ = n; // autofix
+//         pub fn deinitRecursive(self: *@This()) void {
+//             if (@hasDecl(K, "deinit")) {
+//                 for (self.items.items) |*item| {
+//                     item.deinit();
+//                 }
+//             }
+//             self.deinit();
+//         }
+//         pub fn reserve(self: *@This()) !Ref {
 //             return try self.append(undefined);
 //         }
-//         pub fn append(self: *@This(), item: T) !Ref {
-//             const idx = self.items.items.len;
+//         pub fn slice(self: @This()) []K {
+//             return self.items.items;
+//         }
+//         const Entry = struct {
+//             ref: Ref,
+//             item: *K,
+//         };
+//         const Iter = struct {
+//             items: []K,
+//             i: u32,
+//             pub fn next(self: *@This()) ?Entry {
+//                 if (self.i >= self.items.len) return null;
+//                 const i = self.i;
+//                 self.i += 1;
+//                 return .{ .ref = .{ .ref = i }, .item = &self.items[i] };
+//             }
+//         };
+//         pub fn iter(self: @This()) Iter {
+//             return .{ .items = self.items.items, .i = 0 };
+//         }
+//         pub fn append(self: *@This(), item: K) !Ref {
+//             const ref = self.items.items.len;
 //             try self.items.append(item);
-//             return .{ .idx = @intCast(idx) };
+//             return .{ .ref = @intCast(ref) };
 //         }
-//         pub fn get(self: @This(), ref: Ref) T {
-//             return self.items.items[@intCast(ref.idx)];
+//         pub fn get(self: @This(), ref: Ref) K {
+//             return self.items.items[@intCast(ref.ref)];
 //         }
-//         pub fn set(self: *@This(), ref: Ref, item: T) void {
-//             self.items.items[@intCast(ref.idx)] = item;
+//         pub fn getPtr(self: @This(), ref: Ref) *K {
+//             return &self.items.items[@intCast(ref.ref)];
+//         }
+//         pub fn set(self: *@This(), ref: Ref, item: K) void {
+//             self.items.items[@intCast(ref.ref)] = item;
 //         }
 //         pub fn len(self: @This()) usize {
 //             return self.items.items.len;
 //         }
 //     };
 // }
-
 pub const testing = struct {
     pub fn assertFormatsAs(value: anytype, comptime expected: []const u8) !void {
         var buf: [expected.len * 2]u8 = undefined;

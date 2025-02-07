@@ -440,8 +440,17 @@ pub fn getTokenSlice(self: *Ast, token_i: Token.Index) []const u8 {
     const token = self.tokens.items[token_i];
     return self.source[token.start..token.end];
 }
+pub fn getList(self: *Ast, range: InternedIndexesList.Range) []const Node.Index {
+    return self.interned_lists.getSlice(range);
+}
 pub fn getNode(self: *Ast, node_i: Node.Index) Node {
     return self.nodes.items[node_i];
+}
+pub fn nodeIf(self: *Ast, node_i: Node.Index, tag: Node.Tag) ?Node {
+    if (self.getNodeTag(node_i) == tag) {
+        return self.getNode(node_i);
+    }
+    return null;
 }
 pub fn getNodeStartToken(self: *Ast, node_i: Node.Index) Token.Index {
     return self.getNode(node_i).start_token;

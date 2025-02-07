@@ -4,6 +4,8 @@ const Self = @This();
 const Module = @import("./Module.zig");
 pub const Ref = utils.MakeRef(.def, Self);
 const Dfg = @import("./Dfg.zig");
+const Array = std.ArrayList;
+const Value = @import("./val.zig").Value;
 
 dfg: Dfg,
 kind: Kind,
@@ -31,6 +33,12 @@ pub const Formatable = struct {
     ) !void {
         const instruction_indent = "    ";
         var block_iter = self.def.dfg.blocks.iter();
+        for (self.def.dfg.local_values.slice(), 0..) |local, i| {
+            if (local.is_param) {
+                continue;
+            }
+            try writer.print(instruction_indent ++ "l{}: {}\n", .{ i, local.value.getTy() });
+        }
         while (block_iter.next()) |entry| {
             const block = entry.item;
             const ref = entry.ref;
@@ -43,8 +51,10 @@ pub const Formatable = struct {
             for (block.instructions.items) |inst_ref| {
                 try writer.print("{s}", .{instruction_indent});
                 try self.def.dfg.formatInst(writer, inst_ref);
+
                 try writer.print("\n", .{});
             }
+            try writer.print("\n", .{});
         }
     }
 };

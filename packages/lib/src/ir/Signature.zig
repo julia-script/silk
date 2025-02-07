@@ -4,15 +4,19 @@ const utils = @import("./utils.zig");
 const std = @import("std");
 const Module = @import("./Module.zig");
 
-params: std.ArrayList(Ty),
+params: std.ArrayList(Param),
 ret: Ty = Ty.void,
 
 pub const Ref = utils.MakeRef(.sig, u32);
 const Self = @This();
 
+pub const Param = struct {
+    ty: Ty,
+    is_comptime: bool,
+};
 pub fn init(allocator: std.mem.Allocator) Self {
     return .{
-        .params = std.ArrayList(Ty).init(allocator),
+        .params = std.ArrayList(Param).init(allocator),
     };
 }
 
@@ -20,8 +24,8 @@ pub fn deinit(self: *Self) void {
     self.params.deinit();
 }
 
-pub fn addParam(self: *Self, param: Ty) !void {
-    try self.params.append(param);
+pub fn addParam(self: *Self, param: Ty, is_comptime: bool) !void {
+    try self.params.append(.{ .ty = param, .is_comptime = is_comptime });
 }
 
 pub fn setReturn(self: *Self, ret: Ty) void {
@@ -42,7 +46,11 @@ const Formatable = struct {
             if (i > 0) {
                 try writer.writeAll(", ");
             }
-            try writer.print("{s}", .{param});
+            if (param.is_comptime) {
+                try writer.writeAll("comp ");
+            }
+
+            try writer.print("l{d}: {s}", .{ i, param.ty });
         }
         try writer.writeAll(")");
         try writer.print(" -> {s}", .{self.sig.ret});

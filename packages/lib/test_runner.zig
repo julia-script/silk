@@ -558,7 +558,9 @@ pub fn printLineFromFileAnyOs(out_stream: std.io.AnyWriter, source_location: std
             try out_stream.writeAll(" ┆ ");
             try out_stream.writeAll("\x1b[0m");
 
-            try out_stream.writeByteNTimes(' ', source_location.column - 1);
+            if (source_location.column > 0) {
+                try out_stream.writeByteNTimes(' ', source_location.column - 1);
+            }
             try out_stream.writeAll("\x1b[31m^\x1b[0m\n");
         }
 

@@ -1,10 +1,12 @@
 const Op = @import("./opcodes.zig").Op;
-
+const Value = @import("./val.zig").Value;
 const std = @import("std");
 const activeTag = std.meta.activeTag;
 const utils = @import("./utils.zig");
 const Block = @import("./Block.zig");
 const Definition = @import("./Definition.zig");
+const InstData = @import("./inst.zig").InstData;
+
 pub const Val = union(ValKind) {
     /// Can represent any value that fits in 8 bytes,
     /// it should always be paired with a Type to know how to interpret the bytes
@@ -195,9 +197,6 @@ pub const TyVal = struct {
             u32 => return from(Ty.u32, try Val.fromBytes(value)),
             u64 => return from(Ty.u64, try Val.fromBytes(value)),
 
-            usize => return from(Ty.u64, try Val.fromBytes(value)),
-            isize => return from(Ty.i64, try Val.fromBytes(value)),
-
             bool => return from(Ty.bool, try Val.fromBytes(value)),
             else => return error.UnsupportedType,
         }
@@ -253,18 +252,21 @@ pub const Ty = union(enum) {
     i16,
     i32,
     i64,
-    isize,
 
     u8,
     u16,
     u32,
     u64,
-    usize,
+
+    int,
+    float,
 
     bool,
 
     type,
     unresolved,
+
+    typeof: InstData.Ref,
 
     ref: Ref,
 
@@ -322,6 +324,64 @@ pub const Ty = union(enum) {
                 try writer.print("{s}", .{@tagName(self)});
             },
         }
+    }
+
+    pub fn isInt(self: Ty) bool {
+        return switch (self) {
+            .i8,
+            .i16,
+            .i32,
+            .i64,
+            .u8,
+            .u16,
+            .u32,
+            .u64,
+            // float and int literal don't have define type yet so they can be coerced to both
+            // int and float is just how they are currently represented
+            // we may introduce other untyped numbers in the future like bigint and decimals
+            .int,
+            .float,
+            => true,
+            else => false,
+        };
+    }
+    pub fn isFloat(self: Ty) bool {
+        return switch (self) {
+            .f16, .f32, .f64, .float, .int => true,
+            else => false,
+        };
+    }
+    pub fn isSigned(self: Ty) bool {
+        return switch (self) {
+            .i8, .i16, .i32, .i64, .float, .int => true,
+            else => false,
+        };
+    }
+    pub fn isUntypedNumber(self: Ty) bool {
+        return switch (self) {
+            .int, .float => true,
+            else => false,
+        };
+    }
+    pub fn bits(self: Ty) u32 {
+        return switch (self) {
+            .i8, .u8 => 8,
+            .i16, .u16 => 16,
+            .i32, .u32 => 32,
+            .i64, .u64 => 64,
+            .int => 0,
+            .float => 0,
+
+            else => 0,
+        };
+    }
+    /// There might be cases where the expression hasn't been evaluated yet,
+    /// which my be a numeric type but we don't know yet
+    pub fn isResolvedNumeric(self: Ty) bool {
+        return switch (self) {
+            .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .int, .float => true,
+            else => false,
+        };
     }
 };
 test "Ty" {
