@@ -1,6 +1,7 @@
 const Ty = @import("./tyval.zig").Ty;
 const std = @import("std");
 const Module = @import("./Module.zig");
+const Dfg = @import("./Dfg.zig");
 pub const Value = union(enum) {
     local: Data,
     global: Data,
@@ -27,6 +28,7 @@ pub const Value = union(enum) {
         bytes: [8]u8,
         slice: Slice,
         ty: Ty,
+        // func: Function,
         void,
         runtime,
 

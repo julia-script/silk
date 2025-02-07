@@ -13,14 +13,19 @@ const Array = std.ArrayList;
 pub const Ty = @import("./tyval.zig").Ty;
 pub const Value = @import("./val.zig").Value;
 const utils = @import("./utils.zig");
+pub const GlobalDeclaration = @import("./GlobalDeclaration.zig");
 pub const Decl = union(enum) {
     func: FunctionDeclaration,
+    global: GlobalDeclaration,
 
     pub const Ref = utils.MakeRef(.decl, Decl);
     pub fn deinit(self: *Decl) void {
         switch (self.*) {
             .func => |*func| {
                 func.deinit();
+            },
+            .global => |*global| {
+                global.deinit();
             },
         }
     }
@@ -104,10 +109,58 @@ pub fn setFunctionDeclaration(
     ) };
 }
 
-pub fn declareTy(self: *Self, ty: Ty.TyData) !Ty.Ref {
+pub fn declareGlobalDeclaration(
+    self: *Self,
+    namespace: Namespace.Ref,
+    name: []const u8,
+    ty: Ty,
+) !Decl.Ref {
+    return try self.decls.append(.{ .global = try GlobalDeclaration.init(
+        self.allocator,
+        namespace,
+        name,
+        ty,
+    ) });
+}
+pub fn setGlobalDeclaration(
+    self: *Self,
+    ref: Decl.Ref,
+    namespace: Namespace.Ref,
+    name: []const u8,
+    ty: Ty,
+) !void {
+    self.decls.getPtr(ref).* = .{ .global = try GlobalDeclaration.init(
+        self.allocator,
+        namespace,
+        name,
+        ty,
+    ) };
+}
+pub fn declareTy(self: *Self, ty: Ty.TyData) !Ty {
     const ref = try self.tys.append(ty);
     return .{ .ref = ref };
 }
+pub fn getTy(self: *Self, ref: anytype) *Ty.TyData {
+    const tyref = switch (@TypeOf(ref)) {
+        Ty => ref.ref,
+        Ty.Ref => ref,
+        else => unreachable,
+    };
+    return self.tys.getPtr(tyref);
+}
+pub fn acceptTyData(self: *Self, ty: Ty, tag: std.meta.FieldEnum(Ty.TyData)) ?*Ty.TyData {
+    return switch (ty) {
+        .ref => |ref| {
+            const tydata = self.getTy(ref);
+            if (std.meta.activeTag(tydata.*) == tag) {
+                return tydata;
+            }
+            return null;
+        },
+        else => null,
+    };
+}
+
 pub fn modString(self: *Self, str: []const u8) []const u8 {
     return self.arena.allocator.dupe(u8, str);
 }
@@ -133,8 +186,10 @@ pub fn format(
 ) !void {
     try writer.print(";; Module\n\n", .{});
     var func_decl_iter = self.decls.iter();
+
     var i: usize = 0;
     while (func_decl_iter.next()) |entry| {
+        try writer.print("\n", .{});
         i += 1;
         const decl = entry.item;
         const ref = entry.ref;
@@ -148,6 +203,16 @@ pub fn format(
                 const def_ref = self.function_definitions_map.get(ref) orelse continue;
                 var def = self.definitions.getPtr(def_ref);
                 try writer.print("{}", .{def.formatable(&self)});
+            },
+            .global => |*global| {
+                switch (global.ty) {
+                    .type => {
+                        try writer.print("{}: type {s}\n", .{ ref, global.name });
+                    },
+                    else => {
+                        try writer.print("{}: {s} {}\n", .{ ref, global.name, global.ty });
+                    },
+                }
             },
         }
     }

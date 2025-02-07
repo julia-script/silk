@@ -45,6 +45,10 @@ pub const InstData = union(enum) {
         callee: Value,
         args: []Value,
     },
+    init_array: struct {
+        ty: Module.Ty,
+        items: []Value,
+    },
 
     pub const Ref = utils.MakeRef(.inst, InstData);
 

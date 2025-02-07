@@ -564,7 +564,7 @@ pub fn printLineFromFileAnyOs(out_stream: std.io.AnyWriter, source_location: std
             try out_stream.writeAll("\x1b[31m^\x1b[0m\n");
         }
 
-        slice = slice[pos + 1 ..];
+        slice = slice[@min(pos + 1, slice.len)..];
         written_lines += 1;
     }
     try out_stream.writeBytesNTimes("┄", 40);

@@ -12,6 +12,7 @@ kind: Kind,
 
 pub const Kind = enum {
     function_body,
+    global_body,
     inline_expression,
 };
 pub fn init(kind: Kind, dfg: Dfg) Self {

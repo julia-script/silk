@@ -9,6 +9,7 @@ pub const Scope = union(enum) {
     namespace: NamespaceScope,
     fn_decl: FunctionDeclarationScope,
     block: BlockScope,
+    global_decl: GlobalDeclarationScope,
     pub fn initNamespace(allocator: Allocator, parent: ?*Scope, ref: Module.Namespace.Ref) Scope {
         return Scope{
             .namespace = .{
@@ -55,6 +56,34 @@ pub const Scope = union(enum) {
             },
         };
     }
+    pub fn initGlobalDeclaration(
+        allocator: Allocator,
+        mod: *Module,
+        parent: *Scope,
+        ref: Module.Decl.Ref,
+        name: []const u8,
+        ty_node: Ast.Node.Index,
+        value_node: Ast.Node.Index,
+        is_type_decl: bool,
+        is_mutable: bool,
+        visibility: Visibility,
+        is_exported: bool,
+    ) !Scope {
+        return Scope{
+            .global_decl = .{
+                .definition_builder = try Module.DefinitionBuilder.init(allocator, mod, .global_body),
+                .parent = parent,
+                .ref = ref,
+                .name = name,
+                .ty_node = ty_node,
+                .value_node = value_node,
+                .is_type_decl = is_type_decl,
+                .is_mutable = is_mutable,
+                .visibility = visibility,
+                .is_exported = is_exported,
+            },
+        };
+    }
     pub fn deinit(self: *Scope) void {
         switch (self.*) {
             .namespace => |*ns| {
@@ -66,6 +95,10 @@ pub const Scope = union(enum) {
             },
             .block => |*block| {
                 block.symbols_table.deinit();
+            },
+            .global_decl => |*global_decl| {
+                _ = global_decl; // autofix
+                // global_decl.definition_builder.deinit();
             },
         }
     }
@@ -81,6 +114,9 @@ pub const Scope = union(enum) {
             .block => |*block| {
                 return block.symbols_table.get(name);
             },
+            .global_decl => {
+                return null;
+            },
         };
     }
     pub fn getParent(self: *Scope) ?*Scope {
@@ -88,6 +124,7 @@ pub const Scope = union(enum) {
             .namespace => |*ns| ns.parent,
             .fn_decl => |*fn_decl| fn_decl.parent,
             .block => |*block| block.parent,
+            .global_decl => |*global_decl| global_decl.parent,
         };
     }
     pub fn getSymbolRecursive(self: *Scope, name: []const u8) ?Symbol {
@@ -126,6 +163,18 @@ const FunctionDeclarationScope = struct {
         return ast.getNodeSlice(param_node_data.name);
     }
 };
+const GlobalDeclarationScope = struct {
+    parent: *Scope,
+    definition_builder: Module.DefinitionBuilder,
+    ref: Module.Decl.Ref,
+    name: []const u8,
+    ty_node: Ast.Node.Index,
+    value_node: Ast.Node.Index,
+    is_type_decl: bool,
+    is_mutable: bool,
+    visibility: Visibility,
+    is_exported: bool,
+};
 
 const SymbolsTable = std.StringArrayHashMap(Symbol);
 pub const Symbol = union(enum) {
@@ -140,9 +189,5 @@ const BlockScope = struct {
     definition_builder: *Module.DefinitionBuilder,
 };
 const ExpressionScope = struct {
-    parent: *Scope,
-};
-
-const GlobalDeclarationScope = struct {
     parent: *Scope,
 };

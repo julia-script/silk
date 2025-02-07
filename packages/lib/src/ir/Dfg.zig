@@ -179,7 +179,8 @@ pub fn pushLoop(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !InstDat
         },
     });
 }
-pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value: ?Value) !InstData.Ref {
+pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value: ?Value, is_comptime: bool) !InstData.Ref {
+    _ = is_comptime; // autofix
     return try self.pushInst(block_ref, .{
         .@"break" = .{
             .target = target,
@@ -188,7 +189,7 @@ pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value:
     });
 }
 
-pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Value, args: []Value) !Value {
+pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Value, args: []Value, is_comptime: bool) !Value {
     const ref = try self.pushInst(block_ref, .{
         .call = .{
             .callee = callee,
@@ -197,17 +198,34 @@ pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Valu
     });
 
     const callee_ty = callee.getTy();
-    const signature = switch (callee_ty) {
-        .func => |func_ty| module.getSignature(func_ty.signature),
-        else => {
-            std.debug.panic("{} is not callable", .{callee_ty});
-        },
-    };
+
+    const ty_data = module.acceptTyData(callee_ty, .func) orelse
+        std.debug.panic("{} is not callable", .{callee_ty});
+
+    const signature = module.getSignature(ty_data.func.signature);
+
     const val = Value.Inst(
         ref.ref,
         signature.ret,
         .runtime,
-        false,
+        is_comptime,
+    );
+    try self.values.put(ref, val);
+    return val;
+}
+pub fn pushInitArray(self: *Self, block_ref: Block.Ref, ty: Module.Ty, items: []Value, is_comptime: bool) !Value {
+    const ref = try self.pushInst(block_ref, .{
+        .init_array = .{
+            .ty = ty,
+            .items = try self.arena.allocator().dupe(Value, items),
+        },
+    });
+
+    const val = Value.Inst(
+        ref.ref,
+        ty,
+        .runtime,
+        is_comptime,
     );
     try self.values.put(ref, val);
     return val;
@@ -256,6 +274,18 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, inst_ref: InstData.Ref)
                     try writer.print(", ", .{});
                 }
                 try writer.print("{}", .{arg});
+            }
+        },
+        .init_array => |init_array| {
+            try writer.print("init_array {}", .{init_array.ty});
+            if (init_array.items.len > 0) {
+                try writer.print(" with ", .{});
+            }
+            for (init_array.items, 0..) |item, i| {
+                if (i > 0) {
+                    try writer.print(", ", .{});
+                }
+                try writer.print("{}", .{item});
             }
         },
 

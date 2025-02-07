@@ -67,32 +67,30 @@ pub fn useLocal(self: *Self, ref: Dfg.Local.Ref) Value {
     //     },
     // };
 }
-pub fn useGlobal(self: *Self, module: *Module, ref: Module.Decl.Ref, is_comptime: bool) Value {
+pub fn useGlobal(self: *Self, module: *Module, ref: Module.Decl.Ref, is_comptime: bool) !Value {
     _ = self; // autofix
     const decl = module.getDeclaration(ref);
+
     switch (decl.*) {
         .func => {
-            const ty = .{
+            const ty = try module.declareTy(.{
                 .func = .{
                     .signature = decl.func.signature,
                     .declaration = ref,
                 },
-            };
-            _ = ty; // autofix
+            });
+
             return .{ .global = .{
                 .index = ref.ref,
                 .is_comptime = is_comptime,
-                .ty = .{
-                    .func = .{
-                        .signature = decl.func.signature,
-                        .declaration = ref,
-                    },
-                },
+                .ty = ty,
                 .data = .runtime,
             } };
         },
+        .global => {
+            @panic("not implemented");
+        },
         // else => {
-        //     @panic("not implemented");
         // },
     }
 }
@@ -136,8 +134,8 @@ pub fn commit(self: *Self) !Definition.Ref {
             return def;
         },
         .global_body => {
-            @panic("not implemented");
             // return try self.module.definitions.append(Definition.init(self.kind, self.dfg));
+            return try self.module.definitions.append(Definition.init(.global_body, self.dfg));
         },
         .inline_expression => {
             return try self.module.definitions.append(Definition.init(.inline_expression, self.dfg));
@@ -250,8 +248,11 @@ pub fn ge(self: *Self, ty: Ty, a: Value, b: Value, is_comptime: bool) !Value {
 pub fn makeBranch(self: *Self, cond: Value) !InstData.Ref {
     return try self.dfg.pushBranch(self.active_block, cond, [3]?Block.Ref{ null, null, null });
 }
-pub fn call(self: *Self, callee: Value, args: []Value) !Value {
-    return try self.dfg.pushCall(self.module, self.active_block, callee, args);
+pub fn call(self: *Self, callee: Value, args: []Value, is_comptime: bool) !Value {
+    return try self.dfg.pushCall(self.module, self.active_block, callee, args, is_comptime);
+}
+pub fn initArray(self: *Self, ty: Module.Ty, items: []Value, is_comptime: bool) !Value {
+    return try self.dfg.pushInitArray(self.active_block, ty, items, is_comptime);
 }
 
 pub fn setBranchTarget(
@@ -273,8 +274,8 @@ pub fn setBranchTarget(
 pub fn makeLoop(self: *Self) !InstData.Ref {
     return try self.dfg.pushLoop(self.active_block, [2]?Block.Ref{ null, null });
 }
-pub fn breakTo(self: *Self, target: InstData.Ref, value: ?Value) !InstData.Ref {
-    return try self.dfg.pushBreak(self.active_block, target, value);
+pub fn breakTo(self: *Self, target: InstData.Ref, value: ?Value, is_comptime: bool) !InstData.Ref {
+    return try self.dfg.pushBreak(self.active_block, target, value, is_comptime);
 }
 
 pub fn setLoopTarget(self: *Self, loop: InstData.Ref, body: Block.Ref, finally: ?Block.Ref) !void {
