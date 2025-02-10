@@ -1,23 +1,25 @@
 const std = @import("std");
 const Self = @This();
-const Ty = @import("./tyval.zig").Ty;
+const Ty = @import("./ty.zig").Ty;
 const Namespace = @import("./Namespace.zig");
+const Module = @import("./Module.zig");
+const TypedValue = Module.TypedValue;
 
 name: []const u8,
 namespace: Namespace.Ref,
-ty: Ty,
+value: TypedValue,
 allocator: std.mem.Allocator,
 pub fn init(
     allocator: std.mem.Allocator,
     namespace: Namespace.Ref,
     name: []const u8,
-    ty: Ty,
+    value: TypedValue,
 ) !Self {
     return .{
         .namespace = namespace,
         .allocator = allocator,
         .name = try allocator.dupe(u8, name),
-        .ty = ty,
+        .value = value,
     };
 }
 

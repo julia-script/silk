@@ -1,4 +1,4 @@
-const Ty = @import("./tyval.zig").Ty;
+const Ty = @import("./ty.zig").Ty;
 const std = @import("std");
 const Module = @import("./Module.zig");
 const Dfg = @import("./Dfg.zig");

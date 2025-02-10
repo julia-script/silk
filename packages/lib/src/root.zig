@@ -29,4 +29,5 @@ test {
     _ = @import("ir/Dfg.zig");
     _ = @import("ir/Module.zig");
     _ = @import("irgen/gen.zig");
+    _ = @import("ir/TypedValue.zig");
 }

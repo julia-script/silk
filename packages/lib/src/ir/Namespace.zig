@@ -1,4 +1,4 @@
-const Ty = @import("./tyval.zig").Ty;
+const Ty = @import("./ty.zig").Ty;
 const utils = @import("./utils.zig");
 const Function = @import("./Function.zig");
 const std = @import("std");
@@ -7,7 +7,7 @@ const Set = @import("../data_structures.zig").AutoSet;
 const Module = @import("./Module.zig");
 
 const Self = @This();
-pub const Ref = utils.MakeRef(.namespace, Self);
+pub const Ref = utils.MakeRef(.namespace, Self, "ns{d}");
 
 name: []const u8,
 ty: ?Ty,

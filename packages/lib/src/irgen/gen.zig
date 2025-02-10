@@ -6,21 +6,54 @@ const ErrorManager = @import("../ErrorManager.zig");
 const Allocator = std.mem.Allocator;
 const debug = @import("../debug.zig");
 const Scope = @import("./scopes.zig").Scope;
+const Set = @import("../data_structures.zig").AutoSetUnmanaged;
+const SemaPass = @import("../ir/passes/sema.zig");
 
 mod: *Module,
 ast: *Ast,
 allocator: Allocator,
+arena: std.heap.ArenaAllocator,
+decl_status: std.AutoHashMapUnmanaged(Module.Decl.Ref, DeclProgress) = .{},
+const DeclProgress = struct {
+    scope: *Scope,
+    decl_status: Status = .idle,
+    def_status: Status = .idle,
+};
+const Status = enum {
+    idle,
+    resolving,
+    done,
+};
 
 const Self = @This();
-pub inline fn gen(allocator: Allocator, ast: *Ast) !Module {
+pub fn deinit(self: *Self) void {
+    self.arena.deinit();
+}
+pub fn initStatus(self: *Self, ref: Module.Decl.Ref, scope: *Scope) !void {
+    try self.decl_status.put(self.arena.allocator(), ref, .{ .scope = scope });
+}
+pub fn updateDeclStatus(self: *Self, ref: Module.Decl.Ref, status: Status) void {
+    self.decl_status.getPtr(ref).?.decl_status = status;
+}
+pub fn getDeclStatus(self: *Self, ref: Module.Decl.Ref) Status {
+    return self.decl_status.getPtr(ref).?.decl_status;
+}
+pub fn updateDefStatus(self: *Self, ref: Module.Decl.Ref, status: Status) void {
+    self.decl_status.getPtr(ref).?.def_status = status;
+}
+pub fn getDefStatus(self: *Self, ref: Module.Decl.Ref) Status {
+    return self.decl_status.getPtr(ref).?.def_status;
+}
+pub fn gen(allocator: Allocator, ast: *Ast) !Module {
     var module = Module.init(allocator);
     var self = Self{
         .mod = &module,
         .ast = ast,
         .allocator = allocator,
+        .arena = std.heap.ArenaAllocator.init(allocator),
     };
+    defer self.deinit();
     try self.parseRoot();
-
     return module;
 }
 
@@ -65,6 +98,7 @@ pub fn collectMemberDecls(self: *Self, scope: *Scope, node_index: Ast.Node.Index
         .@"export",
         .@"extern",
         => try self.collectDecl(scope, node_index),
+        .struct_field => {},
         else => {
             std.debug.panic(
                 "Can't parse member decl {d}, unhandled node type: .{s}\n",
@@ -92,8 +126,8 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
     }
 
     if (self.ast.nodeIf(index, .fn_decl)) |fn_node| {
-        const ref = try self.mod.decls.reserve();
-        const fn_scope = try Scope.initFunctionDeclaration(
+        const ref = try self.mod.decls.reserve(self.mod.arena.allocator());
+        var fn_scope = try Scope.initFunctionDeclaration(
             self.allocator,
             self.mod,
             scope,
@@ -103,6 +137,8 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
             visibility,
             is_exported,
         );
+        try self.initStatus(ref, &fn_scope);
+
         const proto_data = self.ast.getNode(fn_node.data.fn_decl.proto);
         const name = self.ast.getNodeSlice(proto_data.data.fn_proto.name);
         try scope.namespace.symbols_table.put(name, .{ .global = ref });
@@ -123,7 +159,7 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
     };
 
     const name = self.ast.getNodeSlice(data.name);
-    const ref = try self.mod.decls.reserve();
+    const ref = try self.mod.decls.reserve(self.mod.arena.allocator());
     try scope.namespace.symbols_table.put(name, .{ .global = ref });
     // try scope.namespace.member_scopes.put(name, .{
     //     .global_decl = .{
@@ -138,37 +174,43 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
     //         .is_exported = is_exported,
     //     },
     // });
-
+    var global_scope = try Scope.initGlobalDeclaration(
+        self.allocator,
+        self.mod,
+        scope,
+        ref,
+        name,
+        data.type,
+        data.value,
+        self.ast.nodeIs(index, .type_decl),
+        self.ast.nodeIs(index, .var_decl),
+        visibility,
+        is_exported,
+    );
     try scope.namespace.member_scopes.put(
         name,
-        try Scope.initGlobalDeclaration(
-            self.allocator,
-            self.mod,
-            scope,
-            ref,
-            name,
-            data.type,
-            data.value,
-            self.ast.nodeIs(index, .type_decl),
-            self.ast.nodeIs(index, .var_decl),
-            visibility,
-            is_exported,
-        ),
+        global_scope,
     );
-    //     return;
-    // }
-
-    // std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
+    try self.initStatus(ref, &global_scope);
+}
+pub fn parseDecl(self: *Self, scope: *Scope) !void {
+    switch (scope.*) {
+        .fn_decl => {
+            self.updateDeclStatus(scope.fn_decl.ref, .resolving);
+            defer self.updateDeclStatus(scope.fn_decl.ref, .done);
+            try self.parseFnDecl(scope);
+        },
+        .global_decl => {
+            self.updateDeclStatus(scope.global_decl.ref, .resolving);
+            defer self.updateDeclStatus(scope.global_decl.ref, .done);
+            try self.parseGlobalDecl(scope);
+        },
+        else => {
+            std.debug.panic("Unexpected scope: '{s}'", .{@tagName(scope.*)});
+        },
+    }
 }
 
-pub fn parseTypeDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index, visibility: Visibility, is_exported: bool) !void {
-    _ = scope; // autofix
-    _ = visibility; // autofix
-    _ = is_exported; // autofix
-    const node = self.ast.getNode(node_index);
-    const data = node.data.type_decl;
-    _ = data; // autofix
-}
 pub fn parseGlobalDecl(
     self: *Self,
     scope: *Scope,
@@ -181,14 +223,18 @@ pub fn parseGlobalDecl(
             ref,
             scope.global_decl.parent.namespace.ref,
             name,
-            .type,
+            Module.TypedValue.init(
+                .type,
+                .{ .global = ref },
+                true,
+            ),
         );
     }
 }
 pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
     const proto_data = self.ast.getNode(scope.fn_decl.proto_node);
     const name = self.ast.getNodeSlice(proto_data.data.fn_proto.name);
-    var signature = Module.Signature.init(self.allocator);
+    var signature = Module.Signature.init();
 
     const param_nodes = self.ast.getList(proto_data.data.fn_proto.params_list);
     // scope.fn_decl.definition_builder = try Module.DefinitionBuilder.init(self.allocator, self.mod, .{ .global_body = {} });
@@ -203,7 +249,7 @@ pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
         // const param_name = self.ast.getNodeSlice(fn_param.name);
         // _ = param_name; // autofix
 
-        try signature.addParam(param_type, false);
+        try signature.addParam(self.mod.arena.allocator(), param_type, false);
     }
 
     const ret_type = try self.parseTypeExpression(
@@ -213,7 +259,7 @@ pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
     );
     signature.setReturn(ret_type);
 
-    const signature_ref = try self.mod.signatures.append(signature);
+    const signature_ref = try self.mod.signatures.append(self.mod.arena.allocator(), signature);
 
     const fn_decl_ref = try self.mod.setFunctionDeclaration(
         scope.fn_decl.ref,
@@ -229,38 +275,43 @@ pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
 }
 pub fn parseTypeExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) !Module.Ty {
     const typeValue = try self.parseExpression(scope, builder, node_index);
-    switch (typeValue) {
-        .immediate => |immediate| {
-            if (immediate.ty == .type) {
-                return immediate.data.ty;
-            }
+    // if (typeValue.isType()) {
+    //     return typeValue.value.ty;
+    // }
+    switch (typeValue.value) {
+        .ty => |ty| {
+            return ty;
         },
-        else => {},
+        .global => |ref| {
+            return .{ .global = ref };
+        },
+        else => {
+            std.debug.panic("Unexpected type value: '{}'", .{typeValue.display(self.mod)});
+        },
     }
-    std.debug.panic("Unexpected type value: '{}'", .{typeValue});
 }
 
-pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) anyerror!Module.Value {
+pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) anyerror!Module.TypedValue {
     const node = self.ast.getNode(node_index);
 
     switch (node.data) {
         // Parse easy ones first
-        .ty_f32 => return Module.Value.ImmTy(.f32),
-        .ty_f64 => return Module.Value.ImmTy(.f64),
+        .ty_f32 => return Module.TypedValue.Type(.f32),
+        .ty_f64 => return Module.TypedValue.Type(.f64),
 
-        .ty_i8 => return Module.Value.ImmTy(.i8),
-        .ty_i16 => return Module.Value.ImmTy(.i16),
-        .ty_i32 => return Module.Value.ImmTy(.i32),
-        .ty_i64 => return Module.Value.ImmTy(.i64),
+        .ty_i8 => return Module.TypedValue.Type(.i8),
+        .ty_i16 => return Module.TypedValue.Type(.i16),
+        .ty_i32 => return Module.TypedValue.Type(.i32),
+        .ty_i64 => return Module.TypedValue.Type(.i64),
 
-        .ty_u8 => return Module.Value.ImmTy(.u8),
-        .ty_u16 => return Module.Value.ImmTy(.u16),
-        .ty_u32 => return Module.Value.ImmTy(.u32),
-        .ty_u64 => return Module.Value.ImmTy(.u64),
+        .ty_u8 => return Module.TypedValue.Type(.u8),
+        .ty_u16 => return Module.TypedValue.Type(.u16),
+        .ty_u32 => return Module.TypedValue.Type(.u32),
+        .ty_u64 => return Module.TypedValue.Type(.u64),
 
-        .ty_boolean => return Module.Value.ImmTy(.bool),
-        .ty_void => return Module.Value.ImmTy(.void),
-        .ty_type => return Module.Value.ImmTy(.type),
+        .ty_boolean => return Module.TypedValue.Type(.bool),
+        .ty_void => return Module.TypedValue.Type(.void),
+        .ty_type => return Module.TypedValue.Type(.type),
         .ty_array => |ty_array| {
             const ty = try self.parseTypeExpression(scope, builder, ty_array.type);
 
@@ -269,16 +320,16 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             // const len = try std.fmt.parseInt(usize, slice, 10);
             // return Module.Value.ImmTy(.{ .array = .{ .type = ty, .size = size } });
             const array_ty = try self.mod.declareTy(.{ .array = .{ .type = ty, .size = size } });
-            return Module.Value.ImmTy(array_ty);
+            return Module.TypedValue.Type(array_ty);
         },
         .number_literal => |number_literal| {
             const slice = self.ast.getTokenSlice(number_literal.token);
             if (std.mem.containsAtLeast(u8, slice, 1, ".")) {
                 const value = try std.fmt.parseFloat(f64, slice);
-                return Module.Value.Const(.float, value);
+                return Module.TypedValue.Imm(.float, value, false);
             } else {
                 const value = try std.fmt.parseInt(i64, slice, 10);
-                return Module.Value.Const(.int, value);
+                return Module.TypedValue.Imm(.int, value, false);
             }
         },
         // .comment_line => {
@@ -293,7 +344,7 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
         => |bin_expr| {
             const left = try self.parseExpression(scope, builder, bin_expr.lhs);
             const right = try self.parseExpression(scope, builder, bin_expr.rhs);
-            const ty = left.getTy();
+            const ty = left.ty;
 
             switch (node.data) {
                 .gt => return try builder.gt(ty, left, right, false),
@@ -313,7 +364,7 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
         => |bin_expr| {
             const left = try self.parseExpression(scope, builder, bin_expr.lhs);
             const right = try self.parseExpression(scope, builder, bin_expr.rhs);
-            const ty = left.getTy();
+            const ty = left.ty;
 
             switch (node.data) {
                 .add => return try builder.add(ty, left, right, false),
@@ -331,7 +382,17 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             };
             switch (symbol) {
                 .global => |global| {
-                    return try scope.block.definition_builder.useGlobal(self.mod, global, false);
+                    const value = try scope.block.definition_builder.useGlobal(self.mod, global, false);
+                    return value;
+                    // switch (value.value) {
+                    //     .global => |ref| {
+                    //         std.debug.print("ref: {}\n", .{ref});
+                    //         return value;
+                    //     },
+                    //     else => {
+                    //         return value;
+                    //     },
+                    // }
                 },
                 .local => |local| {
                     return scope.block.definition_builder.useLocal(local);
@@ -348,13 +409,13 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             for (statements) |statement| {
                 try self.parseStatement(scope, builder, statement);
             }
-            return Module.Value.Imm(.void, .void);
+            return Module.TypedValue.Void;
         },
         .array_init => |array_init| {
             const ty = try self.parseTypeExpression(scope, builder, array_init.type);
 
             const items_list = self.ast.getList(array_init.items_list);
-            var items = std.ArrayList(Module.Value).init(self.allocator);
+            var items = std.ArrayList(Module.TypedValue).init(self.allocator);
             defer items.deinit();
 
             for (items_list) |item| {
@@ -364,13 +425,65 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             const array = try builder.initArray(ty, items.items, false);
             return array;
         },
+        .type_init => |type_init| {
+            const ty = try self.parseTypeExpression(scope, builder, type_init.type);
+            const fields_list = self.ast.getList(type_init.field_init_list);
+            var keys = std.ArrayList([]const u8).init(self.allocator);
+            defer keys.deinit();
+            var values = std.ArrayList(Module.TypedValue).init(self.allocator);
+            defer values.deinit();
+            for (fields_list) |field| {
+                const field_init = self.ast.getNode(field).data.field_init;
+                const name = self.ast.getNodeSlice(field_init.name);
+                const value = try self.parseExpression(scope, builder, field_init.value);
+                try keys.append(name);
+                try values.append(value);
+            }
+            const init_struct = try builder.initStruct(ty, keys.items, values.items, false);
+            return init_struct;
+        },
 
-        // .struct_decl => |struct_decl| {
-        //     const members = self.ast.getList(struct_decl.members_list);
-        //     for (members) |member| {
-        //         try self.parseStatement(scope, builder, member);
-        //     }
-        // },
+        .struct_decl => |struct_decl| {
+            const members = self.ast.getList(struct_decl.members_list);
+            var allocator = self.mod.arena.allocator();
+
+            var fields = std.ArrayList(Module.Ty.TyData.Struct.Field).init(allocator);
+            var has_decl = false;
+
+            // defer fields.deinit();
+            for (members, 0..) |member, i| {
+                const member_data = self.ast.getNode(member).data;
+                const struct_field = switch (member_data) {
+                    .struct_field => member_data.struct_field,
+                    else => {
+                        has_decl = true;
+                        continue;
+                    },
+                };
+                const name = self.ast.getNodeSlice(struct_field.name);
+                const ty = try self.parseTypeExpression(scope, builder, struct_field.type);
+                try fields.append(.{
+                    .name = try allocator.dupe(u8, name),
+                    .ty = ty,
+                    .source_order_index = @intCast(i),
+                });
+            }
+            const struct_ty = try self.mod.declareTy(.{
+                .@"struct" = .{
+                    .fields = try fields.toOwnedSlice(),
+                    .sealed = false,
+                },
+            });
+            if (has_decl) {
+                var ns_scope = try self.collectNamespaceSymbols(scope, node_index);
+                self.mod.namespaces.getPtr(ns_scope.namespace.ref).ty = struct_ty;
+                defer ns_scope.deinit();
+                const ns_scope_ptr = &ns_scope;
+                try self.parseStructDecl(ns_scope_ptr);
+                try self.parseStructDef(ns_scope_ptr);
+            }
+            return Module.TypedValue.Type(struct_ty);
+        },
         else => {
             std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
         },
@@ -396,17 +509,18 @@ pub fn parseStructDecl(self: *Self, scope: *Scope) !void {
     var iter = scope.namespace.member_scopes.iterator();
     while (iter.next()) |entry| {
         const member_scope = entry.value_ptr;
-        switch (member_scope.*) {
-            .fn_decl => {
-                try self.parseFnDecl(member_scope);
-            },
-            .global_decl => {
-                try self.parseGlobalDecl(member_scope);
-            },
-            else => {
-                std.debug.panic("Unexpected member scope: '{s}'", .{@tagName(member_scope.*)});
-            },
-        }
+        try self.parseDecl(member_scope);
+        // switch (member_scope.*) {
+        //     .fn_decl => {
+        //         try self.parseFnDecl(member_scope);
+        //     },
+        //     .global_decl => {
+        //         try self.parseGlobalDecl(member_scope);
+        //     },
+        //     else => {
+        //         std.debug.panic("Unexpected member scope: '{s}'", .{@tagName(member_scope.*)});
+        //     },
+        // }
         // try self.parseDecl(&member_scope);
     }
 }
@@ -415,54 +529,71 @@ pub fn parseStructDef(self: *Self, scope: *Scope) !void {
     var iter = scope.namespace.member_scopes.iterator();
     while (iter.next()) |entry| {
         const member_scope = entry.value_ptr;
-        switch (member_scope.*) {
-            .fn_decl => {
-                try self.parseFnDef(member_scope);
-                member_scope.deinit();
-            },
-            .global_decl => {
-                try self.parseGlobalDef(member_scope);
-                member_scope.deinit();
-            },
-            else => {
-                std.debug.panic("Unexpected member scope: '{s}'", .{@tagName(member_scope.*)});
-            },
-        }
+        try self.parseDefinition(member_scope);
+        member_scope.deinit();
     }
 }
 
+pub fn parseDefinition(self: *Self, scope: *Scope) !void {
+    const decl = switch (scope.*) {
+        .fn_decl => scope.fn_decl.ref,
+        .global_decl => scope.global_decl.ref,
+        else => {
+            std.debug.panic("Unexpected scope: '{s}'", .{@tagName(scope.*)});
+        },
+    };
+    const status = self.getDefStatus(decl);
+    if (status == .done) {
+        return;
+    }
+    self.updateDefStatus(decl, .resolving);
+    defer self.updateDefStatus(decl, .done);
+    switch (scope.*) {
+        .fn_decl => try self.parseFnDef(scope),
+        .global_decl => try self.parseGlobalDef(scope),
+        else => {
+            std.debug.panic("Unexpected scope: '{s}'", .{@tagName(scope.*)});
+        },
+    }
+}
 pub fn parseFnDef(self: *Self, scope: *Scope) !void {
     const body_node_index = scope.fn_decl.body_node orelse return;
     const body_node = self.ast.getNode(body_node_index);
     _ = body_node; // autofix
-    // scope.fn_decl.definition_builder = try Module.DefinitionBuilder.init(
-    //     self.allocator,
-    //     self.mod,
-    //     .{ .function_body = scope.fn_decl.ref },
-    // );
 
-    scope.fn_decl.definition_builder.kind = .{ .function_body = scope.fn_decl.ref };
     const fn_decl = self.mod.getFunctionDeclaration(scope.fn_decl.ref);
     const signature = self.mod.getSignature(fn_decl.signature);
-    var dfg = scope.fn_decl.definition_builder.dfg;
     for (signature.params.items, 0..) |param, i| {
+        var dfg = scope.fn_decl.definition_builder.getDfg();
         const local = try dfg.pushLocal(param.ty, true, param.is_comptime);
         const param_name = scope.fn_decl.getParamName(@intCast(i), self.ast);
         try scope.fn_decl.params.put(param_name, .{ .local = local });
     }
     try self.parseEntrypoint(scope, &scope.fn_decl.definition_builder, body_node_index);
 
-    _ = try scope.fn_decl.definition_builder.commit();
+    _ = try scope.fn_decl.definition_builder.commit(scope.fn_decl.ref);
 }
+
 pub fn parseGlobalDef(self: *Self, scope: *Scope) !void {
     const body_node_index = scope.global_decl.value_node;
     const body_node = self.ast.getNode(body_node_index);
     _ = body_node; // autofix
 
-    const ty = try self.parseExpression(scope, &scope.global_decl.definition_builder, scope.global_decl.value_node);
-    _ = ty; // autofix
+    const value = try self.parseExpression(
+        scope,
+        &scope.global_decl.definition_builder,
+        scope.global_decl.value_node,
+    );
+    std.debug.print("value node {} value: {}\n", .{ scope.global_decl.value_node, value.display(self.mod) });
+    self.mod.getDeclaration(scope.global_decl.ref).global.value = value;
+    // try self.mod.setGlobalDeclaration(
+    //     scope.global_decl.ref,
+    //     scope.global_decl.parent.namespace.ref,
+    //     scope.global_decl.name,
+    //     value,
+    // );
 
-    _ = try scope.global_decl.definition_builder.commit();
+    _ = try scope.global_decl.definition_builder.commit(scope.global_decl.ref);
 }
 
 pub fn parseEntrypoint(self: *Self, parent_scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) !void {
@@ -502,7 +633,7 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
             else
                 null;
 
-            const maybeValue: ?Module.Value = if (decl.value > 0)
+            const maybeValue: ?Module.TypedValue = if (decl.value > 0)
                 try self.parseExpression(scope, builder, decl.value)
             else
                 null;
@@ -511,7 +642,7 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
                 ty = _ty;
             } else {
                 if (maybeValue) |value| {
-                    ty = value.getTy();
+                    ty = value.ty;
                 } else {
                     std.debug.panic("No value or type", .{});
                 }
@@ -522,8 +653,7 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
             // if (ty)
 
             if (maybeValue) |value| {
-                const value_ty = value.getTy();
-                if (value_ty.eql(ty)) {
+                if (value.ty.eql(ty)) {
                     try builder.store(local, value);
                 } else {
                     const casted = try builder.cast(ty, value, false);
@@ -531,9 +661,6 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
                 }
             }
             try scope.block.symbols_table.put(name, .{ .local = local });
-            // const ty = try self.parseTypeExpression(scope, var_decl.type);
-            // const local = try builder.declareLocal(ty, false);
-            // _ = ty; // autofix
         },
         .assign => |assign| {
             // const left = try self.parseExpression(scope, builder, assign.lhs);
@@ -589,8 +716,8 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
             const value = if (ret_expr.node > 0)
                 try self.parseExpression(scope, builder, ret_expr.node)
             else
-                Module.Value.Imm(.void, .void);
-            const ty = value.getTy();
+                Module.TypedValue.Imm(.void, .void, false);
+            const ty = value.ty;
             const ret_ty = blk: {
                 var s = scope;
                 while (std.meta.activeTag(s.*) != .fn_decl) {
@@ -611,7 +738,7 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
             const callee = try self.parseExpression(scope, builder, fn_call.callee);
             std.debug.print("callee: {}\n", .{callee});
             const args = self.ast.getList(fn_call.args_list);
-            var args_list = std.ArrayList(Module.Value).init(self.allocator);
+            var args_list = std.ArrayList(Module.TypedValue).init(self.allocator);
             defer args_list.deinit();
             for (args) |arg| {
                 const value = try self.parseExpression(scope, builder, arg);
@@ -623,24 +750,6 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
             std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
         },
     }
-}
-
-test "gen" {
-    const test_allocator = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("./playground.sk", .{});
-    defer file.close();
-    const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
-    defer test_allocator.free(source);
-
-    var errors = try ErrorManager.init(test_allocator);
-    defer errors.deinit();
-    var ast = try Ast.parse(test_allocator, &errors, source, .{});
-    defer ast.deinit();
-    std.debug.print("AST:\n", .{});
-    try ast.format(std.io.getStdErr().writer().any(), 0, .{});
-    var module = try gen(std.testing.allocator, &ast);
-    defer module.deinit();
-    std.debug.print("{}", .{module});
 }
 
 const T = struct {
@@ -685,7 +794,7 @@ test "Alloc" {
         try t.list.append(@intCast(i));
     }
     defer t.deinit();
-    std.debug.print("t: {any}\n", .{t.hash.get("aaa")});
+    // std.debug.print("t: {any}\n", .{t.hash.get("aaa")});
     // var t = T.init(std.testing.allocator);
     // var a = Scope.initNamespace(std.testing.allocator, null, .{ .ref = 1 });
     // defer a.deinit();
@@ -715,4 +824,24 @@ test "Alloc" {
     // const test_allocator = std.testing.allocator;
     // const scope = Scope.initNamespace(test_allocator, null, undefined);
     // _ = scope; // autofix
+}
+
+test "gen" {
+    const test_allocator = std.testing.allocator;
+    const file = try std.fs.cwd().openFile("./playground.sk", .{});
+    defer file.close();
+    const source = try file.readToEndAlloc(test_allocator, 1024 * 1024);
+    defer test_allocator.free(source);
+
+    var errors = try ErrorManager.init(test_allocator);
+    defer errors.deinit();
+    var ast = try Ast.parse(test_allocator, &errors, source, .{});
+    defer ast.deinit();
+    std.debug.print("AST:\n", .{});
+    try ast.format(std.io.getStdErr().writer().any(), 0, .{});
+    var module = try gen(std.testing.allocator, &ast);
+    defer module.deinit();
+    std.debug.print("{}", .{module});
+    try SemaPass.run(test_allocator, &module);
+    std.debug.print("{}", .{module});
 }

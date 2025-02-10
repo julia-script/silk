@@ -1,12 +1,10 @@
-type A = u32
 
 fn var_array() void {
  const arr: [3]i32 = [3]i32 {11, 22, 33};
 }
 export pub fn fib(n: i32) i32 {
-  var a:i32 = 0
+  var a:A = 0
   var b:i32 = 1
-  fib(a, b, n)
   if (n > 0) {
     while (n > 1) {
       var t:i32 = a + b
@@ -18,6 +16,7 @@ export pub fn fib(n: i32) i32 {
   }
   return a
 }
+// type A = u32
 // fn main() i32 {
 //   const a: A = A{
 //     a = 22, 
@@ -27,8 +26,19 @@ export pub fn fib(n: i32) i32 {
 // }
 
 
-// type A = struct {
-//   a: i32,
-//   b: i32,
-// }
+type A = struct {
+  a: i32,
+  b: i32,
+  fn add(a: i32, b: i32) i32 {
+    return a + b;
+  }
+}
+
+fn main() void {
+  var a: A = A{
+    a = 22, 
+    b = 33,
+  }
+  // return a.a;
+}
 

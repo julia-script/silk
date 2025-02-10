@@ -5,6 +5,7 @@ const InstContext = @import("./InstContext.zig");
 const GenScope = @import("../gen.zig").Scope;
 pub fn emit(block: *InstContext.Block, hir_inst_index: Hir.Inst.Index) !Sema.Instruction.Index {
     const hir_inst = block.ctx.getHirInstruction(hir_inst_index);
+
     _ = hir_inst; // autofix
 
     const entity_key = try block.ctx.builder.makeEntity(.{

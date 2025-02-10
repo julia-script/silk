@@ -1,12 +1,72 @@
 const std = @import("std");
 const activeTag = std.meta.activeTag;
+const Module = @import("Module.zig");
 
-pub fn MakeRef(label: anytype, comptime T: type) type {
+pub fn MakeRef(label: anytype, comptime T: type, comptime maybe_format_str: ?[]const u8) type {
     _ = T; // autofix
     return struct {
         ref: u32,
         pub const Ref = @This();
-        pub fn List(comptime K: type) type {
+        pub fn ListUnmanaged(comptime K: type) type {
+            return struct {
+                items: std.ArrayListUnmanaged(K) = .{},
+                pub fn init() @This() {
+                    return .{};
+                }
+                pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                    self.items.deinit(allocator);
+                }
+                pub fn deinitRecursive(self: *@This(), allocator: std.mem.Allocator) void {
+                    if (@hasDecl(K, "deinit")) {
+                        for (self.items.items) |*item| {
+                            item.deinit(allocator);
+                        }
+                    }
+                    self.deinit(allocator);
+                }
+                pub fn reserve(self: *@This(), allocator: std.mem.Allocator) !Ref {
+                    return try self.append(allocator, undefined);
+                }
+                pub fn slice(self: @This()) []K {
+                    return self.items.items;
+                }
+                const Entry = struct {
+                    ref: Ref,
+                    item: *K,
+                };
+                const Iter = struct {
+                    items: []K,
+                    i: u32,
+                    pub fn next(self: *@This()) ?Entry {
+                        if (self.i >= self.items.len) return null;
+                        const i = self.i;
+                        self.i += 1;
+                        return .{ .ref = .{ .ref = i }, .item = &self.items[i] };
+                    }
+                };
+                pub fn iter(self: @This()) Iter {
+                    return .{ .items = self.items.items, .i = 0 };
+                }
+                pub fn append(self: *@This(), allocator: std.mem.Allocator, item: K) !Ref {
+                    const ref = self.items.items.len;
+                    try self.items.append(allocator, item);
+                    return .{ .ref = @intCast(ref) };
+                }
+                pub fn get(self: @This(), ref: Ref) K {
+                    return self.items.items[@intCast(ref.ref)];
+                }
+                pub fn getPtr(self: @This(), ref: Ref) *K {
+                    return &self.items.items[@intCast(ref.ref)];
+                }
+                pub fn set(self: *@This(), ref: Ref, item: K) void {
+                    self.items.items[@intCast(ref.ref)] = item;
+                }
+                pub fn count(self: @This()) usize {
+                    return self.items.items.len;
+                }
+            };
+        }
+        pub fn _List(comptime K: type) type {
             return struct {
                 items: std.ArrayList(K),
                 pub fn init(allocator: std.mem.Allocator) @This() {
@@ -71,6 +131,9 @@ pub fn MakeRef(label: anytype, comptime T: type) type {
         pub fn Map(V: type) type {
             return std.AutoHashMap(Ref, V);
         }
+        pub fn MapUnmanaged(V: type) type {
+            return std.AutoHashMapUnmanaged(Ref, V);
+        }
         pub fn from(value: u32) @This() {
             return .{ .ref = value };
         }
@@ -81,7 +144,11 @@ pub fn MakeRef(label: anytype, comptime T: type) type {
             _: std.fmt.FormatOptions,
             writer: std.io.AnyWriter,
         ) !void {
-            try writer.print("{s}#{d}", .{ @tagName(label), self.ref });
+            if (maybe_format_str) |format_str| {
+                try writer.print(format_str, .{self.ref});
+            } else {
+                try writer.print("{s}#{d}", .{ @tagName(label), self.ref });
+            }
         }
     };
 }
@@ -164,3 +231,30 @@ pub const testing = struct {
         return try std.testing.expectEqualStrings(actual, expected);
     }
 };
+
+// fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerror!void {
+//     _ = module; // autofix
+//     try writer.print("{}", .{self});
+// }
+// pub fn display(self: Self, module: *const Module) Module.utils.MakeDisplay(Self, displayFn) {
+//     return .{ .value = &self, .module = module };
+// }
+
+pub fn MakeDisplay(comptime T: type, comptime display_fn: fn (
+    T,
+    std.io.AnyWriter,
+    *const Module,
+) anyerror!void) type {
+    return struct {
+        value: T,
+        module: *const Module,
+        pub fn format(
+            self: @This(),
+            comptime _: []const u8,
+            _: std.fmt.FormatOptions,
+            writer: std.io.AnyWriter,
+        ) !void {
+            try display_fn(self.value, writer, self.module);
+        }
+    };
+}

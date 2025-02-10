@@ -1,7 +1,7 @@
 const std = @import("std");
 pub const Signature = @import("./Signature.zig");
 pub const FunctionDeclaration = @import("./FunctionDeclaration.zig");
-const Map = std.AutoHashMap;
+const Map = std.AutoHashMapUnmanaged;
 pub const Dfg = @import("./Dfg.zig");
 pub const Function = @import("./Function.zig");
 pub const Definition = @import("./Definition.zig");
@@ -10,15 +10,16 @@ const debug = @import("../debug.zig");
 pub const Block = @import("./Block.zig");
 pub const Namespace = @import("./Namespace.zig");
 const Array = std.ArrayList;
-pub const Ty = @import("./tyval.zig").Ty;
-pub const Value = @import("./val.zig").Value;
-const utils = @import("./utils.zig");
+pub const Ty = @import("./ty.zig").Ty;
+pub const utils = @import("./utils.zig");
+pub const InstData = @import("./inst.zig").InstData;
 pub const GlobalDeclaration = @import("./GlobalDeclaration.zig");
+pub const TypedValue = @import("./TypedValue.zig");
 pub const Decl = union(enum) {
     func: FunctionDeclaration,
     global: GlobalDeclaration,
 
-    pub const Ref = utils.MakeRef(.decl, Decl);
+    pub const Ref = utils.MakeRef(.decl, Decl, "\x1b[36mdecl{d}\x1b[0m");
     pub fn deinit(self: *Decl) void {
         switch (self.*) {
             .func => |*func| {
@@ -35,45 +36,36 @@ allocator: std.mem.Allocator,
 // Lives for the lifetime of the module
 arena: std.heap.ArenaAllocator,
 
-namespaces: Namespace.Ref.List(Namespace),
-signatures: Signature.Ref.List(Signature),
-functions: Map(Decl.Ref, Function),
-function_definitions_map: Map(Decl.Ref, Definition.Ref),
-definitions: Definition.Ref.List(Definition),
-tys: Ty.Ref.List(Ty.TyData),
-decls: Decl.Ref.List(Decl),
+namespaces: Namespace.Ref.ListUnmanaged(Namespace) = .{},
+signatures: Signature.Ref.ListUnmanaged(Signature) = .{},
+definition_map: Map(Decl.Ref, Definition.Ref) = .{},
+definitions: Definition.Ref.ListUnmanaged(Definition) = .{},
+tys: Ty.Ref.ListUnmanaged(Ty.TyData) = .{},
+decls: Decl.Ref.ListUnmanaged(Decl) = .{},
 const Self = @This();
 pub fn init(allocator: std.mem.Allocator) Self {
     return .{
         .allocator = allocator,
         .arena = std.heap.ArenaAllocator.init(allocator),
-        .signatures = Signature.Ref.List(Signature).init(allocator),
-        .functions = Map(Decl.Ref, Function).init(allocator),
-        .function_definitions_map = Map(Decl.Ref, Definition.Ref).init(allocator),
-        .definitions = Definition.Ref.List(Definition).init(allocator),
-        .namespaces = Namespace.Ref.List(Namespace).init(allocator),
-        .decls = Decl.Ref.List(Decl).init(allocator),
-        .tys = Ty.Ref.List(Ty.TyData).init(allocator),
     };
 }
 pub fn deinit(self: *Self) void {
     self.arena.deinit();
-    self.signatures.deinitRecursive();
-    self.tys.deinitRecursive();
-    // self.function_declarations.deinitRecursive();
-    self.definitions.deinitRecursive();
-    self.functions.deinit();
-    self.function_definitions_map.deinit();
-    self.namespaces.deinitRecursive();
-    self.decls.deinitRecursive();
+    // // self.signatures.deinitRecursive();
+    // self.tys.deinitRecursive();
+    // // self.function_declarations.deinitRecursive();
+    // self.definitions.deinitRecursive();
+    // self.definition_map.deinit();
+    // self.namespaces.deinitRecursive();
+    // self.decls.deinitRecursive();
 }
 pub fn declareNamespace(self: *Self, name: []const u8) !Namespace.Ref {
     const namespace = try Namespace.init(
-        self.allocator,
+        self.arena.allocator(),
         name,
     );
 
-    return try self.namespaces.append(namespace);
+    return try self.namespaces.append(self.arena.allocator(), namespace);
 }
 pub fn declareFunction(
     self: *Self,
@@ -84,7 +76,7 @@ pub fn declareFunction(
 ) !Decl.Ref {
     return try self.decls.append(.{
         .func = try FunctionDeclaration.init(
-            self.allocator,
+            self.arena.allocator(),
             namespace,
             name,
             linkage,
@@ -92,6 +84,7 @@ pub fn declareFunction(
         ),
     });
 }
+
 pub fn setFunctionDeclaration(
     self: *Self,
     ref: Decl.Ref,
@@ -101,25 +94,30 @@ pub fn setFunctionDeclaration(
     signature: Signature.Ref,
 ) !void {
     self.decls.getPtr(ref).* = .{ .func = try FunctionDeclaration.init(
-        self.allocator,
+        self.arena.allocator(),
         namespace,
         name,
         linkage,
         signature,
     ) };
 }
+pub fn makeDefinition(self: *Self) !Definition.Ref {
+    return try self.definitions.append(self.arena.allocator(), .{
+        .dfg = try Dfg.init(self.arena.allocator()),
+    });
+}
 
 pub fn declareGlobalDeclaration(
     self: *Self,
     namespace: Namespace.Ref,
     name: []const u8,
-    ty: Ty,
+    value: TypedValue,
 ) !Decl.Ref {
     return try self.decls.append(.{ .global = try GlobalDeclaration.init(
-        self.allocator,
+        self.arena.allocator(),
         namespace,
         name,
-        ty,
+        value,
     ) });
 }
 pub fn setGlobalDeclaration(
@@ -127,17 +125,17 @@ pub fn setGlobalDeclaration(
     ref: Decl.Ref,
     namespace: Namespace.Ref,
     name: []const u8,
-    ty: Ty,
+    value: TypedValue,
 ) !void {
     self.decls.getPtr(ref).* = .{ .global = try GlobalDeclaration.init(
-        self.allocator,
+        self.arena.allocator(),
         namespace,
         name,
-        ty,
+        value,
     ) };
 }
 pub fn declareTy(self: *Self, ty: Ty.TyData) !Ty {
-    const ref = try self.tys.append(ty);
+    const ref = try self.tys.append(self.arena.allocator(), ty);
     return .{ .ref = ref };
 }
 pub fn getTy(self: *Self, ref: anytype) *Ty.TyData {
@@ -193,34 +191,23 @@ pub fn format(
         i += 1;
         const decl = entry.item;
         const ref = entry.ref;
+
         switch (decl.*) {
             .func => |*func_decl| {
-
-                // var sig = self.signatures.getPtr(func_decl.signature);
                 var sig = self.signatures.getPtr(func_decl.signature);
-
                 try writer.print("{}: function {s} {}\n", .{ ref, func_decl.name, sig.formatable(@constCast(&self)) });
-                const def_ref = self.function_definitions_map.get(ref) orelse continue;
+
+                const def_ref = self.definition_map.get(ref) orelse continue;
+
                 var def = self.definitions.getPtr(def_ref);
-                try writer.print("{}", .{def.formatable(&self)});
+                try writer.print("{}", .{def.display(&self)});
             },
             .global => |*global| {
-                switch (global.ty) {
-                    .type => {
-                        try writer.print("{}: type {s}\n", .{ ref, global.name });
-                    },
-                    else => {
-                        try writer.print("{}: {s} {}\n", .{ ref, global.name, global.ty });
-                    },
-                }
+                try writer.print("{}: {s} = {}\n", .{ ref, global.name, global.value.display(&self) });
             },
         }
     }
 }
-
-const Inst = @import("./inst.zig").Inst;
-const InstVal = Inst.InstVal;
-
 test "Module" {
     var module = Self.init(std.testing.allocator);
     defer module.deinit();
@@ -241,13 +228,13 @@ test "Module" {
     const local0_val = builder.useLocal(local0);
     const param0 = builder.useParam(0);
 
-    const a = Value.Const(.u8, 1);
+    const a = TypedValue.Imm(.u8, 1, false);
     _ = a; // autofix
-    const b = Value.Const(.u8, 2);
+    const b = TypedValue.Imm(.u8, 2, false);
     _ = b; // autofix
 
     const ins0 = try builder.add(.u8, param0, local0_val, true);
-    const c = Value.Const(.u8, 3);
+    const c = TypedValue.Imm(.u8, 3, false);
     const ins1 = try builder.sub(.u8, ins0, c, false);
     // const call = try builder.call(func_decl, &[_]Value{ins1});
     // _ = call; // autofix

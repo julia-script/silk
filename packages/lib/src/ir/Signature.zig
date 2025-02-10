@@ -1,31 +1,29 @@
-const Ty = @import("./tyval.zig").Ty;
-const Val = @import("./tyval.zig").Val;
+const Ty = @import("./ty.zig").Ty;
+const Val = @import("./ty.zig").Val;
 const utils = @import("./utils.zig");
 const std = @import("std");
 const Module = @import("./Module.zig");
 
-params: std.ArrayList(Param),
+params: std.ArrayListUnmanaged(Param) = .{},
 ret: Ty = Ty.void,
 
-pub const Ref = utils.MakeRef(.sig, u32);
+pub const Ref = utils.MakeRef(.sig, u32, "sig{d}");
 const Self = @This();
 
 pub const Param = struct {
     ty: Ty,
     is_comptime: bool,
 };
-pub fn init(allocator: std.mem.Allocator) Self {
-    return .{
-        .params = std.ArrayList(Param).init(allocator),
-    };
+pub fn init() Self {
+    return .{};
 }
 
 pub fn deinit(self: *Self) void {
     self.params.deinit();
 }
 
-pub fn addParam(self: *Self, param: Ty, is_comptime: bool) !void {
-    try self.params.append(.{ .ty = param, .is_comptime = is_comptime });
+pub fn addParam(self: *Self, allocator: std.mem.Allocator, param: Ty, is_comptime: bool) !void {
+    try self.params.append(allocator, .{ .ty = param, .is_comptime = is_comptime });
 }
 
 pub fn setReturn(self: *Self, ret: Ty) void {
@@ -50,7 +48,7 @@ const Formatable = struct {
                 try writer.writeAll("comp ");
             }
 
-            try writer.print("l{d}: {s}", .{ i, param.ty });
+            try writer.print("{}: {s}", .{ Module.Dfg.Local.Ref.from(@intCast(i)), param.ty });
         }
         try writer.writeAll(")");
         try writer.print(" -> {s}", .{self.sig.ret});

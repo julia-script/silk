@@ -10,6 +10,7 @@ pub const Scope = union(enum) {
     fn_decl: FunctionDeclarationScope,
     block: BlockScope,
     global_decl: GlobalDeclarationScope,
+
     pub fn initNamespace(allocator: Allocator, parent: ?*Scope, ref: Module.Namespace.Ref) Scope {
         return Scope{
             .namespace = .{
@@ -42,7 +43,7 @@ pub const Scope = union(enum) {
                 .visibility = visibility,
                 .is_exported = is_exported,
                 .params = std.StringArrayHashMap(Symbol).init(allocator),
-                .definition_builder = try Module.DefinitionBuilder.init(allocator, mod, .global_body),
+                .definition_builder = try Module.DefinitionBuilder.init(mod, ref),
             },
         };
     }
@@ -69,9 +70,10 @@ pub const Scope = union(enum) {
         visibility: Visibility,
         is_exported: bool,
     ) !Scope {
+        _ = allocator; // autofix
         return Scope{
             .global_decl = .{
-                .definition_builder = try Module.DefinitionBuilder.init(allocator, mod, .global_body),
+                .definition_builder = try Module.DefinitionBuilder.init(mod, ref),
                 .parent = parent,
                 .ref = ref,
                 .name = name,
