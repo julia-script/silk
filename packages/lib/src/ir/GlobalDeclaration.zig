@@ -6,20 +6,24 @@ const Module = @import("./Module.zig");
 const TypedValue = Module.TypedValue;
 
 name: []const u8,
+parent_namespace: Namespace.Ref,
 namespace: Namespace.Ref,
-value: TypedValue,
 allocator: std.mem.Allocator,
+ty: Module.Ty,
+
 pub fn init(
     allocator: std.mem.Allocator,
+    parent_namespace: Namespace.Ref,
     namespace: Namespace.Ref,
     name: []const u8,
-    value: TypedValue,
+    ty: Module.Ty,
 ) !Self {
     return .{
+        .parent_namespace = parent_namespace,
         .namespace = namespace,
         .allocator = allocator,
         .name = try allocator.dupe(u8, name),
-        .value = value,
+        .ty = ty,
     };
 }
 

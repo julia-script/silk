@@ -15,12 +15,13 @@ const debug = @import("../debug.zig");
 const utils = @import("./utils.zig");
 
 module: *Module,
-decl_ref: Module.Decl.Ref,
-ref: Definition.Ref,
+def_ref: Definition.Ref,
+dfg: *Dfg,
 
 // kind: Kind,
 active_block: Block.Ref = Dfg.EntryBlock,
 unused_inst_vals: Set(Module.InstData.Ref) = .{},
+initiators_block_map: std.AutoHashMapUnmanaged(Module.InstData.Ref, Block.Ref) = .{},
 
 // pub const Kind = union(enum) {
 //     function_body,
@@ -29,33 +30,40 @@ unused_inst_vals: Set(Module.InstData.Ref) = .{},
 // };
 
 const Self = @This();
-pub fn init(module: *Module, decl_ref: Module.Decl.Ref) !Self {
+pub fn init(module: *Module, def_ref: Definition.Ref, dfg: *Dfg, is_comptime: bool) !Self {
+    _ = is_comptime; // autofix
     return .{
         .module = module,
-        .ref = try module.makeDefinition(),
-        .decl_ref = decl_ref,
-        // .unused_inst_vals = Set(Module.InstData.Ref).init(allocator),
+        .def_ref = def_ref,
+        .dfg = dfg,
     };
 }
-pub fn getDefinition(self: *Self) *Definition {
-    return self.module.definitions.getPtr(self.ref);
-}
+// pub fn getDefinition(self: *Self) *Definition {
+//     return self.module.definitions.getPtr(self.def_ref);
+// }
 pub fn getDfg(self: *Self) *Dfg {
-    return &self.getDefinition().dfg;
+    return self.dfg;
+    // return &self.getDefinition().dfg;
 }
-pub fn declareLocal(self: *Self, ty: Ty, is_comptime: bool) !Dfg.Local.Ref {
-    return try self.getDfg().pushLocal(ty, false, is_comptime);
+pub fn declareLocal(self: *Self, ty: Ty, is_param: bool, is_comptime: bool) !Dfg.Local.Ref {
+    const index = self.getDfg().local_values.count();
+    return try self.getDfg().pushLocal(.{
+        .value = TypedValue.Runtime(ty),
+        .is_param = is_param,
+        .index = @intCast(index),
+        .is_comptime = is_comptime,
+    });
 }
 pub fn useParam(self: *Self, index: u32) TypedValue {
     const local = self.getDfg().local_values.get(.{ .ref = index });
     debug.assertPrint(local.is_param, "Local {d} is not a param", .{index});
-    return TypedValue.Local(local.value.ty, .{ .ref = index }, local.is_comptime);
+    return TypedValue.Local(local.value.ty, .{ .ref = index });
 }
 
 pub fn useLocal(self: *Self, ref: Dfg.Local.Ref) TypedValue {
     const local = self.getDfg().local_values.get(ref);
 
-    return TypedValue.Local(local.value.ty, ref, local.is_comptime);
+    return TypedValue.Local(local.value.ty, ref);
     // return .{
     //     .local = .{
     //         .index = local.index,
@@ -65,32 +73,26 @@ pub fn useLocal(self: *Self, ref: Dfg.Local.Ref) TypedValue {
     //     },
     // };
 }
-pub fn useGlobal(self: *Self, module: *Module, ref: Module.Decl.Ref, is_comptime: bool) !TypedValue {
-    const decl = module.getDeclaration(ref);
-    if (is_comptime) {
-        try self.getDfg().setDependency(ref, .definition);
-    } else {
-        try self.getDfg().setDependency(ref, .declaration);
-    }
+pub fn useGlobal(self: *Self, ref: Module.Decl.Ref) !TypedValue {
+    const decl = self.module.getDeclaration(ref);
 
     switch (decl.*) {
         .func => {
-            const ty = try module.declareTy(.{
+            const ty = try self.module.declareTy(.{
                 .func = .{
                     .signature = decl.func.signature,
                     .declaration = ref,
                 },
             });
-
-            return TypedValue.Global(ty, ref, is_comptime);
+            return TypedValue.Global(ty, ref);
         },
         .global => {
-            return decl.global.value;
+            return TypedValue.Global(decl.global.ty, ref);
         },
     }
 }
 
-pub fn consumeValue(self: *Self, val: TypedValue) void {
+pub fn consumeValue(self: *Self, val: TypedValue) !void {
     switch (val.value) {
         .inst => |ref| {
             debug.assertPrint(
@@ -98,44 +100,68 @@ pub fn consumeValue(self: *Self, val: TypedValue) void {
                 "You're trying to consume '{}', but it either hasn't been defined or has already been consumed",
                 .{val},
             );
+
             _ = self.unused_inst_vals.remove(ref);
+        },
+        .global => |ref| {
+            // const decl = self.mod.getDeclaration(ref);
+            const block = self.getBlock(self.active_block);
+            if (block.is_comptime) {
+                try self.getDfg().setDependency(ref, .definition);
+            } else {
+                try self.getDfg().setDependency(ref, .declaration);
+            }
+            // if (self.module.getDeclaration(ref)) |decl| {
+            //     if (decl.* == .func) {
+            //         _ = self.unused_inst_vals.remove(ref);
+            //     }
+            // }
         },
         else => {},
     }
 }
 
-pub fn makeBlock(self: *Self, initiator: InstData.Ref) !Block.Ref {
-    const ref = try self.getDfg().makeBlock(initiator);
+pub fn makeBlock(self: *Self, initiator: InstData.Ref, maybe_is_comptime: ?bool) !Block.Ref {
+    var is_comptime = maybe_is_comptime orelse false;
+    const initiator_block = self.initiators_block_map.get(initiator);
+    if (initiator_block) |block_ref| {
+        const block = self.getBlock(block_ref);
+        is_comptime = is_comptime or block.is_comptime;
+    }
+    const ref = try self.getDfg().makeBlock(initiator, is_comptime);
     self.active_block = ref;
     return ref;
 }
 pub fn switchToBlock(self: *Self, block: Block.Ref) void {
     self.active_block = block;
 }
-pub fn commit(self: *Self, decl_ref: Module.Decl.Ref) !void {
-    // switch (self.decl_ref) {
-    // .function_body => |decl_ref| {
-    // self.getDefinition().kind = .function_body;
+pub fn linkToDecl(self: *Self, decl_ref: Module.Decl.Ref) !void {
+    //     _ = self; // autofix
+    //     _ = decl_ref; // autofix
+    //     // switch (self.decl_ref) {
+    //     // .function_body => |decl_ref| {
+    //     // self.getDefinition().kind = .function_body;
 
-    try self.module.definition_map.put(self.module.arena.allocator(), decl_ref, self.ref);
-    // return self.ref;
-    //     // },
-    //     .global_body => {
-    //         self.getDefinition().kind = .global_body;
-    //         return self.ref;
-    //     },
-    //     .inline_expression => {
-    //         self.getDefinition().kind = .inline_expression;
-    //         return self.ref;
-    //     },
-    // }
+    try self.module.definition_map.put(self.module.arena.allocator(), decl_ref, self.def_ref);
+    //     // return self.ref;
+    //     //     // },
+    //     //     .global_body => {
+    //     //         self.getDefinition().kind = .global_body;
+    //     //         return self.ref;
+    //     //     },
+    //     //     .inline_expression => {
+    //     //         self.getDefinition().kind = .inline_expression;
+    //     //         return self.ref;
+    //     //     },
+    //     // }
 }
 
 pub fn storeGlobal(self: *Self, global: Module.Decl.Ref, value: TypedValue) !void {
+    try self.consumeValue(value);
     return self.getDfg().pushStoreGlobal(self.active_block, global, value);
 }
 pub fn store(self: *Self, local: Dfg.Local.Ref, value: TypedValue) !void {
-    self.consumeValue(value);
+    try self.consumeValue(value);
     return self.getDfg().pushStore(self.active_block, local, value);
 }
 
@@ -147,26 +173,31 @@ inline fn arithmetic(
     comptime fop: Op,
     a: TypedValue,
     b: TypedValue,
-    is_comptime: bool,
 ) !TypedValue {
-    self.consumeValue(a);
-    self.consumeValue(b);
+    try self.consumeValue(a);
+    try self.consumeValue(b);
+    if (a.ty.isUntypedNumber() or b.ty.isUntypedNumber()) {
+        return try self.getDfg().pushBinary(self.active_block, ty, op, a, b);
+    }
     if (ty.isInt()) {
-        return try self.getDfg().pushBinary(self.active_block, ty, iop, a, b, is_comptime);
+        return try self.getDfg().pushBinary(self.active_block, ty, iop, a, b);
     }
     if (ty.isFloat()) {
-        return try self.getDfg().pushBinary(self.active_block, ty, fop, a, b, is_comptime);
+        return try self.getDfg().pushBinary(self.active_block, ty, fop, a, b);
     }
-    return try self.getDfg().pushBinary(self.active_block, ty, op, a, b, is_comptime);
+    return try self.getDfg().pushBinary(self.active_block, ty, op, a, b);
 }
-pub fn add(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try arithmetic(self, ty, .add, .iadd, .fadd, a, b, is_comptime);
+pub fn add(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try arithmetic(self, ty, .add, .iadd, .fadd, a, b);
 }
-pub fn sub(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try arithmetic(self, ty, .sub, .isub, .fsub, a, b, is_comptime);
+pub fn sub(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try arithmetic(self, ty, .sub, .isub, .fsub, a, b);
 }
-pub fn mul(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try arithmetic(self, ty, .mul, .imul, .fmul, a, b, is_comptime);
+pub fn mul(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try arithmetic(self, ty, .mul, .imul, .fmul, a, b);
+}
+pub fn div(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try arithmetic(self, ty, .div, .idiv, .fdiv, a, b);
 }
 
 pub fn getBlock(self: *Self, ref: Block.Ref) Block {
@@ -175,26 +206,34 @@ pub fn getBlock(self: *Self, ref: Block.Ref) Block {
 /// Comparison instructions
 ///
 /// eq and ne are simpler
-pub fn eq(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    self.consumeValue(a);
-    self.consumeValue(b);
-    return try self.getDfg().pushBinary(self.active_block, ty, .eq, a, b, is_comptime);
-}
 
-pub fn ne(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    self.consumeValue(a);
-    self.consumeValue(b);
-    return try self.getDfg().pushBinary(self.active_block, ty, .ne, a, b, is_comptime);
-}
 // pub fn typeof(self: *Self, value: Value, is_comptime: bool) !Ty {
 //     self.consumeValue(value);
 //     const val = try self.dfg.pushOperand(self.active_block, .typeof, value, is_comptime);
 //     _ = val; // autofix
 //     // return Ty {.ref = }
 // }
-pub fn cast(self: *Self, ty: Ty, value: TypedValue, is_comptime: bool) !TypedValue {
-    self.consumeValue(value);
-    return try self.getDfg().pushOperand(self.active_block, .cast, ty, value, is_comptime);
+pub fn cast(self: *Self, ty: Ty, value: TypedValue) !TypedValue {
+    try self.consumeValue(value);
+    return try self.getDfg().pushCast(self.active_block, ty, value);
+}
+pub fn propertyByName(self: *Self, tyv: TypedValue, name: []const u8, property_ty: Module.Ty) !TypedValue {
+    try self.consumeValue(tyv);
+    return try self.getDfg().pushPropertyByName(self.active_block, tyv, name, property_ty);
+}
+
+pub fn eq(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    _ = ty; // autofix
+    try self.consumeValue(a);
+    try self.consumeValue(b);
+    return try self.getDfg().pushBinary(self.active_block, .bool, .eq, a, b);
+}
+
+pub fn ne(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    _ = ty; // autofix
+    try self.consumeValue(a);
+    try self.consumeValue(b);
+    return try self.getDfg().pushBinary(self.active_block, .bool, .ne, a, b);
 }
 inline fn comparison(
     self: *Self,
@@ -204,46 +243,70 @@ inline fn comparison(
     comptime op_s: Op,
     a: TypedValue,
     b: TypedValue,
-    is_comptime: bool,
 ) !TypedValue {
-    self.consumeValue(a);
-    self.consumeValue(b);
+    try self.consumeValue(a);
+    try self.consumeValue(b);
     if (ty.isUntypedNumber() or !ty.isResolvedNumeric() or ty.isFloat()) {
-        return try self.getDfg().pushBinary(self.active_block, .bool, op, a, b, is_comptime);
+        return try self.getDfg().pushBinary(self.active_block, .bool, op, a, b);
     }
     if (ty.isSigned()) {
-        return try self.getDfg().pushBinary(self.active_block, .bool, op_s, a, b, is_comptime);
+        return try self.getDfg().pushBinary(self.active_block, .bool, op_s, a, b);
     }
-    return try self.getDfg().pushBinary(self.active_block, .bool, op_u, a, b, is_comptime);
+    return try self.getDfg().pushBinary(self.active_block, .bool, op_u, a, b);
 }
 
-pub fn lt(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try comparison(self, ty, .lt, .lt_u, .lt_s, a, b, is_comptime);
+pub fn lt(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try comparison(self, ty, .lt, .lt_u, .lt_s, a, b);
 }
 
-pub fn le(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try comparison(self, ty, .le, .le_u, .le_s, a, b, is_comptime);
+pub fn le(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try comparison(self, ty, .le, .le_u, .le_s, a, b);
 }
 
-pub fn gt(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try comparison(self, ty, .gt, .gt_u, .gt_s, a, b, is_comptime);
+pub fn gt(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try comparison(self, ty, .gt, .gt_u, .gt_s, a, b);
 }
 
-pub fn ge(self: *Self, ty: Ty, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
-    return try comparison(self, ty, .ge, .ge_u, .ge_s, a, b, is_comptime);
+pub fn ge(self: *Self, ty: Ty, a: TypedValue, b: TypedValue) !TypedValue {
+    return try comparison(self, ty, .ge, .ge_u, .ge_s, a, b);
 }
 
 pub fn makeBranch(self: *Self, cond: TypedValue) !InstData.Ref {
-    return try self.getDfg().pushBranch(self.active_block, cond, [3]?Block.Ref{ null, null, null });
+    try self.consumeValue(cond);
+    const ref = try self.getDfg().pushBranch(self.active_block, cond, [3]?Block.Ref{ null, null, null });
+    try self.initiators_block_map.put(self.dfg.arena.allocator(), ref, self.active_block);
+    return ref;
 }
-pub fn call(self: *Self, callee: TypedValue, args: []TypedValue, is_comptime: bool) !TypedValue {
-    return try self.getDfg().pushCall(self.module, self.active_block, callee, args, is_comptime);
+pub fn call(self: *Self, callee: TypedValue, args: []TypedValue) !TypedValue {
+    for (args) |arg| {
+        try self.consumeValue(arg);
+    }
+    return try self.getDfg().pushCall(self.module, self.active_block, callee, args);
 }
-pub fn initArray(self: *Self, ty: Module.Ty, items: []TypedValue, is_comptime: bool) !TypedValue {
-    return try self.getDfg().pushInitArray(self.active_block, ty, items, is_comptime);
+pub fn makeBlockCall(self: *Self) !InstData.Ref {
+    return try self.getDfg().pushBlockCall(self.active_block, undefined);
 }
-pub fn initStruct(self: *Self, ty: Module.Ty, keys: []const []const u8, values: []const TypedValue, is_comptime: bool) !TypedValue {
-    return try self.getDfg().pushInitStruct(self.active_block, ty, keys, values, is_comptime);
+pub fn setBlockCallTarget(self: *Self, inst_ref: InstData.Ref, block: Block.Ref, finally: ?Block.Ref) !void {
+    const call_inst = self.getDfg().instructions.getPtr(inst_ref);
+    call_inst.block_call.args[0] = block;
+    call_inst.block_call.args[1] = finally;
+}
+pub fn blockCall(self: *Self, block: Block.Ref) !TypedValue {
+    const ref = try self.getDfg().pushBlockCall(self.active_block, block);
+    try self.initiators_block_map.put(self.dfg.arena.allocator(), ref, block);
+    return ref;
+}
+pub fn initArray(self: *Self, ty: Module.Ty, items: []TypedValue) !TypedValue {
+    for (items) |item| {
+        try self.consumeValue(item);
+    }
+    return try self.getDfg().pushInitArray(self.active_block, ty, items);
+}
+pub fn initStruct(self: *Self, ty: Module.Ty, keys: []const []const u8, values: []const TypedValue) !TypedValue {
+    for (values) |value| {
+        try self.consumeValue(value);
+    }
+    return try self.getDfg().pushInitStruct(self.active_block, ty, keys, values);
 }
 
 pub fn setBranchTarget(
@@ -254,33 +317,39 @@ pub fn setBranchTarget(
     finally_block: ?Block.Ref,
 ) !void {
     const branch_inst = self.getDfg().instructions.getPtr(branch);
-    debug.assertPrint(then_block == null or self.getBlock(then_block.?).initiator.?.ref == branch.ref, "Then target {?} wasn't created from branch", .{then_block});
-    debug.assertPrint(else_block == null or self.getBlock(else_block.?).initiator.?.ref == branch.ref, "Else target {?} wasn't created from branch", .{else_block});
-    debug.assertPrint(finally_block == null or self.getBlock(finally_block.?).initiator.?.ref == branch.ref, "Finally target {?} wasn't created from branch", .{finally_block});
+    debug.assertPrint(then_block == null or self.getBlock(then_block.?).initiator.?.idx == branch.idx, "Then target {?} wasn't created from branch", .{then_block});
+    debug.assertPrint(else_block == null or self.getBlock(else_block.?).initiator.?.idx == branch.idx, "Else target {?} wasn't created from branch", .{else_block});
+    debug.assertPrint(finally_block == null or self.getBlock(finally_block.?).initiator.?.idx == branch.idx, "Finally target {?} wasn't created from branch", .{finally_block});
     branch_inst.branch.args[0] = then_block;
     branch_inst.branch.args[1] = else_block;
     branch_inst.branch.args[2] = finally_block;
 }
 
 pub fn makeLoop(self: *Self) !InstData.Ref {
-    return try self.getDfg().pushLoop(self.active_block, [2]?Block.Ref{ null, null });
+    const ref = try self.getDfg().pushLoop(self.active_block, [2]?Block.Ref{ null, null });
+    try self.initiators_block_map.put(self.dfg.arena.allocator(), ref, self.active_block);
+    return ref;
 }
-pub fn breakTo(self: *Self, target: InstData.Ref, value: ?TypedValue, is_comptime: bool) !InstData.Ref {
-    return try self.getDfg().pushBreak(self.active_block, target, value, is_comptime);
+pub fn breakTo(self: *Self, target: InstData.Ref, value: ?TypedValue) !InstData.Ref {
+    return try self.getDfg().pushBreak(self.active_block, target, value);
 }
 
-pub fn setLoopTarget(self: *Self, loop: InstData.Ref, body: Block.Ref, finally: ?Block.Ref) !void {
+pub fn setLoopTarget(self: *Self, loop: InstData.Ref, body: ?Block.Ref, finally: ?Block.Ref) !void {
     const loop_inst = self.getDfg().instructions.getPtr(loop);
-    debug.assertPrint(self.getBlock(body).initiator.?.ref == loop.ref, "Body {?} wasn't created from loop", .{body});
-    debug.assertPrint(finally == null or self.getBlock(finally.?).initiator.?.ref == loop.ref, "Finally {?} wasn't created from loop", .{finally});
+    debug.assertPrint(body == null or self.getBlock(body.?).initiator.?.idx == loop.idx, "Body {?} wasn't created from loop", .{body});
+    debug.assertPrint(finally == null or self.getBlock(finally.?).initiator.?.idx == loop.idx, "Finally {?} wasn't created from loop", .{finally});
 
     loop_inst.loop.args[0] = body;
     loop_inst.loop.args[1] = finally;
 }
 
-pub fn ret(self: *Self, value: ?TypedValue, is_comptime: bool) !void {
+pub fn ret(self: *Self, value: ?TypedValue) !void {
     const val = value orelse TypedValue.Void;
-    self.consumeValue(val);
+    try self.consumeValue(val);
 
-    try self.getDfg().pushReturn(self.active_block, val, is_comptime);
+    try self.getDfg().pushReturn(self.active_block, val);
+}
+
+pub fn isBlockEmpty(self: *Self, block: Block.Ref) bool {
+    return self.getBlock(block).isEmpty();
 }

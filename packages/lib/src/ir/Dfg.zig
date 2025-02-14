@@ -25,6 +25,7 @@ blocks: Block.Ref.ListUnmanaged(Block) = .{},
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 dependencies: Map(Module.Decl.Ref, DependsOn) = .{},
+is_comptime: bool = false,
 
 pub const DependsOn = enum {
     declaration,
@@ -50,23 +51,25 @@ pub const EntryBlock = Block.Ref.from(0);
 
 const Self = @This();
 
-pub fn init(allocator: std.mem.Allocator) !Self {
+pub fn init(allocator: std.mem.Allocator, is_comptime: bool) !Self {
     var self = Self{
         .arena = std.heap.ArenaAllocator.init(allocator),
         .allocator = allocator,
+        .is_comptime = is_comptime,
     };
 
     // Fixes weird zig memory leak bug
     // try self.local_values.items.ensureUnusedCapacity(1);
 
-    _ = try self.makeBlock(null);
+    _ = try self.makeBlock(null, is_comptime);
 
     return self;
 }
-pub inline fn makeBlock(self: *Self, initiator: ?InstData.Ref) !Block.Ref {
+pub inline fn makeBlock(self: *Self, initiator: ?InstData.Ref, is_comptime: bool) !Block.Ref {
     return try self.blocks.append(self.arena.allocator(), Block.init(
         .body,
         initiator,
+        is_comptime,
     ));
 }
 
@@ -83,21 +86,21 @@ pub fn deinit(self: *Self) void {
     // self.blocks.deinit(self.arena.allocator());
     // self.types.deinit(self.arena.allocator());
 }
+pub fn getBlock(self: *Self, ref: Block.Ref) *Block {
+    return self.blocks.getPtr(ref);
+}
+pub fn getInstruction(self: *Self, ref: InstData.Ref) *InstData {
+    return self.instructions.getPtr(ref);
+}
 
-pub fn pushLocal(self: *Self, ty: Ty, is_param: bool, is_comptime: bool) !Local.Ref {
-    const index: u32 = @intCast(self.local_values.count());
-    const ref = try self.local_values.append(self.arena.allocator(), Local{
-        .index = index,
-        .value = TypedValue.Runtime(ty, is_comptime),
-        .is_comptime = is_comptime,
-        .is_param = is_param,
-    });
+pub fn pushLocal(self: *Self, local: Local) !Local.Ref {
+    const ref = try self.local_values.append(self.arena.allocator(), local);
     return ref;
 }
 pub fn pushInst(self: *Self, block_ref: Block.Ref, inst: InstData) !InstData.Ref {
     const block = self.blocks.getPtr(block_ref);
     if (block.sealed) {
-        return error.BlockAlreadySealed;
+        std.debug.panic("Block {s} is sealed\n", .{block_ref});
     }
     const ref = try self.instructions.append(self.arena.allocator(), inst);
     try block.instructions.append(self.arena.allocator(), ref);
@@ -115,7 +118,29 @@ pub fn setDependency(self: *Self, dep: Module.Decl.Ref, depends_on: DependsOn) !
     gop.value_ptr.* = depends_on;
 }
 
-pub fn pushBinary(self: *Self, block_ref: Block.Ref, ty: Ty, op: Op, a: TypedValue, b: TypedValue, is_comptime: bool) !TypedValue {
+pub fn pushBlockCall(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !InstData.Ref {
+    const call = try self.pushInst(block_ref, .{
+        .block_call = .{
+            .args = args,
+        },
+    });
+    return call;
+}
+pub fn pushCast(self: *Self, block_ref: Block.Ref, ty: Ty, value: TypedValue) !TypedValue {
+    const ref = try self.pushInst(block_ref, .{
+        .cast = .{
+            .ty = ty,
+            .value = value,
+        },
+    });
+    const val = TypedValue.Inst(
+        ty,
+        ref,
+    );
+    try self.inst_values.put(self.arena.allocator(), ref, val);
+    return val;
+}
+pub fn pushBinary(self: *Self, block_ref: Block.Ref, ty: Ty, op: Op, a: TypedValue, b: TypedValue) !TypedValue {
     const ref = try self.pushInst(block_ref, .{
         .binary = .{
             .op = op,
@@ -125,12 +150,11 @@ pub fn pushBinary(self: *Self, block_ref: Block.Ref, ty: Ty, op: Op, a: TypedVal
     const val = TypedValue.Inst(
         ty,
         ref,
-        is_comptime,
     );
     try self.inst_values.put(self.arena.allocator(), ref, val);
     return val;
 }
-pub fn pushOperand(self: *Self, block_ref: Block.Ref, op: Op, ty: Ty, value: TypedValue, is_comptime: bool) !TypedValue {
+pub fn pushOperand(self: *Self, block_ref: Block.Ref, op: Op, ty: Ty, value: TypedValue) !TypedValue {
     const ref = try self.pushInst(block_ref, .{
         .operand = .{
             .op = op,
@@ -140,14 +164,12 @@ pub fn pushOperand(self: *Self, block_ref: Block.Ref, op: Op, ty: Ty, value: Typ
     const val = TypedValue.Inst(
         ty,
         ref,
-        is_comptime,
     );
     try self.inst_values.put(self.arena.allocator(), ref, val);
 
     return val;
 }
-pub fn pushReturn(self: *Self, block_ref: Block.Ref, value: TypedValue, is_comptime: bool) !void {
-    _ = is_comptime; // autofix
+pub fn pushReturn(self: *Self, block_ref: Block.Ref, value: TypedValue) !void {
     _ = try self.pushInst(block_ref, .{
         .@"return" = .{
             .op = .@"return",
@@ -186,8 +208,10 @@ pub fn pushLoop(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !InstDat
         },
     });
 }
-pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value: ?TypedValue, is_comptime: bool) !InstData.Ref {
-    _ = is_comptime; // autofix
+pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value: ?TypedValue) !InstData.Ref {
+    const val = value orelse TypedValue.Void;
+    try self.inst_values.put(self.arena.allocator(), target, val);
+
     return try self.pushInst(block_ref, .{
         .@"break" = .{
             .target = target,
@@ -196,7 +220,7 @@ pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value:
     });
 }
 
-pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: TypedValue, args: []TypedValue, is_comptime: bool) !TypedValue {
+pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: TypedValue, args: []TypedValue) !TypedValue {
     const ref = try self.pushInst(block_ref, .{
         .call = .{
             .callee = callee,
@@ -214,12 +238,11 @@ pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Type
     const val = TypedValue.Inst(
         signature.ret,
         ref,
-        is_comptime,
     );
     try self.inst_values.put(self.arena.allocator(), ref, val);
     return val;
 }
-pub fn pushInitArray(self: *Self, block_ref: Block.Ref, ty: Module.Ty, items: []TypedValue, is_comptime: bool) !TypedValue {
+pub fn pushInitArray(self: *Self, block_ref: Block.Ref, ty: Module.Ty, items: []TypedValue) !TypedValue {
     const ref = try self.pushInst(block_ref, .{
         .init_array = .{
             .ty = ty,
@@ -230,12 +253,11 @@ pub fn pushInitArray(self: *Self, block_ref: Block.Ref, ty: Module.Ty, items: []
     const val = TypedValue.Inst(
         ty,
         ref,
-        is_comptime,
     );
     try self.inst_values.put(self.arena.allocator(), ref, val);
     return val;
 }
-pub fn pushInitStruct(self: *Self, block_ref: Block.Ref, ty: Module.Ty, keys: []const []const u8, values: []const TypedValue, is_comptime: bool) !TypedValue {
+pub fn pushInitStruct(self: *Self, block_ref: Block.Ref, ty: Module.Ty, keys: []const []const u8, values: []const TypedValue) !TypedValue {
     var keys_dupe = try self.arena.allocator().dupe([]const u8, keys);
     for (keys_dupe, 0..) |key, i| {
         keys_dupe[i] = try self.arena.allocator().dupe(u8, key);
@@ -251,12 +273,26 @@ pub fn pushInitStruct(self: *Self, block_ref: Block.Ref, ty: Module.Ty, keys: []
     const val = TypedValue.Inst(
         ty,
         ref,
-        is_comptime,
     );
     try self.inst_values.put(self.arena.allocator(), ref, val);
     return val;
 }
 
+pub fn pushPropertyByName(self: *Self, block_ref: Block.Ref, tyv: TypedValue, name: []const u8, prop_ty: Module.Ty) !TypedValue {
+    const ref = try self.pushInst(block_ref, .{
+        .property_by_name = .{
+            .tyv = tyv,
+            .name = try self.arena.allocator().dupe(u8, name),
+        },
+    });
+
+    const val = TypedValue.Inst(
+        prop_ty,
+        ref,
+    );
+    try self.inst_values.put(self.arena.allocator(), ref, val);
+    return val;
+}
 // pub fn getParam(self: *Self, index: u32) Value {
 //     return self.local_values.items[index].value;
 // }
@@ -276,6 +312,9 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, module: *const Module, 
         }
     }
 }
+pub fn isBlockEmpty(self: *Self, block: Block.Ref) bool {
+    return self.getBlock(block).isEmpty();
+}
 
 fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerror!void {
     const instruction_indent = "    ";
@@ -290,6 +329,9 @@ fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerr
         const block = entry.item;
         const ref = entry.ref;
 
+        if (block.is_comptime) {
+            try writer.print("\x1b[31mcomptime\x1b[0m ", .{});
+        }
         if (block.initiator == null) {
             try writer.print("Entry:\n", .{});
         } else {

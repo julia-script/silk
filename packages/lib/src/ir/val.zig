@@ -119,28 +119,6 @@ pub const Value = union(enum) {
         };
     }
 
-    // fn fromBytes(value: anytype) !Value {
-    //     const T = @TypeOf(value);
-    //     switch (T) {
-    //         comptime_float => return Imm(Ty.f64, try ValData.fromBytes(@as(f64, value))),
-    //         comptime_int => return Imm(Ty.i64, try ValData.fromBytes(@as(i64, value))),
-
-    //         i8 => return Imm(Ty.i8, try ValData.fromBytes(value)),
-    //         i16 => return Imm(Ty.i16, try ValData.fromBytes(value)),
-    //         i32 => return Imm(Ty.i32, try ValData.fromBytes(value)),
-    //         i64 => return Imm(Ty.i64, try ValData.fromBytes(value)),
-    //         u8 => return Imm(Ty.u8, try ValData.fromBytes(value)),
-    //         u16 => return Imm(Ty.u16, try ValData.fromBytes(value)),
-    //         u32 => return Imm(Ty.u32, try ValData.fromBytes(value)),
-    //         u64 => return Imm(Ty.u64, try ValData.fromBytes(value)),
-
-    //         usize => return Imm(Ty.u64, try ValData.fromBytes(value)),
-    //         isize => return Imm(Ty.i64, try ValData.fromBytes(value)),
-
-    //         bool => return Imm(Ty.bool, try ValData.fromBytes(value)),
-    //         else => return error.UnsupportedType,
-    //     }
-    // }
     pub fn format(
         self: Value,
         comptime _: []const u8,

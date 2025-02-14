@@ -5,7 +5,7 @@ const Module = @import("Module.zig");
 pub fn MakeRef(label: anytype, comptime T: type, comptime maybe_format_str: ?[]const u8) type {
     _ = T; // autofix
     return struct {
-        ref: u32,
+        idx: u32,
         pub const Ref = @This();
         pub fn ListUnmanaged(comptime K: type) type {
             return struct {
@@ -41,25 +41,25 @@ pub fn MakeRef(label: anytype, comptime T: type, comptime maybe_format_str: ?[]c
                         if (self.i >= self.items.len) return null;
                         const i = self.i;
                         self.i += 1;
-                        return .{ .ref = .{ .ref = i }, .item = &self.items[i] };
+                        return .{ .ref = .{ .idx = i }, .item = &self.items[i] };
                     }
                 };
                 pub fn iter(self: @This()) Iter {
                     return .{ .items = self.items.items, .i = 0 };
                 }
                 pub fn append(self: *@This(), allocator: std.mem.Allocator, item: K) !Ref {
-                    const ref = self.items.items.len;
+                    const idx = self.items.items.len;
                     try self.items.append(allocator, item);
-                    return .{ .ref = @intCast(ref) };
+                    return .{ .idx = @intCast(idx) };
                 }
                 pub fn get(self: @This(), ref: Ref) K {
-                    return self.items.items[@intCast(ref.ref)];
+                    return self.items.items[@intCast(ref.idx)];
                 }
                 pub fn getPtr(self: @This(), ref: Ref) *K {
-                    return &self.items.items[@intCast(ref.ref)];
+                    return &self.items.items[@intCast(ref.idx)];
                 }
                 pub fn set(self: *@This(), ref: Ref, item: K) void {
-                    self.items.items[@intCast(ref.ref)] = item;
+                    self.items.items[@intCast(ref.idx)] = item;
                 }
                 pub fn count(self: @This()) usize {
                     return self.items.items.len;
@@ -135,7 +135,7 @@ pub fn MakeRef(label: anytype, comptime T: type, comptime maybe_format_str: ?[]c
             return std.AutoHashMapUnmanaged(Ref, V);
         }
         pub fn from(value: u32) @This() {
-            return .{ .ref = value };
+            return .{ .idx = value };
         }
 
         pub fn format(
@@ -145,9 +145,9 @@ pub fn MakeRef(label: anytype, comptime T: type, comptime maybe_format_str: ?[]c
             writer: std.io.AnyWriter,
         ) !void {
             if (maybe_format_str) |format_str| {
-                try writer.print(format_str, .{self.ref});
+                try writer.print(format_str, .{self.idx});
             } else {
-                try writer.print("{s}#{d}", .{ @tagName(label), self.ref });
+                try writer.print("{s}#{d}", .{ @tagName(label), self.idx });
             }
         }
     };

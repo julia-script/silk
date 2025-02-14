@@ -48,6 +48,8 @@ pub const Ty = union(enum) {
         func: Function,
         array: Array,
         @"struct": Struct,
+        // property_of: PropertyOf,
+
         // decl: Module.Decl.Ref,
         pub const Array = struct {
             type: Ty,
@@ -60,11 +62,16 @@ pub const Ty = union(enum) {
         pub const Struct = struct {
             fields: []const Field,
             sealed: bool,
+            associated_ns: ?Module.Namespace.Ref,
             pub const Field = struct {
                 name: []const u8,
                 ty: Ty,
                 source_order_index: u32,
             };
+        };
+        pub const PropertyOf = struct {
+            ty: Ty,
+            name: []const u8,
         };
         pub fn displayFn(self: TyData, writer: std.io.AnyWriter, module: *const Module) anyerror!void {
             switch (self) {
@@ -84,9 +91,8 @@ pub const Ty = union(enum) {
                     }
                     try writer.print(" }}", .{});
                 },
-
-                // else => {
-                //     try writer.print("{}", .{self});
+                // .property_of => |property_of| {
+                //     try writer.print("{}['{s}']", .{ property_of.ty.display(module), property_of.name });
                 // },
             }
         }
@@ -95,12 +101,72 @@ pub const Ty = union(enum) {
         }
     };
 
+    const Hasher = std.hash.Wyhash;
+    var UNIQUE: u64 = 0;
+    pub fn hashTyData(ty_data: TyData, mod: *const Module) u64 {
+        return switch (ty_data) {
+            .func => |func| {
+                var hasher = Hasher.init(0);
+                hasher.update(std.mem.asBytes(&@intFromEnum(ty_data)));
+                hasher.update(std.mem.asBytes(&func.signature));
+                hasher.update(std.mem.asBytes(&func.declaration));
+                return hasher.final();
+            },
+            .array => |array| {
+                var hasher = Hasher.init(0);
+                hasher.update(std.mem.asBytes(&@intFromEnum(ty_data)));
+                const type_hash = Ty.hash(array.type, mod);
+
+                hasher.update(std.mem.asBytes(&type_hash));
+                hasher.update(std.mem.asBytes(&array.size.ty.hash(mod)));
+                switch (array.size.value) {
+                    .bytes => |bytes| {
+                        hasher.update(std.mem.asBytes(&bytes));
+                    },
+                    else => {
+                        hasher.update(std.mem.asBytes(&array.size));
+                    },
+                }
+                return hasher.final();
+            },
+            .@"struct" => {
+                UNIQUE += 1;
+                var hasher = Hasher.init(UNIQUE);
+                hasher.update(std.mem.asBytes(&@intFromEnum(ty_data)));
+                return hasher.final();
+            },
+            // .property_of => |property_of| {
+            //     var hasher = Hasher.init(0);
+            //     hasher.update(std.mem.asBytes(&@intFromEnum(ty_data)));
+            //     hasher.update(std.mem.asBytes(&property_of.name));
+            //     hasher.update(std.mem.asBytes(&property_of.ty.hash(mod)));
+            //     return hasher.final();
+            // },
+        };
+    }
+    pub fn hash(self: Ty, mod: *const Module) u64 {
+        switch (self) {
+            .ref => |ref| return Ty.hashTyData(mod.tys.get(ref), mod),
+            .global => |ref| {
+                var hasher = Hasher.init(0);
+                hasher.update(std.mem.asBytes(&@intFromEnum(self)));
+                hasher.update(std.mem.asBytes(&ref));
+                return hasher.final();
+            },
+
+            else => {
+                var hasher = Hasher.init(0);
+                hasher.update(std.mem.asBytes(&@intFromEnum(self)));
+                return hasher.final();
+            },
+        }
+    }
     pub fn eql(self: Ty, other: Ty) bool {
         const self_tag = std.meta.activeTag(self);
         const other_tag = std.meta.activeTag(other);
         if (self_tag == other_tag) {
             return switch (self) {
-                .ref => |ref| ref.ref == other.ref.ref,
+                .ref => |ref| ref.idx == other.ref.idx,
                 else => true,
             };
         }
@@ -132,26 +198,44 @@ pub const Ty = union(enum) {
     pub fn toVal(self: Ty) Value {
         return Value.ImmTy(self);
     }
-
-    pub fn format(
-        self: Ty,
-        comptime _: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: std.io.AnyWriter,
-    ) !void {
-        switch (self) {
-            .ref => |ref| {
-                try writer.print("{}", .{ref});
-            },
-            .global => |ref| {
-                try writer.print("{}", .{ref});
-            },
+    pub fn getSize(self: Ty, module: *const Module) u32 {
+        return switch (self) {
+            .i8, .u8 => 8,
+            .i16, .u16 => 16,
+            .i32, .u32 => 32,
+            .i64, .u64 => 64,
+            .int, .float => 0,
+            .bool => 1,
+            .f32 => 32,
+            .f64 => 64,
+            .f16 => 16,
+            .void => 0,
 
             else => {
-                try writer.print("{s}", .{@tagName(self)});
+                std.debug.panic("can't get size of '{}'", .{self.display(module)});
             },
-        }
+        };
     }
+
+    // pub fn format(
+    //     self: Ty,
+    //     comptime _: []const u8,
+    //     _: std.fmt.FormatOptions,
+    //     writer: std.io.AnyWriter,
+    // ) !void {
+    //     switch (self) {
+    //         .ref => |ref| {
+    //             try writer.print("{}", .{ref});
+    //         },
+    //         .global => |ref| {
+    //             try writer.print("{}", .{ref});
+    //         },
+
+    //         else => {
+    //             try writer.print("{s}", .{@tagName(self)});
+    //         },
+    //     }
+    // }
 
     fn displayFn(self: Ty, writer: std.io.AnyWriter, module: *const Module) anyerror!void {
         // try writer.print("{}", .{self});
@@ -192,13 +276,17 @@ pub const Ty = union(enum) {
     }
     pub fn isFloat(self: Ty) bool {
         return switch (self) {
-            .f16, .f32, .f64, .float, .int => true,
+            .f16,
+            .f32,
+            .f64,
+            .float,
+            => true,
             else => false,
         };
     }
     pub fn isSigned(self: Ty) bool {
         return switch (self) {
-            .i8, .i16, .i32, .i64, .float, .int => true,
+            .i8, .i16, .i32, .i64, .int => true,
             else => false,
         };
     }
@@ -227,6 +315,107 @@ pub const Ty = union(enum) {
             .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .int, .float => true,
             else => false,
         };
+    }
+    pub fn getTyData(self: Ty, mod: *Module) ?TyData {
+        return switch (self) {
+            .ref => |ref| mod.tys.get(ref),
+            else => null,
+        };
+    }
+    pub fn getChildTy(self: Ty, mod: *Module) ?Ty {
+        const ty_data = self.getTyData(mod) orelse return null;
+        return switch (ty_data) {
+            .array => |array| array.type,
+            else => null,
+        };
+    }
+    pub fn resolveGlobalType(global_decl_ref: Module.Decl.Ref, mod: *Module) ?Ty {
+        if (!mod.definition_map.contains(global_decl_ref)) {
+            return .{ .global = global_decl_ref };
+        }
+        const def = mod.getDefinitionByDeclRef(global_decl_ref);
+        const result = def.dfg.result orelse return null;
+        if (!result.isType()) {
+            std.debug.panic("can't resolve global type for {}", .{global_decl_ref});
+        }
+
+        switch (result.value) {
+            .ty => |ty| {
+                return ty;
+            },
+            .global => |global| {
+                return resolveGlobalType(global, mod) orelse return .{ .global = global };
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+    pub fn resolveGlobal(self: Ty, mod: *Module) ?Ty {
+        return switch (self) {
+            .global => |ref| {
+                return resolveGlobalType(ref, mod);
+                // const def = mod.getDefinitionByDeclRef(ref);
+                // const result = def.dfg.result orelse return null;
+                // if (!result.isType()) {
+                //     std.debug.panic("can't resolve global type for {}", .{ref});
+                // }
+                // switch (result.value) {
+                //     .ty => |ty| {
+                //         return ty;
+                //     },
+                //     .global => |global| {
+                //         return resolveGlobalType(global, mod);
+                //     },
+                //     else => {
+                //         return null;
+                //     },
+                // }
+            },
+            else => null,
+        };
+    }
+    pub fn getFieldByName(self: Ty, mod: *Module, name: []const u8) ?TyData.Struct.Field {
+        var ty = self;
+        switch (self) {
+            .global => |ref| {
+                ty = resolveGlobalType(ref, mod) orelse return null;
+            },
+            else => {},
+        }
+        const ty_data = ty.getTyData(mod) orelse return null;
+        return switch (ty_data) {
+            .@"struct" => |struct_ty| {
+                for (struct_ty.fields) |field| {
+                    if (std.mem.eql(u8, field.name, name)) {
+                        return field;
+                    }
+                }
+                return null;
+            },
+
+            else => null,
+        };
+    }
+    pub fn getAssociatedNs(self: Ty, mod: *Module) ?Module.Namespace.Ref {
+        const ty_data = self.getTyData(mod) orelse return null;
+        return switch (ty_data) {
+            .@"struct" => |struct_ty| struct_ty.associated_ns,
+            else => null,
+        };
+    }
+    pub fn getAssociatedDeclByName(self: Ty, mod: *Module, name: []const u8) ?Module.Decl.Ref {
+        const ns_ref = self.getAssociatedNs(mod) orelse return null;
+        const ns = mod.namespaces.getPtr(ns_ref);
+        var iter = ns.declarations.hashmap.iterator();
+        while (iter.next()) |entry| {
+            const decl_ref = entry.key_ptr.*;
+            const decl = mod.getDeclaration(decl_ref);
+            if (std.mem.eql(u8, decl.getName(), name)) {
+                return decl_ref;
+            }
+        }
+        return null;
     }
 };
 test "Ty" {

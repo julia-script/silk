@@ -1,8 +1,25 @@
 
+
+
+fn main() i32 {
+  var a: T = T{
+    a = 22, 
+    b = 33,
+  }
+  return a.a;
+}
+type T = struct {
+  a: A,
+  b: i32,
+  // fn add(a: A, b: i32) i32 {
+  //   return a + b;
+  // }
+}
 fn var_array() void {
  const arr: [3]i32 = [3]i32 {11, 22, 33};
 }
-export pub fn fib(n: i32) i32 {
+export pub fn fib(n: A) i32 {
+  comp {
   var a:A = 0
   var b:i32 = 1
   if (n > 0) {
@@ -15,8 +32,26 @@ export pub fn fib(n: i32) i32 {
     return b
   }
   return a
+  }
 }
-// type A = u32
+fn test() i32 {
+  if (2 > 1) {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+fn test2() i32 {
+  var a: i32 = comp 2 + 3 + 9
+  return a
+}
+fn rec(n: i32) i32 {
+  if (n == 0) {
+    return 0;
+  }
+  return rec(n - 1);
+}
+type A = i32
 // fn main() i32 {
 //   const a: A = A{
 //     a = 22, 
@@ -26,19 +61,4 @@ export pub fn fib(n: i32) i32 {
 // }
 
 
-type A = struct {
-  a: i32,
-  b: i32,
-  fn add(a: i32, b: i32) i32 {
-    return a + b;
-  }
-}
-
-fn main() void {
-  var a: A = A{
-    a = 22, 
-    b = 33,
-  }
-  // return a.a;
-}
 

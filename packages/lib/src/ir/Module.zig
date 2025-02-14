@@ -15,6 +15,7 @@ pub const utils = @import("./utils.zig");
 pub const InstData = @import("./inst.zig").InstData;
 pub const GlobalDeclaration = @import("./GlobalDeclaration.zig");
 pub const TypedValue = @import("./TypedValue.zig");
+pub const Value = @import("./value.zig").Value;
 pub const Decl = union(enum) {
     func: FunctionDeclaration,
     global: GlobalDeclaration,
@@ -30,6 +31,22 @@ pub const Decl = union(enum) {
             },
         }
     }
+    pub fn getValue(self: *Decl) TypedValue {
+        return switch (self.*) {
+            .func => |*func| {
+                _ = func; // autofix
+                // const def =
+                // return def.dfg.getValue(def.dfg.entry);
+            },
+            .global => |*global| global.value,
+        };
+    }
+    pub fn getName(self: *Decl) []const u8 {
+        return switch (self.*) {
+            .func => |*func| func.name,
+            .global => |*global| global.name,
+        };
+    }
 };
 allocator: std.mem.Allocator,
 
@@ -42,6 +59,7 @@ definition_map: Map(Decl.Ref, Definition.Ref) = .{},
 definitions: Definition.Ref.ListUnmanaged(Definition) = .{},
 tys: Ty.Ref.ListUnmanaged(Ty.TyData) = .{},
 decls: Decl.Ref.ListUnmanaged(Decl) = .{},
+hashed_ty_map: Map(u64, Ty.Ref) = .{},
 const Self = @This();
 pub fn init(allocator: std.mem.Allocator) Self {
     return .{
@@ -50,7 +68,11 @@ pub fn init(allocator: std.mem.Allocator) Self {
     };
 }
 pub fn deinit(self: *Self) void {
+    for (self.definitions.slice()) |*def| {
+        def.dfg.deinit();
+    }
     self.arena.deinit();
+
     // // self.signatures.deinitRecursive();
     // self.tys.deinitRecursive();
     // // self.function_declarations.deinitRecursive();
@@ -92,6 +114,7 @@ pub fn setFunctionDeclaration(
     name: []const u8,
     linkage: FunctionDeclaration.Linkage,
     signature: Signature.Ref,
+    ty: Ty,
 ) !void {
     self.decls.getPtr(ref).* = .{ .func = try FunctionDeclaration.init(
         self.arena.allocator(),
@@ -99,22 +122,34 @@ pub fn setFunctionDeclaration(
         name,
         linkage,
         signature,
+        ty,
     ) };
 }
-pub fn makeDefinition(self: *Self) !Definition.Ref {
+
+pub fn makeDefinition(self: *Self, is_comptime: bool) !Definition.Ref {
     return try self.definitions.append(self.arena.allocator(), .{
-        .dfg = try Dfg.init(self.arena.allocator()),
+        .dfg = try self.makeDfg(is_comptime),
     });
 }
+pub fn setDefinition(self: *Self, ref: Definition.Ref, dfg: Dfg) !void {
+    self.definitions.getPtr(ref).* = .{
+        .dfg = dfg,
+    };
+}
+pub fn makeDfg(self: *Self, is_comptime: bool) !Dfg {
+    return try Dfg.init(self.allocator, is_comptime);
+}
 
-pub fn declareGlobalDeclaration(
+pub fn declareGlobal(
     self: *Self,
+    parent_namespace: Namespace.Ref,
     namespace: Namespace.Ref,
     name: []const u8,
     value: TypedValue,
 ) !Decl.Ref {
     return try self.decls.append(.{ .global = try GlobalDeclaration.init(
         self.arena.allocator(),
+        parent_namespace,
         namespace,
         name,
         value,
@@ -123,19 +158,61 @@ pub fn declareGlobalDeclaration(
 pub fn setGlobalDeclaration(
     self: *Self,
     ref: Decl.Ref,
+    parent_namespace: Namespace.Ref,
     namespace: Namespace.Ref,
     name: []const u8,
-    value: TypedValue,
+    ty: Ty,
 ) !void {
     self.decls.getPtr(ref).* = .{ .global = try GlobalDeclaration.init(
         self.arena.allocator(),
+        parent_namespace,
         namespace,
         name,
-        value,
+        ty,
     ) };
 }
-pub fn declareTy(self: *Self, ty: Ty.TyData) !Ty {
-    const ref = try self.tys.append(self.arena.allocator(), ty);
+fn dupeTyData(self: *Self, ty_data: Ty.TyData) !Ty.TyData {
+    return switch (ty_data) {
+        .@"struct" => |_struct_ty| {
+            const struct_ty: Ty.TyData.Struct = _struct_ty;
+            const allocator = self.arena.allocator();
+
+            const fields = try allocator.dupe(Ty.TyData.Struct.Field, struct_ty.fields);
+            for (fields) |*field| {
+                field.name = try allocator.dupe(u8, field.name);
+            }
+            return .{
+                .@"struct" = .{
+                    .fields = fields,
+                    .associated_ns = struct_ty.associated_ns,
+                    .sealed = struct_ty.sealed,
+                },
+            };
+        },
+        // .property_of => |property_of| {
+        //     const allocator = self.arena.allocator();
+        //     return .{
+        //         .property_of = .{
+        //             .ty = property_of.ty,
+        //             .name = try allocator.dupe(u8, property_of.name),
+        //         },
+        //     };
+        // },
+        else => ty_data,
+    };
+}
+pub fn declareTy(self: *Self, ty_data: Ty.TyData) !Ty {
+    const hash = Ty.hashTyData(ty_data, self);
+    const gop = try self.hashed_ty_map.getOrPut(self.arena.allocator(), hash);
+    if (gop.found_existing) {
+        return .{ .ref = gop.value_ptr.* };
+    }
+
+    const ref = try self.tys.append(
+        self.arena.allocator(),
+        try self.dupeTyData(ty_data),
+    );
+    gop.value_ptr.* = ref;
     return .{ .ref = ref };
 }
 pub fn getTy(self: *Self, ref: anytype) *Ty.TyData {
@@ -163,14 +240,25 @@ pub fn modString(self: *Self, str: []const u8) []const u8 {
     return self.arena.allocator.dupe(u8, str);
 }
 
-pub fn getSignature(self: *Self, ref: Signature.Ref) Signature {
-    return self.signatures.get(ref);
+pub fn getSignature(self: *Self, ref: Signature.Ref) *Signature {
+    return self.signatures.getPtr(ref);
 }
 pub fn getFunctionDeclaration(self: *Self, ref: Decl.Ref) *FunctionDeclaration {
     return &self.decls.getPtr(ref).func;
 }
 pub fn getDeclaration(self: *Self, ref: Decl.Ref) *Decl {
     return self.decls.getPtr(ref);
+}
+pub fn getDefinitionByDeclRef(self: *const Self, ref: Decl.Ref) *Definition {
+    const decl_ref = self.definition_map.get(ref) orelse std.debug.panic("Definition not found: {}", .{ref});
+    return self.definitions.getPtr(decl_ref);
+}
+pub fn maybeGetDefinitionByDeclRef(self: *const Self, ref: Decl.Ref) ?*Definition {
+    const maybe_def = self.definition_map.get(ref);
+    if (maybe_def) |def_ref| {
+        return self.definitions.getPtr(def_ref);
+    }
+    return null;
 }
 pub fn getFunction(self: *Self, ref: Decl.Ref) Function {
     return self.functions.get(ref) orelse debug.assertPrint("Function not found: {}", .{ref});
@@ -184,26 +272,49 @@ pub fn format(
 ) !void {
     try writer.print(";; Module\n\n", .{});
     var func_decl_iter = self.decls.iter();
-
     var i: usize = 0;
+
     while (func_decl_iter.next()) |entry| {
         try writer.print("\n", .{});
         i += 1;
         const decl = entry.item;
         const ref = entry.ref;
-
+        {
+            const def = self.getDefinitionByDeclRef(ref);
+            if (def.dfg.dependencies.count() > 0) {
+                var deps_iter = def.dfg.dependencies.iterator();
+                try writer.print("[deps: ", .{});
+                var first = true;
+                while (deps_iter.next()) |dep_entry| {
+                    const decl_ref = dep_entry.key_ptr.*;
+                    if (!first) {
+                        try writer.print(", ", .{});
+                    }
+                    first = false;
+                    try writer.print("{}", .{decl_ref});
+                }
+                try writer.print("]\n", .{});
+            }
+        }
         switch (decl.*) {
             .func => |*func_decl| {
                 var sig = self.signatures.getPtr(func_decl.signature);
                 try writer.print("{}: function {s} {}\n", .{ ref, func_decl.name, sig.formatable(@constCast(&self)) });
-
                 const def_ref = self.definition_map.get(ref) orelse continue;
-
                 var def = self.definitions.getPtr(def_ref);
                 try writer.print("{}", .{def.display(&self)});
             },
             .global => |*global| {
-                try writer.print("{}: {s} = {}\n", .{ ref, global.name, global.value.display(&self) });
+                const def = self.getDefinitionByDeclRef(ref);
+
+                try writer.print("{}: {s}", .{ ref, global.name });
+                if (def.dfg.result) |result| {
+                    try writer.print(" = {}", .{result.display(&self)});
+                } else {
+                    try writer.print(" {}", .{global.ty.display(&self)});
+                }
+                // try writer.print("{}", .{def.display(&self)});
+                try writer.print("\n", .{});
             },
         }
     }

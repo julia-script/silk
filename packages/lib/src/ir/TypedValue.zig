@@ -5,44 +5,37 @@ const Ty = Module.Ty;
 
 ty: Ty,
 value: Value,
-is_comptime: bool,
 
 const Self = @This();
 pub const Ref = Module.utils.MakeRef(.tyv, Self);
 pub const Void = Self{
     .ty = .void,
     .value = .void,
-    .is_comptime = true,
 };
-pub fn init(ty: Ty, value: Value, is_comptime: bool) Self {
+pub fn init(ty: Ty, value: Value) Self {
     return .{
         .ty = ty,
         .value = value,
-        .is_comptime = is_comptime,
     };
 }
-pub fn Undefined(ty: Ty, is_comptime: bool) Self {
+pub fn Undefined(ty: Ty) Self {
     return .{
         .ty = ty,
         .value = .undefined,
-        .is_comptime = is_comptime,
     };
 }
-pub fn Imm(ty: Ty, value: anytype, is_comptime: bool) Self {
+pub fn Imm(ty: Ty, value: anytype) Self {
     switch (ty) {
         .i8, .i16, .i32, .i64, .int, .u8, .u16, .u32, .u64, .float, .f32, .f64, .bool => {
             return .{
                 .ty = ty,
                 .value = Value.fromBytes(ty, value),
-                .is_comptime = is_comptime,
             };
         },
         .type => {
             return .{
                 .ty = .type,
                 .value = .{ .ty = ty },
-                // type values are always comptime
-                .is_comptime = true,
             };
         },
 
@@ -53,35 +46,30 @@ pub fn Type(ty: Ty) Self {
     return .{
         .ty = .type,
         .value = .{ .ty = ty },
-        .is_comptime = true,
     };
 }
-pub fn Runtime(ty: Ty, is_comptime: bool) Self {
+pub fn Runtime(ty: Ty) Self {
     return .{
         .ty = ty,
         .value = .{ .runtime = {} },
-        .is_comptime = is_comptime,
     };
 }
-pub fn Local(ty: Ty, local: Module.Dfg.Local.Ref, is_comptime: bool) Self {
+pub fn Local(ty: Ty, local: Module.Dfg.Local.Ref) Self {
     return .{
         .ty = ty,
         .value = .{ .local = local },
-        .is_comptime = is_comptime,
     };
 }
-pub fn Global(ty: Ty, global: Module.Decl.Ref, is_comptime: bool) Self {
+pub fn Global(ty: Ty, global: Module.Decl.Ref) Self {
     return .{
         .ty = ty,
         .value = .{ .global = global },
-        .is_comptime = is_comptime,
     };
 }
-pub fn Inst(ty: Ty, inst: Module.InstData.Ref, is_comptime: bool) Self {
+pub fn Inst(ty: Ty, inst: Module.InstData.Ref) Self {
     return .{
         .ty = ty,
         .value = .{ .inst = inst },
-        .is_comptime = is_comptime,
     };
 }
 
@@ -91,8 +79,20 @@ pub fn isRuntime(self: Self) bool {
         else => false,
     };
 }
+pub fn isResolved(self: Self) bool {
+    return switch (self.value) {
+        .global, .local, .inst => false,
+        else => true,
+    };
+}
 pub fn isType(self: Self) bool {
     return self.ty == .type;
+}
+pub fn isBytes(self: Self) bool {
+    return switch (self.value) {
+        .bytes => true,
+        else => false,
+    };
 }
 
 pub fn toTypeTyv(self: Self, module: *const Module) Self {
@@ -126,7 +126,7 @@ pub fn getTypeAsValue(self: Self, module: *const Module) Self {
         .type => {
             switch (self.value) {
                 .ty => |ty| {
-                    return Runtime(ty, false);
+                    return Runtime(ty);
                 },
                 .tyty => |ty| {
                     return Type(ty);
@@ -181,11 +181,7 @@ fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerr
             try writer.print("{}", .{self.ty.display(module)});
         },
         .runtime => {
-            if (self.is_comptime) {
-                try writer.print("{}{{ comptime }}", .{self.ty.display(module)});
-            } else {
-                try writer.print("{}{{ runtime }}", .{self.ty.display(module)});
-            }
+            try writer.print("{}{{ runtime }}", .{self.ty.display(module)});
         },
         .inst => |ref| {
             try writer.print("{}{{ {} }}", .{ self.ty.display(module), ref });
@@ -214,6 +210,7 @@ fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerr
         },
     }
 }
+
 pub fn display(self: Self, module: *const Module) Module.utils.MakeDisplay(Self, displayFn) {
     return .{ .value = self, .module = module };
 }

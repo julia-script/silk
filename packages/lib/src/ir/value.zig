@@ -95,10 +95,25 @@ pub const Value = union(enum) {
             else => std.debug.panic("type {} can't be stored as Value.bytes", .{ty}),
         }
     }
-    fn readBytesAsT(self: Value, T: type) T {
-        return std.mem.bytesToValue(T, self.bytes);
-    }
+    // fn readBytesAsT(self: Value, T: type) T {
+    //     return std.mem.bytesToValue(T, self.bytes);
+    // }
     pub fn readAs(self: Value, T: type) T {
         return std.mem.bytesToValue(T, &self.bytes);
+    }
+    pub fn acceptLocal(self: Value) ?Dfg.Local.Ref {
+        return switch (self) {
+            .local => self.local,
+            else => null,
+        };
+    }
+    pub fn isTag(self: Value, tag: std.meta.Tag(Value)) bool {
+        return std.meta.activeTag(self) == tag;
+    }
+    pub fn acceptGlobal(self: Value) ?Module.Decl.Ref {
+        return switch (self) {
+            .global => self.global,
+            else => null,
+        };
     }
 };

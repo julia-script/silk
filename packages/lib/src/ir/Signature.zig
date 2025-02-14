@@ -48,10 +48,10 @@ const Formatable = struct {
                 try writer.writeAll("comp ");
             }
 
-            try writer.print("{}: {s}", .{ Module.Dfg.Local.Ref.from(@intCast(i)), param.ty });
+            try writer.print("{}: {}", .{ Module.Dfg.Local.Ref.from(@intCast(i)), param.ty.display(self.module) });
         }
         try writer.writeAll(")");
-        try writer.print(" -> {s}", .{self.sig.ret});
+        try writer.print(" -> {}", .{self.sig.ret.display(self.module)});
     }
 };
 pub fn formatable(self: *Self, module: *Module) Formatable {

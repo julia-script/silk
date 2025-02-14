@@ -32,7 +32,9 @@ pub const Scope = union(enum) {
         body_node: ?Ast.Node.Index,
         visibility: Visibility,
         is_exported: bool,
+        is_comptime: bool,
     ) !Scope {
+        const def_ref = try mod.makeDefinition(is_comptime);
         return Scope{
             .fn_decl = .{
                 .allocator = allocator,
@@ -43,17 +45,18 @@ pub const Scope = union(enum) {
                 .visibility = visibility,
                 .is_exported = is_exported,
                 .params = std.StringArrayHashMap(Symbol).init(allocator),
-                .definition_builder = try Module.DefinitionBuilder.init(mod, ref),
+                .definition_builder = try Module.DefinitionBuilder.init(mod, def_ref, &mod.definitions.getPtr(def_ref).dfg, is_comptime),
             },
         };
     }
-    pub fn initBlock(allocator: Allocator, parent: *Scope, definition_builder: *Module.DefinitionBuilder) Scope {
+    pub fn initBlock(allocator: Allocator, parent: *Scope, definition_builder: *Module.DefinitionBuilder, is_comptime: bool) Scope {
         return Scope{
             .block = .{
                 .allocator = allocator,
                 .parent = parent,
                 .symbols_table = std.StringArrayHashMap(Symbol).init(allocator),
                 .definition_builder = definition_builder,
+                .is_comptime = is_comptime,
             },
         };
     }
@@ -69,11 +72,13 @@ pub const Scope = union(enum) {
         is_mutable: bool,
         visibility: Visibility,
         is_exported: bool,
+        is_comptime: bool,
     ) !Scope {
+        const def_ref = try mod.makeDefinition(is_comptime);
         _ = allocator; // autofix
         return Scope{
             .global_decl = .{
-                .definition_builder = try Module.DefinitionBuilder.init(mod, ref),
+                .definition_builder = try Module.DefinitionBuilder.init(mod, def_ref, &mod.definitions.getPtr(def_ref).dfg, is_comptime),
                 .parent = parent,
                 .ref = ref,
                 .name = name,
@@ -137,6 +142,14 @@ pub const Scope = union(enum) {
             return null;
         };
     }
+    pub fn getBuilder(self: *Scope) ?*Module.DefinitionBuilder {
+        return switch (self.*) {
+            .namespace => null,
+            .fn_decl => |*fn_decl| &fn_decl.definition_builder,
+            .block => |*block| block.definition_builder,
+            .global_decl => null,
+        };
+    }
 };
 
 const NamespaceScope = struct {
@@ -145,6 +158,12 @@ const NamespaceScope = struct {
     ref: Module.Namespace.Ref,
     member_scopes: std.StringArrayHashMap(Scope),
     symbols_table: SymbolsTable,
+    pub fn putDecl(self: *NamespaceScope, mod: *Module, name: []const u8, ref: Module.Decl.Ref, scope: Scope) !void {
+        try self.member_scopes.put(name, scope);
+        try self.symbols_table.put(name, .{ .global = ref });
+        var ns = mod.namespaces.getPtr(self.ref);
+        try ns.declarations.insert(mod.arena.allocator(), ref);
+    }
 };
 
 const FunctionDeclarationScope = struct {
@@ -189,6 +208,7 @@ const BlockScope = struct {
     parent: *Scope,
     symbols_table: SymbolsTable,
     definition_builder: *Module.DefinitionBuilder,
+    is_comptime: bool,
 };
 const ExpressionScope = struct {
     parent: *Scope,

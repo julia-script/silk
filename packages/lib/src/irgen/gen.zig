@@ -58,7 +58,8 @@ pub fn gen(allocator: Allocator, ast: *Ast) !Module {
 }
 
 pub fn parseRoot(self: *Self) !void {
-    var scope = try self.collectNamespaceSymbols(null, 0);
+    const namespace = try self.mod.declareNamespace("root");
+    var scope = try self.collectNamespaceSymbols(namespace, null, 0);
     defer scope.deinit();
     const scope_ptr = &scope;
     try self.parseStructDecl(scope_ptr);
@@ -127,6 +128,7 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
 
     if (self.ast.nodeIf(index, .fn_decl)) |fn_node| {
         const ref = try self.mod.decls.reserve(self.mod.arena.allocator());
+
         var fn_scope = try Scope.initFunctionDeclaration(
             self.allocator,
             self.mod,
@@ -136,21 +138,16 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
             if (fn_node.data.fn_decl.body > 0) fn_node.data.fn_decl.body else null,
             visibility,
             is_exported,
+            false,
         );
         try self.initStatus(ref, &fn_scope);
 
         const proto_data = self.ast.getNode(fn_node.data.fn_decl.proto);
         const name = self.ast.getNodeSlice(proto_data.data.fn_proto.name);
-        try scope.namespace.symbols_table.put(name, .{ .global = ref });
-        try scope.namespace.member_scopes.put(name, fn_scope);
+        try scope.namespace.putDecl(self.mod, name, ref, fn_scope);
         return;
-
-        // return try self.parseFnDecl(scope, index, visibility, is_exported);
     }
 
-    // if (self.ast.nodeIs(index, .var_decl) or self.ast.nodeIs(index, .const_decl)) {
-    //     std.debug.panic("var_decl or const_decl not implemented", .{});
-    // }
     const data = switch (node.data) {
         .type_decl, .var_decl, .const_decl => |d| d,
         else => {
@@ -160,20 +157,6 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
 
     const name = self.ast.getNodeSlice(data.name);
     const ref = try self.mod.decls.reserve(self.mod.arena.allocator());
-    try scope.namespace.symbols_table.put(name, .{ .global = ref });
-    // try scope.namespace.member_scopes.put(name, .{
-    //     .global_decl = .{
-    //         .parent = scope,
-    //         .ref = ref,
-    //         .name = name,
-    //         .ty_node = data.type,
-    //         .value_node = data.value,
-    //         .is_type_decl = self.ast.nodeIs(index, .type_decl),
-    //         .is_mutable = self.ast.nodeIs(index, .var_decl),
-    //         .visibility = visibility,
-    //         .is_exported = is_exported,
-    //     },
-    // });
     var global_scope = try Scope.initGlobalDeclaration(
         self.allocator,
         self.mod,
@@ -186,11 +169,10 @@ pub fn collectDecl(self: *Self, scope: *Scope, node_index: Ast.Node.Index) !void
         self.ast.nodeIs(index, .var_decl),
         visibility,
         is_exported,
+        false,
     );
-    try scope.namespace.member_scopes.put(
-        name,
-        global_scope,
-    );
+    try scope.namespace.putDecl(self.mod, name, ref, global_scope);
+
     try self.initStatus(ref, &global_scope);
 }
 pub fn parseDecl(self: *Self, scope: *Scope) !void {
@@ -222,12 +204,10 @@ pub fn parseGlobalDecl(
         try self.mod.setGlobalDeclaration(
             ref,
             scope.global_decl.parent.namespace.ref,
+            try self.mod.declareNamespace(name),
             name,
-            Module.TypedValue.init(
-                .type,
-                .{ .global = ref },
-                true,
-            ),
+
+            .type,
         );
     }
 }
@@ -237,7 +217,6 @@ pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
     var signature = Module.Signature.init();
 
     const param_nodes = self.ast.getList(proto_data.data.fn_proto.params_list);
-    // scope.fn_decl.definition_builder = try Module.DefinitionBuilder.init(self.allocator, self.mod, .{ .global_body = {} });
     for (param_nodes) |param_node| {
         const fn_param = self.ast.getNode(param_node).data.fn_param;
 
@@ -261,7 +240,7 @@ pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
 
     const signature_ref = try self.mod.signatures.append(self.mod.arena.allocator(), signature);
 
-    const fn_decl_ref = try self.mod.setFunctionDeclaration(
+    try self.mod.setFunctionDeclaration(
         scope.fn_decl.ref,
         scope.fn_decl.parent.namespace.ref,
         name,
@@ -270,8 +249,8 @@ pub fn parseFnDecl(self: *Self, scope: *Scope) !void {
             .private => .Local,
         },
         signature_ref,
+        try self.mod.declareTy(.{ .func = .{ .signature = signature_ref, .declaration = scope.fn_decl.ref } }),
     );
-    _ = fn_decl_ref; // autofix
 }
 pub fn parseTypeExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) !Module.Ty {
     const typeValue = try self.parseExpression(scope, builder, node_index);
@@ -316,9 +295,6 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             const ty = try self.parseTypeExpression(scope, builder, ty_array.type);
 
             const size = try self.parseExpression(scope, builder, ty_array.size_expr);
-            // const slice = self.ast.getNodeSlice();
-            // const len = try std.fmt.parseInt(usize, slice, 10);
-            // return Module.Value.ImmTy(.{ .array = .{ .type = ty, .size = size } });
             const array_ty = try self.mod.declareTy(.{ .array = .{ .type = ty, .size = size } });
             return Module.TypedValue.Type(array_ty);
         },
@@ -326,10 +302,10 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             const slice = self.ast.getTokenSlice(number_literal.token);
             if (std.mem.containsAtLeast(u8, slice, 1, ".")) {
                 const value = try std.fmt.parseFloat(f64, slice);
-                return Module.TypedValue.Imm(.float, value, false);
+                return Module.TypedValue.Imm(.float, value);
             } else {
                 const value = try std.fmt.parseInt(i64, slice, 10);
-                return Module.TypedValue.Imm(.int, value, false);
+                return Module.TypedValue.Imm(.int, value);
             }
         },
         // .comment_line => {
@@ -347,12 +323,12 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             const ty = left.ty;
 
             switch (node.data) {
-                .gt => return try builder.gt(ty, left, right, false),
-                .ge => return try builder.ge(ty, left, right, false),
-                .lt => return try builder.lt(ty, left, right, false),
-                .le => return try builder.le(ty, left, right, false),
-                .eq => return try builder.eq(ty, left, right, false),
-                .ne => return try builder.ne(ty, left, right, false),
+                .gt => return try builder.gt(ty, left, right),
+                .ge => return try builder.ge(ty, left, right),
+                .lt => return try builder.lt(ty, left, right),
+                .le => return try builder.le(ty, left, right),
+                .eq => return try builder.eq(ty, left, right),
+                .ne => return try builder.ne(ty, left, right),
                 else => {
                     unreachable;
                 },
@@ -361,15 +337,17 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
         .add,
         .sub,
         .mul,
+        .div,
         => |bin_expr| {
             const left = try self.parseExpression(scope, builder, bin_expr.lhs);
             const right = try self.parseExpression(scope, builder, bin_expr.rhs);
             const ty = left.ty;
 
             switch (node.data) {
-                .add => return try builder.add(ty, left, right, false),
-                .sub => return try builder.sub(ty, left, right, false),
-                .mul => return try builder.mul(ty, left, right, false),
+                .add => return try builder.add(ty, left, right),
+                .sub => return try builder.sub(ty, left, right),
+                .mul => return try builder.mul(ty, left, right),
+                .div => return try builder.div(ty, left, right),
                 else => {
                     unreachable;
                 },
@@ -382,17 +360,7 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
             };
             switch (symbol) {
                 .global => |global| {
-                    const value = try scope.block.definition_builder.useGlobal(self.mod, global, false);
-                    return value;
-                    // switch (value.value) {
-                    //     .global => |ref| {
-                    //         std.debug.print("ref: {}\n", .{ref});
-                    //         return value;
-                    //     },
-                    //     else => {
-                    //         return value;
-                    //     },
-                    // }
+                    return try builder.useGlobal(global);
                 },
                 .local => |local| {
                     return scope.block.definition_builder.useLocal(local);
@@ -422,7 +390,7 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
                 const value = try self.parseExpression(scope, builder, item);
                 try items.append(value);
             }
-            const array = try builder.initArray(ty, items.items, false);
+            const array = try builder.initArray(ty, items.items);
             return array;
         },
         .type_init => |type_init| {
@@ -439,15 +407,16 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
                 try keys.append(name);
                 try values.append(value);
             }
-            const init_struct = try builder.initStruct(ty, keys.items, values.items, false);
+            const init_struct = try builder.initStruct(ty, keys.items, values.items);
             return init_struct;
         },
 
         .struct_decl => |struct_decl| {
             const members = self.ast.getList(struct_decl.members_list);
-            var allocator = self.mod.arena.allocator();
+            var allocator = self.arena.allocator();
 
             var fields = std.ArrayList(Module.Ty.TyData.Struct.Field).init(allocator);
+            defer fields.deinit();
             var has_decl = false;
 
             // defer fields.deinit();
@@ -468,33 +437,118 @@ pub fn parseExpression(self: *Self, scope: *Scope, builder: *Module.DefinitionBu
                     .source_order_index = @intCast(i),
                 });
             }
+            // const maybe_ns_ref = if (has_decl) try self.mod.declareNamespace("struct") else null;
+            const maybe_ns_ref = switch (scope.*) {
+                .global_decl => |global_decl| maybe_ns_ref: {
+                    const decl = self.mod.getDeclaration(global_decl.ref);
+                    break :maybe_ns_ref switch (decl.*) {
+                        .global => |global| global.namespace,
+                        else => null,
+                    };
+                },
+                else => null,
+            };
             const struct_ty = try self.mod.declareTy(.{
                 .@"struct" = .{
-                    .fields = try fields.toOwnedSlice(),
+                    .fields = fields.items,
                     .sealed = false,
+                    .associated_ns = maybe_ns_ref,
                 },
             });
-            if (has_decl) {
-                var ns_scope = try self.collectNamespaceSymbols(scope, node_index);
-                self.mod.namespaces.getPtr(ns_scope.namespace.ref).ty = struct_ty;
+            std.debug.print("struct_ty: {s} ns: {?}\n", .{ struct_ty.display(self.mod), maybe_ns_ref });
+            if (maybe_ns_ref) |ns_ref| {
+                var ns_scope = try self.collectNamespaceSymbols(ns_ref, scope, node_index);
+                self.mod.namespaces.getPtr(ns_ref).ty = struct_ty;
                 defer ns_scope.deinit();
                 const ns_scope_ptr = &ns_scope;
                 try self.parseStructDecl(ns_scope_ptr);
                 try self.parseStructDef(ns_scope_ptr);
+            } else {
+                std.debug.panic("No namespace found for struct", .{});
             }
             return Module.TypedValue.Type(struct_ty);
         },
+        .prop_access => |property_access| {
+            const lhs = try self.parseExpression(scope, builder, property_access.lhs);
+
+            // const rhs = try self.parseExpression(scope, builder, property_access.rhs);
+            const name = self.ast.getNodeSlice(property_access.rhs);
+            // const field = lhs.ty.getFieldByName(self.mod, name) orelse std.debug.panic("can't get field '{s}' of {}", .{ name, lhs.display(self.mod) });
+            std.debug.print("lhs: {} name: {s}\n", .{ lhs.display(self.mod), name });
+            // try self.maybeResolveTypeIfGlobal(lhs.ty);
+            const prop_ty = blk: {
+                const field = lhs.ty.getFieldByName(self.mod, name) orelse break :blk .unresolved;
+                // try self.mod.declareTy(.{
+                //     .property_of = .{ .ty = lhs.ty, .name = name },
+                // });
+                break :blk field.ty;
+            };
+            // const value = try self.parseExpression(scope, builder, property_access.value);
+            return try builder.propertyByName(lhs, name, prop_ty);
+        },
+        .comp_block => |comp_block| {
+            const statements = self.ast.getList(comp_block.list);
+            // const node = self.ast.getNode(node_index).data.comp_block;
+            // const statements = self.ast.getList(comp_block.list);
+            var block_scope = Scope.initBlock(self.allocator, scope, builder, true);
+            defer block_scope.deinit();
+            const block_call = try builder.makeBlockCall();
+            const dfg_block = try builder.makeBlock(block_call, true);
+            if (comp_block.is_inline) {
+                const expr = try self.parseExpression(&block_scope, builder, statements[0]);
+                _ = try builder.breakTo(block_call, expr);
+            } else {
+                for (statements) |statement| {
+                    try self.parseStatement(&block_scope, builder, statement);
+                }
+            }
+            const finally_block = try builder.makeBlock(block_call, null);
+            try builder.setBlockCallTarget(block_call, dfg_block, finally_block);
+
+            return builder.dfg.inst_values.get(block_call) orelse Module.TypedValue.Void;
+            // return Module.TypedValue.Inst(.unresolved, local.?, true);
+        },
+        .fn_call => |fn_call| {
+            const callee = try self.parseExpression(scope, builder, fn_call.callee);
+            std.debug.print("callee: {}\n", .{callee});
+            const args = self.ast.getList(fn_call.args_list);
+            var args_list = std.ArrayList(Module.TypedValue).init(self.allocator);
+            defer args_list.deinit();
+            for (args) |arg| {
+                const value = try self.parseExpression(scope, builder, arg);
+                try args_list.append(value);
+            }
+            return try builder.call(callee, args_list.items);
+        },
+
         else => {
             std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
         },
     }
 }
-pub inline fn collectNamespaceSymbols(self: *Self, parent_scope: ?*Scope, node_index: Ast.Node.Index) !Scope {
+fn maybeResolveTypeIfGlobal(self: *Self, ty: Module.Ty) !void {
+    switch (ty) {
+        .global => |ref| {
+            try self.maybeResolveDefinition(ref);
+        },
+        else => {},
+    }
+}
+
+fn maybeResolveDefinition(self: *Self, ref: Module.Decl.Ref) !void {
+    const decl_status = self.decl_status.get(ref) orelse return;
+    switch (decl_status.def_status) {
+        .idle => {
+            try self.parseDefinition(decl_status.scope);
+        },
+        else => {},
+    }
+}
+pub inline fn collectNamespaceSymbols(self: *Self, ns_ref: Module.Namespace.Ref, parent_scope: ?*Scope, node_index: Ast.Node.Index) !Scope {
     const node = self.ast.getNode(node_index);
     const data = node.data.struct_decl;
     const members = self.ast.getList(data.members_list);
-    const namespace = try self.mod.declareNamespace("struct");
-    var scope = Scope.initNamespace(self.allocator, parent_scope, namespace);
+    var scope = Scope.initNamespace(self.allocator, parent_scope, ns_ref);
 
     // Collect phase creates the scopes for each member and collect their symbols, but doesn't parse them.
     // the reason being that we want to be able to hoist declarations up in case they depend on each other
@@ -510,6 +564,7 @@ pub fn parseStructDecl(self: *Self, scope: *Scope) !void {
     while (iter.next()) |entry| {
         const member_scope = entry.value_ptr;
         try self.parseDecl(member_scope);
+
         // switch (member_scope.*) {
         //     .fn_decl => {
         //         try self.parseFnDecl(member_scope);
@@ -564,14 +619,13 @@ pub fn parseFnDef(self: *Self, scope: *Scope) !void {
     const fn_decl = self.mod.getFunctionDeclaration(scope.fn_decl.ref);
     const signature = self.mod.getSignature(fn_decl.signature);
     for (signature.params.items, 0..) |param, i| {
-        var dfg = scope.fn_decl.definition_builder.getDfg();
-        const local = try dfg.pushLocal(param.ty, true, param.is_comptime);
+        const local = try scope.fn_decl.definition_builder.declareLocal(param.ty, true, false);
         const param_name = scope.fn_decl.getParamName(@intCast(i), self.ast);
         try scope.fn_decl.params.put(param_name, .{ .local = local });
     }
     try self.parseEntrypoint(scope, &scope.fn_decl.definition_builder, body_node_index);
 
-    _ = try scope.fn_decl.definition_builder.commit(scope.fn_decl.ref);
+    _ = try scope.fn_decl.definition_builder.linkToDecl(scope.fn_decl.ref);
 }
 
 pub fn parseGlobalDef(self: *Self, scope: *Scope) !void {
@@ -584,16 +638,9 @@ pub fn parseGlobalDef(self: *Self, scope: *Scope) !void {
         &scope.global_decl.definition_builder,
         scope.global_decl.value_node,
     );
-    std.debug.print("value node {} value: {}\n", .{ scope.global_decl.value_node, value.display(self.mod) });
-    self.mod.getDeclaration(scope.global_decl.ref).global.value = value;
-    // try self.mod.setGlobalDeclaration(
-    //     scope.global_decl.ref,
-    //     scope.global_decl.parent.namespace.ref,
-    //     scope.global_decl.name,
-    //     value,
-    // );
 
-    _ = try scope.global_decl.definition_builder.commit(scope.global_decl.ref);
+    _ = try scope.global_decl.definition_builder.linkToDecl(scope.global_decl.ref);
+    scope.global_decl.definition_builder.getDfg().result = value;
 }
 
 pub fn parseEntrypoint(self: *Self, parent_scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) !void {
@@ -604,22 +651,13 @@ pub fn parseEntrypoint(self: *Self, parent_scope: *Scope, builder: *Module.Defin
             std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
         },
     };
-    var scope = Scope.initBlock(self.allocator, parent_scope, builder);
+    var scope = Scope.initBlock(self.allocator, parent_scope, builder, false);
     defer scope.deinit();
 
     const statements = self.ast.getList(block.list);
     for (statements) |statement| {
         try self.parseStatement(&scope, builder, statement);
     }
-    // switch (node.data) {
-    //     .block => {
-    //         const block_node = node.data.block;
-    //         _ = block_node; // autofix
-    //     },
-    //     else => {
-    //         std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
-    //     },
-    // }
 }
 
 pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBuilder, node_index: Ast.Node.Index) !void {
@@ -648,17 +686,17 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
                 }
             }
 
-            const local = try builder.declareLocal(ty, false);
+            const local = try builder.declareLocal(ty, false, false);
             // try scope.symbols_table.put(name, .{ .local = local });
             // if (ty)
 
             if (maybeValue) |value| {
-                if (value.ty.eql(ty)) {
-                    try builder.store(local, value);
-                } else {
-                    const casted = try builder.cast(ty, value, false);
-                    try builder.store(local, casted);
-                }
+                // if (value.ty.eql(ty)) {
+                try builder.store(local, value);
+                // } else {
+                //     const casted = try builder.cast(ty, value, false);
+                //     try builder.store(local, casted);
+                // }
             }
             try scope.block.symbols_table.put(name, .{ .local = local });
         },
@@ -681,33 +719,33 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
         .if_expr => |if_expr| {
             const condition = try self.parseExpression(scope, builder, if_expr.condition);
             const branch = try builder.makeBranch(condition);
-            const then_block = try builder.makeBlock(branch);
+            const then_block = try builder.makeBlock(branch, null);
             _ = try self.parseExpression(scope, builder, if_expr.then_branch);
             // const then_branch = try self.parseExpression(scope, builder, if_expr.then_branch);
             // const then_branch = try self.parseExpression(scope, builder, if_expr.then_branch);
             const else_block = blk: {
                 if (if_expr.else_branch == 0) break :blk null;
-                const block = try builder.makeBlock(branch);
+                const block = try builder.makeBlock(branch, null);
                 _ = try self.parseExpression(scope, builder, if_expr.else_branch);
                 break :blk block;
             };
-            const finally_block = try builder.makeBlock(branch);
+            const finally_block = try builder.makeBlock(branch, null);
             try builder.setBranchTarget(branch, then_block, else_block, finally_block);
         },
         .while_loop => |while_loop| {
             const loop_expr = try builder.makeLoop();
-            const loop_body = try builder.makeBlock(loop_expr);
+            const loop_body = try builder.makeBlock(loop_expr, null);
             const condition = try self.parseExpression(scope, builder, while_loop.condition);
 
             const branch = try builder.makeBranch(condition);
-            const branch_body = try builder.makeBlock(branch);
+            const branch_body = try builder.makeBlock(branch, null);
 
             _ = try self.parseExpression(scope, builder, while_loop.body);
-            const break_inst = try builder.breakTo(loop_expr, null, false);
+            const break_inst = try builder.breakTo(loop_expr, null);
             try builder.setBranchTarget(branch, branch_body, null, null);
             _ = break_inst; // autofix
 
-            const finally_block = try builder.makeBlock(loop_expr);
+            const finally_block = try builder.makeBlock(loop_expr, null);
             try builder.setLoopTarget(loop_expr, loop_body, finally_block);
             // return Module.Value.Imm(.void, .void);
         },
@@ -716,38 +754,41 @@ pub fn parseStatement(self: *Self, scope: *Scope, builder: *Module.DefinitionBui
             const value = if (ret_expr.node > 0)
                 try self.parseExpression(scope, builder, ret_expr.node)
             else
-                Module.TypedValue.Imm(.void, .void, false);
-            const ty = value.ty;
-            const ret_ty = blk: {
-                var s = scope;
-                while (std.meta.activeTag(s.*) != .fn_decl) {
-                    s = s.getParent() orelse std.debug.panic("No function scope found", .{});
-                }
-                const func_decl = self.mod.getFunctionDeclaration(s.fn_decl.ref);
-                const signature = self.mod.getSignature(func_decl.signature);
-                break :blk signature.ret;
-            };
-            if (!ty.eql(ret_ty)) {
-                const casted = try builder.cast(ret_ty, value, false);
-                try builder.ret(casted, false);
-            } else {
-                try builder.ret(value, false);
-            }
+                Module.TypedValue.Void;
+
+            // const ty = value.ty;
+            // _ = ty; // autofix
+            // const ret_ty = blk: {
+            //     var s = scope;
+            //     while (std.meta.activeTag(s.*) != .fn_decl) {
+            //         s = s.getParent() orelse std.debug.panic("No function scope found", .{});
+            //     }
+            //     const func_decl = self.mod.getFunctionDeclaration(s.fn_decl.ref);
+            //     const signature = self.mod.getSignature(func_decl.signature);
+            //     break :blk signature.ret;
+            // };
+            // _ = ret_ty; // autofix
+            // if (!ty.eql(ret_ty)) {
+            //     const casted = try builder.cast(ret_ty, value, false);
+            //     try builder.ret(casted, false);
+            // } else {
+            try builder.ret(value);
+            // }
         },
-        .fn_call => |fn_call| {
-            const callee = try self.parseExpression(scope, builder, fn_call.callee);
-            std.debug.print("callee: {}\n", .{callee});
-            const args = self.ast.getList(fn_call.args_list);
-            var args_list = std.ArrayList(Module.TypedValue).init(self.allocator);
-            defer args_list.deinit();
-            for (args) |arg| {
-                const value = try self.parseExpression(scope, builder, arg);
-                try args_list.append(value);
-            }
-            _ = try builder.call(callee, args_list.items, false);
-        },
+        // .fn_call => |fn_call| {
+        //     const callee = try self.parseExpression(scope, builder, fn_call.callee);
+        //     std.debug.print("callee: {}\n", .{callee});
+        //     const args = self.ast.getList(fn_call.args_list);
+        //     var args_list = std.ArrayList(Module.TypedValue).init(self.allocator);
+        //     defer args_list.deinit();
+        //     for (args) |arg| {
+        //         const value = try self.parseExpression(scope, builder, arg);
+        //         try args_list.append(value);
+        //     }
+        //     _ = try builder.call(callee, args_list.items, false);
+        // },
         else => {
-            std.debug.panic("Unexpected token: '{s}'", .{@tagName(node.data)});
+            _ = try self.parseExpression(scope, builder, node_index);
         },
     }
 }

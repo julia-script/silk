@@ -41,6 +41,9 @@ pub const InstData = union(enum) {
         global: Module.Decl.Ref,
         value: TypedValue,
     },
+    block_call: struct {
+        args: [2]?Block.Ref,
+    },
     call: struct {
         callee: TypedValue,
         args: []TypedValue,
@@ -53,6 +56,14 @@ pub const InstData = union(enum) {
         ty: Module.Ty,
         keys: []const []const u8,
         values: []TypedValue,
+    },
+    cast: struct {
+        ty: Module.Ty,
+        value: TypedValue,
+    },
+    property_by_name: struct {
+        tyv: TypedValue,
+        name: []const u8,
     },
 
     pub const Ref = utils.MakeRef(.inst, InstData, "\x1b[33mins{d}\x1b[0m");
@@ -83,6 +94,13 @@ pub const InstData = union(enum) {
             .@"break" => |@"break"| {
                 try writer.print("break {} {}", .{ @"break".target, @"break".value.display(module) });
             },
+            .block_call => |block_call| {
+                try writer.print("block_call {?}, {?}", .{ block_call.args[0], block_call.args[1] });
+            },
+            .cast => |cast| {
+                try writer.print("cast {} {}", .{ cast.ty.display(module), cast.value.display(module) });
+            },
+
             .call => |call| {
                 try writer.print("call {}", .{call.callee.display(module)});
                 if (call.args.len > 0) {
@@ -118,6 +136,9 @@ pub const InstData = union(enum) {
                     }
                     try writer.print("{s} = {}", .{ key, init_struct.values[i].display(module) });
                 }
+            },
+            .property_by_name => |property_by_name| {
+                try writer.print("property_by_name {} '{s}'", .{ property_by_name.tyv.display(module), property_by_name.name });
             },
 
             // else => {
