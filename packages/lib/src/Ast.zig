@@ -35,7 +35,7 @@ pub const Node = struct {
         lhs: Index,
         rhs: Index,
     };
-    const ChildList = InternedIndexesList.Range;
+    pub const ChildList = InternedIndexesList.Range;
 
     pub const Data = union(Tag) {
         reserved: struct {},
@@ -152,8 +152,12 @@ pub const Node = struct {
         ret_expression: NodeIndex,
         block: struct {
             list: ChildList,
+            is_inline: bool,
         },
-        comp_block: NodeIndex,
+        comp_block: struct {
+            list: ChildList,
+            is_inline: bool,
+        },
         while_loop: WhileLoop,
         type_init: struct {
             type: Index,

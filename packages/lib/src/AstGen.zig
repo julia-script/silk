@@ -698,14 +698,13 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             inline .keyword_export,
             .keyword_extern,
             .keyword_pub,
-            .keyword_comp,
             => |token_tag| {
                 const start_token = self.token_index;
                 const tag: Node.Tag = comptime switch (token_tag) {
                     .keyword_export => .@"export",
                     .keyword_extern => .@"extern",
                     .keyword_pub => .@"pub",
-                    .keyword_comp => .comp_block,
+                    // .keyword_comp => .comp_block,
                     else => unreachable,
                 };
 
@@ -713,6 +712,41 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
                 const expr = try self.parseExpression();
                 return try self.pushNode(.{
                     .data = @unionInit(Node.Data, @tagName(tag), .{ .node = expr }),
+                    .start_token = start_token,
+                    .end_token = self.token_index,
+                });
+            },
+
+            .keyword_comp => {
+                const start_token = self.token_index;
+                self.consumeToken();
+                if (self.accept(.l_brace)) {
+                    const statements = try self.parseBlockBodyStatements();
+                    if (!self.accept(.r_brace)) {
+                        try self.errors.addError(.{
+                            .tag = .expected_token,
+                            .start = self.token_index,
+                            .end = self.token_index,
+                            .payload = @intFromEnum(Token.Tag.r_brace),
+                        });
+                    }
+                    return try self.pushNode(.{
+                        .data = .{ .comp_block = .{ .list = statements, .is_inline = false } },
+                        .start_token = start_token,
+                        .end_token = self.token_index,
+                    });
+                }
+
+                const expr = try self.parseExpression();
+                const statements = try self.ast.interned_lists.internSlice(&.{expr});
+
+                return try self.pushNode(.{
+                    .data = .{
+                        .comp_block = .{
+                            .list = statements,
+                            .is_inline = true,
+                        },
+                    },
                     .start_token = start_token,
                     .end_token = self.token_index,
                 });
@@ -762,12 +796,13 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
             .keyword_var,
             // .keyword_type,
             => |token_tag| {
+                // std.debug.panic("const var type\n", .{});
                 const start_token = self.token_index;
                 self.consumeToken();
                 const name = try self.parseIdentifier();
                 const ty: Node.Index = blk: {
                     if (self.accept(.colon)) {
-                        break :blk try self.parsePrimary();
+                        break :blk try self.parseExpression();
                     }
                     break :blk 0;
                 };
@@ -846,7 +881,7 @@ pub fn parsePrimary(self: *AstGen) AstGenError!Node.Index {
 
 fn getTokenPrecedence(tag: Token.Tag, is_type_expression: bool) i32 {
     return switch (tag) {
-        .equal => 0,
+        // .equal => 0,
         // .colon => 0,
 
         // logical
@@ -1536,10 +1571,10 @@ pub fn parseTyInner(self: *AstGen, depth_arg: usize) AstGenError!Node.Index {
 
     @panic("unimplemented");
 }
-pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
+pub fn parseBlockBodyStatements(self: *AstGen) AstGenError!Ast.Node.ChildList {
     const trace = self.tracer.begin(@src(), .{
-        "parseBlock",
-        "AstGen.parseBlock",
+        "parseBlockBodyStatements",
+        "AstGen.parseBlockBodyStatements",
         .{},
     }, .{
         .snapshot = self.ast.nodes.items,
@@ -1548,18 +1583,28 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
     defer trace.end(.{
         .current_token = self.token_index,
     });
-    const start_token = self.token_index;
-    assert(self.tokenIs(.l_brace));
-    self.consumeToken();
     var nodes = self.ast.interned_lists.new();
     while (!self.tokenIs(.r_brace)) {
         const index = self.token_index;
-        _ = index; // autofix
-        const node = try self.parseExpression();
+        var node = try self.parseExpression();
+
         // assert(index != self.token_index);
         if (node == 0) {
             break;
         }
+
+        if (self.accept(.equal)) {
+            const value = try self.parseExpression();
+
+            node = try self.pushNode(.{
+                .data = .{
+                    .assign = .{ .lhs = node, .rhs = value },
+                },
+                .start_token = index,
+                .end_token = self.token_index - 1,
+            });
+        }
+
         try nodes.append(node);
         if (!self.tokenIs(.semicolon)) {
             try self.errors.addError(.{
@@ -1576,6 +1621,25 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
         }
         break;
     }
+    return try nodes.commit();
+}
+pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
+    const trace = self.tracer.begin(@src(), .{
+        "parseBlock",
+        "AstGen.parseBlock",
+        .{},
+    }, .{
+        .snapshot = self.ast.nodes.items,
+        .current_token = self.token_index,
+    });
+    defer trace.end(.{
+        .current_token = self.token_index,
+    });
+    const start_token = self.token_index;
+    assert(self.tokenIs(.l_brace));
+    self.consumeToken();
+    const statements = try self.parseBlockBodyStatements();
+
     if (!self.accept(.r_brace)) {} else {
         try self.errors.addError(.{
             .tag = .expected_token,
@@ -1586,7 +1650,7 @@ pub fn parseBlock(self: *AstGen) AstGenError!Node.Index {
     }
     // self.consumeToken();
     return try self.pushNode(.{
-        .data = .{ .block = .{ .list = try nodes.commit() } },
+        .data = .{ .block = .{ .list = statements, .is_inline = false } },
         .start_token = start_token,
         .end_token = self.token_index - 1,
     });
