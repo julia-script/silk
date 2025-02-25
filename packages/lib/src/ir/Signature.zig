@@ -21,6 +21,14 @@ pub fn init() Self {
 pub fn deinit(self: *Self) void {
     self.params.deinit();
 }
+pub fn from(allocator: std.mem.Allocator, params: []const Param, ret: Ty) !Self {
+    var sig = Self{};
+    for (params) |param| {
+        try sig.addParam(allocator, param.ty, param.is_comptime);
+    }
+    sig.setReturn(ret);
+    return sig;
+}
 
 pub fn addParam(self: *Self, allocator: std.mem.Allocator, param: Ty, is_comptime: bool) !void {
     try self.params.append(allocator, .{ .ty = param, .is_comptime = is_comptime });

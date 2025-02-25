@@ -28,6 +28,9 @@ pub fn Set(comptime T: type, comptime Context: type, comptime max_load_percentag
         pub fn count(self: Self) usize {
             return self.hashmap.count();
         }
+        pub fn iterator(self: Self) @TypeOf(self.hashmap.keyIterator()) {
+            return self.hashmap.keyIterator();
+        }
     };
 }
 
@@ -62,6 +65,9 @@ pub fn SetUnmanaged(comptime T: type, comptime Context: type, comptime max_load_
 
         pub fn count(self: Self) usize {
             return self.hashmap.count();
+        }
+        pub fn iterator(self: Self) @TypeOf(self.hashmap.keyIterator()) {
+            return self.hashmap.keyIterator();
         }
     };
 }

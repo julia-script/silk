@@ -1,10 +1,11 @@
 const std = @import("std");
-const Self = @This();
-const Ty = @import("./ty.zig").Ty;
-const Namespace = @import("./Namespace.zig");
-const Module = @import("./Module.zig");
-const TypedValue = Module.TypedValue;
 
+const Module = @import("Module.zig");
+const TypedValue = Module.TypedValue;
+const Namespace = @import("Namespace.zig");
+const Ty = @import("ty.zig").Ty;
+
+const Self = @This();
 name: []const u8,
 parent_namespace: Namespace.Ref,
 namespace: Namespace.Ref,

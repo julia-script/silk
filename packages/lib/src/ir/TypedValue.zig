@@ -66,6 +66,12 @@ pub fn Global(ty: Ty, global: Module.Decl.Ref) Self {
         .value = .{ .global = global },
     };
 }
+pub fn Builtin(ty: Ty, builtin: Value.Builtin) Self {
+    return .{
+        .ty = ty,
+        .value = .{ .builtin = builtin },
+    };
+}
 pub fn Inst(ty: Ty, inst: Module.InstData.Ref) Self {
     return .{
         .ty = ty,
@@ -81,7 +87,7 @@ pub fn isRuntime(self: Self) bool {
 }
 pub fn isResolved(self: Self) bool {
     return switch (self.value) {
-        .global, .local, .inst => false,
+        .runtime, .global, .local, .inst, .def => false,
         else => true,
     };
 }
@@ -204,11 +210,20 @@ fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerr
         .ref => |ref| {
             try writer.print("{}{{ {} }}", .{ self.ty.display(module), ref });
         },
+        .builtin => |builtin| {
+            try writer.print("{}{{ @{s} }}", .{ self.ty.display(module), @tagName(builtin) });
+        },
 
         else => {
             try writer.print("TODO", .{});
         },
     }
+}
+pub fn isBuiltin(self: Self) bool {
+    return switch (self.value) {
+        .builtin => true,
+        else => false,
+    };
 }
 
 pub fn display(self: Self, module: *const Module) Module.utils.MakeDisplay(Self, displayFn) {

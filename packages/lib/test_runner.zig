@@ -505,7 +505,8 @@ pub fn printLineFromFileAnyOs(out_stream: std.io.AnyWriter, source_location: std
     const start_line = if (source_location.line < vertical_padding_lines) 0 else source_location.line - vertical_padding_lines;
     const end_line = source_location.line + vertical_padding_lines;
 
-    var buf: [std.mem.page_size]u8 = undefined;
+    const page_size: usize = 4096;
+    var buf: [page_size]u8 = undefined;
     var amt_read = try f.read(buf[0..]);
     const line_start = seek: {
         var current_line_start: usize = 0;

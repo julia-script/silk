@@ -34,7 +34,18 @@ pub const Scope = union(enum) {
         is_exported: bool,
         is_comptime: bool,
     ) !Scope {
-        const def_ref = try mod.makeDefinition(is_comptime);
+        const def_ref = try mod.makeDefinition(is_comptime, false, null);
+        const decl = mod.getDeclaration(ref);
+        var def = mod.getDefinition(def_ref);
+        def.dfg.signature = decl.func.signature;
+
+        var builder = try Module.DefinitionBuilder.init(
+            mod,
+            def_ref,
+            &def.dfg,
+        );
+        try builder.linkToDecl(ref);
+
         return Scope{
             .fn_decl = .{
                 .allocator = allocator,
@@ -45,7 +56,7 @@ pub const Scope = union(enum) {
                 .visibility = visibility,
                 .is_exported = is_exported,
                 .params = std.StringArrayHashMap(Symbol).init(allocator),
-                .definition_builder = try Module.DefinitionBuilder.init(mod, def_ref, &mod.definitions.getPtr(def_ref).dfg, is_comptime),
+                .definition_builder = builder,
             },
         };
     }
@@ -74,11 +85,15 @@ pub const Scope = union(enum) {
         is_exported: bool,
         is_comptime: bool,
     ) !Scope {
-        const def_ref = try mod.makeDefinition(is_comptime);
+        const def_ref = try mod.makeDefinition(is_comptime, true, null);
         _ = allocator; // autofix
         return Scope{
             .global_decl = .{
-                .definition_builder = try Module.DefinitionBuilder.init(mod, def_ref, &mod.definitions.getPtr(def_ref).dfg, is_comptime),
+                .definition_builder = try Module.DefinitionBuilder.init(
+                    mod,
+                    def_ref,
+                    &mod.getDefinition(def_ref).dfg,
+                ),
                 .parent = parent,
                 .ref = ref,
                 .name = name,

@@ -19,17 +19,20 @@ bytes: Array(u8) = .{},
 instructions: InstData.Ref.ListUnmanaged(InstData) = .{},
 result: ?TypedValue = null,
 inst_values: InstData.Ref.MapUnmanaged(TypedValue) = .{},
+signature: ?Module.Signature.Ref = null,
 types: InstData.Ref.MapUnmanaged(Ty) = .{},
 local_values: Local.Ref.ListUnmanaged(Local) = .{},
 blocks: Block.Ref.ListUnmanaged(Block) = .{},
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
-dependencies: Map(Module.Decl.Ref, DependsOn) = .{},
+dependencies: Set(Dependency) = .{},
 is_comptime: bool = false,
+deinitialized: bool = false,
+is_inline: bool = false,
 
-pub const DependsOn = enum {
-    declaration,
-    definition,
+pub const Dependency = union(enum) {
+    declaration: Module.Decl.Ref,
+    definition: Module.Definition.Ref,
 };
 
 pub const Local = struct {
@@ -51,21 +54,20 @@ pub const EntryBlock = Block.Ref.from(0);
 
 const Self = @This();
 
-pub fn init(allocator: std.mem.Allocator, is_comptime: bool) !Self {
+pub fn init(allocator: std.mem.Allocator, is_comptime: bool, is_inline: bool) !Self {
     var self = Self{
         .arena = std.heap.ArenaAllocator.init(allocator),
         .allocator = allocator,
         .is_comptime = is_comptime,
+        .is_inline = is_inline,
     };
-
-    // Fixes weird zig memory leak bug
-    // try self.local_values.items.ensureUnusedCapacity(1);
 
     _ = try self.makeBlock(null, is_comptime);
 
     return self;
 }
 pub inline fn makeBlock(self: *Self, initiator: ?InstData.Ref, is_comptime: bool) !Block.Ref {
+    self.assertNotDeinitialized();
     return try self.blocks.append(self.arena.allocator(), Block.init(
         .body,
         initiator,
@@ -73,7 +75,13 @@ pub inline fn makeBlock(self: *Self, initiator: ?InstData.Ref, is_comptime: bool
     ));
 }
 
+pub fn assertNotDeinitialized(self: *const Self) void {
+    if (self.deinitialized) {
+        std.debug.panic("Dfg is deinitialized\n", .{});
+    }
+}
 pub fn deinit(self: *Self) void {
+    self.deinitialized = true;
     // for (self.blocks.slice()) |*block| {
     //     block.deinit();
     // }
@@ -87,17 +95,21 @@ pub fn deinit(self: *Self) void {
     // self.types.deinit(self.arena.allocator());
 }
 pub fn getBlock(self: *Self, ref: Block.Ref) *Block {
+    self.assertNotDeinitialized();
     return self.blocks.getPtr(ref);
 }
 pub fn getInstruction(self: *Self, ref: InstData.Ref) *InstData {
+    self.assertNotDeinitialized();
     return self.instructions.getPtr(ref);
 }
 
 pub fn pushLocal(self: *Self, local: Local) !Local.Ref {
+    self.assertNotDeinitialized();
     const ref = try self.local_values.append(self.arena.allocator(), local);
     return ref;
 }
 pub fn pushInst(self: *Self, block_ref: Block.Ref, inst: InstData) !InstData.Ref {
+    self.assertNotDeinitialized();
     const block = self.blocks.getPtr(block_ref);
     if (block.sealed) {
         std.debug.panic("Block {s} is sealed\n", .{block_ref});
@@ -106,19 +118,21 @@ pub fn pushInst(self: *Self, block_ref: Block.Ref, inst: InstData) !InstData.Ref
     try block.instructions.append(self.arena.allocator(), ref);
     return ref;
 }
-pub fn setDependency(self: *Self, dep: Module.Decl.Ref, depends_on: DependsOn) !void {
-    const gop = try self.dependencies.getOrPut(self.arena.allocator(), dep);
-    if (gop.found_existing) {
-        if (gop.value_ptr.* == .definition) {
-            return;
-        }
-        gop.value_ptr.* = depends_on;
-        return;
-    }
-    gop.value_ptr.* = depends_on;
+pub fn setDependency(self: *Self, depends_on: Dependency) !void {
+    self.assertNotDeinitialized();
+    try self.dependencies.insert(self.arena.allocator(), depends_on);
+    // if (gop.found_existing) {
+    //     if (gop.value_ptr.* == .definition) {
+    //         return;
+    //     }
+    //     gop.value_ptr.* = depends_on;
+    //     return;
+    // }
+    // gop.value_ptr.* = depends_on;
 }
 
 pub fn pushBlockCall(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !InstData.Ref {
+    self.assertNotDeinitialized();
     const call = try self.pushInst(block_ref, .{
         .block_call = .{
             .args = args,
@@ -127,6 +141,7 @@ pub fn pushBlockCall(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !In
     return call;
 }
 pub fn pushCast(self: *Self, block_ref: Block.Ref, ty: Ty, value: TypedValue) !TypedValue {
+    self.assertNotDeinitialized();
     const ref = try self.pushInst(block_ref, .{
         .cast = .{
             .ty = ty,
@@ -141,6 +156,7 @@ pub fn pushCast(self: *Self, block_ref: Block.Ref, ty: Ty, value: TypedValue) !T
     return val;
 }
 pub fn pushBinary(self: *Self, block_ref: Block.Ref, ty: Ty, op: Op, a: TypedValue, b: TypedValue) !TypedValue {
+    self.assertNotDeinitialized();
     const ref = try self.pushInst(block_ref, .{
         .binary = .{
             .op = op,
@@ -155,6 +171,7 @@ pub fn pushBinary(self: *Self, block_ref: Block.Ref, ty: Ty, op: Op, a: TypedVal
     return val;
 }
 pub fn pushOperand(self: *Self, block_ref: Block.Ref, op: Op, ty: Ty, value: TypedValue) !TypedValue {
+    self.assertNotDeinitialized();
     const ref = try self.pushInst(block_ref, .{
         .operand = .{
             .op = op,
@@ -170,6 +187,7 @@ pub fn pushOperand(self: *Self, block_ref: Block.Ref, op: Op, ty: Ty, value: Typ
     return val;
 }
 pub fn pushReturn(self: *Self, block_ref: Block.Ref, value: TypedValue) !void {
+    self.assertNotDeinitialized();
     _ = try self.pushInst(block_ref, .{
         .@"return" = .{
             .op = .@"return",
@@ -178,6 +196,7 @@ pub fn pushReturn(self: *Self, block_ref: Block.Ref, value: TypedValue) !void {
     });
 }
 pub fn pushStoreGlobal(self: *Self, block_ref: Block.Ref, global: Module.Decl.Ref, value: TypedValue) !void {
+    self.assertNotDeinitialized();
     _ = try self.pushInst(block_ref, .{
         .storeGlobal = .{
             .global = global,
@@ -186,6 +205,7 @@ pub fn pushStoreGlobal(self: *Self, block_ref: Block.Ref, global: Module.Decl.Re
     });
 }
 pub fn pushStore(self: *Self, block_ref: Block.Ref, local: Local.Ref, value: TypedValue) !void {
+    self.assertNotDeinitialized();
     _ = try self.pushInst(block_ref, .{
         .store = .{
             .local = local,
@@ -194,6 +214,7 @@ pub fn pushStore(self: *Self, block_ref: Block.Ref, local: Local.Ref, value: Typ
     });
 }
 pub fn pushBranch(self: *Self, block_ref: Block.Ref, cond: TypedValue, args: [3]?Block.Ref) !InstData.Ref {
+    self.assertNotDeinitialized();
     return try self.pushInst(block_ref, .{
         .branch = .{
             .cond = cond,
@@ -202,6 +223,7 @@ pub fn pushBranch(self: *Self, block_ref: Block.Ref, cond: TypedValue, args: [3]
     });
 }
 pub fn pushLoop(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !InstData.Ref {
+    self.assertNotDeinitialized();
     return try self.pushInst(block_ref, .{
         .loop = .{
             .args = args,
@@ -209,6 +231,7 @@ pub fn pushLoop(self: *Self, block_ref: Block.Ref, args: [2]?Block.Ref) !InstDat
     });
 }
 pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value: ?TypedValue) !InstData.Ref {
+    self.assertNotDeinitialized();
     const val = value orelse TypedValue.Void;
     try self.inst_values.put(self.arena.allocator(), target, val);
 
@@ -221,13 +244,13 @@ pub fn pushBreak(self: *Self, block_ref: Block.Ref, target: InstData.Ref, value:
 }
 
 pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: TypedValue, args: []TypedValue) !TypedValue {
+    self.assertNotDeinitialized();
     const ref = try self.pushInst(block_ref, .{
         .call = .{
             .callee = callee,
             .args = try self.arena.allocator().dupe(TypedValue, args),
         },
     });
-
     const callee_ty = callee.ty;
 
     const ty_data = module.acceptTyData(callee_ty, .func) orelse
@@ -239,10 +262,15 @@ pub fn pushCall(self: *Self, module: *Module, block_ref: Block.Ref, callee: Type
         signature.ret,
         ref,
     );
+
     try self.inst_values.put(self.arena.allocator(), ref, val);
+
     return val;
 }
+
 pub fn pushInitArray(self: *Self, block_ref: Block.Ref, ty: Module.Ty, items: []TypedValue) !TypedValue {
+    self.assertNotDeinitialized();
+
     const ref = try self.pushInst(block_ref, .{
         .init_array = .{
             .ty = ty,
@@ -254,10 +282,14 @@ pub fn pushInitArray(self: *Self, block_ref: Block.Ref, ty: Module.Ty, items: []
         ty,
         ref,
     );
+
     try self.inst_values.put(self.arena.allocator(), ref, val);
+
     return val;
 }
+
 pub fn pushInitStruct(self: *Self, block_ref: Block.Ref, ty: Module.Ty, keys: []const []const u8, values: []const TypedValue) !TypedValue {
+    self.assertNotDeinitialized();
     var keys_dupe = try self.arena.allocator().dupe([]const u8, keys);
     for (keys_dupe, 0..) |key, i| {
         keys_dupe[i] = try self.arena.allocator().dupe(u8, key);
@@ -279,6 +311,7 @@ pub fn pushInitStruct(self: *Self, block_ref: Block.Ref, ty: Module.Ty, keys: []
 }
 
 pub fn pushPropertyByName(self: *Self, block_ref: Block.Ref, tyv: TypedValue, name: []const u8, prop_ty: Module.Ty) !TypedValue {
+    self.assertNotDeinitialized();
     const ref = try self.pushInst(block_ref, .{
         .property_by_name = .{
             .tyv = tyv,
@@ -293,10 +326,41 @@ pub fn pushPropertyByName(self: *Self, block_ref: Block.Ref, tyv: TypedValue, na
     try self.inst_values.put(self.arena.allocator(), ref, val);
     return val;
 }
-// pub fn getParam(self: *Self, index: u32) Value {
-//     return self.local_values.items[index].value;
-// }
+pub fn pushBuiltinPropertyAccess(self: *Self, block_ref: Block.Ref, tyv: TypedValue, name: []const u8, prop_ty: Module.Ty) !TypedValue {
+    self.assertNotDeinitialized();
+
+    const ref = try self.pushInst(block_ref, .{
+        .builtin_property_access = .{
+            .tyv = tyv,
+            .name = try self.arena.allocator().dupe(u8, name),
+        },
+    });
+
+    const val = TypedValue.Inst(
+        prop_ty,
+        ref,
+    );
+    try self.inst_values.put(self.arena.allocator(), ref, val);
+    return val;
+}
+pub fn pushPropertyByIndex(self: *Self, block_ref: Block.Ref, tyv: TypedValue, index: TypedValue, prop_ty: Module.Ty) !TypedValue {
+    self.assertNotDeinitialized();
+    const ref = try self.pushInst(block_ref, .{
+        .property_by_index = .{
+            .tyv = tyv,
+            .index = index,
+        },
+    });
+
+    const val = TypedValue.Inst(
+        prop_ty,
+        ref,
+    );
+    try self.inst_values.put(self.arena.allocator(), ref, val);
+    return val;
+}
 pub fn formatInst(self: *Self, writer: std.io.AnyWriter, module: *const Module, inst_ref: InstData.Ref) !void {
+    self.assertNotDeinitialized();
     const inst = self.instructions.get(inst_ref);
     if (self.inst_values.get(inst_ref)) |val| {
         _ = val; // autofix
@@ -313,10 +377,12 @@ pub fn formatInst(self: *Self, writer: std.io.AnyWriter, module: *const Module, 
     }
 }
 pub fn isBlockEmpty(self: *Self, block: Block.Ref) bool {
+    self.assertNotDeinitialized();
     return self.getBlock(block).isEmpty();
 }
 
 fn displayFn(self: Self, writer: std.io.AnyWriter, module: *const Module) anyerror!void {
+    self.assertNotDeinitialized();
     const instruction_indent = "    ";
     var block_iter = self.blocks.iter();
     for (self.local_values.slice()) |local| {

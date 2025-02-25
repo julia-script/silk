@@ -29,8 +29,32 @@ pub const Value = union(enum) {
     runtime,
     local: Dfg.Local.Ref,
     global: Module.Decl.Ref,
-
+    def: Module.Definition.Ref,
+    builtin: Builtin,
     ref: Ref,
+
+    pub const Builtin = enum {
+        length,
+        sizeof,
+        typeof,
+        as,
+        comp_log,
+        assert,
+
+        pub fn fromSlice(slice: []const u8) ?Builtin {
+            if (slice[0] != '@') {
+                return null;
+            }
+            const name = slice[1..];
+            const fields: []const std.builtin.Type.EnumField = std.meta.fields(Builtin);
+            inline for (fields) |field| {
+                if (std.mem.eql(u8, field.name, name)) {
+                    return @enumFromInt(field.value);
+                }
+            }
+            return null;
+        }
+    };
 
     pub const Ref = utils.MakeRef(.value, Value, "\x1b[32mval{d}\x1b[0m");
 
@@ -62,7 +86,7 @@ pub const Value = union(enum) {
         const T = @TypeOf(value);
 
         switch (ty) {
-            inline .i8,
+            .i8,
             .i16,
             .i32,
             .i64,
@@ -86,7 +110,7 @@ pub const Value = union(enum) {
                 f32, f64, comptime_float, comptime_int => return bytesOfT(f64, value),
                 else => std.debug.panic("type '{s}' can't be stored as Value.bytes", .{@typeName(T)}),
             },
-            inline .bool,
+            .bool,
             => switch (T) {
                 bool => return bytesOfT(bool, value),
                 else => std.debug.panic("type '{s}' can't be stored as bool", .{@typeName(T)}),

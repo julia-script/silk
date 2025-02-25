@@ -19,6 +19,7 @@ fn assertFormatsAs(value: anytype, comptime expected: []const u8) !void {
 
 pub const Ty = union(enum) {
     void,
+    any,
     f16,
     f32,
     f64,
@@ -40,7 +41,9 @@ pub const Ty = union(enum) {
 
     type,
     unresolved,
+    def: Definition.Ref,
     global: Module.Decl.Ref,
+    inst: Module.InstData.Ref,
     ref: Ref,
 
     pub const Ref = utils.MakeRef(.ty, Ty, "ty{d}");
@@ -53,7 +56,8 @@ pub const Ty = union(enum) {
         // decl: Module.Decl.Ref,
         pub const Array = struct {
             type: Ty,
-            size: Module.TypedValue,
+            len: Module.TypedValue,
+            size: ?u32,
         };
         pub const Function = struct {
             signature: Module.Signature.Ref,
@@ -63,10 +67,14 @@ pub const Ty = union(enum) {
             fields: []const Field,
             sealed: bool,
             associated_ns: ?Module.Namespace.Ref,
+            size: ?u32,
+            // size: u32,
             pub const Field = struct {
                 name: []const u8,
                 ty: Ty,
                 source_order_index: u32,
+                size: ?u32,
+                offset: ?u32,
             };
         };
         pub const PropertyOf = struct {
@@ -79,7 +87,7 @@ pub const Ty = union(enum) {
                     try writer.print("func({})", .{func.signature});
                 },
                 .array => |array| {
-                    try writer.print("array({}, {})", .{ array.type.display(module), array.size.display(module) });
+                    try writer.print("array({}, {})", .{ array.type.display(module), array.len.display(module) });
                 },
                 .@"struct" => |struct_ty| {
                     try writer.print("struct{{ ", .{});
@@ -118,13 +126,13 @@ pub const Ty = union(enum) {
                 const type_hash = Ty.hash(array.type, mod);
 
                 hasher.update(std.mem.asBytes(&type_hash));
-                hasher.update(std.mem.asBytes(&array.size.ty.hash(mod)));
-                switch (array.size.value) {
+                hasher.update(std.mem.asBytes(&array.len.ty.hash(mod)));
+                switch (array.len.value) {
                     .bytes => |bytes| {
                         hasher.update(std.mem.asBytes(&bytes));
                     },
                     else => {
-                        hasher.update(std.mem.asBytes(&array.size));
+                        hasher.update(std.mem.asBytes(&array.len));
                     },
                 }
                 return hasher.final();
@@ -198,25 +206,51 @@ pub const Ty = union(enum) {
     pub fn toVal(self: Ty) Value {
         return Value.ImmTy(self);
     }
-    pub fn getSize(self: Ty, module: *const Module) u32 {
-        return switch (self) {
-            .i8, .u8 => 8,
-            .i16, .u16 => 16,
-            .i32, .u32 => 32,
-            .i64, .u64 => 64,
-            .int, .float => 0,
-            .bool => 1,
-            .f32 => 32,
-            .f64 => 64,
-            .f16 => 16,
-            .void => 0,
-
-            else => {
-                std.debug.panic("can't get size of '{}'", .{self.display(module)});
-            },
-        };
+    pub fn getSize(self: Ty, module: *Module) u32 {
+        return self.maybeGetSize(module) orelse std.debug.panic("can't get size of '{}'", .{self.display(module)});
     }
 
+    pub fn maybeGetSize(self: Ty, mod: *Module) ?u32 {
+        return switch (self) {
+            .void => 0,
+            .any => null,
+            .f16 => 2,
+            .f32 => 4,
+            .f64 => 8,
+
+            .i8 => 1,
+            .i16 => 2,
+            .i32 => 4,
+            .i64 => 8,
+
+            .u8 => 1,
+            .u16 => 2,
+            .u32 => 4,
+            .u64 => 8,
+
+            .int => null,
+            .float => null,
+
+            .bool => 1,
+
+            .type => null,
+            .unresolved => null,
+            .ref => |ref| {
+                const ty_data = mod.tys.get(ref);
+                return switch (ty_data) {
+                    .array => |array| array.size,
+                    .@"struct" => |struct_ty| struct_ty.size,
+                    .func => 0,
+                };
+            },
+            .global => |ref| {
+                const ty = Ty.resolveGlobalType(ref, mod) orelse return null;
+                return ty.maybeGetSize(mod);
+            },
+            .def => null,
+            .inst => null,
+        };
+    }
     // pub fn format(
     //     self: Ty,
     //     comptime _: []const u8,
@@ -245,6 +279,12 @@ pub const Ty = union(enum) {
                 try writer.print("{}", .{ty_data.display(module)});
             },
             .global => |ref| {
+                try writer.print("{}", .{ref});
+            },
+            .inst => |inst| {
+                try writer.print("{}", .{inst});
+            },
+            .def => |ref| {
                 try writer.print("{}", .{ref});
             },
             else => {
@@ -316,16 +356,15 @@ pub const Ty = union(enum) {
             else => false,
         };
     }
+    pub fn isNumber(self: Ty) bool {
+        return switch (self) {
+            .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .int, .float => true,
+            else => false,
+        };
+    }
     pub fn getTyData(self: Ty, mod: *Module) ?TyData {
         return switch (self) {
             .ref => |ref| mod.tys.get(ref),
-            else => null,
-        };
-    }
-    pub fn getChildTy(self: Ty, mod: *Module) ?Ty {
-        const ty_data = self.getTyData(mod) orelse return null;
-        return switch (ty_data) {
-            .array => |array| array.type,
             else => null,
         };
     }
@@ -375,6 +414,7 @@ pub const Ty = union(enum) {
             else => null,
         };
     }
+
     pub fn getFieldByName(self: Ty, mod: *Module, name: []const u8) ?TyData.Struct.Field {
         var ty = self;
         switch (self) {
@@ -397,6 +437,13 @@ pub const Ty = union(enum) {
             else => null,
         };
     }
+    pub fn getChildTy(self: Ty, mod: *Module) ?Ty {
+        const ty_data = self.getTyData(mod) orelse return null;
+        return switch (ty_data) {
+            .array => |array| array.type,
+            else => null,
+        };
+    }
     pub fn getAssociatedNs(self: Ty, mod: *Module) ?Module.Namespace.Ref {
         const ty_data = self.getTyData(mod) orelse return null;
         return switch (ty_data) {
@@ -416,6 +463,67 @@ pub const Ty = union(enum) {
             }
         }
         return null;
+    }
+    fn fieldLessThanFn(mod: *Module, lhs: TyData.Struct.Field, rhs: TyData.Struct.Field) bool {
+        _ = mod; // autofix
+        const lhs_size = lhs.size.?;
+        const rhs_size = rhs.size.?;
+        return lhs_size < rhs_size;
+    }
+
+    pub fn tryComputeSize(fields: []TyData.Struct.Field, mod: *Module) ?u32 {
+        for (fields) |*field| {
+            const size = field.ty.maybeGetSize(mod);
+            if (size == null) {
+                return null;
+            }
+            field.size = size;
+        }
+        std.mem.sortUnstable(TyData.Struct.Field, fields, mod, fieldLessThanFn);
+
+        var offset: u32 = 0;
+        const alignment: u32 = switch (mod.arch) {
+            .@"32-bit" => 4,
+            .@"64-bit" => 8,
+        };
+        for (fields) |*field| {
+            field.offset = offset;
+            offset += field.size.?;
+            if (offset % alignment != 0) {
+                offset = offset + alignment - (offset % alignment);
+            }
+            std.debug.print("field: {s}, type: {}, offset: {d} size: {d}\n", .{ field.name, field.ty.display(mod), field.offset.?, field.size.? });
+        }
+
+        return offset;
+    }
+    pub fn satisfies(self: Ty, mod: *Module, other: Ty) bool {
+        _ = mod; // autofix
+        if (self.eql(other)) return true;
+        if (other.eql(.any)) return true;
+        const is_numeric = other.isNumber();
+        if (is_numeric) {
+            if (self.isUntypedNumber()) return true;
+            if (!self.isNumber()) return false;
+            const is_float = other.isFloat();
+            if (is_float and !self.isFloat()) return false;
+            const is_signed = other.isSigned();
+            if (is_signed != self.isSigned()) return false;
+
+            return self.bits() <= other.bits();
+        }
+
+        return false;
+    }
+    pub fn isResolved(self: Ty, _: *Module) bool {
+        return switch (self) {
+            .unresolved,
+            .def,
+            .global,
+            .inst,
+            => false,
+            else => true,
+        };
     }
 };
 test "Ty" {

@@ -7,6 +7,7 @@ const Dfg = @import("./Dfg.zig");
 const Module = @import("./Module.zig");
 const FunctionDeclaration = @import("./FunctionDeclaration.zig");
 const TypedValue = Module.TypedValue;
+
 pub const InstData = union(enum) {
     binary: struct {
         op: Op,
@@ -64,6 +65,14 @@ pub const InstData = union(enum) {
     property_by_name: struct {
         tyv: TypedValue,
         name: []const u8,
+    },
+    builtin_property_access: struct {
+        tyv: TypedValue,
+        name: []const u8,
+    },
+    property_by_index: struct {
+        tyv: TypedValue,
+        index: TypedValue,
     },
 
     pub const Ref = utils.MakeRef(.inst, InstData, "\x1b[33mins{d}\x1b[0m");
@@ -139,6 +148,12 @@ pub const InstData = union(enum) {
             },
             .property_by_name => |property_by_name| {
                 try writer.print("property_by_name {} '{s}'", .{ property_by_name.tyv.display(module), property_by_name.name });
+            },
+            .property_by_index => |property_by_index| {
+                try writer.print("property_by_index {} {}", .{ property_by_index.tyv.display(module), property_by_index.index.display(module) });
+            },
+            .builtin_property_access => |builtin_property_access| {
+                try writer.print("builtin_property_access {} '{s}'", .{ builtin_property_access.tyv.display(module), builtin_property_access.name });
             },
 
             // else => {
