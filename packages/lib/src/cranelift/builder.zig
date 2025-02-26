@@ -29,7 +29,7 @@ pub const Function = struct {
         namespace: u32,
         index: u32,
     };
-    pub fn withNameSignature(name: UserFuncName, signature: *Signature) Function {
+    pub fn withNameSignature(name: UserFuncName, signature: *const Signature) Function {
         return .{
             .c = c.Function_with_name_signature(name.namespace, name.index, signature.c) orelse @panic("Failed to create Function"),
         };
@@ -153,7 +153,7 @@ pub const FunctionBuilder = struct {
         );
     }
 };
-const SettingsBuilder = struct {
+pub const SettingsBuilder = struct {
     c: *c.struct_Builder,
     pub fn new() SettingsBuilder {
         return .{
@@ -176,7 +176,7 @@ pub const Flags = struct {
     }
 };
 
-const CallConv = enum(c.enum_CCallConv) {
+pub const CallConv = enum(c.enum_CCallConv) {
     Fast,
     Cold,
     Tail,
@@ -208,7 +208,7 @@ pub const Signature = struct {
     }
 };
 
-const Type = enum(c.enum_CType) {
+pub const Type = enum(c.enum_CType) {
     /// An integer type with 8 bits.
     /// WARNING: arithmetic on 8bit integers is incomplete
     I8,
@@ -456,7 +456,7 @@ const Type = enum(c.enum_CType) {
     }
 };
 
-const IsaBuilder = struct {
+pub const IsaBuilder = struct {
     c: *c.struct_IsaBuilder,
     pub fn new() IsaBuilder {
         return .{
@@ -468,11 +468,11 @@ const IsaBuilder = struct {
     }
 };
 
-const TargetIsa = struct {
+pub const TargetIsa = struct {
     c: *c.struct_TargetIsaHandle,
 };
 
-const ObjectBuilder = struct {
+pub const ObjectBuilder = struct {
     c: *c.struct_ObjectBuilder,
     pub fn new(isa: *TargetIsa, name: [:0]const u8) ObjectBuilder {
         return .{
@@ -481,14 +481,14 @@ const ObjectBuilder = struct {
     }
 };
 
-const ObjectModule = struct {
+pub const ObjectModule = struct {
     c: *c.struct_ObjectModule,
     pub fn new(object_builder: *ObjectBuilder) ObjectModule {
         return .{
             .c = c.ObjectModule_new(object_builder.c) orelse @panic("Failed to create ObjectModule"),
         };
     }
-    pub fn declareFunction(self: *ObjectModule, name: [:0]const u8, signature: *Signature) FuncId {
+    pub fn declareFunction(self: *ObjectModule, name: [:0]const u8, signature: *const Signature) FuncId {
         return FuncId.new(c.ObjectModule_declare_function(self.c, name.ptr, signature.c));
     }
     pub fn defineFunction(self: *ObjectModule, func_id: FuncId, codegen_ctx: *CodegenContext) void {
@@ -498,7 +498,7 @@ const ObjectModule = struct {
         return .{ .c = c.ObjectModule_finish(self.c) orelse @panic("Failed to finish ObjectModule") };
     }
 };
-const ObjectProduct = struct {
+pub const ObjectProduct = struct {
     c: *c.struct_ObjectProduct,
     pub fn emit(self: *ObjectProduct, allocator: std.mem.Allocator) !std.ArrayList(u8) {
         const c_bytes = c.ObjectProduct_emit(self.c);
@@ -512,7 +512,7 @@ const ObjectProduct = struct {
     }
 };
 
-const CodegenContext = struct {
+pub const CodegenContext = struct {
     c: *c.struct_Context,
     pub fn forFunction(func: *Function) CodegenContext {
         return .{
@@ -533,13 +533,13 @@ test "cranelift" {
     var isa_builder = IsaBuilder.new();
 
     var isa = isa_builder.finish(&flags);
+    var object_builder = ObjectBuilder.new(&isa, "main");
+    var object_module = ObjectModule.new(&object_builder);
+
     var sig = Signature.init(CallConv.SystemV);
     // defer sig.deinit();
     sig.addParam(Type.I32);
     sig.addReturn(Type.I32);
-
-    var object_builder = ObjectBuilder.new(&isa, "main");
-    var object_module = ObjectModule.new(&object_builder);
 
     var ctx = FunctionBuilderContext.init();
     defer ctx.deinit();

@@ -28,6 +28,7 @@ test {
     _ = @import("cranelift/builder.zig");
     _ = @import("ir/Dfg.zig");
     _ = @import("ir/Module.zig");
-    _ = @import("irgen/gen.zig");
+    _ = @import("irgen/IrGen.zig");
     _ = @import("ir/TypedValue.zig");
+    _ = @import("backend/cranelift.zig");
 }

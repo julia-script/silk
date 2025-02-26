@@ -162,4 +162,7 @@ pub fn build(b: *std.Build) void {
         &b.addRunArtifact(test_cases).step,
         b.step("snapshots", "Run snapshots"),
     });
+    // const check = b.step("check", "Check if foo compiles");
+    // check.dependOn(&exe_check.step);
+
 }

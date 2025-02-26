@@ -156,7 +156,6 @@ fn analyzeLocals(self: *Self) !void {
         }
         // const value = try self.analyzeTypedValue(local.value);
         // local.value = value;
-
         _ = try self.dst.pushLocal(local);
     }
     // if (self.src.result) |src_result| {
@@ -284,13 +283,14 @@ pub fn analyzeTypedValue(self: *Self, tyv: Module.TypedValue) !Module.TypedValue
             return self.getValue(inst);
         },
         .local => |local| {
+            // TODO: manage comptime vars
             if (self.local_map.get(local)) |val| {
                 return val;
             }
 
             const src_local = self.src.local_values.get(local);
             var val = try self.analyzeTypedValue(src_local.value);
-            if (val.isRuntime()) {
+            if (!val.isResolved()) {
                 val.value = tyv.value;
             }
             try self.local_map.put(self.arena.allocator(), local, val);

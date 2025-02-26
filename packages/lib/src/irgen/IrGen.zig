@@ -54,6 +54,8 @@ pub fn gen(allocator: Allocator, ast: *Ast) !Module {
     };
     defer self.deinit();
     try self.parseRoot();
+
+    try SemaPass.run(allocator, &module);
     return module;
 }
 
@@ -952,7 +954,8 @@ test "gen" {
     try ast.format(std.io.getStdErr().writer().any(), 0, .{});
     var module = try gen(std.testing.allocator, &ast);
     defer module.deinit();
-    std.debug.print("{}", .{module});
-    try SemaPass.run(test_allocator, &module);
+
+    // std.debug.print("{}", .{module});
+    // try SemaPass.run(test_allocator, &module);
     std.debug.print("{}", .{module});
 }

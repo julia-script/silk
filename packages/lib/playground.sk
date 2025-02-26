@@ -1,92 +1,96 @@
 
-
-fn test(n: i32) i32 {
-  if (n > 1) {
-    return 10;
-  } else {
-    return 20;
-  }
-}
-
-// fn add(a: i32, b: i32) i32 {
-//   return a + b;
+//
+// fn test(n: i32) i32 {
+//   if (n > 1) {
+//     return 10;
+//   } else {
+//     return 20;
+//   }
 // }
-
- fn fib(n: i32) i32 {
-   var a:i32 = 0
-   var b:i32 = 1
-   if (n > 0) {
-     while (n > 1) {
-       var t:i32 = a + b
-       a = b
-       b = t
-       n = n - 1
-     }
-     return b
-   }
-   return a
- }
-
- fn test2() i32 {
-   var a: i32 = comp 2 + 3 + test(2)
-   var b: i32 = comp fib(20)
-   var c: i32 = comp rec(10)
-   return a;
- }
-
-
-
- fn rec(n: i32) i32 {
-   if (n == 0) {
-     return 0;
-   }
-   return rec(n - 1);
- }
-
-// // fn main() i32 {
-// //   return a;
+//
+// // fn add(a: i32, b: i32) i32 {
+// //   return a + b;
 // // }
-
-// // type A = i32
-
- type A = struct {
-   a: i32,
-   b: i32,
+//
+fn fib(n: i32) i32 {
+    var a:i32 = 0
+    var b:i32 = 1
+    if (n > 0) {
+      while (n > 1) {
+        var t:i32 = a + b
+        a = b
+        b = t
+        n = n - 1
+      }
+      return b
+    }
+    return a
  }
- fn struct_test(n: i32) i32 {
-   const a: A = A{
-     a = n,
-     b = 33,
-   }
-   return a.a + a.b;
- }
-// fn main() void {
-//   // const a: i32 = comp struct_test(10);
-
-//   const b = comp infer_type();
-//   const c = @sizeof(i32);
-
+pub fn main() void {
+    var result = fib(10);
+}
+//
+ // fn test2() i32 {
+//    var a: i32 = comp 2 + 3 + test(2)
+//    var b: i32 = comp fib(20)
+//    var c: i32 = comp rec(10)
+//    return a;
+ // }
+//
+//
+//
+ // fn rec(n: i32) i32 {
+//    if (n == 0) {
+//      return 0;
+//    }
+//    return rec(n - 1);
+ // }
+//
+// // // fn main() i32 {
+// // //   return a;
+// // // }
+//
+// // // type A = i32
+//
+ // type A = struct {
+//    a: i32,
+//    b: i32,
+ // }
+ // fn struct_test(n: i32) i32 {
+//    const a: A = A{
+//      a = n,
+//      b = 33,
+//    }
+//    return a.a + a.b;
+ // }
+// // fn main() void {
+// //   // const a: i32 = comp struct_test(10);
+//
+// //   const b = comp infer_type();
+// //   const c = @sizeof(i32);
+//
+// // }
+//
+//
+// fn infer_type() u64 {
+//   var sum: u64 = 0;
+//   var i: u64 = 0;
+//   var arr = [3]u64 {1, 2, 123}
+//
+//   while (i < @length(arr)) {
+//     sum = sum + arr[i]
+//     i = i + 1
+//   }
+//   return sum;
 // }
-
-
-fn infer_type() u64 {
-  var sum: u64 = 0;
-  var i: u64 = 0;
-  var arr = [3]u64 {1, 2, 123}
-
-  while (i < @length(arr)) {
-    sum = sum + arr[i]
-    i = i + 1
-  }
-  return sum;
-}
-
-fn T() type {
-  return u32;
-}
-
- fn main(a: T()) u32 {
-   //const a: T() = 10;
-   const a: u32 = 10;
-   return a;
- }
+//
+// fn T() type {
+//   return u32;
+// }
+//
+ // fn main(a: T()) u32 {
+//    //const a: T() = 10;
+//    const a: u32 = 10;
+//    return a;
+ // }
+//

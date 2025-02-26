@@ -1,24 +1,26 @@
 const std = @import("std");
-pub const Signature = @import("./Signature.zig");
-pub const FunctionDeclaration = @import("./FunctionDeclaration.zig");
 const Map = std.AutoHashMapUnmanaged;
-pub const Dfg = @import("./Dfg.zig");
-pub const Function = @import("./Function.zig");
+const Array = std.ArrayList;
+
+const Set = @import("../data_structures.zig").AutoSetUnmanaged;
+const debug = @import("../debug.zig");
+const Box = @import("../pointer.zig").Box;
+pub const Block = @import("./Block.zig");
 pub const Definition = @import("./Definition.zig");
 pub const DefinitionBuilder = @import("./DefinitionBuilder.zig");
-const debug = @import("../debug.zig");
-pub const Block = @import("./Block.zig");
-pub const Namespace = @import("./Namespace.zig");
-const Array = std.ArrayList;
-pub const Ty = @import("./ty.zig").Ty;
-pub const utils = @import("./utils.zig");
-pub const InstData = @import("./inst.zig").InstData;
+pub const Dfg = @import("./Dfg.zig");
+pub const Function = @import("./Function.zig");
+pub const FunctionDeclaration = @import("./FunctionDeclaration.zig");
 pub const GlobalDeclaration = @import("./GlobalDeclaration.zig");
-pub const TypedValue = @import("./TypedValue.zig");
-pub const Value = @import("./value.zig").Value;
+pub const InstData = @import("./inst.zig").InstData;
+pub const Namespace = @import("./Namespace.zig");
 pub const Op = @import("./opcodes.zig").Op;
-const Set = @import("../data_structures.zig").AutoSetUnmanaged;
-const Box = @import("../pointer.zig").Box;
+pub const Signature = @import("./Signature.zig");
+pub const Ty = @import("./ty.zig").Ty;
+pub const TypedValue = @import("./TypedValue.zig");
+pub const utils = @import("./utils.zig");
+pub const Value = @import("./value.zig").Value;
+
 const BoxedDefinition = Box(Definition);
 
 pub const Decl = union(enum) {
@@ -272,6 +274,23 @@ pub fn getFunctionDeclaration(self: *Self, ref: Decl.Ref) *FunctionDeclaration {
 }
 pub fn getDeclaration(self: *Self, ref: Decl.Ref) *Decl {
     return self.decls.getPtr(ref);
+}
+pub fn getDeclarationRefByName(self: *Self, ns_ref: Namespace.Ref, name: []const u8) ?Decl.Ref {
+    const ns = self.namespaces.get(ns_ref);
+    var decl_iter = ns.declarations.iterator();
+    while (decl_iter.next()) |decl_ref| {
+        const decl = self.getDeclaration(decl_ref.*);
+        switch (decl.*) {
+            .func => |func| {
+                if (std.mem.eql(u8, func.name, name)) return decl_ref.*;
+            },
+            .global => |global| {
+                if (std.mem.eql(u8, global.name, name)) return decl_ref.*;
+            },
+        }
+        // std.debug.print("{s}\n", .{ decl});
+    }
+    return null;
 }
 pub fn getDefinitionByDeclRef(self: *const Self, ref: Decl.Ref) *Definition {
     const decl_ref = self.definition_map.get(ref) orelse std.debug.panic("Definition not found: {}", .{ref});
