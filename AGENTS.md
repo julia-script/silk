@@ -1,8 +1,16 @@
 # Silk Effect agent instructions
 
-These conventions apply to the entire repository. `@silk-effect/llvm` is currently blank; new
-code must establish these shapes from the first exported feature instead of adding Effect as a
-wrapper after an imperative implementation already exists.
+## Project stage
+
+This project is either unreleased or undergoing a quiet alpha review. Attempts to preserve backward
+compatibility are forbidden at this stage. Do not create technical debt or compromise a better
+implementation to remain compatible with the current API. Breaking any API is not only allowed but
+encouraged when it advances the project toward an eventual stable version we can be confident in.
+
+These conventions apply to the entire repository. The current `effect-patterns` skill is the
+authoritative source for Effect architecture. When this file and that skill differ, follow the
+skill and update this file rather than preserving an older convention.
+
 
 ## Repository workflow
 
@@ -77,78 +85,99 @@ channel and resources to a `Scope`; everything inward of the boundary stays effe
 - Keep boundary wrappers thin. Do not build a large imperative core and bolt Effect onto its outer
   constructor or entry point.
 
-Use one repo-wide tagged error by default. The default is `SilkError`; introduce another tag only
-when callers need to branch on that distinction.
+Use the LLVM-specific `LlvmError` family for expected package failures. Preserve the operation and
+message, and distinguish invalid input, invalid state or ownership, and wrapped external failure
+with a discriminated reason. Only wrapped failures carry JavaScript causal ancestry; rejected
+values belong in semantic error details. Introduce another public tag only when callers need a
+distinct recovery branch.
 
 ```ts
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 
-export class SilkError extends Data.TaggedError('SilkError')<{
+export class LlvmError extends Data.TaggedError('LlvmError')<{
+  readonly operation: string
   readonly message: string
-  readonly cause: unknown
+  readonly reason: {
+    readonly _tag: 'WrappedFailure'
+    readonly cause: unknown
+  }
 }> {}
 
 export const fromExternal = Effect.fn('Llvm.fromExternal')(function* (input: string) {
   return yield* Effect.try({
     try: () => externalApi(input),
-    catch: (cause) => new SilkError({ message: `LLVM operation failed for ${input}`, cause }),
+    catch: (cause) =>
+      new LlvmError({
+        operation: 'Llvm.fromExternal',
+        message: `LLVM operation failed for ${input}`,
+        reason: { _tag: 'WrappedFailure', cause },
+      }),
   })
 })
 ```
 
-Never throw ordinary errors across a public boundary, swallow errors in `catch`, or expose
-`unknown` as a public Effect error channel.
+Never throw yieldable errors across a public boundary, use a tagged error as synchronous control
+flow, swallow errors in `catch`, or expose `unknown` as a public Effect error channel. Synchronous
+mutable transitions return a typed result such as `Either`; unexpected JavaScript throws remain
+defects. Public fallible helpers return Effects. Private synchronous encoders may abort with a
+private non-yieldable implementation failure that is translated once at the outer Effect boundary.
 
 ## Effectful functions are Effect.fn
 
-Define effectful functions with `Effect.fn('Actor.operation')`. Use `Effect.fnUntraced` only for a
-measured hot path or a small internal function where span overhead matters. Do not define an arrow
-that merely returns `Effect.gen`; that drops function tracing, span arguments, and improved stack
-traces.
+Define named public actor operations with `Effect.fn('Actor.operation')`; these are the package's
+observability boundaries. Define reusable internal Effect-returning functions and recipe callbacks
+with `Effect.fnUntraced`. Keep inline `Effect.gen` for one-off composition rather than reusable
+arrows that merely return a generator.
 
 ```ts
 export const compile = Effect.fn('Compiler.compile')(function* (
   target: Target.Target,
-): Effect.fn.Return<Artifact.Artifact, SilkError, CompilerService> {
+): Effect.fn.Return<Artifact.Artifact, LlvmError, CompilerService> {
   const compiler = yield* CompilerService
   return yield* compiler.compile(target)
 })
 ```
 
 The explicit `Effect.fn.Return<A, E, R>` annotation is optional for internal functions. Use it to
-pin public and recursive signatures.
+pin public and recursive signatures. Prefer `Function.dual` for immutable actor transformations
+that are useful both data-first and in a pipe; preserve the existing data-first argument order and
+defaults.
 
 Raw imperative code is allowed only inside a documented performance-critical inner loop, such as
 per-instruction or per-byte processing. Keep that loop behind an effectful API, keep construction
 and teardown in Effect, and add a comment naming the measured reason for the exception. A claim
 that an entire package is a hot path is not an exception.
 
-## Tests stay inside Effect
+## Tests use @effect/vitest
 
-Build shared test layers once per file, create one `ManagedRuntime`, and pass its runner to
-`Effect.fnUntraced`. Keep test bodies as generators that yield Effects.
+Import `it` and `assert` from `@effect/vitest`. Use ordinary `it` for synchronous tests and
+`it.effect` for Effect-returning tests. Use `it.layer` only when tests genuinely share a service
+graph. Assertions stay inside the Effect generator.
 
 ```ts
 import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as ManagedRuntime from 'effect/ManagedRuntime'
-import { expect, test } from 'vitest'
+import { assert, it } from '@effect/vitest'
 
-const TestRuntime = ManagedRuntime.make(Layer.merge(TestCompiler.layer, Layer.empty))
-
-test(
-  'compiles a target',
-  Effect.fnUntraced(function* () {
+it.effect('compiles a target', () =>
+  Effect.gen(function* () {
     const artifact = yield* Compiler.compile(Target.make('wasm32'))
-    expect(artifact.target).toBe('wasm32')
-  }, TestRuntime.runPromise),
+    assert.strictEqual(artifact.target, 'wasm32')
+  }),
 )
 ```
 
-Do not call `Effect.runPromise` or `Effect.runSync` inside each test, rebuild common layers per
-test, or wrap Effect code in `async` test callbacks. A test that genuinely needs isolation may
-scope a distinct layer within that test.
+Do not build a `ManagedRuntime` test harness, call `Effect.runPromise` or `Effect.runSync` inside
+each test, rebuild common layers per test, or wrap Effect code in `async` callbacks. A test that
+genuinely needs isolation may scope a distinct layer within that test.
+
+## Scope resource lifecycles
+
+Use `Effect.acquireRelease`, `Effect.acquireUseRelease`, or an equivalent scoped bracket whenever
+an operation acquires a reservation, draft, handle, or external resource. Release must run after
+success, typed failure, defect, and interruption without replacing the original exit. Do not rely
+on duplicated cleanup branches or manual `try/finally`. Preserve generic success, error, and
+requirement channels through the bracket.
 
 ## Stay type-safe
 
