@@ -1,0 +1,31 @@
+{
+  "name": "silk-effect",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "changeset": "changeset",
+    "check": "biome check . && turbo run typecheck test && pnpm test:scripts",
+    "check:write": "biome check --write .",
+    "format": "biome format --write .",
+    "release:candidate": "pnpm build && vitest run release-candidate/validate.test.ts",
+    "release:publish": "changeset publish",
+    "release:publish:ci": "node .github/scripts/publish-with-oidc-guard.mjs",
+    "release:version": "changeset version",
+    "test": "turbo run test",
+    "test:scripts": "node --test \".github/scripts/*.test.mjs\"",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.4",
+    "@changesets/cli": "^2.31.1",
+    "turbo": "2.10.5",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

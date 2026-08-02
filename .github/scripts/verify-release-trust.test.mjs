@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import { checkManifest, fetchRegistryManifest } from './verify-release-trust.mjs'
+
+const trusted = {
+  version: '0.1.0',
+  _npmUser: { trustedPublisher: { id: 'github' } },
+  dist: { attestations: { provenance: {} } },
+}
+
+test('accepts a trusted publish with provenance', () => {
+  assert.deepEqual(checkManifest('@silk-effect/llvm', '0.1.0', trusted), [])
+})
+
+test('rejects an untrusted publish without provenance', () => {
+  const failures = checkManifest('@silk-effect/llvm', '0.1.0', {
+    version: '0.1.0',
+    _npmUser: { name: 'manual' },
+  })
+
+  assert.equal(failures.length, 2)
+})
+
+test('reads the requested version from the registry packument', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({ versions: { '0.1.0': trusted } }),
+  })
+  const manifest = await fetchRegistryManifest('@silk-effect/llvm', '0.1.0', { fetchImpl })
+
+  assert.equal(manifest.version, '0.1.0')
+})
+
+test('surfaces registry errors', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 503 })
+
+  await assert.rejects(
+    () => fetchRegistryManifest('@silk-effect/llvm', '0.1.0', { fetchImpl }),
+    /returned 503/u,
+  )
+})

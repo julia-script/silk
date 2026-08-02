@@ -1,0 +1,181 @@
+/**
+ * An immutable sequence of bytes used at LLVM's byte-oriented boundaries.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export interface ByteString {
+  readonly _tag: 'ByteString'
+  readonly bytes: ReadonlyArray<number>
+}
+
+/** @internal */
+const fromNumbers = (bytes: Iterable<number>): ByteString => ({
+  _tag: 'ByteString',
+  bytes: Object.freeze(Array.from(bytes)),
+})
+
+/**
+ * Copies a typed array into an immutable byte string, isolating it from later mutations.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const fromUint8Array = (bytes: Uint8Array): ByteString => fromNumbers(bytes)
+
+/**
+ * Encodes a JavaScript string as immutable UTF-8 bytes without a platform dependency.
+ *
+ * **When to use**
+ *
+ * Use when the input is genuinely Unicode text. LLVM identifiers and assembly fragments are
+ * byte-oriented; use {@link fromUint8Array} to preserve arbitrary bytes.
+ *
+ * **Example** (Encoding UTF-8 text)
+ *
+ * ```ts
+ * import * as ByteString from '@silk-effect/llvm/ByteString'
+ *
+ * const value = ByteString.fromString('λ')
+ * // ByteString.toUint8Array(value) equals Uint8Array.of(0xCE, 0xBB)
+ * ```
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const fromString = (value: string): ByteString => {
+  const bytes: Array<number> = []
+
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0
+    if (codePoint <= 0x7f) {
+      bytes.push(codePoint)
+    } else if (codePoint <= 0x7ff) {
+      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f))
+    } else if (codePoint <= 0xffff) {
+      bytes.push(
+        0xe0 | (codePoint >> 12),
+        0x80 | ((codePoint >> 6) & 0x3f),
+        0x80 | (codePoint & 0x3f),
+      )
+    } else {
+      bytes.push(
+        0xf0 | (codePoint >> 18),
+        0x80 | ((codePoint >> 12) & 0x3f),
+        0x80 | ((codePoint >> 6) & 0x3f),
+        0x80 | (codePoint & 0x3f),
+      )
+    }
+  }
+
+  return fromNumbers(bytes)
+}
+
+/**
+ * The canonical empty byte sequence.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const empty: ByteString = fromNumbers([])
+
+/**
+ * Returns a defensive copy suitable for passing across a mutable boundary.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const toUint8Array = (self: ByteString): Uint8Array => Uint8Array.from(self.bytes)
+
+/**
+ * Compares two byte strings byte-for-byte.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const equals = (self: ByteString, other: ByteString): boolean => {
+  if (self.bytes.length !== other.bytes.length) return false
+  return self.bytes.every((byte, index) => byte === other.bytes[index])
+}
+
+/**
+ * A stable 32-bit FNV-1a hash.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const hash = (self: ByteString): number => {
+  let value = 0x811c9dc5
+  for (const byte of self.bytes) {
+    value ^= byte
+    value = Math.imul(value, 0x01000193) >>> 0
+  }
+  return value
+}
+
+/** @internal */
+const hexadecimal = (byte: number): string => byte.toString(16).toUpperCase().padStart(2, '0')
+
+/**
+ * Escapes bytes using LLVM IR's quoted-string spelling.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const escapeForIr = (self: ByteString): string => {
+  let output = ''
+  for (const byte of self.bytes) {
+    if (byte >= 0x20 && byte <= 0x7e && byte !== 0x22 && byte !== 0x5c) {
+      output += String.fromCharCode(byte)
+    } else {
+      output += `\\${hexadecimal(byte)}`
+    }
+  }
+  return output
+}
+
+/**
+ * Tests whether a byte string contains no bytes.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const isEmpty = (self: ByteString): boolean => self.bytes.length === 0
+
+/**
+ * Concatenates byte strings in iteration order into a new immutable value.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const concat = (parts: Iterable<ByteString>): ByteString => {
+  const bytes: Array<number> = []
+  for (const part of parts) bytes.push(...part.bytes)
+  return fromNumbers(bytes)
+}
+
+/**
+ * Splits on line-feed bytes and drops empty lines.
+ *
+ * **Gotchas**
+ *
+ * Carriage returns are ordinary bytes and remain in the corresponding line. Leading, trailing,
+ * and repeated `\n` bytes do not produce empty entries.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const splitLines = (self: ByteString): ReadonlyArray<ByteString> => {
+  const lines: Array<ByteString> = []
+  let line: Array<number> = []
+  for (const byte of self.bytes) {
+    if (byte === 0x0a) {
+      if (line.length > 0) lines.push(fromNumbers(line))
+      line = []
+    } else {
+      line.push(byte)
+    }
+  }
+  if (line.length > 0) lines.push(fromNumbers(line))
+  return lines
+}

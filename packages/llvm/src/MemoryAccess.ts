@@ -1,0 +1,401 @@
+import * as Effect from 'effect/Effect'
+import type * as Alignment from './Alignment.js'
+import { defaultAlignment } from './Alignment.js'
+import { SilkError } from './SilkError.js'
+
+/**
+ * Whether an LLVM memory operation is ordinary or volatile.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export type Kind = 'normal' | 'volatile'
+/**
+ * The synchronization domain used by an atomic operation.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export type SyncScope = 'singlethread' | 'system'
+/**
+ * LLVM's atomic ordering lattice, including `none` for non-atomic operations.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export type AtomicOrdering =
+  | 'none'
+  | 'unordered'
+  | 'monotonic'
+  | 'acquire'
+  | 'release'
+  | 'acq_rel'
+  | 'seq_cst'
+
+/**
+ * Operations supported by LLVM's `atomicrmw` instruction.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export type AtomicOperation =
+  | 'xchg'
+  | 'add'
+  | 'sub'
+  | 'and'
+  | 'nand'
+  | 'or'
+  | 'xor'
+  | 'max'
+  | 'min'
+  | 'umax'
+  | 'umin'
+  | 'fadd'
+  | 'fsub'
+  | 'fmax'
+  | 'fmin'
+
+/**
+ * Immutable settings shared by loads, stores, and atomic memory instructions.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export interface MemoryAccess {
+  readonly kind: Kind
+  readonly alignment: Alignment.Alignment
+  readonly syncScope: SyncScope
+  readonly ordering: AtomicOrdering
+}
+
+/**
+ * Optional fields accepted by {@link make}.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export interface Input {
+  readonly kind?: Kind
+  readonly alignment?: Alignment.Alignment
+  readonly syncScope?: SyncScope
+  readonly ordering?: AtomicOrdering
+}
+
+/**
+ * The non-volatile memory-access kind.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const normal: Kind = 'normal'
+/**
+ * The volatile memory-access kind.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const volatile: Kind = 'volatile'
+/**
+ * Synchronization visible to every thread in the process.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const system: SyncScope = 'system'
+/**
+ * Synchronization restricted to the current thread.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const singlethread: SyncScope = 'singlethread'
+
+/**
+ * Numeric bitcode codes for {@link AtomicOrdering}.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const orderingCode: Readonly<Record<AtomicOrdering, number>> = Object.freeze({
+  none: 0,
+  unordered: 1,
+  monotonic: 2,
+  acquire: 3,
+  release: 4,
+  acq_rel: 5,
+  seq_cst: 6,
+})
+
+/**
+ * Numeric bitcode codes for {@link AtomicOperation}.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const operationCode: Readonly<Record<AtomicOperation, number>> = Object.freeze({
+  xchg: 0,
+  add: 1,
+  sub: 2,
+  and: 3,
+  nand: 4,
+  or: 5,
+  xor: 6,
+  max: 7,
+  min: 8,
+  umax: 9,
+  umin: 10,
+  fadd: 11,
+  fsub: 12,
+  fmax: 13,
+  fmin: 14,
+})
+
+/**
+ * Normalizes memory settings with target alignment, system scope, and non-atomic defaults.
+ *
+ * **Details**
+ *
+ * Construction is intentionally permissive because legality depends on the consuming instruction.
+ * Function-body operations call the corresponding validators before committing an instruction.
+ *
+ * **Example** (Configuring atomic access)
+ *
+ * ```ts
+ * import * as MemoryAccess from '@silk-effect/llvm/MemoryAccess'
+ *
+ * const access = MemoryAccess.withAtomic(
+ *   MemoryAccess.make({ kind: 'volatile' }),
+ *   'acquire',
+ * )
+ * ```
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const make = (input: Input = {}): MemoryAccess =>
+  Object.freeze({
+    kind: input.kind ?? 'normal',
+    alignment: input.alignment ?? defaultAlignment,
+    syncScope: input.syncScope ?? 'system',
+    ordering: input.ordering ?? 'none',
+  })
+
+/**
+ * Returns a copy with volatile access enabled or disabled.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const withVolatile = (self: MemoryAccess, enabled = true): MemoryAccess =>
+  Object.freeze({ ...self, kind: enabled ? 'volatile' : 'normal' })
+
+/**
+ * Returns a copy configured as an atomic access with the requested ordering and scope.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const withAtomic = (
+  self: MemoryAccess,
+  ordering: Exclude<AtomicOrdering, 'none'>,
+  syncScope: SyncScope = 'system',
+): MemoryAccess => Object.freeze({ ...self, ordering, syncScope })
+
+/**
+ * Compares orderings by LLVM's encoding order; instruction-specific legality still requires validation.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const compareOrdering = (left: AtomicOrdering, right: AtomicOrdering): number =>
+  Math.sign(orderingCode[left] - orderingCode[right])
+
+/**
+ * Renders the optional textual `volatile` prefix.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const renderKind = (kind: Kind): string => (kind === 'volatile' ? 'volatile ' : '')
+
+/**
+ * Renders the optional `syncscope("singlethread")` clause.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const renderSyncScope = (scope: SyncScope): string =>
+  scope === 'singlethread' ? 'syncscope("singlethread") ' : ''
+
+/**
+ * Renders an ordering token, or an empty string for non-atomic operations.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const renderOrdering = (ordering: AtomicOrdering): string =>
+  ordering === 'none' ? '' : ordering
+
+/**
+ * Encodes an alignment as LLVM's exponent-plus-one instruction field.
+ *
+ * **Gotchas**
+ *
+ * This low-level encoder throws {@link SilkError} when an explicit alignment cannot fit the
+ * six-bit bitcode field.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const alignmentCode = (alignment: Alignment.Alignment): number => {
+  if (alignment.byteUnits === undefined) return 0
+  let value = alignment.byteUnits
+  let exponent = 0
+  while (value > 1n) {
+    value >>= 1n
+    exponent += 1
+  }
+  if (exponent > 62) {
+    throw new SilkError({
+      operation: 'MemoryAccess.alignmentCode',
+      message: 'LLVM instruction alignment exceeds the 6-bit bitcode encoding',
+      cause: alignment,
+    })
+  }
+  return exponent + 1
+}
+
+/**
+ * Validates that a load does not use the store-only `release` or `acq_rel` orderings.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const validateLoadOrdering = Effect.fn('MemoryAccess.validateLoadOrdering')(function* (
+  ordering: AtomicOrdering,
+): Effect.fn.Return<void, SilkError> {
+  if (ordering === 'release' || ordering === 'acq_rel') {
+    return yield* Effect.fail(
+      new SilkError({
+        operation: 'MemoryAccess.validateLoadOrdering',
+        message: 'Atomic loads cannot use release or acq_rel ordering',
+        cause: ordering,
+      }),
+    )
+  }
+})
+
+/**
+ * Validates that a store does not use the load-only `acquire` or `acq_rel` orderings.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const validateStoreOrdering = Effect.fn('MemoryAccess.validateStoreOrdering')(function* (
+  ordering: AtomicOrdering,
+): Effect.fn.Return<void, SilkError> {
+  if (ordering === 'acquire' || ordering === 'acq_rel') {
+    return yield* Effect.fail(
+      new SilkError({
+        operation: 'MemoryAccess.validateStoreOrdering',
+        message: 'Atomic stores require monotonic, release, or seq_cst ordering',
+        cause: ordering,
+      }),
+    )
+  }
+})
+
+/**
+ * Validates that a fence uses at least acquire or release semantics.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const validateFenceOrdering = Effect.fn('MemoryAccess.validateFenceOrdering')(function* (
+  ordering: AtomicOrdering,
+): Effect.fn.Return<void, SilkError> {
+  if (
+    ordering !== 'acquire' &&
+    ordering !== 'release' &&
+    ordering !== 'acq_rel' &&
+    ordering !== 'seq_cst'
+  ) {
+    return yield* Effect.fail(
+      new SilkError({
+        operation: 'MemoryAccess.validateFenceOrdering',
+        message: 'A fence requires acquire, release, acq_rel, or seq_cst ordering',
+        cause: ordering,
+      }),
+    )
+  }
+})
+
+/**
+ * Validates that an atomic read-modify-write uses at least monotonic ordering.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const validateRmwOrdering = Effect.fn('MemoryAccess.validateRmwOrdering')(function* (
+  ordering: AtomicOrdering,
+): Effect.fn.Return<void, SilkError> {
+  if (ordering === 'none' || ordering === 'unordered') {
+    return yield* Effect.fail(
+      new SilkError({
+        operation: 'MemoryAccess.validateRmwOrdering',
+        message: 'Atomic RMW operations require at least monotonic ordering',
+        cause: ordering,
+      }),
+    )
+  }
+})
+
+/**
+ * Validates LLVM's success/failure ordering relationship for compare-exchange.
+ *
+ * **Gotchas**
+ *
+ * Forbidden failure orderings and failure orderings stronger than the success ordering fail with
+ * {@link SilkError}.
+ *
+ * @category memory access
+ * @since 0.0.0
+ */
+export const validateCompareExchange = Effect.fn('MemoryAccess.validateCompareExchange')(function* (
+  success: AtomicOrdering,
+  failure: AtomicOrdering,
+): Effect.fn.Return<void, SilkError> {
+  yield* validateRmwOrdering(success)
+  if (
+    failure === 'none' ||
+    failure === 'unordered' ||
+    failure === 'release' ||
+    failure === 'acq_rel'
+  ) {
+    return yield* Effect.fail(
+      new SilkError({
+        operation: 'MemoryAccess.validateCompareExchange',
+        message: 'Compare-exchange failure ordering is not permitted by LLVM',
+        cause: failure,
+      }),
+    )
+  }
+  const allowedFailure: Readonly<
+    Record<Exclude<AtomicOrdering, 'none' | 'unordered' | 'release' | 'acq_rel'>, number>
+  > = {
+    monotonic: 0,
+    acquire: 1,
+    seq_cst: 2,
+  }
+  const successLimit =
+    success === 'seq_cst' ? 2 : success === 'acquire' || success === 'acq_rel' ? 1 : 0
+  if (allowedFailure[failure] > successLimit) {
+    return yield* Effect.fail(
+      new SilkError({
+        operation: 'MemoryAccess.validateCompareExchange',
+        message: 'Compare-exchange failure ordering cannot be stronger than success ordering',
+        cause: { success, failure },
+      }),
+    )
+  }
+})

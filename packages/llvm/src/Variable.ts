@@ -1,0 +1,413 @@
+import * as Effect from 'effect/Effect'
+import type * as Builder from './Builder.js'
+import * as ByteString from './ByteString.js'
+import type * as Constant from './Constant.js'
+import type * as Global from './Global.js'
+import * as BuilderState from './internal/BuilderState.js'
+import type * as GlobalDescription from './internal/GlobalDescription.js'
+import * as GlobalState from './internal/GlobalState.js'
+import * as Handle from './internal/Handle.js'
+import type * as Metadata from './Metadata.js'
+import { SilkError } from './SilkError.js'
+import type * as Type from './Type.js'
+
+/**
+ * Opaque builder-owned identity for an LLVM global variable.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export interface Variable extends Handle.Handle<'Variable'> {}
+
+/**
+ * LLVM thread-local storage model for a variable.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export type ThreadLocalModel = GlobalDescription.ThreadLocalModel
+
+/**
+ * Global and variable-specific creation properties.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export interface Options extends Global.Options {
+  readonly initializer?: Constant.Constant
+  readonly constant?: boolean
+  readonly threadLocal?: ThreadLocalModel
+  readonly externallyInitialized?: boolean
+  readonly debugExpressions?: ReadonlyArray<Metadata.Metadata>
+}
+
+/**
+ * Read-only variable-specific properties.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export interface Properties {
+  readonly valueType: Type.Type
+  readonly initializer: Constant.Constant | undefined
+  readonly constant: boolean
+  readonly threadLocal: ThreadLocalModel
+  readonly externallyInitialized: boolean
+  readonly debugExpressions: ReadonlyArray<Metadata.Metadata>
+}
+
+/** @internal */
+const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
+  typeof value === 'string'
+    ? ByteString.fromString(value)
+    : value instanceof Uint8Array
+      ? ByteString.fromUint8Array(value)
+      : value
+
+/** @internal */
+const descriptionAt = (
+  state: BuilderState.MutableState,
+  index: number,
+  operation: string,
+): GlobalDescription.VariableDescription => {
+  const description = state.variables[index]
+  if (description === undefined) {
+    throw new SilkError({ operation, message: 'Variable table entry is missing', cause: index })
+  }
+  return description
+}
+
+/** @internal */
+const handleAt = (state: BuilderState.MutableState, index: number, operation: string): Variable => {
+  const handle = state.variableHandles[index]
+  if (handle === undefined) {
+    throw new SilkError({ operation, message: 'Variable table handle is missing', cause: index })
+  }
+  return handle
+}
+
+/** @internal */
+const resolve = (
+  builder: Builder.Builder,
+  state: BuilderState.MutableState,
+  owner: BuilderState.State['owner'],
+  self: Variable,
+  operation: string,
+): { readonly index: number; readonly description: GlobalDescription.VariableDescription } => {
+  const index = Handle.resolve(builder, owner, self, 'Variable', operation)
+  const description = descriptionAt(state, index, operation)
+  const globalIndex = GlobalState.resolveIndex(state, description.global, operation)
+  const global = state.globals[globalIndex]
+  if (global?.kind !== 'Variable' || global.actorIndex !== index || global.deleted) {
+    throw new SilkError({ operation, message: 'Variable handle is no longer active', cause: self })
+  }
+  return { index, description }
+}
+
+/** @internal */
+const initializerIndex = (
+  builder: Builder.Builder,
+  state: BuilderState.MutableState,
+  owner: BuilderState.State['owner'],
+  valueType: number,
+  initializer: Constant.Constant | undefined,
+  operation: string,
+): number | undefined => {
+  if (initializer === undefined) return undefined
+  const index = Handle.resolve(builder, owner, initializer, 'Constant', operation)
+  const constant = state.constants[index]
+  if (constant?.type !== valueType) {
+    throw new SilkError({
+      operation,
+      message: 'Variable initializer type does not match its value type',
+      cause: initializer,
+    })
+  }
+  return index
+}
+
+/** @internal */
+const debugExpressionIndices = (
+  builder: Builder.Builder,
+  state: BuilderState.MutableState,
+  owner: BuilderState.State['owner'],
+  values: ReadonlyArray<Metadata.Metadata> | undefined,
+  operation: string,
+): ReadonlyArray<number> =>
+  state.strip || values === undefined
+    ? Object.freeze([])
+    : Object.freeze(
+        values.map((value) => Handle.resolve(builder, owner, value, 'Metadata', operation)),
+      )
+
+/** @internal */
+const setGlobalDebugExpressions = (
+  state: BuilderState.MutableState,
+  global: number,
+  expressions: ReadonlyArray<number>,
+): void => {
+  const attachments = state.globalMetadata[global] ?? []
+  state.globalMetadata[global] = Object.freeze([
+    ...attachments.filter((attachment) => attachment.kind !== 'dbg'),
+    ...expressions.map((metadata) => Object.freeze({ kind: 'dbg' as const, metadata })),
+  ])
+}
+
+/**
+ * Creates a global variable and its shared global-symbol identity atomically.
+ *
+ * **Gotchas**
+ *
+ * The initializer must have exactly the declared value type. Debug expressions are ignored when
+ * the builder was created with `strip: true`; all ownership and type failures leave no symbol behind.
+ *
+ * **Example** (Creating a global variable)
+ *
+ * ```ts
+ * import * as Effect from 'effect/Effect'
+ * import * as Builder from '@silk-effect/llvm/Builder'
+ * import * as Constant from '@silk-effect/llvm/Constant'
+ * import * as Type from '@silk-effect/llvm/Type'
+ * import * as Variable from '@silk-effect/llvm/Variable'
+ *
+ * const variable = await Effect.runPromise(
+ *   Effect.gen(function* () {
+ *     const builder = yield* Builder.make()
+ *     const i32 = yield* Type.integer(builder, 32)
+ *     const zero = yield* Constant.integerUnsigned(builder, i32, 0)
+ *     return yield* Variable.make(builder, 'counter', i32, { initializer: zero })
+ *   }),
+ * )
+ * ```
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export const make = Effect.fn('Variable.make')(function* (
+  builder: Builder.Builder,
+  name: ByteString.ByteString | Uint8Array | string,
+  valueType: Type.Type,
+  options: Options = {},
+): Effect.fn.Return<Variable, SilkError> {
+  return yield* BuilderState.mutate(builder, 'Variable.make', (state, owner) => {
+    const typeIndex = Handle.resolve(builder, owner, valueType, 'Type', 'Variable.make')
+    const init = initializerIndex(
+      builder,
+      state,
+      owner,
+      typeIndex,
+      options.initializer,
+      'Variable.make',
+    )
+    const index = state.variables.length
+    const allocated = GlobalState.allocate(
+      state,
+      owner,
+      bytes(name),
+      'Variable',
+      index,
+      options,
+      'Variable.make',
+    )
+    const handle = Handle.make('Variable', owner, index)
+    const debugExpressions = debugExpressionIndices(
+      builder,
+      state,
+      owner,
+      options.debugExpressions,
+      'Variable.make',
+    )
+    state.variables.push(
+      Object.freeze({
+        _tag: 'Variable',
+        global: allocated.index,
+        valueType: typeIndex,
+        initializer: init,
+        constant: options.constant ?? false,
+        threadLocal: options.threadLocal ?? 'none',
+        externallyInitialized: options.externallyInitialized ?? false,
+        debugExpressions,
+      }),
+    )
+    setGlobalDebugExpressions(state, allocated.index, debugExpressions)
+    state.variableHandles.push(handle)
+    return handle
+  })
+})
+
+/**
+ * Adopts an existing generic global as a variable, or returns its existing variable identity.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export const fromGlobal = Effect.fn('Variable.fromGlobal')(function* (
+  builder: Builder.Builder,
+  global: Global.Global,
+  valueType: Type.Type,
+  options: Omit<Options, keyof Global.Options> = {},
+): Effect.fn.Return<Variable, SilkError> {
+  return yield* BuilderState.mutate(builder, 'Variable.fromGlobal', (state, owner) => {
+    const resolved = GlobalState.resolve(builder, state, owner, global, 'Variable.fromGlobal')
+    if (resolved.description.kind === 'Variable') {
+      return handleAt(state, resolved.description.actorIndex, 'Variable.fromGlobal')
+    }
+    const typeIndex = Handle.resolve(builder, owner, valueType, 'Type', 'Variable.fromGlobal')
+    const index = state.variables.length
+    const handle = Handle.make('Variable', owner, index)
+    const debugExpressions = debugExpressionIndices(
+      builder,
+      state,
+      owner,
+      options.debugExpressions,
+      'Variable.fromGlobal',
+    )
+    state.variables.push(
+      Object.freeze({
+        _tag: 'Variable',
+        global: resolved.index,
+        valueType: typeIndex,
+        initializer: initializerIndex(
+          builder,
+          state,
+          owner,
+          typeIndex,
+          options.initializer,
+          'Variable.fromGlobal',
+        ),
+        constant: options.constant ?? false,
+        threadLocal: options.threadLocal ?? 'none',
+        externallyInitialized: options.externallyInitialized ?? false,
+        debugExpressions,
+      }),
+    )
+    setGlobalDebugExpressions(state, resolved.index, debugExpressions)
+    state.variableHandles.push(handle)
+    state.globals[resolved.index] = Object.freeze({
+      ...resolved.description,
+      kind: 'Variable',
+      actorIndex: index,
+    })
+    return handle
+  })
+})
+
+/**
+ * Returns the shared global-symbol handle for a variable.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export const global = Effect.fn('Variable.global')(function* (
+  builder: Builder.Builder,
+  self: Variable,
+): Effect.fn.Return<Global.Global, SilkError> {
+  return yield* BuilderState.mutate(builder, 'Variable.global', (state, owner) => {
+    const value = resolve(builder, state, owner, self, 'Variable.global').description
+    return GlobalState.handleAt(state, value.global, 'Variable.global')
+  })
+})
+
+/**
+ * Replaces or removes a variable initializer after exact type and ownership validation.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export const setInitializer = Effect.fn('Variable.setInitializer')(function* (
+  builder: Builder.Builder,
+  self: Variable,
+  initializer: Constant.Constant | undefined,
+): Effect.fn.Return<void, SilkError> {
+  yield* BuilderState.mutate(builder, 'Variable.setInitializer', (state, owner) => {
+    const { description, index } = resolve(builder, state, owner, self, 'Variable.setInitializer')
+    state.variables[index] = Object.freeze({
+      ...description,
+      initializer: initializerIndex(
+        builder,
+        state,
+        owner,
+        description.valueType,
+        initializer,
+        'Variable.setInitializer',
+      ),
+    })
+  })
+})
+
+/**
+ * Updates variable-only properties while preserving omitted fields and common global settings.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export const configure = Effect.fn('Variable.configure')(function* (
+  builder: Builder.Builder,
+  self: Variable,
+  options: Pick<Options, 'constant' | 'threadLocal' | 'externallyInitialized' | 'debugExpressions'>,
+): Effect.fn.Return<void, SilkError> {
+  yield* BuilderState.mutate(builder, 'Variable.configure', (state, owner) => {
+    const { description, index } = resolve(builder, state, owner, self, 'Variable.configure')
+    const debugExpressions =
+      options.debugExpressions === undefined
+        ? description.debugExpressions
+        : debugExpressionIndices(
+            builder,
+            state,
+            owner,
+            options.debugExpressions,
+            'Variable.configure',
+          )
+    state.variables[index] = Object.freeze({
+      ...description,
+      constant: options.constant ?? description.constant,
+      threadLocal: options.threadLocal ?? description.threadLocal,
+      externallyInitialized: options.externallyInitialized ?? description.externallyInitialized,
+      debugExpressions,
+    })
+    setGlobalDebugExpressions(state, description.global, debugExpressions)
+  })
+})
+
+/**
+ * Reads an immutable snapshot of a variable's value type, initializer, storage, and debug settings.
+ *
+ * @category variables
+ * @since 0.0.0
+ */
+export const properties = Effect.fn('Variable.properties')(function* (
+  builder: Builder.Builder,
+  self: Variable,
+): Effect.fn.Return<Properties, SilkError> {
+  return yield* BuilderState.mutate(builder, 'Variable.properties', (state, owner) => {
+    const description = resolve(builder, state, owner, self, 'Variable.properties').description
+    const valueType = state.typeHandles[description.valueType]
+    const initializer =
+      description.initializer === undefined
+        ? undefined
+        : state.constantHandles[description.initializer]
+    if (
+      valueType === undefined ||
+      (description.initializer !== undefined && initializer === undefined)
+    ) {
+      throw new SilkError({
+        operation: 'Variable.properties',
+        message: 'Variable references a missing table entry',
+        cause: self,
+      })
+    }
+    return Object.freeze({
+      valueType,
+      initializer,
+      constant: description.constant,
+      threadLocal: description.threadLocal,
+      externallyInitialized: description.externallyInitialized,
+      debugExpressions: Object.freeze(
+        description.debugExpressions.flatMap((index) => {
+          const metadata = state.metadataHandles[index]
+          return metadata === undefined ? [] : [metadata]
+        }),
+      ),
+    })
+  })
+})
