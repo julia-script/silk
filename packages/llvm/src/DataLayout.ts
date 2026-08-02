@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as AddrSpace from './AddrSpace.js'
 import * as Alignment from './Alignment.js'
 import * as ByteString from './ByteString.js'
-import { SilkError } from './SilkError.js'
+import { type LlvmError, wrappedFailure } from './LlvmError.js'
 
 /**
  * Alignment rules for one integer, floating-point, or vector bit width.
@@ -239,7 +239,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
  *
  * **Gotchas**
  *
- * Unsupported or malformed components fail with {@link SilkError} instead of being ignored,
+ * Unsupported or malformed components fail with {@link LlvmError} instead of being ignored,
  * preventing target-dependent silent guesses.
  *
  * **Example** (Parsing a target layout)
@@ -262,7 +262,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
  */
 export const parse = Effect.fn('DataLayout.parse')(function* (
   input: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<DataLayout, SilkError> {
+): Effect.fn.Return<DataLayout, LlvmError> {
   const original =
     typeof input === 'string'
       ? ByteString.fromString(input)
@@ -272,10 +272,10 @@ export const parse = Effect.fn('DataLayout.parse')(function* (
   return yield* Effect.try({
     try: () => parseUnsafe(original),
     catch: (cause) =>
-      new SilkError({
+      wrappedFailure({
         operation: 'DataLayout.parse',
         message: cause instanceof Error ? cause.message : 'Invalid LLVM data layout',
-        cause,
+        cause: cause,
       }),
   })
 })

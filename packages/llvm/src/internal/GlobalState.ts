@@ -2,7 +2,7 @@ import * as AddrSpace from '../AddrSpace.js'
 import * as Alignment from '../Alignment.js'
 import * as ByteString from '../ByteString.js'
 import type * as Global from '../Global.js'
-import { SilkError } from '../SilkError.js'
+import { invalidInput, invalidState, type LlvmError } from '../LlvmError.js'
 import type * as BuilderState from './BuilderState.js'
 import * as CanonicalKey from './CanonicalKey.js'
 import type * as GlobalDescription from './GlobalDescription.js'
@@ -57,16 +57,18 @@ export const allocate = (
   actorIndex: number,
   options: CommonOptions,
   operation: string,
-): { readonly index: number; readonly handle: Global.Global } => {
+): Result.Result<{ readonly index: number; readonly handle: Global.Global }, LlvmError> => {
   const resolvedName = name.bytes.length === 0 ? availableAnonymousName(state) : name
   const key = CanonicalKey.bytes(resolvedName)
   const occupied = state.globalNames.get(key)
   if (occupied !== undefined) {
-    throw new SilkError({
-      operation,
-      message: 'LLVM global name is already occupied',
-      cause: { name: resolvedName, occupied },
-    })
+    return Result.fail(
+      invalidState({
+        operation,
+        message: 'LLVM global name is already occupied',
+        state: { name: resolvedName, occupied },
+      }),
+    )
   }
   const index = state.globals.length
   const handle = Handle.make('Global', owner, index)
@@ -83,7 +85,7 @@ export const allocate = (
   state.globalHandles.push(handle)
   state.globalMetadata.push(Object.freeze([]))
   state.globalNames.set(key, index)
-  return { index, handle }
+  return Result.succeed({ index, handle })
 }
 
 /** @internal */
@@ -91,19 +93,23 @@ export const resolveIndex = (
   state: BuilderState.MutableState,
   index: number,
   operation: string,
-): number => {
+): Result.Result<number, LlvmError> => {
   const visited = new globalThis.Set<number>()
   let current = index
   while (true) {
     if (visited.has(current)) {
-      throw new SilkError({ operation, message: 'Global replacement cycle detected', cause: index })
+      return Result.fail(
+        invalidInput({ operation, message: 'Global replacement cycle detected', input: index }),
+      )
     }
     visited.add(current)
     const description = state.globals[current]
     if (description === undefined) {
-      throw new SilkError({ operation, message: 'Global table entry is missing', cause: current })
+      return Result.fail(
+        invalidState({ operation, message: 'Global table entry is missing', state: current }),
+      )
     }
-    if (description.replacement === undefined) return current
+    if (description.replacement === undefined) return Result.succeed(current)
     current = description.replacement
   }
 }
@@ -115,25 +121,35 @@ export const resolve = (
   owner: OwnedHandle.Owner,
   self: Global.Global,
   operation: string,
-): { readonly index: number; readonly description: GlobalDescription.GlobalDescription } => {
-  const original = Handle.resolve(builder, owner, self, 'Global', operation)
-  const index = resolveIndex(state, original, operation)
-  const description = state.globals[index]
-  if (description === undefined || description.deleted) {
-    throw new SilkError({ operation, message: 'Global has been deleted', cause: self })
-  }
-  return { index, description }
-}
+): Result.Result<
+  { readonly index: number; readonly description: GlobalDescription.GlobalDescription },
+  LlvmError
+> =>
+  Result.gen(function* () {
+    const original = yield* Handle.resolve(builder, owner, self, 'Global', operation)
+    const index = yield* resolveIndex(state, original, operation)
+    const description = state.globals[index]
+    if (description === undefined || description.deleted) {
+      return yield* Result.fail(
+        invalidInput({ operation, message: 'Global has been deleted', input: self }),
+      )
+    }
+    return { index, description }
+  })
 
 /** @internal */
 export const handleAt = (
   state: Pick<BuilderState.MutableState, 'globalHandles'>,
   index: number,
   operation: string,
-): Global.Global => {
+): Result.Result<Global.Global, LlvmError> => {
   const handle = state.globalHandles[index]
   if (handle === undefined) {
-    throw new SilkError({ operation, message: 'Global table handle is missing', cause: index })
+    return Result.fail(
+      invalidState({ operation, message: 'Global table handle is missing', state: index }),
+    )
   }
-  return handle
+  return Result.succeed(handle)
 }
+
+import * as Result from 'effect/Result'

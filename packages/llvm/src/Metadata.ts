@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type * as Builder from './Builder.js'
 import * as ByteString from './ByteString.js'
 import type * as Constant from './Constant.js'
@@ -7,8 +8,9 @@ import * as DISPFlags from './DISPFlags.js'
 import * as BuilderState from './internal/BuilderState.js'
 import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
+import * as IntegerInput from './internal/IntegerInput.js'
 import * as MetadataDescription from './internal/MetadataDescription.js'
-import { SilkError } from './SilkError.js'
+import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import type * as Variable from './Variable.js'
 
 /**
@@ -147,9 +149,6 @@ const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.B
       : value
 
 /** @internal */
-const integer = (value: bigint | number | undefined): bigint => BigInt(value ?? 0)
-
-/** @internal */
 const metadataKey = (node: MetadataDescription.Node): string =>
   JSON.stringify(node, (_name, value) => (typeof value === 'bigint' ? `bigint:${value}` : value))
 
@@ -173,14 +172,20 @@ const resolve = (
   owner: BuilderState.State['owner'],
   self: Metadata,
   operation: string,
-): { readonly index: number; readonly entry: MetadataDescription.Entry } => {
-  const index = Handle.resolve(builder, owner, self, 'Metadata', operation)
-  const entry = state.metadata[index]
-  if (entry === undefined) {
-    throw new SilkError({ operation, message: 'Metadata table entry is missing', cause: self })
-  }
-  return { index, entry }
-}
+): Result.Result<
+  { readonly index: number; readonly entry: MetadataDescription.Entry },
+  LlvmError
+> =>
+  Result.gen(function* () {
+    const index = yield* Handle.resolve(builder, owner, self, 'Metadata', operation)
+    const entry = state.metadata[index]
+    if (entry === undefined) {
+      return yield* Result.fail(
+        invalidState({ operation, message: 'Metadata table entry is missing', state: self }),
+      )
+    }
+    return { index, entry }
+  })
 
 /**
  * Resolves optional metadata to its table index for low-level actor and serializer integrations.
@@ -194,8 +199,10 @@ export const resolveIndex = (
   owner: BuilderState.State['owner'],
   self: Optional,
   operation: string,
-): number | undefined =>
-  self === undefined ? undefined : resolve(builder, state, owner, self, operation).index
+): Result.Result<number | undefined, LlvmError> =>
+  self === undefined
+    ? Result.succeed(undefined)
+    : Result.map(resolve(builder, state, owner, self, operation), ({ index }) => index)
 
 /** @internal */
 const resolveString = (
@@ -204,14 +211,17 @@ const resolveString = (
   owner: BuilderState.State['owner'],
   self: Optional,
   operation: string,
-): number | undefined => {
-  if (self === undefined) return undefined
-  const resolved = resolve(builder, state, owner, self, operation)
-  if (resolved.entry._tag !== 'String') {
-    throw new SilkError({ operation, message: 'Expected a metadata string', cause: self })
-  }
-  return resolved.index
-}
+): Result.Result<number | undefined, LlvmError> =>
+  Result.gen(function* () {
+    if (self === undefined) return undefined
+    const resolved = yield* resolve(builder, state, owner, self, operation)
+    if (resolved.entry._tag !== 'String') {
+      return yield* Result.fail(
+        invalidInput({ operation, message: 'Expected a metadata string', input: self }),
+      )
+    }
+    return resolved.index
+  })
 
 /** @internal */
 const node = (
@@ -234,17 +244,23 @@ const node = (
 }
 
 /** @internal */
-const debugNode = (
+const debugNode = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   operation: string,
   make: (
     state: BuilderState.MutableState,
     owner: BuilderState.State['owner'],
-  ) => MetadataDescription.Node,
-): Effect.Effect<Optional, SilkError> =>
-  BuilderState.mutate(builder, operation, (state, owner) =>
-    state.strip ? undefined : node(state, owner, Object.freeze(make(state, owner))),
+  ) => MetadataDescription.Node | Result.Result<MetadataDescription.Node, LlvmError>,
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* BuilderState.mutate(builder, operation, (state, owner) =>
+    Result.gen(function* () {
+      if (state.strip) return undefined
+      const made = make(state, owner)
+      const value = Result.isResult(made) ? yield* made : made
+      return node(state, owner, Object.freeze(value))
+    }),
   )
+})
 
 /**
  * Interns a byte-exact metadata string; strings are retained even when debug nodes are stripped.
@@ -255,18 +271,18 @@ const debugNode = (
 export const string = Effect.fn('Metadata.string')(function* (
   builder: Builder.Builder,
   value: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Metadata, SilkError> {
+): Effect.fn.Return<Metadata, LlvmError> {
   const content = bytes(value)
   return yield* BuilderState.mutate(builder, 'Metadata.string', (state, owner) => {
     const key = CanonicalKey.bytes(content)
     const existing = state.metadataStringKeys.get(key)
     if (existing !== undefined) {
       const handle = state.metadataHandles[existing]
-      if (handle !== undefined) return handle
+      if (handle !== undefined) return Result.succeed(handle)
     }
     const handle = allocate(state, owner, Object.freeze({ _tag: 'String', value: content }))
     state.metadataStringKeys.set(key, state.metadata.length - 1)
-    return handle
+    return Result.succeed(handle)
   })
 })
 
@@ -279,19 +295,23 @@ export const string = Effect.fn('Metadata.string')(function* (
 export const tuple = Effect.fn('Metadata.tuple')(function* (
   builder: Builder.Builder,
   elements: ReadonlyArray<Optional> = [],
-): Effect.fn.Return<Metadata, SilkError> {
+): Effect.fn.Return<Metadata, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Metadata.tuple', (state, owner) =>
-    node(
-      state,
-      owner,
-      Object.freeze({
-        _tag: 'Tuple',
-        distinct: false,
-        elements: Object.freeze(
-          elements.map((element) => resolveIndex(builder, state, owner, element, 'Metadata.tuple')),
-        ),
-      }),
-    ),
+    Result.gen(function* () {
+      const resolved: Array<number | undefined> = []
+      for (const element of elements) {
+        resolved.push(yield* resolveIndex(builder, state, owner, element, 'Metadata.tuple'))
+      }
+      return node(
+        state,
+        owner,
+        Object.freeze({
+          _tag: 'Tuple',
+          distinct: false,
+          elements: Object.freeze(resolved),
+        }),
+      )
+    }),
   )
 })
 
@@ -304,21 +324,23 @@ export const tuple = Effect.fn('Metadata.tuple')(function* (
 export const distinctTuple = Effect.fn('Metadata.distinctTuple')(function* (
   builder: Builder.Builder,
   elements: ReadonlyArray<Optional> = [],
-): Effect.fn.Return<Metadata, SilkError> {
+): Effect.fn.Return<Metadata, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Metadata.distinctTuple', (state, owner) =>
-    node(
-      state,
-      owner,
-      Object.freeze({
-        _tag: 'Tuple',
-        distinct: true,
-        elements: Object.freeze(
-          elements.map((element) =>
-            resolveIndex(builder, state, owner, element, 'Metadata.distinctTuple'),
-          ),
-        ),
-      }),
-    ),
+    Result.gen(function* () {
+      const resolved: Array<number | undefined> = []
+      for (const element of elements) {
+        resolved.push(yield* resolveIndex(builder, state, owner, element, 'Metadata.distinctTuple'))
+      }
+      return node(
+        state,
+        owner,
+        Object.freeze({
+          _tag: 'Tuple',
+          distinct: true,
+          elements: Object.freeze(resolved),
+        }),
+      )
+    }),
   )
 })
 
@@ -328,8 +350,11 @@ export const distinctTuple = Effect.fn('Metadata.distinctTuple')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const emptyTuple = (builder: Builder.Builder): Effect.Effect<Metadata, SilkError> =>
-  tuple(builder)
+export const emptyTuple = Effect.fn('Metadata.emptyTuple')(function* (
+  builder: Builder.Builder,
+): Effect.fn.Return<Metadata, LlvmError> {
+  return yield* tuple(builder)
+})
 
 /**
  * Interns a metadata wrapper around a builder-owned LLVM constant.
@@ -340,17 +365,19 @@ export const emptyTuple = (builder: Builder.Builder): Effect.Effect<Metadata, Si
 export const constant = Effect.fn('Metadata.constant')(function* (
   builder: Builder.Builder,
   value: Constant.Constant,
-): Effect.fn.Return<Metadata, SilkError> {
+): Effect.fn.Return<Metadata, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Metadata.constant', (state, owner) =>
-    node(
-      state,
-      owner,
-      Object.freeze({
-        _tag: 'Constant',
-        distinct: false,
-        constant: Handle.resolve(builder, owner, value, 'Constant', 'Metadata.constant'),
-      }),
-    ),
+    Result.gen(function* () {
+      return node(
+        state,
+        owner,
+        Object.freeze({
+          _tag: 'Constant',
+          distinct: false,
+          constant: yield* Handle.resolve(builder, owner, value, 'Constant', 'Metadata.constant'),
+        }),
+      )
+    }),
   )
 })
 
@@ -363,7 +390,7 @@ export const constant = Effect.fn('Metadata.constant')(function* (
 export const local = Effect.fn('Metadata.local')(function* (
   builder: Builder.Builder,
   label: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Optional, SilkError> {
+): Effect.fn.Return<Optional, LlvmError> {
   const value = bytes(label)
   return yield* debugNode(builder, 'Metadata.local', () =>
     Object.freeze({ _tag: 'Local', distinct: true, label: value }),
@@ -402,11 +429,13 @@ export const local = Effect.fn('Metadata.local')(function* (
 export const forward = Effect.fn('Metadata.forward')(function* (
   builder: Builder.Builder,
   category: Category = 'node',
-): Effect.fn.Return<Optional, SilkError> {
+): Effect.fn.Return<Optional, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Metadata.forward', (state, owner) =>
-    state.strip
-      ? undefined
-      : allocate(state, owner, { _tag: 'Forward', category, target: undefined }),
+    Result.succeed(
+      state.strip
+        ? undefined
+        : allocate(state, owner, { _tag: 'Forward', category, target: undefined }),
+    ),
   )
 })
 
@@ -420,49 +449,59 @@ export const resolveForward = Effect.fn('Metadata.resolveForward')(function* (
   builder: Builder.Builder,
   self: Metadata,
   target: Metadata,
-): Effect.fn.Return<void, SilkError> {
-  yield* BuilderState.mutate(builder, 'Metadata.resolveForward', (state, owner) => {
-    const source = resolve(builder, state, owner, self, 'Metadata.resolveForward')
-    const destination = resolve(builder, state, owner, target, 'Metadata.resolveForward')
-    if (source.entry._tag !== 'Forward') {
-      throw new SilkError({
-        operation: 'Metadata.resolveForward',
-        message: 'Only a metadata forward reference can be resolved',
-        cause: self,
-      })
-    }
-    if (source.entry.target !== undefined) {
-      throw new SilkError({
-        operation: 'Metadata.resolveForward',
-        message: 'Metadata forward reference has already been resolved',
-        cause: self,
-      })
-    }
-    if (destination.entry._tag === 'Forward') {
-      throw new SilkError({
-        operation: 'Metadata.resolveForward',
-        message: 'A metadata forward reference cannot resolve to another forward reference',
-        cause: target,
-      })
-    }
-    if (source.entry.category !== 'any') {
-      const actual =
-        destination.entry._tag === 'String'
-          ? 'string'
-          : MetadataDescription.category(destination.entry.value)
-      if (
-        actual === 'string' ||
-        (source.entry.category !== 'node' && source.entry.category !== actual)
-      ) {
-        throw new SilkError({
-          operation: 'Metadata.resolveForward',
-          message: `Metadata forward reference requires ${source.entry.category} metadata`,
-          cause: { target, actual },
-        })
+): Effect.fn.Return<void, LlvmError> {
+  yield* BuilderState.mutate(builder, 'Metadata.resolveForward', (state, owner) =>
+    Result.gen(function* () {
+      const source = yield* resolve(builder, state, owner, self, 'Metadata.resolveForward')
+      const destination = yield* resolve(builder, state, owner, target, 'Metadata.resolveForward')
+      if (source.entry._tag !== 'Forward') {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Metadata.resolveForward',
+            message: 'Only a metadata forward reference can be resolved',
+            input: self,
+          }),
+        )
       }
-    }
-    source.entry.target = destination.index
-  })
+      if (source.entry.target !== undefined) {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Metadata.resolveForward',
+            message: 'Metadata forward reference has already been resolved',
+            input: self,
+          }),
+        )
+      }
+      if (destination.entry._tag === 'Forward') {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Metadata.resolveForward',
+            message: 'A metadata forward reference cannot resolve to another forward reference',
+            input: target,
+          }),
+        )
+      }
+      if (source.entry.category !== 'any') {
+        const actual =
+          destination.entry._tag === 'String'
+            ? 'string'
+            : MetadataDescription.category(destination.entry.value)
+        if (
+          actual === 'string' ||
+          (source.entry.category !== 'node' && source.entry.category !== actual)
+        ) {
+          return yield* Result.fail(
+            invalidInput({
+              operation: 'Metadata.resolveForward',
+              message: `Metadata forward reference requires ${source.entry.category} metadata`,
+              input: { target, actual },
+            }),
+          )
+        }
+      }
+      source.entry.target = destination.index
+    }),
+  )
 })
 
 /**
@@ -475,13 +514,17 @@ export const file = Effect.fn('Metadata.file')(function* (
   builder: Builder.Builder,
   filename?: Metadata,
   directory?: Metadata,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.file', (state, owner) => ({
-    _tag: 'File',
-    distinct: false,
-    filename: resolveString(builder, state, owner, filename, 'Metadata.file'),
-    directory: resolveString(builder, state, owner, directory, 'Metadata.file'),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.file', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'File',
+        distinct: false,
+        filename: yield* resolveString(builder, state, owner, filename, 'Metadata.file'),
+        directory: yield* resolveString(builder, state, owner, directory, 'Metadata.file'),
+      }
+    }),
+  )
 })
 
 /**
@@ -495,16 +538,26 @@ export const compileUnit = Effect.fn('Metadata.compileUnit')(function* (
   fileValue: Optional,
   producer?: Metadata,
   options: CompileUnitOptions = {},
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.compileUnit', (state, owner) => ({
-    _tag: 'CompileUnit',
-    distinct: true,
-    file: resolveIndex(builder, state, owner, fileValue, 'Metadata.compileUnit'),
-    producer: resolveString(builder, state, owner, producer, 'Metadata.compileUnit'),
-    optimized: options.optimized ?? false,
-    enums: resolveIndex(builder, state, owner, options.enums, 'Metadata.compileUnit'),
-    globals: resolveIndex(builder, state, owner, options.globals, 'Metadata.compileUnit'),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.compileUnit', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'CompileUnit',
+        distinct: true,
+        file: yield* resolveIndex(builder, state, owner, fileValue, 'Metadata.compileUnit'),
+        producer: yield* resolveString(builder, state, owner, producer, 'Metadata.compileUnit'),
+        optimized: options.optimized ?? false,
+        enums: yield* resolveIndex(builder, state, owner, options.enums, 'Metadata.compileUnit'),
+        globals: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.globals,
+          'Metadata.compileUnit',
+        ),
+      }
+    }),
+  )
 })
 
 /**
@@ -518,20 +571,36 @@ export const subprogram = Effect.fn('Metadata.subprogram')(function* (
   fileValue: Optional,
   name?: Metadata,
   options: SubprogramOptions = {},
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.subprogram', (state, owner) => ({
-    _tag: 'Subprogram',
-    distinct: true,
-    file: resolveIndex(builder, state, owner, fileValue, 'Metadata.subprogram'),
-    name: resolveString(builder, state, owner, name, 'Metadata.subprogram'),
-    linkageName: resolveString(builder, state, owner, options.linkageName, 'Metadata.subprogram'),
-    line: options.line ?? 0,
-    scopeLine: options.scopeLine ?? options.line ?? 0,
-    type: resolveIndex(builder, state, owner, options.type, 'Metadata.subprogram'),
-    diFlags: DIFlags.toBitcode(options.diFlags ?? DIFlags.none),
-    spFlags: DISPFlags.toBitcode(options.spFlags ?? DISPFlags.none),
-    compileUnit: resolveIndex(builder, state, owner, options.compileUnit, 'Metadata.subprogram'),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.subprogram', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'Subprogram',
+        distinct: true,
+        file: yield* resolveIndex(builder, state, owner, fileValue, 'Metadata.subprogram'),
+        name: yield* resolveString(builder, state, owner, name, 'Metadata.subprogram'),
+        linkageName: yield* resolveString(
+          builder,
+          state,
+          owner,
+          options.linkageName,
+          'Metadata.subprogram',
+        ),
+        line: options.line ?? 0,
+        scopeLine: options.scopeLine ?? options.line ?? 0,
+        type: yield* resolveIndex(builder, state, owner, options.type, 'Metadata.subprogram'),
+        diFlags: DIFlags.toBitcode(options.diFlags ?? DIFlags.none),
+        spFlags: DISPFlags.toBitcode(options.spFlags ?? DISPFlags.none),
+        compileUnit: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.compileUnit,
+          'Metadata.subprogram',
+        ),
+      }
+    }),
+  )
 })
 
 /**
@@ -546,15 +615,19 @@ export const lexicalBlock = Effect.fn('Metadata.lexicalBlock')(function* (
   fileValue: Optional,
   line = 0,
   column = 0,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.lexicalBlock', (state, owner) => ({
-    _tag: 'LexicalBlock',
-    distinct: false,
-    scope: resolveIndex(builder, state, owner, scope, 'Metadata.lexicalBlock'),
-    file: resolveIndex(builder, state, owner, fileValue, 'Metadata.lexicalBlock'),
-    line,
-    column,
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.lexicalBlock', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'LexicalBlock',
+        distinct: false,
+        scope: yield* resolveIndex(builder, state, owner, scope, 'Metadata.lexicalBlock'),
+        file: yield* resolveIndex(builder, state, owner, fileValue, 'Metadata.lexicalBlock'),
+        line,
+        column,
+      }
+    }),
+  )
 })
 
 /**
@@ -569,15 +642,19 @@ export const location = Effect.fn('Metadata.location')(function* (
   column: number,
   scope: Metadata,
   inlinedAt?: Metadata,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.location', (state, owner) => ({
-    _tag: 'Location',
-    distinct: false,
-    line,
-    column,
-    scope: resolveIndex(builder, state, owner, scope, 'Metadata.location') ?? 0,
-    inlinedAt: resolveIndex(builder, state, owner, inlinedAt, 'Metadata.location'),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.location', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'Location',
+        distinct: false,
+        line,
+        column,
+        scope: (yield* resolve(builder, state, owner, scope, 'Metadata.location')).index,
+        inlinedAt: yield* resolveIndex(builder, state, owner, inlinedAt, 'Metadata.location'),
+      }
+    }),
+  )
 })
 
 /**
@@ -591,14 +668,26 @@ export const basicType = Effect.fn('Metadata.basicType')(function* (
   encoding: BasicEncoding,
   name: Metadata | undefined,
   sizeInBits: bigint | number,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.basicType', (state, owner) => ({
-    _tag: 'BasicType',
-    distinct: false,
-    encoding,
-    name: resolveString(builder, state, owner, name, 'Metadata.basicType'),
-    sizeInBits: integer(sizeInBits),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  const exactSize = yield* Effect.fromResult(
+    IntegerInput.normalize(sizeInBits, {
+      operation: 'Metadata.basicType',
+      message: 'Debug type sizes must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  return yield* debugNode(builder, 'Metadata.basicType', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'BasicType',
+        distinct: false,
+        encoding,
+        name: yield* resolveString(builder, state, owner, name, 'Metadata.basicType'),
+        sizeInBits: exactSize,
+      }
+    }),
+  )
 })
 
 /**
@@ -607,44 +696,52 @@ export const basicType = Effect.fn('Metadata.basicType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const booleanType = (
+export const booleanType = Effect.fn('Metadata.booleanType')(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
-) => basicType(builder, 'boolean', name, bits)
+) {
+  return yield* basicType(builder, 'boolean', name, bits)
+})
 /**
  * Creates an unsigned integer basic debug type through {@link basicType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const unsignedType = (
+export const unsignedType = Effect.fn('Metadata.unsignedType')(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
-) => basicType(builder, 'unsigned', name, bits)
+) {
+  return yield* basicType(builder, 'unsigned', name, bits)
+})
 /**
  * Creates a signed integer basic debug type through {@link basicType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const signedType = (
+export const signedType = Effect.fn('Metadata.signedType')(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
-) => basicType(builder, 'signed', name, bits)
+) {
+  return yield* basicType(builder, 'signed', name, bits)
+})
 /**
  * Creates a floating-point basic debug type through {@link basicType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const floatingType = (
+export const floatingType = Effect.fn('Metadata.floatingType')(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
-) => basicType(builder, 'float', name, bits)
+) {
+  return yield* basicType(builder, 'float', name, bits)
+})
 
 /**
  * Creates a structural composite debug type with source, layout, field, and flag metadata.
@@ -656,29 +753,55 @@ export const compositeType = Effect.fn('Metadata.compositeType')(function* (
   builder: Builder.Builder,
   kind: CompositeKind,
   options: CompositeTypeOptions = {},
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.compositeType', (state, owner) => ({
-    _tag: 'CompositeType',
-    distinct: false,
-    kind,
-    name: resolveString(builder, state, owner, options.name, 'Metadata.compositeType'),
-    file: resolveIndex(builder, state, owner, options.file, 'Metadata.compositeType'),
-    scope: resolveIndex(builder, state, owner, options.scope, 'Metadata.compositeType'),
-    line: options.line ?? 0,
-    underlyingType: resolveIndex(
-      builder,
-      state,
-      owner,
-      options.underlyingType,
-      'Metadata.compositeType',
-    ),
-    sizeInBits: integer(options.sizeInBits),
-    alignInBits: integer(options.alignInBits),
-    fields: resolveIndex(builder, state, owner, options.fields, 'Metadata.compositeType'),
-    flags: DIFlags.toBitcode(
-      options.flags ?? (kind === 'vector' ? DIFlags.make({ vector: true }) : DIFlags.none),
-    ),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  const sizeInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.sizeInBits ?? 0, {
+      operation: 'Metadata.compositeType',
+      message: 'Debug type sizes must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  const alignInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.alignInBits ?? 0, {
+      operation: 'Metadata.compositeType',
+      message: 'Debug type alignments must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  return yield* debugNode(builder, 'Metadata.compositeType', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'CompositeType',
+        distinct: false,
+        kind,
+        name: yield* resolveString(builder, state, owner, options.name, 'Metadata.compositeType'),
+        file: yield* resolveIndex(builder, state, owner, options.file, 'Metadata.compositeType'),
+        scope: yield* resolveIndex(builder, state, owner, options.scope, 'Metadata.compositeType'),
+        line: options.line ?? 0,
+        underlyingType: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.underlyingType,
+          'Metadata.compositeType',
+        ),
+        sizeInBits,
+        alignInBits,
+        fields: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.fields,
+          'Metadata.compositeType',
+        ),
+        flags: DIFlags.toBitcode(
+          options.flags ?? (kind === 'vector' ? DIFlags.make({ vector: true }) : DIFlags.none),
+        ),
+      }
+    }),
+  )
 })
 
 /**
@@ -687,40 +810,60 @@ export const compositeType = Effect.fn('Metadata.compositeType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const structureType = (builder: Builder.Builder, options: CompositeTypeOptions = {}) =>
-  compositeType(builder, 'structure', options)
+export const structureType = Effect.fn('Metadata.structureType')(function* (
+  builder: Builder.Builder,
+  options: CompositeTypeOptions = {},
+) {
+  return yield* compositeType(builder, 'structure', options)
+})
 /**
  * Creates a union debug type through {@link compositeType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const unionType = (builder: Builder.Builder, options: CompositeTypeOptions = {}) =>
-  compositeType(builder, 'union', options)
+export const unionType = Effect.fn('Metadata.unionType')(function* (
+  builder: Builder.Builder,
+  options: CompositeTypeOptions = {},
+) {
+  return yield* compositeType(builder, 'union', options)
+})
 /**
  * Creates an enumeration debug type through {@link compositeType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const enumerationType = (builder: Builder.Builder, options: CompositeTypeOptions = {}) =>
-  compositeType(builder, 'enumeration', options)
+export const enumerationType = Effect.fn('Metadata.enumerationType')(function* (
+  builder: Builder.Builder,
+  options: CompositeTypeOptions = {},
+) {
+  return yield* compositeType(builder, 'enumeration', options)
+})
 /**
  * Creates an array debug type through {@link compositeType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const arrayType = (builder: Builder.Builder, options: CompositeTypeOptions = {}) =>
-  compositeType(builder, 'array', options)
+export const arrayType = Effect.fn('Metadata.arrayType')(function* (
+  builder: Builder.Builder,
+  options: CompositeTypeOptions = {},
+) {
+  return yield* compositeType(builder, 'array', options)
+})
 /**
  * Creates a vector debug type and supplies `DIFlagVector` unless explicitly overridden.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const vectorType = (builder: Builder.Builder, options: CompositeTypeOptions = {}) =>
-  compositeType(builder, 'vector', options)
+export const vectorType = Effect.fn('Metadata.vectorType')(function* (
+  builder: Builder.Builder,
+  options: CompositeTypeOptions = {},
+) {
+  return yield* compositeType(builder, 'vector', options)
+})
 
 /**
  * Creates a structural pointer, member, or typedef debug type with an optional bit offset.
@@ -732,27 +875,55 @@ export const derivedType = Effect.fn('Metadata.derivedType')(function* (
   builder: Builder.Builder,
   kind: DerivedKind,
   options: DerivedTypeOptions = {},
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.derivedType', (state, owner) => ({
-    _tag: 'DerivedType',
-    distinct: false,
-    kind,
-    name: resolveString(builder, state, owner, options.name, 'Metadata.derivedType'),
-    file: resolveIndex(builder, state, owner, options.file, 'Metadata.derivedType'),
-    scope: resolveIndex(builder, state, owner, options.scope, 'Metadata.derivedType'),
-    line: options.line ?? 0,
-    underlyingType: resolveIndex(
-      builder,
-      state,
-      owner,
-      options.underlyingType,
-      'Metadata.derivedType',
-    ),
-    sizeInBits: integer(options.sizeInBits),
-    alignInBits: integer(options.alignInBits),
-    offsetInBits: integer(options.offsetInBits),
-    flags: DIFlags.toBitcode(options.flags ?? DIFlags.none),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  const sizeInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.sizeInBits ?? 0, {
+      operation: 'Metadata.derivedType',
+      message: 'Debug type sizes must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  const alignInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.alignInBits ?? 0, {
+      operation: 'Metadata.derivedType',
+      message: 'Debug type alignments must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  const offsetInBits = yield* Effect.fromResult(
+    IntegerInput.normalize(options.offsetInBits ?? 0, {
+      operation: 'Metadata.derivedType',
+      message: 'Debug type offsets must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
+  return yield* debugNode(builder, 'Metadata.derivedType', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'DerivedType',
+        distinct: false,
+        kind,
+        name: yield* resolveString(builder, state, owner, options.name, 'Metadata.derivedType'),
+        file: yield* resolveIndex(builder, state, owner, options.file, 'Metadata.derivedType'),
+        scope: yield* resolveIndex(builder, state, owner, options.scope, 'Metadata.derivedType'),
+        line: options.line ?? 0,
+        underlyingType: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          options.underlyingType,
+          'Metadata.derivedType',
+        ),
+        sizeInBits,
+        alignInBits,
+        offsetInBits,
+        flags: DIFlags.toBitcode(options.flags ?? DIFlags.none),
+      }
+    }),
+  )
 })
 
 /**
@@ -761,24 +932,36 @@ export const derivedType = Effect.fn('Metadata.derivedType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const pointerType = (builder: Builder.Builder, options: DerivedTypeOptions = {}) =>
-  derivedType(builder, 'pointer', options)
+export const pointerType = Effect.fn('Metadata.pointerType')(function* (
+  builder: Builder.Builder,
+  options: DerivedTypeOptions = {},
+) {
+  return yield* derivedType(builder, 'pointer', options)
+})
 /**
  * Creates a structure-member debug type through {@link derivedType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const memberType = (builder: Builder.Builder, options: DerivedTypeOptions = {}) =>
-  derivedType(builder, 'member', options)
+export const memberType = Effect.fn('Metadata.memberType')(function* (
+  builder: Builder.Builder,
+  options: DerivedTypeOptions = {},
+) {
+  return yield* derivedType(builder, 'member', options)
+})
 /**
  * Creates a typedef debug type through {@link derivedType}.
  *
  * @category metadata
  * @since 0.0.0
  */
-export const typedefType = (builder: Builder.Builder, options: DerivedTypeOptions = {}) =>
-  derivedType(builder, 'typedef', options)
+export const typedefType = Effect.fn('Metadata.typedefType')(function* (
+  builder: Builder.Builder,
+  options: DerivedTypeOptions = {},
+) {
+  return yield* derivedType(builder, 'typedef', options)
+})
 
 /**
  * Creates a `DISubroutineType` whose tuple convention is return type followed by parameters.
@@ -790,13 +973,17 @@ export const subroutineType = Effect.fn('Metadata.subroutineType')(function* (
   builder: Builder.Builder,
   types?: Metadata,
   flags: DIFlags.DIFlags = DIFlags.none,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.subroutineType', (state, owner) => ({
-    _tag: 'SubroutineType',
-    distinct: false,
-    types: resolveIndex(builder, state, owner, types, 'Metadata.subroutineType'),
-    flags: DIFlags.toBitcode(flags),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.subroutineType', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'SubroutineType',
+        distinct: false,
+        types: yield* resolveIndex(builder, state, owner, types, 'Metadata.subroutineType'),
+        flags: DIFlags.toBitcode(flags),
+      }
+    }),
+  )
 })
 
 /**
@@ -810,24 +997,28 @@ export const enumerator = Effect.fn('Metadata.enumerator')(function* (
   name: Metadata | undefined,
   value: bigint,
   options: { readonly unsigned?: boolean; readonly bitWidth?: number } = {},
-): Effect.fn.Return<Optional, SilkError> {
+): Effect.fn.Return<Optional, LlvmError> {
   if (options.unsigned === true && value < 0n) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Metadata.enumerator',
         message: 'An unsigned debug enumerator cannot have a negative value',
-        cause: value,
+        input: value,
       }),
     )
   }
-  return yield* debugNode(builder, 'Metadata.enumerator', (state, owner) => ({
-    _tag: 'Enumerator',
-    distinct: false,
-    name: resolveString(builder, state, owner, name, 'Metadata.enumerator'),
-    unsigned: options.unsigned ?? false,
-    bitWidth: options.bitWidth ?? 64,
-    value,
-  }))
+  return yield* debugNode(builder, 'Metadata.enumerator', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'Enumerator',
+        distinct: false,
+        name: yield* resolveString(builder, state, owner, name, 'Metadata.enumerator'),
+        unsigned: options.unsigned ?? false,
+        bitWidth: options.bitWidth ?? 64,
+        value,
+      }
+    }),
+  )
 })
 
 /**
@@ -840,13 +1031,17 @@ export const subrange = Effect.fn('Metadata.subrange')(function* (
   builder: Builder.Builder,
   lowerBound?: Metadata,
   count?: Metadata,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.subrange', (state, owner) => ({
-    _tag: 'Subrange',
-    distinct: false,
-    lowerBound: resolveIndex(builder, state, owner, lowerBound, 'Metadata.subrange'),
-    count: resolveIndex(builder, state, owner, count, 'Metadata.subrange'),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.subrange', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'Subrange',
+        distinct: false,
+        lowerBound: yield* resolveIndex(builder, state, owner, lowerBound, 'Metadata.subrange'),
+        count: yield* resolveIndex(builder, state, owner, count, 'Metadata.subrange'),
+      }
+    }),
+  )
 })
 
 /**
@@ -858,7 +1053,7 @@ export const subrange = Effect.fn('Metadata.subrange')(function* (
 export const expression = Effect.fn('Metadata.expression')(function* (
   builder: Builder.Builder,
   elements: ReadonlyArray<number> = [],
-): Effect.fn.Return<Optional, SilkError> {
+): Effect.fn.Return<Optional, LlvmError> {
   return yield* debugNode(builder, 'Metadata.expression', () => ({
     _tag: 'Expression',
     distinct: false,
@@ -867,23 +1062,28 @@ export const expression = Effect.fn('Metadata.expression')(function* (
 })
 
 /** @internal */
-const variableNode = (
+const variableNode = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   operation: string,
   argument: number,
   options: VariableOptions,
-): Effect.Effect<Optional, SilkError> =>
-  debugNode(builder, operation, (state, owner) => ({
-    _tag: 'LocalVariable',
-    distinct: false,
-    name: resolveString(builder, state, owner, options.name, operation),
-    file: resolveIndex(builder, state, owner, options.file, operation),
-    scope: resolveIndex(builder, state, owner, options.scope, operation),
-    line: options.line ?? 0,
-    type: resolveIndex(builder, state, owner, options.type, operation),
-    argument,
-    flags: DIFlags.toBitcode(options.flags ?? DIFlags.none),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, operation, (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'LocalVariable',
+        distinct: false,
+        name: yield* resolveString(builder, state, owner, options.name, operation),
+        file: yield* resolveIndex(builder, state, owner, options.file, operation),
+        scope: yield* resolveIndex(builder, state, owner, options.scope, operation),
+        line: options.line ?? 0,
+        type: yield* resolveIndex(builder, state, owner, options.type, operation),
+        argument,
+        flags: DIFlags.toBitcode(options.flags ?? DIFlags.none),
+      }
+    }),
+  )
+})
 
 /**
  * Creates a non-parameter local debug variable.
@@ -915,31 +1115,39 @@ export const parameter = (
 export const globalVariable = Effect.fn('Metadata.globalVariable')(function* (
   builder: Builder.Builder,
   options: GlobalVariableOptions = {},
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.globalVariable', (state, owner) => {
-    const variable =
-      options.variable === undefined
-        ? undefined
-        : Handle.resolve(builder, owner, options.variable, 'Variable', 'Metadata.globalVariable')
-    return {
-      _tag: 'GlobalVariable',
-      distinct: true,
-      name: resolveString(builder, state, owner, options.name, 'Metadata.globalVariable'),
-      linkageName: resolveString(
-        builder,
-        state,
-        owner,
-        options.linkageName,
-        'Metadata.globalVariable',
-      ),
-      file: resolveIndex(builder, state, owner, options.file, 'Metadata.globalVariable'),
-      scope: resolveIndex(builder, state, owner, options.scope, 'Metadata.globalVariable'),
-      line: options.line ?? 0,
-      type: resolveIndex(builder, state, owner, options.type, 'Metadata.globalVariable'),
-      variable,
-      local: options.local ?? false,
-    }
-  })
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.globalVariable', (state, owner) =>
+    Result.gen(function* () {
+      const variable =
+        options.variable === undefined
+          ? undefined
+          : yield* Handle.resolve(
+              builder,
+              owner,
+              options.variable,
+              'Variable',
+              'Metadata.globalVariable',
+            )
+      return {
+        _tag: 'GlobalVariable',
+        distinct: true,
+        name: yield* resolveString(builder, state, owner, options.name, 'Metadata.globalVariable'),
+        linkageName: yield* resolveString(
+          builder,
+          state,
+          owner,
+          options.linkageName,
+          'Metadata.globalVariable',
+        ),
+        file: yield* resolveIndex(builder, state, owner, options.file, 'Metadata.globalVariable'),
+        scope: yield* resolveIndex(builder, state, owner, options.scope, 'Metadata.globalVariable'),
+        line: options.line ?? 0,
+        type: yield* resolveIndex(builder, state, owner, options.type, 'Metadata.globalVariable'),
+        variable,
+        local: options.local ?? false,
+      }
+    }),
+  )
 })
 
 /**
@@ -952,19 +1160,29 @@ export const globalVariableExpression = Effect.fn('Metadata.globalVariableExpres
   builder: Builder.Builder,
   variable?: Metadata,
   expression?: Metadata,
-): Effect.fn.Return<Optional, SilkError> {
-  return yield* debugNode(builder, 'Metadata.globalVariableExpression', (state, owner) => ({
-    _tag: 'GlobalVariableExpression',
-    distinct: false,
-    variable: resolveIndex(builder, state, owner, variable, 'Metadata.globalVariableExpression'),
-    expression: resolveIndex(
-      builder,
-      state,
-      owner,
-      expression,
-      'Metadata.globalVariableExpression',
-    ),
-  }))
+): Effect.fn.Return<Optional, LlvmError> {
+  return yield* debugNode(builder, 'Metadata.globalVariableExpression', (state, owner) =>
+    Result.gen(function* () {
+      return {
+        _tag: 'GlobalVariableExpression',
+        distinct: false,
+        variable: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          variable,
+          'Metadata.globalVariableExpression',
+        ),
+        expression: yield* resolveIndex(
+          builder,
+          state,
+          owner,
+          expression,
+          'Metadata.globalVariableExpression',
+        ),
+      }
+    }),
+  )
 })
 
 /**
@@ -977,33 +1195,37 @@ export const named = Effect.fn('Metadata.named')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   operands: ReadonlyArray<Metadata>,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   const finalName = bytes(name)
-  yield* BuilderState.mutate(builder, 'Metadata.named', (state, owner) => {
-    if (state.strip) return
-    const resolved = Object.freeze(
-      operands.map((operand) => {
-        const index = resolveIndex(builder, state, owner, operand, 'Metadata.named')
+  yield* BuilderState.mutate(builder, 'Metadata.named', (state, owner) =>
+    Result.gen(function* () {
+      if (state.strip) return
+      const mutableResolved: Array<number> = []
+      for (const operand of operands) {
+        const index = yield* resolveIndex(builder, state, owner, operand, 'Metadata.named')
         if (index === undefined) {
-          throw new SilkError({
-            operation: 'Metadata.named',
-            message: 'Named metadata operand unexpectedly resolved to absence',
-            cause: operand,
-          })
+          return yield* Result.fail(
+            invalidInput({
+              operation: 'Metadata.named',
+              message: 'Named metadata operand unexpectedly resolved to absence',
+              input: operand,
+            }),
+          )
         }
-        return index
-      }),
-    )
-    const key = CanonicalKey.bytes(finalName)
-    const existing = state.namedMetadataKeys.get(key)
-    const description = Object.freeze({ name: finalName, operands: resolved })
-    if (existing === undefined) {
-      state.namedMetadataKeys.set(key, state.namedMetadata.length)
-      state.namedMetadata.push(description)
-    } else {
-      state.namedMetadata[existing] = description
-    }
-  })
+        mutableResolved.push(index)
+      }
+      const resolved = Object.freeze(mutableResolved)
+      const key = CanonicalKey.bytes(finalName)
+      const existing = state.namedMetadataKeys.get(key)
+      const description = Object.freeze({ name: finalName, operands: resolved })
+      if (existing === undefined) {
+        state.namedMetadataKeys.set(key, state.namedMetadata.length)
+        state.namedMetadata.push(description)
+      } else {
+        state.namedMetadata[existing] = description
+      }
+    }),
+  )
 })
 
 /**
@@ -1015,11 +1237,9 @@ export const named = Effect.fn('Metadata.named')(function* (
 export const inspect = Effect.fn('Metadata.inspect')(function* (
   builder: Builder.Builder,
   self: Metadata,
-): Effect.fn.Return<MetadataDescription.Entry, SilkError> {
-  return yield* BuilderState.mutate(
-    builder,
-    'Metadata.inspect',
-    (state, owner) => resolve(builder, state, owner, self, 'Metadata.inspect').entry,
+): Effect.fn.Return<MetadataDescription.Entry, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Metadata.inspect', (state, owner) =>
+    Result.map(resolve(builder, state, owner, self, 'Metadata.inspect'), ({ entry }) => entry),
   )
 })
 
@@ -1034,13 +1254,24 @@ export interface Reachable {
   readonly resolved: ReadonlyMap<number, number>
 }
 
+/** @internal */
+class TraversalFailure extends Error {
+  readonly state: unknown
+
+  constructor(message: string, state: unknown) {
+    super(message)
+    this.name = 'MetadataTraversalFailure'
+    this.state = state
+  }
+}
+
 /**
  * Traverses metadata reachable from named roots and attachments without recursion.
  *
  * **Gotchas**
  *
- * This low-level traversal throws {@link SilkError} when a reachable entry is missing or a
- * reachable forward is unresolved.
+ * This low-level traversal throws a private implementation failure when reachable metadata is
+ * malformed. Public renderers translate it once at their Effect boundary.
  *
  * @category metadata
  * @since 0.0.0
@@ -1075,11 +1306,7 @@ export const reachable = (state: BuilderState.Snapshot, operation: string): Reac
     visited.add(index)
     const entry = state.metadata[index]
     if (entry === undefined) {
-      throw new SilkError({
-        operation,
-        message: 'Reachable metadata entry is missing',
-        cause: index,
-      })
+      throw new TraversalFailure(`${operation}: reachable metadata entry is missing`, index)
     }
     if (entry._tag === 'Forward') {
       if (entry.target === undefined) unresolved.push(index)
@@ -1096,11 +1323,10 @@ export const reachable = (state: BuilderState.Snapshot, operation: string): Reac
     }
   }
   if (unresolved.length > 0) {
-    throw new SilkError({
-      operation,
-      message: `Reachable metadata has unresolved forward references: ${unresolved.join(', ')}`,
-      cause: { references: Object.freeze(unresolved), roots: Object.freeze(roots) },
-    })
+    throw new TraversalFailure(
+      `${operation}: reachable metadata has unresolved forward references: ${unresolved.join(', ')}`,
+      { references: Object.freeze(unresolved), roots: Object.freeze(roots) },
+    )
   }
   return Object.freeze({
     entries: Object.freeze(

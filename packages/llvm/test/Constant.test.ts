@@ -1,49 +1,44 @@
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as ManagedRuntime from 'effect/ManagedRuntime'
-import { expect, test } from 'vitest'
 import * as Builder from '../src/Builder.js'
 import * as ByteString from '../src/ByteString.js'
 import * as Constant from '../src/Constant.js'
+import { LlvmError } from '../src/LlvmError.js'
 import * as Type from '../src/Type.js'
 
-const TestRuntime = ManagedRuntime.make(Layer.empty)
-
-test(
-  'normalizes arbitrary-width signed and unsigned integers exactly',
-  Effect.fnUntraced(function* () {
+it.effect('normalizes arbitrary-width signed and unsigned integers exactly', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i129 = yield* Type.integer(builder, 129)
     const minusOne = yield* Constant.integerSigned(builder, i129, -1n)
     const maximum = (1n << 129n) - 1n
     const unsignedMaximum = yield* Constant.integerUnsigned(builder, i129, maximum)
 
-    expect(yield* Constant.integerBitPattern(builder, minusOne)).toBe(maximum)
-    expect(yield* Constant.integerBitPattern(builder, unsignedMaximum)).toBe(maximum)
-    expect(minusOne).not.toBe(unsignedMaximum)
-    expect(
+    assert.strictEqual(yield* Constant.integerBitPattern(builder, minusOne), maximum)
+    assert.strictEqual(yield* Constant.integerBitPattern(builder, unsignedMaximum), maximum)
+    assert.notStrictEqual(minusOne, unsignedMaximum)
+    assert.include(
       (yield* Effect.flip(Constant.integerUnsigned(builder, i129, maximum + 1n))).message,
-    ).toContain('does not fit')
-  }, TestRuntime.runPromise),
+      'does not fit',
+    )
+  }),
 )
 
-test(
-  'preserves raw floating NaN payloads and canonicalizes equal records',
-  Effect.fnUntraced(function* () {
+it.effect('preserves raw floating NaN payloads and canonicalizes equal records', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const double = yield* Type.double(builder)
     const payload = Uint8Array.of(1, 0, 0, 0, 0, 0, 0xf8, 0x7f)
     const first = yield* Constant.floatingRaw(builder, double, 'double', payload)
     const second = yield* Constant.floatingRaw(builder, double, 'double', payload)
 
-    expect(first).toBe(second)
-    expect(ByteString.toUint8Array(yield* Constant.floatingBits(builder, first))).toEqual(payload)
-  }, TestRuntime.runPromise),
+    assert.strictEqual(first, second)
+    assert.deepEqual(ByteString.toUint8Array(yield* Constant.floatingBits(builder, first)), payload)
+  }),
 )
 
-test(
-  'validates aggregate shapes before interning',
-  Effect.fnUntraced(function* () {
+it.effect('validates aggregate shapes before interning', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i8 = yield* Type.integer(builder, 8)
     const i32 = yield* Type.integer(builder, 32)
@@ -53,14 +48,13 @@ test(
     const mismatch = yield* Effect.flip(Constant.aggregate(builder, array, [one, byte]))
     const valid = yield* Constant.aggregate(builder, array, [one, one])
 
-    expect(mismatch.message).toContain('element type')
-    expect(yield* Constant.tag(builder, valid)).toBe('Aggregate')
-  }, TestRuntime.runPromise),
+    assert.include(mismatch.message, 'element type')
+    assert.strictEqual(yield* Constant.tag(builder, valid), 'Aggregate')
+  }),
 )
 
-test(
-  'represents special, string, splat, cast, binary, and assembly constants',
-  Effect.fnUntraced(function* () {
+it.effect('represents special, string, splat, cast, binary, and assembly constants', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const vector = yield* Type.vector(builder, i32, 4)
@@ -76,22 +70,35 @@ test(
       sideEffect: true,
     })
 
-    expect(yield* Constant.tag(builder, splat)).toBe('Splat')
-    expect(yield* Constant.tag(builder, cast)).toBe('Cast')
-    expect(yield* Constant.tag(builder, text)).toBe('String')
-    expect(yield* Constant.tag(builder, zero)).toBe('Special')
-    expect(yield* Constant.tag(builder, assembly)).toBe('Assembly')
-  }, TestRuntime.runPromise),
+    assert.strictEqual(yield* Constant.tag(builder, splat), 'Splat')
+    assert.strictEqual(yield* Constant.tag(builder, cast), 'Cast')
+    assert.strictEqual(yield* Constant.tag(builder, text), 'String')
+    assert.strictEqual(yield* Constant.tag(builder, zero), 'Special')
+    assert.strictEqual(yield* Constant.tag(builder, assembly), 'Assembly')
+  }),
 )
 
-test(
-  'rejects constants across builder owners',
-  Effect.fnUntraced(function* () {
+it.effect('rejects constants across builder owners', () =>
+  Effect.gen(function* () {
     const first = yield* Builder.make()
     const second = yield* Builder.make()
     const i1 = yield* Type.integer(first, 1)
     const value = yield* Constant.integerUnsigned(first, i1, 1)
     const error = yield* Effect.flip(Constant.typeOf(second, value))
-    expect(error.message).toContain('different LLVM builder')
-  }, TestRuntime.runPromise),
+    assert.include(error.message, 'different LLVM builder')
+  }),
+)
+
+it.effect('rejects invalid number inputs as typed integer failures rather than defects', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    const i64 = yield* Type.integer(builder, 64)
+    for (const value of [1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      const unsigned = yield* Effect.flip(Constant.integerUnsigned(builder, i64, value))
+      const signed = yield* Effect.flip(Constant.integerSigned(builder, i64, value))
+      assert.instanceOf(unsigned, LlvmError)
+      assert.instanceOf(signed, LlvmError)
+      assert.strictEqual(unsigned.reason._tag, 'InvalidInput')
+    }
+  }),
 )

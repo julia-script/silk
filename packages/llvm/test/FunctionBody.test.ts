@@ -1,8 +1,9 @@
+import { assert, it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
-import * as Layer from 'effect/Layer'
-import * as ManagedRuntime from 'effect/ManagedRuntime'
-import { expect, test } from 'vitest'
 import * as Attribute from '../src/Attribute.js'
 import * as Block from '../src/Block.js'
 import * as Builder from '../src/Builder.js'
@@ -10,11 +11,9 @@ import * as Constant from '../src/Constant.js'
 import * as FunctionActor from '../src/Function.js'
 import * as FunctionBody from '../src/FunctionBody.js'
 import * as IrText from '../src/IrText.js'
-import { SilkError } from '../src/SilkError.js'
+import { invalidInput, LlvmError } from '../src/LlvmError.js'
 import * as Type from '../src/Type.js'
 import * as Value from '../src/Value.js'
-
-const TestRuntime = ManagedRuntime.make(Layer.empty)
 
 const buildAdd = Effect.fnUntraced(function* (
   builder: Builder.Builder,
@@ -34,9 +33,8 @@ const buildAdd = Effect.fnUntraced(function* (
   )
 })
 
-test(
-  'commits a valid body once and closes its scoped draft',
-  Effect.fnUntraced(function* () {
+it.effect('commits a valid body once and closes its scoped draft', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const type = yield* Type.functionType(builder, i32, [i32, i32])
@@ -44,15 +42,14 @@ test(
     const closed = yield* buildAdd(builder, fn)
 
     const reuse = yield* Effect.flip(Block.make(closed, 'late'))
-    expect(reuse).toBeInstanceOf(SilkError)
+    assert.instanceOf(reuse, LlvmError)
     const duplicate = yield* Effect.flip(buildAdd(builder, fn))
-    expect(duplicate.message).toContain('already has a committed body')
-  }, TestRuntime.runPromise),
+    assert.include(duplicate.message, 'already has a committed body')
+  }),
 )
 
-test(
-  'rolls back callback and validation failures without exposing partial bodies',
-  Effect.fnUntraced(function* () {
+it.effect('rolls back callback and validation failures without exposing partial bodies', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const voidType = yield* Type.voidType(builder)
     const type = yield* Type.functionType(builder, voidType, [])
@@ -65,12 +62,12 @@ test(
         Effect.fnUntraced(function* (body) {
           yield* Block.make(body, 'discarded')
           return yield* Effect.fail(
-            new SilkError({ operation: 'test', message: 'discard this body', cause: fn }),
+            invalidInput({ operation: 'test', message: 'discard this body', input: fn }),
           )
         }),
       ),
     )
-    expect(callbackFailure.message).toBe('discard this body')
+    assert.strictEqual(callbackFailure.message, 'discard this body')
 
     const validationFailure = yield* Effect.flip(
       FunctionActor.buildBody(
@@ -81,7 +78,7 @@ test(
         }),
       ),
     )
-    expect(validationFailure.message).toContain('terminator')
+    assert.include(validationFailure.message, 'terminator')
 
     const phiFailure = yield* Effect.flip(
       FunctionActor.buildBody(
@@ -99,7 +96,7 @@ test(
         }),
       ),
     )
-    expect(phiFailure.message).toContain('cover every predecessor')
+    assert.include(phiFailure.message, 'cover every predecessor')
 
     yield* FunctionActor.buildBody(
       builder,
@@ -109,13 +106,89 @@ test(
         yield* FunctionBody.returnVoid(body)
       }),
     )
-    expect(yield* IrText.render(builder)).toContain('define void @retry()')
-  }, TestRuntime.runPromise),
+    assert.include(yield* IrText.render(builder), 'define void @retry()')
+  }),
 )
 
-test(
-  'rejects values and blocks owned by another function body',
-  Effect.fnUntraced(function* () {
+it.effect('releases body reservations after defects and interruption while rejecting overlap', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    const voidType = yield* Type.voidType(builder)
+    const type = yield* Type.functionType(builder, voidType, [])
+    const defectFunction = yield* FunctionActor.declare(builder, 'defect_retry', type)
+    const interruptedFunction = yield* FunctionActor.declare(builder, 'interrupt_retry', type)
+
+    const defectExit = yield* Effect.exit(
+      FunctionActor.buildBody(
+        builder,
+        defectFunction,
+        Effect.fnUntraced(function* (body) {
+          yield* Block.make(body, 'discarded')
+          return yield* Effect.die(new Error('body callback defect'))
+        }),
+      ),
+    )
+    assert.isTrue(Exit.isFailure(defectExit))
+    if (Exit.isFailure(defectExit)) assert.isTrue(Cause.hasDies(defectExit.cause))
+
+    yield* FunctionActor.buildBody(
+      builder,
+      defectFunction,
+      Effect.fnUntraced(function* (body) {
+        yield* Block.make(body, 'entry')
+        yield* FunctionBody.returnVoid(body)
+      }),
+    )
+
+    const started = yield* Deferred.make<void>()
+    const active = yield* Effect.forkChild(
+      FunctionActor.buildBody(
+        builder,
+        interruptedFunction,
+        Effect.fnUntraced(function* (body) {
+          yield* Block.make(body, 'discarded')
+          yield* Deferred.succeed(started, undefined)
+          return yield* Effect.never
+        }),
+      ),
+    )
+    yield* Deferred.await(started)
+
+    const overlap = yield* Effect.flip(
+      FunctionActor.buildBody(
+        builder,
+        interruptedFunction,
+        Effect.fnUntraced(function* (body) {
+          yield* Block.make(body, 'overlap')
+          yield* FunctionBody.returnVoid(body)
+        }),
+      ),
+    )
+    assert.include(overlap.message, 'already in progress')
+
+    yield* Fiber.interrupt(active)
+    const interruptedExit = yield* Fiber.await(active)
+    assert.isTrue(Exit.isFailure(interruptedExit))
+    if (Exit.isFailure(interruptedExit)) {
+      assert.isTrue(Cause.hasInterrupts(interruptedExit.cause))
+    }
+
+    yield* FunctionActor.buildBody(
+      builder,
+      interruptedFunction,
+      Effect.fnUntraced(function* (body) {
+        yield* Block.make(body, 'entry')
+        yield* FunctionBody.returnVoid(body)
+      }),
+    )
+    const text = yield* IrText.render(builder)
+    assert.include(text, 'define void @defect_retry()')
+    assert.include(text, 'define void @interrupt_retry()')
+  }),
+)
+
+it.effect('rejects values and blocks owned by another function body', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const type = yield* Type.functionType(builder, i32, [i32])
@@ -142,13 +215,12 @@ test(
         }),
       ),
     )
-    expect(error.message).toContain('different function body')
-  }, TestRuntime.runPromise),
+    assert.include(error.message, 'different function body')
+  }),
 )
 
-test(
-  'rejects use of a draft from a child fiber',
-  Effect.fnUntraced(function* () {
+it.effect('rejects use of a draft from a child fiber', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const voidType = yield* Type.voidType(builder)
     const type = yield* Type.functionType(builder, voidType, [])
@@ -161,16 +233,15 @@ test(
         yield* Block.make(body, 'entry')
         const child = yield* Effect.forkChild(Block.make(body, 'foreign'))
         const error = yield* Effect.flip(Fiber.join(child))
-        expect(error.message).toContain('another fiber')
+        assert.include(error.message, 'another fiber')
         yield* FunctionBody.returnVoid(body)
       }),
     )
-  }, TestRuntime.runPromise),
+  }),
 )
 
-test(
-  'builds arithmetic, comparisons, casts, selects, and aggregate operations',
-  Effect.fnUntraced(function* () {
+it.effect('builds arithmetic, comparisons, casts, selects, and aggregate operations', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i1 = yield* Type.integer(builder, 1)
     const i32 = yield* Type.integer(builder, 32)
@@ -203,17 +274,16 @@ test(
     )
 
     const text = yield* IrText.render(builder)
-    expect(text).toContain('%sum = add nsw i32 %v0, %v1')
-    expect(text).toContain('%different = icmp ne i32 %v0, %v1')
-    expect(text).toContain('%widened = zext i32 %chosen to i64')
-    expect(text).toContain('insertvalue')
-    expect(text).toContain('extractvalue')
-  }, TestRuntime.runPromise),
+    assert.include(text, '%sum = add nsw i32 %v0, %v1')
+    assert.include(text, '%different = icmp ne i32 %v0, %v1')
+    assert.include(text, '%widened = zext i32 %chosen to i64')
+    assert.include(text, 'insertvalue')
+    assert.include(text, 'extractvalue')
+  }),
 )
 
-test(
-  'builds a diamond with branches, a forward-aware phi, and a direct call',
-  Effect.fnUntraced(function* () {
+it.effect('builds a diamond with branches, a forward-aware phi, and a direct call', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make({ sourceFilename: 'core.ll' })
     const i32 = yield* Type.integer(builder, 32)
     const binaryType = yield* Type.functionType(builder, i32, [i32, i32])
@@ -239,7 +309,7 @@ test(
         const added = yield* FunctionBody.callDirect(body, callee, [left, right], 'added')
         if (added === undefined) {
           return yield* Effect.fail(
-            new SilkError({ operation: 'test', message: 'expected call result', cause: callee }),
+            invalidInput({ operation: 'test', message: 'expected call result', input: callee }),
           )
         }
         yield* FunctionBody.branch(body, merge)
@@ -257,16 +327,15 @@ test(
     )
 
     const text = yield* IrText.render(builder)
-    expect(text).toContain('define i32 @diamond(i32 %v0, i32 %v1)')
-    expect(text).toContain('br i1 %condition, label %on_true, label %on_false')
-    expect(text).toContain('%added = call i32 @callee(i32 %v0, i32 %v1)')
-    expect(text).toContain('%result = phi i32 [ %added, %on_true ], [ %subtracted, %on_false ]')
-  }, TestRuntime.runPromise),
+    assert.include(text, 'define i32 @diamond(i32 %v0, i32 %v1)')
+    assert.include(text, 'br i1 %condition, label %on_true, label %on_false')
+    assert.include(text, '%added = call i32 @callee(i32 %v0, i32 %v1)')
+    assert.include(text, '%result = phi i32 [ %added, %on_true ], [ %subtracted, %on_false ]')
+  }),
 )
 
-test(
-  'builds and finalizes switches with unique cases',
-  Effect.fnUntraced(function* () {
+it.effect('builds and finalizes switches with unique cases', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const type = yield* Type.functionType(builder, i32, [i32])
@@ -288,7 +357,7 @@ test(
         const duplicate = yield* Effect.flip(
           FunctionBody.addSwitchCase(body, switchHandle, zero, fallback),
         )
-        expect(duplicate.message).toContain('unique')
+        assert.include(duplicate.message, 'unique')
         yield* FunctionBody.sealSwitch(body, switchHandle)
         yield* Block.setInsertionPoint(body, fallback)
         yield* FunctionBody.returnValue(body, one)
@@ -297,13 +366,12 @@ test(
       }),
     )
 
-    expect(yield* IrText.render(builder)).toContain('switch i32 %v0, label %fallback')
-  }, TestRuntime.runPromise),
+    assert.include(yield* IrText.render(builder), 'switch i32 %v0, label %fallback')
+  }),
 )
 
-test(
-  'resolves a loop-carried forward value and validates complete phi coverage',
-  Effect.fnUntraced(function* () {
+it.effect('resolves a loop-carried forward value and validates complete phi coverage', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const type = yield* Type.functionType(builder, i32, [i32])
@@ -340,13 +408,12 @@ test(
     )
 
     const text = yield* IrText.render(builder)
-    expect(text).toContain('%current = phi i32 [ %v0, %entry ], [ %next, %loop ]')
-  }, TestRuntime.runPromise),
+    assert.include(text, '%current = phi i32 [ %v0, %entry ], [ %next, %loop ]')
+  }),
 )
 
-test(
-  'validates vararg calls and preserves call settings',
-  Effect.fnUntraced(function* () {
+it.effect('validates vararg calls and preserves call settings', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const calleeType = yield* Type.functionType(builder, i32, [i32], { variadic: true })
@@ -366,27 +433,28 @@ test(
         yield* Block.make(body, 'entry')
         const argument = yield* Value.argument(body, 0)
         const invalid = yield* Effect.flip(FunctionBody.callDirect(body, callee, []))
-        expect(invalid.message).toContain('argument count')
+        assert.include(invalid.message, 'argument count')
         const invalidConvention = yield* Effect.flip(
           FunctionBody.callDirect(body, callee, [argument], undefined, {
             callingConvention: -1,
           }),
         )
-        expect(invalidConvention.message).toContain('unsigned 10-bit')
+        assert.include(invalidConvention.message, 'unsigned 10-bit')
         const result = yield* FunctionBody.callDirect(body, callee, [argument, one], 'result', {
           tail: 'tail',
         })
         if (result === undefined) {
           return yield* Effect.fail(
-            new SilkError({ operation: 'test', message: 'expected call result', cause: callee }),
+            invalidInput({ operation: 'test', message: 'expected call result', input: callee }),
           )
         }
         yield* FunctionBody.returnValue(body, result)
       }),
     )
 
-    expect(yield* IrText.render(builder)).toContain(
+    assert.include(
+      yield* IrText.render(builder),
       '%result = tail call i32 @variadic(i32 %v0, i32 1) nounwind',
     )
-  }, TestRuntime.runPromise),
+  }),
 )

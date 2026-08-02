@@ -1,16 +1,12 @@
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as ManagedRuntime from 'effect/ManagedRuntime'
-import { expect, test } from 'vitest'
 import * as Attribute from '../src/Attribute.js'
 import * as Builder from '../src/Builder.js'
+import { LlvmError } from '../src/LlvmError.js'
 import * as Type from '../src/Type.js'
 
-const TestRuntime = ManagedRuntime.make(Layer.empty)
-
-test(
-  'interns every attribute storage shape and canonicalizes set ordering',
-  Effect.fnUntraced(function* () {
+it.effect('interns every attribute storage shape and canonicalizes set ordering', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i8 = yield* Type.integer(builder, 8)
     const noAlias = yield* Attribute.flag(builder, 'noalias')
@@ -33,14 +29,13 @@ test(
       targetCpu,
     ])
 
-    expect(first).toBe(second)
-    expect(yield* Attribute.entries(builder, first)).toHaveLength(5)
-  }, TestRuntime.runPromise),
+    assert.strictEqual(first, second)
+    assert.lengthOf(yield* Attribute.entries(builder, first), 5)
+  }),
 )
 
-test(
-  'supports immutable editing and canonical function attribute positions',
-  Effect.fnUntraced(function* () {
+it.effect('supports immutable editing and canonical function attribute positions', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const cold = yield* Attribute.flag(builder, 'cold')
     const noUnwind = yield* Attribute.flag(builder, 'nounwind')
@@ -59,14 +54,13 @@ test(
       functionAttributes: yield* Attribute.set(builder, [noUnwind, cold]),
     })
 
-    expect(backToOne).toBe(one)
-    expect(first).toBe(second)
-  }, TestRuntime.runPromise),
+    assert.strictEqual(backToOne, one)
+    assert.strictEqual(first, second)
+  }),
 )
 
-test(
-  'rejects conflicting and cross-builder attribute sets',
-  Effect.fnUntraced(function* () {
+it.effect('rejects conflicting and cross-builder attribute sets', () =>
+  Effect.gen(function* () {
     const first = yield* Builder.make()
     const second = yield* Builder.make()
     const left = yield* Attribute.integer(first, 'align', 8)
@@ -75,7 +69,29 @@ test(
     const set = yield* Attribute.set(first, [left])
     const ownerError = yield* Effect.flip(Attribute.entries(second, set))
 
-    expect(conflict.message).toContain('conflicting values')
-    expect(ownerError.message).toContain('different LLVM builder')
-  }, TestRuntime.runPromise),
+    assert.include(conflict.message, 'conflicting values')
+    assert.include(ownerError.message, 'different LLVM builder')
+  }),
+)
+
+it.effect('validates integer payloads before bigint conversion', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    for (const value of [1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.instanceOf(yield* Effect.flip(Attribute.integer(builder, 'align', value)), LlvmError)
+    }
+    for (const value of [-1n, 0x1_0000_0000_0000_0000n]) {
+      assert.instanceOf(yield* Effect.flip(Attribute.integer(builder, 'align', value)), LlvmError)
+    }
+    assert.instanceOf(
+      yield* Effect.flip(Attribute.integerList(builder, 'initializes', [0, 1.5])),
+      LlvmError,
+    )
+    assert.instanceOf(
+      yield* Effect.flip(
+        Attribute.integerList(builder, 'initializes', [0n, 0x1_0000_0000_0000_0000n]),
+      ),
+      LlvmError,
+    )
+  }),
 )

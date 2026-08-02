@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type * as Alignment from './Alignment.js'
 import * as Attribute from './Attribute.js'
 import type * as Builder from './Builder.js'
@@ -9,7 +10,7 @@ import * as FunctionBodyActor from './FunctionBody.js'
 import * as BuilderState from './internal/BuilderState.js'
 import * as Handle from './internal/Handle.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
-import { SilkError } from './SilkError.js'
+import { invalidInput, invalidState, type LlvmError, wrappedFailure } from './LlvmError.js'
 import * as Type from './Type.js'
 import type * as Value from './Value.js'
 
@@ -309,57 +310,103 @@ export interface MemorySetOptions {
   readonly destinationAlignment?: Alignment.Alignment
 }
 
-const overloadedRecipes: Readonly<
-  Record<
-    string,
-    (
-      builder: Builder.Builder,
-      overloads: ReadonlyArray<Type.Type>,
-    ) => Effect.Effect<ExplicitSignature, SilkError>
-  >
-> = Object.freeze({
-  va_start: (builder, overloads) =>
-    Effect.gen(function* () {
-      const parameter = overloads[0]
-      if (parameter === undefined) {
-        return yield* Effect.fail(
-          new SilkError({
-            operation: 'Intrinsic.resolve',
-            message: 'llvm.va_start requires one pointer overload type',
-            cause: overloads,
-          }),
-        )
-      }
-      return { returnType: yield* Type.voidType(builder), parameters: [parameter] }
-    }),
-  va_end: (builder, overloads) =>
-    Effect.gen(function* () {
-      const parameter = overloads[0]
-      if (parameter === undefined) {
-        return yield* Effect.fail(
-          new SilkError({
-            operation: 'Intrinsic.resolve',
-            message: 'llvm.va_end requires one pointer overload type',
-            cause: overloads,
-          }),
-        )
-      }
-      return { returnType: yield* Type.voidType(builder), parameters: [parameter] }
-    }),
-  va_copy: (builder, overloads) =>
-    Effect.gen(function* () {
-      const parameter = overloads[0]
-      if (parameter === undefined) {
-        return yield* Effect.fail(
-          new SilkError({
-            operation: 'Intrinsic.resolve',
-            message: 'llvm.va_copy requires one pointer overload type',
-            cause: overloads,
-          }),
-        )
-      }
-      return { returnType: yield* Type.voidType(builder), parameters: [parameter, parameter] }
-    }),
+type OverloadedRecipe = (
+  builder: Builder.Builder,
+  overloads: ReadonlyArray<Type.Type>,
+) => Effect.Effect<ExplicitSignature, LlvmError>
+
+type SimpleRecipe = (builder: Builder.Builder) => Effect.Effect<ExplicitSignature, LlvmError>
+
+/** @internal */
+const memoryCopySignature = Effect.fnUntraced(function* (
+  builder: Builder.Builder,
+  overloads: ReadonlyArray<Type.Type>,
+): Effect.fn.Return<ExplicitSignature, LlvmError> {
+  const destination = overloads[0]
+  const source = overloads[1]
+  const length = overloads[2]
+  if (destination === undefined || source === undefined || length === undefined) {
+    return yield* Effect.fail(
+      invalidInput({
+        operation: 'Intrinsic.resolve',
+        message: 'Memory copy intrinsics require destination, source, and length overload types',
+        input: overloads,
+      }),
+    )
+  }
+  return {
+    returnType: yield* Type.voidType(builder),
+    parameters: [destination, source, length, yield* Type.integer(builder, 1)],
+  }
+})
+
+/** @internal */
+const memorySetSignature = Effect.fnUntraced(function* (
+  builder: Builder.Builder,
+  overloads: ReadonlyArray<Type.Type>,
+): Effect.fn.Return<ExplicitSignature, LlvmError> {
+  const destination = overloads[0]
+  const length = overloads[1]
+  if (destination === undefined || length === undefined) {
+    return yield* Effect.fail(
+      invalidInput({
+        operation: 'Intrinsic.resolve',
+        message: 'Memory set intrinsics require destination and length overload types',
+        input: overloads,
+      }),
+    )
+  }
+  return {
+    returnType: yield* Type.voidType(builder),
+    parameters: [
+      destination,
+      yield* Type.integer(builder, 8),
+      length,
+      yield* Type.integer(builder, 1),
+    ],
+  }
+})
+
+const overloadedRecipes: Readonly<Partial<Record<Id, OverloadedRecipe>>> = Object.freeze({
+  va_start: Effect.fnUntraced(function* (builder, overloads) {
+    const parameter = overloads[0]
+    if (parameter === undefined) {
+      return yield* Effect.fail(
+        invalidInput({
+          operation: 'Intrinsic.resolve',
+          message: 'llvm.va_start requires one pointer overload type',
+          input: overloads,
+        }),
+      )
+    }
+    return { returnType: yield* Type.voidType(builder), parameters: [parameter] }
+  }),
+  va_end: Effect.fnUntraced(function* (builder, overloads) {
+    const parameter = overloads[0]
+    if (parameter === undefined) {
+      return yield* Effect.fail(
+        invalidInput({
+          operation: 'Intrinsic.resolve',
+          message: 'llvm.va_end requires one pointer overload type',
+          input: overloads,
+        }),
+      )
+    }
+    return { returnType: yield* Type.voidType(builder), parameters: [parameter] }
+  }),
+  va_copy: Effect.fnUntraced(function* (builder, overloads) {
+    const parameter = overloads[0]
+    if (parameter === undefined) {
+      return yield* Effect.fail(
+        invalidInput({
+          operation: 'Intrinsic.resolve',
+          message: 'llvm.va_copy requires one pointer overload type',
+          input: overloads,
+        }),
+      )
+    }
+    return { returnType: yield* Type.voidType(builder), parameters: [parameter, parameter] }
+  }),
   memcpy: memoryCopySignature,
   'memcpy.inline': memoryCopySignature,
   memmove: memoryCopySignature,
@@ -367,84 +414,25 @@ const overloadedRecipes: Readonly<
   'memset.inline': memorySetSignature,
 })
 
-/** @internal */
-function memoryCopySignature(
-  builder: Builder.Builder,
-  overloads: ReadonlyArray<Type.Type>,
-): Effect.Effect<ExplicitSignature, SilkError> {
-  return Effect.gen(function* () {
-    const destination = overloads[0]
-    const source = overloads[1]
-    const length = overloads[2]
-    if (destination === undefined || source === undefined || length === undefined) {
-      return yield* Effect.fail(
-        new SilkError({
-          operation: 'Intrinsic.resolve',
-          message: 'Memory copy intrinsics require destination, source, and length overload types',
-          cause: overloads,
-        }),
-      )
-    }
+const simpleRecipes: Readonly<Partial<Record<Id, SimpleRecipe>>> = Object.freeze({
+  assume: Effect.fnUntraced(function* (builder: Builder.Builder) {
     return {
       returnType: yield* Type.voidType(builder),
-      parameters: [destination, source, length, yield* Type.integer(builder, 1)],
+      parameters: [yield* Type.integer(builder, 1)],
     }
-  })
-}
-
-/** @internal */
-function memorySetSignature(
-  builder: Builder.Builder,
-  overloads: ReadonlyArray<Type.Type>,
-): Effect.Effect<ExplicitSignature, SilkError> {
-  return Effect.gen(function* () {
-    const destination = overloads[0]
-    const length = overloads[1]
-    if (destination === undefined || length === undefined) {
-      return yield* Effect.fail(
-        new SilkError({
-          operation: 'Intrinsic.resolve',
-          message: 'Memory set intrinsics require destination and length overload types',
-          cause: overloads,
-        }),
-      )
-    }
-    return {
-      returnType: yield* Type.voidType(builder),
-      parameters: [
-        destination,
-        yield* Type.integer(builder, 8),
-        length,
-        yield* Type.integer(builder, 1),
-      ],
-    }
-  })
-}
-
-const simpleRecipes = Object.freeze({
-  assume: (builder: Builder.Builder) =>
-    Effect.gen(function* () {
-      return {
-        returnType: yield* Type.voidType(builder),
-        parameters: [yield* Type.integer(builder, 1)],
-      }
-    }),
-  trap: (builder: Builder.Builder) =>
-    Effect.gen(function* () {
-      return { returnType: yield* Type.voidType(builder), parameters: [] }
-    }),
-  debugtrap: (builder: Builder.Builder) =>
-    Effect.gen(function* () {
-      return { returnType: yield* Type.voidType(builder), parameters: [] }
-    }),
-  donothing: (builder: Builder.Builder) =>
-    Effect.gen(function* () {
-      return { returnType: yield* Type.voidType(builder), parameters: [] }
-    }),
-  sideeffect: (builder: Builder.Builder) =>
-    Effect.gen(function* () {
-      return { returnType: yield* Type.voidType(builder), parameters: [] }
-    }),
+  }),
+  trap: Effect.fnUntraced(function* (builder: Builder.Builder) {
+    return { returnType: yield* Type.voidType(builder), parameters: [] }
+  }),
+  debugtrap: Effect.fnUntraced(function* (builder: Builder.Builder) {
+    return { returnType: yield* Type.voidType(builder), parameters: [] }
+  }),
+  donothing: Effect.fnUntraced(function* (builder: Builder.Builder) {
+    return { returnType: yield* Type.voidType(builder), parameters: [] }
+  }),
+  sideeffect: Effect.fnUntraced(function* (builder: Builder.Builder) {
+    return { returnType: yield* Type.voidType(builder), parameters: [] }
+  }),
 })
 
 /** @internal */
@@ -495,50 +483,58 @@ const mangleDescription = (
 }
 
 /** @internal */
-const intrinsicName = (
+const intrinsicName = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   id: Id,
   overloads: ReadonlyArray<Type.Type>,
-): Effect.Effect<string, SilkError> =>
-  BuilderState.mutate(builder, 'Intrinsic.name', (state, owner) => {
-    const suffix = overloads.map((type) => {
-      const index = Handle.resolve(builder, owner, type, 'Type', 'Intrinsic.name')
-      const description = state.types[index]
-      if (description === undefined) {
-        throw new SilkError({
-          operation: 'Intrinsic.name',
-          message: 'Intrinsic overload type is missing',
-          cause: type,
-        })
+): Effect.fn.Return<string, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Intrinsic.name', (state, owner) =>
+    Result.gen(function* () {
+      const suffix: Array<string> = []
+      for (const type of overloads) {
+        const index = yield* Handle.resolve(builder, owner, type, 'Type', 'Intrinsic.name')
+        const description = state.types[index]
+        if (description === undefined) {
+          return yield* Result.fail(
+            invalidState({
+              operation: 'Intrinsic.name',
+              message: 'Intrinsic overload type is missing',
+              state: type,
+            }),
+          )
+        }
+        suffix.push(
+          yield* Result.try({
+            try: () => mangleDescription(state, description),
+            catch: (cause) =>
+              wrappedFailure({
+                operation: 'Intrinsic.name',
+                message: 'Intrinsic overload type cannot be mangled',
+                cause: cause,
+              }),
+          }),
+        )
       }
-      try {
-        return mangleDescription(state, description)
-      } catch (cause) {
-        throw new SilkError({
-          operation: 'Intrinsic.name',
-          message: 'Intrinsic overload type cannot be mangled',
-          cause,
-        })
-      }
-    })
-    return `llvm.${id}${suffix.length === 0 ? '' : `.${suffix.join('.')}`}`
-  })
+      return `llvm.${id}${suffix.length === 0 ? '' : `.${suffix.join('.')}`}`
+    }),
+  )
+})
 
 /** @internal */
-const flagSet = Effect.fn('Intrinsic.flagSet')(function* (
+const flagSet = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   names: ReadonlyArray<string>,
-): Effect.fn.Return<Attribute.Set, SilkError> {
+): Effect.fn.Return<Attribute.Set, LlvmError> {
   const values: Array<Attribute.Attribute> = []
   for (const name of names) values.push(yield* Attribute.flag(builder, name))
   return yield* Attribute.set(builder, values)
 })
 
 /** @internal */
-const commonAttributes = Effect.fn('Intrinsic.commonAttributes')(function* (
+const commonAttributes = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   id: Id,
-): Effect.fn.Return<Attribute.FunctionSet | undefined, SilkError> {
+): Effect.fn.Return<Attribute.FunctionSet | undefined, LlvmError> {
   const base = ['nocallback', 'nofree', 'nounwind', 'willreturn']
   if (id === 'assume') {
     return yield* Attribute.functionSet(builder, {
@@ -617,18 +613,18 @@ export const resolve = Effect.fn('Intrinsic.resolve')(function* (
   id: Id,
   overloads: ReadonlyArray<Type.Type> = [],
   options: ResolveOptions = {},
-): Effect.fn.Return<FunctionActor.Function, SilkError> {
+): Effect.fn.Return<FunctionActor.Function, LlvmError> {
   if (!inventory.includes(id)) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidState({
         operation: 'Intrinsic.resolve',
         message: 'Unknown pinned LLVM intrinsic',
-        cause: id,
+        state: id,
       }),
     )
   }
   const recipe = overloadedRecipes[id]
-  const simple = simpleRecipes[id as keyof typeof simpleRecipes]
+  const simple = simpleRecipes[id]
   const signature =
     options.signature ??
     (recipe === undefined
@@ -638,10 +634,10 @@ export const resolve = Effect.fn('Intrinsic.resolve')(function* (
       : yield* recipe(builder, overloads))
   if (signature === undefined) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Intrinsic.resolve',
         message: 'This intrinsic requires an explicit typed signature',
-        cause: { id, overloads },
+        input: { id, overloads },
       }),
     )
   }
@@ -659,19 +655,19 @@ export const resolve = Effect.fn('Intrinsic.resolve')(function* (
 })
 
 /** @internal */
-const inputType = Effect.fn('Intrinsic.inputType')(function* (
+const inputType = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   input: Value.Input,
-): Effect.fn.Return<Type.Type, SilkError> {
+): Effect.fn.Return<Type.Type, LlvmError> {
   return yield* FunctionBodyActor.inputType(body, input)
 })
 
 /** @internal */
-const memoryCallAttributes = Effect.fn('Intrinsic.memoryCallAttributes')(function* (
+const memoryCallAttributes = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   intrinsic: FunctionActor.Function,
   alignments: ReadonlyArray<Alignment.Alignment | undefined>,
-): Effect.fn.Return<Attribute.FunctionSet | undefined, SilkError> {
+): Effect.fn.Return<Attribute.FunctionSet | undefined, LlvmError> {
   const canonical = (yield* FunctionActor.properties(builder, intrinsic)).attributes
   if (
     canonical === undefined ||
@@ -715,7 +711,7 @@ export const call = Effect.fn('Intrinsic.call')(function* (
   args: ReadonlyArray<Value.Input>,
   name?: string,
   options: ResolveOptions = {},
-): Effect.fn.Return<Value.Value | undefined, SilkError> {
+): Effect.fn.Return<Value.Value | undefined, LlvmError> {
   const builder = yield* FunctionBodyActor.builder(body)
   const intrinsic = yield* resolve(builder, id, overloads, options)
   return yield* FunctionBodyActor.callDirect(body, intrinsic, args, name)
@@ -729,7 +725,7 @@ export const call = Effect.fn('Intrinsic.call')(function* (
  */
 export const assumeCold = Effect.fn('Intrinsic.assumeCold')(function* (
   body: FunctionBody.FunctionBody,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   const builder = yield* FunctionBodyActor.builder(body)
   const assume = yield* resolve(builder, 'assume')
   const condition = yield* Constant.integerUnsigned(builder, yield* Type.integer(builder, 1), 1)
@@ -750,7 +746,7 @@ export const memcpy = Effect.fn('Intrinsic.memcpy')(function* (
   source: Value.Input,
   length: Value.Input,
   options: MemoryCopyOptions = {},
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   const builder = yield* FunctionBodyActor.builder(body)
   const overloads = [
     yield* inputType(body, destination),
@@ -788,7 +784,7 @@ export const memmove = Effect.fn('Intrinsic.memmove')(function* (
   source: Value.Input,
   length: Value.Input,
   options: Omit<MemoryCopyOptions, 'inline'> = {},
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   const builder = yield* FunctionBodyActor.builder(body)
   const overloads = [
     yield* inputType(body, destination),
@@ -826,7 +822,7 @@ export const memset = Effect.fn('Intrinsic.memset')(function* (
   byte: Value.Input,
   length: Value.Input,
   options: MemorySetOptions = {},
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   const builder = yield* FunctionBodyActor.builder(body)
   const overloads = [yield* inputType(body, destination), yield* inputType(body, length)]
   const intrinsic = yield* resolve(builder, options.inline ? 'memset.inline' : 'memset', overloads)

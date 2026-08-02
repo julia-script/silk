@@ -1,3 +1,5 @@
+import { dual } from 'effect/Function'
+
 /**
  * Immutable LLVM fast-math settings shared by arithmetic, comparisons, phis, selects, and calls.
  *
@@ -84,11 +86,22 @@ export const make = (input: Input = false): FastMath =>
 /**
  * Overlays normalized flags on an existing setting without mutating either input.
  *
+ * **Example** (Combining flags in a pipeline)
+ *
+ * ```ts
+ * import { pipe } from 'effect/Function'
+ * import * as FastMath from '@silk-effect/llvm/FastMath'
+ *
+ * const flags = pipe(FastMath.none, FastMath.combine({ noNaNs: true }))
+ * ```
+ *
  * @category fast math
  * @since 0.0.0
  */
-export const combine = (self: FastMath, other: Input): FastMath =>
-  Object.freeze({ ...self, ...make(other) })
+export const combine: {
+  (other: Input): (self: FastMath) => FastMath
+  (self: FastMath, other: Input): FastMath
+} = dual(2, (self: FastMath, other: Input): FastMath => Object.freeze({ ...self, ...make(other) }))
 
 /**
  * Encodes the setting as LLVM's instruction fast-math bit mask.

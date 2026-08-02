@@ -14,7 +14,7 @@ import * as DISPFlags from '@silk-effect/llvm/DISPFlags'
 import * as FunctionActor from '@silk-effect/llvm/Function'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import * as Metadata from '@silk-effect/llvm/Metadata'
-import { SilkError } from '@silk-effect/llvm/SilkError'
+import { invalidState } from '@silk-effect/llvm/LlvmError'
 import * as Type from '@silk-effect/llvm/Type'
 
 const program = Effect.gen(function* () {
@@ -25,17 +25,21 @@ const program = Effect.gen(function* () {
   const filename = yield* Metadata.string(builder, 'main.tiny')
   const file = yield* Metadata.file(builder, filename)
   if (file === undefined) {
-    return yield* Effect.fail(
-      new SilkError({ operation: 'Guide.debug', message: 'debug metadata was stripped', cause: file }),
-    )
+    return yield* invalidState({
+      operation: 'Guide.debug',
+      message: 'debug metadata was stripped',
+      state: file,
+    })
   }
 
   const producer = yield* Metadata.string(builder, '@silk-effect/llvm guide')
   const unit = yield* Metadata.compileUnit(builder, file, producer)
   if (unit === undefined) {
-    return yield* Effect.fail(
-      new SilkError({ operation: 'Guide.debug', message: 'compile unit was stripped', cause: unit }),
-    )
+    return yield* invalidState({
+      operation: 'Guide.debug',
+      message: 'compile unit was stripped',
+      state: unit,
+    })
   }
   // Named metadata makes the compile unit reachable from module output.
   yield* Metadata.named(builder, 'llvm.dbg.cu', [unit])
@@ -49,9 +53,11 @@ const program = Effect.gen(function* () {
     compileUnit: unit,
   })
   if (subprogram === undefined) {
-    return yield* Effect.fail(
-      new SilkError({ operation: 'Guide.debug', message: 'subprogram was stripped', cause: name }),
-    )
+    return yield* invalidState({
+      operation: 'Guide.debug',
+      message: 'subprogram was stripped',
+      state: name,
+    })
   }
 
   const voidType = yield* Type.voidType(builder)

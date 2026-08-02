@@ -5,9 +5,14 @@ native LLVM libraries, or external executables at runtime.
 
 ## Start here
 
-New to the package? Follow [Build a tiny expression compiler](./tutorials/tiny-expression-compiler.md).
-It starts with a TypeScript program and ends with a real LLVM function emitted as both textual IR
-and bitcode.
+New to compilers? Start with
+[Build Tiny, a compiled language](./tutorials/tiny-language/01-meet-tiny.md). The 13-lesson series
+begins with source text and will build a lexer, parser, AST, LLVM lowering pipeline, and native
+executable from start to finish.
+
+Already familiar with compiler frontends? Follow
+[Build a tiny expression compiler](./tutorials/tiny-expression-compiler.md). It starts directly at
+LLVM lowering and ends with a real function emitted as textual IR and bitcode.
 
 ## Solve a task
 

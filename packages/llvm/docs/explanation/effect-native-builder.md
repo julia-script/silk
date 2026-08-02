@@ -37,8 +37,10 @@ shared tables.
 
 A half-built function is not useful module state. Missing terminators, incomplete PHI nodes, or a
 late Effect failure should not leave instructions visible to later output. `Function.buildBody`
-therefore creates a draft, lends it to one callback and fiber, validates the finished control-flow
-graph, and commits it as a unit.
+therefore brackets reservation and draft acquisition, lends the draft to one callback and fiber,
+validates the finished control-flow graph, and commits it as a unit. One release path closes the
+draft and reservation after success, typed failure, validation failure, defect, or interruption;
+the callback's original exit remains observable.
 
 This resembles a database transaction more than a conventional `IRBuilder` object. The body handle
 is deliberately unusable after the callback because its only valid states are “being built here”
@@ -51,10 +53,16 @@ that complexity at one boundary and make retries predictable.
 ## Errors remain values
 
 External input controls names, layouts, types, constants, attributes, and control flow. Invalid
-input is therefore expected program behavior, represented by `SilkError` in the Effect channel.
-The `operation` field locates the rejecting actor, the message gives context, and the cause retains
-the relevant value.
+input is therefore expected program behavior, represented by `LlvmError` in the Effect channel.
+The `operation` field locates the rejecting actor, `message` gives stable context, and `reason`
+distinguishes `InvalidInput`, `InvalidState`, and `WrappedFailure`. Rejected values live on the
+semantic reason; JavaScript `cause` is reserved for genuinely wrapped failures.
 
 The distinction is intentional: invalid user IR is recoverable; corrupted internal tables are a
 defect. Treating both as thrown `Error` values would erase the boundary and force callers to guess
 which failures they can handle.
+
+Inside a serialized mutation, synchronous state transitions return `Result` values. The owning
+Effect boundary lifts expected failures into the typed channel while leaving unexpected throws as
+defects. This keeps the mutation critical section synchronous without making yieldable errors do
+double duty as thrown exceptions.

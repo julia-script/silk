@@ -119,7 +119,7 @@ export const fromExternal = Effect.fn('Llvm.fromExternal')(function* (input: str
 
 Never throw yieldable errors across a public boundary, use a tagged error as synchronous control
 flow, swallow errors in `catch`, or expose `unknown` as a public Effect error channel. Synchronous
-mutable transitions return a typed result such as `Either`; unexpected JavaScript throws remain
+mutable transitions return a typed `Result`; unexpected JavaScript throws remain
 defects. Public fallible helpers return Effects. Private synchronous encoders may abort with a
 private non-yieldable implementation failure that is translated once at the outer Effect boundary.
 

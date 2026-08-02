@@ -1,5 +1,5 @@
 import * as Effect from 'effect/Effect'
-import { SilkError } from './SilkError.js'
+import { invalidInput, type LlvmError } from './LlvmError.js'
 
 /**
  * Identifies one LLVM pointer address space as an unsigned 24-bit value.
@@ -29,7 +29,7 @@ export const defaultAddrSpace: AddrSpace = Object.freeze({ _tag: 'AddrSpace', va
  *
  * **Gotchas**
  *
- * Values outside that range, including non-integers, fail with {@link SilkError}.
+ * Values outside that range, including non-integers, fail with {@link LlvmError}.
  *
  * **Example** (Rendering an address space)
  *
@@ -53,13 +53,13 @@ export const defaultAddrSpace: AddrSpace = Object.freeze({ _tag: 'AddrSpace', va
  */
 export const make = Effect.fn('AddrSpace.make')(function* (
   value: number,
-): Effect.fn.Return<AddrSpace, SilkError> {
+): Effect.fn.Return<AddrSpace, LlvmError> {
   if (!Number.isSafeInteger(value) || value < 0 || value > 0xff_ffff) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'AddrSpace.make',
         message: 'LLVM address spaces are unsigned 24-bit integers',
-        cause: value,
+        input: value,
       }),
     )
   }

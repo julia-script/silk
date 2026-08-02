@@ -1,11 +1,13 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type * as Builder from './Builder.js'
 import * as ByteString from './ByteString.js'
 import type * as AttributeDescription from './internal/AttributeDescription.js'
 import * as BuilderState from './internal/BuilderState.js'
 import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
-import { SilkError } from './SilkError.js'
+import * as IntegerInput from './internal/IntegerInput.js'
+import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import type * as Type from './Type.js'
 
 /**
@@ -89,21 +91,29 @@ const handleAt = (
   handles: ReadonlyArray<Attribute>,
   index: number,
   operation: string,
-): Attribute => {
+): Result.Result<Attribute, LlvmError> => {
   const handle = handles[index]
   if (handle === undefined) {
-    throw new SilkError({ operation, message: 'Attribute table handle is missing', cause: index })
+    return Result.fail(
+      invalidState({ operation, message: 'Attribute table handle is missing', state: index }),
+    )
   }
-  return handle
+  return Result.succeed(handle)
 }
 
 /** @internal */
-const setHandleAt = (handles: ReadonlyArray<Set>, index: number, operation: string): Set => {
+const setHandleAt = (
+  handles: ReadonlyArray<Set>,
+  index: number,
+  operation: string,
+): Result.Result<Set, LlvmError> => {
   const handle = handles[index]
   if (handle === undefined) {
-    throw new SilkError({ operation, message: 'Attribute-set handle is missing', cause: index })
+    return Result.fail(
+      invalidState({ operation, message: 'Attribute-set handle is missing', state: index }),
+    )
   }
-  return handle
+  return Result.succeed(handle)
 }
 
 /** @internal */
@@ -111,31 +121,36 @@ const intern = Effect.fn('Attribute.intern')(function* (
   builder: Builder.Builder,
   description: AttributeDescription.Description,
 ) {
-  return yield* BuilderState.mutate(builder, 'Attribute.intern', (state, owner) => {
-    const key = descriptionKey(description)
-    const found = state.attributeKeys.get(key)
-    if (found !== undefined) return handleAt(state.attributeHandles, found, 'Attribute.intern')
-    const index = state.attributes.length
-    const handle = Handle.make('Attribute', owner, index)
-    state.attributes.push(description)
-    state.attributeHandles.push(handle)
-    state.attributeKeys.set(key, index)
-    return handle
-  })
+  return yield* BuilderState.mutate(builder, 'Attribute.intern', (state, owner) =>
+    Result.gen(function* () {
+      const key = descriptionKey(description)
+      const found = state.attributeKeys.get(key)
+      if (found !== undefined) {
+        return yield* handleAt(state.attributeHandles, found, 'Attribute.intern')
+      }
+      const index = state.attributes.length
+      const handle = Handle.make('Attribute', owner, index)
+      state.attributes.push(description)
+      state.attributeHandles.push(handle)
+      state.attributeKeys.set(key, index)
+      return handle
+    }),
+  )
 })
 
 /** @internal */
-const validateName = (
+const validateName = Effect.fnUntraced(function* (
   name: ByteString.ByteString | Uint8Array | string,
   operation: string,
-): Effect.Effect<ByteString.ByteString, SilkError> => {
+): Effect.fn.Return<ByteString.ByteString, LlvmError> {
   const value = bytes(name)
-  return ByteString.isEmpty(value)
-    ? Effect.fail(
-        new SilkError({ operation, message: 'An LLVM attribute requires a name', cause: name }),
-      )
-    : Effect.succeed(value)
-}
+  if (ByteString.isEmpty(value)) {
+    return yield* Effect.fail(
+      invalidInput({ operation, message: 'An LLVM attribute requires a name', input: name }),
+    )
+  }
+  return value
+})
 
 /**
  * Creates or reuses a valueless attribute such as `nounwind`.
@@ -146,7 +161,7 @@ const validateName = (
 export const flag = Effect.fn('Attribute.flag')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Attribute, SilkError> {
+): Effect.fn.Return<Attribute, LlvmError> {
   const value = yield* validateName(name, 'Attribute.flag')
   return yield* intern(builder, Object.freeze({ _tag: 'Flag', name: value }))
 })
@@ -161,18 +176,16 @@ export const integer = Effect.fn('Attribute.integer')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   value: number | bigint,
-): Effect.fn.Return<Attribute, SilkError> {
+): Effect.fn.Return<Attribute, LlvmError> {
   const attributeName = yield* validateName(name, 'Attribute.integer')
-  const exact = typeof value === 'bigint' ? value : BigInt(value)
-  if (exact < 0n || exact > 0xffff_ffff_ffff_ffffn) {
-    return yield* Effect.fail(
-      new SilkError({
-        operation: 'Attribute.integer',
-        message: 'Integer attribute payload must be an unsigned 64-bit integer',
-        cause: value,
-      }),
-    )
-  }
+  const exact = yield* Effect.fromResult(
+    IntegerInput.normalize(value, {
+      operation: 'Attribute.integer',
+      message: 'Integer attribute payload must be an unsigned 64-bit integer',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
   return yield* intern(
     builder,
     Object.freeze({ _tag: 'Integer', name: attributeName, value: exact }),
@@ -189,7 +202,7 @@ export const typeAttribute = Effect.fn('Attribute.typeAttribute')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   type: Type.Type,
-): Effect.fn.Return<Attribute, SilkError> {
+): Effect.fn.Return<Attribute, LlvmError> {
   const attributeName = yield* validateName(name, 'Attribute.typeAttribute')
   const typeIndex = yield* BuilderState.mutate(
     builder,
@@ -212,7 +225,7 @@ export const string = Effect.fn('Attribute.string')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   value: ByteString.ByteString | Uint8Array | string = ByteString.empty,
-): Effect.fn.Return<Attribute, SilkError> {
+): Effect.fn.Return<Attribute, LlvmError> {
   const attributeName = yield* validateName(name, 'Attribute.string')
   return yield* intern(
     builder,
@@ -230,18 +243,16 @@ export const integerList = Effect.fn('Attribute.integerList')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   values: ReadonlyArray<number | bigint>,
-): Effect.fn.Return<Attribute, SilkError> {
+): Effect.fn.Return<Attribute, LlvmError> {
   const attributeName = yield* validateName(name, 'Attribute.integerList')
-  const exact = Object.freeze(values.map((value) => BigInt(value)))
-  if (exact.some((value) => value < 0n || value > 0xffff_ffff_ffff_ffffn)) {
-    return yield* Effect.fail(
-      new SilkError({
-        operation: 'Attribute.integerList',
-        message: 'Attribute list values must be unsigned 64-bit integers',
-        cause: values,
-      }),
-    )
-  }
+  const exact = yield* Effect.fromResult(
+    IntegerInput.normalizeAll(values, {
+      operation: 'Attribute.integerList',
+      message: 'Attribute list values must be unsigned 64-bit integers',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
   return yield* intern(
     builder,
     Object.freeze({ _tag: 'IntegerList', name: attributeName, values: exact }),
@@ -252,48 +263,54 @@ export const integerList = Effect.fn('Attribute.integerList')(function* (
 const internSet = Effect.fn('Attribute.internSet')(function* (
   builder: Builder.Builder,
   attributeIndices: ReadonlyArray<number>,
-): Effect.fn.Return<Set, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Attribute.set', (state, owner) => {
-    const ordered = [...new Set(attributeIndices)].sort((left, right) => {
-      const leftDescription = state.attributes[left]
-      const rightDescription = state.attributes[right]
-      if (leftDescription === undefined || rightDescription === undefined) return left - right
-      return descriptionKey(leftDescription).localeCompare(descriptionKey(rightDescription))
-    })
-    const names = new Map<string, number>()
-    for (const index of ordered) {
-      const description = state.attributes[index]
-      if (description === undefined) {
-        throw new SilkError({
-          operation: 'Attribute.set',
-          message: 'Attribute table entry is missing',
-          cause: index,
-        })
+): Effect.fn.Return<Set, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Attribute.set', (state, owner) =>
+    Result.gen(function* () {
+      const ordered = [...new Set(attributeIndices)].sort((left, right) => {
+        const leftDescription = state.attributes[left]
+        const rightDescription = state.attributes[right]
+        if (leftDescription === undefined || rightDescription === undefined) return left - right
+        return descriptionKey(leftDescription).localeCompare(descriptionKey(rightDescription))
+      })
+      const names = new Map<string, number>()
+      for (const index of ordered) {
+        const description = state.attributes[index]
+        if (description === undefined) {
+          return yield* Result.fail(
+            invalidState({
+              operation: 'Attribute.set',
+              message: 'Attribute table entry is missing',
+              state: index,
+            }),
+          )
+        }
+        const name = CanonicalKey.bytes(description.name)
+        const previous = names.get(name)
+        if (previous !== undefined && previous !== index) {
+          return yield* Result.fail(
+            invalidInput({
+              operation: 'Attribute.set',
+              message: 'An attribute set cannot contain conflicting values for one name',
+              input: { previous, index },
+            }),
+          )
+        }
+        names.set(name, index)
       }
-      const name = CanonicalKey.bytes(description.name)
-      const previous = names.get(name)
-      if (previous !== undefined && previous !== index) {
-        throw new SilkError({
-          operation: 'Attribute.set',
-          message: 'An attribute set cannot contain conflicting values for one name',
-          cause: { previous, index },
-        })
+      const values = Object.freeze(ordered)
+      const key = CanonicalKey.sequence(values.map(CanonicalKey.integer))
+      const found = state.attributeSetKeys.get(key)
+      if (found !== undefined) {
+        return yield* setHandleAt(state.attributeSetHandles, found, 'Attribute.set')
       }
-      names.set(name, index)
-    }
-    const values = Object.freeze(ordered)
-    const key = CanonicalKey.sequence(values.map(CanonicalKey.integer))
-    const found = state.attributeSetKeys.get(key)
-    if (found !== undefined) {
-      return setHandleAt(state.attributeSetHandles, found, 'Attribute.set')
-    }
-    const index = state.attributeSets.length
-    const handle = Handle.make('AttributeSet', owner, index)
-    state.attributeSets.push(values)
-    state.attributeSetHandles.push(handle)
-    state.attributeSetKeys.set(key, index)
-    return handle
-  })
+      const index = state.attributeSets.length
+      const handle = Handle.make('AttributeSet', owner, index)
+      state.attributeSets.push(values)
+      state.attributeSetHandles.push(handle)
+      state.attributeSetKeys.set(key, index)
+      return handle
+    }),
+  )
 })
 
 /**
@@ -329,13 +346,15 @@ const internSet = Effect.fn('Attribute.internSet')(function* (
 export const set = Effect.fn('Attribute.set')(function* (
   builder: Builder.Builder,
   attributes: ReadonlyArray<Attribute>,
-): Effect.fn.Return<Set, SilkError> {
+): Effect.fn.Return<Set, LlvmError> {
   const values = yield* BuilderState.mutate(builder, 'Attribute.set', (_state, owner) =>
-    Object.freeze(
-      attributes.map((attribute) =>
-        Handle.resolve(builder, owner, attribute, 'Attribute', 'Attribute.set'),
-      ),
-    ),
+    Result.gen(function* () {
+      const indices: Array<number> = []
+      for (const attribute of attributes) {
+        indices.push(yield* Handle.resolve(builder, owner, attribute, 'Attribute', 'Attribute.set'))
+      }
+      return Object.freeze(indices)
+    }),
   )
   return yield* internSet(builder, values)
 })
@@ -350,20 +369,30 @@ export const add = Effect.fn('Attribute.add')(function* (
   builder: Builder.Builder,
   self: Set,
   attribute: Attribute,
-): Effect.fn.Return<Set, SilkError> {
-  const values = yield* BuilderState.mutate(builder, 'Attribute.add', (state, owner) => {
-    const setIndex = Handle.resolve(builder, owner, self, 'AttributeSet', 'Attribute.add')
-    const attributeIndex = Handle.resolve(builder, owner, attribute, 'Attribute', 'Attribute.add')
-    const existing = state.attributeSets[setIndex]
-    if (existing === undefined) {
-      throw new SilkError({
-        operation: 'Attribute.add',
-        message: 'Attribute set is missing',
-        cause: self,
-      })
-    }
-    return Object.freeze([...existing, attributeIndex])
-  })
+): Effect.fn.Return<Set, LlvmError> {
+  const values = yield* BuilderState.mutate(builder, 'Attribute.add', (state, owner) =>
+    Result.gen(function* () {
+      const setIndex = yield* Handle.resolve(builder, owner, self, 'AttributeSet', 'Attribute.add')
+      const attributeIndex = yield* Handle.resolve(
+        builder,
+        owner,
+        attribute,
+        'Attribute',
+        'Attribute.add',
+      )
+      const existing = state.attributeSets[setIndex]
+      if (existing === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Attribute.add',
+            message: 'Attribute set is missing',
+            state: self,
+          }),
+        )
+      }
+      return Object.freeze([...existing, attributeIndex])
+    }),
+  )
   return yield* internSet(builder, values)
 })
 
@@ -377,26 +406,36 @@ export const remove = Effect.fn('Attribute.remove')(function* (
   builder: Builder.Builder,
   self: Set,
   attribute: Attribute,
-): Effect.fn.Return<Set, SilkError> {
-  const values = yield* BuilderState.mutate(builder, 'Attribute.remove', (state, owner) => {
-    const setIndex = Handle.resolve(builder, owner, self, 'AttributeSet', 'Attribute.remove')
-    const attributeIndex = Handle.resolve(
-      builder,
-      owner,
-      attribute,
-      'Attribute',
-      'Attribute.remove',
-    )
-    const existing = state.attributeSets[setIndex]
-    if (existing === undefined) {
-      throw new SilkError({
-        operation: 'Attribute.remove',
-        message: 'Attribute set is missing',
-        cause: self,
-      })
-    }
-    return Object.freeze(existing.filter((index) => index !== attributeIndex))
-  })
+): Effect.fn.Return<Set, LlvmError> {
+  const values = yield* BuilderState.mutate(builder, 'Attribute.remove', (state, owner) =>
+    Result.gen(function* () {
+      const setIndex = yield* Handle.resolve(
+        builder,
+        owner,
+        self,
+        'AttributeSet',
+        'Attribute.remove',
+      )
+      const attributeIndex = yield* Handle.resolve(
+        builder,
+        owner,
+        attribute,
+        'Attribute',
+        'Attribute.remove',
+      )
+      const existing = state.attributeSets[setIndex]
+      if (existing === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Attribute.remove',
+            message: 'Attribute set is missing',
+            state: self,
+          }),
+        )
+      }
+      return Object.freeze(existing.filter((index) => index !== attributeIndex))
+    }),
+  )
   return yield* internSet(builder, values)
 })
 
@@ -409,21 +448,27 @@ export const remove = Effect.fn('Attribute.remove')(function* (
 export const entries = Effect.fn('Attribute.entries')(function* (
   builder: Builder.Builder,
   self: Set,
-): Effect.fn.Return<ReadonlyArray<Attribute>, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Attribute.entries', (state, owner) => {
-    const index = Handle.resolve(builder, owner, self, 'AttributeSet', 'Attribute.entries')
-    const values = state.attributeSets[index]
-    if (values === undefined) {
-      throw new SilkError({
-        operation: 'Attribute.entries',
-        message: 'Attribute set is missing',
-        cause: self,
-      })
-    }
-    return Object.freeze(
-      values.map((value) => handleAt(state.attributeHandles, value, 'Attribute.entries')),
-    )
-  })
+): Effect.fn.Return<ReadonlyArray<Attribute>, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Attribute.entries', (state, owner) =>
+    Result.gen(function* () {
+      const index = yield* Handle.resolve(builder, owner, self, 'AttributeSet', 'Attribute.entries')
+      const values = state.attributeSets[index]
+      if (values === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Attribute.entries',
+            message: 'Attribute set is missing',
+            state: self,
+          }),
+        )
+      }
+      const entries: Array<Attribute> = []
+      for (const value of values) {
+        entries.push(yield* handleAt(state.attributeHandles, value, 'Attribute.entries'))
+      }
+      return Object.freeze(entries)
+    }),
+  )
 })
 
 /**
@@ -435,53 +480,63 @@ export const entries = Effect.fn('Attribute.entries')(function* (
 export const functionSet = Effect.fn('Attribute.functionSet')(function* (
   builder: Builder.Builder,
   input: FunctionSetInput = {},
-): Effect.fn.Return<FunctionSet, SilkError> {
+): Effect.fn.Return<FunctionSet, LlvmError> {
   const emptySet = yield* set(builder, [])
   const functionAttributes = input.functionAttributes ?? emptySet
   const returnAttributes = input.returnAttributes ?? emptySet
   const parameterAttributes = input.parameterAttributes ?? []
-  return yield* BuilderState.mutate(builder, 'Attribute.functionSet', (state, owner) => {
-    const functionIndex = Handle.resolve(
-      builder,
-      owner,
-      functionAttributes,
-      'AttributeSet',
-      'Attribute.functionSet',
-    )
-    const returnIndex = Handle.resolve(
-      builder,
-      owner,
-      returnAttributes,
-      'AttributeSet',
-      'Attribute.functionSet',
-    )
-    const parameterIndices = Object.freeze(
-      parameterAttributes.map((attributes) =>
-        Handle.resolve(builder, owner, attributes, 'AttributeSet', 'Attribute.functionSet'),
-      ),
-    )
-    const description = Object.freeze({
-      functionAttributes: functionIndex,
-      returnAttributes: returnIndex,
-      parameterAttributes: parameterIndices,
-    })
-    const key = CanonicalKey.tagged('function-attributes', [
-      CanonicalKey.integer(functionIndex),
-      CanonicalKey.integer(returnIndex),
-      CanonicalKey.sequence(parameterIndices.map(CanonicalKey.integer)),
-    ])
-    const found = state.functionAttributeSetKeys.get(key)
-    if (found !== undefined) {
-      const handle = state.functionAttributeSetHandles[found]
-      if (handle !== undefined) return handle
-    }
-    const index = state.functionAttributeSets.length
-    const handle = Handle.make('FunctionAttributeSet', owner, index)
-    state.functionAttributeSets.push(description)
-    state.functionAttributeSetHandles.push(handle)
-    state.functionAttributeSetKeys.set(key, index)
-    return handle
-  })
+  return yield* BuilderState.mutate(builder, 'Attribute.functionSet', (state, owner) =>
+    Result.gen(function* () {
+      const functionIndex = yield* Handle.resolve(
+        builder,
+        owner,
+        functionAttributes,
+        'AttributeSet',
+        'Attribute.functionSet',
+      )
+      const returnIndex = yield* Handle.resolve(
+        builder,
+        owner,
+        returnAttributes,
+        'AttributeSet',
+        'Attribute.functionSet',
+      )
+      const mutableParameterIndices: Array<number> = []
+      for (const attributes of parameterAttributes) {
+        mutableParameterIndices.push(
+          yield* Handle.resolve(
+            builder,
+            owner,
+            attributes,
+            'AttributeSet',
+            'Attribute.functionSet',
+          ),
+        )
+      }
+      const parameterIndices = Object.freeze(mutableParameterIndices)
+      const description = Object.freeze({
+        functionAttributes: functionIndex,
+        returnAttributes: returnIndex,
+        parameterAttributes: parameterIndices,
+      })
+      const key = CanonicalKey.tagged('function-attributes', [
+        CanonicalKey.integer(functionIndex),
+        CanonicalKey.integer(returnIndex),
+        CanonicalKey.sequence(parameterIndices.map(CanonicalKey.integer)),
+      ])
+      const found = state.functionAttributeSetKeys.get(key)
+      if (found !== undefined) {
+        const handle = state.functionAttributeSetHandles[found]
+        if (handle !== undefined) return handle
+      }
+      const index = state.functionAttributeSets.length
+      const handle = Handle.make('FunctionAttributeSet', owner, index)
+      state.functionAttributeSets.push(description)
+      state.functionAttributeSetHandles.push(handle)
+      state.functionAttributeSetKeys.set(key, index)
+      return handle
+    }),
+  )
 })
 
 /**
@@ -493,46 +548,50 @@ export const functionSet = Effect.fn('Attribute.functionSet')(function* (
 export const functionSetEntries = Effect.fn('Attribute.functionSetEntries')(function* (
   builder: Builder.Builder,
   self: FunctionSet,
-): Effect.fn.Return<FunctionSetEntries, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Attribute.functionSetEntries', (state, owner) => {
-    const index = Handle.resolve(
-      builder,
-      owner,
-      self,
-      'FunctionAttributeSet',
-      'Attribute.functionSetEntries',
-    )
-    const description = state.functionAttributeSets[index]
-    const functionAttributes =
-      description === undefined
-        ? undefined
-        : state.attributeSetHandles[description.functionAttributes]
-    const returnAttributes =
-      description === undefined
-        ? undefined
-        : state.attributeSetHandles[description.returnAttributes]
-    const parameterAttributes =
-      description === undefined
-        ? []
-        : description.parameterAttributes.map((setIndex) => state.attributeSetHandles[setIndex])
-    if (
-      description === undefined ||
-      functionAttributes === undefined ||
-      returnAttributes === undefined ||
-      parameterAttributes.some((set) => set === undefined)
-    ) {
-      throw new SilkError({
-        operation: 'Attribute.functionSetEntries',
-        message: 'Function attribute set references a missing table entry',
-        cause: self,
+): Effect.fn.Return<FunctionSetEntries, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Attribute.functionSetEntries', (state, owner) =>
+    Result.gen(function* () {
+      const index = yield* Handle.resolve(
+        builder,
+        owner,
+        self,
+        'FunctionAttributeSet',
+        'Attribute.functionSetEntries',
+      )
+      const description = state.functionAttributeSets[index]
+      const functionAttributes =
+        description === undefined
+          ? undefined
+          : state.attributeSetHandles[description.functionAttributes]
+      const returnAttributes =
+        description === undefined
+          ? undefined
+          : state.attributeSetHandles[description.returnAttributes]
+      const parameterAttributes =
+        description === undefined
+          ? []
+          : description.parameterAttributes.map((setIndex) => state.attributeSetHandles[setIndex])
+      if (
+        description === undefined ||
+        functionAttributes === undefined ||
+        returnAttributes === undefined ||
+        parameterAttributes.some((set) => set === undefined)
+      ) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Attribute.functionSetEntries',
+            message: 'Function attribute set references a missing table entry',
+            state: self,
+          }),
+        )
+      }
+      return Object.freeze({
+        functionAttributes,
+        returnAttributes,
+        parameterAttributes: Object.freeze(
+          parameterAttributes.flatMap((set) => (set === undefined ? [] : [set])),
+        ),
       })
-    }
-    return Object.freeze({
-      functionAttributes,
-      returnAttributes,
-      parameterAttributes: Object.freeze(
-        parameterAttributes.flatMap((set) => (set === undefined ? [] : [set])),
-      ),
-    })
-  })
+    }),
+  )
 })

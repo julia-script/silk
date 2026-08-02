@@ -1,9 +1,10 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type * as ByteString from './ByteString.js'
 import type * as FunctionBody from './FunctionBody.js'
 import * as FunctionBodyState from './internal/FunctionBodyState.js'
 import type * as Handle from './internal/Handle.js'
-import { SilkError } from './SilkError.js'
+import { invalidState, type LlvmError } from './LlvmError.js'
 
 /**
  * Opaque identity for a basic block inside one open function-body transaction.
@@ -26,7 +27,7 @@ export interface Block extends Handle.Handle<'Block'> {}
  *
  * **Gotchas**
  *
- * A closed body or a body used from a different fiber fails with {@link SilkError}.
+ * A closed body or a body used from a different fiber fails with {@link LlvmError}.
  *
  * **Example** (Building multiple blocks)
  *
@@ -61,9 +62,9 @@ export interface Block extends Handle.Handle<'Block'> {}
 export const make = Effect.fn('Block.make')(function* (
   body: FunctionBody.FunctionBody,
   name?: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Block, SilkError> {
+): Effect.fn.Return<Block, LlvmError> {
   return yield* FunctionBodyState.mutate(body, 'Block.make', (draft) =>
-    FunctionBodyState.makeBlock(draft, name),
+    Result.succeed(FunctionBodyState.makeBlock(draft, name)),
   )
 })
 
@@ -76,7 +77,7 @@ export const make = Effect.fn('Block.make')(function* (
 export const setInsertionPoint = Effect.fn('Block.setInsertionPoint')(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   yield* FunctionBodyState.mutate(body, 'Block.setInsertionPoint', (draft) =>
     FunctionBodyState.setCursor(draft, self),
   )
@@ -91,7 +92,7 @@ export const setInsertionPoint = Effect.fn('Block.setInsertionPoint')(function* 
 export const index = Effect.fn('Block.index')(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
-): Effect.fn.Return<number, SilkError> {
+): Effect.fn.Return<number, LlvmError> {
   return yield* FunctionBodyState.mutate(body, 'Block.index', (draft) =>
     FunctionBodyState.resolveBlock(draft, self, 'Block.index'),
   )
@@ -106,18 +107,22 @@ export const index = Effect.fn('Block.index')(function* (
 export const name = Effect.fn('Block.name')(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
-): Effect.fn.Return<ByteString.ByteString, SilkError> {
-  return yield* FunctionBodyState.mutate(body, 'Block.name', (draft) => {
-    const block = draft.blocks[FunctionBodyState.resolveBlock(draft, self, 'Block.name')]
-    if (block === undefined) {
-      throw new SilkError({
-        operation: 'Block.name',
-        message: 'Block table entry is missing',
-        cause: self,
-      })
-    }
-    return block.name
-  })
+): Effect.fn.Return<ByteString.ByteString, LlvmError> {
+  return yield* FunctionBodyState.mutate(body, 'Block.name', (draft) =>
+    Result.gen(function* () {
+      const block = draft.blocks[yield* FunctionBodyState.resolveBlock(draft, self, 'Block.name')]
+      if (block === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Block.name',
+            message: 'Block table entry is missing',
+            state: self,
+          }),
+        )
+      }
+      return block.name
+    }),
+  )
 })
 
 /**
@@ -129,21 +134,26 @@ export const name = Effect.fn('Block.name')(function* (
 export const predecessors = Effect.fn('Block.predecessors')(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
-): Effect.fn.Return<ReadonlyArray<Block>, SilkError> {
-  return yield* FunctionBodyState.mutate(body, 'Block.predecessors', (draft) => {
-    const block = draft.blocks[FunctionBodyState.resolveBlock(draft, self, 'Block.predecessors')]
-    if (block === undefined) {
-      throw new SilkError({
-        operation: 'Block.predecessors',
-        message: 'Block table entry is missing',
-        cause: self,
-      })
-    }
-    return Object.freeze(
-      [...block.predecessors].flatMap((index) => {
-        const handle = draft.blockHandles[index]
-        return handle === undefined ? [] : [handle]
-      }),
-    )
-  })
+): Effect.fn.Return<ReadonlyArray<Block>, LlvmError> {
+  return yield* FunctionBodyState.mutate(body, 'Block.predecessors', (draft) =>
+    Result.gen(function* () {
+      const block =
+        draft.blocks[yield* FunctionBodyState.resolveBlock(draft, self, 'Block.predecessors')]
+      if (block === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Block.predecessors',
+            message: 'Block table entry is missing',
+            state: self,
+          }),
+        )
+      }
+      return Object.freeze(
+        [...block.predecessors].flatMap((index) => {
+          const handle = draft.blockHandles[index]
+          return handle === undefined ? [] : [handle]
+        }),
+      )
+    }),
+  )
 })

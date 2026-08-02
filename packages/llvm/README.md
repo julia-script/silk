@@ -56,6 +56,38 @@ The example moves through the package's main lifecycle:
 4. Read the two arguments, emit an `add` instruction, and terminate the block with the result.
 5. Render the committed module as text and encode the same state as bitcode bytes.
 
+`Function.buildBody` is a scoped transaction. The callback's success, typed failure, defect, or
+interruption is preserved; every non-success exit closes the draft and releases its reservation,
+so failed construction never exposes a partial body and can be retried.
+
+## Errors and immutable options
+
+Public Effect operations fail with `LlvmError`. Its `reason` discriminates rejected input,
+invalid state or ownership, and wrapped implementation failures, so callers can recover by tag and
+then inspect the reason without treating expected validation as a defect.
+
+Immutable option actors support both data-first and pipeable transformations:
+
+```typescript
+import * as Effect from 'effect/Effect'
+import { pipe } from 'effect/Function'
+import * as Builder from '@silk-effect/llvm/Builder'
+import * as IntegerMath from '@silk-effect/llvm/IntegerMath'
+import * as Type from '@silk-effect/llvm/Type'
+
+declare const builder: Builder.Builder
+
+const flags = pipe(
+  IntegerMath.make(),
+  IntegerMath.withNoSignedWrap(),
+  IntegerMath.withNoUnsignedWrap(false),
+)
+
+const recovered = Type.integer(builder, 0).pipe(
+  Effect.catchTag('LlvmError', (error) => Effect.succeed(error.reason._tag)),
+)
+```
+
 ## Documentation
 
 - [Build a tiny expression compiler](./docs/tutorials/tiny-expression-compiler.md)
@@ -85,3 +117,7 @@ pnpm --filter @silk-effect/llvm parity:validate
 ```
 
 Fixture generation uses pinned Zig and LLVM tools, but runtime APIs never invoke them.
+
+Tests that return an Effect use `it.effect` from `@effect/vitest`; pure cases use ordinary `it`
+and `assert`. Shared layers belong in `it.layer`, while application examples may run their final
+program with `Effect.runPromise` at the edge.

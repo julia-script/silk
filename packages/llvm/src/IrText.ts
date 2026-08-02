@@ -10,9 +10,9 @@ import type * as FunctionBodyDescription from './internal/FunctionBodyDescriptio
 import type * as GlobalDescription from './internal/GlobalDescription.js'
 import type * as MetadataDescription from './internal/MetadataDescription.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
+import { type LlvmError, wrappedFailure } from './LlvmError.js'
 import * as MemoryAccess from './MemoryAccess.js'
 import * as Metadata from './Metadata.js'
-import { SilkError } from './SilkError.js'
 
 /** @internal */
 const quoted = (value: ByteString.ByteString): string => `"${ByteString.escapeForIr(value)}"`
@@ -1015,7 +1015,7 @@ const renderSnapshot = (state: BuilderState.Snapshot): string => {
  *
  * **Gotchas**
  *
- * Unresolved or invalid module state fails with {@link SilkError}.
+ * Unresolved or invalid module state fails with {@link LlvmError}.
  *
  * **Example** (Rendering LLVM IR)
  *
@@ -1038,17 +1038,18 @@ const renderSnapshot = (state: BuilderState.Snapshot): string => {
  */
 export const render = Effect.fn('IrText.render')(function* (
   self: Builder.Builder,
-): Effect.fn.Return<string, SilkError> {
+): Effect.fn.Return<string, LlvmError> {
   const state = yield* BuilderState.snapshot(self, 'IrText.render')
   return yield* Effect.try({
     try: () => renderSnapshot(state),
     catch: (cause) =>
-      cause instanceof SilkError
-        ? cause
-        : new SilkError({
-            operation: 'IrText.render',
-            message: 'LLVM IR rendering failed',
-            cause,
-          }),
+      wrappedFailure({
+        operation: 'IrText.render',
+        message:
+          cause instanceof Error
+            ? `LLVM IR rendering failed: ${cause.message}`
+            : 'LLVM IR rendering failed',
+        cause: cause,
+      }),
   })
 })

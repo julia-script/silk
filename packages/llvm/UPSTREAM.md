@@ -60,7 +60,7 @@ but are informational until explicitly promoted in the parity manifest.
 The mechanically extracted inventory records every pinned `TODO`, `unreachable`, explicit panic,
 and panic-only assertion path. These entries receive the `upstream-unsupported` disposition in the
 parity manifest and are not claimed as implemented behavior. Recoverable malformed public input in
-the Effect port fails with `SilkError`; internal corruption remains a defect. The authoritative
+the Effect port fails with `LlvmError`; internal corruption remains a defect. The authoritative
 entry list is [parity/upstream-inventory.json](./parity/upstream-inventory.json), and its validated
 summary is [parity/REPORT.md](./parity/REPORT.md).
 

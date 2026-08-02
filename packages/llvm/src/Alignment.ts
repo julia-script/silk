@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect'
-import { SilkError } from './SilkError.js'
+import * as IntegerInput from './internal/IntegerInput.js'
+import { invalidInput, type LlvmError } from './LlvmError.js'
 
 /**
  * A power-of-two LLVM alignment measured in bytes, or the target default.
@@ -35,7 +36,7 @@ const isPowerOfTwo = (value: bigint): boolean => value > 0n && (value & (value -
  *
  * **Gotchas**
  *
- * Zero and values that are not powers of two fail with {@link SilkError}.
+ * Zero and values that are not powers of two fail with {@link LlvmError}.
  *
  * **Example** (Creating an explicit alignment)
  *
@@ -52,14 +53,20 @@ const isPowerOfTwo = (value: bigint): boolean => value > 0n && (value & (value -
  */
 export const fromByteUnits = Effect.fn('Alignment.fromByteUnits')(function* (
   byteUnits: number | bigint,
-): Effect.fn.Return<Alignment, SilkError> {
-  const value = typeof byteUnits === 'bigint' ? byteUnits : BigInt(byteUnits)
+): Effect.fn.Return<Alignment, LlvmError> {
+  const value = yield* Effect.fromResult(
+    IntegerInput.normalize(byteUnits, {
+      operation: 'Alignment.fromByteUnits',
+      message: 'LLVM alignment must be a positive power of two',
+      minimum: 1n,
+    }),
+  )
   if (!isPowerOfTwo(value)) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Alignment.fromByteUnits',
         message: 'LLVM alignment must be a positive power of two',
-        cause: byteUnits,
+        input: byteUnits,
       }),
     )
   }
@@ -74,13 +81,13 @@ export const fromByteUnits = Effect.fn('Alignment.fromByteUnits')(function* (
  */
 export const fromBitUnits = Effect.fn('Alignment.fromBitUnits')(function* (
   bitUnits: number,
-): Effect.fn.Return<Alignment, SilkError> {
+): Effect.fn.Return<Alignment, LlvmError> {
   if (!Number.isSafeInteger(bitUnits) || bitUnits < 8 || bitUnits % 8 !== 0) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Alignment.fromBitUnits',
         message: 'LLVM bit alignment must be a positive whole number of bytes',
-        cause: bitUnits,
+        input: bitUnits,
       }),
     )
   }

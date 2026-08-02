@@ -127,8 +127,16 @@ export type Instruction =
     })
   | (ResultInstruction & {
       readonly _tag: 'Compare'
-      readonly kind: 'integer' | 'floating'
-      readonly predicate: IntegerPredicate | FloatingPredicate
+      readonly kind: 'integer'
+      readonly predicate: IntegerPredicate
+      readonly left: Operand
+      readonly right: Operand
+      readonly fastMath: FastMath
+    })
+  | (ResultInstruction & {
+      readonly _tag: 'Compare'
+      readonly kind: 'floating'
+      readonly predicate: FloatingPredicate
       readonly left: Operand
       readonly right: Operand
       readonly fastMath: FastMath

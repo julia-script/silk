@@ -1,10 +1,11 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import * as Semaphore from 'effect/Semaphore'
 import * as ByteString from './ByteString.js'
 import * as DataLayout from './DataLayout.js'
 import * as BuilderState from './internal/BuilderState.js'
 import * as OwnedHandle from './internal/OwnedHandle.js'
-import { SilkError } from './SilkError.js'
+import { invalidState, type LlvmError } from './LlvmError.js'
 
 /**
  * An opaque, concurrency-safe owner of LLVM IR state.
@@ -68,7 +69,7 @@ const bytes = (
  *
  * **Gotchas**
  *
- * An invalid data layout fails with {@link SilkError} before the builder is created.
+ * An invalid data layout fails with {@link LlvmError} before the builder is created.
  *
  * **Example** (Creating a module)
  *
@@ -93,7 +94,7 @@ const bytes = (
  */
 export const make = Effect.fn('Builder.make')(function* (
   options: Options = {},
-): Effect.fn.Return<Builder, SilkError> {
+): Effect.fn.Return<Builder, LlvmError> {
   const gate = yield* Semaphore.make(1)
   const dataLayout = bytes(options.dataLayout)
   const layout = yield* DataLayout.parse(dataLayout)
@@ -164,18 +165,18 @@ are  * Allocates a lightweight handle whose owner is checked by every consuming 
  */
 export const allocateHandle = Effect.fn('Builder.allocateHandle')(function* (
   self: Builder,
-): Effect.fn.Return<Handle, SilkError> {
+): Effect.fn.Return<Handle, LlvmError> {
   return yield* BuilderState.mutate(self, 'Builder.allocateHandle', (state, owner) => {
     const handle: Handle = { _tag: 'Handle', [HandleTypeId]: HandleTypeId }
     Object.freeze(handle)
     handles.set(handle, OwnedHandle.make(owner, state.nextHandle))
     state.nextHandle += 1
-    return handle
+    return Result.succeed(handle)
   })
 })
 
 /**
- * Validates that a low-level handle belongs to this builder, failing with {@link SilkError}.
+ * Validates that a low-level handle belongs to this builder, failing with {@link LlvmError}.
  *
  * @category builders
  * @since 0.0.0
@@ -183,19 +184,22 @@ export const allocateHandle = Effect.fn('Builder.allocateHandle')(function* (
 export const validateHandle = Effect.fn('Builder.validateHandle')(function* (
   self: Builder,
   handle: Handle,
-): Effect.fn.Return<void, SilkError> {
-  yield* BuilderState.mutate(self, 'Builder.validateHandle', (_state, owner) => {
-    const owned = handles.get(handle)
-    if (owned === undefined) {
-      throw new SilkError({
-        operation: 'Builder.validateHandle',
-        message: 'Unknown LLVM builder handle',
-        cause: handle,
-      })
-    }
-    const error = OwnedHandle.ensureOwner(owner, owned, 'Builder.validateHandle')
-    if (error !== undefined) throw error
-  })
+): Effect.fn.Return<void, LlvmError> {
+  yield* BuilderState.mutate(self, 'Builder.validateHandle', (_state, owner) =>
+    Result.gen(function* () {
+      const owned = handles.get(handle)
+      if (owned === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Builder.validateHandle',
+            message: 'Unknown LLVM builder handle',
+            state: handle,
+          }),
+        )
+      }
+      yield* OwnedHandle.ensureOwner(owner, owned, 'Builder.validateHandle')
+    }),
+  )
 })
 
 /**
@@ -207,9 +211,10 @@ export const validateHandle = Effect.fn('Builder.validateHandle')(function* (
 export const appendModuleAssembly = Effect.fn('Builder.appendModuleAssembly')(function* (
   self: Builder,
   assembly: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   const value = bytes(assembly)
   yield* BuilderState.mutate(self, 'Builder.appendModuleAssembly', (state) => {
     state.moduleAssembly.push(value)
+    return Result.succeed(undefined)
   })
 })

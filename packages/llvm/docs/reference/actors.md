@@ -18,7 +18,7 @@ their TSDoc. This page defines the responsibility and boundary of every public a
 | `Builder` | Owns one serialized LLVM module state. Captures module headers, data layout, target triple, initial assembly, and debug-strip policy. |
 | `Bitcode` | Encodes a builder snapshot as deterministic LLVM bitcode in a `Uint8Array`. |
 | `IrText` | Renders a builder snapshot as deterministic textual LLVM IR. |
-| `SilkError` | Tagged error in the typed failure channel of public Effect operations. Contains `operation`, `message`, and `cause`. |
+| `LlvmError` | Tagged error in the typed failure channel of public Effect operations. Contains stable `operation` and `message` fields plus an `InvalidInput`, `InvalidState`, or `WrappedFailure` reason. Only wrapped failures expose JavaScript `cause`. |
 
 ## Bytes, layout, and flags
 
@@ -28,9 +28,9 @@ their TSDoc. This page defines the responsibility and boundary of every public a
 | `AddrSpace` | Unsigned 24-bit LLVM address-space identifiers and textual suffix rendering. |
 | `Alignment` | Power-of-two byte alignments and LLVM alignment encoding. |
 | `DataLayout` | Parsed target data-layout strings and integer, float, vector, and pointer layout lookup. |
-| `FastMath` | Immutable fast-math flag sets with textual and bitcode forms. |
-| `IntegerMath` | Immutable integer arithmetic flags such as `nsw`, `nuw`, and `exact`. |
-| `MemoryAccess` | Immutable volatile, alignment, sync-scope, and atomic-ordering settings plus legality validation. |
+| `FastMath` | Immutable fast-math flag sets with textual and bitcode forms. `combine` supports data-first and pipeable calls. |
+| `IntegerMath` | Immutable integer arithmetic flags such as `nsw`, `nuw`, and `exact`; every `with*` transformation supports data-first and pipeable calls. |
+| `MemoryAccess` | Immutable volatile, alignment, sync-scope, and atomic-ordering settings plus legality validation. `withVolatile` and `withAtomic` support data-first and pipeable calls. |
 | `DIFlags` | LLVM debug-information flags with textual and bitcode forms. |
 | `DISPFlags` | LLVM subprogram flags with textual and bitcode forms. |
 
@@ -64,6 +64,11 @@ Variables, aliases, and functions occupy one ordered global symbol table.
 
 `FunctionBody` is the largest actor because its operations share one lifecycle and validation
 boundary: the callback passed to `Function.buildBody`.
+
+That callback receives a draft valid only in its creating fiber and scope. Body construction is
+bracketed: success validates and atomically commits, while typed failure, validation failure,
+defect, or interruption closes the draft and releases the function reservation without exposing
+partial instructions.
 
 ## Debug metadata
 

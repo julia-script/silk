@@ -1,7 +1,5 @@
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as ManagedRuntime from 'effect/ManagedRuntime'
-import { expect, test } from 'vitest'
 import * as Alias from '../src/Alias.js'
 import * as Attribute from '../src/Attribute.js'
 import * as Builder from '../src/Builder.js'
@@ -11,11 +9,8 @@ import * as Global from '../src/Global.js'
 import * as Type from '../src/Type.js'
 import * as Variable from '../src/Variable.js'
 
-const TestRuntime = ManagedRuntime.make(Layer.empty)
-
-test(
-  'creates, looks up, renames, configures, and removes ordered globals',
-  Effect.fnUntraced(function* () {
+it.effect('creates, looks up, renames, configures, and removes ordered globals', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const initializer = yield* Constant.integerUnsigned(builder, i32, 7)
@@ -26,35 +21,34 @@ test(
     })
     const global = yield* Variable.global(builder, variable)
 
-    expect(yield* Global.lookup(builder, 'answer')).toBe(global)
-    expect((yield* Variable.properties(builder, variable)).initializer).toBe(initializer)
-    expect((yield* Global.properties(builder, global)).linkage).toBe('internal')
+    assert.strictEqual(yield* Global.lookup(builder, 'answer'), global)
+    assert.strictEqual((yield* Variable.properties(builder, variable)).initializer, initializer)
+    assert.strictEqual((yield* Global.properties(builder, global)).linkage, 'internal')
     yield* Global.rename(builder, global, 'renamed')
-    expect(yield* Global.lookup(builder, 'answer')).toBeUndefined()
-    expect(yield* Global.lookup(builder, 'renamed')).toBe(global)
+    assert.isUndefined(yield* Global.lookup(builder, 'answer'))
+    assert.strictEqual(yield* Global.lookup(builder, 'renamed'), global)
     yield* Global.remove(builder, global)
-    expect(yield* Global.lookup(builder, 'renamed')).toBeUndefined()
-  }, TestRuntime.runPromise),
+    assert.isUndefined(yield* Global.lookup(builder, 'renamed'))
+  }),
 )
 
-test(
-  'rejects duplicate declarations without disturbing the original',
-  Effect.fnUntraced(function* () {
+it.effect('rejects duplicate declarations without disturbing the original', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const original = yield* Variable.make(builder, 'occupied', i32)
     const duplicate = yield* Effect.flip(Variable.make(builder, 'occupied', i32))
 
-    expect(duplicate.message).toContain('already occupied')
-    expect(yield* Global.lookup(builder, 'occupied')).toBe(
+    assert.include(duplicate.message, 'already occupied')
+    assert.strictEqual(
+      yield* Global.lookup(builder, 'occupied'),
       yield* Variable.global(builder, original),
     )
-  }, TestRuntime.runPromise),
+  }),
 )
 
-test(
-  'creates aliases and atomically converts an existing global category',
-  Effect.fnUntraced(function* () {
+it.effect('creates aliases and atomically converts an existing global category', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const target = yield* Variable.make(builder, 'target', i32)
@@ -67,15 +61,14 @@ test(
     const alias = yield* Alias.fromGlobal(builder, sourceGlobal, i32, targetPointer)
     const staleVariable = yield* Effect.flip(Variable.properties(builder, source))
 
-    expect(yield* Alias.aliasee(builder, alias)).toBe(targetPointer)
-    expect(yield* Global.kind(builder, sourceGlobal)).toBe('Alias')
-    expect(staleVariable.message).toContain('no longer active')
-  }, TestRuntime.runPromise),
+    assert.strictEqual(yield* Alias.aliasee(builder, alias), targetPointer)
+    assert.strictEqual(yield* Global.kind(builder, sourceGlobal), 'Alias')
+    assert.include(staleVariable.message, 'no longer active')
+  }),
 )
 
-test(
-  'canonicalizes compatible function declarations and round-trips properties',
-  Effect.fnUntraced(function* () {
+it.effect('canonicalizes compatible function declarations and round-trips properties', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i32 = yield* Type.integer(builder, 32)
     const type = yield* Type.functionType(builder, i32, [i32])
@@ -96,22 +89,21 @@ test(
       FunctionActor.declare(builder, 'compute', type, { callingConvention: 9 }),
     )
 
-    expect(first).toBe(second)
-    expect((yield* FunctionActor.properties(builder, first)).attributes).toBe(attributes)
-    expect(incompatible.message).toContain('incompatible global')
-  }, TestRuntime.runPromise),
+    assert.strictEqual(first, second)
+    assert.strictEqual((yield* FunctionActor.properties(builder, first)).attributes, attributes)
+    assert.include(incompatible.message, 'incompatible global')
+  }),
 )
 
-test(
-  'replaces globals while preserving stale global indirection',
-  Effect.fnUntraced(function* () {
+it.effect('replaces globals while preserving stale global indirection', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const i8 = yield* Type.integer(builder, 8)
     const first = yield* Variable.global(builder, yield* Variable.make(builder, 'first', i8))
     const second = yield* Variable.global(builder, yield* Variable.make(builder, 'second', i8))
     yield* Global.replace(builder, first, second)
 
-    expect(yield* Global.name(builder, first)).toEqual(yield* Global.name(builder, second))
-    expect(yield* Global.lookup(builder, 'first')).toBeUndefined()
-  }, TestRuntime.runPromise),
+    assert.deepEqual(yield* Global.name(builder, first), yield* Global.name(builder, second))
+    assert.isUndefined(yield* Global.lookup(builder, 'first'))
+  }),
 )

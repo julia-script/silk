@@ -18,13 +18,13 @@ validation are described in their exported TSDoc.
 
 `moduleName`, `sourceFilename`, `targetTriple`, `dataLayout`, and `moduleAssembly` accept a
 `ByteString`, `Uint8Array`, or JavaScript string. String inputs are UTF-8 encoded. An invalid data
-layout fails builder construction with `SilkError`.
+layout fails builder construction with `LlvmError`.
 
 ## Ownership
 
 Every type, attribute, constant, global, function, metadata node, block, and local value belongs to
 the builder that created it. A consuming operation validates this owner before mutation. A handle
-from another builder fails with `SilkError`.
+from another builder fails with `LlvmError`.
 
 Blocks and local values additionally belong to one function-body draft. They cannot be consumed by
 another function body, by a child fiber, or after the body callback closes.
@@ -45,8 +45,9 @@ commits only when all of these conditions hold:
 - branches, switches, and PHI nodes are complete and internally consistent;
 - calls and returns match their function types.
 
-A callback failure or validation failure discards the whole draft and leaves the function as a
-declaration. A valid body can then be retried. A committed function body cannot be replaced.
+A callback failure, validation failure, defect, or interruption discards the whole draft, closes
+its handles, releases the reservation, and leaves the function as a declaration. The original exit
+is preserved and a valid body can then be retried. A committed function body cannot be replaced.
 
 ## Interning and declaration identity
 
@@ -70,17 +71,19 @@ attachment.
 
 ## Errors
 
-Public validation failures use `SilkError` in the Effect error channel.
+Public validation failures use `LlvmError` in the Effect error channel.
 
 | Field | Meaning |
 | --- | --- |
-| `_tag` | Always `SilkError`. |
+| `_tag` | Always `LlvmError`. |
 | `operation` | Actor operation that rejected the state or input. |
 | `message` | Human-readable failure context. |
-| `cause` | Offending input or wrapped implementation failure. |
+| `reason` | `InvalidInput` with `input`, `InvalidState` with `state`, or `WrappedFailure` with `cause`. |
+| `cause` | Present only for `WrappedFailure`, preserving genuine JavaScript causal ancestry. |
 
-Pure functions throw only where their signature explicitly documents `@throws`. Internal state
-corruption is treated as a defect rather than a public validation outcome.
+Expected validation never crosses the public boundary as a throw. Unexpected exceptions remain
+defects, and private renderer or encoder exceptions are translated once into `WrappedFailure` at
+their public Effect boundary.
 
 ## Output
 

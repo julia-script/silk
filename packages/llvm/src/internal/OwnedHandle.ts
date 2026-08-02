@@ -1,4 +1,5 @@
-import { SilkError } from '../SilkError.js'
+import * as Result from 'effect/Result'
+import { invalidState, type LlvmError } from '../LlvmError.js'
 
 export interface Owner {
   readonly token: symbol
@@ -20,11 +21,13 @@ export const ensureOwner = (
   expected: Owner,
   handle: OwnedHandle,
   operation: string,
-): SilkError | undefined =>
+): Result.Result<void, LlvmError> =>
   expected.token === handle.owner.token
-    ? undefined
-    : new SilkError({
-        operation,
-        message: 'The handle belongs to a different LLVM builder',
-        cause: handle,
-      })
+    ? Result.succeed(undefined)
+    : Result.fail(
+        invalidState({
+          operation,
+          message: 'The handle belongs to a different LLVM builder',
+          state: handle,
+        }),
+      )

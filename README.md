@@ -13,6 +13,10 @@ pnpm check
 pnpm release:candidate
 ```
 
+Effect-returning tests use `it.effect` from `@effect/vitest`; pure tests use ordinary `it` with
+`assert`. Package-facing changes require a Changesets entry and a validated packed release
+candidate.
+
 ## License
 
 [MIT](LICENSE) © 2026 Julia Ortiz

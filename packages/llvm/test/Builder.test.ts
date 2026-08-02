@@ -1,30 +1,25 @@
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Layer from 'effect/Layer'
-import * as ManagedRuntime from 'effect/ManagedRuntime'
-import { expect, test } from 'vitest'
 import * as Builder from '../src/Builder.js'
 import * as IrText from '../src/IrText.js'
+import { raise } from './support/raise.js'
 
-const TestRuntime = ManagedRuntime.make(Layer.empty)
-
-test(
-  'rejects a handle from another builder without changing either builder',
-  Effect.fnUntraced(function* () {
+it.effect('rejects a handle from another builder without changing either builder', () =>
+  Effect.gen(function* () {
     const first = yield* Builder.make()
     const second = yield* Builder.make()
     const handle = yield* Builder.allocateHandle(first)
     const error = yield* Effect.flip(Builder.validateHandle(second, handle))
 
-    expect(error._tag).toBe('SilkError')
-    expect(error.operation).toBe('Builder.validateHandle')
-    expect(yield* IrText.render(first)).toBe('')
-    expect(yield* IrText.render(second)).toBe('')
-  }, TestRuntime.runPromise),
+    assert.strictEqual(error._tag, 'LlvmError')
+    assert.strictEqual(error.operation, 'Builder.validateHandle')
+    assert.strictEqual(yield* IrText.render(first), '')
+    assert.strictEqual(yield* IrText.render(second), '')
+  }),
 )
 
-test(
-  'serializes concurrent mutations without losing committed fragments',
-  Effect.fnUntraced(function* () {
+it.effect('serializes concurrent mutations without losing committed fragments', () =>
+  Effect.gen(function* () {
     const builder = yield* Builder.make()
     const fragments = Array.from({ length: 64 }, (_, index) => `asm-${index}`)
     yield* Effect.all(
@@ -33,7 +28,10 @@ test(
     )
 
     const rendered = yield* IrText.render(builder)
-    for (const fragment of fragments) expect(rendered).toContain(`module asm "${fragment}"`)
-    expect(rendered.match(/^module asm /gm)).toHaveLength(fragments.length)
-  }, TestRuntime.runPromise),
+    for (const fragment of fragments) assert.include(rendered, `module asm "${fragment}"`)
+    assert.lengthOf(
+      rendered.match(/^module asm /gm) ?? raise('expected assembly fragments'),
+      fragments.length,
+    )
+  }),
 )

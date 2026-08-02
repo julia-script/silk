@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@effect/vitest':
+      specifier: 4.0.0-beta.102
+      version: 4.0.0-beta.102
     effect:
       specifier: 4.0.0-beta.102
       version: 4.0.0-beta.102
@@ -35,6 +38,10 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10(vite@8.2.0(yaml@2.9.0)))
 
 packages:
 
@@ -153,6 +160,12 @@ packages:
 
   '@changesets/write@0.4.0':
     resolution: {integrity: sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q==}
+
+  '@effect/vitest@4.0.0-beta.102':
+    resolution: {integrity: sha512-4dipFAYG6imOzrY3zy3BgzCJkbb9xESyzUef0WSx8bsK0/SpITqbJpdwKeOyDWLZ+rimjua8IbTFMAde865pIQ==}
+    peerDependencies:
+      effect: ^4.0.0-beta.102
+      vitest: ^3.0.0 || ^4.0.0
 
   '@emnapi/core@2.0.0-alpha.3':
     resolution: {integrity: sha512-AZypUeJ/yByuxyS7BlSNRDOMLMlROYtjYdIAuBmJssVz1UJDSeYxLrdizhXCFYhedC5bqd/ASy8EuNXbVVXp9g==}
@@ -1307,6 +1320,11 @@ snapshots:
       fs-extra: 7.0.1
       human-id: 4.2.0
       prettier: 2.8.8
+
+  '@effect/vitest@4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10(vite@8.2.0(yaml@2.9.0)))':
+    dependencies:
+      effect: 4.0.0-beta.102
+      vitest: 4.1.10(vite@8.2.0(yaml@2.9.0))
 
   '@emnapi/core@2.0.0-alpha.3':
     dependencies:

@@ -73,9 +73,11 @@ check(
   'benchmark decision is missing',
 )
 for (const source of sourceFiles(resolve(packageRoot, 'src'))) {
+  if (source.includes(`${resolve(packageRoot, 'src')}/internal/`)) continue
+  const contents = readFileSync(source, 'utf8')
   check(
-    !readFileSync(source, 'utf8').includes('Effect.fnUntraced'),
-    `unmeasured Effect.fnUntraced remains in production source: ${source}`,
+    !/export const \w+ = Effect\.fnUntraced/.test(contents),
+    `public actor operation must use named Effect.fn tracing: ${source}`,
   )
 }
 
@@ -172,9 +174,10 @@ samples per workload:
 ${benchmarks.workloads.map((entry) => `- ${entry.name}: median ${entry.medianMs} ms`).join('\n')}
 
 The candidate-untraced comparison improved the median by ${benchmarks.decision.improvementPercent}%
-against a ${benchmarks.decision.materialThresholdPercent}% materiality threshold. Production actor
-operations therefore remain traced; measured bit/byte packing loops remain imperative behind the
-typed \`Bitcode.encode\` boundary.
+against a ${benchmarks.decision.materialThresholdPercent}% materiality threshold. Public actor
+operations therefore remain traced; reusable internal Effect functions use \`Effect.fnUntraced\`,
+while measured bit/byte packing loops remain imperative behind the typed \`Bitcode.encode\`
+boundary.
 
 ## Verification evidence
 

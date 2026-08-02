@@ -41,10 +41,18 @@ test('the llvm release candidate is a self-contained ESM package', () => {
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'docs/reference/actors.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'docs/explanation/effect-native-builder.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'THIRD_PARTY_NOTICES.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'UPSTREAM.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'dist/LlvmError.js'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'dist/SilkError.js'))).toBe(false)
+    expect(readFileSync(resolve(packedRoot, 'README.md'), 'utf8')).toContain('LlvmError')
+    expect(readFileSync(resolve(packedRoot, 'docs/reference/actors.md'), 'utf8')).toContain(
+      'WrappedFailure',
+    )
     expect(Object.keys(manifest.dependencies ?? {})).toEqual(['effect'])
     const packedFiles = (directory: string): ReadonlyArray<string> =>
       readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -82,13 +90,14 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       './IntegerMath',
       './Intrinsic',
       './IrText',
+      './LlvmError',
       './MemoryAccess',
       './Metadata',
-      './SilkError',
       './Type',
       './Value',
       './Variable',
     ])
+    expect(manifest.exports).not.toHaveProperty('./SilkError')
 
     const consumerRoot = resolve(temporary, 'consumer')
     mkdirSync(consumerRoot)
@@ -114,7 +123,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-effect/llvm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/llvm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './SilkError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
+          `import * as api from '@silk-effect/llvm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/llvm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './LlvmError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
         ],
         {
           cwd: consumerRoot,
@@ -155,9 +164,9 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       'IntegerMath',
       'Intrinsic',
       'IrText',
+      'LlvmError',
       'MemoryAccess',
       'Metadata',
-      'SilkError',
       'Type',
       'Value',
       'Variable',
@@ -167,7 +176,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
     >) {
       expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
       const rootName = path.slice(2)
-      if (rootName === 'SilkError') expect(exports).toContain('SilkError')
+      if (rootName === 'LlvmError') expect(exports).toContain('LlvmError')
       else expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Builder']).toContain('make')

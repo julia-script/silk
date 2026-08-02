@@ -1,7 +1,9 @@
 import * as Effect from 'effect/Effect'
+import { dual } from 'effect/Function'
 import type * as Alignment from './Alignment.js'
 import { defaultAlignment } from './Alignment.js'
-import { SilkError } from './SilkError.js'
+import * as MemoryAccessEncoding from './internal/MemoryAccessEncoding.js'
+import { invalidInput, type LlvmError } from './LlvmError.js'
 
 /**
  * Whether an LLVM memory operation is ordinary or volatile.
@@ -161,11 +163,12 @@ export const operationCode: Readonly<Record<AtomicOperation, number>> = Object.f
  * **Example** (Configuring atomic access)
  *
  * ```ts
+ * import { pipe } from 'effect/Function'
  * import * as MemoryAccess from '@silk-effect/llvm/MemoryAccess'
  *
- * const access = MemoryAccess.withAtomic(
+ * const access = pipe(
  *   MemoryAccess.make({ kind: 'volatile' }),
- *   'acquire',
+ *   MemoryAccess.withAtomic('acquire'),
  * )
  * ```
  *
@@ -186,8 +189,15 @@ export const make = (input: Input = {}): MemoryAccess =>
  * @category memory access
  * @since 0.0.0
  */
-export const withVolatile = (self: MemoryAccess, enabled = true): MemoryAccess =>
-  Object.freeze({ ...self, kind: enabled ? 'volatile' : 'normal' })
+export const withVolatile: {
+  (): (self: MemoryAccess) => MemoryAccess
+  (enabled: boolean): (self: MemoryAccess) => MemoryAccess
+  (self: MemoryAccess, enabled?: boolean): MemoryAccess
+} = dual(
+  (args) => typeof args[0] === 'object',
+  (self: MemoryAccess, enabled = true): MemoryAccess =>
+    Object.freeze({ ...self, kind: enabled ? 'volatile' : 'normal' }),
+)
 
 /**
  * Returns a copy configured as an atomic access with the requested ordering and scope.
@@ -195,11 +205,24 @@ export const withVolatile = (self: MemoryAccess, enabled = true): MemoryAccess =
  * @category memory access
  * @since 0.0.0
  */
-export const withAtomic = (
-  self: MemoryAccess,
-  ordering: Exclude<AtomicOrdering, 'none'>,
-  syncScope: SyncScope = 'system',
-): MemoryAccess => Object.freeze({ ...self, ordering, syncScope })
+export const withAtomic: {
+  (
+    ordering: Exclude<AtomicOrdering, 'none'>,
+    syncScope?: SyncScope,
+  ): (self: MemoryAccess) => MemoryAccess
+  (
+    self: MemoryAccess,
+    ordering: Exclude<AtomicOrdering, 'none'>,
+    syncScope?: SyncScope,
+  ): MemoryAccess
+} = dual(
+  (args) => typeof args[0] === 'object',
+  (
+    self: MemoryAccess,
+    ordering: Exclude<AtomicOrdering, 'none'>,
+    syncScope: SyncScope = 'system',
+  ): MemoryAccess => Object.freeze({ ...self, ordering, syncScope }),
+)
 
 /**
  * Compares orderings by LLVM's encoding order; instruction-specific legality still requires validation.
@@ -241,29 +264,24 @@ export const renderOrdering = (ordering: AtomicOrdering): string =>
  *
  * **Gotchas**
  *
- * This low-level encoder throws {@link SilkError} when an explicit alignment cannot fit the
- * six-bit bitcode field.
+ * Explicit alignments that do not fit the six-bit instruction field fail with {@link LlvmError}.
  *
  * @category memory access
  * @since 0.0.0
  */
-export const alignmentCode = (alignment: Alignment.Alignment): number => {
-  if (alignment.byteUnits === undefined) return 0
-  let value = alignment.byteUnits
-  let exponent = 0
-  while (value > 1n) {
-    value >>= 1n
-    exponent += 1
-  }
-  if (exponent > 62) {
-    throw new SilkError({
-      operation: 'MemoryAccess.alignmentCode',
-      message: 'LLVM instruction alignment exceeds the 6-bit bitcode encoding',
-      cause: alignment,
-    })
-  }
-  return exponent + 1
-}
+export const alignmentCode = Effect.fn('MemoryAccess.alignmentCode')(function* (
+  alignment: Alignment.Alignment,
+): Effect.fn.Return<number, LlvmError> {
+  return yield* Effect.try({
+    try: () => MemoryAccessEncoding.alignmentCode(alignment),
+    catch: () =>
+      invalidInput({
+        operation: 'MemoryAccess.alignmentCode',
+        message: 'LLVM instruction alignment exceeds the 6-bit bitcode encoding',
+        input: alignment,
+      }),
+  })
+})
 
 /**
  * Validates that a load does not use the store-only `release` or `acq_rel` orderings.
@@ -273,13 +291,13 @@ export const alignmentCode = (alignment: Alignment.Alignment): number => {
  */
 export const validateLoadOrdering = Effect.fn('MemoryAccess.validateLoadOrdering')(function* (
   ordering: AtomicOrdering,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'release' || ordering === 'acq_rel') {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'MemoryAccess.validateLoadOrdering',
         message: 'Atomic loads cannot use release or acq_rel ordering',
-        cause: ordering,
+        input: ordering,
       }),
     )
   }
@@ -293,13 +311,13 @@ export const validateLoadOrdering = Effect.fn('MemoryAccess.validateLoadOrdering
  */
 export const validateStoreOrdering = Effect.fn('MemoryAccess.validateStoreOrdering')(function* (
   ordering: AtomicOrdering,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'acquire' || ordering === 'acq_rel') {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'MemoryAccess.validateStoreOrdering',
         message: 'Atomic stores require monotonic, release, or seq_cst ordering',
-        cause: ordering,
+        input: ordering,
       }),
     )
   }
@@ -313,7 +331,7 @@ export const validateStoreOrdering = Effect.fn('MemoryAccess.validateStoreOrderi
  */
 export const validateFenceOrdering = Effect.fn('MemoryAccess.validateFenceOrdering')(function* (
   ordering: AtomicOrdering,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   if (
     ordering !== 'acquire' &&
     ordering !== 'release' &&
@@ -321,10 +339,10 @@ export const validateFenceOrdering = Effect.fn('MemoryAccess.validateFenceOrderi
     ordering !== 'seq_cst'
   ) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'MemoryAccess.validateFenceOrdering',
         message: 'A fence requires acquire, release, acq_rel, or seq_cst ordering',
-        cause: ordering,
+        input: ordering,
       }),
     )
   }
@@ -338,13 +356,13 @@ export const validateFenceOrdering = Effect.fn('MemoryAccess.validateFenceOrderi
  */
 export const validateRmwOrdering = Effect.fn('MemoryAccess.validateRmwOrdering')(function* (
   ordering: AtomicOrdering,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'none' || ordering === 'unordered') {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'MemoryAccess.validateRmwOrdering',
         message: 'Atomic RMW operations require at least monotonic ordering',
-        cause: ordering,
+        input: ordering,
       }),
     )
   }
@@ -356,7 +374,7 @@ export const validateRmwOrdering = Effect.fn('MemoryAccess.validateRmwOrdering')
  * **Gotchas**
  *
  * Forbidden failure orderings and failure orderings stronger than the success ordering fail with
- * {@link SilkError}.
+ * {@link LlvmError}.
  *
  * @category memory access
  * @since 0.0.0
@@ -364,7 +382,7 @@ export const validateRmwOrdering = Effect.fn('MemoryAccess.validateRmwOrdering')
 export const validateCompareExchange = Effect.fn('MemoryAccess.validateCompareExchange')(function* (
   success: AtomicOrdering,
   failure: AtomicOrdering,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   yield* validateRmwOrdering(success)
   if (
     failure === 'none' ||
@@ -373,10 +391,10 @@ export const validateCompareExchange = Effect.fn('MemoryAccess.validateCompareEx
     failure === 'acq_rel'
   ) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'MemoryAccess.validateCompareExchange',
         message: 'Compare-exchange failure ordering is not permitted by LLVM',
-        cause: failure,
+        input: failure,
       }),
     )
   }
@@ -391,10 +409,10 @@ export const validateCompareExchange = Effect.fn('MemoryAccess.validateCompareEx
     success === 'seq_cst' ? 2 : success === 'acquire' || success === 'acq_rel' ? 1 : 0
   if (allowedFailure[failure] > successLimit) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'MemoryAccess.validateCompareExchange',
         message: 'Compare-exchange failure ordering cannot be stronger than success ordering',
-        cause: { success, failure },
+        input: { success, failure },
       }),
     )
   }

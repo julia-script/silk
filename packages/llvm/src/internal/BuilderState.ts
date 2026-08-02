@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import type * as Result from 'effect/Result'
 import type * as Semaphore from 'effect/Semaphore'
 import type * as Alias from '../Alias.js'
 import type * as Attribute from '../Attribute.js'
@@ -8,7 +9,7 @@ import type * as Constant from '../Constant.js'
 import type * as DataLayout from '../DataLayout.js'
 import type * as FunctionActor from '../Function.js'
 import type * as Global from '../Global.js'
-import { SilkError } from '../SilkError.js'
+import { invalidState, type LlvmError } from '../LlvmError.js'
 import type * as Type from '../Type.js'
 import type * as Variable from '../Variable.js'
 import type * as AttributeDescription from './AttributeDescription.js'
@@ -107,37 +108,38 @@ export const register = (self: Builder.Builder, state: State): void => {
 }
 
 /** @internal */
-const lookup = (self: Builder.Builder, operation: string): Effect.Effect<State, SilkError> => {
-  const state = states.get(self)
-  return state === undefined
-    ? Effect.fail(new SilkError({ operation, message: 'Unknown LLVM builder value', cause: self }))
-    : Effect.succeed(state)
-}
-
-/** @internal */
-export const mutate = <A>(
+const lookup = Effect.fnUntraced(function* (
   self: Builder.Builder,
   operation: string,
-  transition: (state: MutableState, owner: OwnedHandle.Owner) => A,
-): Effect.Effect<A, SilkError> =>
-  Effect.flatMap(lookup(self, operation), (state) =>
+): Effect.fn.Return<State, LlvmError> {
+  const state = states.get(self)
+  if (state === undefined) {
+    return yield* Effect.fail(
+      invalidState({ operation, message: 'Unknown LLVM builder value', state: self }),
+    )
+  }
+  return state
+})
+
+/** @internal */
+export const mutate = Effect.fnUntraced(function* <A>(
+  self: Builder.Builder,
+  operation: string,
+  transition: (state: MutableState, owner: OwnedHandle.Owner) => Result.Result<A, LlvmError>,
+): Effect.fn.Return<A, LlvmError> {
+  return yield* Effect.flatMap(lookup(self, operation), (state) =>
     state.gate.withPermit(
-      Effect.try({
-        try: () => transition(state.value, state.owner),
-        catch: (cause) =>
-          cause instanceof SilkError
-            ? cause
-            : new SilkError({ operation, message: 'LLVM builder mutation failed', cause }),
-      }),
+      Effect.suspend(() => Effect.fromResult(transition(state.value, state.owner))),
     ),
   )
+})
 
 /** @internal */
-export const snapshot = (
+export const snapshot = Effect.fnUntraced(function* (
   self: Builder.Builder,
   operation: string,
-): Effect.Effect<Snapshot, SilkError> =>
-  Effect.flatMap(lookup(self, operation), (state) =>
+): Effect.fn.Return<Snapshot, LlvmError> {
+  return yield* Effect.flatMap(lookup(self, operation), (state) =>
     state.gate.withPermit(
       Effect.sync(() => ({
         owner: state.owner,
@@ -170,3 +172,4 @@ export const snapshot = (
       })),
     ),
   )
+})

@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type * as Builder from './Builder.js'
 import * as ByteString from './ByteString.js'
 import type * as Constant from './Constant.js'
@@ -7,7 +8,7 @@ import * as BuilderState from './internal/BuilderState.js'
 import type * as GlobalDescription from './internal/GlobalDescription.js'
 import * as GlobalState from './internal/GlobalState.js'
 import * as Handle from './internal/Handle.js'
-import { SilkError } from './SilkError.js'
+import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import type * as Type from './Type.js'
 
 /**
@@ -41,27 +42,36 @@ const aliaseeIndex = (
   owner: BuilderState.State['owner'],
   aliasee: Constant.Constant,
   operation: string,
-): number => {
-  const index = Handle.resolve(builder, owner, aliasee, 'Constant', operation)
-  const constant = state.constants[index]
-  const type = constant === undefined ? undefined : state.types[constant.type]
-  if (type?._tag !== 'Pointer') {
-    throw new SilkError({
-      operation,
-      message: 'An LLVM alias aliasee must have pointer type',
-      cause: aliasee,
-    })
-  }
-  return index
-}
+): Result.Result<number, LlvmError> =>
+  Result.gen(function* () {
+    const index = yield* Handle.resolve(builder, owner, aliasee, 'Constant', operation)
+    const constant = state.constants[index]
+    const type = constant === undefined ? undefined : state.types[constant.type]
+    if (type?._tag !== 'Pointer') {
+      return yield* Result.fail(
+        invalidInput({
+          operation,
+          message: 'An LLVM alias aliasee must have pointer type',
+          input: aliasee,
+        }),
+      )
+    }
+    return index
+  })
 
 /** @internal */
-const handleAt = (state: BuilderState.MutableState, index: number, operation: string): Alias => {
+const handleAt = (
+  state: BuilderState.MutableState,
+  index: number,
+  operation: string,
+): Result.Result<Alias, LlvmError> => {
   const handle = state.aliasHandles[index]
   if (handle === undefined) {
-    throw new SilkError({ operation, message: 'Alias table handle is missing', cause: index })
+    return Result.fail(
+      invalidState({ operation, message: 'Alias table handle is missing', state: index }),
+    )
   }
-  return handle
+  return Result.succeed(handle)
 }
 
 /** @internal */
@@ -71,20 +81,26 @@ const resolve = (
   owner: BuilderState.State['owner'],
   self: Alias,
   operation: string,
-): { readonly index: number; readonly description: GlobalDescription.AliasDescription } => {
-  const index = Handle.resolve(builder, owner, self, 'Alias', operation)
-  const description = state.aliases[index]
-  const global = description === undefined ? undefined : state.globals[description.global]
-  if (
-    description === undefined ||
-    global?.kind !== 'Alias' ||
-    global.actorIndex !== index ||
-    global.deleted
-  ) {
-    throw new SilkError({ operation, message: 'Alias handle is no longer active', cause: self })
-  }
-  return { index, description }
-}
+): Result.Result<
+  { readonly index: number; readonly description: GlobalDescription.AliasDescription },
+  LlvmError
+> =>
+  Result.gen(function* () {
+    const index = yield* Handle.resolve(builder, owner, self, 'Alias', operation)
+    const description = state.aliases[index]
+    const global = description === undefined ? undefined : state.globals[description.global]
+    if (
+      description === undefined ||
+      global?.kind !== 'Alias' ||
+      global.actorIndex !== index ||
+      global.deleted
+    ) {
+      return yield* Result.fail(
+        invalidState({ operation, message: 'Alias handle is no longer active', state: self }),
+      )
+    }
+    return { index, description }
+  })
 
 /**
  * Creates a named LLVM alias to a pointer-typed constant.
@@ -99,7 +115,7 @@ const resolve = (
  *
  * **Gotchas**
  *
- * Name collisions, cross-builder handles, and non-pointer aliasees fail with {@link SilkError}.
+ * Name collisions, cross-builder handles, and non-pointer aliasees fail with {@link LlvmError}.
  *
  * **Example** (Creating a global alias)
  *
@@ -134,32 +150,34 @@ export const make = Effect.fn('Alias.make')(function* (
   valueType: Type.Type,
   aliasee: Constant.Constant,
   options: Options = {},
-): Effect.fn.Return<Alias, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Alias.make', (state, owner) => {
-    const typeIndex = Handle.resolve(builder, owner, valueType, 'Type', 'Alias.make')
-    const target = aliaseeIndex(builder, state, owner, aliasee, 'Alias.make')
-    const index = state.aliases.length
-    const allocated = GlobalState.allocate(
-      state,
-      owner,
-      bytes(name),
-      'Alias',
-      index,
-      options,
-      'Alias.make',
-    )
-    const handle = Handle.make('Alias', owner, index)
-    state.aliases.push(
-      Object.freeze({
-        _tag: 'Alias',
-        global: allocated.index,
-        valueType: typeIndex,
-        aliasee: target,
-      }),
-    )
-    state.aliasHandles.push(handle)
-    return handle
-  })
+): Effect.fn.Return<Alias, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Alias.make', (state, owner) =>
+    Result.gen(function* () {
+      const typeIndex = yield* Handle.resolve(builder, owner, valueType, 'Type', 'Alias.make')
+      const target = yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.make')
+      const index = state.aliases.length
+      const allocated = yield* GlobalState.allocate(
+        state,
+        owner,
+        bytes(name),
+        'Alias',
+        index,
+        options,
+        'Alias.make',
+      )
+      const handle = Handle.make('Alias', owner, index)
+      state.aliases.push(
+        Object.freeze({
+          _tag: 'Alias',
+          global: allocated.index,
+          valueType: typeIndex,
+          aliasee: target,
+        }),
+      )
+      state.aliasHandles.push(handle)
+      return handle
+    }),
+  )
 })
 
 /**
@@ -173,30 +191,32 @@ export const fromGlobal = Effect.fn('Alias.fromGlobal')(function* (
   global: Global.Global,
   valueType: Type.Type,
   aliasee: Constant.Constant,
-): Effect.fn.Return<Alias, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Alias.fromGlobal', (state, owner) => {
-    const resolved = GlobalState.resolve(builder, state, owner, global, 'Alias.fromGlobal')
-    if (resolved.description.kind === 'Alias') {
-      return handleAt(state, resolved.description.actorIndex, 'Alias.fromGlobal')
-    }
-    const index = state.aliases.length
-    const handle = Handle.make('Alias', owner, index)
-    state.aliases.push(
-      Object.freeze({
-        _tag: 'Alias',
-        global: resolved.index,
-        valueType: Handle.resolve(builder, owner, valueType, 'Type', 'Alias.fromGlobal'),
-        aliasee: aliaseeIndex(builder, state, owner, aliasee, 'Alias.fromGlobal'),
-      }),
-    )
-    state.aliasHandles.push(handle)
-    state.globals[resolved.index] = Object.freeze({
-      ...resolved.description,
-      kind: 'Alias',
-      actorIndex: index,
-    })
-    return handle
-  })
+): Effect.fn.Return<Alias, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Alias.fromGlobal', (state, owner) =>
+    Result.gen(function* () {
+      const resolved = yield* GlobalState.resolve(builder, state, owner, global, 'Alias.fromGlobal')
+      if (resolved.description.kind === 'Alias') {
+        return yield* handleAt(state, resolved.description.actorIndex, 'Alias.fromGlobal')
+      }
+      const index = state.aliases.length
+      const handle = Handle.make('Alias', owner, index)
+      state.aliases.push(
+        Object.freeze({
+          _tag: 'Alias',
+          global: resolved.index,
+          valueType: yield* Handle.resolve(builder, owner, valueType, 'Type', 'Alias.fromGlobal'),
+          aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.fromGlobal'),
+        }),
+      )
+      state.aliasHandles.push(handle)
+      state.globals[resolved.index] = Object.freeze({
+        ...resolved.description,
+        kind: 'Alias',
+        actorIndex: index,
+      })
+      return handle
+    }),
+  )
 })
 
 /**
@@ -209,14 +229,16 @@ export const setAliasee = Effect.fn('Alias.setAliasee')(function* (
   builder: Builder.Builder,
   self: Alias,
   aliasee: Constant.Constant,
-): Effect.fn.Return<void, SilkError> {
-  yield* BuilderState.mutate(builder, 'Alias.setAliasee', (state, owner) => {
-    const { description, index } = resolve(builder, state, owner, self, 'Alias.setAliasee')
-    state.aliases[index] = Object.freeze({
-      ...description,
-      aliasee: aliaseeIndex(builder, state, owner, aliasee, 'Alias.setAliasee'),
-    })
-  })
+): Effect.fn.Return<void, LlvmError> {
+  yield* BuilderState.mutate(builder, 'Alias.setAliasee', (state, owner) =>
+    Result.gen(function* () {
+      const { description, index } = yield* resolve(builder, state, owner, self, 'Alias.setAliasee')
+      state.aliases[index] = Object.freeze({
+        ...description,
+        aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.setAliasee'),
+      })
+    }),
+  )
 })
 
 /**
@@ -228,11 +250,13 @@ export const setAliasee = Effect.fn('Alias.setAliasee')(function* (
 export const global = Effect.fn('Alias.global')(function* (
   builder: Builder.Builder,
   self: Alias,
-): Effect.fn.Return<Global.Global, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Alias.global', (state, owner) => {
-    const value = resolve(builder, state, owner, self, 'Alias.global').description
-    return GlobalState.handleAt(state, value.global, 'Alias.global')
-  })
+): Effect.fn.Return<Global.Global, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Alias.global', (state, owner) =>
+    Result.gen(function* () {
+      const value = (yield* resolve(builder, state, owner, self, 'Alias.global')).description
+      return yield* GlobalState.handleAt(state, value.global, 'Alias.global')
+    }),
+  )
 })
 
 /**
@@ -244,17 +268,21 @@ export const global = Effect.fn('Alias.global')(function* (
 export const aliasee = Effect.fn('Alias.aliasee')(function* (
   builder: Builder.Builder,
   self: Alias,
-): Effect.fn.Return<Constant.Constant, SilkError> {
-  return yield* BuilderState.mutate(builder, 'Alias.aliasee', (state, owner) => {
-    const description = resolve(builder, state, owner, self, 'Alias.aliasee').description
-    const constant = state.constantHandles[description.aliasee]
-    if (constant === undefined) {
-      throw new SilkError({
-        operation: 'Alias.aliasee',
-        message: 'Alias target constant is missing',
-        cause: self,
-      })
-    }
-    return constant
-  })
+): Effect.fn.Return<Constant.Constant, LlvmError> {
+  return yield* BuilderState.mutate(builder, 'Alias.aliasee', (state, owner) =>
+    Result.gen(function* () {
+      const description = (yield* resolve(builder, state, owner, self, 'Alias.aliasee')).description
+      const constant = state.constantHandles[description.aliasee]
+      if (constant === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Alias.aliasee',
+            message: 'Alias target constant is missing',
+            state: self,
+          }),
+        )
+      }
+      return constant
+    }),
+  )
 })

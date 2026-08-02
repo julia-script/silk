@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import * as AddrSpace from './AddrSpace.js'
 import type * as Alignment from './Alignment.js'
 import type * as Builder from './Builder.js'
@@ -7,8 +8,9 @@ import * as DataLayout from './DataLayout.js'
 import * as BuilderState from './internal/BuilderState.js'
 import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
+import * as IntegerInput from './internal/IntegerInput.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
-import { SilkError } from './SilkError.js'
+import { invalidInput, invalidState, type LlvmError, wrappedFailure } from './LlvmError.js'
 
 /**
  * Opaque builder-owned identity for a structurally interned LLVM type.
@@ -98,12 +100,14 @@ const handleAt = (
   state: Pick<BuilderState.MutableState, 'typeHandles'>,
   index: number,
   operation: string,
-): Type => {
+): Result.Result<Type, LlvmError> => {
   const handle = state.typeHandles[index]
   if (handle === undefined) {
-    throw new SilkError({ operation, message: 'Type table handle is missing', cause: index })
+    return Result.fail(
+      invalidState({ operation, message: 'Type table handle is missing', state: index }),
+    )
   }
-  return handle
+  return Result.succeed(handle)
 }
 
 /** @internal */
@@ -111,17 +115,19 @@ const intern = Effect.fn('Type.intern')(function* (
   builder: Builder.Builder,
   description: TypeDescription.Description,
 ) {
-  return yield* BuilderState.mutate(builder, 'Type.intern', (state, owner) => {
-    const key = keyForDescription(description)
-    const found = state.typeKeys.get(key)
-    if (found !== undefined) return handleAt(state, found, 'Type.intern')
-    const index = state.types.length
-    const handle = Handle.make('Type', owner, index)
-    state.types.push(description)
-    state.typeHandles.push(handle)
-    state.typeKeys.set(key, index)
-    return handle
-  })
+  return yield* BuilderState.mutate(builder, 'Type.intern', (state, owner) =>
+    Result.gen(function* () {
+      const key = keyForDescription(description)
+      const found = state.typeKeys.get(key)
+      if (found !== undefined) return yield* handleAt(state, found, 'Type.intern')
+      const index = state.types.length
+      const handle = Handle.make('Type', owner, index)
+      state.types.push(description)
+      state.typeHandles.push(handle)
+      state.typeKeys.set(key, index)
+      return handle
+    }),
+  )
 })
 
 /** @internal */
@@ -257,7 +263,7 @@ export const token = Effect.fn('Type.token')(function* (builder: Builder.Builder
  *
  * **Gotchas**
  *
- * Values outside that range, including non-integers, fail with {@link SilkError}.
+ * Values outside that range, including non-integers, fail with {@link LlvmError}.
  *
  * **Example** (Creating a wide integer type)
  *
@@ -280,13 +286,13 @@ export const token = Effect.fn('Type.token')(function* (builder: Builder.Builder
 export const integer = Effect.fn('Type.integer')(function* (
   builder: Builder.Builder,
   bitWidth: number,
-): Effect.fn.Return<Type, SilkError> {
+): Effect.fn.Return<Type, LlvmError> {
   if (!Number.isSafeInteger(bitWidth) || bitWidth < 1 || bitWidth > 0xff_ffff) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Type.integer',
         message: 'LLVM integer width must be from 1 through 16777215 bits',
-        cause: bitWidth,
+        input: bitWidth,
       }),
     )
   }
@@ -312,8 +318,14 @@ const indices = (
   owner: BuilderState.Snapshot['owner'],
   types: ReadonlyArray<Type>,
   operation: string,
-): ReadonlyArray<number> =>
-  Object.freeze(types.map((type) => Handle.resolve(builder, owner, type, 'Type', operation)))
+): Result.Result<ReadonlyArray<number>, LlvmError> =>
+  Result.gen(function* () {
+    const values: Array<number> = []
+    for (const type of types) {
+      values.push(yield* Handle.resolve(builder, owner, type, 'Type', operation))
+    }
+    return Object.freeze(values)
+  })
 
 /**
  * Interns an LLVM function signature from a return type, positional parameters, and variadic flag.
@@ -326,13 +338,15 @@ export const functionType = Effect.fn('Type.functionType')(function* (
   returnType: Type,
   parameters: ReadonlyArray<Type>,
   options: { readonly variadic?: boolean } = {},
-): Effect.fn.Return<Type, SilkError> {
+): Effect.fn.Return<Type, LlvmError> {
   const description = yield* BuilderState.mutate(builder, 'Type.functionType', (_state, owner) =>
-    Object.freeze({
-      _tag: 'Function' as const,
-      returnType: Handle.resolve(builder, owner, returnType, 'Type', 'Type.functionType'),
-      parameters: indices(builder, owner, parameters, 'Type.functionType'),
-      variadic: options.variadic ?? false,
+    Result.gen(function* () {
+      return Object.freeze({
+        _tag: 'Function' as const,
+        returnType: yield* Handle.resolve(builder, owner, returnType, 'Type', 'Type.functionType'),
+        parameters: yield* indices(builder, owner, parameters, 'Type.functionType'),
+        variadic: options.variadic ?? false,
+      })
     }),
   )
   return yield* intern(builder, description)
@@ -344,13 +358,13 @@ const vectorOf = Effect.fn('Type.vectorOf')(function* (
   child: Type,
   length: number,
   scalable: boolean,
-): Effect.fn.Return<Type, SilkError> {
+): Effect.fn.Return<Type, LlvmError> {
   if (!Number.isSafeInteger(length) || length < 1 || length > 0xffff_ffff) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Type.vector',
         message: 'LLVM vector length must be a positive 32-bit integer',
-        cause: length,
+        input: length,
       }),
     )
   }
@@ -401,17 +415,15 @@ export const array = Effect.fn('Type.array')(function* (
   builder: Builder.Builder,
   child: Type,
   length: number | bigint,
-): Effect.fn.Return<Type, SilkError> {
-  const exactLength = typeof length === 'bigint' ? length : BigInt(length)
-  if (exactLength < 0n || exactLength > 0xffff_ffff_ffff_ffffn) {
-    return yield* Effect.fail(
-      new SilkError({
-        operation: 'Type.array',
-        message: 'LLVM array length must be an unsigned 64-bit integer',
-        cause: length,
-      }),
-    )
-  }
+): Effect.fn.Return<Type, LlvmError> {
+  const exactLength = yield* Effect.fromResult(
+    IntegerInput.normalize(length, {
+      operation: 'Type.array',
+      message: 'LLVM array length must be an unsigned 64-bit integer',
+      minimum: 0n,
+      maximum: 0xffff_ffff_ffff_ffffn,
+    }),
+  )
   const childIndex = yield* BuilderState.mutate(builder, 'Type.array', (_state, owner) =>
     Handle.resolve(builder, owner, child, 'Type', 'Type.array'),
   )
@@ -433,10 +445,12 @@ export const structure = Effect.fn('Type.structure')(function* (
   options: { readonly packed?: boolean } = {},
 ) {
   const description = yield* BuilderState.mutate(builder, 'Type.structure', (_state, owner) =>
-    Object.freeze({
-      _tag: 'Structure' as const,
-      fields: indices(builder, owner, fields, 'Type.structure'),
-      packed: options.packed ?? false,
+    Result.gen(function* () {
+      return Object.freeze({
+        _tag: 'Structure' as const,
+        fields: yield* indices(builder, owner, fields, 'Type.structure'),
+        packed: options.packed ?? false,
+      })
     }),
   )
   return yield* intern(builder, description)
@@ -456,7 +470,7 @@ export const structure = Effect.fn('Type.structure')(function* (
 export const namedStructure = Effect.fn('Type.namedStructure')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Type, SilkError> {
+): Effect.fn.Return<Type, LlvmError> {
   const value =
     typeof name === 'string'
       ? ByteString.fromString(name)
@@ -465,30 +479,32 @@ export const namedStructure = Effect.fn('Type.namedStructure')(function* (
         : name
   if (ByteString.isEmpty(value)) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Type.namedStructure',
         message: 'A named LLVM structure requires a non-empty name',
-        cause: name,
+        input: name,
       }),
     )
   }
-  return yield* BuilderState.mutate(builder, 'Type.namedStructure', (state, owner) => {
-    const key = CanonicalKey.bytes(value)
-    const found = state.namedTypes.get(key)
-    if (found !== undefined) return handleAt(state, found, 'Type.namedStructure')
-    const index = state.types.length
-    const handle = Handle.make('Type', owner, index)
-    const description: TypeDescription.Description = Object.freeze({
-      _tag: 'NamedStructure',
-      name: value,
-      body: undefined,
-    })
-    state.types.push(description)
-    state.typeHandles.push(handle)
-    state.typeKeys.set(keyForDescription(description), index)
-    state.namedTypes.set(key, index)
-    return handle
-  })
+  return yield* BuilderState.mutate(builder, 'Type.namedStructure', (state, owner) =>
+    Result.gen(function* () {
+      const key = CanonicalKey.bytes(value)
+      const found = state.namedTypes.get(key)
+      if (found !== undefined) return yield* handleAt(state, found, 'Type.namedStructure')
+      const index = state.types.length
+      const handle = Handle.make('Type', owner, index)
+      const description: TypeDescription.Description = Object.freeze({
+        _tag: 'NamedStructure',
+        name: value,
+        body: undefined,
+      })
+      state.types.push(description)
+      state.typeHandles.push(handle)
+      state.typeKeys.set(keyForDescription(description), index)
+      state.namedTypes.set(key, index)
+      return handle
+    }),
+  )
 })
 
 /**
@@ -502,32 +518,38 @@ export const setNamedBody = Effect.fn('Type.setNamedBody')(function* (
   self: Type,
   fields: ReadonlyArray<Type>,
   options: { readonly packed?: boolean } = {},
-): Effect.fn.Return<void, SilkError> {
-  yield* BuilderState.mutate(builder, 'Type.setNamedBody', (state, owner) => {
-    const index = Handle.resolve(builder, owner, self, 'Type', 'Type.setNamedBody')
-    const description = state.types[index]
-    if (description?._tag !== 'NamedStructure') {
-      throw new SilkError({
-        operation: 'Type.setNamedBody',
-        message: 'Only a named structure can receive a body',
-        cause: self,
+): Effect.fn.Return<void, LlvmError> {
+  yield* BuilderState.mutate(builder, 'Type.setNamedBody', (state, owner) =>
+    Result.gen(function* () {
+      const index = yield* Handle.resolve(builder, owner, self, 'Type', 'Type.setNamedBody')
+      const description = state.types[index]
+      if (description?._tag !== 'NamedStructure') {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Type.setNamedBody',
+            message: 'Only a named structure can receive a body',
+            input: self,
+          }),
+        )
+      }
+      if (description.body !== undefined) {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Type.setNamedBody',
+            message: 'A named structure body can only be assigned once',
+            input: self,
+          }),
+        )
+      }
+      state.types[index] = Object.freeze({
+        ...description,
+        body: Object.freeze({
+          fields: yield* indices(builder, owner, fields, 'Type.setNamedBody'),
+          packed: options.packed ?? false,
+        }),
       })
-    }
-    if (description.body !== undefined) {
-      throw new SilkError({
-        operation: 'Type.setNamedBody',
-        message: 'A named structure body can only be assigned once',
-        cause: self,
-      })
-    }
-    state.types[index] = Object.freeze({
-      ...description,
-      body: Object.freeze({
-        fields: indices(builder, owner, fields, 'Type.setNamedBody'),
-        packed: options.packed ?? false,
-      }),
-    })
-  })
+    }),
+  )
 })
 
 /**
@@ -541,7 +563,7 @@ export const targetExtension = Effect.fn('Type.targetExtension')(function* (
   name: ByteString.ByteString | Uint8Array | string,
   types: ReadonlyArray<Type> = [],
   integerParameters: ReadonlyArray<number | bigint> = [],
-): Effect.fn.Return<Type, SilkError> {
+): Effect.fn.Return<Type, LlvmError> {
   const value =
     typeof name === 'string'
       ? ByteString.fromString(name)
@@ -550,19 +572,27 @@ export const targetExtension = Effect.fn('Type.targetExtension')(function* (
         : name
   if (ByteString.isEmpty(value)) {
     return yield* Effect.fail(
-      new SilkError({
+      invalidInput({
         operation: 'Type.targetExtension',
         message: 'A target extension type requires a non-empty name',
-        cause: name,
+        input: name,
       }),
     )
   }
+  const integers = yield* Effect.fromResult(
+    IntegerInput.normalizeAll(integerParameters, {
+      operation: 'Type.targetExtension',
+      message: 'Target extension integer parameters must be finite safe integers or bigints',
+    }),
+  )
   const description = yield* BuilderState.mutate(builder, 'Type.targetExtension', (_state, owner) =>
-    Object.freeze({
-      _tag: 'TargetExtension' as const,
-      name: value,
-      types: indices(builder, owner, types, 'Type.targetExtension'),
-      integers: Object.freeze(integerParameters.map((integer) => BigInt(integer))),
+    Result.gen(function* () {
+      return Object.freeze({
+        _tag: 'TargetExtension' as const,
+        name: value,
+        types: yield* indices(builder, owner, types, 'Type.targetExtension'),
+        integers,
+      })
     }),
   )
   return yield* intern(builder, description)
@@ -577,16 +607,20 @@ const inspect = <A>(
     description: TypeDescription.Description,
     state: BuilderState.MutableState,
     index: number,
-  ) => A,
+  ) => Result.Result<A, LlvmError>,
 ) =>
-  BuilderState.mutate(builder, operation, (state, owner) => {
-    const index = Handle.resolve(builder, owner, self, 'Type', operation)
-    const description = state.types[index]
-    if (description === undefined) {
-      throw new SilkError({ operation, message: 'Type table entry is missing', cause: self })
-    }
-    return f(description, state, index)
-  })
+  BuilderState.mutate(builder, operation, (state, owner) =>
+    Result.gen(function* () {
+      const index = yield* Handle.resolve(builder, owner, self, 'Type', operation)
+      const description = state.types[index]
+      if (description === undefined) {
+        return yield* Result.fail(
+          invalidState({ operation, message: 'Type table entry is missing', state: self }),
+        )
+      }
+      return yield* f(description, state, index)
+    }),
+  )
 
 /**
  * Returns a stable runtime tag for a builder-owned type.
@@ -596,12 +630,12 @@ const inspect = <A>(
  */
 export const tag = Effect.fn('Type.tag')(function* (builder: Builder.Builder, self: Type) {
   return yield* inspect(builder, self, 'Type.tag', (description) =>
-    description._tag === 'Simple' ? description.tag : description._tag,
+    Result.succeed(description._tag === 'Simple' ? description.tag : description._tag),
   )
 })
 
 /**
- * Reads an integer type's bit width, failing with {@link SilkError} for other type families.
+ * Reads an integer type's bit width, failing with {@link LlvmError} for other type families.
  *
  * @category types
  * @since 0.0.0
@@ -609,17 +643,21 @@ export const tag = Effect.fn('Type.tag')(function* (builder: Builder.Builder, se
 export const integerBitWidth = Effect.fn('Type.integerBitWidth')(function* (
   builder: Builder.Builder,
   self: Type,
-): Effect.fn.Return<number, SilkError> {
-  return yield* inspect(builder, self, 'Type.integerBitWidth', (description) => {
-    if (description._tag !== 'Integer') {
-      throw new SilkError({
-        operation: 'Type.integerBitWidth',
-        message: 'Expected an integer type',
-        cause: self,
-      })
-    }
-    return description.bitWidth
-  })
+): Effect.fn.Return<number, LlvmError> {
+  return yield* inspect(builder, self, 'Type.integerBitWidth', (description) =>
+    Result.gen(function* () {
+      if (description._tag !== 'Integer') {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Type.integerBitWidth',
+            message: 'Expected an integer type',
+            input: self,
+          }),
+        )
+      }
+      return description.bitWidth
+    }),
+  )
 })
 
 /**
@@ -631,17 +669,21 @@ export const integerBitWidth = Effect.fn('Type.integerBitWidth')(function* (
 export const childType = Effect.fn('Type.childType')(function* (
   builder: Builder.Builder,
   self: Type,
-): Effect.fn.Return<Type, SilkError> {
-  return yield* inspect(builder, self, 'Type.childType', (description, state) => {
-    if (description._tag !== 'Array' && description._tag !== 'Vector') {
-      throw new SilkError({
-        operation: 'Type.childType',
-        message: 'Expected an array or vector type',
-        cause: self,
-      })
-    }
-    return handleAt(state, description.child, 'Type.childType')
-  })
+): Effect.fn.Return<Type, LlvmError> {
+  return yield* inspect(builder, self, 'Type.childType', (description, state) =>
+    Result.gen(function* () {
+      if (description._tag !== 'Array' && description._tag !== 'Vector') {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Type.childType',
+            message: 'Expected an array or vector type',
+            input: self,
+          }),
+        )
+      }
+      return yield* handleAt(state, description.child, 'Type.childType')
+    }),
+  )
 })
 
 /**
@@ -653,23 +695,29 @@ export const childType = Effect.fn('Type.childType')(function* (
 export const functionSignature = Effect.fn('Type.functionSignature')(function* (
   builder: Builder.Builder,
   self: Type,
-): Effect.fn.Return<FunctionSignature, SilkError> {
-  return yield* inspect(builder, self, 'Type.functionSignature', (description, state) => {
-    if (description._tag !== 'Function') {
-      throw new SilkError({
-        operation: 'Type.functionSignature',
-        message: 'Expected a function type',
-        cause: self,
+): Effect.fn.Return<FunctionSignature, LlvmError> {
+  return yield* inspect(builder, self, 'Type.functionSignature', (description, state) =>
+    Result.gen(function* () {
+      if (description._tag !== 'Function') {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Type.functionSignature',
+            message: 'Expected a function type',
+            input: self,
+          }),
+        )
+      }
+      const parameters: Array<Type> = []
+      for (const index of description.parameters) {
+        parameters.push(yield* handleAt(state, index, 'Type.functionSignature'))
+      }
+      return Object.freeze({
+        returnType: yield* handleAt(state, description.returnType, 'Type.functionSignature'),
+        parameters: Object.freeze(parameters),
+        variadic: description.variadic,
       })
-    }
-    return Object.freeze({
-      returnType: handleAt(state, description.returnType, 'Type.functionSignature'),
-      parameters: Object.freeze(
-        description.parameters.map((index) => handleAt(state, index, 'Type.functionSignature')),
-      ),
-      variadic: description.variadic,
-    })
-  })
+    }),
+  )
 })
 
 /**
@@ -690,38 +738,44 @@ export const functionSignature = Effect.fn('Type.functionSignature')(function* (
 export const aggregateShape = Effect.fn('Type.aggregateShape')(function* (
   builder: Builder.Builder,
   self: Type,
-): Effect.fn.Return<AggregateShape, SilkError> {
-  return yield* inspect(builder, self, 'Type.aggregateShape', (description, state) => {
-    if (description._tag === 'Array' || description._tag === 'Vector') {
+): Effect.fn.Return<AggregateShape, LlvmError> {
+  return yield* inspect(builder, self, 'Type.aggregateShape', (description, state) =>
+    Result.gen(function* () {
+      if (description._tag === 'Array' || description._tag === 'Vector') {
+        return Object.freeze({
+          fields: Object.freeze([yield* handleAt(state, description.child, 'Type.aggregateShape')]),
+          packed: false,
+          scalable: description._tag === 'Vector' && description.scalable,
+          length: description._tag === 'Array' ? description.length : BigInt(description.length),
+        })
+      }
+      const body =
+        description._tag === 'Structure'
+          ? description
+          : description._tag === 'NamedStructure'
+            ? description.body
+            : undefined
+      if (body === undefined) {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Type.aggregateShape',
+            message: 'Expected a complete aggregate type',
+            input: self,
+          }),
+        )
+      }
+      const fields: Array<Type> = []
+      for (const index of body.fields) {
+        fields.push(yield* handleAt(state, index, 'Type.aggregateShape'))
+      }
       return Object.freeze({
-        fields: Object.freeze([handleAt(state, description.child, 'Type.aggregateShape')]),
-        packed: false,
-        scalable: description._tag === 'Vector' && description.scalable,
-        length: description._tag === 'Array' ? description.length : BigInt(description.length),
+        fields: Object.freeze(fields),
+        packed: body.packed,
+        scalable: false,
+        length: undefined,
       })
-    }
-    const body =
-      description._tag === 'Structure'
-        ? description
-        : description._tag === 'NamedStructure'
-          ? description.body
-          : undefined
-    if (body === undefined) {
-      throw new SilkError({
-        operation: 'Type.aggregateShape',
-        message: 'Expected a complete aggregate type',
-        cause: self,
-      })
-    }
-    return Object.freeze({
-      fields: Object.freeze(
-        body.fields.map((index) => handleAt(state, index, 'Type.aggregateShape')),
-      ),
-      packed: body.packed,
-      scalable: false,
-      length: undefined,
-    })
-  })
+    }),
+  )
 })
 
 /** @internal */
@@ -824,7 +878,7 @@ const layoutOf = (
  * **Gotchas**
  *
  * Recursive inline types, scalable vectors, unsized types, target extensions, and pointers without
- * a layout specification fail with {@link SilkError}.
+ * a layout specification fail with {@link LlvmError}.
  *
  * @category types
  * @since 0.0.0
@@ -832,14 +886,18 @@ const layoutOf = (
 export const sizeOf = Effect.fn('Type.sizeOf')(function* (
   builder: Builder.Builder,
   self: Type,
-): Effect.fn.Return<bigint, SilkError> {
-  return yield* inspect(builder, self, 'Type.sizeOf', (_description, state, index) => {
-    try {
-      return layoutOf(index, state, new Set()).size
-    } catch (cause) {
-      throw new SilkError({ operation: 'Type.sizeOf', message: 'Type has no fixed size', cause })
-    }
-  })
+): Effect.fn.Return<bigint, LlvmError> {
+  return yield* inspect(builder, self, 'Type.sizeOf', (_description, state, index) =>
+    Result.try({
+      try: () => layoutOf(index, state, new Set()).size,
+      catch: (cause) =>
+        wrappedFailure({
+          operation: 'Type.sizeOf',
+          message: 'Type has no fixed size',
+          cause: cause,
+        }),
+    }),
+  )
 })
 
 /**
@@ -851,16 +909,16 @@ export const sizeOf = Effect.fn('Type.sizeOf')(function* (
 export const alignmentOf = Effect.fn('Type.alignmentOf')(function* (
   builder: Builder.Builder,
   self: Type,
-): Effect.fn.Return<Alignment.Alignment, SilkError> {
-  return yield* inspect(builder, self, 'Type.alignmentOf', (_description, state, index) => {
-    try {
-      return layoutOf(index, state, new Set()).alignment
-    } catch (cause) {
-      throw new SilkError({
-        operation: 'Type.alignmentOf',
-        message: 'Type has no alignment',
-        cause,
-      })
-    }
-  })
+): Effect.fn.Return<Alignment.Alignment, LlvmError> {
+  return yield* inspect(builder, self, 'Type.alignmentOf', (_description, state, index) =>
+    Result.try({
+      try: () => layoutOf(index, state, new Set()).alignment,
+      catch: (cause) =>
+        wrappedFailure({
+          operation: 'Type.alignmentOf',
+          message: 'Type has no alignment',
+          cause: cause,
+        }),
+    }),
+  )
 })

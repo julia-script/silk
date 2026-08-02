@@ -119,9 +119,9 @@
       "types": "./dist/Metadata.d.ts",
       "import": "./dist/Metadata.js"
     },
-    "./SilkError": {
-      "types": "./dist/SilkError.d.ts",
-      "import": "./dist/SilkError.js"
+    "./LlvmError": {
+      "types": "./dist/LlvmError.d.ts",
+      "import": "./dist/LlvmError.js"
     },
     "./Type": {
       "types": "./dist/Type.d.ts",
@@ -137,7 +137,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "fixtures:regenerate": "node scripts/foundation-fixtures.mjs regenerate && pnpm build && node scripts/declaration-fixtures.mjs regenerate && node scripts/core-fixtures.mjs regenerate && node scripts/advanced-fixtures.mjs regenerate && node scripts/metadata-fixtures.mjs regenerate",
     "fixtures:verify": "node scripts/foundation-fixtures.mjs verify && node scripts/declaration-fixtures.mjs verify && node scripts/core-fixtures.mjs verify && node scripts/advanced-fixtures.mjs verify && node scripts/metadata-fixtures.mjs verify",
     "parity:corpus": "node scripts/parity-corpus.mjs",
@@ -148,10 +149,13 @@
     "parity:validate": "node scripts/parity-validate.mjs",
     "runtime:smoke": "node scripts/runtime-smoke.mjs",
     "test": "vitest run --passWithNoTests && node scripts/parity-validate.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "upstream:candidate": "node scripts/upstream-candidate.mjs"
   },
   "dependencies": {
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:"
   }
 }

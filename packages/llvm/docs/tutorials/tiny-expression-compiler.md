@@ -207,11 +207,13 @@ predecessors.
 ## Check the failure boundary
 
 Delete the `FunctionBody.branch(body, merge)` call from the `otherwise` block and run the program.
-The Effect should fail with a `SilkError` reporting that the block lacks a terminator. Restore the
-branch before continuing.
+The Effect should fail with a `LlvmError` whose `operation` identifies body validation and whose
+`reason._tag` is `InvalidState`, reporting that the block lacks a terminator. You can recover with
+`Effect.catchTag('LlvmError', ...)` without catching defects. Restore the branch before continuing.
 
 The failed body is not partially committed. `Function.buildBody` validates and commits the whole
-draft as one transaction.
+draft as one scoped transaction, closes it on every exit, and releases the reservation so a retry
+can build the function successfully.
 
 ## What you built
 

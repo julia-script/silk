@@ -1,10 +1,11 @@
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import type * as ByteString from './ByteString.js'
 import type * as Constant from './Constant.js'
 import type * as FunctionBody from './FunctionBody.js'
 import * as FunctionBodyState from './internal/FunctionBodyState.js'
 import * as Handle from './internal/Handle.js'
-import { SilkError } from './SilkError.js'
+import { invalidState, type LlvmError } from './LlvmError.js'
 import type * as Type from './Type.js'
 
 /**
@@ -32,7 +33,7 @@ export type Input = Value | Constant.Constant
 export const argument = Effect.fn('Value.argument')(function* (
   body: FunctionBody.FunctionBody,
   index: number,
-): Effect.fn.Return<Value, SilkError> {
+): Effect.fn.Return<Value, LlvmError> {
   return yield* FunctionBodyState.mutate(body, 'Value.argument', (draft) =>
     FunctionBodyState.argument(draft, index),
   )
@@ -46,7 +47,7 @@ export const argument = Effect.fn('Value.argument')(function* (
  * Every reachable forward must be resolved exactly once before the function commits.
  *
  * The type must belong to the body transaction's builder. Foreign types and invalid body scope fail
- * with {@link SilkError}; JavaScript names are encoded as UTF-8.
+ * with {@link LlvmError}; JavaScript names are encoded as UTF-8.
  *
  * **Example** (Resolving a loop-carried value)
  *
@@ -110,13 +111,15 @@ export const forward = Effect.fn('Value.forward')(function* (
   body: FunctionBody.FunctionBody,
   type: Type.Type,
   name?: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Value, SilkError> {
+): Effect.fn.Return<Value, LlvmError> {
   return yield* FunctionBodyState.mutateModule(body, 'Value.forward', (draft) =>
-    FunctionBodyState.forward(
-      draft,
-      Handle.resolve(draft.builder, draft.moduleOwner, type, 'Type', 'Value.forward'),
-      name,
-    ),
+    Result.gen(function* () {
+      return FunctionBodyState.forward(
+        draft,
+        yield* Handle.resolve(draft.builder, draft.moduleOwner, type, 'Type', 'Value.forward'),
+        name,
+      )
+    }),
   )
 })
 
@@ -130,7 +133,7 @@ export const resolveForward = Effect.fn('Value.resolveForward')(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
   resolved: Input,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   yield* FunctionBodyState.mutateModule(body, 'Value.resolveForward', (draft, module) =>
     FunctionBodyState.resolveForward(draft, module, self, resolved),
   )
@@ -145,18 +148,22 @@ export const resolveForward = Effect.fn('Value.resolveForward')(function* (
 export const typeOf = Effect.fn('Value.typeOf')(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
-): Effect.fn.Return<Type.Type, SilkError> {
-  return yield* FunctionBodyState.mutateModule(body, 'Value.typeOf', (draft, module) => {
-    const type = module.typeHandles[FunctionBodyState.valueType(draft, self)]
-    if (type === undefined) {
-      throw new SilkError({
-        operation: 'Value.typeOf',
-        message: 'Value type handle is missing',
-        cause: self,
-      })
-    }
-    return type
-  })
+): Effect.fn.Return<Type.Type, LlvmError> {
+  return yield* FunctionBodyState.mutateModule(body, 'Value.typeOf', (draft, module) =>
+    Result.gen(function* () {
+      const type = module.typeHandles[yield* FunctionBodyState.valueType(draft, self)]
+      if (type === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Value.typeOf',
+            message: 'Value type handle is missing',
+            state: self,
+          }),
+        )
+      }
+      return type
+    }),
+  )
 })
 
 /**
@@ -168,7 +175,7 @@ export const typeOf = Effect.fn('Value.typeOf')(function* (
 export const name = Effect.fn('Value.name')(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
-): Effect.fn.Return<ByteString.ByteString, SilkError> {
+): Effect.fn.Return<ByteString.ByteString, LlvmError> {
   return yield* FunctionBodyState.mutate(body, 'Value.name', (draft) =>
     FunctionBodyState.valueName(draft, self),
   )
@@ -184,7 +191,7 @@ export const setName = Effect.fn('Value.setName')(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
   name: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<void, SilkError> {
+): Effect.fn.Return<void, LlvmError> {
   yield* FunctionBodyState.mutate(body, 'Value.setName', (draft) =>
     FunctionBodyState.setValueName(draft, self, name),
   )
@@ -199,7 +206,7 @@ export const setName = Effect.fn('Value.setName')(function* (
 export const instruction = Effect.fn('Value.instruction')(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
-): Effect.fn.Return<FunctionBody.Instruction | undefined, SilkError> {
+): Effect.fn.Return<FunctionBody.Instruction | undefined, LlvmError> {
   return yield* FunctionBodyState.mutate(body, 'Value.instruction', (draft) =>
     FunctionBodyState.valueInstruction(draft, self),
   )

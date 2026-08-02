@@ -1,4 +1,4 @@
-import { SilkError } from '../SilkError.js'
+import { invalidInput, type LlvmError } from '../LlvmError.js'
 
 export interface Writer {
   readonly words: Array<number>
@@ -36,8 +36,8 @@ export interface BlockWriter {
 export type RecordValue = Scalar | ReadonlyArray<Scalar>
 
 /** @internal */
-const failure = (operation: string, message: string, cause: unknown): SilkError =>
-  new SilkError({ operation, message, cause })
+const failure = (operation: string, message: string, cause: unknown): LlvmError =>
+  invalidInput({ operation, message, input: cause })
 
 /** @internal */
 const integer = (value: Scalar, operation: string): bigint => {

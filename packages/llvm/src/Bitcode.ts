@@ -10,10 +10,11 @@ import * as CoreSchema from './internal/CoreBitcodeSchema.js'
 import * as DeclarationSchema from './internal/DeclarationBitcodeSchema.js'
 import type * as FunctionBodyDescription from './internal/FunctionBodyDescription.js'
 import type * as GlobalDescription from './internal/GlobalDescription.js'
+import * as MemoryAccessEncoding from './internal/MemoryAccessEncoding.js'
 import type * as MetadataDescription from './internal/MetadataDescription.js'
+import { type LlvmError, wrappedFailure } from './LlvmError.js'
 import * as MemoryAccess from './MemoryAccess.js'
 import * as Metadata from './Metadata.js'
-import { SilkError } from './SilkError.js'
 
 /**
  * Identification record embedded in generated LLVM bitcode.
@@ -907,12 +908,8 @@ const writeFunctionInstruction = (
       const math = fastMathCode(instruction.fastMath)
       const predicate =
         instruction.kind === 'integer'
-          ? CoreSchema.integerPredicate[
-              instruction.predicate as FunctionBodyDescription.IntegerPredicate
-            ]
-          : CoreSchema.floatingPredicate[
-              instruction.predicate as FunctionBodyDescription.FloatingPredicate
-            ]
+          ? CoreSchema.integerPredicate[instruction.predicate]
+          : CoreSchema.floatingPredicate[instruction.predicate]
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.compare, [
         relative(instruction.left),
         relative(instruction.right),
@@ -955,7 +952,7 @@ const writeFunctionInstruction = (
       ])
       break
     case 'Alloca': {
-      const alignment = MemoryAccess.alignmentCode(instruction.alignment)
+      const alignment = MemoryAccessEncoding.alignmentCode(instruction.alignment)
       const flags =
         (alignment & 0x1f) |
         (instruction.inAlloca ? 1 << 5 : 0) |
@@ -974,7 +971,7 @@ const writeFunctionInstruction = (
       const values = [
         relative(instruction.pointer),
         instruction.valueType,
-        MemoryAccess.alignmentCode(instruction.access.alignment),
+        MemoryAccessEncoding.alignmentCode(instruction.access.alignment),
         instruction.access.kind === 'volatile' ? 1 : 0,
       ]
       if (instruction.access.ordering !== 'none') {
@@ -994,7 +991,7 @@ const writeFunctionInstruction = (
       const values = [
         relative(instruction.pointer),
         relative(instruction.value),
-        MemoryAccess.alignmentCode(instruction.access.alignment),
+        MemoryAccessEncoding.alignmentCode(instruction.access.alignment),
         instruction.access.kind === 'volatile' ? 1 : 0,
       ]
       if (instruction.access.ordering !== 'none') {
@@ -1056,7 +1053,7 @@ const writeFunctionInstruction = (
         instruction.access.syncScope === 'singlethread' ? 0 : 1,
         MemoryAccess.orderingCode[instruction.failureOrdering],
         instruction.weak ? 1 : 0,
-        MemoryAccess.alignmentCode(instruction.access.alignment),
+        MemoryAccessEncoding.alignmentCode(instruction.access.alignment),
       ])
       break
     case 'AtomicRmw':
@@ -1067,7 +1064,7 @@ const writeFunctionInstruction = (
         instruction.access.kind === 'volatile' ? 1 : 0,
         MemoryAccess.orderingCode[instruction.access.ordering],
         instruction.access.syncScope === 'singlethread' ? 0 : 1,
-        MemoryAccess.alignmentCode(instruction.access.alignment),
+        MemoryAccessEncoding.alignmentCode(instruction.access.alignment),
       ])
       break
     case 'VaArg':
@@ -1698,7 +1695,7 @@ const encodeSnapshot = (state: BuilderState.Snapshot, options: Options): Uint8Ar
  *
  * **Gotchas**
  *
- * Unresolved or invalid module state fails with {@link SilkError}.
+ * Unresolved or invalid module state fails with {@link LlvmError}.
  *
  * **Example** (Encoding a module)
  *
@@ -1722,17 +1719,18 @@ const encodeSnapshot = (state: BuilderState.Snapshot, options: Options): Uint8Ar
 export const encode = Effect.fn('Bitcode.encode')(function* (
   self: Builder.Builder,
   options: Options = {},
-): Effect.fn.Return<Uint8Array, SilkError> {
+): Effect.fn.Return<Uint8Array, LlvmError> {
   const state = yield* BuilderState.snapshot(self, 'Bitcode.encode')
   return yield* Effect.try({
     try: () => encodeSnapshot(state, options),
     catch: (cause) =>
-      cause instanceof SilkError
-        ? cause
-        : new SilkError({
-            operation: 'Bitcode.encode',
-            message: 'LLVM bitcode encoding failed',
-            cause,
-          }),
+      wrappedFailure({
+        operation: 'Bitcode.encode',
+        message:
+          cause instanceof Error
+            ? `LLVM bitcode encoding failed: ${cause.message}`
+            : 'LLVM bitcode encoding failed',
+        cause: cause,
+      }),
   })
 })

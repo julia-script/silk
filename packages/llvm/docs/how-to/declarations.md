@@ -68,7 +68,7 @@ declare i32 @transform(i32) nounwind
 
 Declaration names share one ordered namespace. Repeating a compatible function declaration
 returns its existing identity. An incompatible redeclaration or a collision with a variable or
-alias fails with `SilkError` without inserting another symbol.
+alias fails with `LlvmError` without inserting another symbol.
 
 For the complete module-level actor list, refer to the
 [actor reference](../reference/actors.md#module-level-declarations).

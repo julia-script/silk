@@ -5,6 +5,7 @@ an LLVM memory intrinsic. It assumes familiarity with LLVM pointers and atomic o
 
 ```typescript
 import * as Effect from 'effect/Effect'
+import { pipe } from 'effect/Function'
 import * as Alignment from '@silk-effect/llvm/Alignment'
 import * as Block from '@silk-effect/llvm/Block'
 import * as Builder from '@silk-effect/llvm/Builder'
@@ -12,6 +13,7 @@ import * as Constant from '@silk-effect/llvm/Constant'
 import * as FunctionActor from '@silk-effect/llvm/Function'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import * as Intrinsic from '@silk-effect/llvm/Intrinsic'
+import * as MemoryAccess from '@silk-effect/llvm/MemoryAccess'
 import * as Type from '@silk-effect/llvm/Type'
 import * as Value from '@silk-effect/llvm/Value'
 
@@ -25,6 +27,14 @@ const program = Effect.gen(function* () {
   const signature = yield* Type.functionType(builder, voidType, [pointer, pointer, i32])
   const fn = yield* FunctionActor.declare(builder, 'update', signature)
   const alignment = yield* Alignment.fromByteUnits(4)
+  const volatileRead = pipe(
+    MemoryAccess.make({ alignment }),
+    MemoryAccess.withVolatile(),
+  )
+  const monotonicUpdate = pipe(
+    MemoryAccess.make({ alignment }),
+    MemoryAccess.withAtomic('monotonic'),
+  )
 
   yield* FunctionActor.buildBody(
     builder,
@@ -36,18 +46,19 @@ const program = Effect.gen(function* () {
       const increment = yield* Value.argument(body, 2)
 
       // Perform an ordinary volatile read, calculation, and aligned write.
-      const loaded = yield* FunctionBody.load(body, i32, destination, 'loaded', {
-        alignment,
-        kind: 'volatile',
-      })
+      const loaded = yield* FunctionBody.load(body, i32, destination, 'loaded', volatileRead)
       const sum = yield* FunctionBody.binary(body, 'add', loaded, increment, 'sum')
       yield* FunctionBody.store(body, sum, destination, { alignment })
 
       // Perform a separate atomic update on the same opaque pointer.
-      yield* FunctionBody.atomicRmw(body, 'add', destination, increment, 'previous', {
-        alignment,
-        ordering: 'monotonic',
-      })
+      yield* FunctionBody.atomicRmw(
+        body,
+        'add',
+        destination,
+        increment,
+        'previous',
+        monotonicUpdate,
+      )
 
       // Invoke LLVM's overloaded memcpy intrinsic for a four-byte copy.
       const length = yield* Constant.integerUnsigned(builder, i64, 4)
@@ -85,6 +96,8 @@ The function receives two opaque pointers and one `i32` increment:
 
 Use `Alignment.fromByteUnits` for byte alignments; it rejects zero and non-power-of-two inputs.
 Memory options are immutable inputs, so the same alignment can be reused across operations.
+`MemoryAccess.withVolatile` and `withAtomic` accept both data-first and pipeable forms; the example
+uses `pipe` to keep successive transformations left-to-right.
 
 Atomic validation happens before an instruction is appended. Loads reject `release` and
 `acq_rel`; stores reject `acquire` and `acq_rel`; compare-exchange rejects a failure ordering that

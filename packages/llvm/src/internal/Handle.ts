@@ -1,5 +1,6 @@
+import * as Result from 'effect/Result'
 import type * as Builder from '../Builder.js'
-import { SilkError } from '../SilkError.js'
+import { invalidState, type LlvmError } from '../LlvmError.js'
 import type * as OwnedHandle from './OwnedHandle.js'
 
 const HandleTypeId: unique symbol = Symbol.for('@silk-effect/llvm/internal/Handle')
@@ -34,17 +35,19 @@ export const resolve = <Tag extends string>(
   handle: Handle<Tag>,
   tag: Tag,
   operation: string,
-): number => {
+): Result.Result<number, LlvmError> => {
   const entry = entries.get(handle)
   if (entry === undefined || entry.kind !== tag) {
-    throw new SilkError({ operation, message: `Unknown ${tag} handle`, cause: handle })
+    return Result.fail(invalidState({ operation, message: `Unknown ${tag} handle`, state: handle }))
   }
   if (entry.owner.token !== owner.token) {
-    throw new SilkError({
-      operation,
-      message: `The ${tag} handle belongs to a different LLVM builder`,
-      cause: { builder, handle },
-    })
+    return Result.fail(
+      invalidState({
+        operation,
+        message: `The ${tag} handle belongs to a different LLVM builder`,
+        state: { builder, handle },
+      }),
+    )
   }
-  return entry.index
+  return Result.succeed(entry.index)
 }

@@ -1,3 +1,5 @@
+import { dual } from 'effect/Function'
+
 /**
  * Immutable overflow and exactness promises for integer instructions.
  *
@@ -45,9 +47,14 @@ export const none: IntegerMath = Object.freeze({
  * **Example** (Creating integer flags)
  *
  * ```ts
+ * import { pipe } from 'effect/Function'
  * import * as IntegerMath from '@silk-effect/llvm/IntegerMath'
  *
- * const flags = IntegerMath.make({ noUnsignedWrap: true })
+ * const flags = pipe(
+ *   IntegerMath.make(),
+ *   IntegerMath.withNoUnsignedWrap(),
+ *   IntegerMath.withExact(false),
+ * )
  * // IntegerMath.toText(flags) equals ['nuw']
  * ```
  *
@@ -67,8 +74,15 @@ export const make = (input: Input = {}): IntegerMath =>
  * @category integer math
  * @since 0.0.0
  */
-export const withNoSignedWrap = (self: IntegerMath, enabled = true): IntegerMath =>
-  Object.freeze({ ...self, noSignedWrap: enabled })
+export const withNoSignedWrap: {
+  (): (self: IntegerMath) => IntegerMath
+  (enabled: boolean): (self: IntegerMath) => IntegerMath
+  (self: IntegerMath, enabled?: boolean): IntegerMath
+} = dual(
+  (args) => typeof args[0] === 'object',
+  (self: IntegerMath, enabled = true): IntegerMath =>
+    Object.freeze({ ...self, noSignedWrap: enabled }),
+)
 
 /**
  * Returns a copy with the unsigned-overflow promise enabled or disabled.
@@ -76,8 +90,15 @@ export const withNoSignedWrap = (self: IntegerMath, enabled = true): IntegerMath
  * @category integer math
  * @since 0.0.0
  */
-export const withNoUnsignedWrap = (self: IntegerMath, enabled = true): IntegerMath =>
-  Object.freeze({ ...self, noUnsignedWrap: enabled })
+export const withNoUnsignedWrap: {
+  (): (self: IntegerMath) => IntegerMath
+  (enabled: boolean): (self: IntegerMath) => IntegerMath
+  (self: IntegerMath, enabled?: boolean): IntegerMath
+} = dual(
+  (args) => typeof args[0] === 'object',
+  (self: IntegerMath, enabled = true): IntegerMath =>
+    Object.freeze({ ...self, noUnsignedWrap: enabled }),
+)
 
 /**
  * Returns a copy with the exact division or shift promise enabled or disabled.
@@ -85,8 +106,14 @@ export const withNoUnsignedWrap = (self: IntegerMath, enabled = true): IntegerMa
  * @category integer math
  * @since 0.0.0
  */
-export const withExact = (self: IntegerMath, enabled = true): IntegerMath =>
-  Object.freeze({ ...self, exact: enabled })
+export const withExact: {
+  (): (self: IntegerMath) => IntegerMath
+  (enabled: boolean): (self: IntegerMath) => IntegerMath
+  (self: IntegerMath, enabled?: boolean): IntegerMath
+} = dual(
+  (args) => typeof args[0] === 'object',
+  (self: IntegerMath, enabled = true): IntegerMath => Object.freeze({ ...self, exact: enabled }),
+)
 
 /**
  * Encodes flags for the corresponding LLVM instruction-record field.
