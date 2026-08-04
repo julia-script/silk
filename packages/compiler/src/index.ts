@@ -1,0 +1,5 @@
+export * as Lexer from './Lexer.js'
+export * as LexicalDiagnostic from './LexicalDiagnostic.js'
+export * as SourceFile from './SourceFile.js'
+export * as SourceSpan from './SourceSpan.js'
+export * as Token from './Token.js'

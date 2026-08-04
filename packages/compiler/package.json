@@ -1,0 +1,70 @@
+{
+  "name": "@silk-effect/compiler",
+  "version": "0.0.0",
+  "description": "Byte-oriented bootstrap compiler primitives for Silk Effect.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "directory": "packages/compiler"
+  },
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
+  "keywords": [
+    "compiler",
+    "lexer",
+    "effect",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./SourceFile": {
+      "types": "./dist/SourceFile.d.ts",
+      "import": "./dist/SourceFile.js"
+    },
+    "./SourceSpan": {
+      "types": "./dist/SourceSpan.d.ts",
+      "import": "./dist/SourceSpan.js"
+    },
+    "./Token": {
+      "types": "./dist/Token.d.ts",
+      "import": "./dist/Token.js"
+    },
+    "./LexicalDiagnostic": {
+      "types": "./dist/LexicalDiagnostic.d.ts",
+      "import": "./dist/LexicalDiagnostic.js"
+    },
+    "./Lexer": {
+      "types": "./dist/Lexer.d.ts",
+      "import": "./dist/Lexer.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:"
+  }
+}

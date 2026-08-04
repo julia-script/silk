@@ -1,7 +1,9 @@
 # Silk Effect
 
-Silk Effect is a strict TypeScript, ESM-only monorepo. It currently contains one package:
+Silk Effect is a strict TypeScript, ESM-only monorepo. It currently contains two packages:
 
+- [`@silk-effect/compiler`](packages/compiler) — byte-oriented source, span, token, diagnostic, and
+  bootstrap lexer primitives.
 - [`@silk-effect/llvm`](packages/llvm) — Effect-native LLVM IR construction and deterministic text
   and bitcode emission.
 
