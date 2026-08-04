@@ -216,6 +216,8 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './LexicalDiagnostic',
       './ParseDiagnostic',
       './Parser',
+      './SemanticAnalysis',
+      './SemanticDiagnostic',
       './SourceFile',
       './SourceSpan',
       './SyntaxTree',
@@ -273,6 +275,8 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       'LexicalDiagnostic',
       'ParseDiagnostic',
       'Parser',
+      'SemanticAnalysis',
+      'SemanticDiagnostic',
       'SourceFile',
       'SourceSpan',
       'SyntaxTree',
@@ -286,6 +290,8 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     }
     expect(api.deep['./Lexer']).toContain('lex')
     expect(api.deep['./Parser']).toContain('parse')
+    expect(api.deep['./SemanticAnalysis']).toContain('analyze')
+    expect(api.deep['./SemanticDiagnostic']).toContain('unknownType')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
   } finally {

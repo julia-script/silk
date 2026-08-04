@@ -2,25 +2,30 @@
 
 `@silk-effect/compiler` contains the first bootstrap layer of the Silk Effect compiler: immutable
 source bytes, source-owned spans, tokens, lexical diagnostics, a deterministic lexer, and a
-lossless concrete parser for one public function.
+lossless concrete parser and first semantic facts for one public function.
 
 ```ts
-import { Lexer, Parser, SourceFile, SyntaxTree } from '@silk-effect/compiler'
+import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-effect/compiler'
 
 const source = SourceFile.make(
   'memory://example.silk',
   new TextEncoder().encode('pub fn main() -> I32 { return 42 }'),
 )
 const lexical = Lexer.lex(source)
-const result = Parser.parse(lexical)
+const parse = Parser.parse(lexical)
+const result = SemanticAnalysis.analyze(parse)
 
-console.log(result.root.kind) // SourceFile
-console.log(SyntaxTree.tokens(result.root).length === lexical.tokens.length) // true
+console.log(parse.root.kind) // SourceFile
+console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // true
+console.log(result.declaration.name) // { _tag: 'Present', spelling: 'main', ... }
+console.log(result.integerExpression) // { _tag: 'Available', type: 'I32', value: 42, ... }
+console.log(result.returnCompatibility) // { _tag: 'Compatible' }
 ```
 
 The same actors are available through explicit deep imports such as
 `@silk-effect/compiler/SourceFile`, `@silk-effect/compiler/Lexer`, and
-`@silk-effect/compiler/Parser`.
+`@silk-effect/compiler/Parser`. Semantic facts and diagnostics are available through
+`@silk-effect/compiler/SemanticAnalysis` and `@silk-effect/compiler/SemanticDiagnostic`.
 
 ## Byte and span conventions
 
@@ -56,9 +61,23 @@ empty span and a `PAR0001` diagnostic. Unexpected concrete input becomes a lossl
 and a `PAR0002` diagnostic. Lexical diagnostics remain separate on the retained lexical result;
 `Parser.parse` does not throw or fail an Effect for these mistakes.
 
-This package intentionally does not yet contain a semantic AST, name resolution, type checking,
-HIR, MIR, LLVM lowering, or native compilation. Those belong to later changes after this concrete
-grammar and recovery contract have proved useful.
+## First semantic facts
+
+`SemanticAnalysis.analyze` retains the exact parse result and describes its single function as
+immutable, syntax-provenanced facts. The declaration has a deterministic source-local identity,
+public visibility, zero parameters, a present or unavailable name, and a resolved, unresolved, or
+unavailable declared return type. `SemanticAnalysis.declarationByName` supports data-first and
+pipeable lookup without hiding unavailable syntax behind `undefined`.
+
+This slice recognizes only the exact ASCII type spelling `I32` and positive decimal values from
+`0` through `2147483647`. It interprets token bytes without host-number precision loss. A present
+unknown type produces `SEM0001`; a present integer above the boundary produces `SEM0002`. Missing
+or damaged syntax remains unavailable and belongs to parser diagnostics, so lexical, parser, and
+semantic diagnostics remain separate ordered collections.
+
+These are direct semantic facts over the concrete tree—not a semantic AST or a general type
+checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
+compilation. Those layers follow only after this narrow source-to-fact contract proves useful.
 
 Token families deliberately deferred with those later grammar decisions include string and
 character literals, floating-point numbers, general operators, separators, attributes, and any

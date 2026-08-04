@@ -13,9 +13,9 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** turn the first bootstrap function into recoverable syntax — measured by the
-accepted fixture and a small malformed-input set producing deterministic, lossless concrete syntax
-trees that can be inspected directly on the docs site.
+**Current objective:** give the first bootstrap function semantic facts — measured by its
+declaration, `I32` return type, integer value, and return compatibility remaining deterministic and
+inspectable across the accepted fixture and a tiny malformed-input corpus.
 
 ## Column rules
 
@@ -25,37 +25,36 @@ trees that can be inspected directly on the docs site.
 
 ## Now
 
-### Turn the first bootstrap function into recoverable syntax
+### Analyze the first bootstrap function without introducing HIR
 
-- **Problem:** Source bytes now become trustworthy tokens, but those tokens do not yet express even
-  one function declaration, a return statement, missing syntax, or parser recovery.
-- **Outcome & done-when:** `pub fn main() -> I32 { return 42 }` becomes a deterministic, lossless
-  concrete syntax tree; a bounded malformed-input corpus produces explicit missing and error nodes
-  with stable diagnostics; and a direct-link-only docs page makes the tree inspectable without
-  implying semantic analysis exists.
-- **Status:** shaped — the grammar and recovery boundary are intentionally limited to one function
-  and one integer return.
-- **Appetite:** worth approximately one focused week; general expressions, multiple declarations,
-  semantic facts, AST lowering, HIR, and MIR do not enter this scope.
-- **Links:** change: `parse-first-bootstrap-function` ·
-  [bootstrap lexer spec](../openspec/specs/bootstrap-lexer/spec.md) ·
+- **Problem:** The concrete tree identifies grammatical regions, but `main`, `I32`, and `42` still
+  have no declaration, type, or checked-value meaning.
+- **Outcome & done-when:** The accepted fixture publishes immutable declaration, type, value, and
+  return-compatibility facts; unknown types, out-of-range integers, and syntax-damaged declarations
+  remain explicit and deterministic; and the hidden inspector can show the facts without implying
+  HIR or code generation exists.
+- **Status:** shaped — one function, one built-in type, and one integer expression are enough to
+  discover the first semantic fact boundary before any semantic IR is justified.
+- **Appetite:** one focused OpenSpec change; multiple declarations, references, general expressions,
+  modules, AST lowering, HIR, MIR, ownership, contracts, and code generation remain outside scope.
+- **Links:** change: `analyze-first-bootstrap-function` ·
+  [bootstrap syntax spec](../openspec/specs/bootstrap-syntax/spec.md) ·
   [bootstrap-language map](../wayfinder/bootstrap-language/map.md) ·
-  [compiler pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
-  [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
+  [compiler pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md)
 
 ## Next
 
-### Give the first syntax tree semantic meaning
+### Add the first resolved reference
 
-- **Problem:** A parsed `main` function and return expression still have no declaration identity,
-  resolved type, or checked value.
-- **Hypothesis:** We believe declaration collection plus the smallest `I32` type-checking slice will
-  reveal the right semantic fact model before HIR is introduced or generalized.
-- **Confidence:** medium.
-- **Assumes:** A public parameterless `main` returning an `I32` constant is a useful permanent first
-  semantic subset — decided, not yet implemented.
-- **Open questions:** Should the first semantic change publish HIR, or only declaration and type fact
-  tables until a second expression form requires a true semantic IR?
+- **Problem:** One declaration can validate fact shape and local typing, but it cannot test header
+  collection, name lookup, references, or dependency ordering.
+- **Hypothesis:** A second parameterless function plus one direct call is the smallest grammar and
+  semantic extension that can validate declaration identity and name-resolution facts without HIR.
+- **Confidence:** low until the first semantic fact model exists.
+- **Assumes:** Multiple declarations and direct calls are the next pressure needed by the bootstrap
+  compiler rather than local bindings or richer integer expressions.
+- **Open questions:** Should multiple declarations and the first call land together as one vertical
+  slice, or should syntax repetition be proven before reference resolution?
 
 ## Later
 
@@ -111,6 +110,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-04: Shipped and archived `parse-first-bootstrap-function` in commit `ba6feaf`; its
+  lossless tree, bounded recovery, deterministic diagnostics, and hidden inspector met the recorded
+  outcome. Promoted one-function declaration and `I32` fact analysis to Now, explicitly keeping HIR
+  behind evidence from a second semantic form.
 - 2026-08-04: Shipped exact source text and lossless lexing, then promoted a one-function concrete
   syntax tree and direct-link inspector to Now; semantic interpretation remains Next.
 - 2026-08-04: Replaced the oversized end-to-end compiler-kernel initiative with source text and

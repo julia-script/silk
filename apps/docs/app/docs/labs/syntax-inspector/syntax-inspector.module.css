@@ -107,7 +107,7 @@
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   margin: 0;
   border-bottom: 1px solid var(--color-fd-border);
 }
@@ -135,7 +135,99 @@
 
 .diagnostics {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.semanticFacts {
+  border-bottom: 1px solid var(--color-fd-border);
+  padding: 1rem;
+}
+
+.semanticHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.semanticHeading h3 {
+  margin: 0.15rem 0 0;
+  color: var(--color-fd-foreground);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.phaseBoundary {
+  border: 1px solid color-mix(in srgb, var(--color-fd-primary) 30%, var(--color-fd-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-fd-primary) 7%, transparent);
+  padding: 0.25rem 0.5rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+}
+
+.factGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.8rem 0 0;
+}
+
+.factGrid > div {
+  min-width: 0;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--color-fd-background) 72%, var(--color-fd-card));
+  padding: 0.65rem 0.7rem;
+}
+
+.factGrid dt {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.65rem;
+  font-weight: 650;
+}
+
+.factGrid dd {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+  margin: 0.3rem 0 0;
+}
+
+.factGrid strong {
+  overflow: hidden;
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.factGrid span,
+.factGrid code,
+.factGrid small {
+  overflow: hidden;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.64rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.factGrid code,
+.factGrid small {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.factGrid small {
+  color: color-mix(in srgb, var(--color-fd-primary) 65%, var(--color-fd-muted-foreground));
+}
+
+.boundaryNote {
+  margin: 0.75rem 0 0;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.45;
 }
 
 .diagnosticGroup {
@@ -385,6 +477,16 @@
 
   .metrics div:nth-child(4) {
     border-top: 1px solid var(--color-fd-border);
+  }
+
+  .metrics div:nth-child(5) {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--color-fd-border);
+    border-left: 0;
+  }
+
+  .factGrid {
+    grid-template-columns: 1fr;
   }
 
   .diagnostics {

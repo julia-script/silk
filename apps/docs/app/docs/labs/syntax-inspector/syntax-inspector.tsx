@@ -1,6 +1,6 @@
 'use client'
 
-import { Lexer, Parser, SourceFile, SyntaxTree } from '@silk-effect/compiler'
+import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import styles from './syntax-inspector.module.css'
 
@@ -11,6 +11,8 @@ const examples = [
   { label: 'Valid', source: acceptedSource },
   { label: 'Missing }', source: 'pub fn main() -> I32 { return 42' },
   { label: 'Unexpected @', source: 'pub fn @ main() -> I32 { return 42 }' },
+  { label: 'Unknown type', source: 'pub fn main() -> Mystery { return 42 }' },
+  { label: 'I32 overflow', source: 'pub fn main() -> I32 { return 2147483648 }' },
   { label: 'UTF-8', source: 'pub fn café() -> I32 { return 42 }' },
 ] as const
 
@@ -113,12 +115,81 @@ function DiagnosticList({
   )
 }
 
+function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Result }) {
+  const declaration = analysis.declaration
+  const name = declaration.name
+  const returnType = declaration.returnType
+  const integer = analysis.integerExpression
+
+  return (
+    <section className={styles.semanticFacts} aria-labelledby="semantic-facts-heading">
+      <div className={styles.semanticHeading}>
+        <div>
+          <span className={styles.eyebrow}>Analysis</span>
+          <h3 id="semantic-facts-heading">Semantic facts</h3>
+        </div>
+        <span className={styles.phaseBoundary}>CST → facts</span>
+      </div>
+
+      <dl className={styles.factGrid}>
+        <div>
+          <dt>Declaration</dt>
+          <dd>
+            <strong>{name._tag === 'Present' ? name.spelling : 'Unavailable'}</strong>
+            <span>public · 0 parameters</span>
+            <code>
+              {declaration.id.sourceId}#{declaration.id.ordinal}
+            </code>
+            <small>{spanLabel(declaration.syntax)}</small>
+          </dd>
+        </div>
+        <div>
+          <dt>Declared type</dt>
+          <dd>
+            <strong>
+              {returnType._tag === 'Resolved'
+                ? returnType.type
+                : returnType._tag === 'Unresolved'
+                  ? returnType.spelling
+                  : 'Unavailable'}
+            </strong>
+            <span>{returnType._tag}</span>
+            <small>{spanLabel(returnType.syntax)}</small>
+          </dd>
+        </div>
+        <div>
+          <dt>Integer expression</dt>
+          <dd>
+            <strong>{integer._tag === 'Available' ? integer.value : 'Unavailable'}</strong>
+            <span>
+              {integer._tag === 'Unavailable' ? integer._tag : `${integer.type} · ${integer._tag}`}
+            </span>
+            <small>{spanLabel(integer.syntax)}</small>
+          </dd>
+        </div>
+        <div>
+          <dt>Return</dt>
+          <dd>
+            <strong>{analysis.returnCompatibility._tag}</strong>
+            <span>I32 range 0…2147483647</span>
+          </dd>
+        </div>
+      </dl>
+
+      <p className={styles.boundaryNote}>
+        Direct facts over the concrete tree. No semantic AST, HIR, or code generation exists yet.
+      </p>
+    </section>
+  )
+}
+
 export function SyntaxInspector() {
   const [text, setText] = useState(acceptedSource)
-  const result = useMemo(() => {
+  const analysis = useMemo(() => {
     const source = SourceFile.make(sourceId, encoder.encode(text))
-    return Parser.parse(Lexer.lex(source))
+    return SemanticAnalysis.analyze(Parser.parse(Lexer.lex(source)))
   }, [text])
+  const result = analysis.parse
 
   return (
     <div className={styles.inspector}>
@@ -169,11 +240,18 @@ export function SyntaxInspector() {
             <dt>Parser</dt>
             <dd>{result.diagnostics.length}</dd>
           </div>
+          <div>
+            <dt>Semantic</dt>
+            <dd>{analysis.diagnostics.length}</dd>
+          </div>
         </dl>
+
+        <SemanticFacts analysis={analysis} />
 
         <div className={styles.diagnostics}>
           <DiagnosticList title="Lexer" diagnostics={result.lexical.diagnostics} />
           <DiagnosticList title="Parser" diagnostics={result.diagnostics} />
+          <DiagnosticList title="Semantic" diagnostics={analysis.diagnostics} />
         </div>
       </section>
 

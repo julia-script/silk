@@ -64,6 +64,14 @@
     "./Parser": {
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
+    },
+    "./SemanticAnalysis": {
+      "types": "./dist/SemanticAnalysis.d.ts",
+      "import": "./dist/SemanticAnalysis.js"
+    },
+    "./SemanticDiagnostic": {
+      "types": "./dist/SemanticDiagnostic.d.ts",
+      "import": "./dist/SemanticDiagnostic.js"
     }
   },
   "scripts": {

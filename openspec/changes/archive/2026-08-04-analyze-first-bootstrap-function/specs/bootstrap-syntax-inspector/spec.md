@@ -1,11 +1,4 @@
-# Bootstrap Syntax Inspector Specification
-
-## Purpose
-
-Give compiler developers a small direct-link browser surface for seeing how the first Silk fixture
-and nearby malformed inputs become tokens, concrete syntax, and diagnostics.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Direct-link-only syntax inspector
 The docs site SHALL expose a Syntax Inspector at `/docs/labs/syntax-inspector` while omitting the
@@ -48,12 +41,3 @@ and valid Unicode text whose UTF-8 bytes are unsupported by the bootstrap vocabu
 #### Scenario: Enter an out-of-range integer
 - **WHEN** a developer replaces `42` with `2147483648`
 - **THEN** the semantic view shows an unavailable integer value and its semantic diagnostic
-
-### Requirement: Inspector state is disposable
-The inspector SHALL keep source and derived results only in browser memory. It MUST NOT write files,
-persist source text, invoke a compiler service, or imply that the page is a supported language
-playground.
-
-#### Scenario: Reload the inspector
-- **WHEN** a developer reloads the page after editing the source
-- **THEN** the accepted fixture is restored and no previous input is recovered from storage
