@@ -3,8 +3,10 @@
 The documentation site for every package in this monorepo. Next.js + Fumadocs + Tailwind.
 
 ```sh
-pnpm --filter @silk-effect/docs dev
+pnpm dev
 ```
+
+Run this from the repository root so Turbo also watches the local packages consumed by the app.
 
 ## How content gets here
 

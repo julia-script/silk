@@ -12,6 +12,7 @@
     "changeset": "changeset",
     "check": "biome check . && turbo run typecheck test && pnpm test:scripts",
     "check:write": "biome check --write .",
+    "dev": "turbo run dev",
     "format": "biome format --write .",
     "prototype:bootstrap-syntax": "node .scratch/bootstrap-language/prototype-syntax/tui.mjs",
     "release:candidate": "pnpm build && vitest run release-candidate/validate.test.ts",

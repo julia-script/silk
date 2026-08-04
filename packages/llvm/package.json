@@ -139,6 +139,7 @@
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "fixtures:regenerate": "node scripts/foundation-fixtures.mjs regenerate && pnpm build && node scripts/declaration-fixtures.mjs regenerate && node scripts/core-fixtures.mjs regenerate && node scripts/advanced-fixtures.mjs regenerate && node scripts/metadata-fixtures.mjs regenerate",
     "fixtures:verify": "node scripts/foundation-fixtures.mjs verify && node scripts/declaration-fixtures.mjs verify && node scripts/core-fixtures.mjs verify && node scripts/advanced-fixtures.mjs verify && node scripts/metadata-fixtures.mjs verify",
     "parity:corpus": "node scripts/parity-corpus.mjs",
