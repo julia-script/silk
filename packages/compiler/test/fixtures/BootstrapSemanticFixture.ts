@@ -11,3 +11,19 @@ export const laterSemanticDamageSource = `${acceptedSource}
 pub fn ignored() -> Mystery { return 2147483648 }`
 export const laterSyntaxDamageSource = `${acceptedSource}
 pub fn ignored() -> @ { return }`
+export const twoFunctionSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return 0 }`
+export const threeFunctionSource = `pub fn one() -> I32 { return 1 }
+pub fn two() -> I32 { return 2 }
+pub fn three() -> I32 { return 3 }`
+export const missingSecondNameSource = `${acceptedSource}
+pub fn () -> I32 { return 0 }`
+export const duplicateNameSource = `pub fn same() -> I32 { return 1 }
+pub fn same() -> I32 { return 2 }`
+export const tripleDuplicateNameSource = `${duplicateNameSource}
+pub fn same() -> I32 { return 3 }`
+export const mixedFunctionDamageSource = `${acceptedSource}
+pub fn damaged() -> Mystery { return 2147483648 }`
+export const parserAndSemanticDamageSource = `pub fn same() -> I32 { return 1 }
+pub fn () -> Mystery { return 2 }
+pub fn same() -> I32 { return 2147483648 }`

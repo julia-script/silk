@@ -263,7 +263,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       [
         '--input-type=module',
         '--eval',
-        `import * as api from '@silk-effect/compiler'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/compiler/\${path.slice(2)}\`))); const source = api.SourceFile.make('memory://packed.silk', new TextEncoder().encode('pub fn answer() -> I32 { return 42 }\\npub fn main() -> I32 { return 0 }')); const parse = api.Parser.parse(api.Lexer.lex(source)); const functions = parse.root.children.filter((element) => api.SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration'); const analysis = api.SemanticAnalysis.analyze(parse); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])), functionCount: functions.length, firstName: analysis.declaration.name._tag === 'Present' ? analysis.declaration.name.spelling : null, parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code) }))`,
+        `import * as api from '@silk-effect/compiler'; import * as semanticModule from '@silk-effect/compiler/SemanticAnalysis'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/compiler/\${path.slice(2)}\`))); const source = api.SourceFile.make('memory://packed.silk', new TextEncoder().encode('pub fn answer() -> I32 { return 42 }\\npub fn main() -> I32 { return 0 }')); const parse = api.Parser.parse(api.Lexer.lex(source)); const concreteFunctions = parse.root.children.filter((element) => api.SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration'); const analysis = api.SemanticAnalysis.analyze(parse); const deepAnalysis = semanticModule.analyze(parse); const names = analysis.functions.map((fact) => fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])), functionCount: concreteFunctions.length, semantic: { names, ordinals: analysis.functions.map((fact) => fact.declaration.id.ordinal), rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'answer')._tag, deepLookup: semanticModule.declarationByName(deepAnalysis, 'missing')._tag, legacyFields: ['declaration', 'integerExpression', 'returnCompatibility'].filter((key) => key in analysis) }, parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code) }))`,
       ],
       {
         cwd: consumerRoot,
@@ -297,7 +297,13 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.functionCount).toBe(2)
-    expect(api.firstName).toBe('answer')
+    expect(api.semantic).toEqual({
+      names: ['answer', 'main'],
+      ordinals: [0, 1],
+      rootLookup: 'Resolved',
+      deepLookup: 'Missing',
+      legacyFields: [],
+    })
     expect(api.parserDiagnostics).toEqual([])
   } finally {
     rmSync(temporary, { recursive: true, force: true })

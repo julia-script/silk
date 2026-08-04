@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
+import { DocsPage } from 'fumadocs-ui/layouts/docs/page'
 import { SyntaxInspector } from './syntax-inspector'
 
 export const metadata: Metadata = {
   title: 'Syntax Inspector',
-  description: 'An internal lab for inspecting Silk concrete trees and first-function facts.',
+  description: 'An internal lab for inspecting Silk concrete trees and ordered function facts.',
   robots: {
     index: false,
     follow: false,
@@ -12,7 +13,14 @@ export const metadata: Metadata = {
 
 export default function SyntaxInspectorPage() {
   return (
-    <main className="mx-auto w-full max-w-[1500px] px-4 py-10 sm:px-7 lg:px-10">
+    <DocsPage
+      full
+      breadcrumb={{ enabled: false }}
+      footer={{ enabled: false }}
+      tableOfContent={{ enabled: false }}
+      tableOfContentPopover={{ enabled: false }}
+      className="max-w-[1500px] gap-0 px-4 py-10 sm:px-7 lg:px-10"
+    >
       <header className="mb-8 max-w-3xl">
         <p className="mb-3 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-fd-muted-foreground">
           Internal compiler lab
@@ -22,12 +30,12 @@ export default function SyntaxInspectorPage() {
         </h1>
         <p className="text-base leading-7 text-fd-muted-foreground">
           Edit one or more bootstrap functions and inspect their lossless concrete syntax tree
-          alongside semantic facts for the first function. Every token stays attached to its
-          original UTF-8 byte span; recovery appears as explicit error nodes and missing leaves.
+          alongside ordered semantic facts and declaration lookup. Every token stays attached to
+          its original UTF-8 byte span; recovery appears as explicit error nodes and missing leaves.
           This is not yet a semantic AST, HIR, or code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />
-    </main>
+    </DocsPage>
   )
 }

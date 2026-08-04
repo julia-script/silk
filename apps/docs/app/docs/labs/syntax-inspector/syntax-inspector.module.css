@@ -167,19 +167,90 @@
   font-size: 0.62rem;
 }
 
-.semanticScope {
+.lookupSummary {
   margin: 0.8rem 0 0;
-  border-left: 2px solid color-mix(in srgb, var(--color-fd-primary) 65%, #8b5cf6);
-  border-radius: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-fd-primary) 25%, var(--color-fd-border));
+  border-radius: 0.65rem;
   background: color-mix(in srgb, var(--color-fd-primary) 6%, transparent);
-  padding: 0.55rem 0.65rem;
+  padding: 0.65rem 0.7rem;
   color: var(--color-fd-muted-foreground);
   font-size: 0.7rem;
   line-height: 1.5;
 }
 
-.semanticScope strong {
+.lookupSummary > strong {
   color: var(--color-fd-foreground);
+}
+
+.lookupSummary > span {
+  margin-left: 0.5rem;
+}
+
+.lookupSummary ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lookupSummary li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-fd-background) 75%, transparent);
+  padding: 0.25rem 0.5rem;
+}
+
+.lookupSummary code {
+  color: var(--color-fd-foreground);
+  font-size: 0.66rem;
+}
+
+.lookupSummary li span {
+  font-size: 0.64rem;
+}
+
+.functionList {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.8rem;
+}
+
+.functionCard {
+  overflow: hidden;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--color-fd-background) 58%, var(--color-fd-card));
+}
+
+.functionCardHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--color-fd-border);
+  padding: 0.65rem 0.7rem;
+}
+
+.functionCardHeading > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.functionCardHeading span,
+.functionCardHeading code {
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+}
+
+.functionCardHeading strong {
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.82rem;
 }
 
 .factGrid {
@@ -187,6 +258,11 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
   margin: 0.8rem 0 0;
+}
+
+.functionCard .factGrid {
+  margin: 0;
+  padding: 0.65rem;
 }
 
 .factGrid > div {
@@ -502,6 +578,11 @@
 
   .factGrid {
     grid-template-columns: 1fr;
+  }
+
+  .functionCardHeading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .diagnostics {

@@ -13,7 +13,7 @@ export type SemanticType = 'I32'
 export interface DeclarationId {
   readonly _tag: 'DeclarationId'
   readonly sourceId: string
-  readonly ordinal: 0
+  readonly ordinal: number
 }
 
 /** A declaration name supplied by syntax or explicitly unavailable after recovery. */
@@ -69,10 +69,10 @@ export type IntegerExpressionFact =
       readonly syntax: SyntaxTree.Element
     }
 
-/** Whether the first returned expression is known to match its declared result type. */
+/** Whether one returned expression is known to match its declared result type. */
 export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _tag: 'Unavailable' }
 
-/** The first public function declaration and its syntax-owned semantic facts. */
+/** One public function declaration and its syntax-owned semantic facts. */
 export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
   readonly id: DeclarationId
@@ -83,13 +83,36 @@ export interface DeclarationFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** The complete deterministic semantic result for the first direct bootstrap declaration. */
-export interface Result {
-  readonly _tag: 'SemanticAnalysis'
-  readonly parse: Parser.ParseResult
+/** One function's declaration, returned integer, and compatibility facts. */
+export interface FunctionFact {
+  readonly _tag: 'FunctionFact'
   readonly declaration: DeclarationFact
   readonly integerExpression: IntegerExpressionFact
   readonly returnCompatibility: ReturnCompatibility
+}
+
+/** The closed result of looking up one declaration spelling. */
+export type DeclarationLookup =
+  | {
+      readonly _tag: 'Resolved'
+      readonly spelling: string
+      readonly declaration: DeclarationFact
+    }
+  | {
+      readonly _tag: 'Missing'
+      readonly spelling: string
+    }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly declarations: ReadonlyArray<DeclarationFact>
+    }
+
+/** The complete deterministic semantic result for all direct bootstrap declarations. */
+export interface Result {
+  readonly _tag: 'SemanticAnalysis'
+  readonly parse: Parser.ParseResult
+  readonly functions: ReadonlyArray<FunctionFact>
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
@@ -106,6 +129,14 @@ const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTr
   }
   return child
 }
+
+const directChildNodes = (
+  parent: SyntaxTree.Node,
+  kind: SyntaxTree.NodeKind,
+): ReadonlyArray<SyntaxTree.Node> =>
+  parent.children.filter(
+    (element): element is SyntaxTree.Node => SyntaxTree.isNode(element) && element.kind === kind,
+  )
 
 const directToken = (parent: SyntaxTree.Node, kind: Token.TokenKind): Token.Token | undefined =>
   parent.children.find(
@@ -254,10 +285,16 @@ const compareDiagnostics = (
   left.span.end - right.span.end ||
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
 
-/** Analyzes only the first direct bootstrap function into immutable semantic facts. */
-export const analyze = (parse: Parser.ParseResult): Result => {
-  const source = parse.lexical.source
-  const functionNode = childNode(parse.root, 'FunctionDeclaration')
+interface FunctionAnalysis {
+  readonly fact: FunctionFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+}
+
+const analyzeFunction = (
+  source: SourceFile.SourceFile,
+  functionNode: SyntaxTree.Node,
+  ordinal: number,
+): FunctionAnalysis => {
   const returnTypeNode = childNode(functionNode, 'ReturnType')
   const blockNode = childNode(functionNode, 'Block')
   const returnStatementNode = childNode(blockNode, 'ReturnStatement')
@@ -269,7 +306,7 @@ export const analyze = (parse: Parser.ParseResult): Result => {
     id: Object.freeze({
       _tag: 'DeclarationId',
       sourceId: source.id,
-      ordinal: 0,
+      ordinal,
     }),
     visibility: 'Public',
     parameterCount: 0,
@@ -283,23 +320,102 @@ export const analyze = (parse: Parser.ParseResult): Result => {
       : unavailableCompatibility
 
   return Object.freeze({
-    _tag: 'SemanticAnalysis',
-    parse,
-    declaration,
-    integerExpression: integer.fact,
-    returnCompatibility,
-    diagnostics: Object.freeze(
-      [...returnType.diagnostics, ...integer.diagnostics].sort(compareDiagnostics),
-    ),
+    fact: Object.freeze({
+      _tag: 'FunctionFact',
+      declaration,
+      integerExpression: integer.fact,
+      returnCompatibility,
+    }),
+    diagnostics: Object.freeze([...returnType.diagnostics, ...integer.diagnostics]),
   })
 }
 
-/** Looks up the first declaration only when syntax supplied the exact requested name. */
+interface PresentNameEntry {
+  readonly spelling: string
+  readonly token: Token.Token
+  readonly declaration: DeclarationFact
+}
+
+const presentNameEntries = (
+  functions: ReadonlyArray<FunctionFact>,
+): ReadonlyArray<PresentNameEntry> =>
+  Object.freeze(
+    functions.flatMap((fact): ReadonlyArray<PresentNameEntry> => {
+      const name = fact.declaration.name
+      return name._tag === 'Present'
+        ? [
+            Object.freeze({
+              spelling: name.spelling,
+              token: name.token,
+              declaration: fact.declaration,
+            }),
+          ]
+        : []
+    }),
+  )
+
+const duplicateNameDiagnostics = (
+  entries: ReadonlyArray<PresentNameEntry>,
+): ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> => {
+  const firstBySpelling = new Map<string, PresentNameEntry>()
+  let diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> = Object.freeze([])
+
+  for (const entry of entries) {
+    const original = firstBySpelling.get(entry.spelling)
+    if (original === undefined) {
+      firstBySpelling.set(entry.spelling, entry)
+    } else {
+      diagnostics = Object.freeze([
+        ...diagnostics,
+        SemanticDiagnostic.duplicateDeclarationName(
+          entry.spelling,
+          original.token.span,
+          entry.token.span,
+        ),
+      ])
+    }
+  }
+
+  return diagnostics
+}
+
+/** Analyzes every direct bootstrap function into ordered immutable semantic facts. */
+export const analyze = (parse: Parser.ParseResult): Result => {
+  const source = parse.lexical.source
+  const analyzed = directChildNodes(parse.root, 'FunctionDeclaration').map((node, ordinal) =>
+    analyzeFunction(source, node, ordinal),
+  )
+  const functions = Object.freeze(analyzed.map((result) => result.fact))
+  const diagnostics = [
+    ...analyzed.flatMap((result) => result.diagnostics),
+    ...duplicateNameDiagnostics(presentNameEntries(functions)),
+  ].sort(compareDiagnostics)
+
+  return Object.freeze({
+    _tag: 'SemanticAnalysis',
+    parse,
+    functions,
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
+/** Looks up every present declaration with the exact requested spelling. */
 export const declarationByName = dual<
-  (name: string) => (self: Result) => Option.Option<DeclarationFact>,
-  (self: Result, name: string) => Option.Option<DeclarationFact>
->(2, (self, name) =>
-  self.declaration.name._tag === 'Present' && self.declaration.name.spelling === name
-    ? Option.some(self.declaration)
-    : Option.none(),
-)
+  (spelling: string) => (self: Result) => DeclarationLookup,
+  (self: Result, spelling: string) => DeclarationLookup
+>(2, (self, spelling) => {
+  const declarations = presentNameEntries(self.functions)
+    .filter((entry) => entry.spelling === spelling)
+    .map((entry) => entry.declaration)
+  const first = declarations.at(0)
+
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling })
+  if (declarations.length === 1) {
+    return Object.freeze({ _tag: 'Resolved', spelling, declaration: first })
+  }
+  return Object.freeze({
+    _tag: 'Ambiguous',
+    spelling,
+    declarations: Object.freeze(declarations),
+  })
+})

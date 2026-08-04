@@ -6,6 +6,9 @@ export const unknownTypeCode = 'SEM0001' as const
 /** Stable code for a present decimal literal outside the positive `I32` range. */
 export const integerOutOfRangeCode = 'SEM0002' as const
 
+/** Stable code for a present declaration name repeated after its first occurrence. */
+export const duplicateDeclarationNameCode = 'SEM0003' as const
+
 /** Why semantic analysis produced a diagnostic. */
 export type Reason =
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
@@ -14,11 +17,19 @@ export type Reason =
       readonly spelling: string
       readonly maximum: 2147483647
     }
+  | {
+      readonly _tag: 'DuplicateDeclarationName'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
 
 /** A recoverable semantic problem attached to one exact source span. */
 export interface SemanticDiagnostic {
   readonly _tag: 'SemanticDiagnostic'
-  readonly code: typeof unknownTypeCode | typeof integerOutOfRangeCode
+  readonly code:
+    | typeof unknownTypeCode
+    | typeof integerOutOfRangeCode
+    | typeof duplicateDeclarationNameCode
   readonly severity: 'error'
   readonly message: string
   readonly reason: Reason
@@ -50,6 +61,25 @@ export const integerOutOfRange = (
       _tag: 'IntegerOutOfRange',
       spelling,
       maximum: 2147483647,
+    }),
+    span,
+  })
+
+/** Creates the diagnostic for a declaration name repeated after its first occurrence. */
+export const duplicateDeclarationName = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): SemanticDiagnostic =>
+  Object.freeze({
+    _tag: 'SemanticDiagnostic',
+    code: duplicateDeclarationNameCode,
+    severity: 'error',
+    message: `Duplicate declaration name ${spelling}`,
+    reason: Object.freeze({
+      _tag: 'DuplicateDeclarationName',
+      spelling,
+      originalSpan,
     }),
     span,
   })

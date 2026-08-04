@@ -15,6 +15,27 @@ const examples = [
 pub fn main() -> I32 { return 0 }`,
   },
   {
+    label: 'Three functions',
+    source: `pub fn one() -> I32 { return 1 }
+pub fn two() -> I32 { return 2 }
+pub fn three() -> I32 { return 3 }`,
+  },
+  {
+    label: 'Missing name',
+    source: `pub fn answer() -> I32 { return 42 }
+pub fn () -> I32 { return 0 }`,
+  },
+  {
+    label: 'Duplicate names',
+    source: `pub fn same() -> I32 { return 1 }
+pub fn same() -> I32 { return 2 }`,
+  },
+  {
+    label: 'Mixed damage',
+    source: `pub fn main() -> I32 { return 42 }
+pub fn damaged() -> Mystery { return 2147483648 }`,
+  },
+  {
     label: 'Missing first }',
     source: `pub fn answer() -> I32 { return 42
 pub fn main() -> I32 { return 0 }`,
@@ -126,10 +147,16 @@ function DiagnosticList({
 }
 
 function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Result }) {
-  const declaration = analysis.declaration
-  const name = declaration.name
-  const returnType = declaration.returnType
-  const integer = analysis.integerExpression
+  const presentNames = Array.from(
+    new Set(
+      analysis.functions.flatMap((fact) =>
+        fact.declaration.name._tag === 'Present' ? [fact.declaration.name.spelling] : [],
+      ),
+    ),
+  )
+  const lookups = presentNames.map((spelling) =>
+    SemanticAnalysis.declarationByName(analysis, spelling),
+  )
 
   return (
     <section className={styles.semanticFacts} aria-labelledby="semantic-facts-heading">
@@ -138,62 +165,110 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
           <span className={styles.eyebrow}>Analysis</span>
           <h3 id="semantic-facts-heading">Semantic facts</h3>
         </div>
-        <span className={styles.phaseBoundary}>First function only</span>
+        <span className={styles.phaseBoundary}>
+          {analysis.functions.length} {analysis.functions.length === 1 ? 'function' : 'functions'}
+        </span>
       </div>
 
-      <p className={styles.semanticScope} role="note">
-        <strong>Temporary phase boundary.</strong> These facts describe the first direct function;
-        later functions are visible in the concrete tree but are not semantically collected yet.
-      </p>
+      <section className={styles.lookupSummary} aria-labelledby="lookup-summary-heading">
+        <strong id="lookup-summary-heading">Declaration lookup</strong>
+        {lookups.length === 0 ? (
+          <span>No present names</span>
+        ) : (
+          <ul>
+            {lookups.map((lookup) => (
+              <li key={lookup.spelling}>
+                <code>{lookup.spelling}</code>
+                <span>
+                  {lookup._tag}
+                  {lookup._tag === 'Ambiguous' ? ` · ${lookup.declarations.length} matches` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-      <dl className={styles.factGrid}>
-        <div>
-          <dt>Declaration</dt>
-          <dd>
-            <strong>{name._tag === 'Present' ? name.spelling : 'Unavailable'}</strong>
-            <span>public · 0 parameters</span>
-            <code>
-              {declaration.id.sourceId}#{declaration.id.ordinal}
-            </code>
-            <small>{spanLabel(declaration.syntax)}</small>
-          </dd>
-        </div>
-        <div>
-          <dt>Declared type</dt>
-          <dd>
-            <strong>
-              {returnType._tag === 'Resolved'
-                ? returnType.type
-                : returnType._tag === 'Unresolved'
-                  ? returnType.spelling
-                  : 'Unavailable'}
-            </strong>
-            <span>{returnType._tag}</span>
-            <small>{spanLabel(returnType.syntax)}</small>
-          </dd>
-        </div>
-        <div>
-          <dt>Integer expression</dt>
-          <dd>
-            <strong>{integer._tag === 'Available' ? integer.value : 'Unavailable'}</strong>
-            <span>
-              {integer._tag === 'Unavailable' ? integer._tag : `${integer.type} · ${integer._tag}`}
-            </span>
-            <small>{spanLabel(integer.syntax)}</small>
-          </dd>
-        </div>
-        <div>
-          <dt>Return</dt>
-          <dd>
-            <strong>{analysis.returnCompatibility._tag}</strong>
-            <span>I32 range 0…2147483647</span>
-          </dd>
-        </div>
-      </dl>
+      <div className={styles.functionList} aria-label="Collected function facts">
+        {analysis.functions.map((fact) => {
+          const declaration = fact.declaration
+          const name = declaration.name
+          const returnType = declaration.returnType
+          const integer = fact.integerExpression
+          const nameLabel = name._tag === 'Present' ? name.spelling : 'Unavailable name'
+
+          return (
+            <article
+              className={styles.functionCard}
+              key={`${declaration.id.sourceId}-${declaration.id.ordinal}`}
+              aria-label={`Function ${declaration.id.ordinal}: ${nameLabel}`}
+            >
+              <div className={styles.functionCardHeading}>
+                <div>
+                  <span>Function #{declaration.id.ordinal}</span>
+                  <strong>{nameLabel}</strong>
+                </div>
+                <code>{spanLabel(declaration.syntax)}</code>
+              </div>
+
+              <dl className={styles.factGrid}>
+                <div>
+                  <dt>Declaration</dt>
+                  <dd>
+                    <strong>{nameLabel}</strong>
+                    <span>public · 0 parameters</span>
+                    <code>
+                      {declaration.id.sourceId}#{declaration.id.ordinal}
+                    </code>
+                    <small>
+                      {name._tag === 'Present'
+                        ? `name ${spanLabel(name.token)}`
+                        : `missing ${spanLabel(name.syntax)}`}
+                    </small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Declared type</dt>
+                  <dd>
+                    <strong>
+                      {returnType._tag === 'Resolved'
+                        ? returnType.type
+                        : returnType._tag === 'Unresolved'
+                          ? returnType.spelling
+                          : 'Unavailable'}
+                    </strong>
+                    <span>{returnType._tag}</span>
+                    <small>{spanLabel(returnType.syntax)}</small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Integer expression</dt>
+                  <dd>
+                    <strong>{integer._tag === 'Available' ? integer.value : 'Unavailable'}</strong>
+                    <span>
+                      {integer._tag === 'Unavailable'
+                        ? integer._tag
+                        : `${integer.type} · ${integer._tag}`}
+                    </span>
+                    <small>{spanLabel(integer.syntax)}</small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Return</dt>
+                  <dd>
+                    <strong>{fact.returnCompatibility._tag}</strong>
+                    <span>I32 range 0…2147483647</span>
+                  </dd>
+                </div>
+              </dl>
+            </article>
+          )
+        })}
+      </div>
 
       <p className={styles.boundaryNote}>
-        Direct facts over the first concrete branch. No semantic AST, HIR, or code generation
-        exists yet.
+        Ordered facts over every concrete function branch. Calls, scope graphs, semantic AST, HIR,
+        and code generation do not exist yet.
       </p>
     </section>
   )
