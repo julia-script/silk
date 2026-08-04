@@ -12,6 +12,8 @@ import {
   beyondSafeIntegerSource,
   damagedTypeSource,
   i32BoundarySource,
+  laterSemanticDamageSource,
+  laterSyntaxDamageSource,
   missingIntegerSource,
   missingNameSource,
   mixedDamageSource,
@@ -186,6 +188,31 @@ it('keeps parser and semantic diagnostics in their owning collections', () => {
   )
   assert.strictEqual(result.declaration.name._tag, 'Unavailable')
   assert.strictEqual(result.declaration.returnType._tag, 'Unresolved')
+})
+
+it('analyzes only the first direct declaration when later declarations have semantic damage', () => {
+  const baseline = analyzeText('fixture://first-only.silk', acceptedSource)
+  const result = analyzeText('fixture://first-only.silk', laterSemanticDamageSource)
+
+  assert.deepEqual(result.declaration, baseline.declaration)
+  assert.deepEqual(result.integerExpression, baseline.integerExpression)
+  assert.deepEqual(result.returnCompatibility, baseline.returnCompatibility)
+  assert.deepEqual(result.parse.diagnostics, [])
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps later parser damage out of the first declaration semantic facts', () => {
+  const baseline = analyzeText('fixture://first-only-syntax.silk', acceptedSource)
+  const result = analyzeText('fixture://first-only-syntax.silk', laterSyntaxDamageSource)
+
+  assert.deepEqual(result.declaration, baseline.declaration)
+  assert.deepEqual(result.integerExpression, baseline.integerExpression)
+  assert.deepEqual(result.returnCompatibility, baseline.returnCompatibility)
+  assert.deepEqual(
+    result.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002', 'PAR0001', 'PAR0001'],
+  )
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('is deterministic across repeated fresh semantic results', () => {

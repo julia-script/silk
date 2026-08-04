@@ -2,14 +2,15 @@
 
 `@silk-effect/compiler` contains the first bootstrap layer of the Silk Effect compiler: immutable
 source bytes, source-owned spans, tokens, lexical diagnostics, a deterministic lexer, and a
-lossless concrete parser and first semantic facts for one public function.
+lossless concrete parser for one or more public functions plus semantic facts for the first one.
 
 ```ts
 import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-effect/compiler'
 
 const source = SourceFile.make(
   'memory://example.silk',
-  new TextEncoder().encode('pub fn main() -> I32 { return 42 }'),
+  new TextEncoder().encode(`pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return 0 }`),
 )
 const lexical = Lexer.lex(source)
 const parse = Parser.parse(lexical)
@@ -17,7 +18,7 @@ const result = SemanticAnalysis.analyze(parse)
 
 console.log(parse.root.kind) // SourceFile
 console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // true
-console.log(result.declaration.name) // { _tag: 'Present', spelling: 'main', ... }
+console.log(result.declaration.name) // { _tag: 'Present', spelling: 'answer', ... }
 console.log(result.integerExpression) // { _tag: 'Available', type: 'I32', value: 42, ... }
 console.log(result.returnCompatibility) // { _tag: 'Compatible' }
 ```
@@ -42,19 +43,22 @@ parentheses, braces, `->`, whitespace, and `//` line comments. Trivia is retaine
 Unsupported bytes form maximal `Invalid` tokens and ordered `LEX0001` diagnostics, so lexing always
 makes progress and every input byte can be reconstructed from the non-EOF token spans.
 
-## First concrete grammar
+## Bootstrap concrete grammar
 
 The parser recognizes exactly this grammatical slice, with whitespace and `//` line comments
 allowed between its elements:
 
 ```text
-File → pub fn Identifier() -> Identifier { return DecimalInteger } EOF
+File                → FunctionDeclaration+ EOF
+FunctionDeclaration → pub fn Identifier() -> Identifier { return DecimalInteger }
 ```
 
 The result is a concrete syntax tree (CST), not a semantic AST. Its nodes group the source into a
-function declaration, parameter list, return type, block, return statement, and integer literal
-expression. Every lexer token—including trivia, invalid tokens, and EOF—remains the same object in
-the tree and appears exactly once in source order.
+one or more direct function declarations in source order. Each declaration contains a parameter
+list, return type, block, return statement, and integer literal expression. Every lexer
+token—including trivia, invalid tokens, and EOF—remains the same object in the tree and appears
+exactly once in source order. A following `pub` also bounds recovery when the prior function is
+missing its closing brace.
 
 Ordinary source mistakes remain data. A required absent token becomes a `MissingToken` leaf with an
 empty span and a `PAR0001` diagnostic. Unexpected concrete input becomes a lossless `Error` node
@@ -63,11 +67,12 @@ and a `PAR0002` diagnostic. Lexical diagnostics remain separate on the retained 
 
 ## First semantic facts
 
-`SemanticAnalysis.analyze` retains the exact parse result and describes its single function as
-immutable, syntax-provenanced facts. The declaration has a deterministic source-local identity,
-public visibility, zero parameters, a present or unavailable name, and a resolved, unresolved, or
-unavailable declared return type. `SemanticAnalysis.declarationByName` supports data-first and
-pipeable lookup without hiding unavailable syntax behind `undefined`.
+`SemanticAnalysis.analyze` retains the exact parse result and currently describes only its first
+direct function as immutable, syntax-provenanced facts. Later functions are parsed into the CST but
+are not collected or analyzed yet. The first declaration has a deterministic source-local
+identity, public visibility, zero parameters, a present or unavailable name, and a resolved,
+unresolved, or unavailable declared return type. `SemanticAnalysis.declarationByName` supports
+data-first and pipeable lookup without hiding unavailable syntax behind `undefined`.
 
 This slice recognizes only the exact ASCII type spelling `I32` and positive decimal values from
 `0` through `2147483647`. It interprets token bytes without host-number precision loss. A present

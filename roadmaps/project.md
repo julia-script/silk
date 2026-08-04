@@ -13,9 +13,9 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** give the first bootstrap function semantic facts — measured by its
-declaration, `I32` return type, integer value, and return compatibility remaining deterministic and
-inspectable across the accepted fixture and a tiny malformed-input corpus.
+**Current objective:** prove a checkable two-function Silk program — measured by `main` calling a
+uniquely resolved `answer`, receiving its `I32` type, and remaining deterministic and inspectable
+across valid, missing, duplicate, ambiguous, and syntax-damaged sources.
 
 ## Column rules
 
@@ -25,36 +25,38 @@ inspectable across the accepted fixture and a tiny malformed-input corpus.
 
 ## Now
 
-### Analyze the first bootstrap function without introducing HIR
+### Prove the first cross-declaration semantic relationship
 
-- **Problem:** The concrete tree identifies grammatical regions, but `main`, `I32`, and `42` still
-  have no declaration, type, or checked-value meaning.
-- **Outcome & done-when:** The accepted fixture publishes immutable declaration, type, value, and
-  return-compatibility facts; unknown types, out-of-range integers, and syntax-damaged declarations
-  remain explicit and deterministic; and the hidden inspector can show the facts without implying
-  HIR or code generation exists.
-- **Status:** shaped — one function, one built-in type, and one integer expression are enough to
-  discover the first semantic fact boundary before any semantic IR is justified.
-- **Appetite:** one focused OpenSpec change; multiple declarations, references, general expressions,
-  modules, AST lowering, HIR, MIR, ownership, contracts, and code generation remain outside scope.
-- **Links:** change: `analyze-first-bootstrap-function` ·
+- **Problem:** One checked function proves local facts, but it cannot validate declaration
+  collection, ambiguity, expression references, or source-order-independent lookup.
+- **Outcome & done-when:** A two-function source can parse both declarations, collect stable facts,
+  preserve a zero-argument call, resolve `main → answer`, propagate `I32`, and show every stage and
+  failure state in the hidden inspector without introducing AST, HIR, or execution.
+- **Status:** shaped — four dependency-ordered OpenSpec changes are ready; implement, visually
+  inspect, sync, and archive exactly one before reassessing the remaining changes.
+- **Appetite:** four focused changes with a hard review boundary after each sync; parameters,
+  arguments, arithmetic, local bindings, general scopes, AST, HIR, MIR, and lowering remain outside
+  this milestone.
+- **Links:** changes: `parse-multiple-bootstrap-functions` →
+  `collect-bootstrap-declarations` → `parse-first-function-call` →
+  `resolve-first-function-call` ·
   [bootstrap syntax spec](../openspec/specs/bootstrap-syntax/spec.md) ·
+  [bootstrap semantic facts](../openspec/specs/bootstrap-semantic-facts/spec.md) ·
   [bootstrap-language map](../wayfinder/bootstrap-language/map.md) ·
   [compiler pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md)
 
 ## Next
 
-### Add the first resolved reference
+### Find the next pressure that earns a semantic representation
 
-- **Problem:** One declaration can validate fact shape and local typing, but it cannot test header
-  collection, name lookup, references, or dependency ordering.
-- **Hypothesis:** A second parameterless function plus one direct call is the smallest grammar and
-  semantic extension that can validate declaration identity and name-resolution facts without HIR.
-- **Confidence:** low until the first semantic fact model exists.
-- **Assumes:** Multiple declarations and direct calls are the next pressure needed by the bootstrap
-  compiler rather than local bindings or richer integer expressions.
-- **Open questions:** Should multiple declarations and the first call land together as one vertical
-  slice, or should syntax repetition be proven before reference resolution?
+- **Problem:** Even a resolved two-function program has only explicit return types, integer literals,
+  and zero-argument calls, so it does not prove which next language feature should shape AST/HIR.
+- **Hypothesis:** Comparing the real implementation pressure from signed integers, one parameter and
+  argument, arithmetic, or a local binding will reveal the smallest next coherent milestone.
+- **Confidence:** low until the resolved-call milestone is complete.
+- **Assumes:** Direct facts over the CST remain sufficient through the first reference — unvalidated.
+- **Open questions:** Which candidate creates necessary semantic structure rather than completeness
+  polish, and does that structure finally justify a semantic AST or HIR?
 
 ## Later
 
@@ -105,11 +107,15 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
-- What appetite should normally bound one bootstrap OpenSpec change when a semantic slice touches
-  syntax, HIR, MIR, runtime, and fixtures together?
+- After the resolved-call milestone, which pressure should come first: signed literals, one
+  parameter and argument, arithmetic, or a local binding?
 
 ## Changelog
 
+- 2026-08-04: Shipped and archived `analyze-first-bootstrap-function` in commit `373c4d8`; direct
+  declaration, `I32`, integer, compatibility, and semantic diagnostic facts held without AST/HIR.
+  Recast Now as a checkable two-function milestone split into four dependency-ordered changes, each
+  with a required inspector checkpoint and a sync/reassessment boundary.
 - 2026-08-04: Shipped and archived `parse-first-bootstrap-function` in commit `ba6feaf`; its
   lossless tree, bounded recovery, deterministic diagnostics, and hidden inspector met the recorded
   outcome. Promoted one-function declaration and `I32` fact analysis to Now, explicitly keeping HIR

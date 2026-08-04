@@ -167,6 +167,21 @@
   font-size: 0.62rem;
 }
 
+.semanticScope {
+  margin: 0.8rem 0 0;
+  border-left: 2px solid color-mix(in srgb, var(--color-fd-primary) 65%, #8b5cf6);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--color-fd-primary) 6%, transparent);
+  padding: 0.55rem 0.65rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.semanticScope strong {
+  color: var(--color-fd-foreground);
+}
+
 .factGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

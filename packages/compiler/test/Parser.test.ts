@@ -10,9 +10,15 @@ import {
   acceptedSource,
   denseTriviaSource,
   type ExpectedNodeShape,
+  emptySource,
+  interFunctionPunctuationSource,
   invalidUtf8Source,
+  missingFirstRightBraceSource,
   missingNameSource,
   missingRightBraceSource,
+  threeFunctionSource,
+  trailingTriviaSource,
+  twoFunctionSource,
   unexpectedPunctuationSource,
   whollyUnrelatedSource,
 } from './fixtures/BootstrapParserFixture.js'
@@ -47,6 +53,27 @@ const errorNodes = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
   descendants(node).filter(
     (element): element is SyntaxTree.Node => SyntaxTree.isNode(element) && element.kind === 'Error',
   )
+
+const directFunctionDeclarations = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
+  node.children.filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
+  )
+
+const directTokenText = (
+  result: Parser.ParseResult,
+  node: SyntaxTree.Node,
+  kind: Token.TokenKind,
+): string | undefined => {
+  const token = node.children.find(
+    (element): element is Token.Token => SyntaxTree.isToken(element) && element.kind === kind,
+  )
+  if (token === undefined) return undefined
+  return Array.from(
+    Option.getOrThrow(SourceFile.slice(result.lexical.source, token.span)),
+    (byte) => String.fromCharCode(byte),
+  ).join('')
+}
 
 const assertOriginalTokenTraversal = (result: Parser.ParseResult): void => {
   const flattened = SyntaxTree.tokens(result.root)
@@ -101,6 +128,120 @@ it('parses dense whitespace and line-comment trivia without changing the grammar
   assert.deepEqual(result.diagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(denseTriviaSource))
+})
+
+it('parses two declarations as separate direct branches in source order', () => {
+  const result = parseText('fixture://two-functions.silk', twoFunctionSource)
+  const declarations = directFunctionDeclarations(result.root)
+
+  assert.strictEqual(declarations.length, 2)
+  assert.deepEqual(
+    declarations.map((declaration) => directTokenText(result, declaration, 'Identifier')),
+    ['answer', 'main'],
+  )
+  const secondLeading = declarations.at(1)?.children.at(0)
+  assert.strictEqual(
+    secondLeading === undefined ? undefined : SyntaxTree.isToken(secondLeading),
+    true,
+  )
+  if (secondLeading === undefined || !SyntaxTree.isToken(secondLeading)) return
+  assert.strictEqual(secondLeading.kind, 'Whitespace')
+  assert.strictEqual(Object.isFrozen(result.root), true)
+  assert.strictEqual(Object.isFrozen(result.root.children), true)
+  assert.strictEqual(Object.isFrozen(declarations.at(0)), true)
+  assert.strictEqual(Object.isFrozen(declarations.at(1)), true)
+  assert.strictEqual(Object.isFrozen(result.diagnostics), true)
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(twoFunctionSource))
+})
+
+it('parses three declarations without imposing a temporary source-file limit', () => {
+  const result = parseText('fixture://three-functions.silk', threeFunctionSource)
+
+  assert.deepEqual(
+    directFunctionDeclarations(result.root).map((declaration) =>
+      directTokenText(result, declaration, 'Identifier'),
+    ),
+    ['one', 'two', 'three'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(threeFunctionSource))
+})
+
+it('keeps trailing trivia with the end-of-file expectation', () => {
+  const result = parseText('fixture://trailing-trivia.silk', trailingTriviaSource)
+  const directTokens = result.root.children.filter(SyntaxTree.isToken)
+
+  assert.deepEqual(
+    directTokens.map((token) => token.kind),
+    ['Whitespace', 'LineComment', 'Whitespace', 'EndOfFile'],
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(trailingTriviaSource))
+})
+
+it('inserts a missing first brace without consuming the second declaration', () => {
+  const result = parseText('fixture://missing-first-brace.silk', missingFirstRightBraceSource)
+  const declarations = directFunctionDeclarations(result.root)
+  const first = declarations.at(0)
+  const second = declarations.at(1)
+
+  assert.notStrictEqual(first, undefined)
+  assert.notStrictEqual(second, undefined)
+  if (first === undefined || second === undefined) return
+  assert.deepEqual(
+    missingLeaves(first).map((leaf) => ({
+      expected: leaf.expected,
+      start: leaf.span.start,
+      end: leaf.span.end,
+    })),
+    [
+      {
+        expected: 'RightBrace',
+        start: missingFirstRightBraceSource.indexOf('pub fn main'),
+        end: missingFirstRightBraceSource.indexOf('pub fn main'),
+      },
+    ],
+  )
+  assert.deepEqual(missingLeaves(second), [])
+  assert.strictEqual(directTokenText(result, second, 'Identifier'), 'main')
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(missingFirstRightBraceSource))
+})
+
+it('retains unexpected punctuation at a function boundary and parses the next declaration', () => {
+  const result = parseText(
+    'fixture://inter-function-punctuation.silk',
+    interFunctionPunctuationSource,
+  )
+  const declarations = directFunctionDeclarations(result.root)
+  const boundaryErrors = errorNodes(result.root)
+  const second = declarations.at(1)
+
+  assert.strictEqual(declarations.length, 2)
+  assert.notStrictEqual(second, undefined)
+  if (second === undefined) return
+  assert.strictEqual(directTokenText(result, second, 'Identifier'), 'main')
+  assert.deepEqual(missingLeaves(second), [])
+  assert.strictEqual(boundaryErrors.length, 1)
+  assert.deepEqual(
+    boundaryErrors.flatMap((node) => SyntaxTree.tokens(node)).map((token) => token.kind),
+    ['Invalid', 'Whitespace'],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(interFunctionPunctuationSource))
 })
 
 it('inserts a missing function name before the opening parenthesis', () => {
@@ -174,7 +315,7 @@ it('groups unexpected punctuation and following trivia before the function name'
 })
 
 it('terminates with explicit missing structure for empty input', () => {
-  const result = parseBytes('fixture://empty.silk', new Uint8Array())
+  const result = parseBytes('fixture://empty.silk', emptySource)
 
   assert.strictEqual(missingLeaves(result.root).length, 11)
   assert.strictEqual(result.diagnostics.length, 11)
@@ -218,8 +359,8 @@ it('retains invalid UTF-8 bytes and lexical diagnostics inside concrete recovery
 })
 
 it('is deterministic across repeated fresh lexical results', () => {
-  const first = parseText('fixture://deterministic.silk', unexpectedPunctuationSource)
-  const second = parseText('fixture://deterministic.silk', unexpectedPunctuationSource)
+  const first = parseText('fixture://deterministic.silk', interFunctionPunctuationSource)
+  const second = parseText('fixture://deterministic.silk', interFunctionPunctuationSource)
 
   assert.deepEqual(nodeShape(first.root), nodeShape(second.root))
   assert.deepEqual(diagnosticView(first), diagnosticView(second))

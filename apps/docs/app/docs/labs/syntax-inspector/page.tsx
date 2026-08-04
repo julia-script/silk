@@ -3,7 +3,7 @@ import { SyntaxInspector } from './syntax-inspector'
 
 export const metadata: Metadata = {
   title: 'Syntax Inspector',
-  description: 'An internal lab for inspecting the first Silk concrete tree and semantic facts.',
+  description: 'An internal lab for inspecting Silk concrete trees and first-function facts.',
   robots: {
     index: false,
     follow: false,
@@ -21,10 +21,10 @@ export default function SyntaxInspectorPage() {
           Syntax Inspector
         </h1>
         <p className="text-base leading-7 text-fd-muted-foreground">
-          Edit the first bootstrap function and inspect its lossless concrete syntax tree alongside
-          the first semantic facts. Every token stays attached to its original UTF-8 byte span;
-          recovery appears as explicit error nodes and missing leaves. This is not yet a semantic
-          AST, HIR, or code-generation pipeline.
+          Edit one or more bootstrap functions and inspect their lossless concrete syntax tree
+          alongside semantic facts for the first function. Every token stays attached to its
+          original UTF-8 byte span; recovery appears as explicit error nodes and missing leaves.
+          This is not yet a semantic AST, HIR, or code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />

@@ -83,7 +83,7 @@ export interface DeclarationFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** The complete deterministic semantic result for the first bootstrap grammar slice. */
+/** The complete deterministic semantic result for the first direct bootstrap declaration. */
 export interface Result {
   readonly _tag: 'SemanticAnalysis'
   readonly parse: Parser.ParseResult
@@ -254,7 +254,7 @@ const compareDiagnostics = (
   left.span.end - right.span.end ||
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
 
-/** Analyzes the exact first bootstrap function into immutable semantic facts. */
+/** Analyzes only the first direct bootstrap function into immutable semantic facts. */
 export const analyze = (parse: Parser.ParseResult): Result => {
   const source = parse.lexical.source
   const functionNode = childNode(parse.root, 'FunctionDeclaration')

@@ -9,6 +9,16 @@ const acceptedSource = 'pub fn main() -> I32 { return 42 }'
 
 const examples = [
   { label: 'Valid', source: acceptedSource },
+  {
+    label: 'Two functions',
+    source: `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return 0 }`,
+  },
+  {
+    label: 'Missing first }',
+    source: `pub fn answer() -> I32 { return 42
+pub fn main() -> I32 { return 0 }`,
+  },
   { label: 'Missing }', source: 'pub fn main() -> I32 { return 42' },
   { label: 'Unexpected @', source: 'pub fn @ main() -> I32 { return 42 }' },
   { label: 'Unknown type', source: 'pub fn main() -> Mystery { return 42 }' },
@@ -128,8 +138,13 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
           <span className={styles.eyebrow}>Analysis</span>
           <h3 id="semantic-facts-heading">Semantic facts</h3>
         </div>
-        <span className={styles.phaseBoundary}>CST → facts</span>
+        <span className={styles.phaseBoundary}>First function only</span>
       </div>
+
+      <p className={styles.semanticScope} role="note">
+        <strong>Temporary phase boundary.</strong> These facts describe the first direct function;
+        later functions are visible in the concrete tree but are not semantically collected yet.
+      </p>
 
       <dl className={styles.factGrid}>
         <div>
@@ -177,7 +192,8 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
       </dl>
 
       <p className={styles.boundaryNote}>
-        Direct facts over the concrete tree. No semantic AST, HIR, or code generation exists yet.
+        Direct facts over the first concrete branch. No semantic AST, HIR, or code generation
+        exists yet.
       </p>
     </section>
   )

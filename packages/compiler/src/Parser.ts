@@ -33,6 +33,18 @@ const isTrivia = (kind: Token.TokenKind): boolean => triviaKinds.includes(kind)
 
 const currentToken = (state: State): Token.Token | undefined => state.lexical.tokens.at(state.index)
 
+const nextSignificantKind = (state: State): Token.TokenKind | undefined => {
+  let index = state.index
+  let token = state.lexical.tokens.at(index)
+
+  while (token !== undefined && isTrivia(token.kind)) {
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
+
+  return token?.kind
+}
+
 const advance = (state: State): State =>
   Object.freeze({
     ...state,
@@ -148,7 +160,7 @@ const parseReturnStatement = (initial: State): NodeResult => {
 const parseBlock = (initial: State): NodeResult => {
   const leftBrace = expect(initial, 'LeftBrace', ['ReturnKeyword', 'DecimalInteger', 'RightBrace'])
   const statement = parseReturnStatement(leftBrace.state)
-  const rightBrace = expect(statement.state, 'RightBrace', [])
+  const rightBrace = expect(statement.state, 'RightBrace', ['PubKeyword'])
   return Object.freeze({
     state: rightBrace.state,
     node: syntaxNode(rightBrace.state, 'Block', [
@@ -209,16 +221,27 @@ const compareDiagnostics = (
   left.span.end - right.span.end ||
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
 
-/** Parses the exact first bootstrap function grammar with lossless local recovery. */
+/** Parses one or more bootstrap functions with lossless local recovery. */
 export const parse = (lexical: Lexer.LexicalResult): ParseResult => {
   const initial: State = Object.freeze({
     lexical,
     index: 0,
     diagnostics: Object.freeze([]),
   })
-  const declaration = parseFunctionDeclaration(initial)
-  const endOfFile = expect(declaration.state, 'EndOfFile', [])
-  const root = syntaxNode(endOfFile.state, 'SourceFile', [declaration.node, ...endOfFile.elements])
+  const first = parseFunctionDeclaration(initial)
+  let state = first.state
+  let declarations: ReadonlyArray<SyntaxTree.Node> = Object.freeze([first.node])
+  let significantKind = nextSignificantKind(state)
+
+  while (significantKind !== undefined && significantKind !== 'EndOfFile') {
+    const declaration = parseFunctionDeclaration(state)
+    declarations = Object.freeze([...declarations, declaration.node])
+    state = declaration.state
+    significantKind = nextSignificantKind(state)
+  }
+
+  const endOfFile = expect(state, 'EndOfFile', [])
+  const root = syntaxNode(endOfFile.state, 'SourceFile', [...declarations, ...endOfFile.elements])
 
   return Object.freeze({
     lexical,

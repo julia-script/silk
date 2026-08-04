@@ -234,9 +234,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         const path = resolve(directory, entry.name)
         return entry.isDirectory() ? packedFiles(path) : [path]
       })
-    expect(
-      packedFiles(packedRoot).filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts')),
-    ).toEqual([])
+    const compilerFiles = packedFiles(packedRoot)
+    expect(compilerFiles.filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))).toEqual(
+      [],
+    )
+    expect(compilerFiles.filter((file) => file.includes('syntax-inspector'))).toEqual([])
 
     const consumerRoot = resolve(temporary, 'consumer')
     mkdirSync(consumerRoot)
@@ -261,7 +263,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       [
         '--input-type=module',
         '--eval',
-        `import * as api from '@silk-effect/compiler'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/compiler/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
+        `import * as api from '@silk-effect/compiler'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/compiler/\${path.slice(2)}\`))); const source = api.SourceFile.make('memory://packed.silk', new TextEncoder().encode('pub fn answer() -> I32 { return 42 }\\npub fn main() -> I32 { return 0 }')); const parse = api.Parser.parse(api.Lexer.lex(source)); const functions = parse.root.children.filter((element) => api.SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration'); const analysis = api.SemanticAnalysis.analyze(parse); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])), functionCount: functions.length, firstName: analysis.declaration.name._tag === 'Present' ? analysis.declaration.name.spelling : null, parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code) }))`,
       ],
       {
         cwd: consumerRoot,
@@ -294,6 +296,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownType')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
+    expect(api.functionCount).toBe(2)
+    expect(api.firstName).toBe('answer')
+    expect(api.parserDiagnostics).toEqual([])
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
