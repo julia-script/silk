@@ -1,5 +1,8 @@
 export * as Lexer from './Lexer.js'
 export * as LexicalDiagnostic from './LexicalDiagnostic.js'
+export * as ParseDiagnostic from './ParseDiagnostic.js'
+export * as Parser from './Parser.js'
 export * as SourceFile from './SourceFile.js'
 export * as SourceSpan from './SourceSpan.js'
+export * as SyntaxTree from './SyntaxTree.js'
 export * as Token from './Token.js'

@@ -52,6 +52,18 @@
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
+    },
+    "./SyntaxTree": {
+      "types": "./dist/SyntaxTree.d.ts",
+      "import": "./dist/SyntaxTree.js"
+    },
+    "./ParseDiagnostic": {
+      "types": "./dist/ParseDiagnostic.d.ts",
+      "import": "./dist/ParseDiagnostic.js"
+    },
+    "./Parser": {
+      "types": "./dist/Parser.d.ts",
+      "import": "./dist/Parser.js"
     }
   },
   "scripts": {

@@ -214,8 +214,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       '.',
       './Lexer',
       './LexicalDiagnostic',
+      './ParseDiagnostic',
+      './Parser',
       './SourceFile',
       './SourceSpan',
+      './SyntaxTree',
       './Token',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
@@ -265,7 +268,16 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       },
     )
     const api = JSON.parse(inspected)
-    expect(api.root).toEqual(['Lexer', 'LexicalDiagnostic', 'SourceFile', 'SourceSpan', 'Token'])
+    expect(api.root).toEqual([
+      'Lexer',
+      'LexicalDiagnostic',
+      'ParseDiagnostic',
+      'Parser',
+      'SourceFile',
+      'SourceSpan',
+      'SyntaxTree',
+      'Token',
+    ])
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
       readonly [string, ReadonlyArray<string>]
     >) {
@@ -273,7 +285,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
+    expect(api.deep['./Parser']).toContain('parse')
     expect(api.deep['./SourceFile']).toContain('make')
+    expect(api.deep['./SyntaxTree']).toContain('tokens')
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }

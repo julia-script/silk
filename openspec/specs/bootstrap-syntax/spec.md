@@ -1,9 +1,11 @@
+# Bootstrap Syntax Specification
+
 ## Purpose
 
 Turn the bootstrap lexer result into the smallest source-faithful grammatical structure that can
 recover from ordinary mistakes without introducing semantic or lowering representations.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: First function grammar
 The parser SHALL recognize exactly one source file containing a public, parameterless function
@@ -50,9 +52,9 @@ concrete token.
 
 ### Requirement: Unexpected syntax remains explicit
 When concrete tokens cannot satisfy the next grammar element, the parser SHALL consume a maximal
-run of unexpected non-trivia tokens into one error region until it reaches the expected token, a
-closing brace, or end-of-file. Recovery SHALL always consume a concrete token or insert a missing
-element, and SHALL retain every skipped token in the tree.
+run of unexpected non-trivia tokens into one error region until it reaches the expected token, the
+next structurally valid token, a closing brace, or end-of-file. Recovery SHALL always consume a
+concrete token or insert a missing element, and SHALL retain every skipped token in the tree.
 
 #### Scenario: Recover before a function name
 - **WHEN** unsupported punctuation appears between `fn` and the function name

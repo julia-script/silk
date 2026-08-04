@@ -78,10 +78,11 @@ current significant token's start (or EOF), or consumes unexpected concrete toke
 `Error` node. Error recovery includes trivia between unexpected significant tokens so the flattened
 leaf order remains identical to the lexical stream.
 
-Each expectation has a deliberately small synchronization set: its expected kind, the current
-enclosing right brace where applicable, and EOF. An error run stops before a synchronization token.
-If no concrete token is consumed, the expectation inserts a missing token. This makes the progress
-argument local and prevents recovery loops.
+Each expectation has a deliberately small synchronization set: its expected kind, the next token
+kind that could validly continue the fixed grammar, the current enclosing right brace where
+applicable, and EOF. An error run stops before a synchronization token. If no concrete token is
+consumed, the expectation inserts a missing token. This makes the progress argument local,
+preserves later structure when an element is absent, and prevents recovery loops.
 
 The first stable parser codes are `PAR0001` for a missing required token and `PAR0002` for an
 unexpected token region. Lexical diagnostics remain owned by `LexicalResult`; the parser neither
