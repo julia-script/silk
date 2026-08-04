@@ -13,9 +13,9 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** establish Silk source text and lexing — measured by exact source bytes
-becoming a deterministic, lossless token stream with owner-qualified spans, explicit trivia, and
-recoverable lexical diagnostics.
+**Current objective:** turn the first bootstrap function into recoverable syntax — measured by the
+accepted fixture and a small malformed-input set producing deterministic, lossless concrete syntax
+trees that can be inspected directly on the docs site.
 
 ## Column rules
 
@@ -25,34 +25,25 @@ recoverable lexical diagnostics.
 
 ## Now
 
-### Establish bootstrap source and lexing
+### Turn the first bootstrap function into recoverable syntax
 
-- **Problem:** The bootstrap language decisions are complete, but the repository has no Silk source
-  model or lexer on which a real parser can be built.
-- **Outcome & done-when:** Arbitrary source bytes are preserved exactly, and the first future parser
-  fixture tokenizes deterministically with complete byte coverage, explicit whitespace and line
-  comments, exact spans, EOF, and recoverable invalid-byte diagnostics.
-- **Status:** shaped — OpenSpec planning artifacts are complete and ready for implementation.
-- **Appetite:** worth approximately one focused week; parser or syntax-tree work does not enter this
-  scope.
-- **Links:** change: `establish-bootstrap-source-and-lexer` ·
+- **Problem:** Source bytes now become trustworthy tokens, but those tokens do not yet express even
+  one function declaration, a return statement, missing syntax, or parser recovery.
+- **Outcome & done-when:** `pub fn main() -> I32 { return 42 }` becomes a deterministic, lossless
+  concrete syntax tree; a bounded malformed-input corpus produces explicit missing and error nodes
+  with stable diagnostics; and a direct-link-only docs page makes the tree inspectable without
+  implying semantic analysis exists.
+- **Status:** shaped — the grammar and recovery boundary are intentionally limited to one function
+  and one integer return.
+- **Appetite:** worth approximately one focused week; general expressions, multiple declarations,
+  semantic facts, AST lowering, HIR, and MIR do not enter this scope.
+- **Links:** change: `parse-first-bootstrap-function` ·
+  [bootstrap lexer spec](../openspec/specs/bootstrap-lexer/spec.md) ·
   [bootstrap-language map](../wayfinder/bootstrap-language/map.md) ·
   [compiler pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
   [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
 
 ## Next
-
-### Turn tokens into recoverable syntax
-
-- **Problem:** Tokens alone cannot express grammatical structure, missing syntax, or parser recovery.
-- **Hypothesis:** We believe a lossless syntax tree that retains token identity and explicit missing
-  or error nodes will support the first function-and-return grammar without committing to semantic
-  representations prematurely.
-- **Confidence:** high.
-- **Assumes:** The source and token identities established in Now are sufficient for a source-
-  faithful tree — specified, not yet validated in implementation.
-- **Open questions:** Which minimum error-recovery cases belong with the first parser slice?
-  Candidate change: `add-bootstrap-parser-and-syntax-tree`.
 
 ### Give the first syntax tree semantic meaning
 
@@ -120,6 +111,8 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-04: Shipped exact source text and lossless lexing, then promoted a one-function concrete
+  syntax tree and direct-link inspector to Now; semantic interpretation remains Next.
 - 2026-08-04: Replaced the oversized end-to-end compiler-kernel initiative with source text and
   lexing. Moved parsing, semantic facts, HIR/MIR, native code generation, and runtime work behind
   evidence-producing capability boundaries.
