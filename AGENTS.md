@@ -11,6 +11,13 @@ These conventions apply to the entire repository. The current `effect-patterns` 
 authoritative source for Effect architecture. When this file and that skill differ, follow the
 skill and update this file rather than preserving an older convention.
 
+## Agent skills
+
+### Issue tracker
+
+Use the local Markdown tracker. General issues live under `.scratch/<feature>/`; Wayfinder maps
+live under visible `wayfinder/<effort>/` directories. See `docs/agents/issue-tracker.md`.
+
 
 ## Repository workflow
 
@@ -22,6 +29,20 @@ skill and update this file rather than preserving an older convention.
   change.
 - Do not describe changes as complete when a required check was not run. Report the exact failure
   and whether it predates the change.
+
+## Collaborative decision sessions
+
+When a task requires a multi-decision interview, grilling session, or other branching design
+process, publish a visible Codex task plan at the start. Show the major decision branches, mark
+exactly one current branch in progress, and keep completed and pending branches visible so the user
+can orient themselves. Treat the plan as a live map: update, split, reorder, add, or remove branches
+as answers expose new dependencies or invalidate earlier assumptions.
+
+Before every user-facing decision question in that session, also include a compact, friendly
+Markdown checklist showing the overall session state. Use `✅` for completed branches, `🟡` for the
+single current branch, and `⬜` for pending branches. Keep it pleasant and quickly scannable; group
+items only when the map becomes unwieldy, and never omit the current branch or remaining work. Keep
+this in-message checklist synchronized with the visible Codex task plan.
 
 ## One module per actor
 

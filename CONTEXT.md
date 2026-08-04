@@ -18,6 +18,19 @@ coherent subset of the intended language rather than a disposable dialect, altho
 implementations may impose restrictions and alpha discoveries may still justify breaking changes.
 _Avoid_: v0 language, minimal language
 
+**Actor module**:
+A module centered on one minimal data or service concept whose core capabilities preserve its
+invariants. Its richer public API consists of qualified, data-first sibling functions that are
+individually importable and pipeable without retroactively changing the concept's method set.
+_Avoid_: extension implementation, open method set, class-per-entity
+
+**Source module**:
+An inert declaration namespace defined by exactly one source file, whose canonical, case-sensitive
+identity is its extensionless path relative to a compiler-provided source root. Importing one never
+runs code; modules cannot be declared independently of their locations, assembled from partial
+files, or hold implicit runtime initialization.
+_Avoid_: partial module, declared module name
+
 **Direct WebAssembly backend**:
 A compiler backend that emits WebAssembly without passing through LLVM. It is a stretch path for
 reducing Silk Effect's long-term dependence on LLVM, not a prerequisite for the bootstrap language.
@@ -29,11 +42,377 @@ without Node.js or TypeScript at runtime. The first self-hosting compiler may em
 the LLVM toolchain for code generation and linking.
 _Avoid_: frontend-only self-host, LLVM-independent compiler
 
+**Stage-0 compiler**:
+The trusted Effect/TypeScript seed compiler that produces the first native compiler under a pinned
+Node.js runtime.
+_Avoid_: stage-1 TypeScript compiler, self-hosted compiler
+
+**Stage-1 compiler**:
+The first native Silk compiler, produced by stage 0 and used to build stage 2 from the same source
+snapshot.
+_Avoid_: seed compiler, accepted compiler
+
+**Stage-2 compiler**:
+The native Silk compiler produced by stage 1 and promoted only after it reproduces itself and passes
+the complete bootstrap acceptance procedure.
+_Avoid_: verification compiler, automatically accepted compiler
+
+**Fixed-point rebuild**:
+The verification-only compiler output produced when stage 2 rebuilds the same source snapshot with
+the same recipe; it is evidence for stage 2 rather than a separately distributed stage.
+_Avoid_: stage-3 release, second compiler product
+
+**Source snapshot**:
+The content-addressed, canonical manifest and exact bytes of all compiler, standard-library,
+runtime, and shim source inputs used by a bootstrap build.
+_Avoid_: Git revision, checkout
+
+**Build recipe**:
+The canonical identity of every declared source, target, toolchain, environment, and path input that
+must remain equal across comparable bootstrap builds.
+_Avoid_: build log, compiler options
+
+**Build record**:
+The provenance and observed results of one recipe execution, including its producer, commands,
+artifact hashes, diagnostics, statuses, and measurements.
+_Avoid_: build recipe, acceptance result
+
+**Acceptance corpus**:
+The content-addressed fixture manifest that traces every normative bootstrap decision to required
+positive, negative, failure, recovery, runtime, and native-inspection evidence.
+_Avoid_: coverage target, smoke suite
+
+**Silk toolchain bundle**:
+The promoted per-target stage-2 compiler together with its version-matched bootstrap standard
+library, runtime shim, target specification, and content manifest.
+_Avoid_: native dependency bundle, compiler executable
+
+**Native dependency bundle**:
+The per-target content-addressed Clang/LLVM, linker, SDK or sysroot, platform-startup, compiler-rt,
+and system inputs required by the bootstrap compiler's native backend and linker services.
+_Avoid_: Silk toolchain bundle, ambient host toolchain
+
+**Acceptance evidence bundle**:
+The retained recipes, build records, stage artifacts, comparisons, inspections, measurements, and
+gate report that justify promoting one stage-2 Silk toolchain bundle.
+_Avoid_: release bundle, build cache
+
+**Analysis snapshot**:
+An immutable, source-identified view of one compilation state that preserves every syntax and
+semantic fact the implemented frontend phases can still determine, together with diagnostics and
+explicit unknown or erroneous states for incomplete code. Batch executable generation may reject
+an erroneous snapshot, but source mistakes do not invalidate unrelated facts. The bootstrap
+snapshot need not initially expose every future tooling query; its identities, provenance, and
+phase boundaries must allow the supported analysis surface to grow without creating a second
+language implementation.
+_Avoid_: valid-program model, compiler-success result
+
+**Syntax file**:
+The lossless frontend artifact for one source module, owning its original bytes, tokens including
+comments and whitespace, and a source-faithful tree with explicit missing and error nodes. Stable
+source identities and byte spans connect its tokens and nodes to diagnostics and later semantic
+facts; semantic phases do not store tooling trivia in HIR.
+_Avoid_: trivia-free AST, valid-source tree
+
+**Bytes**:
+A nominal owned growable sequence of arbitrary octets. A borrowed `Slice<U8>` views its storage
+without asserting that the contents are text; an exclusive borrow may expose mutable bytes, and
+syntax files retain source as `Bytes` even when UTF-8 is malformed.
+_Avoid_: byte string, unvalidated string
+
+**String**:
+A nominal owned growable sequence of valid UTF-8 text, distinct from `Bytes` even when both use the
+same physical storage shape. Exclusive mutation preserves UTF-8 and never exposes writable raw
+bytes; bootstrap uses no separate string-builder type. It supports UTF-8 encoding and Unicode
+scalar decoding but not normalization, grapheme segmentation, locale-sensitive operations, or
+Unicode collation.
+_Avoid_: branded byte array, text bytes
+
+**String slice**:
+A lexical borrowed view of a `String` whose endpoints are valid UTF-8 boundaries. Converting bytes
+to a string or string slice requires explicit validation; viewing string storage as bytes is
+infallible.
+_Avoid_: unchecked text slice, code-unit string
+
+**Static string**:
+A copyable immutable value pointing into compiler-emitted read-only UTF-8 data. It requires no
+allocation, cleanup, or named scope; it may produce a lexical string slice or be explicitly copied
+into an owned growable string.
+_Avoid_: global string, immortal borrow
+
+**Static bytes**:
+A copyable immutable value pointing into compiler-emitted read-only arbitrary bytes. It requires no
+allocation, cleanup, or named scope; it may produce a lexical byte slice or be explicitly copied
+into owned growable bytes.
+_Avoid_: global byte buffer, immortal borrow
+
+**Compile-time constant**:
+An order-independent value produced by the closed bootstrap constant-expression subset: literals,
+constant references, finite aggregate construction and selection, checked scalar operations, and
+finite conditional matching. It cannot call functions, loop, recurse, allocate, borrow runtime
+storage, create raw pointers, fail, require services, perform I/O, or own cleanup.
+_Avoid_: compile-time program, const function
+
+**Numeric text conversion**:
+The locale-independent bootstrap scalar operations for checked ASCII integer parsing with explicit
+radix, correctly rounded floating parsing, integer append formatting, and deterministic shortest-
+round-trip or exact hexadecimal floating formatting. Invalid source text is ordinary result data;
+only destination growth may fail with out-of-memory.
+_Avoid_: printf, generic formatter
+
+**OS string**:
+A nominal platform-boundary value for command arguments and environment entries. Bootstrap Unix
+hosts preserve arbitrary non-NUL bytes; valid `String` and `Path` values convert without loss, while
+diagnostic rendering uses deterministic escaping rather than claiming the value is UTF-8.
+_Avoid_: process string, lossy argument
+
+**Host input**:
+The owned startup data constructed once by the native entry adapter: ordered OS-string arguments,
+an explicit OS-string environment map, and the resolved startup path. The compiler driver receives
+it as ordinary data; later code has no global argument, environment, or current-directory getters.
+_Avoid_: process environment, runtime context
+
+**Native entry adapter**:
+The typed root that constructs the bootstrap host providers and input, invokes the compiler driver,
+renders source rejection or operational failure, performs root cleanup, and maps success, source
+rejection, or operational failure to the platform exit convention. It retains no unresolved
+failure or requirement row and has an allocation-free emergency reporting path.
+_Avoid_: fallible main, runtime launcher
+
+**Path**:
+A nominal owned platform-native filesystem path, distinct from both `String` and source-module
+identity. Bootstrap Unix paths preserve arbitrary non-NUL bytes; rendering a path as text uses an
+explicit deterministic escape rather than silent replacement, and filesystem operations never
+consult a hidden current directory.
+_Avoid_: path string, implicit working-directory path
+
+**Path slice**:
+A lexical borrowed view of a `Path` used by path-component operations without claiming its bytes
+are UTF-8 text.
+_Avoid_: path substring
+
+**Path resolution**:
+Structured host facts for an explicit path: its exact absolute spelling, final entry kind, and
+whether resolution traversed a symbolic link. The file-system service reports these facts; callers
+such as the source loader impose their own canonicality and admissibility policy.
+_Avoid_: canonical source path, implicit realpath policy
+
+**Vector**:
+The bootstrap generic owned growable contiguous sequence. Shared or exclusive lexical borrows
+produce `Slice<T>` values; stacks use a vector directly, and compiler-specific queues pair one with
+a head index. Bootstrap has no general linked list, deque, rope, immutable sequence, or small-vector
+variant.
+_Avoid_: dynamic array, list
+
+**Hash map**:
+The sole general bootstrap associative collection: an owned mutable mapping whose keys satisfy an
+explicit type-owned hash-and-equality contract. Its iteration order has no semantic meaning;
+canonical compiler output uses canonical identities, deterministic worklists, or explicitly sorted
+keys rather than table order.
+_Avoid_: ordered hash map, dictionary
+
+**Hash key**:
+The single bootstrap generic-key interface, pairing equivalence with a 64-bit hash under the law
+that equivalent values produce equal hashes. A hash map receives one type-owned `HashKey` witness
+rather than independently selected hashing and equality semantics; equality-only algorithms accept
+an ordinary callback during bootstrap. Standard conformances cover booleans, integer scalars,
+strings, static strings, bytes, OS strings, and paths; floats, pointers, aggregates, and collections
+receive no automatic structural conformance.
+_Avoid_: independent hash witness, generic equality protocol
+
+**Hash seed**:
+A nominal copyable value supplied explicitly when constructing a hash map or set. Bootstrap
+provides a fixed deterministic seed for the compiler and conformance tests; there is no hidden
+global seed or entropy capability, and canonical products never depend on table iteration order.
+_Avoid_: randomized global hash, implicit seed
+
+**Hash set**:
+A nominal bootstrap set actor implemented over hash-map machinery. It expresses membership,
+reachability, and duplicate detection without exposing dummy map values; it shares `HashKey` and
+unordered iteration semantics with `HashMap`.
+_Avoid_: unit-valued map, ordered set
+
+**Canonical sort**:
+The bootstrap deterministic, in-place, allocation-free unstable sort over a vector and a pure
+infallible three-way comparator. Callers producing canonical output supply complete tie-breakers
+rather than depending on the relative order of values that compare equal.
+_Avoid_: stable-by-accident sort, hash-order canonicalization
+
+**Bootstrap traversal**:
+Collection traversal through lexical slices or actor-specific non-escaping visitor functions whose
+callbacks preserve failure and requirement rows. Hash visitors never promise canonical order;
+bootstrap has no general iterator protocol, lazy chain, generator, or heap-allocated traversal
+object.
+_Avoid_: iterator pipeline, enumerable collection
+
+**High-level intermediate representation (HIR)**:
+The compiler's generic-aware semantic representation after name, type, and function-contract
+elaboration. It uses canonical declaration and type identities, normalized contracts, core semantic
+operations, and source provenance; separate stable-ID-keyed tables retain partial semantic facts
+for tooling and incomplete programs.
+_Avoid_: annotated syntax tree, LLVM-like IR
+
+**Mid-level intermediate representation (MIR)**:
+The compiler's monomorphic, backend-neutral control-flow representation after ownership and scope
+checking. It makes moves, borrows, cleanup, typed-failure branches, service slots, witness calls,
+traps, and runtime operations explicit while retaining logical Silk types and source provenance;
+physical target layout and backend instructions remain outside it.
+_Avoid_: LLVM wrapper, source-module object model, WebAssembly stack IR
+
+**Backend service**:
+A nominal compiler capability that converts backend-neutral MIR plus an explicit target and codegen
+request into a relocatable object artifact. The selected implementation is provided lexically and
+owns its backend-specific lowering and object-emission path; callers do not inspect its identity or
+receive its private IR. Bootstrap provides an LLVM implementation, while native linking remains a
+separate compiler-driver responsibility.
+_Avoid_: LLVM switch, backend registry, codegen plugin lookup
+
+**Native linker service**:
+A nominal compiler capability that combines compatible relocatable object artifacts, the selected
+target runtime, and approved system libraries into a native executable at a durable destination.
+Bootstrap provides a pinned-Clang implementation; the compiler driver depends on the capability
+rather than constructing platform linker command lines itself.
+_Avoid_: shell link command, backend-owned linking, external build harness
+
+**Platform shim**:
+The private compiler-versioned C boundary beneath bootstrap host-service implementations. Its ABI
+uses fixed-width scalars, raw pointers with explicit lengths, transient integer handles, caller-
+owned output buffers, and numeric status codes; it never retains Silk pointers, returns C-owned
+objects, calls arbitrary Silk callbacks, unwinds across the boundary, or exposes a public FFI.
+Its surface is limited to aligned allocation, path and whole-file primitives, unique temporary
+directories, redirected synchronous child execution, standard-stream writes, monotonic time, and
+startup handoff; higher-level values and typed semantics remain in Silk. Each required host compiles
+a matching implementation of the same semantic ABI into a toolchain-bundled runtime object, with
+private compiler-versioned symbols and no independent compatibility promise.
+_Avoid_: C runtime library, platform SDK
+
+**File-system service**:
+The narrow bootstrap host capability for explicit path-based file, directory, and temporary-
+artifact operations. Public bootstrap I/O reads and writes whole-file `Bytes`; native handles,
+seeking, streaming, mapping, buffering, and locking remain private or deferred. The capability does
+not imply child-process execution, terminal output, a hidden working directory, or environment
+lookup.
+_Avoid_: platform service, ambient filesystem
+
+**File error**:
+The owned typed failure for a file-system operation, retaining its operation, explicit path, a
+portable semantic reason, and any native code as diagnostic detail. Bootstrap reasons distinguish
+not found, already exists, permission denied, invalid path, wrong type, not empty, no space, too
+large, unsupported, and otherwise unclassified platform failure; allocation exhaustion remains a
+separate failure.
+_Avoid_: errno failure, I/O exception
+
+**Temporary directory**:
+A unique directory resource created through the file-system service in a caller-provided named
+scope. It owns temporary child artifacts and removes them recursively through private infallible
+cleanup; retaining an artifact requires an explicit fallible copy or rename to a durable path.
+_Avoid_: temporary path, global temp file
+
+**Child-process service**:
+The narrow bootstrap host capability for synchronously executing a program from structured input
+and returning structured output. Requests provide an executable path, ordered OS-string arguments,
+optional explicit working directory, exact environment, and closed standard input; results own
+captured output and distinguish exit codes from signal termination. Nonzero exit is result data,
+while failure to start, wait, or capture is typed process failure. It never interprets a shell
+command string.
+_Avoid_: shell service, process manager
+
+**Standard-streams service**:
+The narrow bootstrap host capability for writing bytes to standard output and standard error. It
+offers only blocking all-or-failure byte writes, with broken pipes represented by typed stream
+failure. Formatting and diagnostic presentation happen above the boundary; the service does not
+imply terminal control, color detection, flushing, logging, or interactive input.
+_Avoid_: console service, terminal service
+
+**Monotonic-clock service**:
+The narrow bootstrap host capability for measuring elapsed compiler-phase time without exposing
+calendar time, time zones, sleeping, or scheduling. Reading produces an opaque copyable `Instant`
+infallibly; subtracting ordered instants produces a nominal nanosecond `Duration`.
+_Avoid_: wall clock, timer service
+
+**Phase encoder**:
+An optional observer that converts one canonical compiler-phase artifact, such as a syntax file,
+HIR, or MIR, into a requested textual or binary representation without changing that artifact or
+participating in the next phase. A phase has one semantic processor but may have multiple encoders;
+writing or transporting the encoded bytes is a separate boundary.
+_Avoid_: phase emitter, alternate phase processor, serialized pipeline handoff
+
+**Diagnostic renderer**:
+A pure compiler actor that converts sorted structured diagnostics plus their source files into a
+deterministic presentation. Bootstrap emits colorless UTF-8 bytes with escaped invalid source and
+path bytes; writing those bytes is a separate standard-streams operation, and future machine or
+styled formats remain alternate pure renderers over the same diagnostic data.
+_Avoid_: diagnostic service, printing diagnostic
+
 **Safe code**:
 Code outside an explicit unsafe boundary. Safe code cannot cause undefined behavior, use-after-free,
 double-free, invalid aliasing, or data races; its resources are released deterministically without
 requiring a tracing garbage collector.
 _Avoid_: managed code, garbage-collected code
+
+**Owned value**:
+A non-copyable value governed by affine single ownership: transferring it moves ownership and the
+previous binding becomes unusable. Its resources are reclaimed automatically when its owner ends
+or through an explicit consuming `drop`; ordinary code neither implicitly copies it nor manually
+frees it.
+_Avoid_: managed object, implicitly shared value
+
+**Whole-value move**:
+An ownership transfer that consumes an entire initialized value. Aggregates may be consumed through
+complete destructuring, but extracting from a retained aggregate must replace the field so safe
+code never contains a partially moved value.
+_Avoid_: partial move, moved-out field
+
+**Mutable owner**:
+An owned binding explicitly declared to permit mutation. Mutation requires an exclusive scoped
+borrow of a mutable owner; read-only borrowing and whole-value moves do not.
+_Avoid_: implicitly mutable binding, shared mutation
+
+**Copy value**:
+A value whose declaration is compiler-verified to contain only copyable fields and no cleanup
+behavior, so assignment duplicates it instead of moving it. Other duplication is an explicit
+actor-module operation whose function contract exposes requirements such as allocation.
+_Avoid_: implicitly cloned value, copyable owner
+
+**Automatic cleanup**:
+Compiler-invoked, consuming destruction when an owner ends or its maximum scope closes. Automatic
+cleanup is typed-infallible and runs in deterministic last-acquired, first-released order; cleanup
+whose failure matters is an explicit consuming operation.
+_Avoid_: fallible destructor, manual free
+
+**Scope finalizer**:
+A private compiler/runtime cleanup record attached to a named scope and invoked in last-acquired,
+first-released order if its resource has not already been consumed. A scope finalizer cannot fail,
+allocate, or require an ambient service; bootstrap safe code cannot register arbitrary finalizer
+callbacks.
+_Avoid_: user finalizer, cleanup callback
+
+**Scoped borrow**:
+A temporary, non-owning view of an owned value that cannot outlive its explicit lexical scope. A
+bootstrap-language borrow may be passed and captured only when it cannot be returned, stored in an
+owned value, or otherwise made to escape that scope; overlapping borrows are either all read-only
+or one exclusive mutable borrow.
+_Avoid_: reference, lifetime parameter
+
+**Named scope**:
+A first-class, lexically named maximum resource lifetime that is independent of allocation policy;
+ownership may end a resource earlier. Named scopes form an outlives hierarchy: the nearest scope is
+the default destination, targeting an ancestor is explicit, and values tied to a descendant cannot
+escape into an ancestor.
+_Avoid_: allocator lifetime, implicit scope
+
+**Scoped value**:
+A simple or composite value with one compiler-inferred maximum named scope. A composite is limited
+to the shortest-lived scope among its components; ordinary structs and unions neither own scopes
+nor expose independent per-field scope parameters.
+_Avoid_: scope-owning struct, per-field lifetime
+
+**Scope requirement**:
+A function-contract requirement for a particular named scope used by scoped operations in the
+function body. Functions do not create scopes implicitly: an unsatisfied scope requirement
+propagates whether or not the function returns a scoped value, while a locally created scope
+discharges that requirement.
+_Avoid_: function scope, implicit lifetime
 
 **Unsafe boundary**:
 A small, explicit region that may perform operations whose safety invariants the compiler cannot
@@ -43,48 +422,190 @@ _Avoid_: escape hatch, unchecked mode
 
 **Allocation requirement**:
 A typed capability in a function signature indicating that the function may perform dynamic
-allocation. Allocation requirements propagate through callers and are satisfied by an allocator
-provided through the service environment; ownership, lifetimes, and scopes determine reclamation
-without ordinary code calling `free`.
+allocation through a selected nominal service role. Allocation requirements propagate through
+callers and are satisfied by an allocator provided for that role; a function needing several
+policies simultaneously uses distinct roles such as durable and scratch. Ownership, lifetimes, and
+scopes determine reclamation without ordinary code calling `free`.
 _Avoid_: allocator parameter, manual allocation
+
+**Allocation metrics**:
+An infallible copyable snapshot required from every bootstrap allocator, reporting live logical
+bytes, reserved physical bytes, peak reserved bytes, cumulative requested bytes, and allocation
+count. Compiler phases observe snapshots directly; process peak RSS remains an external harness
+measurement.
+_Avoid_: allocator log, process memory usage
+
+**Layout**:
+A copyable validated allocation request containing a byte size and power-of-two alignment. Layout
+construction and repeated-element multiplication report invalid alignment or representational
+overflow as ordinary result data; zero-sized and supported over-aligned layouts are valid, and only
+storage exhaustion reaches the allocator failure channel.
+_Avoid_: size-and-align pair, unchecked layout
+
+**Dynamic allocation**:
+An owned allocation obtained by a fallible request for a byte size and alignment in a named
+destination scope. Its private release participates in automatic infallible cleanup; the allocator
+may reclaim storage when the owner ends or retain it until the scope closes. Bootstrap has no
+primitive resize, zero-fill, or user-callable release operation.
+_Avoid_: raw allocation, manual reallocation
+
+**Reclaim ticket**:
+Private, unforgeable metadata carried by a dynamic allocation that invokes the originating
+allocator's infallible release behavior. The allocator provider must outlive the allocation's named
+destination scope, so cleanup never depends on whichever allocator is currently provided.
+_Avoid_: captured allocator, ambient deallocation
+
+**System allocator**:
+The bootstrap root allocator backed by the platform allocation boundary. It may physically reclaim
+an allocation as soon as that allocation's owner ends.
+_Avoid_: global allocator
+
+**Arena allocator**:
+A bootstrap allocator that obtains storage from an outer allocator and retains that physical
+storage until a caller-provided named scope closes. It does not create or encapsulate its own scope.
+_Avoid_: arena-owned scope, implicit region
+
+**Out-of-memory failure**:
+The typed failure produced when an allocator cannot satisfy a dynamic allocation request. It
+propagates through ordinary function failure rows and may be handled at the native entry boundary;
+allocation exhaustion is not a trap, while automatic cleanup after it remains infallible.
+_Avoid_: allocation trap, OOM panic
 
 **Function contract**:
 The type-level description of what a function returns, which typed failures it may produce, and
-which service capabilities it requires. Failures and requirements propagate through callers; a
-pure function has neither.
+which service capabilities it requires; this complete contract is part of a function value's type.
+Calling a function executes it directly: success yields its return value, while unhandled failures
+and unsatisfied requirements propagate through callers. A function value retains its requirements
+and resolves them at invocation; it never captures currently provided services implicitly. A pure
+function has neither. Externally visible and recursive functions declare the complete contract;
+private non-recursive functions may infer it.
 _Avoid_: effect wrapper, hidden effects
 
 **Type row**:
-An unordered, duplicate-free set of nominal types used to describe the failures or service
-requirements in a function contract. A row is not an ordered list, tagged record, or key-value map.
-_Avoid_: type list, dependency map
+An unordered, duplicate-free set of nominal types. Failure rows use this form directly; requirement
+rows refine it by associating each nominal service capability and role pair with a shared or
+exclusive access mode. A row has no source-order identity or runtime lookup semantics.
+_Avoid_: type list, runtime dependency map
 
 **Requirement row**:
-A type row naming the service capabilities required by a function. It exists in the function
-contract at compile time and does not itself create a runtime union or require runtime tag checks.
+A compile-time row keyed by pairs of nominal service capability and nominal service role, with one
+shared or exclusive access mode per pair. Combining entries retains the strongest mode; the row does
+not itself create a runtime union or require runtime tag checks.
 _Avoid_: dependency union, service map
+
+**Contract-row parameter**:
+A compile-time generic parameter ranging only over failure rows or requirement rows so a
+higher-order function can preserve a callback's complete contract. It is inferred at calls,
+monomorphized, and confined to function-contract positions rather than general type-level code.
+_Avoid_: erased effect, runtime row, general row polymorphism
 
 **Failure row**:
 A type row naming the error types a function may fail with. When a failure occurs, its value has one
 active member and can be discriminated by that member's nominal type.
 _Avoid_: error list, error codes
 
+**Typed failure**:
+An abortive, non-resumable exit carrying a value whose nominal type belongs to the current function's
+failure row. It transfers control to the nearest matching handler or propagates through the caller,
+while automatic cleanup runs for exited ownership scopes. An explicit `fail` consumes and transfers
+ownership of its failure value. Generated code uses explicit discriminated success-or-failure
+returns and branches rather than native exception unwinding. Each exit carries one value; collecting
+multiple diagnostics is explicit ordinary data modeling rather than failure-channel behavior. Its
+payload obeys the same named-scope escape checks as a returned success value.
+_Avoid_: exception, resumable condition
+
+**Trap**:
+An unrecoverable bootstrap-runtime termination caused by conditions such as bounds violations,
+ordinary integer overflow, impossible compiler states, or violated unsafe contracts. Traps are not
+typed failures, cannot be handled, and do not promise stack unwinding or automatic cleanup.
+_Avoid_: catchable panic, implicit failure
+
+**Host adapter**:
+A typed platform boundary that constructs and provides approved root services, handles every
+remaining typed failure from the user entry function, and exposes a final native machine entry with
+empty failure and requirement rows.
+_Avoid_: ambient runtime, unchecked main requirements
+
+**Failure handler**:
+A lexical expression or block that handles selected nominal members of a failure row and produces a
+replacement result or control-flow exit. Handled members are removed from the surrounding failure
+row; unmatched members continue to propagate. A matching branch receives ownership of its failure
+value and uses the ordinary consuming or borrowing match rules. Only an unguarded exact-member or
+universal branch proves coverage; guarded branches do not remove a member from the residual row. Its
+success type is the normalized union of the protected expression and reachable recovery branches.
+_Avoid_: catch-all exception handler, resumption point
+
 **Type union**:
-A value type written as a set of alternatives such as `A | B`. A union value has one active nominal
-member and an implicit discriminant, allowing exhaustive matching without user-defined tag-field
-names.
+A normalized, unordered set of nominal alternatives such as `A | B`; order, nesting, and duplicate
+members do not affect its identity. A value has one active member and an implicit discriminant,
+allowing exhaustive matching without user-defined tag-field names.
 _Avoid_: tagged record, variant map
+
+**Finite type-set constraint**:
+A compile-time generic bound restricting a type parameter to a closed set of nominal types while
+preserving the concrete type at each monomorphized call. It is not a runtime union or permission to
+branch on type identity.
+_Avoid_: overload set, conditional type, runtime type switch
+
+**Interface conformance**:
+A declaration owned by a nominal type that maps interface operations to existing actor-module
+functions. It neither adds instance methods nor permits another module to attach retroactive
+behavior. A conforming operation may have smaller failure and requirement rows or weaker access
+needs than the interface operation, but never stronger ones.
+_Avoid_: extension implementation, orphan conformance, method injection
+
+**Raw pointer**:
+A typed, non-null, non-owning machine address whose existence alone grants no lifetime or access
+right. Holding one is inert in safe code; interpreting or manipulating its address requires an
+unsafe boundary.
+_Avoid_: reference, nullable pointer, owned pointer
+
+**Pattern condition**:
+An `if` condition that borrows a value, tests a refutable pattern, and binds the successful nominal
+member without treating the value as truthy.
+_Avoid_: truthiness test, implicit case check
 
 **Service capability**:
 A nominal compile-time interface named in a function's requirement row. Implementations declare
 conformance explicitly; provisioning supplies a runtime value through statically known arguments or
-environment slots rather than runtime tag lookup. Allocation is an ordinary service capability.
+environment slots rather than runtime tag lookup. A lexical environment has at most one current
+implementation of each capability-role pair. Capability-and-role-qualified operation calls use
+that implementation implicitly; allocation is an ordinary service capability.
 _Avoid_: global service, injected object
+
+**Service role**:
+A nominal compile-time marker distinguishing one statically known use of a service capability from
+another, such as primary and replica databases or durable and scratch allocators. Omitting the role
+selects the built-in `DefaultRole`; roles are never strings, runtime keys, or a substitute for an
+explicit router or pool when the instance set is dynamic.
+_Avoid_: service name, dependency key
 
 **Service implementation**:
 A runtime value satisfying a service capability's interface. Implementations are replaceable even
 though the required contract and its provision path are checked at compile time.
 _Avoid_: dependency tag, service singleton
+
+**Service witness**:
+A compiler-shaped table mapping one service capability's operations to functions for a conforming
+implementation type. Capability calls use statically known table offsets; the witness carries no
+runtime service tag and requires no registry lookup.
+_Avoid_: service tag, reflection table, global vtable registry
+
+**Service slot**:
+A hidden, non-owning pair of an implementation pointer and its service witness, passed as an
+individual function argument for each required capability-role pair in canonical row order. The
+role selects a slot at compile time and has no runtime lookup representation. A slot is not a
+heterogeneous environment object and cannot escape its provision lifetime.
+_Avoid_: service container, ambient context object
+
+**Service provision**:
+A lexical binding of one service implementation to a capability-role pair, discharging that pair
+from the enclosed computation's requirement row. Providing an already satisfied pair requires an
+explicit override; leaving the region restores the outer implementation. Provision may move and
+own an implementation for the region or borrow an existing one explicitly, following ordinary
+ownership, lifetime, aliasing, and automatic-cleanup rules. Multiple providers initialize in source
+order, may depend only on earlier or outer providers, and clean up in reverse order.
+_Avoid_: global registration, implicit override
 
 **Effect reference model**:
 The TypeScript Effect library as a semantic reference for how programs compose through typed

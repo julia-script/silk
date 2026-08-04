@@ -13,6 +13,7 @@
     "check": "biome check . && turbo run typecheck test && pnpm test:scripts",
     "check:write": "biome check --write .",
     "format": "biome format --write .",
+    "prototype:bootstrap-syntax": "node .scratch/bootstrap-language/prototype-syntax/tui.mjs",
     "release:candidate": "pnpm build && vitest run release-candidate/validate.test.ts",
     "release:publish": "changeset publish",
     "release:publish:ci": "node .github/scripts/publish-with-oidc-guard.mjs",

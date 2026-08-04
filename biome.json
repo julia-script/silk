@@ -1,7 +1,14 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.4/schema.json",
   "files": {
-    "includes": [".github/scripts/**", "packages/**", "release-candidate/**", "test/**", "*.json"]
+    "includes": [
+      ".github/scripts/**",
+      "examples/**",
+      "packages/**",
+      "release-candidate/**",
+      "test/**",
+      "*.json"
+    ]
   },
   "vcs": {
     "enabled": true,

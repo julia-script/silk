@@ -193,24 +193,25 @@ a return instruction. LLVM only receives the result of that translation: `ret i3
 Available now:
 
 1. **Meet Tiny and follow the compilation pipeline** — this lesson.
+2. [Understand LLVM's role and read basic IR](./02-understand-llvm.md).
+3. [Create the consumer project and render a module](./03-consumer-setup.md).
+4. [Tokenize Tiny source](./04-tokenize-source.md).
+5. [Build an AST and resolve arithmetic precedence](./05-precedence-ast.md).
+6. [Parse complete Tiny programs](./06-parse-programs.md).
+7. [Lower and run `fn main() = 42`](./07-first-native-program.md).
+8. [Lower arithmetic and learn SSA](./08-ssa-expressions.md).
+9. [Resolve functions and lower calls](./09-functions-calls.md).
+10. [Lower `if` with control flow and PHI nodes](./10-conditionals-phi.md).
+11. [Compile and run the complete language](./11-complete-compiler.md).
+12. [Diagnose failures and understand bitcode](./12-diagnostics-bitcode.md).
+13. [Extend Tiny with `%` and consolidate what you learned](./13-extend-remainder.md).
 
-Planned lessons:
-
-2. Understand LLVM's role and read basic IR.
-3. Create the consumer project and render a module.
-4. Tokenize Tiny source.
-5. Build an AST and resolve arithmetic precedence.
-6. Parse functions, calls, and conditionals.
-7. Lower and run `fn main() = 42`.
-8. Lower arithmetic and learn SSA.
-9. Resolve functions and lower calls.
-10. Lower `if` with control flow and PHI nodes.
-11. Compile and run the complete language.
-12. Diagnose failures and understand bitcode.
-13. Extend Tiny with `%` and consolidate what you learned.
+After the series, try the recursive factorial fixture, add another small operator, or build the
+optional compile-only playground described in Lesson 13. The written tutorial and compiler remain
+fully usable without a playground or server.
 
 If you already know how compiler frontends work and only want a focused package walkthrough, use
 [Build a tiny expression compiler](../tiny-expression-compiler.md). It starts directly at LLVM
 lowering.
 
-Next: **Lesson 2 — Understand LLVM's role and read basic IR** (planned).
+Next: [Lesson 2 — Understand LLVM's role and read basic IR](./02-understand-llvm.md).

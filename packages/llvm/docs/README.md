@@ -6,8 +6,8 @@ native LLVM libraries, or external executables at runtime.
 ## Start here
 
 New to compilers? Start with
-[Build Tiny, a compiled language](./tutorials/tiny-language/01-meet-tiny.md). The 13-lesson series
-begins with source text and will build a lexer, parser, AST, LLVM lowering pipeline, and native
+[Build Tiny, a compiled language](./tutorials/tiny-language/01-meet-tiny.md). The complete
+13-lesson series begins with source text and builds a lexer, parser, AST, LLVM lowering pipeline, and native
 executable from start to finish.
 
 Already familiar with compiler frontends? Follow

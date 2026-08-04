@@ -1,0 +1,35 @@
+{
+  "name": "@silk-effect/docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "typedoc && node scripts/label-api-folders.mjs",
+    "build": "pnpm api && next build",
+    "clean": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
+    "dev": "pnpm api && next dev",
+    "start": "next start",
+    "typecheck": "pnpm api && next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "fumadocs-core": "^16.14.0",
+    "fumadocs-mdx": "^15.2.2",
+    "fumadocs-ui": "^16.14.0",
+    "next": "16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@silk-effect/llvm": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "postcss": "^8.5.24",
+    "tailwindcss": "^4.3.3",
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.12.0",
+    "typescript": "5.9.3"
+  }
+}

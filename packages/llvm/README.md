@@ -90,6 +90,7 @@ const recovered = Type.integer(builder, 0).pipe(
 
 ## Documentation
 
+- [Build Tiny, a compiled language](./docs/tutorials/tiny-language/01-meet-tiny.md)
 - [Build a tiny expression compiler](./docs/tutorials/tiny-expression-compiler.md)
 - [How-to guides](./docs/README.md#solve-a-task)
 - [Actor reference](./docs/reference/actors.md)

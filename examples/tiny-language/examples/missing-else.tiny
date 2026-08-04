@@ -1,0 +1,1 @@
+fn main() = if 1 then 2

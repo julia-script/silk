@@ -8,3 +8,9 @@
 
 # Releases authenticate with short-lived OIDC credentials.
 .npmrc
+
+# Generated TSDoc API pages
+apps/docs/content/*-api/
+/apps/docs/.next/
+/apps/docs/next-env.d.ts
+/apps/docs/tsconfig.tsbuildinfo

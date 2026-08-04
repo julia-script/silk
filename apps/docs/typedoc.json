@@ -1,0 +1,27 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "plugin": ["typedoc-plugin-markdown"],
+  "entryPoints": ["../../packages/llvm/src/*.ts"],
+  "entryPointStrategy": "expand",
+  "exclude": [
+    "**/internal/**",
+    "**/*.test.ts",
+    "**/src/index.ts"
+  ],
+  "tsconfig": "../../packages/llvm/tsconfig.json",
+  "out": "content/llvm-api",
+  "readme": "none",
+  "githubPages": false,
+  "hideGenerator": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "sort": ["alphabetical"],
+  "outputFileStrategy": "modules",
+  "fileExtension": ".md",
+  "entryFileName": "index.md",
+  "hidePageHeader": true,
+  "hideBreadcrumbs": true,
+  "useCodeBlocks": true,
+  "expandObjects": true,
+  "parametersFormat": "table"
+}
