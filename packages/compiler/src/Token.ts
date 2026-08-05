@@ -10,6 +10,7 @@ export type TokenKind =
   | 'PubKeyword'
   | 'FnKeyword'
   | 'ReturnKeyword'
+  | 'ImportKeyword'
   | 'LeftParenthesis'
   | 'RightParenthesis'
   | 'LeftBrace'

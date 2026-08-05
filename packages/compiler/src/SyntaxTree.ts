@@ -6,6 +6,7 @@ import type * as Token from './Token.js'
 /** The complete node vocabulary for the first bootstrap grammar slice. */
 export type NodeKind =
   | 'SourceFile'
+  | 'ImportDeclaration'
   | 'FunctionDeclaration'
   | 'ParameterList'
   | 'ParameterDeclaration'

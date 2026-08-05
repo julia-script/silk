@@ -390,6 +390,20 @@ const parseParameterList = (initial: State): NodeResult => {
   })
 }
 
+const parseImportDeclaration = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'ImportKeyword', ['Identifier', 'PubKeyword', 'FnKeyword'])
+  const name = expect(keyword.state, 'Identifier', ['PubKeyword', 'ImportKeyword', 'FnKeyword'])
+  return Object.freeze({
+    state: name.state,
+    node: syntaxNode(name.state, 'ImportDeclaration', [...keyword.elements, ...name.elements]),
+  })
+}
+
+const parseTopLevelDeclaration = (state: State): NodeResult =>
+  nextSignificantKind(state) === 'ImportKeyword'
+    ? parseImportDeclaration(state)
+    : parseFunctionDeclaration(state)
+
 const parseFunctionDeclaration = (initial: State): NodeResult => {
   const pubKeyword = expect(initial, 'PubKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
   const fnKeyword = expect(pubKeyword.state, 'FnKeyword', ['Identifier', 'LeftParenthesis'])
@@ -423,13 +437,13 @@ export const parse = (lexical: Lexer.LexicalResult): SyntaxFile.SyntaxFile => {
     index: 0,
     diagnostics: Object.freeze([]),
   })
-  const first = parseFunctionDeclaration(initial)
+  const first = parseTopLevelDeclaration(initial)
   let state = first.state
   let declarations: ReadonlyArray<SyntaxTree.Node> = Object.freeze([first.node])
   let significantKind = nextSignificantKind(state)
 
   while (significantKind !== undefined && significantKind !== 'EndOfFile') {
-    const declaration = parseFunctionDeclaration(state)
+    const declaration = parseTopLevelDeclaration(state)
     declarations = Object.freeze([...declarations, declaration.node])
     state = declaration.state
     significantKind = nextSignificantKind(state)

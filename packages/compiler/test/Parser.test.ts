@@ -844,3 +844,61 @@ it('is deterministic across repeated fresh lexical results', () => {
   assert.deepEqual(first.lexicalDiagnostics, second.lexicalDiagnostics)
   assert.deepEqual(reconstructedBytes(first), reconstructedBytes(second))
 })
+
+it('parses import declarations before functions as separate lossless branches', () => {
+  const result = parseText(
+    'fixture://imports.silk',
+    'import math\nimport io\npub fn main() -> I32 { return 42 }',
+  )
+  const kinds = result.root.children.flatMap((element) =>
+    SyntaxTree.isNode(element) ? [element.kind] : [],
+  )
+
+  assert.deepEqual(kinds, ['ImportDeclaration', 'ImportDeclaration', 'FunctionDeclaration'])
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(
+    reconstructedBytes(result),
+    ascii('import math\nimport io\npub fn main() -> I32 { return 42 }'),
+  )
+})
+
+it('recovers a missing import name and keeps the following function parseable', () => {
+  const result = parseText(
+    'fixture://missing-import-name.silk',
+    'import\npub fn main() -> I32 { return 42 }',
+  )
+  const importNode = result.root.children.find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ImportDeclaration',
+  )
+  const functionNode = result.root.children.find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
+  )
+
+  assert.notStrictEqual(importNode, undefined)
+  assert.notStrictEqual(functionNode, undefined)
+  assert.strictEqual(
+    importNode?.children.some(
+      (element) => SyntaxTree.isMissingToken(element) && element.expected === 'Identifier',
+    ),
+    true,
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('keeps import as a keyword only when spelled completely', () => {
+  const lexical = Lexer.lex(
+    SourceFile.make('fixture://import-keyword.silk', ascii('import importer')),
+  )
+
+  assert.deepEqual(
+    lexical.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['ImportKeyword', 'Identifier', 'EndOfFile'],
+  )
+})

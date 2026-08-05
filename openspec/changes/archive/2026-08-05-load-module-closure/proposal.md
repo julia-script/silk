@@ -27,7 +27,9 @@ final surface form.
 
 ### Modified Capabilities
 
+- `bootstrap-lexer`: Recognize the provisional `import` keyword.
 - `bootstrap-syntax`: Parse the minimal import declaration.
+- `bootstrap-diagnostics`: The module phase joins the unified model and ordering.
 - `bootstrap-syntax-inspector`: Import-graph lab over the loaded closure.
 
 ## Impact

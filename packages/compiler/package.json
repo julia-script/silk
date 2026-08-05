@@ -57,6 +57,10 @@
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
     },
+    "./ModuleClosure": {
+      "types": "./dist/ModuleClosure.d.ts",
+      "import": "./dist/ModuleClosure.js"
+    },
     "./SyntaxFile": {
       "types": "./dist/SyntaxFile.d.ts",
       "import": "./dist/SyntaxFile.js"

@@ -70,6 +70,17 @@ const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): 
   ) {
     return 'ReturnKeyword'
   }
+  if (
+    end - start === 6 &&
+    bytes[start] === 0x69 &&
+    bytes[start + 1] === 0x6d &&
+    bytes[start + 2] === 0x70 &&
+    bytes[start + 3] === 0x6f &&
+    bytes[start + 4] === 0x72 &&
+    bytes[start + 5] === 0x74
+  ) {
+    return 'ImportKeyword'
+  }
   return 'Identifier'
 }
 

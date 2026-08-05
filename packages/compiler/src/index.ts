@@ -1,6 +1,7 @@
 export * as BootstrapEvaluation from './BootstrapEvaluation.js'
 export * as Diagnostic from './Diagnostic.js'
 export * as Lexer from './Lexer.js'
+export * as ModuleClosure from './ModuleClosure.js'
 export * as Parser from './Parser.js'
 export * as SemanticAnalysis from './SemanticAnalysis.js'
 export * as SourceFile from './SourceFile.js'
