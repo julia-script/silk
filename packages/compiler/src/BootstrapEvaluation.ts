@@ -19,7 +19,7 @@ export interface CallTraceEvent {
   readonly _tag: 'Call'
   readonly caller: SemanticAnalysis.DeclarationFact
   readonly target: SemanticAnalysis.DeclarationFact
-  readonly call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>
+  readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -47,7 +47,7 @@ export interface ParameterReadTraceEvent {
 export interface ReturnTraceEvent {
   readonly _tag: 'Return'
   readonly declaration: SemanticAnalysis.DeclarationFact
-  readonly expression: SemanticAnalysis.ReturnedExpressionFact
+  readonly expression: SemanticAnalysis.ExpressionFact
   readonly value: I32Value
   readonly span: SourceSpan.SourceSpan
 }
@@ -118,23 +118,23 @@ export type BlockedReason =
   | {
       readonly _tag: 'MissingCallTarget'
       readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>
+      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
     }
   | {
       readonly _tag: 'AmbiguousCallTarget'
       readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>
+      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
     }
   | {
       readonly _tag: 'UnavailableCallTarget'
       readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>
+      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
     }
   | {
       readonly _tag: 'ArityMismatch'
       readonly caller: SemanticAnalysis.DeclarationFact
       readonly target: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>
+      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
       readonly expectedCount: number
       readonly actualCount: number
     }
@@ -142,8 +142,16 @@ export type BlockedReason =
       readonly _tag: 'UnavailableCallContract'
       readonly caller: SemanticAnalysis.DeclarationFact
       readonly target: SemanticAnalysis.DeclarationFact | undefined
-      readonly call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>
+      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
       readonly reason: SemanticAnalysis.UnavailableCallContractReason
+    }
+  | {
+      readonly _tag: 'UnsupportedNestedExpression'
+      readonly caller: SemanticAnalysis.DeclarationFact
+      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly argument: SemanticAnalysis.ArgumentFact
+      readonly expression: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly expressionSpan: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'UnavailableFunction'
@@ -152,10 +160,7 @@ export type BlockedReason =
   | {
       readonly _tag: 'RecursiveCycle'
       readonly cycle: ReadonlyArray<SemanticAnalysis.DeclarationFact>
-      readonly closingCall: Extract<
-        SemanticAnalysis.ReturnedExpressionFact,
-        { readonly _tag: 'Call' }
-      >
+      readonly closingCall: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
       readonly closingCallSpan: SourceSpan.SourceSpan
     }
 
@@ -260,21 +265,21 @@ const readParameter = (
 
 const evaluateArgument = (
   declaration: SemanticAnalysis.DeclarationFact,
-  target: SemanticAnalysis.DeclarationFact,
-  call: Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }>,
+  call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>,
   argument: SemanticAnalysis.ArgumentFact,
   frame: Frame,
   trace: Array<TraceEvent>,
 ): Step => {
   const expression = argument.expression
   if (expression._tag === 'Identifier') return readParameter(declaration, expression, frame, trace)
-  if (expression._tag === 'UnavailableNestedCall') {
+  if (expression._tag === 'Call') {
     return blockedStep({
-      _tag: 'UnavailableCallContract',
+      _tag: 'UnsupportedNestedExpression',
       caller: declaration,
-      target,
       call,
-      reason: Object.freeze({ _tag: 'UnavailableNestedArgument', argument }),
+      argument,
+      expression,
+      expressionSpan: expression.syntax.span,
     })
   }
   if (expression.integer._tag !== 'Available') {
@@ -361,7 +366,7 @@ const evaluateFunction = (
           reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call.syntax }),
         })
       }
-      const argumentResult = evaluateArgument(declaration, target, call, argument, frame, trace)
+      const argumentResult = evaluateArgument(declaration, call, argument, frame, trace)
       if (argumentResult._tag === 'Blocked') return argumentResult
       const binding = Object.freeze({ parameter: mapping.parameter, value: argumentResult.value })
       bindings.push(binding)

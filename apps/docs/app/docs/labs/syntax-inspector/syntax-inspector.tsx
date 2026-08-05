@@ -137,14 +137,24 @@ pub fn other() -> I32 { return value }`,
 pub fn forward(value: I32) -> I32 { return identity(value) }`,
   },
   {
-    label: 'Nested call · syntax only',
+    label: 'Nested call · analyzed',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`,
   },
   {
+    label: 'Nested call · unresolved',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(missing(42)) }`,
+  },
+  {
+    label: 'Nested call · wrong arity',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity()) }`,
+  },
+  {
     label: 'Damaged nested call',
     source: `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42) }`,
+pub fn main() -> I32 { return identity(identity(@)) }`,
   },
   {
     label: 'Missing parameter type',
@@ -285,7 +295,7 @@ function DiagnosticList({
 }
 
 type CallReturnedExpression = Extract<
-  SemanticAnalysis.ReturnedExpressionFact,
+  SemanticAnalysis.ExpressionFact,
   { readonly _tag: 'Call' }
 >
 
@@ -473,9 +483,11 @@ function ParameterFacts({ declaration }: { readonly declaration: SemanticAnalysi
 function CallRelationship({
   caller,
   returned,
+  nested = false,
 }: {
   readonly caller: SemanticAnalysis.DeclarationFact
   readonly returned: CallReturnedExpression
+  readonly nested?: boolean
 }) {
   const reference = returned.reference
   const callerName = declarationLabel(caller)
@@ -490,9 +502,7 @@ function CallRelationship({
         ? 'Call syntax is incomplete.'
         : returned.contract.reason._tag === 'UnavailableCallTarget'
           ? 'A unique call target is unavailable.'
-          : returned.contract.reason._tag === 'UnavailableNestedArgument'
-            ? 'A nested call argument is preserved but not semantically analyzed yet.'
-            : 'A mapped argument or parameter type is unavailable.'
+          : 'A mapped argument or parameter type is unavailable.'
 
   return (
     <section
@@ -500,7 +510,7 @@ function CallRelationship({
       aria-label={`Call relationship from ${callerName} to ${targetName}`}
     >
       <div className={styles.relationshipHeading}>
-        <span>Semantic resolution</span>
+        <span>{nested ? 'Nested resolution' : 'Semantic resolution'}</span>
         <strong>
           {callerName} <i aria-hidden="true">→</i> {targetName}
         </strong>
@@ -565,8 +575,10 @@ function CallRelationship({
                   ? expression.integer._tag === 'Available'
                     ? String(expression.integer.value)
                     : expression.integer._tag
-                  : expression._tag === 'UnavailableNestedCall'
-                    ? 'Nested call · not analyzed'
+                  : expression._tag === 'Call'
+                    ? expression.reference._tag === 'Unavailable'
+                      ? 'Unavailable nested call'
+                      : `${expression.reference.spelling}(…)`
                     : expression.reference._tag === 'Unavailable'
                       ? 'Unavailable reference'
                       : expression.reference.spelling
@@ -591,6 +603,9 @@ function CallRelationship({
                       </code>
                     )}
                   </div>
+                  {expression._tag === 'Call' ? (
+                    <CallRelationship caller={caller} returned={expression} nested />
+                  ) : null}
                 </li>
               )
             })}
@@ -782,6 +797,8 @@ const blockedSummary = (reason: BootstrapEvaluation.BlockedReason): string => {
       return `The reachable call has ${reason.actualCount} arguments but requires ${reason.expectedCount}.`
     case 'UnavailableCallContract':
       return `The reachable call contract is unavailable: ${reason.reason._tag}.`
+    case 'UnsupportedNestedExpression':
+      return `Nested call evaluation is not available yet at [${reason.expressionSpan.start}, ${reason.expressionSpan.end}).`
     case 'UnavailableFunction':
       return `No body fact is available for ${declarationLabel(reason.declaration)}.`
     case 'RecursiveCycle':
@@ -931,16 +948,17 @@ function SemanticFacts({
           const returnType = declaration.returnType
           const returned = fact.returnedExpression
           const nameLabel = name._tag === 'Present' ? name.spelling : 'Unavailable name'
-          const identifierExpressions: ReadonlyArray<IdentifierExpression> =
-            returned._tag === 'Identifier'
-              ? [returned]
-              : returned._tag === 'Call'
-                ? returned.arguments
-                    .map((argument) => argument.expression)
-                    .filter(
-                    (argument): argument is IdentifierExpression => argument._tag === 'Identifier',
+          const collectIdentifiers = (
+            expression: SemanticAnalysis.ExpressionFact,
+          ): ReadonlyArray<IdentifierExpression> =>
+            expression._tag === 'Identifier'
+              ? [expression]
+              : expression._tag === 'Call'
+                ? expression.arguments.flatMap((argument) =>
+                    collectIdentifiers(argument.expression),
                   )
                 : []
+          const identifierExpressions = collectIdentifiers(returned)
 
           return (
             <article
@@ -1066,11 +1084,12 @@ function SemanticFacts({
       </div>
 
       <p className={styles.boundaryNote}>
-        Parameters now have function-local identities, declared types, closed lookup, and exact
-        reference links. Calls now expose ordered argument identities, positional mappings, and a
-        contract outcome independently of their return compatibility. These arrows record semantic
-        relationships, not execution order. Conversions, general scope graphs, semantic AST, HIR,
-        and code generation do not exist yet.
+        Parameters have function-local identities, declared types, closed lookup, and exact
+        reference links. Calls now expose recursive expression facts, ordered argument identities,
+        positional mappings, contracts, and exact provenance at every parsed depth. Evaluation of a
+        reachable nested call is deliberately blocked until the next milestone. These arrows record
+        semantic relationships, not execution order. Conversions, general scope graphs, semantic
+        AST, HIR, and code generation do not exist yet.
       </p>
     </section>
   )

@@ -73,7 +73,11 @@ const argumentLabel = (argument: SemanticAnalysis.ArgumentFact): string => {
       ? 'unavailable reference'
       : expression.reference.spelling
   }
-  if (expression._tag === 'UnavailableNestedCall') return 'nested call (not analyzed)'
+  if (expression._tag === 'Call') {
+    return expression.reference._tag === 'Unavailable'
+      ? 'unavailable call'
+      : `${expression.reference.spelling}(…)`
+  }
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'

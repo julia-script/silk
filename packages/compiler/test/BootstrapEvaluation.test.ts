@@ -79,6 +79,49 @@ pub fn main() -> I32 { return second(10, 42) }`,
   )
 })
 
+it('blocks at a reachable analyzed nested expression with exact provenance', () => {
+  const outcome = evaluate(
+    'fixture://evaluation-nested.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'UnsupportedNestedExpression')
+  if (outcome.reason._tag !== 'UnsupportedNestedExpression') return
+  assert.strictEqual(outcome.reason.expression._tag, 'Call')
+  assert.strictEqual(outcome.reason.argument.expression, outcome.reason.expression)
+  assert.deepEqual(outcome.reason.expressionSpan, outcome.reason.expression.syntax.span)
+  assert.deepEqual(outcome.reason.argument.id.callSpan, outcome.reason.call.syntax.span)
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    ['Entry', 'Call'],
+  )
+})
+
+it('ignores nested expressions outside the reachable declaration graph', () => {
+  const outcome = evaluate(
+    'fixture://evaluation-unreachable-nested.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn unused() -> I32 { return identity(identity(1)) }
+pub fn main() -> I32 { return 42 }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Completed')
+  if (outcome._tag !== 'Completed') return
+  assert.strictEqual(outcome.result.value, 42)
+})
+
+it('repeats the transitional nested-expression outcome deterministically', () => {
+  const source = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
+  const first = evaluate('fixture://evaluation-repeat-nested.silk', source)
+  const second = evaluate('fixture://evaluation-repeat-nested.silk', source)
+
+  assert.deepEqual(first, second)
+})
+
 it('returns precise closed entry reasons', () => {
   const missing = evaluate(
     'fixture://evaluation-missing-entry.silk',

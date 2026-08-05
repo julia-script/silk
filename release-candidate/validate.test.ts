@@ -339,6 +339,8 @@ const visitNested = (element) => {
 visitNested(nestedParse.root);
 const nestedAnalysis = semanticModule.analyze(nestedParse);
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
+const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
+const nestedEvaluation = evaluationModule.evaluate(nestedAnalysis);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -433,12 +435,16 @@ console.log(
         nestedOuter?._tag === 'Call'
           ? nestedOuter.arguments[0]?.expression._tag
           : null,
-      contractReason:
-        nestedOuter?._tag === 'Call' && nestedOuter.contract._tag === 'Unavailable'
-          ? nestedOuter.contract.reason._tag
-          : null,
+      innerReference: nestedInner?._tag === 'Call' ? nestedInner.reference._tag : null,
+      innerArgumentTag:
+        nestedInner?._tag === 'Call' ? nestedInner.arguments[0]?.expression._tag : null,
+      innerContract: nestedInner?._tag === 'Call' ? nestedInner.contract._tag : null,
+      outerContract: nestedOuter?._tag === 'Call' ? nestedOuter.contract._tag : null,
       mappingCount: nestedOuter?._tag === 'Call' ? nestedOuter.mappings.length : null,
       type: nestedOuter?._tag === 'Call' ? nestedOuter.type : null,
+      evaluationReason:
+        nestedEvaluation._tag === 'Blocked' ? nestedEvaluation.reason._tag : null,
+      evaluationTrace: nestedEvaluation.trace.map((event) => event._tag),
     },
     parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code),
   }),
@@ -524,10 +530,15 @@ console.log(
       callCount: 2,
       parserDiagnostics: [],
       semanticDiagnostics: [],
-      argumentTag: 'UnavailableNestedCall',
-      contractReason: 'UnavailableNestedArgument',
-      mappingCount: 0,
-      type: { _tag: 'Unavailable' },
+      argumentTag: 'Call',
+      innerReference: 'Resolved',
+      innerArgumentTag: 'Integer',
+      innerContract: 'Compatible',
+      outerContract: 'Compatible',
+      mappingCount: 1,
+      type: { _tag: 'Available', type: 'I32' },
+      evaluationReason: 'UnsupportedNestedExpression',
+      evaluationTrace: ['Entry', 'Call'],
     })
     expect(api.parserDiagnostics).toEqual([])
   } finally {

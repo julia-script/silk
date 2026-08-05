@@ -81,13 +81,29 @@ describe('EvaluationPanel', () => {
     expect(markup).toContain('Recursive cycle: main → main.')
     expect(markup).toContain('main calls main')
   })
+
+  it('renders the temporary nested-expression boundary with its trace prefix', () => {
+    const outcome = BootstrapEvaluation.evaluate(
+      analyze(`pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`),
+    )
+    const markup = renderToStaticMarkup(
+      <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
+    )
+
+    expect(markup).toContain('UnsupportedNestedExpression')
+    expect(markup).toContain('Nested call evaluation is not available yet at')
+    expect(markup).toContain('main calls identity')
+  })
 })
 
 describe('SyntaxInspector', () => {
-  it('offers valid and damaged nested-call presets without advertising semantic completion', () => {
+  it('offers recursive semantic presets without advertising later compiler phases', () => {
     const markup = renderToStaticMarkup(<SyntaxInspector />)
 
-    expect(markup).toContain('Nested call · syntax only')
+    expect(markup).toContain('Nested call · analyzed')
+    expect(markup).toContain('Nested call · unresolved')
+    expect(markup).toContain('Nested call · wrong arity')
     expect(markup).toContain('Damaged nested call')
     expect(markup).toContain('semantic AST, HIR, and code generation do not exist yet')
   })

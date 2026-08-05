@@ -150,11 +150,13 @@ target resolution, or a mapped type is unavailable. Partial mappings remain visi
 mismatches. `SEM0007` reports the expected and actual counts at the complete call span without
 changing the call's expression type or the caller's return compatibility.
 
-Nested call arguments are the intentional boundary of this parser increment. Analysis retains each
-one as an `UnavailableNestedCall` argument expression with its exact nested call syntax and makes the
-enclosing call contract and expression type unavailable. It does not resolve the nested target,
-invent a positional mapping, or emit a semantic diagnostic for that deferred work. Recursive
-semantic call facts arrive in the next compiler increment.
+`ExpressionFact` is recursive: integer literals, parameter references, and calls use the same
+discriminated fact shape at returned and argument positions. Each nested call retains its own span,
+target resolution, ordered argument identities, positional mappings, contract, and result type.
+Analysis proceeds from nested leaves outward, so an unavailable inner type stops only the dependent
+outer contract while all known inner facts remain inspectable. Argument identities combine the
+enclosing function, owning call span, and concrete ordinal without introducing cyclic object
+references.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
@@ -168,7 +170,10 @@ selects one zero-parameter `main: I32`, follows only reachable decimal literals,
 reads, and compatible calls, and returns either an exact `Completed` value or closed `Blocked`
 reason. Its immutable trace records entry, call, positional binding, parameter read, and return
 events with existing semantic provenance. Unreachable broken declarations do not block a valid
-entry path, and direct or mutual recursion becomes a bounded `RecursiveCycle` outcome.
+entry path, and direct or mutual recursion becomes a bounded `RecursiveCycle` outcome. Recursive
+semantic expressions are deliberately one increment ahead of execution: reaching a nested call
+argument currently returns `UnsupportedNestedExpression` with its exact argument identity, call
+span, and deterministic trace prefix. Unreachable nested syntax is ignored.
 
 This bootstrap evaluator proves that the frontend facts compose into one source-to-result vertical
 slice. It is not lowering, bytecode, LLVM, native compilation, a process runtime, a general
