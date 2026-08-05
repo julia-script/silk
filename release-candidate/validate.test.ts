@@ -227,6 +227,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './BootstrapEvaluation',
       './DeclarationIndex',
       './Diagnostic',
+      './Driver',
       './Elaboration',
       './Hir',
       './Instances',
@@ -392,7 +393,7 @@ console.log(
     root: Object.keys(api).sort(),
     rootNamespaces: Object.fromEntries(
       paths
-        .filter((path) => path !== './NativeToolchain')
+        .filter((path) => path !== './NativeToolchain' && path !== './Driver')
         .map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
     ),
     deep: Object.fromEntries(
@@ -530,7 +531,8 @@ console.log(
       readonly [string, ReadonlyArray<string>]
     >) {
       expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
-      if (path !== './NativeToolchain') expect(api.rootNamespaces[path]).toEqual(exports)
+      if (path !== './NativeToolchain' && path !== './Driver')
+        expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
     expect(api.deep['./BootstrapEvaluation']).toContain('evaluate')

@@ -1,13 +1,20 @@
 # Compiler realignment — spike → pinned pipeline
 
+> **Status: complete (2026-08-05).** All 13 proposals are implemented and archived. The spine
+> runs end to end — compilation request → closure → HIR → ownership → instances → MIR → LLVM
+> bitcode → pinned Clang object → linked native executable — with the differential harness and
+> byte-identical determinism gates running continuously and every phase visualizable in its lab.
+> **The grammar freeze is lifted**: language features are now ordinary proposals that flow
+> through every phase and appear in every lab.
+
 Move `packages/compiler` from the spike shape (lexer → parser → semantic-analysis monolith →
 tree-walking evaluator, single file) to the pipeline pinned in
 [issue 06](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md).
 Nothing in the spike is sacred; the fact-table idiom, lossless syntax, and the inspector
 projection pattern survive.
 
-**Strategy: vertical slice first.** The grammar slice stays frozen while the spine is driven
-down to a native executable. Grammar widening unfreezes only after proposal 13.
+**Strategy: vertical slice first.** The grammar slice stayed frozen while the spine was driven
+down to a native executable. Proposal 13 landed; grammar widening is unfrozen.
 
 ## Definition of done (every phase proposal)
 
@@ -124,4 +131,4 @@ Proposals are written as openspec changes:
 - [x] 10 — [retarget-evaluator-to-mir](../openspec/changes/archive/2026-08-05-retarget-evaluator-to-mir/proposal.md)
 - [x] 11 — [establish-backend-service](../openspec/changes/archive/2026-08-05-establish-backend-service/proposal.md)
 - [x] 12 — [orchestrate-native-toolchain](../openspec/changes/archive/2026-08-05-orchestrate-native-toolchain/proposal.md)
-- [ ] 13 — [accept-end-to-end-pipeline](../openspec/changes/accept-end-to-end-pipeline/proposal.md)
+- [x] 13 — [accept-end-to-end-pipeline](../openspec/changes/archive/2026-08-05-accept-end-to-end-pipeline/proposal.md)

@@ -17,7 +17,11 @@ pub fn main() -> I32 { return identity(identity(42)) }`
 
 const bitcodeFor = (profile: ToolchainPlan.OptimizationProfile): Uint8Array => {
   const snapshot = Analysis.ofSource('memory://native.silk', ascii(nestedSource))
-  return Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) }).bitcode
+  return Analysis.codegen(
+    snapshot,
+    { mode: ToolchainPlan.codegenModeFor(profile) },
+    NativeToolchain.hostLayout(),
+  ).bitcode
 }
 
 it('plans fixed profile arguments and nothing else varies', () => {

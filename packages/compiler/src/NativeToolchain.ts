@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { arch, platform, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type * as Mir from './Mir.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
 
 /**
@@ -10,6 +11,22 @@ import * as ToolchainPlan from './ToolchainPlan.js'
  * `ClangLinker` implementation. Node-only by construction — reachable as a deep import so the
  * package root stays browser-safe. Failures are data with full command provenance.
  */
+
+/** Derives the target layout for the machine running the driver. */
+export const hostLayout = (): Mir.TargetLayout => {
+  const cpu = arch() === 'arm64' ? 'arm64' : 'x86_64'
+  const triple =
+    platform() === 'darwin'
+      ? `${cpu === 'arm64' ? 'arm64' : 'x86_64'}-apple-darwin`
+      : `${cpu === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`
+  return Object.freeze({
+    _tag: 'TargetLayout',
+    triple,
+    pointerWidth: 64,
+    endianness: 'little',
+    i32: Object.freeze({ size: 4, alignment: 4 }),
+  })
+}
 
 /** The caller-pinned external toolchain. No PATH discovery is performed. */
 export interface Toolchain {
