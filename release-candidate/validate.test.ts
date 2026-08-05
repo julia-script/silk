@@ -234,6 +234,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Lower',
       './Mir',
       './ModuleClosure',
+      './NativeToolchain',
       './Ownership',
       './Parser',
       './SourceFile',
@@ -241,6 +242,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SyntaxFile',
       './SyntaxTree',
       './Token',
+      './ToolchainPlan',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
@@ -389,7 +391,9 @@ console.log(
   JSON.stringify({
     root: Object.keys(api).sort(),
     rootNamespaces: Object.fromEntries(
-      paths.map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
+      paths
+        .filter((path) => path !== './NativeToolchain')
+        .map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
     ),
     deep: Object.fromEntries(
       paths.map((path, index) => [path, Object.keys(modules[index]).sort()]),
@@ -520,12 +524,13 @@ console.log(
       'SyntaxFile',
       'SyntaxTree',
       'Token',
+      'ToolchainPlan',
     ])
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
       readonly [string, ReadonlyArray<string>]
     >) {
       expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
-      expect(api.rootNamespaces[path]).toEqual(exports)
+      if (path !== './NativeToolchain') expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
     expect(api.deep['./BootstrapEvaluation']).toContain('evaluate')

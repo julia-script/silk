@@ -45,6 +45,10 @@
       "types": "./dist/BootstrapEvaluation.d.ts",
       "import": "./dist/BootstrapEvaluation.js"
     },
+    "./NativeToolchain": {
+      "types": "./dist/NativeToolchain.d.ts",
+      "import": "./dist/NativeToolchain.js"
+    },
     "./SourceFile": {
       "types": "./dist/SourceFile.d.ts",
       "import": "./dist/SourceFile.js"
@@ -108,6 +112,10 @@
     "./Hir": {
       "types": "./dist/Hir.d.ts",
       "import": "./dist/Hir.js"
+    },
+    "./ToolchainPlan": {
+      "types": "./dist/ToolchainPlan.d.ts",
+      "import": "./dist/ToolchainPlan.js"
     }
   },
   "scripts": {
