@@ -81,3 +81,31 @@ it('assigns identity ordinals among equal phase, code, and span', () => {
   assert.strictEqual(Diagnostic.identityEquals(identities[0]!, identities[2]!), false)
   assert.isBelow(Diagnostic.compareIdentity(identities[0]!, identities[2]!), 0)
 })
+
+it('merges ownership diagnostics after the semantic phase at the same span', () => {
+  const span = spanAt(10, 12)
+  const merged = Diagnostic.merge(
+    [Diagnostic.useAfterMove('value', spanAt(2, 7), span)],
+    [Diagnostic.unknownFunction('missing', span)],
+  )
+
+  assert.deepEqual(
+    merged.map((diagnostic) => ({ phase: diagnostic.phase, code: diagnostic.code })),
+    [
+      { phase: 'ownership', code: 'OWN0001' },
+      { phase: 'semantic', code: 'SEM0004' },
+    ],
+  )
+  const ownership = merged.at(0)
+  assert.strictEqual(ownership?.relatedSpans?.at(0)?.label, 'moved here')
+  assert.strictEqual(ownership?.reason._tag, 'UseAfterMove')
+})
+
+it('carries the original declaration span on a rebinding diagnostic', () => {
+  const diagnostic = Diagnostic.rebindingName('value', spanAt(2, 7), spanAt(10, 15))
+
+  assert.strictEqual(diagnostic.phase, 'semantic')
+  assert.strictEqual(diagnostic.code, 'SEM0008')
+  assert.strictEqual(diagnostic.relatedSpans?.at(0)?.label, 'first declared here')
+  assert.strictEqual(diagnostic.relatedSpans?.at(0)?.span.start, 2)
+})

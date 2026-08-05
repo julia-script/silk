@@ -902,3 +902,160 @@ it('keeps import as a keyword only when spelled completely', () => {
     ['ImportKeyword', 'Identifier', 'EndOfFile'],
   )
 })
+
+it('parses a binding sequence as ordered statement branches', () => {
+  const result = parseText(
+    'fixture://bindings.silk',
+    'pub fn main() -> I32 { let value = 42 return value }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  assert.notStrictEqual(block, undefined)
+  if (block === undefined) return
+
+  const statements = block.children.filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(statements, ['BindingStatement', 'ReturnStatement'])
+  const binding = SyntaxTree.directNode(block, 'BindingStatement')
+  assert.notStrictEqual(binding, undefined)
+  if (binding === undefined) return
+  assert.strictEqual(directTokenText(result, binding, 'Identifier'), 'value')
+  assert.notStrictEqual(SyntaxTree.directToken(binding, 'Equals'), undefined)
+  assert.notStrictEqual(SyntaxTree.directNode(binding, 'IntegerLiteralExpression'), undefined)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(
+    reconstructedBytes(result),
+    ascii('pub fn main() -> I32 { let value = 42 return value }'),
+  )
+})
+
+it('parses a move operand with its keyword and name', () => {
+  const result = parseText(
+    'fixture://move.silk',
+    'pub fn main() -> I32 { let value = 42 return move value }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const returnStatement =
+    block === undefined ? undefined : SyntaxTree.directNode(block, 'ReturnStatement')
+  const move =
+    returnStatement === undefined
+      ? undefined
+      : SyntaxTree.directNode(returnStatement, 'MoveExpression')
+
+  assert.notStrictEqual(move, undefined)
+  if (move === undefined) return
+  assert.notStrictEqual(SyntaxTree.directToken(move, 'MoveKeyword'), undefined)
+  assert.strictEqual(directTokenText(result, move, 'Identifier'), 'value')
+  assert.deepEqual(result.parserDiagnostics, [])
+})
+
+it('recovers a missing initializer at the return boundary', () => {
+  const result = parseText(
+    'fixture://missing-initializer.silk',
+    'pub fn main() -> I32 { let value = return 42 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const binding = block === undefined ? undefined : SyntaxTree.directNode(block, 'BindingStatement')
+
+  assert.notStrictEqual(binding, undefined)
+  if (binding === undefined) return
+  assert.strictEqual(missingLeaves(binding).length, 1)
+  const returnStatement =
+    block === undefined ? undefined : SyntaxTree.directNode(block, 'ReturnStatement')
+  assert.notStrictEqual(returnStatement, undefined)
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers a missing binding name before the equals token', () => {
+  const result = parseText(
+    'fixture://missing-binding-name.silk',
+    'pub fn main() -> I32 { let = 42 return 0 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const binding = block === undefined ? undefined : SyntaxTree.directNode(block, 'BindingStatement')
+
+  assert.notStrictEqual(binding, undefined)
+  if (binding === undefined) return
+  assert.strictEqual(
+    binding.children.some(
+      (element) => SyntaxTree.isMissingToken(element) && element.expected === 'Identifier',
+    ),
+    true,
+  )
+  const statements = (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(statements, ['BindingStatement', 'ReturnStatement'])
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers a block with only bindings by inserting the missing return', () => {
+  const result = parseText(
+    'fixture://missing-return.silk',
+    'pub fn main() -> I32 { let value = 42 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+
+  assert.notStrictEqual(block, undefined)
+  if (block === undefined) return
+  const statements = block.children.filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(statements, ['BindingStatement', 'ReturnStatement'])
+  const returnStatement = SyntaxTree.directNode(block, 'ReturnStatement')
+  assert.strictEqual(
+    returnStatement?.children.some(
+      (element) => SyntaxTree.isMissingToken(element) && element.expected === 'ReturnKeyword',
+    ),
+    true,
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers a bare move with a missing identifier', () => {
+  const result = parseText(
+    'fixture://bare-move.silk',
+    'pub fn main() -> I32 { let value = move return 0 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const binding = block === undefined ? undefined : SyntaxTree.directNode(block, 'BindingStatement')
+  const move = binding === undefined ? undefined : SyntaxTree.directNode(binding, 'MoveExpression')
+
+  assert.notStrictEqual(move, undefined)
+  if (move === undefined) return
+  assert.strictEqual(
+    move.children.some(
+      (element) => SyntaxTree.isMissingToken(element) && element.expected === 'Identifier',
+    ),
+    true,
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('keeps statements after the return statement as concrete branches', () => {
+  const result = parseText(
+    'fixture://trailing-statement.silk',
+    'pub fn main() -> I32 { return 0 let late = 1 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+
+  assert.notStrictEqual(block, undefined)
+  if (block === undefined) return
+  const statements = block.children.filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(statements, ['ReturnStatement', 'BindingStatement'])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(
+    reconstructedBytes(result),
+    ascii('pub fn main() -> I32 { return 0 let late = 1 }'),
+  )
+})

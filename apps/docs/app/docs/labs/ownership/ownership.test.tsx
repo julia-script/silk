@@ -34,6 +34,46 @@ describe('OwnershipView', () => {
     expect(markup).toContain('releases none')
   })
 
+  it('shows let bindings released in reverse order at the exit', () => {
+    const facts = check(
+      'pub fn main() -> I32 { let first = 1 let second = 2 return first }',
+    )
+    expect(facts).toBeDefined()
+    if (facts === undefined) return
+    const markup = renderToStaticMarkup(<OwnershipView facts={facts} />)
+
+    expect(markup).toContain('releases b1, b0')
+    expect(markup).toContain('<code>first</code>')
+    expect(markup).toContain('<code>second</code>')
+  })
+
+  it('shows a moved binding with shortened liveness and no release', () => {
+    const facts = check(
+      `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { let value = 42 return identity(move value) }`,
+    )
+    expect(facts).toBeDefined()
+    if (facts === undefined) return
+    const markup = renderToStaticMarkup(<OwnershipView facts={facts} />)
+
+    expect(markup).toContain('moved at [')
+    expect(markup).toContain('releases none')
+  })
+
+  it('marks a use-after-move verdict as a violation with the timeline intact', () => {
+    const facts = check(
+      `pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
+    )
+    expect(facts).toBeDefined()
+    if (facts === undefined) return
+    const markup = renderToStaticMarkup(<OwnershipView facts={facts} />)
+
+    expect(markup).toContain('violation · OWN0001')
+    expect(markup).toContain('<code>value</code>')
+    expect(markup).toContain('moved at [')
+  })
+
   it('marks unavailable verdicts instead of claiming a satisfied check', () => {
     const facts = check('pub fn main() -> I32 { return missing() }')
     expect(facts).toBeDefined()

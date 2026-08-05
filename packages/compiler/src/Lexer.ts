@@ -33,7 +33,13 @@ const isArrowStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2d && bytes[index + 1] === 0x3e
 
 const isPunctuation = (byte: number | undefined): boolean =>
-  byte === 0x28 || byte === 0x29 || byte === 0x7b || byte === 0x7d || byte === 0x3a || byte === 0x2c
+  byte === 0x28 ||
+  byte === 0x29 ||
+  byte === 0x7b ||
+  byte === 0x7d ||
+  byte === 0x3a ||
+  byte === 0x2c ||
+  byte === 0x3d
 
 const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boolean => {
   const byte = bytes[index]
@@ -50,6 +56,23 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
 const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind => {
   if (end - start === 2 && bytes[start] === 0x66 && bytes[start + 1] === 0x6e) {
     return 'FnKeyword'
+  }
+  if (
+    end - start === 3 &&
+    bytes[start] === 0x6c &&
+    bytes[start + 1] === 0x65 &&
+    bytes[start + 2] === 0x74
+  ) {
+    return 'LetKeyword'
+  }
+  if (
+    end - start === 4 &&
+    bytes[start] === 0x6d &&
+    bytes[start + 1] === 0x6f &&
+    bytes[start + 2] === 0x76 &&
+    bytes[start + 3] === 0x65
+  ) {
+    return 'MoveKeyword'
   }
   if (
     end - start === 3 &&
@@ -98,6 +121,8 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'Colon'
     case 0x2c:
       return 'Comma'
+    case 0x3d:
+      return 'Equals'
     default:
       return 'Invalid'
   }

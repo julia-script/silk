@@ -76,6 +76,29 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
     expected: { _tag: 'Trap' },
   },
   {
+    name: 'binding',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { let value = identity(42) return value }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'binding-chain',
+    source: `pub fn main() -> I32 { let first = 40 let second = 2 return first }`,
+    expected: { _tag: 'Completes', result: 40 },
+  },
+  {
+    name: 'moved-binding',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { let value = 42 return identity(move value) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'use-after-move-trap',
+    source: `pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
+    expected: { _tag: 'Trap' },
+  },
+  {
     name: 'missing-entry',
     source: 'pub fn answer() -> I32 { return 42 }',
     expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },

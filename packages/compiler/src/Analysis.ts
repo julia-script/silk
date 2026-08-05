@@ -47,6 +47,7 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
+    ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
   return Object.freeze({
     _tag: 'AnalysisSnapshot',

@@ -10,14 +10,24 @@ const sourceId = 'memory://docs/ownership.silk'
 
 const presets = [
   {
+    label: 'Let bindings',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { let value = identity(42) let extra = 1 return value }`,
+  },
+  {
+    label: 'Moved binding',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { let value = 42 return identity(move value) }`,
+  },
+  {
+    label: 'Use after move',
+    source: `pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
+  },
+  {
     label: 'Two parameters',
     source: `pub fn choose(left: I32, right: I32) -> I32 { return left }
 pub fn main() -> I32 { return choose(1, 2) }`,
-  },
-  {
-    label: 'Identity',
-    source: `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(42) }`,
   },
   {
     label: 'Damaged body',
@@ -37,6 +47,20 @@ const spanText = (span: { readonly start: number; readonly end: number }): strin
 const functionLabel = (fn: Ownership.FunctionOwnership): string =>
   fn.declaration.name._tag === 'Present' ? fn.declaration.name.spelling : '∅'
 
+const verdictLabel = (verdict: Ownership.Verdict): string => {
+  switch (verdict._tag) {
+    case 'Satisfied':
+      return 'satisfied'
+    case 'Violation':
+      return `violation · ${verdict.cause.code}`
+    case 'Unavailable':
+      return 'verdict unavailable'
+  }
+}
+
+const siteLabel = (site: Ownership.BindingSite): string =>
+  site._tag === 'Parameter' ? `p${site.parameter.ordinal}` : `b${site.binding.ordinal}`
+
 export function OwnershipView({ facts }: { readonly facts: Ownership.ModuleOwnership }) {
   return (
     <div className={styles.diagnostics}>
@@ -48,7 +72,7 @@ export function OwnershipView({ facts }: { readonly facts: Ownership.ModuleOwner
         >
           <div className={styles.diagnosticHeading}>
             <h3 id={`ownership-${fn.declaration.id.ordinal}`}>{functionLabel(fn)}</h3>
-            <span>{fn.verdict._tag === 'Satisfied' ? 'satisfied' : 'verdict unavailable'}</span>
+            <span>{verdictLabel(fn.verdict)}</span>
           </div>
           <ul
             className={styles.diagnosticList}
@@ -63,12 +87,15 @@ export function OwnershipView({ facts }: { readonly facts: Ownership.ModuleOwner
               </li>
             ) : (
               fn.bindings.map((binding) => (
-                <li key={`binding-${binding.parameter.ordinal}`}>
+                <li key={`binding-${siteLabel(binding.site)}`}>
                   <div>
                     <code>{binding.name ?? '∅'}</code>
                     <span>
-                      {binding.category._tag.toLowerCase()} · live {spanText(binding.liveFrom)} →{' '}
-                      {spanText(binding.liveTo)}
+                      {siteLabel(binding.site)} · {binding.category._tag.toLowerCase()} · live{' '}
+                      {spanText(binding.liveFrom)} → {spanText(binding.liveTo)}
+                      {binding.movedAt === undefined
+                        ? ''
+                        : ` · moved at ${spanText(binding.movedAt)}`}
                     </span>
                   </div>
                 </li>
@@ -82,7 +109,7 @@ export function OwnershipView({ facts }: { readonly facts: Ownership.ModuleOwner
                     {spanText(exit.span)} · releases{' '}
                     {exit.releases.length === 0
                       ? 'none'
-                      : exit.releases.map((release) => `p${release.binding.parameter.ordinal}`).join(', ')}
+                      : exit.releases.map((release) => siteLabel(release.binding.site)).join(', ')}
                   </span>
                 </div>
               </li>

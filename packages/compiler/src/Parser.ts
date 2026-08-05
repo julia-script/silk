@@ -138,8 +138,16 @@ const expect = (
   })
 }
 
+const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Comma',
+  'RightParenthesis',
+  'RightBrace',
+  'LetKeyword',
+  'ReturnKeyword',
+])
+
 const parseIntegerLiteralExpression = (initial: State): NodeResult => {
-  const integer = expect(initial, 'DecimalInteger', ['Comma', 'RightParenthesis', 'RightBrace'])
+  const integer = expect(initial, 'DecimalInteger', expressionFollowing)
   return Object.freeze({
     state: integer.state,
     node: syntaxNode(integer.state, 'IntegerLiteralExpression', integer.elements),
@@ -147,22 +155,32 @@ const parseIntegerLiteralExpression = (initial: State): NodeResult => {
 }
 
 const parseIdentifierExpression = (initial: State): NodeResult => {
-  const identifier = expect(initial, 'Identifier', ['Comma', 'RightParenthesis', 'RightBrace'])
+  const identifier = expect(initial, 'Identifier', expressionFollowing)
   return Object.freeze({
     state: identifier.state,
     node: syntaxNode(identifier.state, 'IdentifierExpression', identifier.elements),
   })
 }
 
+const parseMoveExpression = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'MoveKeyword', ['Identifier', ...expressionFollowing])
+  const name = expect(keyword.state, 'Identifier', expressionFollowing)
+  return Object.freeze({
+    state: name.state,
+    node: syntaxNode(name.state, 'MoveExpression', [...keyword.elements, ...name.elements]),
+  })
+}
+
 const expressionKind = (
   state: State,
   recoveryKind: 'Integer' | 'Identifier',
-): 'Integer' | 'Identifier' | 'Call' => {
+): 'Integer' | 'Identifier' | 'Move' | 'Call' => {
   let index = state.index
   let token = state.lexical.tokens.at(index)
 
   while (token !== undefined) {
     if (token.kind === 'DecimalInteger') return 'Integer'
+    if (token.kind === 'MoveKeyword') return 'Move'
     if (token.kind === 'Identifier') {
       index += 1
       token = state.lexical.tokens.at(index)
@@ -177,6 +195,8 @@ const expressionKind = (
       token.kind === 'Comma' ||
       token.kind === 'RightParenthesis' ||
       token.kind === 'RightBrace' ||
+      token.kind === 'LetKeyword' ||
+      token.kind === 'ReturnKeyword' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'EndOfFile'
     ) {
@@ -296,6 +316,7 @@ function parseExpression(
 ): NodeResult {
   const kind = expressionKind(initial, recoveryKind)
   if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls)
+  if (kind === 'Move') return parseMoveExpression(initial)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   return parseIntegerLiteralExpression(initial)
 }
@@ -304,6 +325,7 @@ const parseReturnStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ReturnKeyword', [
     'DecimalInteger',
     'Identifier',
+    'MoveKeyword',
     'LeftParenthesis',
     'RightBrace',
   ])
@@ -314,23 +336,72 @@ const parseReturnStatement = (initial: State): NodeResult => {
   })
 }
 
+const parseBindingStatement = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'LetKeyword', [
+    'Identifier',
+    'Equals',
+    'ReturnKeyword',
+    'RightBrace',
+  ])
+  const name = expect(keyword.state, 'Identifier', [
+    'Equals',
+    'LetKeyword',
+    'ReturnKeyword',
+    'RightBrace',
+  ])
+  const equals = expect(name.state, 'Equals', [
+    'DecimalInteger',
+    'Identifier',
+    'MoveKeyword',
+    'LetKeyword',
+    'ReturnKeyword',
+    'RightBrace',
+  ])
+  const expression = parseExpression(equals.state, 0, 'Integer')
+  return Object.freeze({
+    state: expression.state,
+    node: syntaxNode(expression.state, 'BindingStatement', [
+      ...keyword.elements,
+      ...name.elements,
+      ...equals.elements,
+      expression.node,
+    ]),
+  })
+}
+
 const parseBlock = (initial: State): NodeResult => {
   const leftBrace = expect(initial, 'LeftBrace', [
+    'LetKeyword',
     'ReturnKeyword',
     'DecimalInteger',
     'Identifier',
     'LeftParenthesis',
     'RightBrace',
   ])
-  const statement = parseReturnStatement(leftBrace.state)
-  const rightBrace = expect(statement.state, 'RightBrace', ['PubKeyword'])
+  let state = leftBrace.state
+  let children: ReadonlyArray<SyntaxTree.Element> = leftBrace.elements
+  let sawReturn = false
+
+  let kind = nextSignificantKind(state)
+  while (kind === 'LetKeyword' || kind === 'ReturnKeyword') {
+    const statement =
+      kind === 'LetKeyword' ? parseBindingStatement(state) : parseReturnStatement(state)
+    if (kind === 'ReturnKeyword') sawReturn = true
+    children = Object.freeze([...children, statement.node])
+    state = statement.state
+    kind = nextSignificantKind(state)
+  }
+
+  if (!sawReturn) {
+    const statement = parseReturnStatement(state)
+    children = Object.freeze([...children, statement.node])
+    state = statement.state
+  }
+
+  const rightBrace = expect(state, 'RightBrace', ['PubKeyword'])
   return Object.freeze({
     state: rightBrace.state,
-    node: syntaxNode(rightBrace.state, 'Block', [
-      ...leftBrace.elements,
-      statement.node,
-      ...rightBrace.elements,
-    ]),
+    node: syntaxNode(rightBrace.state, 'Block', [...children, ...rightBrace.elements]),
   })
 }
 

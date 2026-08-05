@@ -334,9 +334,13 @@ function HirExpressionRows({
       ? `literal ${expression.value}`
       : expression._tag === 'ParameterReference'
         ? `param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal}`
-        : expression._tag === 'Call'
-          ? `call ${expression.target.name}`
-          : 'unavailable'
+        : expression._tag === 'BindingReference'
+          ? `binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal}`
+          : expression._tag === 'Move'
+            ? 'move'
+            : expression._tag === 'Call'
+              ? `call ${expression.target.name}`
+              : 'unavailable'
   return (
     <>
       <li style={{ paddingLeft: `${depth * 16}px` }}>
@@ -355,6 +359,38 @@ function HirExpressionRows({
             />
           ))
         : null}
+      {expression._tag === 'Move' ? (
+        <HirExpressionRows expression={expression.subject} depth={depth + 1} />
+      ) : null}
+    </>
+  )
+}
+
+function HirStatementRows({ statement }: { readonly statement: Hir.Statement }) {
+  if (statement._tag === 'Bind') {
+    return (
+      <>
+        <li>
+          <div>
+            <code>
+              bind b{statement.binding.ordinal} {statement.name ?? '∅'}
+            </code>
+            <span>{hirSpanLabel(statement.span)}</span>
+          </div>
+        </li>
+        <HirExpressionRows expression={statement.initializer} depth={1} />
+      </>
+    )
+  }
+  return (
+    <>
+      <li>
+        <div>
+          <code>return</code>
+          <span>{hirSpanLabel(statement.span)}</span>
+        </div>
+      </li>
+      <HirExpressionRows expression={statement.expression} depth={1} />
     </>
   )
 }
@@ -377,7 +413,12 @@ export function HirPanel({ hir }: { readonly hir: Hir.Module }) {
                 <span>{hirContractLabel(fn.contract)}</span>
               </div>
               <ul className={styles.diagnosticList} aria-label={`HIR body of function ${fn.declaration.id.ordinal}`}>
-                <HirExpressionRows expression={fn.body} depth={0} />
+                {fn.statements.map((statement, index) => (
+                  <HirStatementRows
+                    key={`statement-${statement.span.start}-${index}`}
+                    statement={statement}
+                  />
+                ))}
               </ul>
             </li>
           ))}

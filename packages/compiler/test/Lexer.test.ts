@@ -67,6 +67,44 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('lexes binding statements with let, move, and equals tokens', () => {
+  const source = SourceFile.make('memory://bindings.silk', ascii('let answer = move value'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['LetKeyword', 'Identifier', 'Equals', 'MoveKeyword', 'Identifier', 'EndOfFile'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps let and move keyword prefixes as identifiers', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://prefixes.silk', ascii('letter movement lets moved')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Identifier', 'Identifier', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
+it('distinguishes the equals token from the arrow', () => {
+  const source = SourceFile.make('memory://equals.silk', ascii('= ->'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => ({ kind: token.kind, start: token.span.start, end: token.span.end })),
+    [
+      { kind: 'Equals', start: 0, end: 1 },
+      { kind: 'Arrow', start: 2, end: 4 },
+      { kind: 'EndOfFile', start: 4, end: 4 },
+    ],
+  )
+})
+
 it('recognizes typed parameter and argument punctuation with exact spans', () => {
   const source = SourceFile.make(
     'memory://parameter-punctuation.silk',

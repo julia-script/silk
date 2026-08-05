@@ -8,10 +8,11 @@ slice while retaining trivia and recoverable lexical errors.
 ### Requirement: Kernel token vocabulary
 
 The lexer SHALL recognize ASCII whitespace, `//` line comments, `///` documentation comments as a
-distinct token kind, the keywords `pub`, `fn`, `return`, and the provisional `import`, ASCII
-identifiers, decimal integer literals, `(`, `)`, `{`, `}`, `:`, `,`, `->`, and end-of-file. An
-identifier SHALL begin with an ASCII letter or underscore and continue with ASCII letters,
-digits, or underscores. A decimal integer literal SHALL contain one or more ASCII digits.
+distinct token kind, the keywords `pub`, `fn`, `return`, `let`, `move`, and the provisional
+`import`, ASCII identifiers, decimal integer literals, `(`, `)`, `{`, `}`, `:`, `,`, `=`, `->`,
+and end-of-file. An identifier SHALL begin with an ASCII letter or underscore and continue with
+ASCII letters, digits, or underscores. A decimal integer literal SHALL contain one or more ASCII
+digits.
 
 #### Scenario: Lex the first parser fixture
 
@@ -37,6 +38,16 @@ digits, or underscores. A decimal integer literal SHALL contain one or more ASCI
 
 - **WHEN** the source bytes spell `import math` followed by `importer`
 - **THEN** the stream contains one import-keyword token, an identifier `math`, and an identifier `importer` rather than a keyword prefix
+
+#### Scenario: Lex a binding statement
+
+- **WHEN** the source bytes spell `let answer = 42` followed by `letter movement`
+- **THEN** the stream contains one let-keyword token, an identifier, one equals token, and an integer literal, while `letter` and `movement` remain identifier tokens rather than keyword prefixes
+
+#### Scenario: Distinguish equals from the arrow
+
+- **WHEN** the source bytes spell `= ->` separated by a space
+- **THEN** the stream contains one equals token and one arrow token, each with its exact span
 
 ### Requirement: Lossless token coverage
 Every non-end-of-file token SHALL own a non-empty span, token spans SHALL be contiguous and

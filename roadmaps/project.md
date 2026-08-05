@@ -114,6 +114,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-05: Shipped and archived `bind-local-values` — slice 1's first change. `let` bindings
+  and `move` now run through the whole spine: statement sequences in grammar and HIR, initializer
+  inference, non-shadowing (`SEM0008`), the first real ownership analysis (liveness ranges, moves,
+  `OWN0001` use-after-move with a new ownership diagnostic phase and `Violation` verdict),
+  populated cleanup plans, lowered `Drop` operations, and interpreter/native trap parity across
+  four new corpus programs. Backend injection landed alongside in `fa83a5f`. Next: arithmetic.
 - 2026-08-05: Completed the compiler realignment — all 13 changes from
   [compiler-realignment](compiler-realignment.md) implemented and archived in one loop. The spine
   now runs source → module closure → declaration index → HIR → ownership → instances → MIR →

@@ -164,4 +164,4 @@ it('keeps the interpreter and native execution in agreement across the corpus', 
 
     // RecursiveCycle: the program must compile; native unbounded recursion is not executed.
   }
-})
+}, 60000)

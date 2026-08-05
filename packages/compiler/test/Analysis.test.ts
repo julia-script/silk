@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -56,7 +57,11 @@ it('keeps unrelated declarations queryable around damage', () => {
   ])
 
   assert.strictEqual(Analysis.declarationByName(self, 'lib', 'answer')._tag, 'Resolved')
-  assert.strictEqual(Analysis.hirOf(self, 'lib')?.functions.at(0)?.body._tag, 'IntegerLiteral')
+  const libFunction = Analysis.hirOf(self, 'lib')?.functions.at(0)
+  assert.strictEqual(
+    libFunction === undefined ? undefined : Hir.returned(libFunction)._tag,
+    'IntegerLiteral',
+  )
   const rootMain = Analysis.rootAnalysis(self).functions.at(0)
   assert.strictEqual(rootMain?.declaration.returnType._tag, 'Unresolved')
 })

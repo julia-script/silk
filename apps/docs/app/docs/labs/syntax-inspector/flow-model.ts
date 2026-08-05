@@ -120,6 +120,11 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
       : expression.reference.spelling
   }
   if (expression._tag === 'Call') return `${callName(expression)}(…)`
+  if (expression._tag === 'Move') {
+    return expression.reference._tag === 'Unavailable'
+      ? 'unavailable move'
+      : `move ${expression.reference.spelling}`
+  }
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'

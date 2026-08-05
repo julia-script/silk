@@ -35,11 +35,12 @@ explicit entry reason rather than throw, fail, or choose a declaration.
 
 Evaluation SHALL interpret the lowered MIR control-flow graph: literals define locals, moves copy
 them, calls evaluate their already-computed argument locals bound positionally to the target's
-parameter locals, and each function returns its terminator's value, publishing the exact `I32`
-result on completion. Unavailable facts reach evaluation as the explicit generated traps lowering
-inserted; executing a trap SHALL produce a `Blocked` outcome carrying the trap's function
-identity, reason, and provenance rather than a guessed value. Functions absent from the lowered
-program MUST NOT affect the outcome.
+parameter locals, drops execute as explicit no-release events for the copyable slice, and each
+function returns its terminator's value, publishing the exact `I32` result on completion.
+Unavailable facts and ownership violations reach evaluation as the explicit generated traps
+lowering inserted; executing a trap SHALL produce a `Blocked` outcome carrying the trap's
+function identity, reason, and provenance rather than a guessed value. Functions absent from the
+lowered program MUST NOT affect the outcome.
 
 #### Scenario: Evaluate a literal main
 
@@ -85,6 +86,16 @@ program MUST NOT affect the outcome.
 
 - **WHEN** the program contains a valid reachable path from `main` and a different unreachable function has unavailable semantic facts
 - **THEN** evaluation completes from the reachable path without executing the unrelated function
+
+#### Scenario: Evaluate a binding program
+
+- **WHEN** `main` binds `let value = identity(42)` and returns `value`
+- **THEN** the call completes into the binding's local, its drop executes at the exit, and evaluation completes with `42`
+
+#### Scenario: Block a use-after-move program at its trap
+
+- **WHEN** a reachable function's ownership verdict is a violation
+- **THEN** its lowered function is a generated trap and evaluation blocks there with the violation's provenance
 
 ### Requirement: Recursive call cycles are bounded data
 

@@ -20,6 +20,13 @@ export type ContractFact =
   | Contract
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
+/** A deterministic binding identity local to its declaring function's statement order. */
+export interface BindingId {
+  readonly _tag: 'HirBinding'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly ordinal: number
+}
+
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
   | {
@@ -31,6 +38,18 @@ export type Expression =
   | {
       readonly _tag: 'ParameterReference'
       readonly parameter: DeclarationIndex.ParameterId
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'BindingReference'
+      readonly binding: BindingId
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Move'
+      readonly subject: Expression
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -47,12 +66,85 @@ export type Expression =
       readonly cause?: Diagnostic.Identity
     }
 
-/** One elaborated function: its header, normalized contract, and desugared body expression. */
+/** One elaborated body statement in source order. */
+export type Statement =
+  | {
+      readonly _tag: 'Bind'
+      readonly binding: BindingId
+      readonly name: string | undefined
+      readonly initializer: Expression
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Return'
+      readonly expression: Expression
+      readonly span: SourceSpan.SourceSpan
+    }
+
+/** One elaborated function: its header, normalized contract, and desugared body statements. */
 export interface HirFunction {
   readonly _tag: 'HirFunction'
   readonly declaration: DeclarationIndex.DeclarationFact
   readonly contract: ContractFact
-  readonly body: Expression
+  readonly statements: ReadonlyArray<Statement>
+}
+
+/** The return statement's expression — every body ends in exactly one. */
+export const returned = (self: HirFunction): Expression => {
+  const last = self.statements.at(-1)
+  if (last === undefined || last._tag !== 'Return') {
+    throw new RangeError('HIR body must end in a return statement')
+  }
+  return last.expression
+}
+
+/** Tests whether any expression in the body is an explicit unavailable state. */
+export const hasUnavailable = (self: HirFunction): boolean => {
+  const walk = (expression: Expression): boolean => {
+    switch (expression._tag) {
+      case 'Unavailable':
+        return true
+      case 'Move':
+        return walk(expression.subject)
+      case 'Call':
+        return expression.arguments.some(walk)
+      default:
+        return false
+    }
+  }
+  return self.statements.some((statement) =>
+    statement._tag === 'Bind' ? walk(statement.initializer) : walk(statement.expression),
+  )
+}
+
+/** The first unavailable expression's cause and span, if the body has one. */
+export const firstUnavailable = (
+  self: HirFunction,
+): { readonly span: SourceSpan.SourceSpan; readonly cause?: Diagnostic.Identity } | undefined => {
+  const walk = (
+    expression: Expression,
+  ): { readonly span: SourceSpan.SourceSpan; readonly cause?: Diagnostic.Identity } | undefined => {
+    switch (expression._tag) {
+      case 'Unavailable':
+        return expression
+      case 'Move':
+        return walk(expression.subject)
+      case 'Call': {
+        for (const argument of expression.arguments) {
+          const found = walk(argument)
+          if (found !== undefined) return found
+        }
+        return undefined
+      }
+      default:
+        return undefined
+    }
+  }
+  for (const statement of self.statements) {
+    const found = walk(statement._tag === 'Bind' ? statement.initializer : statement.expression)
+    if (found !== undefined) return found
+  }
+  return undefined
 }
 
 /** One module's elaborated HIR. */
@@ -117,6 +209,13 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return `${indent}literal ${expression.value} : ${expression.type} ${spanText(expression.span)}`
     case 'ParameterReference':
       return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${expression.type} ${spanText(expression.span)}`
+    case 'BindingReference':
+      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${expression.type} ${spanText(expression.span)}`
+    case 'Move':
+      return [
+        `${indent}move : ${expression.type} ${spanText(expression.span)}`,
+        encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
     case 'Call':
       return [
         `${indent}call ${expression.target.module}.${expression.target.name} : ${expression.type} ${spanText(expression.span)}`,
@@ -125,6 +224,19 @@ const encodeExpression = (expression: Expression, depth: number): string => {
     case 'Unavailable':
       return `${indent}unavailable ${spanText(expression.span)}`
   }
+}
+
+const encodeStatement = (statement: Statement, depth: number): string => {
+  const indent = '  '.repeat(depth)
+  return statement._tag === 'Bind'
+    ? [
+        `${indent}bind b${statement.binding.ordinal} ${statement.name ?? '?'} ${spanText(statement.span)}`,
+        encodeExpression(statement.initializer, depth + 1),
+      ].join('\n')
+    : [
+        `${indent}return ${spanText(statement.span)}`,
+        encodeExpression(statement.expression, depth + 1),
+      ].join('\n')
 }
 
 /**
@@ -136,7 +248,7 @@ export const encode = (self: Module): string =>
     `hir-module ${self.module}`,
     ...self.functions.flatMap((fn) => [
       `fn ${identityLabel(fn.declaration)} ${contractText(fn.contract)}`,
-      encodeExpression(fn.body, 1),
+      ...fn.statements.map((statement) => encodeStatement(statement, 1)),
     ]),
     '',
   ].join('\n')

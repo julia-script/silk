@@ -8,12 +8,14 @@ recover from ordinary mistakes without introducing semantic or lowering represen
 ### Requirement: First function grammar
 The parser SHALL recognize a source file containing one or more public function declarations
 followed by end-of-file. Every function SHALL have the form `pub fn <name>(<parameters>) ->
-<return-type> { return <expression> }`. A parameter SHALL have the form `<name>: <type>` and
-parameters SHALL be comma-separated. A return expression SHALL be a decimal integer, a bare
-identifier, or a call. A call SHALL have the form `<callee>(<arguments>)`; arguments SHALL be
-comma-separated decimal integers, bare identifiers, or calls. Empty parameter and argument lists SHALL
-remain valid. Lexer trivia SHALL be permitted between grammar elements and declarations. Names and
-types SHALL remain uninterpreted identifier tokens, and declaration, parameter, and argument order
+<return-type> { <statements> }`, where `<statements>` is zero or more binding statements followed
+by exactly one return statement. A binding statement SHALL have the form `let <name> =
+<expression>`. A parameter SHALL have the form `<name>: <type>` and parameters SHALL be
+comma-separated. An expression SHALL be a decimal integer, a bare identifier, a `move <name>`
+operand, or a call. A call SHALL have the form `<callee>(<arguments>)`; arguments SHALL be
+comma-separated expressions. Empty parameter and argument lists SHALL remain valid. Lexer trivia
+SHALL be permitted between grammar elements, statements, and declarations. Names and types SHALL
+remain uninterpreted identifier tokens, and declaration, statement, parameter, and argument order
 SHALL match concrete source order.
 
 #### Scenario: Parse the accepted integer fixture
@@ -39,6 +41,16 @@ SHALL match concrete source order.
 #### Scenario: Parse trivia inside a call
 - **WHEN** whitespace and line comments appear around a call's callee, parentheses, arguments, and commas
 - **THEN** the parser recognizes the same call structure while retaining every trivia token exactly
+
+#### Scenario: Parse a binding sequence
+
+- **WHEN** the source spells `pub fn main() -> I32 { let value = 42 return value }`
+- **THEN** the block contains one binding statement retaining its keyword, name, equals, and initializer expression, followed by one return statement, in source order
+
+#### Scenario: Parse a move operand
+
+- **WHEN** a binding initializer or call argument spells `move value`
+- **THEN** the expression is a move operand retaining the keyword and the moved name with exact spans
 
 ### Requirement: First call syntax remains explicit and recoverable
 A call expression SHALL retain its callee identifier, left parenthesis, ordered arguments,
@@ -222,4 +234,35 @@ with a parser diagnostic, and recovery SHALL keep following top-level declaratio
 
 - **WHEN** a source begins with two import declarations separated by trivia
 - **THEN** both imports are separate concrete branches in source order and every token and trivia slice is retained exactly once
+
+### Requirement: Binding statements remain explicit and recoverable
+
+Each binding statement SHALL retain its `let` keyword, bound name, equals token, initializer
+expression, adjacent trivia, and source-owned span as its own concrete branch. Missing names,
+equals tokens, and initializer expressions SHALL become explicit missing elements with parser
+diagnostics, and recovery SHALL resume at the next `let`, `return`, closing brace, following
+declaration, or end-of-file. A `move` operand missing its name SHALL retain the keyword with an
+explicit missing identifier. Statements after the return statement and blocks without a return
+statement SHALL remain recoverable: extra statements stay in the tree as concrete branches, and a
+missing return statement becomes an explicit recovered return structure with parser diagnostics.
+
+#### Scenario: Recover a missing initializer
+
+- **WHEN** a block spells `let value = return 42`
+- **THEN** the binding retains a missing initializer expression at the `return` boundary with one parser diagnostic, and the return statement parses completely
+
+#### Scenario: Recover a missing binding name
+
+- **WHEN** a block spells `let = 42 return 0`
+- **THEN** the binding contains a missing identifier before the equals token and both statements remain separate concrete branches
+
+#### Scenario: Recover a missing return statement
+
+- **WHEN** a block contains only binding statements before its closing brace
+- **THEN** the block retains every binding followed by a recovered return structure whose missing elements carry parser diagnostics
+
+#### Scenario: Recover a bare move
+
+- **WHEN** an initializer spells `move` immediately before the statement boundary
+- **THEN** the move operand retains its keyword and a missing identifier with one parser diagnostic
 

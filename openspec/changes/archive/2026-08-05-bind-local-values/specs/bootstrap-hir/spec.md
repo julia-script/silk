@@ -1,28 +1,4 @@
-# bootstrap-hir Specification
-
-## Purpose
-The resolved, typed semantic representation of elaborated function bodies: one integrated
-elaboration phase that resolves names, types expressions, validates contracts, and constructs HIR
-with canonical identities and exact source provenance, published as immutable fact tables with a
-deterministic textual encoder.
-## Requirements
-### Requirement: One integrated elaboration phase constructs HIR
-
-Elaboration SHALL consume collected declaration headers and resolve every function body in one
-integrated phase: local and referenced-name resolution, expression typing, and positional
-contract validation together with HIR construction. Elaboration SHALL preserve the existing body
-diagnostics (`SEM0002`, `SEM0004`, `SEM0006`, `SEM0007`) with their codes, spans, and reasons,
-and SHALL return complete ordered facts and diagnostics rather than throw for source mistakes.
-
-#### Scenario: Elaborate the accepted fixture
-
-- **WHEN** `pub fn main() -> I32 { return 42 }` is elaborated
-- **THEN** the result contains one HIR function whose body is a typed `I32` integer-literal return with exact source provenance and no diagnostics
-
-#### Scenario: Preserve body diagnostics
-
-- **WHEN** a body contains an out-of-range literal, an unknown call target, an unknown parameter reference, and a wrong-arity call across functions
-- **THEN** elaboration reports the same stable codes at the same spans as the superseded analysis
+## MODIFIED Requirements
 
 ### Requirement: HIR is resolved, typed, and canonically identified
 
@@ -60,20 +36,3 @@ exists, and MUST NOT masquerade as a valid empty contract, resolved reference, o
 
 - **WHEN** one binding statement's initializer contains an unresolved reference
 - **THEN** that initializer is an explicit unavailable expression carrying the originating diagnostic's identity while the statement sequence and the other statements' facts remain intact
-
-### Requirement: Elaboration output is deterministic and encodable
-
-Elaboration over the same input SHALL produce identical facts, HIR, and diagnostics across fresh
-processes. The HIR SHALL expose a deterministic textual encoder observing the completed artifact;
-identical input SHALL produce byte-identical encodings, gated by committed golden files.
-
-#### Scenario: Repeat elaboration
-
-- **WHEN** equivalent modules are elaborated repeatedly in fresh processes
-- **THEN** the functions, HIR bodies, contracts, and diagnostics are identical
-
-#### Scenario: Match the HIR golden encoding
-
-- **WHEN** a committed fixture is elaborated and encoded
-- **THEN** the encoding equals the committed golden text byte-for-byte, naming every function, contract, typed expression, and unavailable state
-

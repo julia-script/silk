@@ -1,11 +1,5 @@
-# bootstrap-ownership Specification
+## MODIFIED Requirements
 
-## Purpose
-The ownership and scope phase over typed HIR: per-declaration ownership facts (bindings,
-ownership categories, live ranges, verdicts) and the target-neutral cleanup plan that MIR
-lowering will consume to insert drops — established as a producer phase with its fact table and
-artifact before any lowering exists to need them.
-## Requirements
 ### Requirement: Ownership facts are produced once per declaration
 
 The ownership phase SHALL run once per declaration over typed HIR and SHALL publish one immutable
@@ -67,15 +61,7 @@ deterministic textual encoding gated by committed golden files.
 - **WHEN** a body moves its only binding before the return
 - **THEN** the return exit's release list omits that binding
 
-### Requirement: Ownership output is deterministic
-
-Checking the same elaborated module repeatedly in fresh processes SHALL produce identical
-ownership facts, cleanup plans, and encodings.
-
-#### Scenario: Repeat the ownership phase
-
-- **WHEN** equivalent modules are checked repeatedly in fresh processes
-- **THEN** the ownership facts, plans, and encoded texts are identical
+## ADDED Requirements
 
 ### Requirement: Moves consume bindings
 
@@ -101,4 +87,3 @@ produced the violation.
 
 - **WHEN** a body reads a copyable binding and moves it afterwards
 - **THEN** the verdict is satisfied because reads before the consuming move copy rather than consume
-

@@ -126,6 +126,7 @@ export const compile = (request: CompileRequest): Outcome => {
         [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
       ),
     (result) => [...result.values()].reduce((sum, module) => sum + module.functions.length, 0),
+    (result) => [...result.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
   )
   const discovery = phase(
     'instance-discovery',
@@ -138,6 +139,7 @@ export const compile = (request: CompileRequest): Outcome => {
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
+    ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
 
   if (discovery.entry._tag !== 'Resolved') {
