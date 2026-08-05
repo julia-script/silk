@@ -212,6 +212,20 @@ const checkOffset = (
   }
 }
 
+const tagEntry = (context: Context, handle: Parameters<typeof Handle.resolve>[1]) => {
+  const index = orAbort(Handle.resolve(context.owner, handle, 'Tag', context.operation))
+  const entry = context.state.tags[index]
+  return entry ?? abort('Tag entry is missing')
+}
+
+const tagParams = (
+  context: Context,
+  entry: ModuleState.TagEntry,
+): ReadonlyArray<ValType.ValType> => {
+  const funcType = context.state.types[entry.typeIndex]
+  return funcType?.params ?? abort('Tag type entry is missing')
+}
+
 const elemEntry = (context: Context, handle: Parameters<typeof Handle.resolve>[1]) => {
   const index = orAbort(Handle.resolve(context.owner, handle, 'Elem', context.operation))
   const entry = context.state.elems[index]
@@ -286,6 +300,10 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
           pushVal(context, ValType.i32)
           return
         }
+        case 'throw_ref':
+          popVal(context, ValType.exnref)
+          markUnreachable(context)
+          return
         default:
           return abort(`The instruction ${instr.mnemonic} has no typing rule`)
       }
@@ -551,6 +569,46 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
     case 'ElemDrop':
       elemEntry(context, instr.elem)
       return
+    case 'Throw': {
+      const entry = tagEntry(context, instr.tag)
+      popVals(context, tagParams(context, entry))
+      markUnreachable(context)
+      return
+    }
+    case 'TryTable': {
+      const { startTypes, endTypes } = blockTypes(context, instr.blockType)
+      // Catch labels are resolved as seen from the try_table instruction itself,
+      // before its own frame is pushed.
+      for (const clause of instr.catches) {
+        const target = labelTypes(frameAt(context, clause.depth))
+        const delivered: Array<ValType.ValType> = []
+        if (clause._tag === 'Catch' || clause._tag === 'CatchRef') {
+          delivered.push(...tagParams(context, tagEntry(context, clause.tag)))
+        }
+        if (clause._tag === 'CatchRef' || clause._tag === 'CatchAllRef') {
+          delivered.push(ValType.exnref)
+        }
+        const matches =
+          target.length === delivered.length &&
+          target.every((type, position) => {
+            const deliveredType = delivered[position]
+            return deliveredType !== undefined && ValType.equals(type, deliveredType)
+          })
+        if (!matches) {
+          return abort(
+            `The ${clause._tag} clause requires a label accepting [${delivered
+              .map(ValType.text)
+              .join(', ')}]`,
+          )
+        }
+      }
+      popVals(context, startTypes)
+      pushFrame(context, 'block', startTypes, endTypes)
+      checkSequence(context, instr.body)
+      popFrame(context)
+      pushVals(context, endTypes)
+      return
+    }
     case 'V128Const': {
       if (
         instr.bytes.length !== 16 ||

@@ -9,6 +9,7 @@ import type * as Global from '../Global.js'
 import type * as Instr from '../Instr.js'
 import type * as Memory from '../Memory.js'
 import type * as Table from '../Table.js'
+import type * as Tag from '../Tag.js'
 import type * as Type from '../Type.js'
 import type * as ValType from '../ValType.js'
 import { invalidState, type WasmError } from '../WasmError.js'
@@ -68,6 +69,12 @@ export interface MemoryEntry {
   readonly importSource: ImportSource | undefined
 }
 
+export interface TagEntry {
+  readonly typeIndex: number
+  readonly name: string | undefined
+  readonly importSource: ImportSource | undefined
+}
+
 export interface GlobalEntry {
   readonly valType: ValType.ValType
   readonly mutable: boolean
@@ -102,7 +109,7 @@ export interface DataEntry {
   readonly name: string | undefined
 }
 
-export type ExportKind = 'func' | 'table' | 'memory' | 'global'
+export type ExportKind = 'func' | 'table' | 'memory' | 'global' | 'tag'
 
 export interface ExportEntry {
   readonly name: string
@@ -123,6 +130,8 @@ export interface MutableState {
   memoryHandles: Array<Memory.Memory>
   globals: Array<GlobalEntry>
   globalHandles: Array<Global.Global>
+  tags: Array<TagEntry>
+  tagHandles: Array<Tag.Tag>
   elems: Array<ElemEntry>
   elemHandles: Array<Elem.Elem>
   datas: Array<DataEntry>
@@ -147,6 +156,7 @@ export interface Snapshot {
   readonly tables: ReadonlyArray<TableEntry>
   readonly memories: ReadonlyArray<MemoryEntry>
   readonly globals: ReadonlyArray<GlobalEntry>
+  readonly tags: ReadonlyArray<TagEntry>
   readonly elems: ReadonlyArray<ElemEntry>
   readonly datas: ReadonlyArray<DataEntry>
   readonly exports: ReadonlyArray<ExportEntry>
@@ -203,6 +213,7 @@ export const snapshot = Effect.fnUntraced(function* (
         tables: Object.freeze([...state.value.tables]),
         memories: Object.freeze([...state.value.memories]),
         globals: Object.freeze([...state.value.globals]),
+        tags: Object.freeze([...state.value.tags]),
         elems: Object.freeze([...state.value.elems]),
         datas: Object.freeze([...state.value.datas]),
         exports: Object.freeze([...state.value.exports]),

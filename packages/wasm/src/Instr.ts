@@ -15,6 +15,7 @@ import type * as Global from './Global.js'
 import * as InstructionTable from './internal/InstructionTable.js'
 import type * as Memory from './Memory.js'
 import type * as Table from './Table.js'
+import type * as Tag from './Tag.js'
 import type * as Type from './Type.js'
 import type * as ValType from './ValType.js'
 
@@ -31,6 +32,7 @@ export type PlainMnemonic =
   | 'drop'
   | 'select'
   | 'ref.is_null'
+  | 'throw_ref'
   | 'i32.eqz'
   | 'i32.eq'
   | 'i32.ne'
@@ -553,6 +555,27 @@ export type AtomicAccessMnemonic =
   | 'i64.atomic.rmw32.cmpxchg_u'
 
 /**
+ * A branch-hint value for `br_if` and `if` instructions.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export type BranchHint = 'likely' | 'unlikely'
+
+/**
+ * One catch clause of a `try_table`, targeting an enclosing label by relative depth as seen
+ * from the `try_table` instruction itself.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export type Catch =
+  | { readonly _tag: 'Catch'; readonly tag: Tag.Tag; readonly depth: number }
+  | { readonly _tag: 'CatchRef'; readonly tag: Tag.Tag; readonly depth: number }
+  | { readonly _tag: 'CatchAll'; readonly depth: number }
+  | { readonly _tag: 'CatchAllRef'; readonly depth: number }
+
+/**
  * The type of a structured control-flow block.
  *
  * @category instructions
@@ -607,9 +630,10 @@ export type Instr =
       readonly blockType: BlockType
       readonly thenBody: ReadonlyArray<Instr>
       readonly elseBody: ReadonlyArray<Instr>
+      readonly hint: BranchHint | undefined
     }
   | { readonly _tag: 'Br'; readonly depth: number }
-  | { readonly _tag: 'BrIf'; readonly depth: number }
+  | { readonly _tag: 'BrIf'; readonly depth: number; readonly hint: BranchHint | undefined }
   | {
       readonly _tag: 'BrTable'
       readonly depths: ReadonlyArray<number>
@@ -668,6 +692,13 @@ export type Instr =
       readonly source: Memory.Memory
     }
   | { readonly _tag: 'MemoryFill'; readonly memory: Memory.Memory }
+  | { readonly _tag: 'Throw'; readonly tag: Tag.Tag }
+  | {
+      readonly _tag: 'TryTable'
+      readonly blockType: BlockType
+      readonly catches: ReadonlyArray<Catch>
+      readonly body: ReadonlyArray<Instr>
+    }
   | { readonly _tag: 'TableGet'; readonly table: Table.Table }
   | { readonly _tag: 'TableSet'; readonly table: Table.Table }
   | { readonly _tag: 'TableSize'; readonly table: Table.Table }
@@ -857,13 +888,26 @@ export const ifElse = (
   blockType: BlockType,
   thenBody: ReadonlyArray<Instr>,
   elseBody: ReadonlyArray<Instr> = [],
+  options: BranchOptions = {},
 ): Instr =>
   freeze({
     _tag: 'If',
     blockType,
     thenBody: Object.freeze([...thenBody]),
     elseBody: Object.freeze([...elseBody]),
+    hint: options.hint,
   })
+
+/**
+ * Options accepted by hintable branch constructors.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export interface BranchOptions {
+  /** Marks the branch likely or unlikely for the `metadata.code.branch_hint` section. */
+  readonly hint?: BranchHint
+}
 
 /**
  * Constructs `br` branching to an enclosing block by relative depth.
@@ -879,7 +923,8 @@ export const br = (depth: number): Instr => freeze({ _tag: 'Br', depth })
  * @category constructors
  * @since 0.0.0
  */
-export const brIf = (depth: number): Instr => freeze({ _tag: 'BrIf', depth })
+export const brIf = (depth: number, options: BranchOptions = {}): Instr =>
+  freeze({ _tag: 'BrIf', depth, hint: options.hint })
 
 /**
  * Constructs `br_table` selecting among branch depths by index.
@@ -1159,4 +1204,83 @@ export const atomicAccess = (
     memory,
     align: options.align ?? InstructionTable.atomicAccessOps[mnemonic].widthLog2,
     offset: options.offset ?? 0,
+  })
+
+/**
+ * Constructs `throw`, raising an exception with the tag's payload popped from the stack.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const throwTag = (tag: Tag.Tag): Instr => freeze({ _tag: 'Throw', tag })
+
+/**
+ * Constructs a `catch` clause delivering the tag's parameters to a label.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const catchTag = (tag: Tag.Tag, depth: number): Catch =>
+  freeze({ _tag: 'Catch', tag, depth })
+
+/**
+ * Constructs a `catch_ref` clause delivering the tag's parameters plus the `exnref`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const catchTagRef = (tag: Tag.Tag, depth: number): Catch =>
+  freeze({ _tag: 'CatchRef', tag, depth })
+
+/**
+ * Constructs a `catch_all` clause delivering nothing.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const catchAll = (depth: number): Catch => freeze({ _tag: 'CatchAll', depth })
+
+/**
+ * Constructs a `catch_all_ref` clause delivering only the `exnref`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const catchAllRef = (depth: number): Catch => freeze({ _tag: 'CatchAllRef', depth })
+
+/**
+ * Constructs `try_table`: a structured block whose catch clauses route exceptions to enclosing
+ * labels.
+ *
+ * **Example** (Catching an error tag into an enclosing block)
+ *
+ * ```ts
+ * import * as Instr from '@silk-effect/wasm/Instr'
+ * import type * as Tag from '@silk-effect/wasm/Tag'
+ *
+ * declare const error: Tag.Tag
+ *
+ * const body = [
+ *   Instr.block(Instr.emptyBlockType, [
+ *     Instr.tryTable(Instr.emptyBlockType, [Instr.catchTag(error, 0)], [
+ *       Instr.i32Const(1),
+ *       Instr.throwTag(error),
+ *     ]),
+ *   ]),
+ * ]
+ * ```
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const tryTable = (
+  blockType: BlockType,
+  catches: ReadonlyArray<Catch>,
+  body: ReadonlyArray<Instr>,
+): Instr =>
+  freeze({
+    _tag: 'TryTable',
+    blockType,
+    catches: Object.freeze([...catches]),
+    body: Object.freeze([...body]),
   })

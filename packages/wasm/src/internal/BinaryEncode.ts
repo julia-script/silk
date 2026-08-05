@@ -19,10 +19,18 @@ class Abort {
   constructor(readonly error: WasmError) {}
 }
 
+interface HintEntry {
+  readonly funcIndex: number
+  readonly offset: number
+  readonly likely: boolean
+}
+
 interface Context {
   readonly snapshot: ModuleState.Snapshot
   readonly spaces: IndexSpace.Spaces
   readonly operation: string
+  readonly hints: Array<HintEntry>
+  currentFuncIndex: number | undefined
 }
 
 const abort = (context: Context, message: string): never => {
@@ -36,8 +44,8 @@ const orAbort = <A>(result: Result.Result<A, WasmError>): A => {
 
 const spaceIndex = (
   context: Context,
-  handle: Handle.Handle<'Func' | 'Table' | 'Memory' | 'Global' | 'Elem' | 'Data' | 'Type'>,
-  tag: 'Func' | 'Table' | 'Memory' | 'Global' | 'Elem' | 'Data' | 'Type',
+  handle: Handle.Handle<'Func' | 'Table' | 'Memory' | 'Global' | 'Tag' | 'Elem' | 'Data' | 'Type'>,
+  tag: 'Func' | 'Table' | 'Memory' | 'Global' | 'Tag' | 'Elem' | 'Data' | 'Type',
 ): number => {
   const entryIndex = orAbort(Handle.resolve(context.snapshot.owner, handle, tag, context.operation))
   switch (tag) {
@@ -49,6 +57,8 @@ const spaceIndex = (
       return context.spaces.memories[entryIndex] ?? abort(context, 'Memory index is missing')
     case 'Global':
       return context.spaces.globals[entryIndex] ?? abort(context, 'Global index is missing')
+    case 'Tag':
+      return context.spaces.tags[entryIndex] ?? abort(context, 'Tag index is missing')
     case 'Elem':
     case 'Data':
     case 'Type':
@@ -89,6 +99,19 @@ const encodeMemArg = (
     writer.u32(memoryIndex)
   }
   writer.u64(BigInt(offset))
+}
+
+const recordHint = (
+  context: Context,
+  writer: ByteWriter,
+  hint: Instr.BranchHint | undefined,
+): void => {
+  if (hint === undefined || context.currentFuncIndex === undefined) return
+  context.hints.push({
+    funcIndex: context.currentFuncIndex,
+    offset: writer.length,
+    likely: hint === 'likely',
+  })
 }
 
 export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.Instr): void => {
@@ -152,6 +175,7 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
       return
     }
     case 'If': {
+      recordHint(context, writer, instr.hint)
       writer.byte(ops.if)
       encodeBlockType(context, writer, instr.blockType)
       for (const nested of instr.thenBody) encodeInstr(context, writer, nested)
@@ -166,6 +190,7 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
       writer.byte(ops.br).u32(instr.depth)
       return
     case 'BrIf':
+      recordHint(context, writer, instr.hint)
       writer.byte(ops.brIf).u32(instr.depth)
       return
     case 'BrTable': {
@@ -267,6 +292,24 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
         .u32(fc.elemDrop)
         .u32(spaceIndex(context, instr.elem, 'Elem'))
       return
+    case 'Throw':
+      writer.byte(ops.throw).u32(spaceIndex(context, instr.tag, 'Tag'))
+      return
+    case 'TryTable': {
+      writer.byte(ops.tryTable)
+      encodeBlockType(context, writer, instr.blockType)
+      writer.u32(instr.catches.length)
+      for (const clause of instr.catches) {
+        writer.byte(InstructionTable.catchKinds[clause._tag])
+        if (clause._tag === 'Catch' || clause._tag === 'CatchRef') {
+          writer.u32(spaceIndex(context, clause.tag, 'Tag'))
+        }
+        writer.u32(clause.depth)
+      }
+      for (const nested of instr.body) encodeInstr(context, writer, nested)
+      writer.byte(ops.end)
+      return
+    }
     case 'V128Const': {
       writer.byte(ops.prefixSimd).u32(ops.v128Const)
       for (const byte of instr.bytes) writer.byte(byte)
@@ -445,6 +488,7 @@ const encodeNameSection = (context: Context, module: ByteWriter): void => {
   namemap(7, snapshot.globals, spaces.globals)
   namemap(8, snapshot.elems, identity(snapshot.elems))
   namemap(9, snapshot.datas, identity(snapshot.datas))
+  namemap(11, snapshot.tags, spaces.tags)
   if (hasContent) section(module, 0, contents)
 }
 
@@ -458,7 +502,7 @@ export const encodeModule = (
   spaces: IndexSpace.Spaces,
   operation: string,
 ): Result.Result<Uint8Array, WasmError> => {
-  const context: Context = { snapshot, spaces, operation }
+  const context: Context = { snapshot, spaces, operation, hints: [], currentFuncIndex: undefined }
   try {
     const module = new ByteWriter()
     module.raw([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])
@@ -509,6 +553,15 @@ export const encodeModule = (
         contents.byte(ValType.binary(entry.valType)).byte(entry.mutable ? 0x01 : 0x00)
       })
     }
+    for (const entryIndex of spaces.tagOrder) {
+      const entry = snapshot.tags[entryIndex]
+      const source = entry?.importSource
+      if (entry === undefined || source === undefined) continue
+      imports.push((contents) => {
+        contents.name(source.module).name(source.field).byte(0x04)
+        contents.byte(0x00).u32(entry.typeIndex)
+      })
+    }
     vectorSection(module, 2, imports.length, (contents) => {
       for (const write of imports) write(contents)
     })
@@ -546,6 +599,16 @@ export const encodeModule = (
       }
     })
 
+    const definedTags = spaces.tagOrder.filter(
+      (entryIndex) => snapshot.tags[entryIndex]?.importSource === undefined,
+    )
+    vectorSection(module, 13, definedTags.length, (contents) => {
+      for (const entryIndex of definedTags) {
+        const entry = snapshot.tags[entryIndex]
+        if (entry !== undefined) contents.byte(0x00).u32(entry.typeIndex)
+      }
+    })
+
     const definedGlobals = spaces.globalOrder.filter(
       (entryIndex) => snapshot.globals[entryIndex]?.importSource === undefined,
     )
@@ -573,6 +636,9 @@ export const encodeModule = (
             break
           case 'global':
             contents.byte(0x03).u32(spaces.globals[moduleExport.entryIndex] ?? 0)
+            break
+          case 'tag':
+            contents.byte(0x04).u32(spaces.tags[moduleExport.entryIndex] ?? 0)
             break
         }
       }
@@ -619,18 +685,48 @@ export const encodeModule = (
       section(module, 12, contents)
     }
 
-    const codeEntries = definedFuncs.flatMap((entryIndex) => {
+    // Code bodies are buffered first so the branch-hint custom section, which records byte
+    // offsets into them, can be emitted before the code section as the specification requires.
+    const definedFuncDefinitions = definedFuncs.flatMap((entryIndex) => {
       const definition = snapshot.funcs[entryIndex]?.definition
-      return definition === undefined ? [] : [definition]
+      return definition === undefined ? [] : [{ entryIndex, definition }]
     })
-    vectorSection(module, 10, codeEntries.length, (contents) => {
-      for (const definition of codeEntries) {
-        const body = new ByteWriter()
-        encodeCompressedLocals(body, definition.locals)
-        encodeExpr(context, body, definition.body)
-        contents.sized(body)
+    const codeContents = new ByteWriter()
+    codeContents.u32(definedFuncDefinitions.length)
+    for (const { entryIndex, definition } of definedFuncDefinitions) {
+      const body = new ByteWriter()
+      context.currentFuncIndex = spaces.funcs[entryIndex]
+      encodeCompressedLocals(body, definition.locals)
+      encodeExpr(context, body, definition.body)
+      context.currentFuncIndex = undefined
+      codeContents.sized(body)
+    }
+
+    if (context.hints.length > 0) {
+      const contents = new ByteWriter()
+      contents.name('metadata.code.branch_hint')
+      const byFunc = new Map<number, Array<HintEntry>>()
+      for (const entry of context.hints) {
+        const list = byFunc.get(entry.funcIndex) ?? []
+        list.push(entry)
+        byFunc.set(entry.funcIndex, list)
       }
-    })
+      const funcIndices = [...byFunc.keys()].sort((left, right) => left - right)
+      contents.u32(funcIndices.length)
+      for (const funcIndex of funcIndices) {
+        const entries = byFunc.get(funcIndex) ?? []
+        contents.u32(funcIndex).u32(entries.length)
+        for (const entry of entries) {
+          contents
+            .u32(entry.offset)
+            .u32(1)
+            .byte(entry.likely ? 0x01 : 0x00)
+        }
+      }
+      section(module, 0, contents)
+    }
+
+    if (definedFuncDefinitions.length > 0) section(module, 10, codeContents)
 
     vectorSection(module, 11, snapshot.datas.length, (contents) => {
       for (const data of snapshot.datas) {

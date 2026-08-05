@@ -16,11 +16,13 @@ export interface Spaces {
   readonly tables: ReadonlyArray<number>
   readonly memories: ReadonlyArray<number>
   readonly globals: ReadonlyArray<number>
+  readonly tags: ReadonlyArray<number>
   /** Emitted order of entries: imported first, then defined, both in declaration order. */
   readonly funcOrder: ReadonlyArray<number>
   readonly tableOrder: ReadonlyArray<number>
   readonly memoryOrder: ReadonlyArray<number>
   readonly globalOrder: ReadonlyArray<number>
+  readonly tagOrder: ReadonlyArray<number>
 }
 
 const resolveKind = (
@@ -45,14 +47,17 @@ export const resolve = (snapshot: ModuleState.Snapshot): Spaces => {
   const tables = resolveKind(snapshot.tables)
   const memories = resolveKind(snapshot.memories)
   const globals = resolveKind(snapshot.globals)
+  const tags = resolveKind(snapshot.tags)
   return {
     funcs: funcs.indices,
     tables: tables.indices,
     memories: memories.indices,
     globals: globals.indices,
+    tags: tags.indices,
     funcOrder: funcs.order,
     tableOrder: tables.order,
     memoryOrder: memories.order,
     globalOrder: globals.order,
+    tagOrder: tags.order,
   }
 }

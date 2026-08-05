@@ -55,6 +55,7 @@ interface Context {
   readonly tables: Space
   readonly memories: Space
   readonly globals: Space
+  readonly tags: Space
   readonly elems: Space
   readonly datas: Space
   readonly lines: Array<string>
@@ -74,8 +75,8 @@ const ref = (context: Context, space: Space, entryIndex: number): string =>
 
 const resolveRef = (
   context: Context,
-  handle: Handle.Handle<'Func' | 'Table' | 'Memory' | 'Global' | 'Elem' | 'Data' | 'Type'>,
-  tag: 'Func' | 'Table' | 'Memory' | 'Global' | 'Elem' | 'Data' | 'Type',
+  handle: Handle.Handle<'Func' | 'Table' | 'Memory' | 'Global' | 'Tag' | 'Elem' | 'Data' | 'Type'>,
+  tag: 'Func' | 'Table' | 'Memory' | 'Global' | 'Tag' | 'Elem' | 'Data' | 'Type',
 ): { readonly text: string; readonly entryIndex: number; readonly emitted: number } => {
   const entryIndex = orAbort(Handle.resolve(context.snapshot.owner, handle, tag, context.operation))
   switch (tag) {
@@ -102,6 +103,12 @@ const resolveRef = (
         text: ref(context, context.globals, entryIndex),
         entryIndex,
         emitted: context.spaces.globals[entryIndex] ?? entryIndex,
+      }
+    case 'Tag':
+      return {
+        text: ref(context, context.tags, entryIndex),
+        entryIndex,
+        emitted: context.spaces.tags[entryIndex] ?? entryIndex,
       }
     case 'Elem':
       return { text: ref(context, context.elems, entryIndex), entryIndex, emitted: entryIndex }
@@ -144,8 +151,16 @@ const blockTypeText = (context: Context, blockType: Instr.BlockType): string => 
   }
 }
 
-const heapTypeText = (refType: ValType.RefType): string =>
-  refType._tag === 'FuncRef' ? 'func' : 'extern'
+const heapTypeText = (refType: ValType.RefType): string => {
+  switch (refType._tag) {
+    case 'FuncRef':
+      return 'func'
+    case 'ExternRef':
+      return 'extern'
+    case 'ExnRef':
+      return 'exn'
+  }
+}
 
 const memArgText = (
   context: Context,
@@ -211,6 +226,8 @@ const instrText = (context: Context, instr: Instr.Instr): string => {
       return `ref.null ${heapTypeText(instr.refType)}`
     case 'RefFunc':
       return `ref.func ${resolveRef(context, instr.func, 'Func').text}`
+    case 'Throw':
+      return `throw ${resolveRef(context, instr.tag, 'Tag').text}`
     case 'MemoryAccess':
       return memArgText(
         context,
@@ -296,6 +313,7 @@ const instrText = (context: Context, instr: Instr.Instr): string => {
     case 'Block':
     case 'Loop':
     case 'If':
+    case 'TryTable':
       return orAbort(
         Result.fail(
           invalidState({
@@ -305,6 +323,22 @@ const instrText = (context: Context, instr: Instr.Instr): string => {
           }),
         ),
       )
+  }
+}
+
+const hintAnnotation = (hint: Instr.BranchHint): string =>
+  `(@metadata.code.branch_hint "\\${hint === 'likely' ? '01' : '00'}")`
+
+const catchText = (context: Context, clause: Instr.Catch): string => {
+  switch (clause._tag) {
+    case 'Catch':
+      return `(catch ${resolveRef(context, clause.tag, 'Tag').text} ${clause.depth})`
+    case 'CatchRef':
+      return `(catch_ref ${resolveRef(context, clause.tag, 'Tag').text} ${clause.depth})`
+    case 'CatchAll':
+      return `(catch_all ${clause.depth})`
+    case 'CatchAllRef':
+      return `(catch_all_ref ${clause.depth})`
   }
 }
 
@@ -319,7 +353,15 @@ const renderBody = (context: Context, body: ReadonlyArray<Instr.Instr>, indent: 
         context.lines.push(`${indent}end`)
         break
       }
+      case 'TryTable': {
+        const catches = instr.catches.map((clause) => ` ${catchText(context, clause)}`).join('')
+        context.lines.push(`${indent}try_table${blockTypeText(context, instr.blockType)}${catches}`)
+        renderBody(context, instr.body, `${indent}  `)
+        context.lines.push(`${indent}end`)
+        break
+      }
       case 'If': {
+        if (instr.hint !== undefined) context.lines.push(indent + hintAnnotation(instr.hint))
         context.lines.push(`${indent}if${blockTypeText(context, instr.blockType)}`)
         renderBody(context, instr.thenBody, `${indent}  `)
         if (instr.elseBody.length > 0) {
@@ -330,6 +372,9 @@ const renderBody = (context: Context, body: ReadonlyArray<Instr.Instr>, indent: 
         break
       }
       default:
+        if (instr._tag === 'BrIf' && instr.hint !== undefined) {
+          context.lines.push(indent + hintAnnotation(instr.hint))
+        }
         context.lines.push(indent + instrText(context, instr))
     }
   }
@@ -394,6 +439,10 @@ export const renderModule = (
     globals: assignIds(
       snapshot.globals.map((entry) => entry.name),
       spaces.globals,
+    ),
+    tags: assignIds(
+      snapshot.tags.map((entry) => entry.name),
+      spaces.tags,
     ),
     elems: assignIds(
       snapshot.elems.map((entry) => entry.name),
@@ -463,6 +512,16 @@ export const renderModule = (
           `(global${id} ${globalTypeText(entry)}))`,
       )
     }
+    for (const entryIndex of spaces.tagOrder) {
+      const entry = snapshot.tags[entryIndex]
+      const source = entry?.importSource
+      if (entry === undefined || source === undefined) continue
+      const id = importable(ref(context, context.tags, entryIndex))
+      lines.push(
+        `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
+          `(tag${id} (type ${entry.typeIndex})))`,
+      )
+    }
 
     for (const entryIndex of spaces.funcOrder) {
       const entry = snapshot.funcs[entryIndex]
@@ -499,6 +558,13 @@ export const renderModule = (
       lines.push(`  (global${id} ${globalTypeText(entry)} ${constExprText(context, entry.init)})`)
     }
 
+    for (const entryIndex of spaces.tagOrder) {
+      const entry = snapshot.tags[entryIndex]
+      if (entry === undefined || entry.importSource !== undefined) continue
+      const id = importable(ref(context, context.tags, entryIndex))
+      lines.push(`  (tag${id} (type ${entry.typeIndex}))`)
+    }
+
     for (const moduleExport of snapshot.exports) {
       const target = (() => {
         switch (moduleExport.kind) {
@@ -510,6 +576,8 @@ export const renderModule = (
             return `memory ${ref(context, context.memories, moduleExport.entryIndex)}`
           case 'global':
             return `global ${ref(context, context.globals, moduleExport.entryIndex)}`
+          case 'tag':
+            return `tag ${ref(context, context.tags, moduleExport.entryIndex)}`
         }
       })()
       lines.push(`  (export ${escapeName(moduleExport.name)} (${target}))`)

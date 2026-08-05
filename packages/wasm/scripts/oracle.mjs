@@ -38,6 +38,7 @@ const FEATURES = [
   'relaxed-simd',
   'threads',
   'memory64',
+  'exceptions',
 ]
 
 const run = (args, options = {}) => execFileSync(wasmTools, args, { stdio: 'pipe', ...options })

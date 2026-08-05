@@ -20,6 +20,7 @@ import * as NameCheck from './internal/NameCheck.js'
 import type * as Limits from './Limits.js'
 import type * as Memory from './Memory.js'
 import type * as Table from './Table.js'
+import * as TagActor from './Tag.js'
 import type * as Type from './Type.js'
 import type * as ValType from './ValType.js'
 import { invalidInput, type WasmError } from './WasmError.js'
@@ -210,6 +211,37 @@ export const global = Effect.fn('Import.global')(function* (
       })
       const handle: Global.Global = Handle.make('Global', owner, index)
       state.globalHandles.push(handle)
+      return handle
+    }),
+  )
+})
+
+/**
+ * Imports an exception tag with an interned function type whose results are empty.
+ *
+ * @category imports
+ * @since 0.0.0
+ */
+export const tag = Effect.fn('Import.tag')(function* (
+  builder: Builder.Builder,
+  module: string,
+  field: string,
+  type: Type.Type,
+  options: Options = {},
+): Effect.fn.Return<TagActor.Tag, WasmError> {
+  return yield* ModuleState.mutate(builder, 'Import.tag', (state, owner) =>
+    Result.gen(function* () {
+      const typeIndex = yield* Handle.resolve(owner, type, 'Type', 'Import.tag')
+      yield* TagActor.checkTagType(state, typeIndex, 'Import.tag')
+      yield* NameCheck.ensureFresh(state.tags, options.name, 'Import.tag')
+      const index = state.tags.length
+      state.tags.push({
+        typeIndex,
+        name: options.name,
+        importSource: { module, field },
+      })
+      const handle: TagActor.Tag = Handle.make('Tag', owner, index)
+      state.tagHandles.push(handle)
       return handle
     }),
   )

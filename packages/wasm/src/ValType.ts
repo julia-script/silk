@@ -36,7 +36,10 @@ export interface VecType {
  * @category value types
  * @since 0.0.0
  */
-export type RefType = { readonly _tag: 'FuncRef' } | { readonly _tag: 'ExternRef' }
+export type RefType =
+  | { readonly _tag: 'FuncRef' }
+  | { readonly _tag: 'ExternRef' }
+  | { readonly _tag: 'ExnRef' }
 
 /**
  * Any WebAssembly value type.
@@ -103,6 +106,14 @@ export const funcref: RefType = Object.freeze({ _tag: 'FuncRef' })
 export const externref: RefType = Object.freeze({ _tag: 'ExternRef' })
 
 /**
+ * The reference type `exnref`, holding caught exception references.
+ *
+ * @category value types
+ * @since 0.0.0
+ */
+export const exnref: RefType = Object.freeze({ _tag: 'ExnRef' })
+
+/**
  * Compares two value types structurally.
  *
  * @category value types
@@ -117,7 +128,7 @@ export const equals = (self: ValType, that: ValType): boolean => self._tag === t
  * @since 0.0.0
  */
 export const isRefType = (self: ValType): self is RefType =>
-  self._tag === 'FuncRef' || self._tag === 'ExternRef'
+  self._tag === 'FuncRef' || self._tag === 'ExternRef' || self._tag === 'ExnRef'
 
 /**
  * Renders a value type as its text-format keyword.
@@ -141,6 +152,8 @@ export const text = (self: ValType): string => {
       return 'funcref'
     case 'ExternRef':
       return 'externref'
+    case 'ExnRef':
+      return 'exnref'
   }
 }
 
@@ -166,5 +179,7 @@ export const binary = (self: ValType): number => {
       return 0x70
     case 'ExternRef':
       return 0x6f
+    case 'ExnRef':
+      return 0x69
   }
 }

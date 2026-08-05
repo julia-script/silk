@@ -15,6 +15,7 @@ import {
   Instr,
   Memory,
   Table,
+  Tag,
   Type,
   ValType,
   WatText,
@@ -506,6 +507,111 @@ fixtures.push(
       })
       yield* Elem.active(builder, bigTable, [Instr.i64Const(0n)], [probe])
       yield* Export.func(builder, 'probe', probe)
+      return builder
+    }),
+  ),
+)
+
+fixtures.push(
+  build(
+    'exceptions',
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ moduleName: 'exceptions' })
+      const payloadType = yield* Type.func(builder, [ValType.i32], [])
+      const error = yield* Tag.make(builder, payloadType, { name: 'error' })
+      const emptyPayload = yield* Type.func(builder, [], [])
+      const panic = yield* Import.tag(builder, 'env', 'panic', emptyPayload, { name: 'panic' })
+      const pairType = yield* Type.func(builder, [], [ValType.i32, ValType.exnref])
+      const type = yield* Type.func(builder, [ValType.i32], [ValType.i32])
+      const guarded = yield* Func.declare(builder, type, { name: 'guarded' })
+      yield* Func.define(builder, guarded, {
+        body: [
+          Instr.block(Instr.valueBlockType(ValType.i32), [
+            Instr.block(Instr.funcBlockType(pairType), [
+              Instr.block(Instr.valueBlockType(ValType.exnref), [
+                Instr.block(Instr.emptyBlockType, [
+                  Instr.tryTable(
+                    Instr.emptyBlockType,
+                    [
+                      Instr.catchTag(error, 3),
+                      Instr.catchTagRef(error, 2),
+                      Instr.catchAll(0),
+                      Instr.catchAllRef(1),
+                    ],
+                    [
+                      Instr.localGet(0),
+                      Instr.op('i32.eqz'),
+                      Instr.ifElse(Instr.emptyBlockType, [
+                        Instr.i32Const(41),
+                        Instr.throwTag(error),
+                      ]),
+                      Instr.localGet(0),
+                      Instr.i32Const(100),
+                      Instr.op('i32.gt_s'),
+                      Instr.ifElse(Instr.emptyBlockType, [Instr.throwTag(panic)]),
+                    ],
+                  ),
+                  Instr.i32Const(7),
+                  Instr.br(3),
+                ]),
+                // catch_all lands here with nothing.
+                Instr.i32Const(-1),
+                Instr.br(2),
+              ]),
+              // catch_all_ref lands here with the exnref: rethrow it.
+              Instr.op('throw_ref'),
+            ]),
+            // catch_ref lands here with [i32, exnref]: keep the payload.
+            Instr.op('drop'),
+          ]),
+          Instr.i32Const(1),
+          Instr.op('i32.add'),
+        ],
+      })
+      yield* Export.func(builder, 'guarded', guarded)
+      yield* Export.tag(builder, 'error', error)
+      return builder
+    }),
+  ),
+
+  build(
+    'branch-hints',
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ moduleName: 'branch-hints' })
+      const type = yield* Type.func(builder, [ValType.i32], [ValType.i32])
+      const fast = yield* Func.declare(builder, type, { name: 'fast' })
+      yield* Func.define(builder, fast, {
+        body: [
+          Instr.block(Instr.emptyBlockType, [
+            Instr.localGet(0),
+            Instr.op('i32.eqz'),
+            Instr.brIf(0, { hint: 'unlikely' }),
+          ]),
+          Instr.localGet(0),
+          Instr.ifElse(
+            Instr.valueBlockType(ValType.i32),
+            [Instr.localGet(0)],
+            [Instr.i32Const(-1)],
+            { hint: 'likely' },
+          ),
+        ],
+      })
+      const slow = yield* Func.declare(builder, type, { name: 'slow' })
+      yield* Func.define(builder, slow, {
+        body: [
+          Instr.localGet(0),
+          Instr.ifElse(
+            Instr.valueBlockType(ValType.i32),
+            [Instr.i32Const(1)],
+            [Instr.i32Const(0)],
+            {
+              hint: 'unlikely',
+            },
+          ),
+        ],
+      })
+      yield* Export.func(builder, 'fast', fast)
+      yield* Export.func(builder, 'slow', slow)
       return builder
     }),
   ),

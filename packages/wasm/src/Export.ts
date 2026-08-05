@@ -15,13 +15,14 @@ import * as Handle from './internal/Handle.js'
 import * as ModuleState from './internal/ModuleState.js'
 import type * as MemoryActor from './Memory.js'
 import type * as TableActor from './Table.js'
+import type * as TagActor from './Tag.js'
 import { invalidInput, type WasmError } from './WasmError.js'
 
 /** @internal */
 const declare = (
   operation: string,
   kind: ModuleState.ExportKind,
-  tag: 'Func' | 'Table' | 'Memory' | 'Global',
+  tag: 'Func' | 'Table' | 'Memory' | 'Global' | 'Tag',
 ) =>
   Effect.fn(operation)(function* (
     builder: Builder.Builder,
@@ -93,3 +94,15 @@ export const global: (
   name: string,
   handle: GlobalActor.Global,
 ) => Effect.Effect<void, WasmError> = declare('Export.global', 'global', 'Global')
+
+/**
+ * Exports an exception tag under a unique name.
+ *
+ * @category exports
+ * @since 0.0.0
+ */
+export const tag: (
+  builder: Builder.Builder,
+  name: string,
+  handle: TagActor.Tag,
+) => Effect.Effect<void, WasmError> = declare('Export.tag', 'tag', 'Tag')

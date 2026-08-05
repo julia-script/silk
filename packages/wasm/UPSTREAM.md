@@ -24,7 +24,8 @@ if it is not on `PATH`.
 Validation runs with exactly these `wasm-tools` features, matching the package's supported
 surface: `mutable-global`, `saturating-float-to-int`, `sign-extension`, `multi-value`,
 `bulk-memory`, `reference-types`, `tail-call`, `extended-const`, `multi-memory`, `simd`,
-`relaxed-simd`, `threads`, `memory64`.
+`relaxed-simd`, `threads`, `memory64`, `exceptions`. Branch hints are custom-section content
+validated through text round-trips rather than a feature flag.
 
 ## Verification layers
 

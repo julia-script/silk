@@ -69,6 +69,8 @@ export const make = Effect.fn('Builder.make')(function* (options: Options = {}) 
       memoryHandles: [],
       globals: [],
       globalHandles: [],
+      tags: [],
+      tagHandles: [],
       elems: [],
       elemHandles: [],
       datas: [],

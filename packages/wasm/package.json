@@ -86,6 +86,10 @@
       "types": "./dist/Table.d.ts",
       "import": "./dist/Table.js"
     },
+    "./Tag": {
+      "types": "./dist/Tag.d.ts",
+      "import": "./dist/Tag.js"
+    },
     "./Type": {
       "types": "./dist/Type.d.ts",
       "import": "./dist/Type.js"

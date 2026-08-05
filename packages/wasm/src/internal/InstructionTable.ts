@@ -84,6 +84,7 @@ export const plainOps: Record<Instr.PlainMnemonic, PlainRow> = {
   drop: special([0x1a]),
   select: special([0x1b]),
   'ref.is_null': special([0xd1]),
+  throw_ref: special([0x0a]),
   'i32.eqz': test(0x45, i32),
   'i32.eq': compare(0x46, i32),
   'i32.ne': compare(0x47, i32),
@@ -662,6 +663,8 @@ export const opcodes = {
   br: 0x0c,
   brIf: 0x0d,
   brTable: 0x0e,
+  throw: 0x08,
+  tryTable: 0x1f,
   call: 0x10,
   callIndirect: 0x11,
   returnCall: 0x12,
@@ -687,6 +690,14 @@ export const opcodes = {
   prefixFc: 0xfc,
   prefixSimd: 0xfd,
   prefixAtomic: 0xfe,
+} as const
+
+/** Kind bytes of `try_table` catch clauses. */
+export const catchKinds = {
+  Catch: 0x00,
+  CatchRef: 0x01,
+  CatchAll: 0x02,
+  CatchAllRef: 0x03,
 } as const
 
 /** Second bytes of `0xFC`-prefixed instructions that carry immediates. */

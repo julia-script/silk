@@ -20,8 +20,9 @@ verification. Runtime code SHALL never invoke the oracle.
 ### Requirement: Committed fixtures
 The system SHALL commit representative fixture modules covering every supported feature area —
 declarations, imports and exports, segments, control flow, and each instruction family,
-including SIMD, relaxed SIMD, atomics with shared memories, and 64-bit memories — as both
-expected binary bytes and expected text, generated deterministically by a repeatable script.
+including SIMD, relaxed SIMD, atomics with shared memories, 64-bit memories, exception handling
+with tags and `try_table`, and branch hints — as both expected binary bytes and expected text,
+generated deterministically by a repeatable script.
 
 #### Scenario: Fixture verification
 - **WHEN** the fixture verification script runs
@@ -30,8 +31,8 @@ expected binary bytes and expected text, generated deterministically by a repeat
 
 #### Scenario: Extended-feature fixtures exist
 - **WHEN** the fixture inventory is listed
-- **THEN** it contains at least one module per new feature family (SIMD, atomics, memory64)
-  verified with the oracle's matching feature flags
+- **THEN** it contains at least one module per new feature family (SIMD, atomics, memory64,
+  exceptions, branch hints) verified with the oracle's matching feature flags
 
 ### Requirement: Round-trip agreement
 The system SHALL verify for each fixture that the rendered text, parsed by the oracle, produces

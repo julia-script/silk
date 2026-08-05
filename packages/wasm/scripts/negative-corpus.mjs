@@ -144,4 +144,24 @@ export const negativeCorpus = [
     name: 'table64-i32-index',
     wat: '(module (table i64 1 funcref) (func i32.const 0 table.get 0 drop))',
   },
+  {
+    name: 'tag-with-results',
+    wat: '(module (tag (result i32)))',
+  },
+  {
+    name: 'catch-label-arity-mismatch',
+    wat: `(module (tag $e (param i32)) (func
+      block
+        try_table (catch $e 0)
+        end
+      end))`,
+  },
+  {
+    name: 'throw-ref-wrong-operand',
+    wat: '(module (func i32.const 1 throw_ref))',
+  },
+  {
+    name: 'throw-missing-payload',
+    wat: '(module (tag $e (param i32)) (func throw $e))',
+  },
 ]
