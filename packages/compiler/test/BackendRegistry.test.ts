@@ -16,7 +16,10 @@ describe('BackendRegistry.forTarget', () => {
       const claiming = BackendRegistry.backends.filter((backend) =>
         backend.targets.includes(target.id),
       )
-      expect(claiming.map((backend) => backend.name), target.id).toHaveLength(1)
+      expect(
+        claiming.map((backend) => backend.name),
+        target.id,
+      ).toHaveLength(1)
     }
   })
 

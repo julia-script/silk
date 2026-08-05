@@ -1,5 +1,5 @@
 import * as Backend from './Backend.js'
-import * as Target from './Target.js'
+import type * as Target from './Target.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
