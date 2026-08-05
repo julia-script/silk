@@ -199,9 +199,19 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       cwd: compilerPackageRoot,
       stdio: 'pipe',
     })
+    execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+      cwd: packageRoot,
+      stdio: 'pipe',
+    })
 
-    const archive = readdirSync(archiveRoot).find((file) => file.endsWith('.tgz'))
+    const archive = readdirSync(archiveRoot).find(
+      (file) => file.startsWith('silk-effect-compiler-') && file.endsWith('.tgz'),
+    )
+    const llvmArchive = readdirSync(archiveRoot).find(
+      (file) => file.startsWith('silk-effect-llvm-') && file.endsWith('.tgz'),
+    )
     expect(archive).toBeDefined()
+    expect(llvmArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
@@ -209,10 +219,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
 
     expect(manifest.name).toBe('@silk-effect/compiler')
     expect(manifest.private).not.toBe(true)
-    expect(Object.keys(manifest.dependencies ?? {})).toEqual(['effect'])
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual(['@silk-effect/llvm', 'effect'])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './Analysis',
+      './Backend',
       './BootstrapEvaluation',
       './DeclarationIndex',
       './Diagnostic',
@@ -258,7 +269,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         dependencies: { '@silk-effect/compiler': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
+    writeFileSync(
+      resolve(consumerRoot, 'pnpm-workspace.yaml'),
+      `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n`,
+    )
+    execFileSync('pnpm', ['install', '--offline'], {
       cwd: consumerRoot,
       stdio: 'pipe',
     })
@@ -487,6 +502,7 @@ console.log(
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
       'Analysis',
+      'Backend',
       'BootstrapEvaluation',
       'DeclarationIndex',
       'Diagnostic',

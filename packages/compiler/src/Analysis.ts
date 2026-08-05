@@ -1,3 +1,4 @@
+import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -127,6 +128,33 @@ export const parameterLookup = (
 /** The compilation's complete diagnostic sequence in deterministic driver order. */
 export const diagnostics = (self: Snapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
   self.diagnostics
+
+/** The default target layout used by facade codegen until the driver owns target selection. */
+export const defaultLayout: Mir.TargetLayout = Object.freeze({
+  _tag: 'TargetLayout',
+  triple: 'arm64-apple-darwin',
+  pointerWidth: 64,
+  endianness: 'little',
+  i32: Object.freeze({ size: 4, alignment: 4 }),
+})
+
+/** Emits the snapshot's lowered program through the nominal backend service. */
+export const codegen = (
+  self: Snapshot,
+  request: Backend.CodegenRequest,
+  layout: Mir.TargetLayout = defaultLayout,
+): Backend.Artifact =>
+  Backend.LlvmBackend.emit(self.mir, layout, {
+    ...request,
+    sources:
+      request.sources ??
+      new Map(
+        self.closure.modules.map((module) => [
+          module.name,
+          Uint8Array.from(module.syntax.source.bytes),
+        ]),
+      ),
+  })
 
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>

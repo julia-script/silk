@@ -99,3 +99,17 @@ it('answers ownership facts and cleanup plans through the facade', () => {
   assert.deepEqual(facts?.functions.at(0)?.exits.at(0)?.releases, [])
   assert.strictEqual(Analysis.ownershipOf(self, 'absent'), undefined)
 })
+
+it('emits codegen artifacts through the facade', () => {
+  const self = Analysis.ofSource(
+    'memory://codegen.silk',
+    ascii('pub fn main() -> I32 { return 42 }'),
+  )
+  const release = Analysis.codegen(self, { mode: 'release' })
+  const debug = Analysis.codegen(self, { mode: 'debug' })
+
+  assert.strictEqual(release._tag, 'BackendArtifact')
+  assert.include(release.ir, 'silk_main')
+  assert.isAbove(release.bitcode.length, 0)
+  assert.include(debug.ir, '!DICompileUnit(')
+})

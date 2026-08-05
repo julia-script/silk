@@ -122,6 +122,6 @@ Proposals are written as openspec changes:
 - [x] 8 — [define-mir-and-encoder](../openspec/changes/archive/2026-08-05-define-mir-and-encoder/proposal.md)
 - [x] 9 — [discover-instances-and-lower-to-mir](../openspec/changes/archive/2026-08-05-discover-instances-and-lower-to-mir/proposal.md)
 - [x] 10 — [retarget-evaluator-to-mir](../openspec/changes/archive/2026-08-05-retarget-evaluator-to-mir/proposal.md)
-- [ ] 11 — [establish-backend-service](../openspec/changes/establish-backend-service/proposal.md)
+- [x] 11 — [establish-backend-service](../openspec/changes/archive/2026-08-05-establish-backend-service/proposal.md)
 - [ ] 12 — [orchestrate-native-toolchain](../openspec/changes/orchestrate-native-toolchain/proposal.md)
 - [ ] 13 — [accept-end-to-end-pipeline](../openspec/changes/accept-end-to-end-pipeline/proposal.md)

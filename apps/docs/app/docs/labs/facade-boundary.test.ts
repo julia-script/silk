@@ -6,6 +6,7 @@ import { expect, it } from 'vitest'
 const labsRoot = dirname(fileURLToPath(import.meta.url))
 
 const phaseModules = [
+  'Backend',
   'Lexer',
   'Parser',
   'ModuleClosure',

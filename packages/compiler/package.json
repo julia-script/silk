@@ -37,6 +37,10 @@
       "types": "./dist/Analysis.d.ts",
       "import": "./dist/Analysis.js"
     },
+    "./Backend": {
+      "types": "./dist/Backend.d.ts",
+      "import": "./dist/Backend.js"
+    },
     "./BootstrapEvaluation": {
       "types": "./dist/BootstrapEvaluation.d.ts",
       "import": "./dist/BootstrapEvaluation.js"
@@ -115,6 +119,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@silk-effect/llvm": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
