@@ -160,6 +160,32 @@ function executeFunction(
           const left = BigInt(read(operation.left).value.value)
           const right = BigInt(read(operation.right).value.value)
           if (
+            operation.operator === 'Equals' ||
+            operation.operator === 'NotEquals' ||
+            operation.operator === 'LessThan' ||
+            operation.operator === 'LessOrEqual' ||
+            operation.operator === 'GreaterThan' ||
+            operation.operator === 'GreaterOrEqual'
+          ) {
+            const holds =
+              operation.operator === 'Equals'
+                ? left === right
+                : operation.operator === 'NotEquals'
+                  ? left !== right
+                  : operation.operator === 'LessThan'
+                    ? left < right
+                    : operation.operator === 'LessOrEqual'
+                      ? left <= right
+                      : operation.operator === 'GreaterThan'
+                        ? left > right
+                        : left >= right
+            locals.set(operation.destination.ordinal, {
+              value: value(holds ? 1 : 0),
+              fromCall: false,
+            })
+            break
+          }
+          if (
             (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
             right === 0n
           ) {

@@ -55,9 +55,32 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
   )
 }
 
+const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
+  ['if', 'IfKeyword'],
+  ['else', 'ElseKeyword'],
+  ['true', 'TrueKeyword'],
+  ['false', 'FalseKeyword'],
+])
+
+const matchesSpelling = (
+  bytes: ReadonlyArray<number>,
+  start: number,
+  end: number,
+  spelling: string,
+): boolean => {
+  if (end - start !== spelling.length) return false
+  for (let index = 0; index < spelling.length; index += 1) {
+    if (bytes[start + index] !== spelling.charCodeAt(index)) return false
+  }
+  return true
+}
+
 const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind => {
   if (end - start === 2 && bytes[start] === 0x66 && bytes[start + 1] === 0x6e) {
     return 'FnKeyword'
+  }
+  for (const [spelling, kind] of keywordSpellings) {
+    if (matchesSpelling(bytes, start, end, spelling)) return kind
   }
   if (
     end - start === 3 &&

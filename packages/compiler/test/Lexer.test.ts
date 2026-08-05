@@ -248,3 +248,37 @@ it('distinguishes minus from the arrow', () => {
     ['Minus', 'Arrow', 'Minus', 'DecimalInteger', 'EndOfFile'],
   )
 })
+
+it('lexes conditional keywords as complete identifiers only', () => {
+  const conditional = Lexer.lex(
+    SourceFile.make(
+      'memory://conditional.silk',
+      ascii('if flag { return true } else { return false }'),
+    ),
+  )
+  const prefixes = Lexer.lex(
+    SourceFile.make('memory://conditional-prefixes.silk', ascii('iffy elsewhere truer falsehood')),
+  )
+
+  assert.deepEqual(
+    conditional.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'IfKeyword',
+      'Identifier',
+      'LeftBrace',
+      'ReturnKeyword',
+      'TrueKeyword',
+      'RightBrace',
+      'ElseKeyword',
+      'LeftBrace',
+      'ReturnKeyword',
+      'FalseKeyword',
+      'RightBrace',
+      'EndOfFile',
+    ],
+  )
+  assert.deepEqual(
+    prefixes.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Identifier', 'Identifier', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})

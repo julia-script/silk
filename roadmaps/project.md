@@ -28,6 +28,9 @@ riding an unchanged, determinism-gated architecture.
 
 ### Widen the language, slice 1: bindings, arithmetic, branching
 
+**Status: complete (2026-08-05).** All three changes shipped and archived; see the changelog.
+The Next item below is the candidate for promotion at the next review.
+
 - **Problem:** The realigned spine (diagnostics through native link, all 13 changes archived
   2026-08-05) runs end to end over a grammar too small to exercise it: ownership is trivially
   satisfiable, lowering never emits `Branch` or `Drop`, and the differential harness compares only
@@ -114,6 +117,13 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-05: Shipped and archived `branch-on-boolean-conditions` — slice 1 complete. `Bool` as
+  the second scalar (literals, declared types, comparisons, `Bool.not`), `if`/`else` statements
+  with brace arms, condition and argument type checking (`SEM0011`/`SEM0012`), arm-scoped
+  ownership with per-return and arm-end exits and conservative conditional moves, MIR branch
+  diamonds with join blocks and arm drops, exact interpreter branching, and native `icmp`/`zext`
+  emission. Six branching corpus programs hold interpreter/native parity arm by arm. The
+  language now binds, computes, and decides through every phase of the spine.
 - 2026-08-05: Shipped and archived `compute-integer-arithmetic` — slice 1's second change.
   Signed literals with full `I32` range, qualified callees, and the compiler-known `I32` actor
   (`add`/`subtract`/`multiply`/`divide`/`remainder`) as HIR builtin calls lowering to a trapping

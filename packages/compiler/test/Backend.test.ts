@@ -99,3 +99,13 @@ it('matches the arithmetic IR golden and stays deterministic', () => {
   assert.strictEqual(first.ir, golden('arithmetic.ll.txt'))
   assert.deepEqual(first.bitcode, second.bitcode)
 })
+
+it('emits comparisons as icmp with zero-extension and branches natively', () => {
+  const artifact = emit('pub fn main() -> I32 { if I32.lessThan(1, 2) { return 42 } return 0 }', {
+    mode: 'release',
+  })
+
+  assert.include(artifact.ir, 'icmp slt')
+  assert.include(artifact.ir, 'zext')
+  assert.include(artifact.ir, 'br i1')
+})

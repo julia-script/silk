@@ -129,6 +129,39 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
     expected: { _tag: 'Trap' },
   },
   {
+    name: 'branch-taken',
+    source: 'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'branch-otherwise',
+    source: 'pub fn main() -> I32 { if I32.equals(1, 2) { return 0 } return 42 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'branch-else',
+    source:
+      'pub fn main() -> I32 { if I32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'bool-not',
+    source: 'pub fn main() -> I32 { if Bool.not(I32.equals(1, 2)) { return 42 } return 0 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'bool-through-function',
+    source: `pub fn check(flag: Bool) -> I32 { if flag { return 42 } return 0 }
+pub fn main() -> I32 { return check(I32.greaterOrEqual(3, 3)) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'arm-binding',
+    source:
+      'pub fn main() -> I32 { let base = 40 if I32.equals(base, 40) { let bonus = 2 return I32.add(base, bonus) } return 0 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'missing-entry',
     source: 'pub fn answer() -> I32 { return 42 }',
     expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },

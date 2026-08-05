@@ -39,8 +39,9 @@ export interface Release {
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
   readonly _tag: 'Exit'
-  readonly kind: 'Return'
+  readonly kind: 'Return' | 'ArmEnd'
   readonly span: SourceSpan.SourceSpan
+  readonly arm?: 'Taken' | 'Otherwise'
   readonly releases: ReadonlyArray<Release>
 }
 
@@ -145,6 +146,13 @@ interface CheckedFunction {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+interface ExitDescriptor {
+  readonly kind: 'Return' | 'ArmEnd'
+  readonly span: SourceSpan.SourceSpan
+  readonly arm?: 'Taken' | 'Otherwise'
+  readonly sites: ReadonlyArray<string>
+}
+
 const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
   const declaration = fn.declaration
   const state: CheckState = {
@@ -164,22 +172,74 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
     state.order.push(binding)
   }
 
-  const letBindings: Array<MutableBinding> = []
-  for (const statement of fn.statements) {
-    if (statement._tag === 'Bind') {
-      checkExpression(state, statement.initializer)
-      const binding: MutableBinding = {
-        site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
-        name: statement.name,
-        liveFrom: statement.span,
-        liveTo: declaration.syntax.span,
+  // Frames of let-bindings: index 0 is the function body, deeper indices are open arms.
+  const frames: Array<Array<MutableBinding>> = [[]]
+  const exits: Array<ExitDescriptor> = []
+  const frameSitesInnerFirst = (): ReadonlyArray<string> =>
+    [...frames].reverse().flatMap((frame) => [...frame].reverse().map((b) => siteKey(b.site)))
+
+  const walkStatements = (
+    statements: ReadonlyArray<Hir.Statement>,
+    enclosingSpan: SourceSpan.SourceSpan,
+  ): boolean => {
+    for (const statement of statements) {
+      if (statement._tag === 'Bind') {
+        checkExpression(state, statement.initializer)
+        const binding: MutableBinding = {
+          site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
+          name: statement.name,
+          liveFrom: statement.span,
+          liveTo: enclosingSpan,
+        }
+        state.bindings.set(siteKey(binding.site), binding)
+        state.order.push(binding)
+        frames.at(-1)?.push(binding)
+        continue
       }
-      state.bindings.set(siteKey(binding.site), binding)
-      state.order.push(binding)
-      letBindings.push(binding)
-    } else {
+      if (statement._tag === 'If') {
+        checkExpression(state, statement.condition)
+        for (const [arm, body] of [
+          ['Taken', statement.taken],
+          ['Otherwise', statement.otherwise],
+        ] as const) {
+          frames.push([])
+          const returned = walkStatements(body, statement.span)
+          const frame = frames.pop() ?? []
+          if (!returned && frame.length > 0) {
+            exits.push(
+              Object.freeze({
+                kind: 'ArmEnd' as const,
+                span: statement.span,
+                arm,
+                sites: Object.freeze([...frame].reverse().map((b) => siteKey(b.site))),
+              }),
+            )
+          }
+        }
+        continue
+      }
       checkExpression(state, statement.expression)
+      exits.push(
+        Object.freeze({
+          kind: 'Return' as const,
+          span: statement.span,
+          sites: frameSitesInnerFirst(),
+        }),
+      )
+      return true
     }
+    return false
+  }
+
+  const returnedAtTop = walkStatements(fn.statements, declaration.syntax.span)
+  if (!returnedAtTop) {
+    exits.push(
+      Object.freeze({
+        kind: 'Return' as const,
+        span: fn.statements.at(-1)?.span ?? declaration.syntax.span,
+        sites: frameSitesInnerFirst(),
+      }),
+    )
   }
 
   const bindings = Object.freeze(
@@ -198,17 +258,26 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
   )
   const bindingBySite = new Map(bindings.map((binding) => [siteKey(binding.site), binding]))
 
-  const returnSpan = fn.statements.at(-1)?.span ?? declaration.syntax.span
-  const releases = Object.freeze(
-    [...letBindings]
-      .reverse()
-      .filter((binding) => binding.movedAt === undefined)
-      .flatMap((binding): ReadonlyArray<Release> => {
-        const fact = bindingBySite.get(siteKey(binding.site))
-        return fact === undefined
-          ? []
-          : [Object.freeze({ _tag: 'Release' as const, binding: fact })]
-      }),
+  // ponytail: releases use final moved state — sound while every type is copyable; per-path
+  // liveness arrives with cleanup-bearing types.
+  const exitPlans = Object.freeze(
+    exits.map(
+      (exit): ExitPlan =>
+        Object.freeze({
+          _tag: 'Exit' as const,
+          kind: exit.kind,
+          span: exit.span,
+          ...(exit.arm === undefined ? {} : { arm: exit.arm }),
+          releases: Object.freeze(
+            exit.sites.flatMap((site): ReadonlyArray<Release> => {
+              const fact = bindingBySite.get(site)
+              return fact === undefined || fact.movedAt !== undefined
+                ? []
+                : [Object.freeze({ _tag: 'Release' as const, binding: fact })]
+            }),
+          ),
+        }),
+    ),
   )
 
   const firstUnavailable = Hir.firstUnavailable(fn)
@@ -233,14 +302,7 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
       _tag: 'FunctionOwnership' as const,
       declaration,
       bindings,
-      exits: Object.freeze([
-        Object.freeze({
-          _tag: 'Exit' as const,
-          kind: 'Return' as const,
-          span: returnSpan,
-          releases,
-        }),
-      ]),
+      exits: exitPlans,
       verdict,
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
@@ -300,14 +362,18 @@ export const encode = (self: ModuleOwnership): string =>
         (binding) =>
           `  binding ${siteText(binding.site)} ${binding.name ?? '?'} copyable live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`,
       ),
-      ...fn.exits.map((exit) =>
-        exit.releases.length === 0
-          ? `  exit return ${spanText(exit.span)} releases none`
+      ...fn.exits.map((exit) => {
+        const label =
+          exit.kind === 'Return'
+            ? 'return'
+            : `arm-end ${exit.arm === 'Otherwise' ? 'otherwise' : 'taken'}`
+        return exit.releases.length === 0
+          ? `  exit ${label} ${spanText(exit.span)} releases none`
           : [
-              `  exit return ${spanText(exit.span)}`,
+              `  exit ${label} ${spanText(exit.span)}`,
               ...exit.releases.map((release) => `    release ${siteText(release.binding.site)}`),
-            ].join('\n'),
-      ),
+            ].join('\n')
+      }),
     ]),
     '',
   ].join('\n')

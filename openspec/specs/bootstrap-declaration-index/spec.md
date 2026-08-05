@@ -70,3 +70,18 @@ SHALL produce identical indexes across fresh processes.
 - **WHEN** a module declares one present unique `main`
 - **THEN** looking up `main` in that module resolves its header while an undeclared name reports no match
 
+### Requirement: Bool is a built-in declared type
+
+Declared parameter and return types SHALL resolve `Bool` as a built-in semantic type alongside
+`I32`. Any other spelling SHALL keep the existing `SEM0001` unknown-type diagnostic.
+
+#### Scenario: Resolve a Bool parameter and return
+
+- **WHEN** `pub fn negate(flag: Bool) -> Bool { return flag }` is collected
+- **THEN** the parameter and return types resolve to `Bool` with no diagnostics
+
+#### Scenario: Keep unknown types diagnosed
+
+- **WHEN** a return type spells `Boolean`
+- **THEN** the type stays unresolved with one `SEM0001` diagnostic
+

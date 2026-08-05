@@ -104,7 +104,10 @@ export function OwnershipView({ facts }: { readonly facts: Ownership.ModuleOwner
             {fn.exits.map((exit, index) => (
               <li key={`exit-${index}`}>
                 <div>
-                  <code>exit {exit.kind.toLowerCase()}</code>
+                  <code>
+                    exit {exit.kind === 'Return' ? 'return' : 'arm-end'}
+                    {exit.arm === undefined ? '' : ` ${exit.arm.toLowerCase()}`}
+                  </code>
                   <span>
                     {spanText(exit.span)} · releases{' '}
                     {exit.releases.length === 0

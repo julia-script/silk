@@ -7,7 +7,7 @@ import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
 /** The only semantic type recognized by the first analysis slice. */
-export type SemanticType = 'I32'
+export type SemanticType = 'I32' | 'Bool'
 
 /** A deterministic declaration identity local to one analyzed source snapshot. */
 export interface DeclarationId {
@@ -194,11 +194,11 @@ export const analyzeDeclaredType = (
   }
 
   const tokenSpelling = spelling(source, token)
-  if (tokenSpelling === 'I32') {
+  if (tokenSpelling === 'I32' || tokenSpelling === 'Bool') {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',
-        type: 'I32',
+        type: tokenSpelling,
         spelling: tokenSpelling,
         token,
         syntax,

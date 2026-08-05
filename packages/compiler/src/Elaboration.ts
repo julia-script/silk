@@ -109,6 +109,8 @@ export type CallReferenceFact =
       readonly token: Token.Token
       readonly actor: string
       readonly operation: Hir.BuiltinOperation
+      readonly parameters: ReadonlyArray<SemanticType>
+      readonly result: SemanticType
     }
   | {
       readonly _tag: 'Missing'
@@ -148,6 +150,14 @@ export interface MoveExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One `true`/`false` literal expression fact. */
+export interface BooleanExpressionFact {
+  readonly _tag: 'Boolean'
+  readonly value: boolean
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One semantic expression fact at any returned or argument position. */
 export type ExpressionFact =
   | {
@@ -156,6 +166,7 @@ export type ExpressionFact =
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
+  | BooleanExpressionFact
   | IdentifierExpressionFact
   | MoveExpressionFact
   | {
@@ -198,6 +209,11 @@ export type UnavailableCallContractReason =
   | { readonly _tag: 'UnavailableCallTarget'; readonly reference: CallReferenceFact }
   | { readonly _tag: 'UnavailableMappedType'; readonly mapping: ArgumentMappingFact }
   | { readonly _tag: 'UnavailableBuiltinArgument'; readonly argument: ArgumentFact }
+  | {
+      readonly _tag: 'ArgumentTypeMismatch'
+      readonly argument: ArgumentFact
+      readonly expected: SemanticType
+    }
 
 /** The complete positional contract outcome for one call. */
 export type CallContractFact =
@@ -223,10 +239,27 @@ export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _
 /** One public function declaration and its syntax-owned semantic facts. */
 export type DeclarationFact = DeclarationIndex.DeclarationFact
 
-/** One function's declaration, bindings, returned expression, and compatibility facts. */
+/** One analyzed body statement in source order, nesting through conditionals. */
+export type StatementFact =
+  | { readonly _tag: 'BindStatement'; readonly binding: BindingDeclarationFact }
+  | {
+      readonly _tag: 'IfStatement'
+      readonly condition: ExpressionFact
+      readonly taken: ReadonlyArray<StatementFact>
+      readonly otherwise: ReadonlyArray<StatementFact>
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'ReturnStatement'
+      readonly expression: ExpressionFact
+      readonly syntax: SyntaxTree.Node
+    }
+
+/** One function's declaration, statements, bindings, and compatibility facts. */
 export interface FunctionFact {
   readonly _tag: 'FunctionFact'
   readonly declaration: DeclarationFact
+  readonly statements: ReadonlyArray<StatementFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
@@ -251,6 +284,12 @@ const availableI32ExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
   type: 'I32',
 })
+const availableBoolExpressionType: ExpressionTypeFact = Object.freeze({
+  _tag: 'Available',
+  type: 'Bool',
+})
+const availableExpressionType = (type: SemanticType): ExpressionTypeFact =>
+  type === 'I32' ? availableI32ExpressionType : availableBoolExpressionType
 const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
 
 const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
@@ -394,7 +433,7 @@ const resolveValueName = (
       }),
       type:
         lookup.parameter.declaredType._tag === 'Resolved'
-          ? availableI32ExpressionType
+          ? availableExpressionType(lookup.parameter.declaredType.type)
           : unavailableExpressionType,
       diagnostics: Object.freeze([]),
     })
@@ -615,7 +654,30 @@ const analyzeCallContract = (
         diagnostics: Object.freeze([]),
       })
     }
-    const expectedCount = 2
+    for (const [ordinal, argument] of argumentsList.entries()) {
+      const expected = reference.parameters.at(ordinal)
+      if (
+        expected !== undefined &&
+        argument.type._tag === 'Available' &&
+        argument.type.type !== expected
+      ) {
+        const mismatch = Diagnostic.argumentTypeMismatch(
+          expected,
+          argument.type.type,
+          argument.syntax.span,
+        )
+        return Object.freeze({
+          mappings: Object.freeze([]),
+          fact: Object.freeze({
+            _tag: 'Unavailable',
+            reason: Object.freeze({ _tag: 'ArgumentTypeMismatch', argument, expected }),
+            cause: Diagnostic.identity(mismatch),
+          }),
+          diagnostics: Object.freeze([mismatch]),
+        })
+      }
+    }
+    const expectedCount = reference.parameters.length
     const actualCount = argumentsList.length
     if (expectedCount !== actualCount) {
       return Object.freeze({
@@ -682,6 +744,32 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([]),
     })
   }
+  for (const mapping of mappings) {
+    if (
+      mapping.argument.type._tag === 'Available' &&
+      mapping.parameter.declaredType._tag === 'Resolved' &&
+      mapping.argument.type.type !== mapping.parameter.declaredType.type
+    ) {
+      const mismatch = Diagnostic.argumentTypeMismatch(
+        mapping.parameter.declaredType.type,
+        mapping.argument.type.type,
+        mapping.argument.syntax.span,
+      )
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({
+            _tag: 'ArgumentTypeMismatch',
+            argument: mapping.argument,
+            expected: mapping.parameter.declaredType.type,
+          }),
+          cause: Diagnostic.identity(mismatch),
+        }),
+        diagnostics: Object.freeze([mismatch]),
+      })
+    }
+  }
 
   const expectedCount = parameters.length
   const actualCount = argumentsList.length
@@ -702,17 +790,42 @@ const analyzeCallContract = (
   })
 }
 
+interface BuiltinSignature {
+  readonly operation: Hir.BuiltinOperation
+  readonly parameters: ReadonlyArray<SemanticType>
+  readonly result: SemanticType
+}
+
+const binaryI32 = (operation: Hir.BuiltinOperation): BuiltinSignature =>
+  Object.freeze({ operation, parameters: Object.freeze(['I32', 'I32'] as const), result: 'I32' })
+
+const comparisonI32 = (operation: Hir.BuiltinOperation): BuiltinSignature =>
+  Object.freeze({ operation, parameters: Object.freeze(['I32', 'I32'] as const), result: 'Bool' })
+
 /** The compiler-known built-in actor table. Issue 07's runtime actors extend this shape. */
 const builtinActors: Readonly<
-  Record<string, Readonly<Record<string, Hir.BuiltinOperation>> | undefined>
+  Record<string, Readonly<Record<string, BuiltinSignature>> | undefined>
 > = Object.freeze({
   I32: Object.freeze({
-    add: 'Add',
-    subtract: 'Subtract',
-    multiply: 'Multiply',
-    divide: 'Divide',
-    remainder: 'Remainder',
-  } as const),
+    add: binaryI32('Add'),
+    subtract: binaryI32('Subtract'),
+    multiply: binaryI32('Multiply'),
+    divide: binaryI32('Divide'),
+    remainder: binaryI32('Remainder'),
+    equals: comparisonI32('Equals'),
+    notEquals: comparisonI32('NotEquals'),
+    lessThan: comparisonI32('LessThan'),
+    lessOrEqual: comparisonI32('LessOrEqual'),
+    greaterThan: comparisonI32('GreaterThan'),
+    greaterOrEqual: comparisonI32('GreaterOrEqual'),
+  }),
+  Bool: Object.freeze({
+    not: Object.freeze({
+      operation: 'Not' as const,
+      parameters: Object.freeze(['Bool'] as const),
+      result: 'Bool' as const,
+    }),
+  }),
 })
 
 function analyzeBuiltinCall(
@@ -752,21 +865,23 @@ function analyzeBuiltinCall(
   const actorSpelling = spelling(source, actorToken)
   const operationSpelling = spelling(source, operationToken)
   const actor = builtinActors[actorSpelling]
-  const operation = actor?.[operationSpelling]
+  const signature = actor?.[operationSpelling]
   const missingDiagnostic =
     actor === undefined
       ? Diagnostic.unknownActor(actorSpelling, actorToken.span)
-      : operation === undefined
+      : signature === undefined
         ? Diagnostic.unknownActorOperation(actorSpelling, operationSpelling, operationToken.span)
         : undefined
   const reference: CallReferenceFact =
-    operation !== undefined
+    signature !== undefined
       ? Object.freeze({
           _tag: 'ResolvedBuiltin',
           spelling: `${actorSpelling}.${operationSpelling}`,
           token: operationToken,
           actor: actorSpelling,
-          operation,
+          operation: signature.operation,
+          parameters: signature.parameters,
+          result: signature.result,
         })
       : Object.freeze({
           _tag: 'Missing',
@@ -779,7 +894,7 @@ function analyzeBuiltinCall(
   const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
   const expressionType =
     hasAvailableCallSyntax(call) && reference._tag === 'ResolvedBuiltin'
-      ? availableI32ExpressionType
+      ? availableExpressionType(reference.result)
       : unavailableExpressionType
 
   return Object.freeze({
@@ -808,6 +923,21 @@ function analyzeExpression(
   declaration: DeclarationFact,
   scope: Scope,
 ): ExpressionResult | undefined {
+  if (node.kind === 'BooleanLiteralExpression') {
+    const token = directToken(node, 'TrueKeyword') ?? directToken(node, 'FalseKeyword')
+    const type = token === undefined ? unavailableExpressionType : availableBoolExpressionType
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Boolean',
+        value: token?.kind === 'TrueKeyword',
+        type,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
+
   if (node.kind === 'IntegerLiteralExpression') {
     const integer = analyzeInteger(source, node)
     return Object.freeze({
@@ -906,7 +1036,7 @@ function analyzeExpression(
     syntaxAvailable &&
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved'
-      ? availableI32ExpressionType
+      ? availableExpressionType(reference.declaration.returnType.type)
       : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
@@ -932,6 +1062,7 @@ const statementExpressionNode = (statement: SyntaxTree.Node): SyntaxTree.Node =>
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
       (element.kind === 'IntegerLiteralExpression' ||
+        element.kind === 'BooleanLiteralExpression' ||
         element.kind === 'IdentifierExpression' ||
         element.kind === 'MoveExpression' ||
         element.kind === 'CallExpression'),
@@ -979,66 +1110,166 @@ const scopeSpanFor = (scope: Scope, spellingText: string): SourceSpan.SourceSpan
   return undefined
 }
 
+interface BodyContext {
+  readonly source: SourceFile.SourceFile
+  readonly declaration: DeclarationFact
+  readonly declarations: ReadonlyArray<DeclarationFact>
+  readonly bindings: Array<BindingDeclarationFact>
+  readonly diagnostics: Array<Diagnostic.Diagnostic>
+}
+
+const analyzeStatements = (
+  context: BodyContext,
+  blockNode: SyntaxTree.Node,
+  initialScope: Scope,
+): ReadonlyArray<StatementFact> => {
+  const facts: Array<StatementFact> = []
+  let scope = initialScope
+
+  for (const element of blockNode.children) {
+    if (!SyntaxTree.isNode(element)) continue
+
+    if (element.kind === 'BindingStatement') {
+      const initializerNode = statementExpressionNode(element)
+      const initializer = analyzeExpression(
+        context.source,
+        initializerNode,
+        context.declarations,
+        context.declaration,
+        scope,
+      )
+      if (initializer === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
+      }
+      context.diagnostics.push(...initializer.diagnostics)
+
+      const name = bindingName(context.source, element)
+      const binding: BindingDeclarationFact = Object.freeze({
+        _tag: 'BindingFact',
+        id: Object.freeze({
+          _tag: 'HirBinding',
+          function: context.declaration.id,
+          ordinal: context.bindings.length,
+        }),
+        name,
+        inferredType: initializer.fact.type,
+        initializer: initializer.fact,
+        syntax: element,
+      })
+      context.bindings.push(binding)
+      facts.push(Object.freeze({ _tag: 'BindStatement', binding }))
+
+      if (name._tag === 'Present') {
+        const originalSpan = scopeSpanFor(scope, name.spelling)
+        if (originalSpan === undefined) {
+          scope = Object.freeze({
+            parameters: scope.parameters,
+            bindings: Object.freeze([...scope.bindings, binding]),
+          })
+        } else {
+          context.diagnostics.push(
+            Diagnostic.rebindingName(name.spelling, originalSpan, name.token.span),
+          )
+        }
+      }
+      continue
+    }
+
+    if (element.kind === 'ConditionalStatement') {
+      const conditionNode = statementExpressionNode(element)
+      const condition = analyzeExpression(
+        context.source,
+        conditionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+      )
+      if (condition === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+      }
+      context.diagnostics.push(...condition.diagnostics)
+      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'Bool') {
+        context.diagnostics.push(
+          Diagnostic.conditionNotBool(condition.fact.type.type, condition.fact.syntax.span),
+        )
+      }
+
+      const arms = SyntaxTree.directNodes(element, 'Block')
+      const taken =
+        arms.at(0) === undefined
+          ? []
+          : analyzeStatements(context, arms[0] as SyntaxTree.Node, scope)
+      const otherwiseArm = arms.at(1)
+      const otherwise =
+        otherwiseArm === undefined ? [] : analyzeStatements(context, otherwiseArm, scope)
+      facts.push(
+        Object.freeze({
+          _tag: 'IfStatement',
+          condition: condition.fact,
+          taken: Object.freeze([...taken]),
+          otherwise: Object.freeze([...otherwise]),
+          syntax: element,
+        }),
+      )
+      continue
+    }
+
+    if (element.kind === 'ReturnStatement') {
+      const expressionNode = statementExpressionNode(element)
+      const expression = analyzeExpression(
+        context.source,
+        expressionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+      )
+      if (expression === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+      }
+      context.diagnostics.push(...expression.diagnostics)
+      facts.push(
+        Object.freeze({ _tag: 'ReturnStatement', expression: expression.fact, syntax: element }),
+      )
+      break
+    }
+  }
+
+  return Object.freeze(facts)
+}
+
 const analyzeFunctionBody = (
   source: SourceFile.SourceFile,
   declaration: DeclarationFact,
   declarations: ReadonlyArray<DeclarationFact>,
 ): FunctionAnalysis => {
   const blockNode = childNode(declaration.syntax, 'Block')
-  const returnStatementNode = childNode(blockNode, 'ReturnStatement')
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const bindings: Array<BindingDeclarationFact> = []
-  let scope: Scope = Object.freeze({ parameters: declaration.parameters, bindings: [] })
-
-  for (const element of blockNode.children) {
-    if (!SyntaxTree.isNode(element)) continue
-    if (element.kind === 'ReturnStatement') break
-    if (element.kind !== 'BindingStatement') continue
-
-    const initializerNode = statementExpressionNode(element)
-    const initializer = analyzeExpression(source, initializerNode, declarations, declaration, scope)
-    if (initializer === undefined) {
-      throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
-    }
-    diagnostics.push(...initializer.diagnostics)
-
-    const name = bindingName(source, element)
-    const binding: BindingDeclarationFact = Object.freeze({
-      _tag: 'BindingFact',
-      id: Object.freeze({
-        _tag: 'HirBinding',
-        function: declaration.id,
-        ordinal: bindings.length,
-      }),
-      name,
-      inferredType: initializer.fact.type,
-      initializer: initializer.fact,
-      syntax: element,
-    })
-    bindings.push(binding)
-
-    if (name._tag === 'Present') {
-      const originalSpan = scopeSpanFor(scope, name.spelling)
-      if (originalSpan === undefined) {
-        scope = Object.freeze({
-          parameters: scope.parameters,
-          bindings: Object.freeze([...scope.bindings, binding]),
-        })
-      } else {
-        diagnostics.push(Diagnostic.rebindingName(name.spelling, originalSpan, name.token.span))
-      }
-    }
+  const context: BodyContext = {
+    source,
+    declaration,
+    declarations,
+    bindings: [],
+    diagnostics: [],
   }
+  const statements = analyzeStatements(
+    context,
+    blockNode,
+    Object.freeze({ parameters: declaration.parameters, bindings: [] }),
+  )
 
-  const expressionNode = statementExpressionNode(returnStatementNode)
-  const expression = analyzeExpression(source, expressionNode, declarations, declaration, scope)
-  if (expression === undefined) {
-    throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+  const trailing = [...statements]
+    .reverse()
+    .find(
+      (statement): statement is Extract<StatementFact, { _tag: 'ReturnStatement' }> =>
+        statement._tag === 'ReturnStatement',
+    )
+  if (trailing === undefined) {
+    throw new RangeError('Semantic analysis expected a trailing return statement')
   }
-  diagnostics.push(...expression.diagnostics)
+  const expression = trailing.expression
+  const expressionType = expression.type._tag === 'Available' ? expression.type.type : undefined
 
   const returnCompatibility =
-    declaration.returnType._tag === 'Resolved' && expression.type === declaration.returnType.type
+    declaration.returnType._tag === 'Resolved' && expressionType === declaration.returnType.type
       ? compatible
       : unavailableCompatibility
 
@@ -1046,11 +1277,12 @@ const analyzeFunctionBody = (
     fact: Object.freeze({
       _tag: 'FunctionFact',
       declaration,
-      bindings: Object.freeze([...bindings]),
-      returnedExpression: expression.fact,
+      statements,
+      bindings: Object.freeze([...context.bindings]),
+      returnedExpression: expression,
       returnCompatibility,
     }),
-    diagnostics: Object.freeze([...diagnostics]),
+    diagnostics: Object.freeze([...context.diagnostics]),
   })
 }
 
@@ -1091,6 +1323,16 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
           _tag: 'IntegerLiteral',
           value: fact.integer.value,
           type: fact.integer.type,
+          span: fact.syntax.span,
+        })
+      : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
+  if (fact._tag === 'Boolean') {
+    return fact.type._tag === 'Available'
+      ? Object.freeze({
+          _tag: 'BooleanLiteral',
+          value: fact.value,
+          type: fact.type.type,
           span: fact.syntax.span,
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
@@ -1169,6 +1411,37 @@ export const elaborateModule = (syntax: SyntaxFile.SyntaxFile): Result => {
     ...headers.diagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
   ].sort(compareDiagnostics)
+  const hirStatements = (facts: ReadonlyArray<StatementFact>): ReadonlyArray<Hir.Statement> =>
+    Object.freeze(
+      facts.map((statement): Hir.Statement => {
+        if (statement._tag === 'BindStatement') {
+          return Object.freeze({
+            _tag: 'Bind' as const,
+            binding: statement.binding.id,
+            name:
+              statement.binding.name._tag === 'Present'
+                ? statement.binding.name.spelling
+                : undefined,
+            initializer: hirExpression(statement.binding.initializer),
+            span: statement.binding.syntax.span,
+          })
+        }
+        if (statement._tag === 'IfStatement') {
+          return Object.freeze({
+            _tag: 'If' as const,
+            condition: hirExpression(statement.condition),
+            taken: hirStatements(statement.taken),
+            otherwise: hirStatements(statement.otherwise),
+            span: statement.syntax.span,
+          })
+        }
+        return Object.freeze({
+          _tag: 'Return' as const,
+          expression: hirExpression(statement.expression),
+          span: statement.expression.syntax.span,
+        })
+      }),
+    )
   const hir: Hir.Module = Object.freeze({
     _tag: 'HirModule',
     module: source.id,
@@ -1178,23 +1451,7 @@ export const elaborateModule = (syntax: SyntaxFile.SyntaxFile): Result => {
           _tag: 'HirFunction' as const,
           declaration: fact.declaration,
           contract: Hir.contractOf(fact.declaration),
-          statements: Object.freeze([
-            ...fact.bindings.map(
-              (binding): Hir.Statement =>
-                Object.freeze({
-                  _tag: 'Bind' as const,
-                  binding: binding.id,
-                  name: binding.name._tag === 'Present' ? binding.name.spelling : undefined,
-                  initializer: hirExpression(binding.initializer),
-                  span: binding.syntax.span,
-                }),
-            ),
-            Object.freeze({
-              _tag: 'Return' as const,
-              expression: hirExpression(fact.returnedExpression),
-              span: fact.returnedExpression.syntax.span,
-            }),
-          ]),
+          statements: hirStatements(fact.statements),
         }),
       ),
     ),

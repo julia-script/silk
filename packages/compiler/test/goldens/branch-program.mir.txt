@@ -1,0 +1,19 @@
+mir-module golden://program.silk
+fn golden://program.silk.main params=0 locals=8 -> I32
+  bb0:
+    %0 = literal 40 : I32 [33, 36)
+    %1 = move %0 [22, 36)
+    %2 = literal 40 : I32 [56, 59)
+    %3 = equals %1, %2 : Bool [39, 60)
+    branch %3 ? bb1 : bb2 [36, 106)
+  bb1:
+    %4 = literal 2 : I32 [74, 76)
+    %5 = move %4 [62, 76)
+    %6 = add %1, %5 : I32 [83, 104)
+    drop %5 [62, 76) generated
+    drop %1 [22, 36) generated
+    return %6 [83, 104)
+  bb2:
+    %7 = literal 0 : I32 [113, 115)
+    drop %1 [22, 36) generated
+    return %7 [113, 115)

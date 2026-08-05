@@ -384,6 +384,39 @@ function HirStatementRows({ statement }: { readonly statement: Hir.Statement }) 
       </>
     )
   }
+  if (statement._tag === 'If') {
+    return (
+      <>
+        <li>
+          <div>
+            <code>if</code>
+            <span>{hirSpanLabel(statement.span)}</span>
+          </div>
+        </li>
+        <HirExpressionRows expression={statement.condition} depth={1} />
+        <li>
+          <div>
+            <code>then</code>
+          </div>
+        </li>
+        {statement.taken.map((inner, index) => (
+          <HirStatementRows key={`taken-${inner.span.start}-${index}`} statement={inner} />
+        ))}
+        {statement.otherwise.length === 0 ? null : (
+          <>
+            <li>
+              <div>
+                <code>else</code>
+              </div>
+            </li>
+            {statement.otherwise.map((inner, index) => (
+              <HirStatementRows key={`otherwise-${inner.span.start}-${index}`} statement={inner} />
+            ))}
+          </>
+        )}
+      </>
+    )
+  }
   return (
     <>
       <li>
@@ -796,13 +829,15 @@ function CallRelationship({
                   ? expression.integer._tag === 'Available'
                     ? String(expression.integer.value)
                     : expression.integer._tag
-                  : expression._tag === 'Call'
-                    ? expression.reference._tag === 'Unavailable'
-                      ? 'Unavailable nested call'
-                      : `${expression.reference.spelling}(…)`
-                    : expression.reference._tag === 'Unavailable'
-                      ? 'Unavailable reference'
-                      : expression.reference.spelling
+                  : expression._tag === 'Boolean'
+                    ? String(expression.value)
+                    : expression._tag === 'Call'
+                      ? expression.reference._tag === 'Unavailable'
+                        ? 'Unavailable nested call'
+                        : `${expression.reference.spelling}(…)`
+                      : expression.reference._tag === 'Unavailable'
+                        ? 'Unavailable reference'
+                        : expression.reference.spelling
               return (
                 <li key={`${argument.id.callSpan.start}-${argument.id.ordinal}`}>
                   <div>
@@ -1369,7 +1404,16 @@ function SemanticFacts({
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
-                  ) : returned._tag === 'Identifier' ? (
+                  ) : returned._tag === 'Boolean' ? (
+                    <dd>
+                      <strong>{String(returned.value)}</strong>
+                      <span>
+                        Boolean ·{' '}
+                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                      </span>
+                      <small>{spanLabel(returned.syntax)}</small>
+                    </dd>
+                  ) : returned._tag === 'Identifier' || returned._tag === 'Move' ? (
                     <dd>
                       <strong>
                         {returned.reference._tag === 'Unavailable'
@@ -1377,7 +1421,7 @@ function SemanticFacts({
                           : returned.reference.spelling}
                       </strong>
                       <span>
-                        Identifier · {returned.reference._tag} ·{' '}
+                        {returned._tag} · {returned.reference._tag} ·{' '}
                         {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>

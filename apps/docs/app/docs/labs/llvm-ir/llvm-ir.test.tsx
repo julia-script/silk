@@ -33,6 +33,22 @@ describe('LlvmIrLab', () => {
     ).toEqual(['Add', 'Divide'])
   })
 
+  it('shows user-authored branch diamonds through the facade', () => {
+    const snapshot = Analysis.ofSource(
+      'memory://llvm-branch-test.silk',
+      encoder.encode('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
+    )
+    const mir = Analysis.loweredMir(snapshot)
+    const main = mir.functions.at(0)
+
+    expect(main?.blocks.length).toBe(3)
+    expect(main?.blocks.at(0)?.terminator._tag).toBe('Branch')
+    expect(Analysis.codegen(snapshot, { mode: 'release' }).ir).toContain('br i1')
+    const outcome = Analysis.evaluate(snapshot)
+    expect(outcome._tag).toBe('Completed')
+    expect(outcome._tag === 'Completed' ? outcome.result.value : -1).toBe(42)
+  })
+
   it('answers debug emission with metadata through the facade', () => {
     const snapshot = Analysis.ofSource(
       'memory://llvm-ir-test.silk',

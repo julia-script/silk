@@ -169,3 +169,51 @@ it('matches the binding ownership golden encoding byte-for-byte', () => {
     golden('bindings.ownership.txt'),
   )
 })
+
+const branchSource = `pub fn main() -> I32 { let outer = 2 if I32.equals(outer, 2) { let inner = 1 return inner } return outer }`
+
+it('scopes arm bindings to their arm with per-return exits', () => {
+  const facts = check('golden://arms.silk', branchSource)
+  const main = facts.functions.at(0)
+
+  assert.strictEqual(main?.verdict._tag, 'Satisfied')
+  const exits = main?.exits ?? []
+  assert.deepEqual(
+    exits.map((exit) => ({
+      kind: exit.kind,
+      releases: exit.releases.map((release) => release.binding.name),
+    })),
+    [
+      { kind: 'Return', releases: ['inner', 'outer'] },
+      { kind: 'Return', releases: ['outer'] },
+    ],
+  )
+})
+
+it('releases an unmoved arm binding at the arm end when the arm falls through', () => {
+  const facts = check(
+    'golden://arm-end.silk',
+    'pub fn main() -> I32 { if I32.equals(1, 1) { let side = 5 } return 0 }',
+  )
+  const main = facts.functions.at(0)
+  const armEnd = main?.exits.find((exit) => exit.kind === 'ArmEnd')
+
+  assert.notStrictEqual(armEnd, undefined)
+  assert.deepEqual(
+    armEnd?.releases.map((release) => release.binding.name),
+    ['side'],
+  )
+})
+
+it('treats a move inside one arm as consuming for later uses', () => {
+  const facts = check(
+    'golden://conditional-move.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { let value = 1 if I32.equals(1, 1) { return identity(move value) } return value }`,
+  )
+  const main = facts.functions.at(1)
+
+  assert.strictEqual(main?.verdict._tag, 'Violation')
+  if (main?.verdict._tag !== 'Violation') return
+  assert.strictEqual(main.verdict.cause.code, 'OWN0001')
+})

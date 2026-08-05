@@ -162,3 +162,34 @@ it('lowers built-in calls to trapping binary operations', () => {
   )
   assert.strictEqual(Mir.encode(program).includes('= multiply'), true)
 })
+
+const branchProgram =
+  'pub fn main() -> I32 { let base = 40 if I32.equals(base, 40) { let bonus = 2 return I32.add(base, bonus) } return 0 }'
+
+it('lowers conditionals to branch diamonds with arm drops', () => {
+  const program = Analysis.loweredMir(snapshot(branchProgram))
+  const main = program.functions.at(0)
+
+  assert.deepEqual(Mir.verify(program), [])
+  const blocks = main?.blocks ?? []
+  assert.strictEqual(blocks.length, 3)
+  assert.strictEqual(blocks.at(0)?.terminator._tag, 'Branch')
+  const entryTerminator = blocks.at(0)?.terminator
+  if (entryTerminator?._tag === 'Branch') {
+    assert.strictEqual(entryTerminator.taken.ordinal, 1)
+    assert.strictEqual(entryTerminator.otherwise.ordinal, 2)
+    assert.strictEqual(entryTerminator.provenance.generated, false)
+  }
+  assert.strictEqual(blocks.at(1)?.terminator._tag, 'Return')
+  const armDrops = blocks.at(1)?.operations.filter((operation) => operation._tag === 'Drop')
+  assert.strictEqual(armDrops?.length, 2)
+  assert.strictEqual(blocks.at(2)?.terminator._tag, 'Return')
+})
+
+it('matches the branching lowered golden encoding byte-for-byte', () => {
+  const first = Mir.encode(Analysis.loweredMir(snapshot(branchProgram)))
+  const second = Mir.encode(Analysis.loweredMir(snapshot(branchProgram)))
+
+  assert.strictEqual(first, golden('branch-program.mir.txt'))
+  assert.strictEqual(first, second)
+})

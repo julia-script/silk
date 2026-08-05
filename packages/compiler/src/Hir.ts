@@ -27,14 +27,32 @@ export interface BindingId {
   readonly ordinal: number
 }
 
-/** The closed built-in operation vocabulary of the compiler-known `I32` actor. */
-export type BuiltinOperation = 'Add' | 'Subtract' | 'Multiply' | 'Divide' | 'Remainder'
+/** The closed built-in operation vocabulary of the compiler-known actors. */
+export type BuiltinOperation =
+  | 'Add'
+  | 'Subtract'
+  | 'Multiply'
+  | 'Divide'
+  | 'Remainder'
+  | 'Equals'
+  | 'NotEquals'
+  | 'LessThan'
+  | 'LessOrEqual'
+  | 'GreaterThan'
+  | 'GreaterOrEqual'
+  | 'Not'
 
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
   | {
       readonly _tag: 'IntegerLiteral'
       readonly value: number
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'BooleanLiteral'
+      readonly value: boolean
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -86,6 +104,13 @@ export type Statement =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'If'
+      readonly condition: Expression
+      readonly taken: ReadonlyArray<Statement>
+      readonly otherwise: ReadonlyArray<Statement>
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'Return'
       readonly expression: Expression
       readonly span: SourceSpan.SourceSpan
@@ -108,6 +133,22 @@ export const returned = (self: HirFunction): Expression => {
   return last.expression
 }
 
+/** Every expression directly carried by one statement, nesting through conditionals. */
+export const statementExpressions = (statement: Statement): ReadonlyArray<Expression> => {
+  switch (statement._tag) {
+    case 'Bind':
+      return [statement.initializer]
+    case 'Return':
+      return [statement.expression]
+    case 'If':
+      return [
+        statement.condition,
+        ...statement.taken.flatMap(statementExpressions),
+        ...statement.otherwise.flatMap(statementExpressions),
+      ]
+  }
+}
+
 /** Tests whether any expression in the body is an explicit unavailable state. */
 export const hasUnavailable = (self: HirFunction): boolean => {
   const walk = (expression: Expression): boolean => {
@@ -123,9 +164,7 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return false
     }
   }
-  return self.statements.some((statement) =>
-    statement._tag === 'Bind' ? walk(statement.initializer) : walk(statement.expression),
-  )
+  return self.statements.flatMap(statementExpressions).some(walk)
 }
 
 /** The first unavailable expression's cause and span, if the body has one. */
@@ -152,8 +191,8 @@ export const firstUnavailable = (
         return undefined
     }
   }
-  for (const statement of self.statements) {
-    const found = walk(statement._tag === 'Bind' ? statement.initializer : statement.expression)
+  for (const expression of self.statements.flatMap(statementExpressions)) {
+    const found = walk(expression)
     if (found !== undefined) return found
   }
   return undefined
@@ -219,6 +258,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   switch (expression._tag) {
     case 'IntegerLiteral':
       return `${indent}literal ${expression.value} : ${expression.type} ${spanText(expression.span)}`
+    case 'BooleanLiteral':
+      return `${indent}literal ${expression.value} : ${expression.type} ${spanText(expression.span)}`
     case 'ParameterReference':
       return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${expression.type} ${spanText(expression.span)}`
     case 'BindingReference':
@@ -245,15 +286,31 @@ const encodeExpression = (expression: Expression, depth: number): string => {
 
 const encodeStatement = (statement: Statement, depth: number): string => {
   const indent = '  '.repeat(depth)
-  return statement._tag === 'Bind'
-    ? [
+  switch (statement._tag) {
+    case 'Bind':
+      return [
         `${indent}bind b${statement.binding.ordinal} ${statement.name ?? '?'} ${spanText(statement.span)}`,
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
-    : [
+    case 'If':
+      return [
+        `${indent}if ${spanText(statement.span)}`,
+        encodeExpression(statement.condition, depth + 1),
+        `${indent}then`,
+        ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
+        ...(statement.otherwise.length === 0
+          ? []
+          : [
+              `${indent}else`,
+              ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
+            ]),
+      ].join('\n')
+    case 'Return':
+      return [
         `${indent}return ${spanText(statement.span)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
+  }
 }
 
 /**

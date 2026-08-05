@@ -10,8 +10,8 @@ import * as SourceSpan from './SourceSpan.js'
  * consumed only at emission time.
  */
 
-/** A logical Silk type at the MIR level. The frozen slice knows only `I32`. */
-export type Type = { readonly _tag: 'I32' }
+/** A logical Silk type at the MIR level. */
+export type Type = { readonly _tag: 'I32' } | { readonly _tag: 'Bool' }
 
 /** The explicit emission-time target-layout input. Never read by MIR itself. */
 export interface TargetLayout {
@@ -40,8 +40,19 @@ export interface Provenance {
   readonly generated: boolean
 }
 
-/** The closed binary arithmetic operator vocabulary. */
-export type BinaryOperator = 'Add' | 'Subtract' | 'Multiply' | 'Divide' | 'Remainder'
+/** The closed binary operator vocabulary: trapping arithmetic and non-trapping comparisons. */
+export type BinaryOperator =
+  | 'Add'
+  | 'Subtract'
+  | 'Multiply'
+  | 'Divide'
+  | 'Remainder'
+  | 'Equals'
+  | 'NotEquals'
+  | 'LessThan'
+  | 'LessOrEqual'
+  | 'GreaterThan'
+  | 'GreaterOrEqual'
 
 /** One MIR operation. */
 export type Operation =

@@ -1115,3 +1115,65 @@ it('recovers a dangling minus before the closing brace', () => {
   )
   assertOriginalTokenTraversal(result)
 })
+
+it('parses conditionals with both arms and boolean literals', () => {
+  const result = parseText(
+    'fixture://conditional.silk',
+    'pub fn main() -> I32 { if flag { return 1 } else { return 2 } return 0 }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const conditional =
+    block === undefined ? undefined : SyntaxTree.directNode(block, 'ConditionalStatement')
+
+  assert.notStrictEqual(conditional, undefined)
+  if (conditional === undefined) return
+  assert.notStrictEqual(SyntaxTree.directToken(conditional, 'IfKeyword'), undefined)
+  assert.notStrictEqual(SyntaxTree.directToken(conditional, 'ElseKeyword'), undefined)
+  assert.strictEqual(SyntaxTree.directNodes(conditional, 'Block').length, 2)
+  assert.notStrictEqual(SyntaxTree.directNode(conditional, 'IdentifierExpression'), undefined)
+  const statements = (block?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(statements, ['ConditionalStatement', 'ReturnStatement'])
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+
+  const booleans = parseText(
+    'fixture://booleans.silk',
+    'pub fn main() -> I32 { let flag = false return true }',
+  )
+  const boolFn = directFunctionDeclarations(booleans.root).at(0)
+  const boolBlock = boolFn === undefined ? undefined : SyntaxTree.directNode(boolFn, 'Block')
+  const binding =
+    boolBlock === undefined ? undefined : SyntaxTree.directNode(boolBlock, 'BindingStatement')
+  assert.notStrictEqual(
+    binding === undefined ? undefined : SyntaxTree.directNode(binding, 'BooleanLiteralExpression'),
+    undefined,
+  )
+  assert.deepEqual(booleans.parserDiagnostics, [])
+})
+
+it('recovers a missing condition before the arm brace', () => {
+  const result = parseText(
+    'fixture://missing-condition.silk',
+    'pub fn main() -> I32 { if { return 1 } return 0 }',
+  )
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers an arm missing its closing brace before the trailing return', () => {
+  const result = parseText(
+    'fixture://missing-arm-brace.silk',
+    'pub fn main() -> I32 { if flag { return 1 return 0 }',
+  )
+
+  assert.strictEqual(
+    result.parserDiagnostics.every((diagnostic) => diagnostic.code === 'PAR0001'),
+    true,
+  )
+  assertOriginalTokenTraversal(result)
+})

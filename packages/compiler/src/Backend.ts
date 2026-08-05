@@ -206,12 +206,43 @@ const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: Cod
                 case 'Binary': {
                   const left = readLocal(operation.left)
                   const right = readLocal(operation.right)
+                  const ordinal = checkOrdinal
+                  checkOrdinal += 1
+                  const comparisonPredicates: Readonly<
+                    Partial<Record<Mir.BinaryOperator, 'eq' | 'ne' | 'slt' | 'sle' | 'sgt' | 'sge'>>
+                  > = {
+                    Equals: 'eq',
+                    NotEquals: 'ne',
+                    LessThan: 'slt',
+                    LessOrEqual: 'sle',
+                    GreaterThan: 'sgt',
+                    GreaterOrEqual: 'sge',
+                  }
+                  const predicate = comparisonPredicates[operation.operator]
+                  if (predicate !== undefined) {
+                    const flag = yield* FunctionBody.integerCompare(
+                      body,
+                      predicate,
+                      left,
+                      right,
+                      `cmp${ordinal}_flag`,
+                    )
+                    const widened = yield* FunctionBody.cast(
+                      body,
+                      'zext',
+                      flag,
+                      i32,
+                      `cmp${ordinal}`,
+                    )
+                    const instruction = yield* Value.instruction(body, flag)
+                    yield* locate(operation.provenance.span, instruction)
+                    locals.set(operation.destination.ordinal, widened)
+                    break
+                  }
+                  let result: Value.Value
                   if (trapBlock === undefined) {
                     trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
                   }
-                  const ordinal = checkOrdinal
-                  checkOrdinal += 1
-                  let result: Value.Value
                   if (
                     operation.operator === 'Add' ||
                     operation.operator === 'Subtract' ||

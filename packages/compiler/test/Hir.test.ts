@@ -205,3 +205,77 @@ it('keeps bare built-in operation names unresolved', () => {
     ['SEM0004'],
   )
 })
+
+it('elaborates conditionals with typed Bool conditions and arm scopes', () => {
+  const result = elaborate(
+    'golden://branch.silk',
+    'pub fn main() -> I32 { let base = 40 if I32.equals(base, 40) { let bonus = 2 return I32.add(base, bonus) } return 0 }',
+  )
+  const main = result.hir.functions.at(0)
+
+  assert.deepEqual(result.diagnostics, [])
+  const conditional = main?.statements.at(1)
+  assert.strictEqual(conditional?._tag, 'If')
+  if (conditional?._tag !== 'If') return
+  assert.strictEqual(conditional.condition._tag, 'BuiltinCall')
+  assert.strictEqual(
+    conditional.condition._tag === 'BuiltinCall' ? conditional.condition.type : undefined,
+    'Bool',
+  )
+  const armBind = conditional.taken.at(0)
+  assert.strictEqual(armBind?._tag, 'Bind')
+  if (armBind?._tag !== 'Bind') return
+  assert.strictEqual(armBind.binding.ordinal, 1)
+  assert.strictEqual(conditional.taken.at(1)?._tag, 'Return')
+  const encoded = Hir.encode(result.hir)
+  assert.include(encoded, 'if [')
+  assert.include(encoded, 'then')
+})
+
+it('types booleans through declarations and literals', () => {
+  const result = elaborate(
+    'golden://bool.silk',
+    `pub fn check(flag: Bool) -> Bool { return flag }
+pub fn main() -> I32 { if check(true) { return 1 } return 0 }`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  const check = result.hir.functions.at(0)
+  assert.deepEqual(check?.contract, { _tag: 'Contract', parameters: ['Bool'], result: 'Bool' })
+  const returned = check === undefined ? undefined : Hir.returned(check)
+  assert.strictEqual(returned?._tag, 'ParameterReference')
+  if (returned?._tag !== 'ParameterReference') return
+  assert.strictEqual(returned.type, 'Bool')
+})
+
+it('rejects non-Bool conditions and mistyped arguments', () => {
+  const condition = elaborate(
+    'golden://condition.silk',
+    'pub fn main() -> I32 { if 1 { return 1 } return 0 }',
+  )
+  const builtinArg = elaborate(
+    'golden://builtin-arg.silk',
+    'pub fn main() -> I32 { return I32.add(true, 1) }',
+  )
+  const userArg = elaborate(
+    'golden://user-arg.silk',
+    `pub fn pick(flag: Bool) -> I32 { return 1 }
+pub fn main() -> I32 { return pick(42) }`,
+  )
+
+  assert.deepEqual(
+    condition.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0011'],
+  )
+  assert.deepEqual(
+    builtinArg.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0012'],
+  )
+  assert.deepEqual(
+    userArg.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0012'],
+  )
+  const mainFn = builtinArg.hir.functions.at(0)
+  const returned = mainFn === undefined ? undefined : Hir.returned(mainFn)
+  assert.strictEqual(returned?._tag, 'Unavailable')
+})
