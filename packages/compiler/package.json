@@ -49,6 +49,10 @@
       "types": "./dist/Token.d.ts",
       "import": "./dist/Token.js"
     },
+    "./DeclarationIndex": {
+      "types": "./dist/DeclarationIndex.d.ts",
+      "import": "./dist/DeclarationIndex.js"
+    },
     "./Diagnostic": {
       "types": "./dist/Diagnostic.d.ts",
       "import": "./dist/Diagnostic.js"

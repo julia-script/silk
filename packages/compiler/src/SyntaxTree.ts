@@ -104,6 +104,35 @@ export const make = (
   )
 }
 
+/** Returns the direct child nodes of one kind in concrete order. */
+export const directNodes = (parent: Node, kind: NodeKind): ReadonlyArray<Node> =>
+  parent.children.filter((element): element is Node => isNode(element) && element.kind === kind)
+
+/** Returns the first direct child node of one kind, if present. */
+export const directNode = (parent: Node, kind: NodeKind): Node | undefined =>
+  parent.children.find((element): element is Node => isNode(element) && element.kind === kind)
+
+/** Returns the first direct child token of one kind, if present. */
+export const directToken = (parent: Node, kind: Token.TokenKind): Token.Token | undefined =>
+  parent.children.find(
+    (element): element is Token.Token => isToken(element) && element.kind === kind,
+  )
+
+/** Tests whether an element contains no missing tokens or error regions at any depth. */
+export const isAvailableSyntax = (element: Element): boolean =>
+  !isMissingToken(element) &&
+  !(isNode(element) && (element.kind === 'Error' || !element.children.every(isAvailableSyntax)))
+
+/** Returns the missing child expecting one kind, or the parent as the unavailable region. */
+export const unavailableChild = (parent: Node, expected: Token.TokenKind): Element =>
+  parent.children.find(
+    (element): element is MissingToken => isMissingToken(element) && element.expected === expected,
+  ) ?? parent
+
+/** Returns the first missing or damaged element, or the fallback node. */
+export const unavailableElement = (elements: ReadonlyArray<Element>, fallback: Node): Element =>
+  elements.find((element) => isMissingToken(element) || !isAvailableSyntax(element)) ?? fallback
+
 /** Returns every original lexer token below a node in concrete source order. */
 export const tokens = (self: Node): ReadonlyArray<Token.Token> =>
   Object.freeze(

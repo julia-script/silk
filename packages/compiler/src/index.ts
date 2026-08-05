@@ -1,4 +1,5 @@
 export * as BootstrapEvaluation from './BootstrapEvaluation.js'
+export * as DeclarationIndex from './DeclarationIndex.js'
 export * as Diagnostic from './Diagnostic.js'
 export * as Lexer from './Lexer.js'
 export * as ModuleClosure from './ModuleClosure.js'
