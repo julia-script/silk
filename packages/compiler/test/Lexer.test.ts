@@ -67,6 +67,26 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('recognizes typed parameter and argument punctuation with exact spans', () => {
+  const source = SourceFile.make(
+    'memory://parameter-punctuation.silk',
+    ascii('identity(value: I32, other: I32)'),
+  )
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind === 'Colon' || token.kind === 'Comma')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'Colon', start: 14, end: 15, slice: ':' },
+      { kind: 'Comma', start: 19, end: 20, slice: ',' },
+      { kind: 'Colon', start: 26, end: 27, slice: ':' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
 it('keeps comments as trivia and leaves line endings for whitespace tokens', () => {
   const withNewline = Lexer.lex(
     SourceFile.make('memory://comment-newline.silk', ascii('// note\r\nfn')),

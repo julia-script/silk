@@ -12,20 +12,26 @@ import {
   denseTriviaSource,
   type ExpectedNodeShape,
   emptySource,
+  identifierCallArgumentSource,
+  identitySource,
   interFunctionPunctuationSource,
   invalidUtf8Source,
+  malformedArgumentSource,
   missingCallCalleeSource,
   missingCallRightParenthesisSource,
   missingFirstRightBraceSource,
   missingNameSource,
+  missingParameterCommaSource,
+  missingParameterTypeSource,
   missingRightBraceSource,
   threeFunctionSource,
   trailingTriviaSource,
   triviaCallSource,
   twoFunctionSource,
+  twoParameterSource,
   unexpectedPunctuationSource,
-  unsupportedCallArgumentSource,
   validCallSource,
+  valueCallArgumentSource,
   whollyUnrelatedSource,
 } from './fixtures/BootstrapParserFixture.js'
 
@@ -189,7 +195,11 @@ it('parses a zero-argument call as one lossless concrete expression', () => {
   if (call === undefined) return
   assert.deepEqual(nodeShape(call), {
     kind: 'CallExpression',
-    children: ['Whitespace', 'Identifier', 'LeftParenthesis', 'RightParenthesis'],
+    children: [
+      'Whitespace',
+      'Identifier',
+      { kind: 'ArgumentList', children: ['LeftParenthesis', 'RightParenthesis'] },
+    ],
   })
   assert.strictEqual(directTokenText(result, call, 'Identifier'), 'answer')
   assert.deepEqual(result.diagnostics, [])
@@ -206,8 +216,14 @@ it('retains trivia between every concrete call element', () => {
 
   assert.notStrictEqual(call, undefined)
   if (call === undefined) return
+  const argumentsList = call.children.find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
+  )
+  assert.notStrictEqual(argumentsList, undefined)
+  if (argumentsList === undefined) return
   assert.deepEqual(
-    call.children.map((element) =>
+    argumentsList.children.map((element) =>
       SyntaxTree.isNode(element)
         ? element.kind
         : SyntaxTree.isToken(element)
@@ -215,8 +231,6 @@ it('retains trivia between every concrete call element', () => {
           : `Missing(${element.expected})`,
     ),
     [
-      'Whitespace',
-      'Identifier',
       'Whitespace',
       'LineComment',
       'Whitespace',
@@ -299,11 +313,100 @@ it('inserts a missing call parenthesis without consuming the block brace', () =>
   assertOriginalTokenTraversal(result)
 })
 
-it('retains unsupported call arguments in one error region', () => {
-  const result = parseText(
-    'fixture://unsupported-call-argument.silk',
-    unsupportedCallArgumentSource,
+it('parses decimal and identifier call arguments as ordered concrete expressions', () => {
+  const literal = parseText('fixture://value-call-argument.silk', valueCallArgumentSource)
+  const identifier = parseText(
+    'fixture://identifier-call-argument.silk',
+    identifierCallArgumentSource,
   )
+  const literalArguments = descendants(literal.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
+  )
+  const identifierArguments = descendants(identifier.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
+  )
+
+  assert.deepEqual(nodeShape(literalArguments.at(0) ?? literal.root), {
+    kind: 'ArgumentList',
+    children: [
+      'LeftParenthesis',
+      { kind: 'IntegerLiteralExpression', children: ['DecimalInteger'] },
+      'RightParenthesis',
+    ],
+  })
+  assert.deepEqual(nodeShape(identifierArguments.at(0) ?? identifier.root), {
+    kind: 'ArgumentList',
+    children: [
+      'LeftParenthesis',
+      { kind: 'IdentifierExpression', children: ['Identifier'] },
+      'RightParenthesis',
+    ],
+  })
+  assert.deepEqual(literal.diagnostics, [])
+  assert.deepEqual(identifier.diagnostics, [])
+  assertOriginalTokenTraversal(literal)
+  assertOriginalTokenTraversal(identifier)
+})
+
+it('parses typed parameters and bare identifier return expressions', () => {
+  const identity = parseText('fixture://identity.silk', identitySource)
+  const multiple = parseText('fixture://two-parameters.silk', twoParameterSource)
+  const identityParameters = descendants(identity.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ParameterDeclaration',
+  )
+  const multipleParameters = descendants(multiple.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ParameterDeclaration',
+  )
+
+  assert.strictEqual(identityParameters.length, 1)
+  assert.strictEqual(multipleParameters.length, 2)
+  assert.deepEqual(nodeShape(identityParameters.at(0) ?? identity.root), {
+    kind: 'ParameterDeclaration',
+    children: ['Identifier', 'Colon', 'Whitespace', 'Identifier'],
+  })
+  assert.strictEqual(
+    descendants(identity.root).some(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'IdentifierExpression',
+    ),
+    true,
+  )
+  assert.deepEqual(identity.diagnostics, [])
+  assert.deepEqual(multiple.diagnostics, [])
+  assertOriginalTokenTraversal(identity)
+  assertOriginalTokenTraversal(multiple)
+})
+
+it('recovers missing parameter types and commas without losing later syntax', () => {
+  const missingType = parseText('fixture://missing-parameter-type.silk', missingParameterTypeSource)
+  const missingComma = parseText(
+    'fixture://missing-parameter-comma.silk',
+    missingParameterCommaSource,
+  )
+
+  assert.deepEqual(
+    missingLeaves(missingType.root).map((leaf) => leaf.expected),
+    ['Identifier'],
+  )
+  assert.deepEqual(
+    missingLeaves(missingComma.root).map((leaf) => leaf.expected),
+    ['Comma'],
+  )
+  assert.strictEqual(
+    descendants(missingComma.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'ParameterDeclaration',
+    ).length,
+    2,
+  )
+  assertOriginalTokenTraversal(missingType)
+  assertOriginalTokenTraversal(missingComma)
+})
+
+it('keeps malformed arguments explicit and resumes at the next comma', () => {
+  const result = parseText('fixture://malformed-call-argument.silk', malformedArgumentSource)
   const call = descendants(result.root).find(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) && element.kind === 'CallExpression',
@@ -315,14 +418,20 @@ it('retains unsupported call arguments in one error region', () => {
     errorNodes(call)
       .flatMap((node) => SyntaxTree.tokens(node))
       .map((token) => token.kind),
-    ['DecimalInteger'],
+    ['Invalid'],
   )
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002'],
+    ['PAR0002', 'PAR0001'],
+  )
+  assert.strictEqual(
+    descendants(call).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'IdentifierExpression',
+    ).length,
+    2,
   )
   assertOriginalTokenTraversal(result)
-  assert.deepEqual(reconstructedBytes(result), ascii(unsupportedCallArgumentSource))
+  assert.deepEqual(reconstructedBytes(result), ascii(malformedArgumentSource))
 })
 
 it('bounds damaged call recovery before the following function', () => {

@@ -32,8 +32,9 @@ pub fn main() -> I32 { return answer() }`
 export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
 export const missingCallRightParenthesisSource = `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return answer( }`
-export const unsupportedCallArgumentSource = `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer(42) }`
+export const identityCallSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`
+export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
 export const forwardCallSource = `pub fn main() -> I32 { return answer() }
 pub fn answer() -> I32 { return 42 }`
 export const selfCallSource = 'pub fn main() -> I32 { return main() }'

@@ -272,7 +272,7 @@ const modules = await Promise.all(
 const source = api.SourceFile.make(
   'memory://packed.silk',
   new TextEncoder().encode(
-    'pub fn answer() -> I32 { return 42 }\\npub fn main() -> I32 { return answer() }',
+    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
   ),
 );
 const parse = api.Parser.parse(api.Lexer.lex(source));
@@ -312,13 +312,14 @@ console.log(
       names,
       ordinals: analysis.functions.map((fact) => fact.declaration.id.ordinal),
       returnedExpressionTags: analysis.functions.map((fact) => fact.returnedExpression._tag),
+      parameterCounts: analysis.functions.map((fact) => fact.declaration.parameterCount),
       callReference: call?.reference._tag,
       callType: call?.type,
       callTargetOrdinal:
         call?.reference._tag === 'Resolved' ? call.reference.declaration.id.ordinal : null,
       callCompatibility: analysis.functions[1]?.returnCompatibility._tag,
       unknownDiagnosticCodes: unknownAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
-      rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'answer')._tag,
+      rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'identity')._tag,
       deepLookup: semanticModule.declarationByName(deepAnalysis, 'missing')._tag,
       legacyResultFields: ['declaration', 'integerExpression', 'returnCompatibility'].filter(
         (key) => key in analysis,
@@ -366,9 +367,10 @@ console.log(
     expect(api.functionCount).toBe(2)
     expect(api.callCount).toBe(1)
     expect(api.semantic).toEqual({
-      names: ['answer', 'main'],
+      names: ['identity', 'main'],
       ordinals: [0, 1],
-      returnedExpressionTags: ['Integer', 'Call'],
+      returnedExpressionTags: ['Identifier', 'Call'],
+      parameterCounts: [1, 0],
       callReference: 'Resolved',
       callType: { _tag: 'Available', type: 'I32' },
       callTargetOrdinal: 0,

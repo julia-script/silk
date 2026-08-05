@@ -33,7 +33,7 @@ const isArrowStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2d && bytes[index + 1] === 0x3e
 
 const isPunctuation = (byte: number | undefined): boolean =>
-  byte === 0x28 || byte === 0x29 || byte === 0x7b || byte === 0x7d
+  byte === 0x28 || byte === 0x29 || byte === 0x7b || byte === 0x7d || byte === 0x3a || byte === 0x2c
 
 const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boolean => {
   const byte = bytes[index]
@@ -83,6 +83,10 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'LeftBrace'
     case 0x7d:
       return 'RightBrace'
+    case 0x3a:
+      return 'Colon'
+    case 0x2c:
+      return 'Comma'
     default:
       return 'Invalid'
   }

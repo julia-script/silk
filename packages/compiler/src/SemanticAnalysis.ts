@@ -98,11 +98,16 @@ export type ExpressionTypeFact =
   | { readonly _tag: 'Available'; readonly type: SemanticType }
   | { readonly _tag: 'Unavailable' }
 
-/** One returned integer or zero-argument call with exact concrete provenance. */
+/** One returned expression with exact concrete provenance. */
 export type ReturnedExpressionFact =
   | {
       readonly _tag: 'Integer'
       readonly integer: IntegerExpressionFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'Identifier'
+      readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -120,7 +125,7 @@ export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
   readonly id: DeclarationId
   readonly visibility: 'Public'
-  readonly parameterCount: 0
+  readonly parameterCount: number
   readonly name: DeclaredName
   readonly returnType: ReturnTypeFact
   readonly syntax: SyntaxTree.Node
@@ -349,6 +354,18 @@ const analyzeReturnedExpression = (
     })
   }
 
+  if (node.kind === 'IdentifierExpression') {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Identifier',
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+      type: undefined,
+    })
+  }
+
   const token = directToken(node, 'Identifier')
   if (token === undefined) {
     return Object.freeze({
@@ -388,11 +405,7 @@ const analyzeReturnedExpression = (
             spelling: tokenSpelling,
             token,
           })
-  const syntaxAvailable = node.children.every(
-    (element) =>
-      !SyntaxTree.isMissingToken(element) &&
-      !(SyntaxTree.isNode(element) && element.kind === 'Error'),
-  )
+  const syntaxAvailable = node.children.every(isAvailableSyntax)
   const expressionType =
     syntaxAvailable &&
     reference._tag === 'Resolved' &&
@@ -419,13 +432,22 @@ const returnedExpressionNode = (returnStatement: SyntaxTree.Node): SyntaxTree.No
   const expression = returnStatement.children.find(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
-      (element.kind === 'IntegerLiteralExpression' || element.kind === 'CallExpression'),
+      (element.kind === 'IntegerLiteralExpression' ||
+        element.kind === 'IdentifierExpression' ||
+        element.kind === 'CallExpression'),
   )
   if (expression === undefined) {
     throw new RangeError('Semantic analysis expected a returned expression')
   }
   return expression
 }
+
+const isAvailableSyntax = (element: SyntaxTree.Element): boolean =>
+  !SyntaxTree.isMissingToken(element) &&
+  !(
+    SyntaxTree.isNode(element) &&
+    (element.kind === 'Error' || !element.children.every(isAvailableSyntax))
+  )
 
 const compareDiagnostics = (
   left: SemanticDiagnostic.SemanticDiagnostic,
@@ -452,6 +474,7 @@ const analyzeDeclarationHeader = (
   ordinal: number,
 ): DeclarationHeader => {
   const returnTypeNode = childNode(functionNode, 'ReturnType')
+  const parameterListNode = childNode(functionNode, 'ParameterList')
   const returnType = analyzeReturnType(source, returnTypeNode)
   const declaration: DeclarationFact = Object.freeze({
     _tag: 'FunctionDeclaration',
@@ -461,7 +484,7 @@ const analyzeDeclarationHeader = (
       ordinal,
     }),
     visibility: 'Public',
-    parameterCount: 0,
+    parameterCount: directChildNodes(parameterListNode, 'ParameterDeclaration').length,
     name: presentName(source, functionNode),
     returnType: returnType.fact,
     syntax: functionNode,

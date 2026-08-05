@@ -41,7 +41,7 @@ The same actors are available through explicit deep imports such as
 ## Bootstrap lexer vocabulary
 
 The lexer recognizes ASCII identifiers, the `pub`, `fn`, and `return` keywords, decimal integers,
-parentheses, braces, `->`, whitespace, and `//` line comments. Trivia is retained as tokens.
+parentheses, braces, colons, commas, `->`, whitespace, and `//` line comments. Trivia is retained as tokens.
 Unsupported bytes form maximal `Invalid` tokens and ordered `LEX0001` diagnostics, so lexing always
 makes progress and every input byte can be reconstructed from the non-EOF token spans.
 
@@ -52,15 +52,20 @@ allowed between its elements:
 
 ```text
 File                → FunctionDeclaration+ EOF
-FunctionDeclaration → pub fn Identifier() -> Identifier { return ReturnExpression }
-ReturnExpression    → DecimalInteger | Identifier ( )
+FunctionDeclaration → pub fn Identifier(ParameterList?) -> Identifier { return ReturnExpression }
+ParameterList       → Parameter ( , Parameter )*
+Parameter           → Identifier : Identifier
+ReturnExpression    → DecimalInteger | Identifier | CallExpression
+CallExpression      → Identifier ( ArgumentList? )
+ArgumentList        → Argument ( , Argument )*
+Argument            → DecimalInteger | Identifier
 ```
 
 The result is a concrete syntax tree (CST), not a semantic AST. Its nodes group the source into one
 or more direct function declarations in source order. Each declaration contains a parameter list,
-return type, block, return statement, and either an integer literal or zero-argument call
-expression. A call node directly retains its callee, empty parentheses, and trivia; unexpected
-tokens between the parentheses remain one error region rather than becoming arguments. Every lexer
+return type, block, return statement, and an integer, bare-identifier, or call expression. Typed
+parameter declarations and integer or identifier call arguments retain their own ordered concrete
+nodes, separators, and trivia. Unexpected tokens inside lists remain explicit error regions. Every lexer
 token—including trivia, invalid tokens, and EOF—remains the same object in the tree and appears
 exactly once in source order. A following `pub` bounds both block and damaged-call recovery so the
 next declaration remains separate.
@@ -73,10 +78,10 @@ and a `PAR0002` diagnostic. Lexical diagnostics remain separate on the retained 
 ## Bootstrap semantic facts
 
 `SemanticAnalysis.analyze` retains the exact parse result and publishes an immutable ordered
-`functions` collection. Each `FunctionFact` groups one declaration, a closed integer-or-call
+`functions` collection. Each `FunctionFact` groups one declaration, a closed integer, identifier, or call
 `returnedExpression`, and return compatibility. Declaration identities combine the source identity with the function's
 zero-based concrete-source ordinal; missing names do not change later ordinals. Each declaration
-also retains public visibility, zero parameters, a present or unavailable name, and a resolved,
+also retains public visibility, its exact concrete parameter count, a present or unavailable name, and a resolved,
 unresolved, or unavailable declared return type.
 
 `SemanticAnalysis.declarationByName` supports data-first and pipeable lookup with closed `Resolved`,
@@ -102,6 +107,11 @@ even when the target body has its own compatibility error, because this phase re
 relationship rather than executing the function. Missing, ambiguous, syntax-damaged, or
 unresolved-target-type calls remain unavailable. Integer returned expressions keep their existing
 exact value and compatibility behavior.
+
+Typed parameter declarations, bare identifier expressions, and call arguments are concrete-only in
+this slice. Semantic analysis publishes the exact parameter count but deliberately leaves local
+identifier meaning, argument binding, argument compatibility, and argument values unavailable. A
+valid call with arguments can still resolve its top-level callee and result type independently.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native

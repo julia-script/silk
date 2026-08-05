@@ -89,7 +89,15 @@ pub fn main() -> I32 { return answer // callee
   ) }`
 export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
 export const missingCallRightParenthesisSource = 'pub fn main() -> I32 { return answer( }'
-export const unsupportedCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
+export const valueCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
+export const identifierCallArgumentSource =
+  'pub fn main(value: I32) -> I32 { return answer(value) }'
+export const identitySource = 'pub fn identity(value: I32) -> I32 { return value }'
+export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
+export const missingParameterTypeSource = 'pub fn identity(value:) -> I32 { return value }'
+export const missingParameterCommaSource =
+  'pub fn choose(left: I32 right: I32) -> I32 { return left }'
+export const malformedArgumentSource = 'pub fn main(value: I32) -> I32 { return answer(@, value) }'
 export const damagedCallBeforeNextFunctionSource = `pub fn main() -> I32 { return answer(
 pub fn after() -> I32 { return 0 }`
 

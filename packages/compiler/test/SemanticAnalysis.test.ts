@@ -15,6 +15,7 @@ import {
   duplicateNameSource,
   forwardCallSource,
   i32BoundarySource,
+  identityCallSource,
   missingCallCalleeSource,
   missingCallRightParenthesisSource,
   missingIntegerSource,
@@ -28,10 +29,10 @@ import {
   threeFunctionSource,
   tripleDuplicateNameSource,
   twoFunctionSource,
+  twoParameterSource,
   unknownCallSource,
   unknownTypeSource,
   unresolvedTargetTypeCallSource,
-  unsupportedCallArgumentSource,
   validCallSource,
 } from './fixtures/BootstrapSemanticFixture.js'
 import { raise } from './support/raise.js'
@@ -64,6 +65,13 @@ const callFact = (
   fact.returnedExpression._tag === 'Call'
     ? fact.returnedExpression
     : raise('expected a call returned expression')
+
+const identifierFact = (
+  fact: SemanticAnalysis.FunctionFact,
+): Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Identifier' }> =>
+  fact.returnedExpression._tag === 'Identifier'
+    ? fact.returnedExpression
+    : raise('expected an identifier returned expression')
 
 const diagnosticView = (result: SemanticAnalysis.Result) =>
   result.diagnostics.map((diagnostic) => ({
@@ -161,6 +169,25 @@ it('collects two and three declarations with deterministic source-order identiti
       functionAt(two, 1).declaration.syntax.span.start,
     true,
   )
+})
+
+it('counts concrete parameters while leaving identifier meaning unavailable', () => {
+  const identity = analyzeText('fixture://identity-parameters.silk', identityCallSource)
+  const multiple = analyzeText('fixture://two-parameters.silk', twoParameterSource)
+  const identityFunction = functionAt(identity, 0)
+  const main = functionAt(identity, 1)
+  const returnedIdentifier = identifierFact(identityFunction)
+  const returnedCall = callFact(main)
+
+  assert.strictEqual(identityFunction.declaration.parameterCount, 1)
+  assert.strictEqual(functionAt(multiple, 0).declaration.parameterCount, 2)
+  assert.deepEqual(returnedIdentifier.type, { _tag: 'Unavailable' })
+  assert.deepEqual(identityFunction.returnCompatibility, { _tag: 'Unavailable' })
+  assert.strictEqual(returnedCall.reference._tag, 'Resolved')
+  assert.deepEqual(returnedCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
+  assert.deepEqual(identity.diagnostics, [])
+  assert.deepEqual(identity.parse.diagnostics, [])
 })
 
 it('resolves a call to an earlier declaration and propagates its type', () => {
@@ -293,35 +320,34 @@ it('keeps a recovered call callee unavailable and parser-owned', () => {
   assert.deepEqual(result.diagnostics, [])
 })
 
-it('resolves present callees but withholds types through damaged call punctuation', () => {
+it('resolves present callees, accepts unchecked arguments, and withholds damaged calls', () => {
   const missingParenthesis = analyzeText(
     'fixture://missing-call-right-parenthesis.silk',
     missingCallRightParenthesisSource,
   )
-  const unsupportedArgument = analyzeText(
-    'fixture://unsupported-call-argument.silk',
-    unsupportedCallArgumentSource,
+  const uncheckedArgument = analyzeText(
+    'fixture://unchecked-call-argument.silk',
+    identityCallSource,
   )
 
-  for (const result of [missingParenthesis, unsupportedArgument]) {
-    const fact = functionAt(result, 1)
-    const returned = callFact(fact)
-    assert.strictEqual(returned.reference._tag, 'Resolved')
-    if (returned.reference._tag !== 'Resolved') continue
-    assert.strictEqual(returned.reference.spelling, 'answer')
-    assert.strictEqual(returned.reference.declaration, functionAt(result, 0).declaration)
-    assert.deepEqual(returned.type, { _tag: 'Unavailable' })
-    assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
-    assert.deepEqual(result.diagnostics, [])
-  }
+  const damagedFact = functionAt(missingParenthesis, 1)
+  const damagedCall = callFact(damagedFact)
+  assert.strictEqual(damagedCall.reference._tag, 'Resolved')
+  assert.deepEqual(damagedCall.type, { _tag: 'Unavailable' })
+  assert.deepEqual(damagedFact.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(missingParenthesis.diagnostics, [])
+
+  const uncheckedFact = functionAt(uncheckedArgument, 1)
+  const uncheckedCall = callFact(uncheckedFact)
+  assert.strictEqual(uncheckedCall.reference._tag, 'Resolved')
+  assert.deepEqual(uncheckedCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(uncheckedFact.returnCompatibility, { _tag: 'Compatible' })
+  assert.deepEqual(uncheckedArgument.parse.diagnostics, [])
+  assert.deepEqual(uncheckedArgument.diagnostics, [])
 
   assert.deepEqual(
     missingParenthesis.parse.diagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
-  )
-  assert.deepEqual(
-    unsupportedArgument.parse.diagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002'],
   )
 })
 

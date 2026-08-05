@@ -8,11 +8,14 @@ export type NodeKind =
   | 'SourceFile'
   | 'FunctionDeclaration'
   | 'ParameterList'
+  | 'ParameterDeclaration'
   | 'ReturnType'
   | 'Block'
   | 'ReturnStatement'
   | 'IntegerLiteralExpression'
+  | 'IdentifierExpression'
   | 'CallExpression'
+  | 'ArgumentList'
   | 'Error'
 
 /** An absent required token at one exact source position. */

@@ -13,6 +13,8 @@ export type TokenKind =
   | 'RightParenthesis'
   | 'LeftBrace'
   | 'RightBrace'
+  | 'Colon'
+  | 'Comma'
   | 'Arrow'
   | 'Invalid'
   | 'EndOfFile'

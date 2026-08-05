@@ -45,9 +45,30 @@ pub fn main() -> I32 { return same() }`,
 pub fn main() -> I32 { return answer( }`,
   },
   {
-    label: 'Unsupported argument',
-    source: `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer(42) }`,
+    label: 'Identity syntax',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Two parameters',
+    source: 'pub fn choose(left: I32, right: I32) -> I32 { return left }',
+  },
+  {
+    label: 'Identifier argument',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn forward(value: I32) -> I32 { return identity(value) }`,
+  },
+  {
+    label: 'Missing parameter type',
+    source: 'pub fn identity(value:) -> I32 { return value }',
+  },
+  {
+    label: 'Missing parameter comma',
+    source: 'pub fn choose(left: I32 right: I32) -> I32 { return left }',
+  },
+  {
+    label: 'Malformed argument',
+    source: 'pub fn main(value: I32) -> I32 { return missing(@, value) }',
   },
   {
     label: 'Missing name',
@@ -195,6 +216,16 @@ function CallRelationship({
   const calleeName = reference._tag === 'Unavailable' ? 'Unavailable callee' : reference.spelling
   const targetName =
     reference._tag === 'Resolved' ? declarationLabel(reference.declaration) : calleeName
+  const argumentsList = returned.syntax.children.find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
+  )
+  const argumentCount =
+    argumentsList?.children.filter(
+      (element) =>
+        SyntaxTree.isNode(element) &&
+        (element.kind === 'IntegerLiteralExpression' || element.kind === 'IdentifierExpression'),
+    ).length ?? 0
 
   return (
     <section
@@ -232,6 +263,13 @@ function CallRelationship({
           <dd>
             <code>{returned.type._tag === 'Available' ? returned.type.type : 'Unavailable'}</code>
             <span>{returned.type._tag}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Arguments</dt>
+          <dd>
+            <code>{argumentCount}</code>
+            <span>Preserved · unchecked</span>
           </dd>
         </div>
       </dl>
@@ -340,7 +378,10 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                   <dt>Declaration</dt>
                   <dd>
                     <strong>{nameLabel}</strong>
-                    <span>public · 0 parameters</span>
+                    <span>
+                      public · {declaration.parameterCount}{' '}
+                      {declaration.parameterCount === 1 ? 'parameter' : 'parameters'}
+                    </span>
                     <code>
                       {declaration.id.sourceId}#{declaration.id.ordinal}
                     </code>
@@ -382,11 +423,17 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
+                  ) : returned._tag === 'Identifier' ? (
+                    <dd>
+                      <strong>Unavailable</strong>
+                      <span>Identifier · resolution deferred</span>
+                      <small>{spanLabel(returned.syntax)}</small>
+                    </dd>
                   ) : (
                     <dd>
                       <strong>
                         {returned.reference._tag !== 'Unavailable'
-                          ? `${returned.reference.spelling}()`
+                          ? returned.reference.spelling
                           : 'Unavailable call'}
                       </strong>
                       <span>
@@ -416,7 +463,9 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
       </div>
 
       <p className={styles.boundaryNote}>
-        These arrows record top-level name resolution, not execution order. Recursion policy, scope
+        Parameters and arguments are concrete syntax in this slice: counts are available, while
+        local identifier resolution, argument binding, and argument checking are deliberately
+        deferred. These arrows record top-level call-name resolution, not execution order. Scope
         graphs, semantic AST, HIR, and code generation do not exist yet.
       </p>
     </section>

@@ -141,10 +141,74 @@ const expect = (
 }
 
 const parseIntegerLiteralExpression = (initial: State): NodeResult => {
-  const integer = expect(initial, 'DecimalInteger', ['RightBrace'])
+  const integer = expect(initial, 'DecimalInteger', ['Comma', 'RightParenthesis', 'RightBrace'])
   return Object.freeze({
     state: integer.state,
     node: syntaxNode(integer.state, 'IntegerLiteralExpression', integer.elements),
+  })
+}
+
+const parseIdentifierExpression = (initial: State): NodeResult => {
+  const identifier = expect(initial, 'Identifier', ['Comma', 'RightParenthesis', 'RightBrace'])
+  return Object.freeze({
+    state: identifier.state,
+    node: syntaxNode(identifier.state, 'IdentifierExpression', identifier.elements),
+  })
+}
+
+const argumentExpressionKind = (state: State): 'Integer' | 'Identifier' =>
+  nextSignificantKind(state) === 'DecimalInteger' ? 'Integer' : 'Identifier'
+
+const parseArgumentExpression = (initial: State): NodeResult =>
+  argumentExpressionKind(initial) === 'Integer'
+    ? parseIntegerLiteralExpression(initial)
+    : parseIdentifierExpression(initial)
+
+const parseArgumentList = (initial: State): NodeResult => {
+  const leftParenthesis = expect(initial, 'LeftParenthesis', [
+    'DecimalInteger',
+    'Identifier',
+    'RightParenthesis',
+    'RightBrace',
+    'PubKeyword',
+  ])
+  let state = leftParenthesis.state
+  let children: ReadonlyArray<SyntaxTree.Element> = leftParenthesis.elements
+  let kind = nextSignificantKind(state)
+
+  while (
+    kind !== undefined &&
+    kind !== 'RightParenthesis' &&
+    kind !== 'RightBrace' &&
+    kind !== 'PubKeyword' &&
+    kind !== 'EndOfFile'
+  ) {
+    const argument = parseArgumentExpression(state)
+    children = Object.freeze([...children, argument.node])
+    state = argument.state
+    kind = nextSignificantKind(state)
+
+    if (kind === 'RightParenthesis' || kind === 'RightBrace' || kind === 'PubKeyword') break
+
+    const comma = expect(state, 'Comma', [
+      'DecimalInteger',
+      'Identifier',
+      'RightParenthesis',
+      'RightBrace',
+      'PubKeyword',
+    ])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+    kind = nextSignificantKind(state)
+  }
+
+  const rightParenthesis = expect(state, 'RightParenthesis', ['RightBrace', 'PubKeyword'])
+  return Object.freeze({
+    state: rightParenthesis.state,
+    node: syntaxNode(rightParenthesis.state, 'ArgumentList', [
+      ...children,
+      ...rightParenthesis.elements,
+    ]),
   })
 }
 
@@ -155,32 +219,32 @@ const parseCallExpression = (initial: State): NodeResult => {
     'RightBrace',
     'PubKeyword',
   ])
-  const leftParenthesis = expect(callee.state, 'LeftParenthesis', [
-    'RightParenthesis',
-    'RightBrace',
-    'PubKeyword',
-  ])
-  const rightParenthesis = expect(leftParenthesis.state, 'RightParenthesis', [
-    'RightBrace',
-    'PubKeyword',
-  ])
+  const argumentsList = parseArgumentList(callee.state)
   return Object.freeze({
-    state: rightParenthesis.state,
-    node: syntaxNode(rightParenthesis.state, 'CallExpression', [
+    state: argumentsList.state,
+    node: syntaxNode(argumentsList.state, 'CallExpression', [
       ...callee.elements,
-      ...leftParenthesis.elements,
-      ...rightParenthesis.elements,
+      argumentsList.node,
     ]),
   })
 }
 
-const returnedExpressionKind = (state: State): 'Integer' | 'Call' => {
+const returnedExpressionKind = (state: State): 'Integer' | 'Identifier' | 'Call' => {
   let index = state.index
   let token = state.lexical.tokens.at(index)
 
   while (token !== undefined) {
     if (token.kind === 'DecimalInteger') return 'Integer'
-    if (token.kind === 'Identifier' || token.kind === 'LeftParenthesis') return 'Call'
+    if (token.kind === 'Identifier') {
+      index += 1
+      token = state.lexical.tokens.at(index)
+      while (token !== undefined && isTrivia(token.kind)) {
+        index += 1
+        token = state.lexical.tokens.at(index)
+      }
+      return token?.kind === 'LeftParenthesis' ? 'Call' : 'Identifier'
+    }
+    if (token.kind === 'LeftParenthesis') return 'Call'
     if (token.kind === 'RightBrace' || token.kind === 'PubKeyword' || token.kind === 'EndOfFile') {
       return 'Integer'
     }
@@ -191,10 +255,12 @@ const returnedExpressionKind = (state: State): 'Integer' | 'Call' => {
   return 'Integer'
 }
 
-const parseReturnedExpression = (initial: State): NodeResult =>
-  returnedExpressionKind(initial) === 'Call'
-    ? parseCallExpression(initial)
-    : parseIntegerLiteralExpression(initial)
+const parseReturnedExpression = (initial: State): NodeResult => {
+  const kind = returnedExpressionKind(initial)
+  if (kind === 'Call') return parseCallExpression(initial)
+  if (kind === 'Identifier') return parseIdentifierExpression(initial)
+  return parseIntegerLiteralExpression(initial)
+}
 
 const parseReturnStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ReturnKeyword', [
@@ -240,12 +306,47 @@ const parseReturnType = (initial: State): NodeResult => {
 }
 
 const parseParameterList = (initial: State): NodeResult => {
-  const leftParenthesis = expect(initial, 'LeftParenthesis', ['RightParenthesis', 'Arrow'])
-  const rightParenthesis = expect(leftParenthesis.state, 'RightParenthesis', ['Arrow'])
+  const leftParenthesis = expect(initial, 'LeftParenthesis', [
+    'Identifier',
+    'RightParenthesis',
+    'Arrow',
+  ])
+  let state = leftParenthesis.state
+  let children: ReadonlyArray<SyntaxTree.Element> = leftParenthesis.elements
+  let kind = nextSignificantKind(state)
+
+  while (
+    kind !== undefined &&
+    kind !== 'RightParenthesis' &&
+    kind !== 'Arrow' &&
+    kind !== 'PubKeyword' &&
+    kind !== 'EndOfFile'
+  ) {
+    const name = expect(state, 'Identifier', ['Colon', 'Comma', 'RightParenthesis', 'Arrow'])
+    const colon = expect(name.state, 'Colon', ['Identifier', 'Comma', 'RightParenthesis', 'Arrow'])
+    const type = expect(colon.state, 'Identifier', ['Comma', 'RightParenthesis', 'Arrow'])
+    const parameter = syntaxNode(type.state, 'ParameterDeclaration', [
+      ...name.elements,
+      ...colon.elements,
+      ...type.elements,
+    ])
+    children = Object.freeze([...children, parameter])
+    state = type.state
+    kind = nextSignificantKind(state)
+
+    if (kind === 'RightParenthesis' || kind === 'Arrow' || kind === 'PubKeyword') break
+
+    const comma = expect(state, 'Comma', ['Identifier', 'RightParenthesis', 'Arrow', 'PubKeyword'])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+    kind = nextSignificantKind(state)
+  }
+
+  const rightParenthesis = expect(state, 'RightParenthesis', ['Arrow', 'PubKeyword'])
   return Object.freeze({
     state: rightParenthesis.state,
     node: syntaxNode(rightParenthesis.state, 'ParameterList', [
-      ...leftParenthesis.elements,
+      ...children,
       ...rightParenthesis.elements,
     ]),
   })
