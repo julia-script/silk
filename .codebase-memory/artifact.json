@@ -1,11 +1,11 @@
 {
     "schema_version": 1,
-    "commit": "7548eaf05c95063c835f61af843759da3ab5709a",
-    "indexed_at": "2026-08-05T19:11:04Z",
+    "commit": "a01b03b62e2da809e1b76a3069c1468abe87a6c3",
+    "indexed_at": "2026-08-05T19:16:42Z",
     "project": "Users-juliaortiz-Documents-dev.nosync-silk-effect",
-    "nodes": 8421,
-    "edges": 13918,
+    "nodes": 8439,
+    "edges": 13936,
     "original_size": 19857408,
-    "compressed_size": 2608618,
+    "compressed_size": 2607983,
     "compression_level": 3
 }

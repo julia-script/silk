@@ -5,9 +5,7 @@
 Anchor the builder's correctness to a pinned external oracle so that emitted binaries and text
 are continuously verified against the reference WebAssembly tooling rather than trusted by
 construction.
-
 ## Requirements
-
 ### Requirement: Pinned oracle
 The system SHALL pin one exact `wasm-tools` version as the verification oracle, record the pin
 in the package's provenance documentation, and use it for all fixture generation and
@@ -21,8 +19,9 @@ verification. Runtime code SHALL never invoke the oracle.
 The system SHALL commit representative fixture modules covering every supported feature area —
 declarations, imports and exports, segments, control flow, and each instruction family,
 including SIMD, relaxed SIMD, atomics with shared memories, 64-bit memories, exception handling
-with tags and `try_table`, and branch hints — as both expected binary bytes and expected text,
-generated deterministically by a repeatable script.
+with tags and `try_table`, branch hints, and GC with recursive types, casts, and typed calls —
+as both expected binary bytes and expected text, generated deterministically by a repeatable
+script.
 
 #### Scenario: Fixture verification
 - **WHEN** the fixture verification script runs
@@ -32,7 +31,7 @@ generated deterministically by a repeatable script.
 #### Scenario: Extended-feature fixtures exist
 - **WHEN** the fixture inventory is listed
 - **THEN** it contains at least one module per new feature family (SIMD, atomics, memory64,
-  exceptions, branch hints) verified with the oracle's matching feature flags
+  exceptions, branch hints, GC) verified with the oracle's matching feature flags
 
 ### Requirement: Round-trip agreement
 The system SHALL verify for each fixture that the rendered text, parsed by the oracle, produces
@@ -61,3 +60,4 @@ misses supported ones.
 - **WHEN** the oracle runs after this change
 - **THEN** its feature list includes `simd`, `relaxed-simd`, `threads`, and `memory64` in
   addition to the baseline features, and negative-corpus agreement still holds for every rule
+
