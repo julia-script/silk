@@ -3,6 +3,7 @@ import * as Option from 'effect/Option'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import type * as Token from '../src/Token.js'
 import {
@@ -43,10 +44,11 @@ import {
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const parseBytes = (id: string, bytes: Uint8Array): Parser.ParseResult =>
+const parseBytes = (id: string, bytes: Uint8Array): SyntaxFile.SyntaxFile =>
   Parser.parse(Lexer.lex(SourceFile.make(id, bytes)))
 
-const parseText = (id: string, source: string): Parser.ParseResult => parseBytes(id, ascii(source))
+const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
+  parseBytes(id, ascii(source))
 
 const nodeShape = (node: SyntaxTree.Node): ExpectedNodeShape => ({
   kind: node.kind,
@@ -78,7 +80,7 @@ const directFunctionDeclarations = (node: SyntaxTree.Node): ReadonlyArray<Syntax
   )
 
 const directTokenText = (
-  result: Parser.ParseResult,
+  result: SyntaxFile.SyntaxFile,
   node: SyntaxTree.Node,
   kind: Token.TokenKind,
 ): string | undefined => {
@@ -86,31 +88,28 @@ const directTokenText = (
     (element): element is Token.Token => SyntaxTree.isToken(element) && element.kind === kind,
   )
   if (token === undefined) return undefined
-  return Array.from(
-    Option.getOrThrow(SourceFile.slice(result.lexical.source, token.span)),
-    (byte) => String.fromCharCode(byte),
+  return Array.from(Option.getOrThrow(SourceFile.slice(result.source, token.span)), (byte) =>
+    String.fromCharCode(byte),
   ).join('')
 }
 
-const assertOriginalTokenTraversal = (result: Parser.ParseResult): void => {
+const assertOriginalTokenTraversal = (result: SyntaxFile.SyntaxFile): void => {
   const flattened = SyntaxTree.tokens(result.root)
-  assert.strictEqual(flattened.length, result.lexical.tokens.length)
+  assert.strictEqual(flattened.length, result.tokens.length)
   for (const [index, token] of flattened.entries()) {
-    assert.strictEqual(token, result.lexical.tokens.at(index))
+    assert.strictEqual(token, result.tokens.at(index))
   }
 }
 
-const reconstructedBytes = (result: Parser.ParseResult): Uint8Array => {
+const reconstructedBytes = (result: SyntaxFile.SyntaxFile): Uint8Array => {
   const bytes = SyntaxTree.tokens(result.root)
     .filter((token) => token.kind !== 'EndOfFile')
-    .flatMap((token) =>
-      Array.from(Option.getOrThrow(SourceFile.slice(result.lexical.source, token.span))),
-    )
+    .flatMap((token) => Array.from(Option.getOrThrow(SourceFile.slice(result.source, token.span))))
   return Uint8Array.from(bytes)
 }
 
-const diagnosticView = (result: Parser.ParseResult) =>
-  result.diagnostics.map((diagnostic) => ({
+const diagnosticView = (result: SyntaxFile.SyntaxFile) =>
+  result.parserDiagnostics.map((diagnostic) => ({
     code: diagnostic.code,
     start: diagnostic.span.start,
     end: diagnostic.span.end,
@@ -122,10 +121,11 @@ it('parses the accepted function into the exact first concrete node shape', () =
   const result = Parser.parse(lexical)
 
   assert.deepEqual(nodeShape(result.root), acceptedShape)
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(acceptedSource))
-  assert.strictEqual(result.lexical, lexical)
+  assert.strictEqual(result.source, lexical.source)
+  assert.strictEqual(result.tokens, lexical.tokens)
 })
 
 it('parses dense whitespace and line-comment trivia without changing the grammar nodes', () => {
@@ -142,7 +142,7 @@ it('parses dense whitespace and line-comment trivia without changing the grammar
     'ReturnStatement',
     'IntegerLiteralExpression',
   ])
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(denseTriviaSource))
 })
@@ -167,8 +167,8 @@ it('parses two declarations as separate direct branches in source order', () => 
   assert.strictEqual(Object.isFrozen(result.root.children), true)
   assert.strictEqual(Object.isFrozen(declarations.at(0)), true)
   assert.strictEqual(Object.isFrozen(declarations.at(1)), true)
-  assert.strictEqual(Object.isFrozen(result.diagnostics), true)
-  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(Object.isFrozen(result.parserDiagnostics), true)
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(twoFunctionSource))
 })
@@ -182,7 +182,7 @@ it('parses three declarations without imposing a temporary source-file limit', (
     ),
     ['one', 'two', 'three'],
   )
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(threeFunctionSource))
 })
@@ -207,7 +207,7 @@ it('parses a zero-argument call as one lossless concrete expression', () => {
     ],
   })
   assert.strictEqual(directTokenText(result, call, 'Identifier'), 'answer')
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(validCallSource))
 })
@@ -248,7 +248,7 @@ it('retains trivia between every concrete call element', () => {
       'RightParenthesis',
     ],
   )
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(triviaCallSource))
 })
@@ -281,7 +281,7 @@ it('recovers a missing call callee without inventing a name', () => {
     ['Whitespace', 'LeftParenthesis', 'RightParenthesis'],
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -312,7 +312,7 @@ it('inserts a missing call parenthesis without consuming the block brace', () =>
     true,
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -349,8 +349,8 @@ it('parses decimal and identifier call arguments as ordered concrete expressions
       'RightParenthesis',
     ],
   })
-  assert.deepEqual(literal.diagnostics, [])
-  assert.deepEqual(identifier.diagnostics, [])
+  assert.deepEqual(literal.parserDiagnostics, [])
+  assert.deepEqual(identifier.parserDiagnostics, [])
   assertOriginalTokenTraversal(literal)
   assertOriginalTokenTraversal(identifier)
 })
@@ -398,7 +398,7 @@ it('parses nested calls as lossless argument expressions', () => {
   })
   assert.strictEqual(inner.span.start, nestedCallSource.lastIndexOf('identity(42)'))
   assert.strictEqual(inner.span.end, nestedCallSource.lastIndexOf('identity(42)') + 12)
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(nestedCallSource))
 })
@@ -429,7 +429,7 @@ it('preserves sibling nested calls and their outer comma', () => {
     ),
     ['LeftParenthesis', 'CallExpression', 'Comma', 'CallExpression', 'RightParenthesis'],
   )
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(nestedSiblingCallSource))
 })
@@ -464,7 +464,7 @@ it('reserves the outer closing parenthesis when the inner call is damaged', () =
     true,
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -494,7 +494,7 @@ it('keeps a sibling argument after damaged nested syntax', () => {
     2,
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002', 'PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -561,8 +561,8 @@ it('parses typed parameters and bare identifier return expressions', () => {
     ),
     true,
   )
-  assert.deepEqual(identity.diagnostics, [])
-  assert.deepEqual(multiple.diagnostics, [])
+  assert.deepEqual(identity.parserDiagnostics, [])
+  assert.deepEqual(multiple.parserDiagnostics, [])
   assertOriginalTokenTraversal(identity)
   assertOriginalTokenTraversal(multiple)
 })
@@ -608,7 +608,7 @@ it('keeps malformed arguments explicit and resumes at the next comma', () => {
     ['Invalid'],
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002', 'PAR0001'],
   )
   assert.strictEqual(
@@ -640,7 +640,7 @@ it('bounds damaged call recovery before the following function', () => {
   assert.deepEqual(missingLeaves(second), [])
   assert.strictEqual(directTokenText(result, second, 'Identifier'), 'after')
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001', 'PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -656,7 +656,7 @@ it('keeps trailing trivia with the end-of-file expectation', () => {
     ['Whitespace', 'LineComment', 'Whitespace', 'EndOfFile'],
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(trailingTriviaSource))
 })
@@ -687,7 +687,7 @@ it('inserts a missing first brace without consuming the second declaration', () 
   assert.deepEqual(missingLeaves(second), [])
   assert.strictEqual(directTokenText(result, second, 'Identifier'), 'main')
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -714,7 +714,7 @@ it('retains unexpected punctuation at a function boundary and parses the next de
     ['Invalid', 'Whitespace'],
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002'],
   )
   assertOriginalTokenTraversal(result)
@@ -763,7 +763,7 @@ it('inserts a missing right brace at end-of-file', () => {
     ],
   )
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -785,7 +785,7 @@ it('groups unexpected punctuation and following trivia before the function name'
     { code: 'PAR0002', start: 7, end: 9, reason: { _tag: 'UnexpectedTokens' } },
   ])
   assert.deepEqual(
-    result.lexical.diagnostics.map((diagnostic) => diagnostic.code),
+    result.lexicalDiagnostics.map((diagnostic) => diagnostic.code),
     ['LEX0001'],
   )
   assertOriginalTokenTraversal(result)
@@ -795,9 +795,9 @@ it('terminates with explicit missing structure for empty input', () => {
   const result = parseBytes('fixture://empty.silk', emptySource)
 
   assert.strictEqual(missingLeaves(result.root).length, 11)
-  assert.strictEqual(result.diagnostics.length, 11)
+  assert.strictEqual(result.parserDiagnostics.length, 11)
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
     Array.from({ length: 11 }, () => 'PAR0001'),
   )
   assertOriginalTokenTraversal(result)
@@ -808,9 +808,9 @@ it('terminates on wholly unrelated input and retains it in one error region', ()
   const errors = errorNodes(result.root)
 
   assert.strictEqual(errors.length, 1)
-  assert.deepEqual(errors.at(0)?.span, result.lexical.tokens.at(0)?.span)
+  assert.deepEqual(errors.at(0)?.span, result.tokens.at(0)?.span)
   assert.strictEqual(missingLeaves(result.root).length, 11)
-  assert.strictEqual(result.diagnostics.at(0)?.code, 'PAR0002')
+  assert.strictEqual(result.parserDiagnostics.at(0)?.code, 'PAR0002')
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(whollyUnrelatedSource))
 })
@@ -820,7 +820,7 @@ it('retains invalid UTF-8 bytes and lexical diagnostics inside concrete recovery
   const errors = errorNodes(result.root)
 
   assert.deepEqual(
-    result.lexical.diagnostics.map((diagnostic) => ({
+    result.lexicalDiagnostics.map((diagnostic) => ({
       code: diagnostic.code,
       start: diagnostic.span.start,
       end: diagnostic.span.end,
@@ -841,6 +841,6 @@ it('is deterministic across repeated fresh lexical results', () => {
 
   assert.deepEqual(nodeShape(first.root), nodeShape(second.root))
   assert.deepEqual(diagnosticView(first), diagnosticView(second))
-  assert.deepEqual(first.lexical.diagnostics, second.lexical.diagnostics)
+  assert.deepEqual(first.lexicalDiagnostics, second.lexicalDiagnostics)
   assert.deepEqual(reconstructedBytes(first), reconstructedBytes(second))
 })

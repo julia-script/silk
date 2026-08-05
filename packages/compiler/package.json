@@ -57,6 +57,10 @@
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
     },
+    "./SyntaxFile": {
+      "types": "./dist/SyntaxFile.d.ts",
+      "import": "./dist/SyntaxFile.js"
+    },
     "./SyntaxTree": {
       "types": "./dist/SyntaxTree.d.ts",
       "import": "./dist/SyntaxTree.js"
@@ -82,6 +86,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:"
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1"
   }
 }

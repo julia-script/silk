@@ -4,6 +4,7 @@ import type * as SourceSpan from './SourceSpan.js'
 export type TokenKind =
   | 'Whitespace'
   | 'LineComment'
+  | 'DocComment'
   | 'Identifier'
   | 'DecimalInteger'
   | 'PubKeyword'

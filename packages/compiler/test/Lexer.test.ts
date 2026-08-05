@@ -171,3 +171,23 @@ it('terminates on empty and wholly invalid input', () => {
   )
   assert.strictEqual(invalid.diagnostics.length, 1)
 })
+
+it('distinguishes documentation comments from plain line comments', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://doc-comments.silk', ascii('/// doc\n// note\nfn')),
+  )
+  const final = Lexer.lex(SourceFile.make('memory://final-doc.silk', ascii('/// tail')))
+
+  assert.deepEqual(
+    result.tokens.map((token) => token.kind),
+    ['DocComment', 'Whitespace', 'LineComment', 'Whitespace', 'FnKeyword', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    result.tokens.slice(0, 1).map((token) => tokenView(result.source, token)),
+    [{ kind: 'DocComment', start: 0, end: 7, slice: '/// doc' }],
+  )
+  assert.deepEqual(
+    final.tokens.map((token) => token.kind),
+    ['DocComment', 'EndOfFile'],
+  )
+})

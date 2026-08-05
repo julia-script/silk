@@ -9,7 +9,7 @@ import {
   SourceFile,
   SyntaxTree,
 } from '@silk-effect/compiler'
-import type { SourceSpan } from '@silk-effect/compiler'
+import type { SourceSpan, SyntaxFile } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import {
   projectDataFlow,
@@ -303,6 +303,29 @@ export const diagnosticEntries = (
       }))
     })
     .sort((left, right) => Diagnostic.compare(left.diagnostic, right.diagnostic))
+
+export function TokenStream({ syntax }: { readonly syntax: SyntaxFile.SyntaxFile }) {
+  return (
+    <section className={styles.diagnosticGroup} aria-labelledby="token-stream">
+      <div className={styles.diagnosticHeading}>
+        <h3 id="token-stream">Token stream</h3>
+        <span>{syntax.tokens.length}</span>
+      </div>
+      <ul className={styles.diagnosticList} aria-label="SyntaxFile token stream">
+        {syntax.tokens.map((token, index) => (
+          <li key={`${token.kind}-${token.span.start}-${index}`}>
+            <div>
+              <code>{token.kind}</code>
+              <span>
+                [{token.span.start}, {token.span.end})
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
 
 export function DiagnosticPanel({
   entries,
@@ -755,7 +778,7 @@ export function DataFlow({
   const flow = useMemo(() => projectDataFlow(analysis, outcome), [analysis, outcome])
   const items: ReadonlyArray<FlowItem> = [...flow.groups, ...flow.nodes, ...flow.edges]
   const selected = items.find((item) => item.id === selectedId)
-  const source = analysis.parse.lexical.source
+  const source = analysis.syntax.source
   const selectedSlice =
     selected === undefined
       ? undefined
@@ -1329,7 +1352,7 @@ export function SyntaxInspector() {
     const source = SourceFile.make(sourceId, encoder.encode(text))
     return SemanticAnalysis.analyze(Parser.parse(Lexer.lex(source)))
   }, [text])
-  const result = analysis.parse
+  const result = analysis.syntax
 
   return (
     <div className={styles.inspector}>
@@ -1380,19 +1403,19 @@ export function SyntaxInspector() {
         <dl className={styles.metrics}>
           <div>
             <dt>UTF-8 bytes</dt>
-            <dd>{result.lexical.source.bytes.length}</dd>
+            <dd>{result.source.bytes.length}</dd>
           </div>
           <div>
             <dt>Tokens</dt>
-            <dd>{result.lexical.tokens.length}</dd>
+            <dd>{result.tokens.length}</dd>
           </div>
           <div>
             <dt>Lexer</dt>
-            <dd>{result.lexical.diagnostics.length}</dd>
+            <dd>{result.lexicalDiagnostics.length}</dd>
           </div>
           <div>
             <dt>Parser</dt>
-            <dd>{result.diagnostics.length}</dd>
+            <dd>{result.parserDiagnostics.length}</dd>
           </div>
           <div>
             <dt>Semantic</dt>
@@ -1411,13 +1434,14 @@ export function SyntaxInspector() {
         <div className={styles.diagnostics}>
           <DiagnosticPanel
             entries={diagnosticEntries(
-              result.lexical.diagnostics,
-              result.diagnostics,
+              result.lexicalDiagnostics,
+              result.parserDiagnostics,
               analysis.diagnostics,
             )}
             selected={selectedDiagnostic}
             onSelect={setSelectedDiagnostic}
           />
+          <TokenStream syntax={result} />
         </div>
       </section>
 
@@ -1438,7 +1462,7 @@ export function SyntaxInspector() {
         </div>
         <div className={styles.treeScroll}>
           <ol className={styles.treeRoot} aria-label="Concrete syntax tree">
-            <TreeElement element={result.root} source={result.lexical.source} />
+            <TreeElement element={result.root} source={result.source} />
           </ol>
         </div>
       </section>

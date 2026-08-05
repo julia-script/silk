@@ -15,6 +15,7 @@ import {
   diagnosticEntries,
   EvaluationPanel,
   SyntaxInspector,
+  TokenStream,
 } from './syntax-inspector'
 
 const encoder = new TextEncoder()
@@ -178,8 +179,8 @@ describe('DiagnosticPanel', () => {
   const crossPhaseEntries = () => {
     const analysis = analyze(crossPhaseSource)
     return diagnosticEntries(
-      analysis.parse.lexical.diagnostics,
-      analysis.parse.diagnostics,
+      analysis.syntax.lexicalDiagnostics,
+      analysis.syntax.parserDiagnostics,
       analysis.diagnostics,
     )
   }
@@ -240,6 +241,27 @@ describe('DiagnosticPanel', () => {
       `Caused by <code>${origin.code}</code> at [${origin.span.start}, ${origin.span.end})`,
     )
     expect(selected).toContain(origin.message)
+  })
+})
+
+describe('TokenStream', () => {
+  it('lists every artifact token in source order including trivia', () => {
+    const analysis = analyze('// note\npub fn main() -> I32 { return 42 }')
+    const markup = renderToStaticMarkup(<TokenStream syntax={analysis.syntax} />)
+
+    expect(markup).toContain('aria-label="SyntaxFile token stream"')
+    expect(markup).toContain('LineComment')
+    expect(markup).toContain('Whitespace')
+    expect(markup).toContain('PubKeyword')
+    expect(markup).toContain('EndOfFile')
+    expect(markup).toContain(`<span>${analysis.syntax.tokens.length}</span>`)
+  })
+
+  it('keeps invalid tokens visible in the stream', () => {
+    const analysis = analyze('pub fn main() -> I32 { return @ 42 }')
+    const markup = renderToStaticMarkup(<TokenStream syntax={analysis.syntax} />)
+
+    expect(markup).toContain('Invalid')
   })
 })
 

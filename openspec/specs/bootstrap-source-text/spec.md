@@ -4,9 +4,7 @@
 
 Provide an immutable, byte-exact source representation and owner-qualified spans that every later
 compiler phase can reference without assuming the source is valid text.
-
 ## Requirements
-
 ### Requirement: Exact immutable source bytes
 A source file SHALL own an immutable snapshot of the exact bytes supplied by its caller, including
 invalid UTF-8, zero bytes, and line-ending spelling. Later mutation of the caller's input buffer
@@ -21,13 +19,21 @@ MUST NOT change the source file.
 - **THEN** the source file's bytes remain unchanged
 
 ### Requirement: Explicit logical source identity
+
 Every source file SHALL carry an explicit, copyable logical identity supplied by the caller. Source
 identity MUST NOT be inferred from a current directory, filesystem traversal, object identity, or
-the contents of the file.
+the contents of the file. The `SyntaxFile` artifact produced from a source SHALL carry exactly this
+identity, and every stable syntax element identity SHALL be qualified by it.
 
 #### Scenario: Equal bytes with different identities
+
 - **WHEN** two source files contain equal bytes but have different caller-supplied identities
 - **THEN** they remain distinct source files for span ownership and diagnostics
+
+#### Scenario: Qualify syntax identities by source identity
+
+- **WHEN** two source files with equal bytes but different identities are parsed
+- **THEN** their artifacts' element identities are distinct because each is qualified by its own source identity
 
 ### Requirement: Owner-qualified half-open spans
 A source span SHALL identify exactly one source file and a half-open byte range `[start, end)` whose
@@ -54,3 +60,4 @@ equal offsets.
 #### Scenario: Reject a foreign span
 - **WHEN** a span from one source file is applied to another source file
 - **THEN** the operation rejects the ownership mismatch without returning bytes
+

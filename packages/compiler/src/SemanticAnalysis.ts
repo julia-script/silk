@@ -1,9 +1,9 @@
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
-import type * as Parser from './Parser.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
@@ -280,7 +280,7 @@ export type DeclarationLookup =
 /** The complete deterministic semantic result for all direct bootstrap declarations. */
 export interface Result {
   readonly _tag: 'SemanticAnalysis'
-  readonly parse: Parser.ParseResult
+  readonly syntax: SyntaxFile.SyntaxFile
   readonly functions: ReadonlyArray<FunctionFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -1102,9 +1102,9 @@ const lookupDeclaration = (
 }
 
 /** Collects every declaration before resolving returned expressions into immutable facts. */
-export const analyze = (parse: Parser.ParseResult): Result => {
-  const source = parse.lexical.source
-  const headers = directChildNodes(parse.root, 'FunctionDeclaration').map((node, ordinal) =>
+export const analyze = (syntax: SyntaxFile.SyntaxFile): Result => {
+  const source = syntax.source
+  const headers = directChildNodes(syntax.root, 'FunctionDeclaration').map((node, ordinal) =>
     analyzeDeclarationHeader(source, node, ordinal),
   )
   const declarations = Object.freeze(headers.map((header) => header.declaration))
@@ -1117,7 +1117,7 @@ export const analyze = (parse: Parser.ParseResult): Result => {
 
   return Object.freeze({
     _tag: 'SemanticAnalysis',
-    parse,
+    syntax,
     functions,
     diagnostics: Object.freeze(diagnostics),
   })

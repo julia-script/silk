@@ -219,6 +219,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SemanticAnalysis',
       './SourceFile',
       './SourceSpan',
+      './SyntaxFile',
       './SyntaxTree',
       './Token',
     ])
@@ -427,7 +428,7 @@ console.log(
     },
     nested: {
       callCount: nestedCalls.length,
-      parserDiagnostics: nestedParse.diagnostics.map((diagnostic) => diagnostic.code),
+      parserDiagnostics: nestedParse.parserDiagnostics.map((diagnostic) => diagnostic.code),
       semanticDiagnostics: nestedAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
       argumentTag:
         nestedOuter?._tag === 'Call'
@@ -446,7 +447,7 @@ console.log(
         nestedEvaluation._tag === 'Completed' ? nestedEvaluation.result : null,
       evaluationTrace: nestedEvaluation.trace.map((event) => event._tag),
     },
-    parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code),
+    parserDiagnostics: parse.parserDiagnostics.map((diagnostic) => diagnostic.code),
   }),
 );`,
       ],
@@ -465,6 +466,7 @@ console.log(
       'SemanticAnalysis',
       'SourceFile',
       'SourceSpan',
+      'SyntaxFile',
       'SyntaxTree',
       'Token',
     ])

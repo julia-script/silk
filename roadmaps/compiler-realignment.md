@@ -112,7 +112,7 @@ Mostly linear (1 → 2 → 3 → 4 → 5 → 7 → 8 → 9 → 10 → 11 → 12 
 Proposals are written as openspec changes:
 
 - [x] 1 — [unify-compiler-diagnostics](../openspec/changes/archive/2026-08-05-unify-compiler-diagnostics/proposal.md)
-- [ ] 2 — [establish-syntax-file-artifact](../openspec/changes/establish-syntax-file-artifact/proposal.md)
+- [x] 2 — [establish-syntax-file-artifact](../openspec/changes/archive/2026-08-05-establish-syntax-file-artifact/proposal.md)
 - [ ] 3 — [load-module-closure](../openspec/changes/load-module-closure/proposal.md)
 - [ ] 4 — [collect-declaration-headers](../openspec/changes/collect-declaration-headers/proposal.md)
 - [ ] 5 — [elaborate-bodies-to-hir](../openspec/changes/elaborate-bodies-to-hir/proposal.md)

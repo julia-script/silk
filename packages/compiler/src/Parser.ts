@@ -1,15 +1,9 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Lexer from './Lexer.js'
+import * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
-
-/** The deterministic concrete result of parsing one lexical result. */
-export interface ParseResult {
-  readonly lexical: Lexer.LexicalResult
-  readonly root: SyntaxTree.Node
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-}
 
 interface State {
   readonly lexical: Lexer.LexicalResult
@@ -27,7 +21,11 @@ interface NodeResult {
   readonly node: SyntaxTree.Node
 }
 
-const triviaKinds: ReadonlyArray<Token.TokenKind> = Object.freeze(['Whitespace', 'LineComment'])
+const triviaKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Whitespace',
+  'LineComment',
+  'DocComment',
+])
 
 const isTrivia = (kind: Token.TokenKind): boolean => triviaKinds.includes(kind)
 
@@ -419,7 +417,7 @@ const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagn
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
 
 /** Parses one or more bootstrap functions with lossless local recovery. */
-export const parse = (lexical: Lexer.LexicalResult): ParseResult => {
+export const parse = (lexical: Lexer.LexicalResult): SyntaxFile.SyntaxFile => {
   const initial: State = Object.freeze({
     lexical,
     index: 0,
@@ -440,9 +438,11 @@ export const parse = (lexical: Lexer.LexicalResult): ParseResult => {
   const endOfFile = expect(state, 'EndOfFile', [])
   const root = syntaxNode(endOfFile.state, 'SourceFile', [...declarations, ...endOfFile.elements])
 
-  return Object.freeze({
-    lexical,
+  return SyntaxFile.make(
+    lexical.source,
+    lexical.tokens,
     root,
-    diagnostics: Object.freeze([...endOfFile.state.diagnostics].sort(compareDiagnostics)),
-  })
+    lexical.diagnostics,
+    Object.freeze([...endOfFile.state.diagnostics].sort(compareDiagnostics)),
+  )
 }
