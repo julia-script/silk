@@ -128,6 +128,6 @@ export const parameterLookup = (
 export const diagnostics = (self: Snapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
   self.diagnostics
 
-/** Evaluates the snapshot's root module through the closed bootstrap evaluator. */
+/** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>
-  BootstrapEvaluation.evaluate(rootAnalysis(self))
+  BootstrapEvaluation.evaluate(self.instances, self.mir)

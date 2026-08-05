@@ -1,395 +1,128 @@
 import { assert, it } from '@effect/vitest'
-import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Elaboration from '../src/Elaboration.js'
-import * as Lexer from '../src/Lexer.js'
-import * as Parser from '../src/Parser.js'
-import * as SourceFile from '../src/SourceFile.js'
+import * as Analysis from '../src/Analysis.js'
+import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import { corpus } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyze = (id: string, source: string): Elaboration.Result =>
-  Elaboration.elaborateModule(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source)))))
+const evaluateSource = (text: string): BootstrapEvaluation.Outcome =>
+  Analysis.evaluate(Analysis.ofSource('memory://evaluation.silk', ascii(text)))
 
-const evaluate = (id: string, source: string): BootstrapEvaluation.Outcome =>
-  BootstrapEvaluation.evaluate(analyze(id, source))
-
-const identitySource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(42) }`
-
-it('evaluates a literal main to an exact immutable I32 result', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-literal.silk',
-    'pub fn main() -> I32 { return 42 }',
-  )
-
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.deepEqual(outcome.result, { _tag: 'I32Value', value: 42 })
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    ['Entry', 'Return'],
-  )
-  assert.strictEqual(outcome.trace[0]?.span.sourceId, 'fixture://evaluation-literal.silk')
-  assert.strictEqual(Object.isFrozen(outcome), true)
-  assert.strictEqual(Object.isFrozen(outcome.result), true)
-  assert.strictEqual(Object.isFrozen(outcome.trace), true)
+it('reproduces every pinned corpus outcome', () => {
+  for (const program of corpus) {
+    const outcome = evaluateSource(program.source)
+    switch (program.expected._tag) {
+      case 'Completes':
+        assert.strictEqual(outcome._tag, 'Completed', program.name)
+        if (outcome._tag === 'Completed') {
+          assert.strictEqual(outcome.result.value, program.expected.result, program.name)
+        }
+        break
+      case 'Trap':
+        assert.strictEqual(outcome._tag, 'Blocked', program.name)
+        if (outcome._tag === 'Blocked') {
+          assert.strictEqual(outcome.reason._tag, 'Trap', program.name)
+        }
+        break
+      case 'RecursiveCycle':
+        assert.strictEqual(outcome._tag, 'Blocked', program.name)
+        if (outcome._tag === 'Blocked' && outcome.reason._tag === 'RecursiveCycle') {
+          assert.deepEqual(
+            outcome.reason.cycle.map((id) => id.name),
+            program.expected.cycle,
+            program.name,
+          )
+        } else {
+          assert.fail(`${program.name} expected a recursive cycle`)
+        }
+        break
+      case 'UnavailableEntry':
+        assert.strictEqual(outcome._tag, 'Blocked', program.name)
+        if (outcome._tag === 'Blocked' && outcome.reason._tag === 'UnavailableEntry') {
+          assert.strictEqual(outcome.reason.reason, program.expected.reason, program.name)
+        } else {
+          assert.fail(`${program.name} expected an unavailable entry`)
+        }
+        break
+    }
+  }
 })
 
-it('evaluates identity with deterministic call, binding, read, and return trace order', () => {
-  const outcome = evaluate('fixture://evaluation-identity.silk', identitySource)
+it('traces the identity program in order with bound and returned values', () => {
+  const outcome = evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`)
 
   assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 42)
   assert.deepEqual(
     outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call', 'Binding', 'ParameterRead', 'Return', 'Return'],
+    ['Entry', 'Call', 'Binding', 'Return', 'Return'],
   )
-  const binding = outcome.trace.find((event) => event._tag === 'Binding')
-  const read = outcome.trace.find((event) => event._tag === 'ParameterRead')
+  const binding = outcome.trace.at(2)
   assert.strictEqual(binding?._tag, 'Binding')
-  assert.strictEqual(read?._tag, 'ParameterRead')
-  if (binding?._tag !== 'Binding' || read?._tag !== 'ParameterRead') return
-  assert.strictEqual(binding.argument.id.ordinal, 0)
-  assert.strictEqual(binding.parameter.id.ordinal, 0)
+  if (binding?._tag !== 'Binding') return
   assert.strictEqual(binding.value.value, 42)
-  assert.deepEqual(read.parameter.id, binding.parameter.id)
-  assert.strictEqual(read.value.value, 42)
+  assert.strictEqual(binding.parameterOrdinal, 0)
+  assert.strictEqual(binding.fromCall, false)
 })
 
-it('binds two arguments positionally and returns the second parameter', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-second.silk',
-    `pub fn second(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return second(10, 42) }`,
-  )
+it('marks nested-call bindings and orders inner events before outer bindings', () => {
+  const outcome = evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`)
 
   assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 42)
-  assert.deepEqual(
-    outcome.trace
-      .filter((event) => event._tag === 'Binding')
-      .map((event) => [event.argument.id.ordinal, event.parameter.id.ordinal, event.value.value]),
-    [
-      [0, 0, 10],
-      [1, 1, 42],
-    ],
-  )
+  const tags = outcome.trace.map((event) => event._tag)
+  assert.deepEqual(tags, [
+    'Entry',
+    'Call',
+    'Binding',
+    'Return',
+    'Call',
+    'Binding',
+    'Return',
+    'Return',
+  ])
+  const outerBinding = outcome.trace.at(5)
+  assert.strictEqual(outerBinding?._tag, 'Binding')
+  if (outerBinding?._tag !== 'Binding') return
+  assert.strictEqual(outerBinding.fromCall, true)
+  const innerCall = outcome.trace.at(1)
+  const outerCall = outcome.trace.at(4)
+  assert.strictEqual(innerCall?._tag, 'Call')
+  assert.strictEqual(outerCall?._tag, 'Call')
+  if (innerCall?._tag !== 'Call' || outerCall?._tag !== 'Call') return
+  assert.notDeepEqual(innerCall.span, outerCall.span)
 })
 
-it('evaluates a nested call inside out with exact trace provenance', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-nested.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 42)
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    [
-      'Entry',
-      'Call',
-      'Call',
-      'Binding',
-      'ParameterRead',
-      'Return',
-      'Binding',
-      'ParameterRead',
-      'Return',
-      'Return',
-    ],
-  )
-  const calls = outcome.trace.filter((event) => event._tag === 'Call')
-  const bindings = outcome.trace.filter((event) => event._tag === 'Binding')
-  assert.strictEqual(calls.length, 2)
-  assert.notDeepEqual(calls.at(0)?.span, calls.at(1)?.span)
-  assert.strictEqual(bindings.at(0)?.argument.expression._tag, 'Integer')
-  assert.strictEqual(bindings.at(1)?.argument.expression._tag, 'Call')
-  assert.strictEqual(bindings.at(0)?.value.value, 42)
-  assert.strictEqual(bindings.at(1)?.value.value, 42)
-})
-
-it('ignores nested expressions outside the reachable declaration graph', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-unreachable-nested.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn unused() -> I32 { return identity(identity(1)) }
-pub fn main() -> I32 { return 42 }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 42)
-})
-
-it('repeats successful nested evaluation deterministically', () => {
-  const source = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
-  const first = evaluate('fixture://evaluation-repeat-nested.silk', source)
-  const second = evaluate('fixture://evaluation-repeat-nested.silk', source)
-
-  assert.deepEqual(first, second)
-})
-
-it('evaluates nested siblings left to right before emitting enclosing bindings', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-nested-siblings.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
+it('retains the completed prefix before a trap without fabricated events', () => {
+  const outcome = evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
 pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(identity(1), identity(2)) }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 2)
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    [
-      'Entry',
-      'Call',
-      'Call',
-      'Binding',
-      'ParameterRead',
-      'Return',
-      'Call',
-      'Binding',
-      'ParameterRead',
-      'Return',
-      'Binding',
-      'Binding',
-      'ParameterRead',
-      'Return',
-      'Return',
-    ],
-  )
-  const calls = outcome.trace.filter((event) => event._tag === 'Call')
-  const bindings = outcome.trace.filter((event) => event._tag === 'Binding')
-  assert.ok((calls.at(1)?.span.start ?? 0) < (calls.at(2)?.span.start ?? 0))
-  assert.deepEqual(
-    bindings.slice(-2).map((event) => [event.argument.id.ordinal, event.value.value]),
-    [
-      [0, 1],
-      [1, 2],
-    ],
-  )
-})
-
-it('retains earlier nested work when a later inner target blocks', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-later-inner-block.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
-  )
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
 
   assert.strictEqual(outcome._tag, 'Blocked')
   if (outcome._tag !== 'Blocked') return
-  assert.strictEqual(outcome.reason._tag, 'MissingCallTarget')
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call', 'Call', 'Binding', 'ParameterRead', 'Return'],
-  )
-  assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Binding').length, 1)
-  assert.strictEqual(outcome.trace.at(-1)?._tag, 'Return')
-})
-
-it('blocks at wrong arity at nested depth without an enclosing binding', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-inner-arity.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity()) }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Blocked')
-  if (outcome._tag !== 'Blocked') return
-  assert.strictEqual(outcome.reason._tag, 'ArityMismatch')
-  if (outcome.reason._tag !== 'ArityMismatch') return
-  assert.strictEqual(outcome.reason.expectedCount, 1)
-  assert.strictEqual(outcome.reason.actualCount, 0)
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call'],
-  )
-})
-
-it('bounds a cycle reached inside an argument before entering the enclosing target', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-nested-cycle.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(main()) }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Blocked')
-  if (outcome._tag !== 'Blocked') return
-  assert.strictEqual(outcome.reason._tag, 'RecursiveCycle')
-  if (outcome.reason._tag !== 'RecursiveCycle') return
-  assert.deepEqual(
-    outcome.reason.cycle.map((declaration) => declaration.id.ordinal),
-    [1, 1],
-  )
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call', 'Call'],
-  )
-  assert.strictEqual(
-    outcome.trace.some((event) => event._tag === 'Binding'),
-    false,
-  )
-})
-
-it('evaluates representative deep nesting without losing the exact result', () => {
-  const depth = 64
-  const expression = `${'identity('.repeat(depth)}42${')'.repeat(depth)}`
-  const outcome = evaluate(
-    'fixture://evaluation-deep-nested.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return ${expression} }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 42)
-  assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Call').length, depth)
-})
-
-it('returns precise closed entry reasons', () => {
-  const missing = evaluate(
-    'fixture://evaluation-missing-entry.silk',
-    'pub fn answer() -> I32 { return 42 }',
-  )
-  const ambiguous = evaluate(
-    'fixture://evaluation-ambiguous-entry.silk',
-    `pub fn main() -> I32 { return 1 }
-pub fn main() -> I32 { return 2 }`,
-  )
-  const parameterized = evaluate(
-    'fixture://evaluation-parameterized-entry.silk',
-    'pub fn main(value: I32) -> I32 { return value }',
-  )
-  const unavailableType = evaluate(
-    'fixture://evaluation-entry-type.silk',
-    'pub fn main() -> Mystery { return 42 }',
-  )
-
-  assert.strictEqual(missing._tag, 'Blocked')
-  assert.strictEqual(ambiguous._tag, 'Blocked')
-  assert.strictEqual(parameterized._tag, 'Blocked')
-  assert.strictEqual(unavailableType._tag, 'Blocked')
-  if (
-    missing._tag !== 'Blocked' ||
-    ambiguous._tag !== 'Blocked' ||
-    parameterized._tag !== 'Blocked' ||
-    unavailableType._tag !== 'Blocked'
-  ) {
-    return
-  }
-  assert.strictEqual(missing.reason._tag, 'MissingEntry')
-  assert.strictEqual(ambiguous.reason._tag, 'AmbiguousEntry')
-  assert.strictEqual(parameterized.reason._tag, 'ParameterizedEntry')
-  assert.strictEqual(unavailableType.reason._tag, 'UnavailableEntryType')
-  if (ambiguous.reason._tag === 'AmbiguousEntry') {
-    assert.deepEqual(
-      ambiguous.reason.lookup.declarations.map((declaration) => declaration.id.ordinal),
-      [0, 1],
-    )
-  }
-  if (parameterized.reason._tag === 'ParameterizedEntry') {
-    assert.strictEqual(parameterized.reason.actualCount, 1)
-  }
-})
-
-it('blocks wrong arity at the reachable call with exact counts', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-arity.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity() }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Blocked')
-  if (outcome._tag !== 'Blocked') return
-  assert.strictEqual(outcome.reason._tag, 'ArityMismatch')
-  if (outcome.reason._tag !== 'ArityMismatch') return
-  assert.strictEqual(outcome.reason.expectedCount, 1)
-  assert.strictEqual(outcome.reason.actualCount, 0)
+  assert.strictEqual(outcome.reason._tag, 'Trap')
   assert.deepEqual(
     outcome.trace.map((event) => event._tag),
     ['Entry'],
   )
 })
 
-it('retains a successful prefix when a reachable parameter reference is unavailable', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-unavailable.silk',
-    `pub fn identity(value: I32) -> I32 { return missing }
-pub fn main() -> I32 { return identity(42) }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Blocked')
-  if (outcome._tag !== 'Blocked') return
-  assert.strictEqual(outcome.reason._tag, 'MissingParameterReference')
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call', 'Binding'],
-  )
-})
-
-it('ignores unavailable facts outside the reachable declaration graph', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-unreachable.silk',
-    `pub fn main() -> I32 { return 42 }
-pub fn broken() -> Mystery { return missing }`,
-  )
-
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return
-  assert.strictEqual(outcome.result.value, 42)
-})
-
-it('bounds a direct recursive cycle at its closing call site', () => {
-  const outcome = evaluate(
-    'fixture://evaluation-direct-cycle.silk',
-    'pub fn main() -> I32 { return main() }',
-  )
+it('blocks recursive cycles with the closing call span', () => {
+  const outcome = evaluateSource('pub fn main() -> I32 { return main() }')
 
   assert.strictEqual(outcome._tag, 'Blocked')
   if (outcome._tag !== 'Blocked') return
   assert.strictEqual(outcome.reason._tag, 'RecursiveCycle')
   if (outcome.reason._tag !== 'RecursiveCycle') return
-  assert.deepEqual(
-    outcome.reason.cycle.map((declaration) => declaration.id.ordinal),
-    [0, 0],
-  )
-  assert.deepEqual(
-    outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call'],
-  )
-  assert.deepEqual(outcome.reason.closingCallSpan, outcome.reason.closingCall.syntax.span)
+  assert.isAbove(outcome.reason.closingCallSpan.end, outcome.reason.closingCallSpan.start)
 })
 
-it('reports mutual recursion deterministically without overflowing', () => {
-  const source = `pub fn main() -> I32 { return other() }
-pub fn other() -> I32 { return main() }`
-  const first = evaluate('fixture://evaluation-mutual-cycle.silk', source)
-  const second = evaluate('fixture://evaluation-mutual-cycle.silk', source)
+it('evaluates identically across repeated fresh runs', () => {
+  const source = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
+  const first = evaluateSource(source)
+  const second = evaluateSource(source)
 
   assert.deepEqual(first, second)
-  assert.strictEqual(first._tag, 'Blocked')
-  if (first._tag !== 'Blocked') return
-  assert.strictEqual(first.reason._tag, 'RecursiveCycle')
-  if (first.reason._tag !== 'RecursiveCycle') return
-  assert.deepEqual(
-    first.reason.cycle.map((declaration) =>
-      declaration.name._tag === 'Present' ? declaration.name.spelling : 'Unavailable',
-    ),
-    ['main', 'other', 'main'],
-  )
-  assert.deepEqual(
-    first.trace.map((event) => event._tag),
-    ['Entry', 'Call', 'Call'],
-  )
 })

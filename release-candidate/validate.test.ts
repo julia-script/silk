@@ -299,8 +299,17 @@ const visit = (element) => {
 visit(parse.root);
 const analysis = api.Elaboration.elaborateModule(parse);
 const deepAnalysis = semanticModule.elaborateModule(parse);
-const evaluation = api.BootstrapEvaluation.evaluate(analysis);
-const deepEvaluation = evaluationModule.evaluate(deepAnalysis);
+const rootSnapshot = api.Analysis.ofSource(
+  'memory://packed.silk',
+  new TextEncoder().encode(
+    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
+  ),
+);
+const evaluation = api.Analysis.evaluate(rootSnapshot);
+const deepEvaluation = evaluationModule.evaluate(
+  api.Analysis.instancesOf(rootSnapshot),
+  api.Analysis.loweredMir(rootSnapshot),
+);
 const call = analysis.functions[1]?.returnedExpression;
 const unknownSource = api.SourceFile.make(
   'memory://packed-unknown.silk',
@@ -327,8 +336,11 @@ const cycleSource = api.SourceFile.make(
   'memory://packed-cycle.silk',
   new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
 );
-const cycleEvaluation = evaluationModule.evaluate(
-  semanticModule.elaborateModule(api.Parser.parse(api.Lexer.lex(cycleSource))),
+const cycleEvaluation = api.Analysis.evaluate(
+  api.Analysis.ofSource(
+    'memory://packed-cycle.silk',
+    new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
+  ),
 );
 const nestedSource = api.SourceFile.make(
   'memory://packed-nested.silk',
@@ -347,7 +359,14 @@ visitNested(nestedParse.root);
 const nestedAnalysis = semanticModule.elaborateModule(nestedParse);
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
-const nestedEvaluation = evaluationModule.evaluate(nestedAnalysis);
+const nestedEvaluation = api.Analysis.evaluate(
+  api.Analysis.ofSource(
+    'memory://packed-nested.silk',
+    new TextEncoder().encode(
+      'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(identity(42)) }',
+    ),
+  ),
+);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -428,9 +447,9 @@ console.log(
       deepResult: deepEvaluation._tag === 'Completed' ? deepEvaluation.result : null,
       cycleTag: cycleEvaluation._tag,
       cycleReason: cycleEvaluation._tag === 'Blocked' ? cycleEvaluation.reason._tag : null,
-      cycleOrdinals:
+      cycleNames:
         cycleEvaluation._tag === 'Blocked' && cycleEvaluation.reason._tag === 'RecursiveCycle'
-          ? cycleEvaluation.reason.cycle.map((declaration) => declaration.id.ordinal)
+          ? cycleEvaluation.reason.cycle.map((id) => id.name)
           : [],
       cycleTrace: cycleEvaluation.trace.map((event) => event._tag),
     },
@@ -536,12 +555,12 @@ console.log(
     expect(api.evaluation).toEqual({
       rootTag: 'Completed',
       rootResult: { _tag: 'I32Value', value: 42 },
-      rootTrace: ['Entry', 'Call', 'Binding', 'ParameterRead', 'Return', 'Return'],
+      rootTrace: ['Entry', 'Call', 'Binding', 'Return', 'Return'],
       deepTag: 'Completed',
       deepResult: { _tag: 'I32Value', value: 42 },
       cycleTag: 'Blocked',
       cycleReason: 'RecursiveCycle',
-      cycleOrdinals: [0, 0],
+      cycleNames: ['main', 'main'],
       cycleTrace: ['Entry', 'Call'],
     })
     expect(api.nested).toEqual({
@@ -560,12 +579,10 @@ console.log(
       evaluationTrace: [
         'Entry',
         'Call',
+        'Binding',
+        'Return',
         'Call',
         'Binding',
-        'ParameterRead',
-        'Return',
-        'Binding',
-        'ParameterRead',
         'Return',
         'Return',
       ],

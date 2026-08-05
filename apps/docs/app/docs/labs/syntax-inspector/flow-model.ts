@@ -590,59 +590,28 @@ const projectCall = (
 const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
   switch (reason._tag) {
     case 'RecursiveCycle':
-      return `RecursiveCycle: ${reason.cycle.map(declarationName).join(' → ')}`
-    case 'UnavailableCallContract':
-      return `${reason._tag}: ${reason.reason._tag}`
-    default:
-      return reason._tag
-  }
-}
-
-const blockedCall = (reason: BootstrapEvaluation.BlockedReason): CallFact | undefined => {
-  switch (reason._tag) {
-    case 'MissingCallTarget':
-    case 'AmbiguousCallTarget':
-    case 'UnavailableCallTarget':
-    case 'ArityMismatch':
-    case 'UnavailableCallContract':
-      return reason.call
-    case 'RecursiveCycle':
-      return reason.closingCall
-    default:
-      return undefined
+      return `RecursiveCycle: ${reason.cycle.map((id) => id.name).join(' → ')}`
+    case 'Trap':
+      return `Trap: ${reason.reason}`
+    case 'UnavailableEntry':
+      return `UnavailableEntry: ${reason.reason}`
+    case 'MissingFunction':
+      return `MissingFunction: ${reason.target.name}`
   }
 }
 
 const blockedSpan = (
   reason: BootstrapEvaluation.BlockedReason,
 ): SourceSpan.SourceSpan | undefined => {
-  const call = blockedCall(reason)
-  if (call !== undefined) return call.syntax.span
   switch (reason._tag) {
-    case 'MissingEntry':
+    case 'UnavailableEntry':
       return undefined
-    case 'AmbiguousEntry':
-      return reason.lookup.declarations.at(0)?.syntax.span
-    case 'ParameterizedEntry':
-    case 'UnavailableEntryType':
-      return reason.declaration.syntax.span
-    case 'UnavailableInteger':
-      return reason.integer.syntax.span
-    case 'MissingParameterReference':
-    case 'AmbiguousParameterReference':
-      return reason.reference.token.span
-    case 'UnavailableParameterReference':
-    case 'UnboundParameter':
-      return reason.reference.syntax.span
-    case 'UnavailableFunction':
-      return reason.declaration.syntax.span
-    case 'MissingCallTarget':
-    case 'AmbiguousCallTarget':
-    case 'UnavailableCallTarget':
-    case 'ArityMismatch':
-    case 'UnavailableCallContract':
+    case 'Trap':
+      return reason.span
+    case 'MissingFunction':
+      return reason.span
     case 'RecursiveCycle':
-      return undefined
+      return reason.closingCallSpan
   }
 }
 
@@ -651,23 +620,28 @@ interface Overlay {
   readonly items: Map<string, FlowEvidence>
 }
 
-const traceOverlay = (
-  draft: ProjectionDraft,
-  outcome: BootstrapEvaluation.Outcome,
-): Overlay => {
+const traceOverlay = (draft: ProjectionDraft, outcome: BootstrapEvaluation.Outcome): Overlay => {
   const groups = new Map<string, FlowEvidence>()
   const items = new Map<string, FlowEvidence>()
   const stack: Array<GroupDraft> = []
 
+  const targetMatches = (
+    target: Elaboration.DeclarationFact,
+    id: { readonly module: string; readonly name: string },
+  ): boolean =>
+    target.canonical._tag === 'Canonical' &&
+    target.canonical.id.module === id.module &&
+    target.canonical.id.name === id.name
+
   for (const [index, event] of outcome.trace.entries()) {
     const evidence = Object.freeze({
       order: index + 1,
-      ...(event._tag === 'Binding' || event._tag === 'ParameterRead' || event._tag === 'Return'
+      ...(event._tag === 'Binding' || event._tag === 'Return'
         ? { value: event.value.value }
         : {}),
     })
     if (event._tag === 'Call') {
-      const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.call.syntax.span))
+      const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.span))
       if (group !== undefined) {
         groups.set(group.id, evidence)
         stack.push(group)
@@ -675,32 +649,24 @@ const traceOverlay = (
       continue
     }
     if (event._tag === 'Binding') {
-      const group = draft.groups.find((candidate) =>
-        sameSpan(candidate.span, event.argument.id.callSpan),
-      )
+      const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.callSpan))
       if (group !== undefined) {
-        items.set(`${group.id}-argument-${event.argument.id.ordinal}`, evidence)
-        items.set(`${group.id}-parameter-${event.parameter.id.ordinal}`, evidence)
-        items.set(`${group.id}-mapping-${event.argument.id.ordinal}`, evidence)
-        if (event.argument.expression._tag === 'Call') {
-          items.set(`${group.id}-nested-result-${event.argument.id.ordinal}`, evidence)
+        items.set(`${group.id}-argument-${event.argumentOrdinal}`, evidence)
+        items.set(`${group.id}-parameter-${event.parameterOrdinal}`, evidence)
+        items.set(`${group.id}-mapping-${event.argumentOrdinal}`, evidence)
+        if (event.fromCall) {
+          items.set(`${group.id}-nested-result-${event.argumentOrdinal}`, evidence)
         }
-      }
-      continue
-    }
-    if (event._tag === 'ParameterRead') {
-      const group = stack.at(-1)
-      if (group !== undefined && group.target !== undefined && sameDeclaration(group.target, event.declaration)) {
-        if (!items.has(`${group.id}-target-returned`)) {
-          items.set(`${group.id}-target-returned`, evidence)
-        }
-        items.set(`${group.id}-parameter-reference`, evidence)
       }
       continue
     }
     if (event._tag === 'Return') {
       const group = stack.at(-1)
-      if (group !== undefined && group.target !== undefined && sameDeclaration(group.target, event.declaration)) {
+      if (
+        group !== undefined &&
+        group.target !== undefined &&
+        targetMatches(group.target, event.function)
+      ) {
         items.set(`${group.id}-target-returned`, evidence)
         items.set(`${group.id}-result`, evidence)
         items.set(`${group.id}-returned-result`, evidence)
@@ -784,12 +750,11 @@ export const projectDataFlow = (
   }
 
   if (outcome?._tag === 'Blocked') {
-    const reasonCall = blockedCall(outcome.reason)
-    const group =
-      reasonCall === undefined
-        ? draft.groups.at(0)
-        : draft.groups.find((candidate) => sameSpan(candidate.span, reasonCall.syntax.span))
     const span = blockedSpan(outcome.reason)
+    const group =
+      (span === undefined
+        ? undefined
+        : draft.groups.find((candidate) => sameSpan(candidate.span, span))) ?? draft.groups.at(0)
     if (group !== undefined && span !== undefined) {
       const terminalId = `${group.id}-evaluated-stop`
       const evidence = Object.freeze({ order: outcome.trace.length + 1 })

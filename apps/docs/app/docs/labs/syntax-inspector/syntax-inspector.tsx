@@ -1016,38 +1016,24 @@ export function DataFlow({
 
 const blockedSummary = (reason: BootstrapEvaluation.BlockedReason): string => {
   switch (reason._tag) {
-    case 'MissingEntry':
-      return 'No top-level declaration named main is available.'
-    case 'AmbiguousEntry':
-      return `${reason.lookup.declarations.length} declarations named main are available; none was selected.`
-    case 'ParameterizedEntry':
-      return `main has ${reason.actualCount} parameters; bootstrap entry requires exactly zero.`
-    case 'UnavailableEntryType':
-      return `main does not have an available resolved I32 return type (${reason.returnType._tag}).`
-    case 'UnavailableInteger':
-      return `An integer on the reachable path is ${reason.integer._tag}.`
-    case 'MissingParameterReference':
-      return `No local parameter matches ${reason.reference.spelling}.`
-    case 'AmbiguousParameterReference':
-      return `${reason.reference.parameters.length} local parameters match ${reason.reference.spelling}.`
-    case 'UnavailableParameterReference':
-      return 'Parser recovery did not provide a usable parameter reference.'
-    case 'UnboundParameter':
-      return `Parameter #${reason.parameter.id.ordinal} has no value in the current call frame.`
-    case 'MissingCallTarget':
-      return 'The reachable call target is missing.'
-    case 'AmbiguousCallTarget':
-      return 'The reachable call target is ambiguous.'
-    case 'UnavailableCallTarget':
-      return 'Parser recovery did not provide a usable call target.'
-    case 'ArityMismatch':
-      return `The reachable call has ${reason.actualCount} arguments but requires ${reason.expectedCount}.`
-    case 'UnavailableCallContract':
-      return `The reachable call contract is unavailable: ${reason.reason._tag}.`
-    case 'UnavailableFunction':
-      return `No body fact is available for ${declarationLabel(reason.declaration)}.`
+    case 'UnavailableEntry':
+      switch (reason.reason) {
+        case 'MissingEntry':
+          return 'No top-level declaration named main is available.'
+        case 'AmbiguousEntry':
+          return 'Multiple declarations named main are available; none was selected.'
+        case 'ParameterizedEntry':
+          return 'main has parameters; bootstrap entry requires exactly zero.'
+        case 'UntypedEntry':
+          return 'main does not have an available resolved I32 return type.'
+      }
+      return 'The entry is unavailable.'
+    case 'Trap':
+      return `${reason.function.name} trapped: ${reason.reason}.`
+    case 'MissingFunction':
+      return `No lowered function is available for ${reason.target.name}.`
     case 'RecursiveCycle':
-      return `Recursive cycle: ${reason.cycle.map(declarationLabel).join(' → ')}.`
+      return `Recursive cycle: ${reason.cycle.map((id) => id.name).join(' → ')}.`
   }
 }
 
@@ -1055,30 +1041,12 @@ const blockedSpan = (
   reason: BootstrapEvaluation.BlockedReason,
 ): SourceSpan.SourceSpan | undefined => {
   switch (reason._tag) {
-    case 'MissingEntry':
+    case 'UnavailableEntry':
       return undefined
-    case 'AmbiguousEntry':
-      return reason.lookup.declarations.at(0)?.syntax.span
-    case 'ParameterizedEntry':
-    case 'UnavailableEntryType':
-      return reason.declaration.syntax.span
-    case 'UnavailableInteger':
-      return reason.integer.syntax.span
-    case 'MissingParameterReference':
-    case 'AmbiguousParameterReference':
-      return reason.reference.token.span
-    case 'UnavailableParameterReference':
-      return reason.reference.syntax.span
-    case 'UnboundParameter':
-      return reason.reference.syntax.span
-    case 'MissingCallTarget':
-    case 'AmbiguousCallTarget':
-    case 'UnavailableCallTarget':
-    case 'ArityMismatch':
-    case 'UnavailableCallContract':
-      return reason.call.syntax.span
-    case 'UnavailableFunction':
-      return reason.declaration.syntax.span
+    case 'Trap':
+      return reason.span
+    case 'MissingFunction':
+      return reason.span
     case 'RecursiveCycle':
       return reason.closingCallSpan
   }
@@ -1089,20 +1057,17 @@ interface TraceRow {
   readonly depth: number
 }
 
-const sameDeclarationIdentity = (
-  left: Elaboration.DeclarationFact,
-  right: Elaboration.DeclarationFact,
-): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
-
-const traceRows = (trace: ReadonlyArray<BootstrapEvaluation.TraceEvent>): ReadonlyArray<TraceRow> => {
-  const openCalls: Array<Elaboration.DeclarationFact> = []
+const traceRows = (
+  trace: ReadonlyArray<BootstrapEvaluation.TraceEvent>,
+): ReadonlyArray<TraceRow> => {
+  const openCalls: Array<string> = []
   return trace.map((event) => {
     const row = Object.freeze({ event, depth: openCalls.length })
     if (event._tag === 'Call') {
-      openCalls.push(event.target)
+      openCalls.push(`${event.target.module}.${event.target.name}`)
     } else if (event._tag === 'Return') {
       const current = openCalls.at(-1)
-      if (current !== undefined && sameDeclarationIdentity(current, event.declaration)) {
+      if (current !== undefined && current === `${event.function.module}.${event.function.name}`) {
         openCalls.pop()
       }
     }
@@ -1113,17 +1078,15 @@ const traceRows = (trace: ReadonlyArray<BootstrapEvaluation.TraceEvent>): Readon
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
     case 'Entry':
-      return `Enter ${declarationLabel(event.declaration)}`
+      return `Enter ${event.function.name}`
     case 'Call':
-      return `${declarationLabel(event.caller)} calls ${declarationLabel(event.target)}`
+      return `${event.caller.name} calls ${event.target.name}`
     case 'Binding':
-      return event.argument.expression._tag === 'Call'
-        ? `Nested result ${event.value.value} from [${event.argument.syntax.span.start}, ${event.argument.syntax.span.end}) binds to ${declarationLabel(event.target)}.${parameterLabel(event.parameter)}`
-        : `Argument #${event.argument.id.ordinal} binds ${event.value.value} to ${declarationLabel(event.target)}.${parameterLabel(event.parameter)}`
-    case 'ParameterRead':
-      return `${declarationLabel(event.declaration)} reads ${parameterLabel(event.parameter)} as ${event.value.value}`
+      return event.fromCall
+        ? `Nested result ${event.value.value} from [${event.callSpan.start}, ${event.callSpan.end}) binds to ${event.target.name} parameter #${event.parameterOrdinal}`
+        : `Argument #${event.argumentOrdinal} binds ${event.value.value} to ${event.target.name} parameter #${event.parameterOrdinal}`
     case 'Return':
-      return `${declarationLabel(event.declaration)} returns ${event.value.value}`
+      return `${event.function.name} returns ${event.value.value}`
   }
 }
 

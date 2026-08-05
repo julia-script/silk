@@ -66,7 +66,7 @@ describe('projectDataFlow', () => {
 
     expect(children.map((group) => group.ordinal)).toEqual([0, 1])
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
-    expect(children.map((group) => group.evaluation?.order)).toEqual([3, 7])
+    expect(children.map((group) => group.evaluation?.order)).toEqual([2, 5])
     expect(flow.mode).toBe('Evaluated')
     expect(flow.nodes.some((item) => item.evaluation?.value === 2)).toBe(true)
   })
@@ -116,8 +116,8 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
     const outer = flow.groups.find((group) => group.depth === 0)
 
     expect(outcome._tag).toBe('Blocked')
-    expect(flow.nodes.some((item) => item.evaluation?.value === 1)).toBe(true)
-    expect(flow.nodes.some((item) => item.label === 'Evaluation stops: MissingCallTarget')).toBe(true)
+    expect(flow.nodes.some((item) => item.evaluation !== undefined && item.layer !== 'Evaluated')).toBe(false)
+    expect(flow.nodes.some((item) => item.label === 'Evaluation stops: Trap')).toBe(true)
     expect(
       flow.edges.some(
         (item) => item.groupId === outer?.id && item.label === 'binds positionally to' && item.evaluation !== undefined,

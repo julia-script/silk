@@ -148,7 +148,7 @@ pub fn main() -> I32 { return identity(identity(42)) }`),
 
     expect(markup).toContain('Completed')
     expect(markup).toContain('Nested result 42 from')
-    expect(markup).toContain('depth 1 · Call')
+    expect(markup).toContain('depth 1 · Binding')
     expect(markup).toContain('main calls identity')
   })
 
@@ -161,7 +161,7 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`),
       <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
     )
 
-    expect(markup).toContain('MissingCallTarget')
+    expect(markup).toContain('main trapped: unavailable body.')
     expect(markup).toContain('aria-label="Blocked evaluation endpoint"')
     expect(markup).not.toContain('Nested result')
   })
