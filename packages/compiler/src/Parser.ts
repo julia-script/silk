@@ -156,15 +156,77 @@ const parseIdentifierExpression = (initial: State): NodeResult => {
   })
 }
 
-const argumentExpressionKind = (state: State): 'Integer' | 'Identifier' =>
-  nextSignificantKind(state) === 'DecimalInteger' ? 'Integer' : 'Identifier'
+const expressionKind = (
+  state: State,
+  recoveryKind: 'Integer' | 'Identifier',
+): 'Integer' | 'Identifier' | 'Call' => {
+  let index = state.index
+  let token = state.lexical.tokens.at(index)
 
-const parseArgumentExpression = (initial: State): NodeResult =>
-  argumentExpressionKind(initial) === 'Integer'
-    ? parseIntegerLiteralExpression(initial)
-    : parseIdentifierExpression(initial)
+  while (token !== undefined) {
+    if (token.kind === 'DecimalInteger') return 'Integer'
+    if (token.kind === 'Identifier') {
+      index += 1
+      token = state.lexical.tokens.at(index)
+      while (token !== undefined && isTrivia(token.kind)) {
+        index += 1
+        token = state.lexical.tokens.at(index)
+      }
+      return token?.kind === 'LeftParenthesis' ? 'Call' : 'Identifier'
+    }
+    if (token.kind === 'LeftParenthesis') return 'Call'
+    if (
+      token.kind === 'Comma' ||
+      token.kind === 'RightParenthesis' ||
+      token.kind === 'RightBrace' ||
+      token.kind === 'PubKeyword' ||
+      token.kind === 'EndOfFile'
+    ) {
+      return recoveryKind
+    }
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
 
-const parseArgumentList = (initial: State): NodeResult => {
+  return recoveryKind
+}
+
+const remainingRightParentheses = (state: State): number => {
+  let count = 0
+  for (let index = state.index; index < state.lexical.tokens.length; index += 1) {
+    const token = state.lexical.tokens.at(index)
+    if (token === undefined) break
+    if (token.kind === 'RightParenthesis') count += 1
+    if (token.kind === 'RightBrace' || token.kind === 'PubKeyword' || token.kind === 'EndOfFile') {
+      break
+    }
+  }
+  return count
+}
+
+const expectCallRightParenthesis = (
+  initial: State,
+  reservedForEnclosingCalls: number,
+): ElementsResult => {
+  const leading = consumeTrivia(initial)
+  const token = currentToken(leading.state)
+  if (
+    token?.kind === 'RightParenthesis' &&
+    remainingRightParentheses(leading.state) <= reservedForEnclosingCalls
+  ) {
+    const missing = missingToken(leading.state, 'RightParenthesis')
+    return Object.freeze({
+      state: addDiagnostic(
+        leading.state,
+        ParseDiagnostic.missingToken('RightParenthesis', missing.span),
+      ),
+      elements: Object.freeze([...leading.elements, missing]),
+    })
+  }
+  return expect(initial, 'RightParenthesis', ['RightBrace', 'PubKeyword'])
+}
+
+function parseArgumentList(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
     'DecimalInteger',
     'Identifier',
@@ -183,7 +245,7 @@ const parseArgumentList = (initial: State): NodeResult => {
     kind !== 'PubKeyword' &&
     kind !== 'EndOfFile'
   ) {
-    const argument = parseArgumentExpression(state)
+    const argument = parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
     children = Object.freeze([...children, argument.node])
     state = argument.state
     kind = nextSignificantKind(state)
@@ -202,7 +264,7 @@ const parseArgumentList = (initial: State): NodeResult => {
     kind = nextSignificantKind(state)
   }
 
-  const rightParenthesis = expect(state, 'RightParenthesis', ['RightBrace', 'PubKeyword'])
+  const rightParenthesis = expectCallRightParenthesis(state, reservedForEnclosingCalls)
   return Object.freeze({
     state: rightParenthesis.state,
     node: syntaxNode(rightParenthesis.state, 'ArgumentList', [
@@ -212,14 +274,14 @@ const parseArgumentList = (initial: State): NodeResult => {
   })
 }
 
-const parseCallExpression = (initial: State): NodeResult => {
+function parseCallExpression(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const callee = expect(initial, 'Identifier', [
     'LeftParenthesis',
     'RightParenthesis',
     'RightBrace',
     'PubKeyword',
   ])
-  const argumentsList = parseArgumentList(callee.state)
+  const argumentsList = parseArgumentList(callee.state, reservedForEnclosingCalls)
   return Object.freeze({
     state: argumentsList.state,
     node: syntaxNode(argumentsList.state, 'CallExpression', [
@@ -229,35 +291,13 @@ const parseCallExpression = (initial: State): NodeResult => {
   })
 }
 
-const returnedExpressionKind = (state: State): 'Integer' | 'Identifier' | 'Call' => {
-  let index = state.index
-  let token = state.lexical.tokens.at(index)
-
-  while (token !== undefined) {
-    if (token.kind === 'DecimalInteger') return 'Integer'
-    if (token.kind === 'Identifier') {
-      index += 1
-      token = state.lexical.tokens.at(index)
-      while (token !== undefined && isTrivia(token.kind)) {
-        index += 1
-        token = state.lexical.tokens.at(index)
-      }
-      return token?.kind === 'LeftParenthesis' ? 'Call' : 'Identifier'
-    }
-    if (token.kind === 'LeftParenthesis') return 'Call'
-    if (token.kind === 'RightBrace' || token.kind === 'PubKeyword' || token.kind === 'EndOfFile') {
-      return 'Integer'
-    }
-    index += 1
-    token = state.lexical.tokens.at(index)
-  }
-
-  return 'Integer'
-}
-
-const parseReturnedExpression = (initial: State): NodeResult => {
-  const kind = returnedExpressionKind(initial)
-  if (kind === 'Call') return parseCallExpression(initial)
+function parseExpression(
+  initial: State,
+  reservedForEnclosingCalls: number,
+  recoveryKind: 'Integer' | 'Identifier',
+): NodeResult {
+  const kind = expressionKind(initial, recoveryKind)
+  if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   return parseIntegerLiteralExpression(initial)
 }
@@ -269,7 +309,7 @@ const parseReturnStatement = (initial: State): NodeResult => {
     'LeftParenthesis',
     'RightBrace',
   ])
-  const expression = parseReturnedExpression(keyword.state)
+  const expression = parseExpression(keyword.state, 0, 'Integer')
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'ReturnStatement', [...keyword.elements, expression.node]),

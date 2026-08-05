@@ -100,6 +100,19 @@ export const missingParameterCommaSource =
 export const malformedArgumentSource = 'pub fn main(value: I32) -> I32 { return answer(@, value) }'
 export const damagedCallBeforeNextFunctionSource = `pub fn main() -> I32 { return answer(
 pub fn after() -> I32 { return 0 }`
+export const nestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
+export const nestedSiblingCallSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
+export const damagedNestedSiblingSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(identity(@), identity(2)) }`
+export const missingNestedRightParenthesisSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42) }`
+export const damagedNestedBeforeNextFunctionSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)
+pub fn after() -> I32 { return 0 }`
 
 export const invalidUtf8Source = Uint8Array.of(
   ...Array.from('pub fn ', (character) => character.charCodeAt(0)),

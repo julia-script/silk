@@ -7,7 +7,7 @@ import {
 } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { DataFlow, EvaluationPanel } from './syntax-inspector'
+import { DataFlow, EvaluationPanel, SyntaxInspector } from './syntax-inspector'
 
 const encoder = new TextEncoder()
 
@@ -80,5 +80,15 @@ describe('EvaluationPanel', () => {
     expect(markup).toContain('RecursiveCycle')
     expect(markup).toContain('Recursive cycle: main → main.')
     expect(markup).toContain('main calls main')
+  })
+})
+
+describe('SyntaxInspector', () => {
+  it('offers valid and damaged nested-call presets without advertising semantic completion', () => {
+    const markup = renderToStaticMarkup(<SyntaxInspector />)
+
+    expect(markup).toContain('Nested call · syntax only')
+    expect(markup).toContain('Damaged nested call')
+    expect(markup).toContain('semantic AST, HIR, and code generation do not exist yet')
   })
 })

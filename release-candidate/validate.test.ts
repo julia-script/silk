@@ -266,7 +266,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         '--eval',
         `import * as api from '@silk-effect/compiler';
 import * as evaluationModule from '@silk-effect/compiler/BootstrapEvaluation';
+import * as parserModule from '@silk-effect/compiler/Parser';
 import * as semanticModule from '@silk-effect/compiler/SemanticAnalysis';
+import * as syntaxTreeModule from '@silk-effect/compiler/SyntaxTree';
 const paths = ${JSON.stringify(deepPaths)};
 const modules = await Promise.all(
   paths.map((path) => import(\`@silk-effect/compiler/\${path.slice(2)}\`)),
@@ -321,6 +323,22 @@ const cycleSource = api.SourceFile.make(
 const cycleEvaluation = evaluationModule.evaluate(
   semanticModule.analyze(api.Parser.parse(api.Lexer.lex(cycleSource))),
 );
+const nestedSource = api.SourceFile.make(
+  'memory://packed-nested.silk',
+  new TextEncoder().encode(
+    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(identity(42)) }',
+  ),
+);
+const nestedParse = parserModule.parse(api.Lexer.lex(nestedSource));
+const nestedCalls = [];
+const visitNested = (element) => {
+  if (!syntaxTreeModule.isNode(element)) return;
+  if (element.kind === 'CallExpression') nestedCalls.push(element);
+  for (const child of element.children) visitNested(child);
+};
+visitNested(nestedParse.root);
+const nestedAnalysis = semanticModule.analyze(nestedParse);
+const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -407,6 +425,21 @@ console.log(
           : [],
       cycleTrace: cycleEvaluation.trace.map((event) => event._tag),
     },
+    nested: {
+      callCount: nestedCalls.length,
+      parserDiagnostics: nestedParse.diagnostics.map((diagnostic) => diagnostic.code),
+      semanticDiagnostics: nestedAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
+      argumentTag:
+        nestedOuter?._tag === 'Call'
+          ? nestedOuter.arguments[0]?.expression._tag
+          : null,
+      contractReason:
+        nestedOuter?._tag === 'Call' && nestedOuter.contract._tag === 'Unavailable'
+          ? nestedOuter.contract.reason._tag
+          : null,
+      mappingCount: nestedOuter?._tag === 'Call' ? nestedOuter.mappings.length : null,
+      type: nestedOuter?._tag === 'Call' ? nestedOuter.type : null,
+    },
     parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code),
   }),
 );`,
@@ -486,6 +519,15 @@ console.log(
       cycleReason: 'RecursiveCycle',
       cycleOrdinals: [0, 0],
       cycleTrace: ['Entry', 'Call'],
+    })
+    expect(api.nested).toEqual({
+      callCount: 2,
+      parserDiagnostics: [],
+      semanticDiagnostics: [],
+      argumentTag: 'UnavailableNestedCall',
+      contractReason: 'UnavailableNestedArgument',
+      mappingCount: 0,
+      type: { _tag: 'Unavailable' },
     })
     expect(api.parserDiagnostics).toEqual([])
   } finally {

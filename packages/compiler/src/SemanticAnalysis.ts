@@ -176,6 +176,11 @@ export type ArgumentExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | IdentifierExpressionFact
+  | {
+      readonly _tag: 'UnavailableNestedCall'
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
 
 /** A deterministic argument identity within one caller and concrete call site. */
 export interface ArgumentId {
@@ -206,6 +211,7 @@ export type UnavailableCallContractReason =
   | { readonly _tag: 'UnavailableCallSyntax'; readonly syntax: SyntaxTree.Node }
   | { readonly _tag: 'UnavailableCallTarget'; readonly reference: CallReferenceFact }
   | { readonly _tag: 'UnavailableMappedType'; readonly mapping: ArgumentMappingFact }
+  | { readonly _tag: 'UnavailableNestedArgument'; readonly argument: ArgumentFact }
 
 /** The complete positional contract outcome for one call. */
 export type CallContractFact =
@@ -441,6 +447,11 @@ interface ArgumentsResult {
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
+interface ArgumentExpressionResult {
+  readonly fact: ArgumentExpressionFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+}
+
 const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): IntegerResult => {
   const token = directToken(node, 'DecimalInteger')
   if (token === undefined) {
@@ -554,6 +565,40 @@ const analyzeIdentifier = (
   })
 }
 
+const analyzeArgumentExpression = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  parameters: ReadonlyArray<ParameterFact>,
+): ArgumentExpressionResult | undefined => {
+  if (node.kind === 'CallExpression') {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UnavailableNestedCall',
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  if (!isAvailableSyntax(node)) return undefined
+  if (node.kind === 'IdentifierExpression') {
+    const identifier = analyzeIdentifier(source, node, parameters)
+    return Object.freeze({ fact: identifier.fact, diagnostics: identifier.diagnostics })
+  }
+  if (node.kind !== 'IntegerLiteralExpression') return undefined
+  const integer = analyzeInteger(source, node)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Integer',
+      integer: integer.fact,
+      type:
+        integer.fact._tag === 'Available' ? availableI32ExpressionType : unavailableExpressionType,
+      syntax: node,
+    }),
+    diagnostics: integer.diagnostics,
+  })
+}
+
 const analyzeArguments = (
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
@@ -561,41 +606,15 @@ const analyzeArguments = (
   parameters: ReadonlyArray<ParameterFact>,
 ): ArgumentsResult => {
   const argumentList = childNode(call, 'ArgumentList')
-  const analyzed = argumentList.children.filter(isAvailableSyntax).flatMap(
-    (
-      element,
-    ): ReadonlyArray<
-      | IdentifierResult
-      | (IntegerResult & {
-          readonly type: SemanticType | undefined
-          readonly syntax: SyntaxTree.Node
-        })
-    > => {
+  const analyzed = argumentList.children.flatMap(
+    (element): ReadonlyArray<ArgumentExpressionResult> => {
       if (!SyntaxTree.isNode(element)) return []
-      if (element.kind === 'IdentifierExpression')
-        return [analyzeIdentifier(source, element, parameters)]
-      if (element.kind !== 'IntegerLiteralExpression') return []
-      const integer = analyzeInteger(source, element)
-      return [
-        Object.freeze({
-          ...integer,
-          type: integer.fact._tag === 'Available' ? integer.fact.type : undefined,
-          syntax: element,
-        }),
-      ]
+      const result = analyzeArgumentExpression(source, element, parameters)
+      return result === undefined ? [] : [result]
     },
   )
   const facts = analyzed.map((result, ordinal): ArgumentFact => {
-    const expression: ArgumentExpressionFact =
-      'reference' in result.fact
-        ? result.fact
-        : Object.freeze({
-            _tag: 'Integer',
-            integer: result.fact,
-            type:
-              result.type === undefined ? unavailableExpressionType : availableI32ExpressionType,
-            syntax: result.syntax,
-          })
+    const expression = result.fact
     return Object.freeze({
       _tag: 'Argument',
       id: Object.freeze({
@@ -643,6 +662,23 @@ const analyzeCallContract = (
       fact: Object.freeze({
         _tag: 'Unavailable',
         reason: Object.freeze({ _tag: 'UnavailableCallTarget', reference }),
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+
+  const unavailableNestedArgument = argumentsList.find(
+    (argument) => argument.expression._tag === 'UnavailableNestedCall',
+  )
+  if (unavailableNestedArgument !== undefined) {
+    return Object.freeze({
+      mappings: Object.freeze([]),
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({
+          _tag: 'UnavailableNestedArgument',
+          argument: unavailableNestedArgument,
+        }),
       }),
       diagnostics: Object.freeze([]),
     })
@@ -775,8 +811,12 @@ const analyzeReturnedExpression = (
           })
   const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
   const syntaxAvailable = node.children.every(isAvailableSyntax)
+  const hasUnavailableNestedArgument = argumentsResult.facts.some(
+    (argument) => argument.expression._tag === 'UnavailableNestedCall',
+  )
   const expressionType =
     syntaxAvailable &&
+    !hasUnavailableNestedArgument &&
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved'
       ? availableI32ExpressionType

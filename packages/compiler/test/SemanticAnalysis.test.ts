@@ -12,6 +12,7 @@ import {
   beyondSafeIntegerSource,
   crossFunctionParameterSource,
   damagedIdentifierSource,
+  damagedNestedCallSource,
   damagedTargetBodyCallSource,
   damagedTypeSource,
   duplicateNameSource,
@@ -28,6 +29,7 @@ import {
   missingSecondNameSource,
   mixedFunctionDamageSource,
   mixedResolutionDamageSource,
+  nestedCallSource,
   overflowSource,
   parserAndSemanticDamageSource,
   recoveredArgumentSource,
@@ -313,6 +315,60 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
   assert.strictEqual(Object.isFrozen(firstArgument), true)
   assert.strictEqual(Object.isFrozen(oneCall.mappings), true)
   assert.strictEqual(Object.isFrozen(oneCall.contract), true)
+})
+
+it('preserves nested call arguments as explicit unavailable semantic facts', () => {
+  const result = analyzeText('fixture://nested-call-placeholder.silk', nestedCallSource)
+  const main = functionAt(result, 1)
+  const call = callFact(main)
+  const argument = call.arguments.at(0) ?? raise('expected nested argument')
+
+  assert.strictEqual(argument.expression._tag, 'UnavailableNestedCall')
+  if (argument.expression._tag !== 'UnavailableNestedCall') return
+  assert.strictEqual(argument.syntax, argument.expression.syntax)
+  assert.strictEqual(argument.syntax.kind, 'CallExpression')
+  assert.deepEqual(argument.type, { _tag: 'Unavailable' })
+  assert.deepEqual(call.type, { _tag: 'Unavailable' })
+  assert.deepEqual(main.returnCompatibility, { _tag: 'Unavailable' })
+  assert.strictEqual(call.mappings.length, 0)
+  assert.strictEqual(call.contract._tag, 'Unavailable')
+  if (call.contract._tag !== 'Unavailable') return
+  assert.strictEqual(call.contract.reason._tag, 'UnavailableNestedArgument')
+  if (call.contract.reason._tag !== 'UnavailableNestedArgument') return
+  assert.strictEqual(call.contract.reason.argument, argument)
+  assert.deepEqual(result.parse.diagnostics, [])
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps damaged nested syntax parser-owned and semantically unavailable', () => {
+  const result = analyzeText('fixture://damaged-nested-call.silk', damagedNestedCallSource)
+  const main = functionAt(result, 1)
+  const call = callFact(main)
+  const argument = call.arguments.at(0) ?? raise('expected damaged nested argument')
+
+  assert.strictEqual(argument.expression._tag, 'UnavailableNestedCall')
+  assert.deepEqual(argument.type, { _tag: 'Unavailable' })
+  assert.strictEqual(call.mappings.length, 0)
+  assert.strictEqual(call.contract._tag, 'Unavailable')
+  assert.deepEqual(
+    result.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps flat argument semantics unchanged beside nested placeholders', () => {
+  const flat = analyzeText('fixture://flat-call-regression.silk', identityCallSource)
+  const nested = analyzeText('fixture://nested-call-regression.silk', nestedCallSource)
+  const flatCall = callFact(functionAt(flat, 1))
+  const nestedCall = callFact(functionAt(nested, 1))
+
+  assert.strictEqual(flatCall.arguments.at(0)?.expression._tag, 'Integer')
+  assert.strictEqual(flatCall.contract._tag, 'Compatible')
+  assert.deepEqual(flatCall.type, { _tag: 'Available', type: 'I32' })
+  assert.strictEqual(nestedCall.arguments.at(0)?.expression._tag, 'UnavailableNestedCall')
+  assert.strictEqual(nestedCall.contract._tag, 'Unavailable')
+  assert.deepEqual(nested.diagnostics, [])
 })
 
 it('checks zero-, one-, and two-argument compatible calls', () => {

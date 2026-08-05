@@ -9,6 +9,8 @@ import {
   acceptedShape,
   acceptedSource,
   damagedCallBeforeNextFunctionSource,
+  damagedNestedBeforeNextFunctionSource,
+  damagedNestedSiblingSource,
   denseTriviaSource,
   type ExpectedNodeShape,
   emptySource,
@@ -21,9 +23,12 @@ import {
   missingCallRightParenthesisSource,
   missingFirstRightBraceSource,
   missingNameSource,
+  missingNestedRightParenthesisSource,
   missingParameterCommaSource,
   missingParameterTypeSource,
   missingRightBraceSource,
+  nestedCallSource,
+  nestedSiblingCallSource,
   threeFunctionSource,
   trailingTriviaSource,
   triviaCallSource,
@@ -348,6 +353,188 @@ it('parses decimal and identifier call arguments as ordered concrete expressions
   assert.deepEqual(identifier.diagnostics, [])
   assertOriginalTokenTraversal(literal)
   assertOriginalTokenTraversal(identifier)
+})
+
+it('parses nested calls as lossless argument expressions', () => {
+  const result = parseText('fixture://nested-call.silk', nestedCallSource)
+  const calls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+  const outer = calls.at(0)
+  const inner = calls.at(1)
+
+  assert.strictEqual(calls.length, 2)
+  assert.notStrictEqual(outer, undefined)
+  assert.notStrictEqual(inner, undefined)
+  if (outer === undefined || inner === undefined) return
+  assert.deepEqual(nodeShape(outer), {
+    kind: 'CallExpression',
+    children: [
+      'Whitespace',
+      'Identifier',
+      {
+        kind: 'ArgumentList',
+        children: [
+          'LeftParenthesis',
+          {
+            kind: 'CallExpression',
+            children: [
+              'Identifier',
+              {
+                kind: 'ArgumentList',
+                children: [
+                  'LeftParenthesis',
+                  { kind: 'IntegerLiteralExpression', children: ['DecimalInteger'] },
+                  'RightParenthesis',
+                ],
+              },
+            ],
+          },
+          'RightParenthesis',
+        ],
+      },
+    ],
+  })
+  assert.strictEqual(inner.span.start, nestedCallSource.lastIndexOf('identity(42)'))
+  assert.strictEqual(inner.span.end, nestedCallSource.lastIndexOf('identity(42)') + 12)
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(nestedCallSource))
+})
+
+it('preserves sibling nested calls and their outer comma', () => {
+  const result = parseText('fixture://nested-siblings.silk', nestedSiblingCallSource)
+  const calls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+  const outerArguments = calls
+    .at(0)
+    ?.children.find(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
+    )
+
+  assert.strictEqual(calls.length, 3)
+  assert.notStrictEqual(outerArguments, undefined)
+  if (outerArguments === undefined) return
+  assert.deepEqual(
+    outerArguments.children.map((element) =>
+      SyntaxTree.isNode(element)
+        ? element.kind
+        : SyntaxTree.isToken(element)
+          ? element.kind
+          : `Missing(${element.expected})`,
+    ),
+    ['LeftParenthesis', 'CallExpression', 'Comma', 'CallExpression', 'RightParenthesis'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(nestedSiblingCallSource))
+})
+
+it('reserves the outer closing parenthesis when the inner call is damaged', () => {
+  const result = parseText(
+    'fixture://missing-nested-right-parenthesis.silk',
+    missingNestedRightParenthesisSource,
+  )
+  const calls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+  const outer = calls.at(0)
+  const inner = calls.at(1)
+
+  assert.notStrictEqual(outer, undefined)
+  assert.notStrictEqual(inner, undefined)
+  if (outer === undefined || inner === undefined) return
+  assert.deepEqual(
+    missingLeaves(inner).map((leaf) => leaf.expected),
+    ['RightParenthesis'],
+  )
+  assert.deepEqual(
+    missingLeaves(outer).map((leaf) => leaf.expected),
+    ['RightParenthesis'],
+  )
+  assert.strictEqual(
+    outer.children
+      .flatMap((element) => (SyntaxTree.isNode(element) ? element.children : []))
+      .some((element) => SyntaxTree.isToken(element) && element.kind === 'RightParenthesis'),
+    true,
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(missingNestedRightParenthesisSource))
+})
+
+it('keeps a sibling argument after damaged nested syntax', () => {
+  const result = parseText('fixture://damaged-nested-sibling.silk', damagedNestedSiblingSource)
+  const calls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+  const outerArguments = calls
+    .at(0)
+    ?.children.find(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
+    )
+
+  assert.strictEqual(calls.length, 3)
+  assert.notStrictEqual(outerArguments, undefined)
+  if (outerArguments === undefined) return
+  assert.strictEqual(
+    outerArguments.children.filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+    ).length,
+    2,
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002', 'PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(damagedNestedSiblingSource))
+})
+
+it('bounds nested recovery before the following declaration', () => {
+  const result = parseText(
+    'fixture://damaged-nested-before-next-function.silk',
+    damagedNestedBeforeNextFunctionSource,
+  )
+  const declarations = directFunctionDeclarations(result.root)
+  const after = declarations.at(2)
+
+  assert.strictEqual(declarations.length, 3)
+  assert.notStrictEqual(after, undefined)
+  if (after === undefined) return
+  assert.deepEqual(missingLeaves(after), [])
+  assert.strictEqual(directTokenText(result, after, 'Identifier'), 'after')
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(damagedNestedBeforeNextFunctionSource))
+})
+
+it('parses representative deep nested calls deterministically', () => {
+  const depth = 64
+  const expression = `${'identity('.repeat(depth)}42${')'.repeat(depth)}`
+  const source = `pub fn identity(value: I32) -> I32 { return value }\npub fn main() -> I32 { return ${expression} }`
+  const first = parseText('fixture://deep-nested-call.silk', source)
+  const second = parseText('fixture://deep-nested-call.silk', source)
+
+  assert.strictEqual(
+    descendants(first.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+    ).length,
+    depth,
+  )
+  assert.deepEqual(nodeShape(first.root), nodeShape(second.root))
+  assert.deepEqual(diagnosticView(first), diagnosticView(second))
+  assertOriginalTokenTraversal(first)
+  assert.deepEqual(reconstructedBytes(first), ascii(source))
 })
 
 it('parses typed parameters and bare identifier return expressions', () => {

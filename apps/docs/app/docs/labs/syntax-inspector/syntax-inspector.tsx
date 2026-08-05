@@ -137,6 +137,16 @@ pub fn other() -> I32 { return value }`,
 pub fn forward(value: I32) -> I32 { return identity(value) }`,
   },
   {
+    label: 'Nested call · syntax only',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`,
+  },
+  {
+    label: 'Damaged nested call',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42) }`,
+  },
+  {
     label: 'Missing parameter type',
     source: 'pub fn identity(value:) -> I32 { return value }',
   },
@@ -480,7 +490,9 @@ function CallRelationship({
         ? 'Call syntax is incomplete.'
         : returned.contract.reason._tag === 'UnavailableCallTarget'
           ? 'A unique call target is unavailable.'
-          : 'A mapped argument or parameter type is unavailable.'
+          : returned.contract.reason._tag === 'UnavailableNestedArgument'
+            ? 'A nested call argument is preserved but not semantically analyzed yet.'
+            : 'A mapped argument or parameter type is unavailable.'
 
   return (
     <section
@@ -553,9 +565,11 @@ function CallRelationship({
                   ? expression.integer._tag === 'Available'
                     ? String(expression.integer.value)
                     : expression.integer._tag
-                  : expression.reference._tag === 'Unavailable'
-                    ? 'Unavailable reference'
-                    : expression.reference.spelling
+                  : expression._tag === 'UnavailableNestedCall'
+                    ? 'Nested call · not analyzed'
+                    : expression.reference._tag === 'Unavailable'
+                      ? 'Unavailable reference'
+                      : expression.reference.spelling
               return (
                 <li key={`${argument.id.callSpan.start}-${argument.id.ordinal}`}>
                   <div>

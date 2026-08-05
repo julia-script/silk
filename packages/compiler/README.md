@@ -72,17 +72,19 @@ Parameter           → Identifier : Identifier
 ReturnExpression    → DecimalInteger | Identifier | CallExpression
 CallExpression      → Identifier ( ArgumentList? )
 ArgumentList        → Argument ( , Argument )*
-Argument            → DecimalInteger | Identifier
+Argument            → DecimalInteger | Identifier | CallExpression
 ```
 
 The result is a concrete syntax tree (CST), not a semantic AST. Its nodes group the source into one
 or more direct function declarations in source order. Each declaration contains a parameter list,
 return type, block, return statement, and an integer, bare-identifier, or call expression. Typed
-parameter declarations and integer or identifier call arguments retain their own ordered concrete
-nodes, separators, and trivia. Unexpected tokens inside lists remain explicit error regions. Every lexer
-token—including trivia, invalid tokens, and EOF—remains the same object in the tree and appears
-exactly once in source order. A following `pub` bounds both block and damaged-call recovery so the
-next declaration remains separate.
+parameter declarations and integer, identifier, or recursively nested call arguments retain their
+own ordered concrete nodes, separators, and trivia. Nested calls reserve the closing tokens required
+by their enclosing calls, so one missing inner `)` does not consume the outer call's delimiter.
+Unexpected tokens inside lists remain explicit error regions. Every lexer token—including trivia,
+invalid tokens, and EOF—remains the same object in the tree and appears exactly once in source order.
+A following `pub` bounds both block and damaged-call recovery so the next declaration remains
+separate.
 
 Ordinary source mistakes remain data. A required absent token becomes a `MissingToken` leaf with an
 empty span and a `PAR0001` diagnostic. Unexpected concrete input becomes a lossless `Error` node
@@ -147,6 +149,12 @@ type is available, `ArityMismatch` when available counts differ, or `Unavailable
 target resolution, or a mapped type is unavailable. Partial mappings remain visible across arity
 mismatches. `SEM0007` reports the expected and actual counts at the complete call span without
 changing the call's expression type or the caller's return compatibility.
+
+Nested call arguments are the intentional boundary of this parser increment. Analysis retains each
+one as an `UnavailableNestedCall` argument expression with its exact nested call syntax and makes the
+enclosing call contract and expression type unavailable. It does not resolve the nested target,
+invent a positional mapping, or emit a semantic diagnostic for that deferred work. Recursive
+semantic call facts arrive in the next compiler increment.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native

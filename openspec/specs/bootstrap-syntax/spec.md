@@ -13,7 +13,7 @@ followed by end-of-file. Every function SHALL have the form `pub fn <name>(<para
 <return-type> { return <expression> }`. A parameter SHALL have the form `<name>: <type>` and
 parameters SHALL be comma-separated. A return expression SHALL be a decimal integer, a bare
 identifier, or a call. A call SHALL have the form `<callee>(<arguments>)`; arguments SHALL be
-comma-separated decimal integers or bare identifiers. Empty parameter and argument lists SHALL
+comma-separated decimal integers, bare identifiers, or calls. Empty parameter and argument lists SHALL
 remain valid. Lexer trivia SHALL be permitted between grammar elements and declarations. Names and
 types SHALL remain uninterpreted identifier tokens, and declaration, parameter, and argument order
 SHALL match concrete source order.
@@ -69,6 +69,28 @@ or end-of-file.
 #### Scenario: Keep integer expressions unchanged
 - **WHEN** a function returns a decimal integer
 - **THEN** its existing integer-literal concrete shape and recovery behavior remain unchanged
+
+### Requirement: Parse nested call arguments losslessly
+The bootstrap parser SHALL accept a call expression wherever a call argument expression is allowed.
+It SHALL preserve each nested call and argument list as its own concrete branch with every token,
+separator, trivia slice, and owner-qualified half-open byte span retained exactly once. This grammar
+extension MUST NOT imply that nested calls are already semantically resolved or evaluated.
+
+#### Scenario: Parse one nested identity call
+- **WHEN** a function returns `identity(identity(42))`
+- **THEN** the outer argument contains a complete inner call-expression branch whose literal `42` and both parenthesis pairs retain exact source order and spans
+
+#### Scenario: Parse two nested arguments
+- **WHEN** a function returns `choose(identity(1), identity(2))`
+- **THEN** both outer arguments contain independent nested call branches separated by the outer comma
+
+#### Scenario: Recover a damaged inner call
+- **WHEN** damaged inner syntax reaches an outer sibling boundary or an inner call lacks a closing parenthesis before the outer closing parenthesis
+- **THEN** recovery records the inner error or missing token and keeps the outer argument boundary, following arguments, and enclosing call visible
+
+#### Scenario: Preserve a following declaration after nested damage
+- **WHEN** malformed nested call syntax is followed by another `pub fn` declaration
+- **THEN** recovery remains bounded to the damaged function and the following declaration remains a separate complete concrete branch
 
 ### Requirement: Function-boundary recovery remains local
 Recovery inside one function SHALL stop at a following function's `pub` token when that token can
