@@ -35,6 +35,7 @@ export interface CompileRequest {
   readonly toolchain: NativeToolchain.Toolchain
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly destination: string
+  readonly backend?: Backend.Backend
   readonly layout?: Mir.TargetLayout
   readonly scopeName?: string
   readonly saveTemps?: boolean
@@ -155,11 +156,12 @@ export const compile = (request: CompileRequest): Outcome => {
     (result) => result.functions.length,
   )
   const layout = request.layout ?? NativeToolchain.hostLayout()
+  const backend = request.backend ?? Backend.LlvmBackend
   const artifact = phase(
     'backend',
     program.functions.length,
     () =>
-      Backend.LlvmBackend.emit(program, layout, {
+      backend.emit(program, layout, {
         mode: request.profile === 'release' ? 'release' : 'debug',
         sources: new Map(
           closure.modules.map((module) => [

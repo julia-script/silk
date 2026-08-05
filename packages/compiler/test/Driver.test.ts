@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Analysis from '../src/Analysis.js'
+import * as Backend from '../src/Backend.js'
 import * as Driver from '../src/Driver.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import { corpus } from './support/corpus.js'
@@ -83,6 +84,22 @@ it('reports every phase in order with counts and totals', () => {
   const closure = outcome.report.at(0)
   assert.strictEqual(closure?.inputs, 1)
   assert.strictEqual(closure?.outputs, 1)
+})
+
+it('routes emission through an injected backend service', () => {
+  let emissions = 0
+  const spy: Backend.Backend = {
+    emit: (program, layout, request) => {
+      emissions += 1
+      return Backend.LlvmBackend.emit(program, layout, request)
+    },
+  }
+  const outcome = compileSource('injected-backend', 'pub fn main() -> I32 { return 42 }', {
+    backend: spy,
+  })
+
+  assert.strictEqual(emissions, 1)
+  assert.strictEqual(outcome._tag, 'Compiled')
 })
 
 it('surfaces a missing entry as a closed outcome without invoking the toolchain', () => {

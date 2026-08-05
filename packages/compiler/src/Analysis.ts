@@ -143,8 +143,9 @@ export const codegen = (
   self: Snapshot,
   request: Backend.CodegenRequest,
   layout: Mir.TargetLayout = defaultLayout,
+  backend: Backend.Backend = Backend.LlvmBackend,
 ): Backend.Artifact =>
-  Backend.LlvmBackend.emit(self.mir, layout, {
+  backend.emit(self.mir, layout, {
     ...request,
     sources:
       request.sources ??
