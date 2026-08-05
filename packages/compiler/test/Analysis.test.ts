@@ -86,3 +86,16 @@ it('evaluates the root module through the facade', () => {
   if (outcome._tag !== 'Completed') return
   assert.deepEqual(outcome.result, { _tag: 'I32Value', value: 42 })
 })
+
+it('answers ownership facts and cleanup plans through the facade', () => {
+  const self = Analysis.ofSource(
+    'memory://ownership.silk',
+    ascii('pub fn identity(value: I32) -> I32 { return value }'),
+  )
+  const facts = Analysis.ownershipOf(self, 'memory://ownership.silk')
+
+  assert.strictEqual(facts?.functions.at(0)?.verdict._tag, 'Satisfied')
+  assert.strictEqual(facts?.functions.at(0)?.bindings.at(0)?.category._tag, 'Copyable')
+  assert.deepEqual(facts?.functions.at(0)?.exits.at(0)?.releases, [])
+  assert.strictEqual(Analysis.ownershipOf(self, 'absent'), undefined)
+})

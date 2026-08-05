@@ -26,8 +26,9 @@ pipeline's own shape requires it. Exactly two language-visible additions are in 
 
 - **Import declarations** (proposal 3) — closure loading needs syntactic imports; the current
   single-file grammar has none. Minimal spelling, issue 08 owns the final form.
-- **Possibly minimal bindings/moves** (proposal 7, open question) — only if a vacuous ownership
-  check turns out to prove nothing. Default is to keep the slice frozen.
+- **Minimal bindings/moves** (proposal 7) — **resolved: stay frozen.** The vacuous check still
+  lands the phase, fact table, cleanup-plan artifact, encoder, facade query, and lab; bindings
+  arrive with issue 08's syntax work.
 
 Everything else (HIR, MIR, ownership, instances, backend, linker) changes what the compiler
 *is*, not what the language *has*. Feature work builds on this foundation afterwards.
@@ -72,7 +73,7 @@ Everything else (HIR, MIR, ownership, instances, backend, linker) changes what t
 7. **Ownership check + cleanup plan (slice-sized)**
    - Checker over generic HIR for the frozen slice — trivially satisfiable is fine; the phase, its fact table, and the cleanup-plan artifact exist from day one
    - Inspector: scope/lifetime timeline over source spans
-   - Open: pull forward minimal bindings/moves from issue 08, or stay frozen?
+   - Resolved: stay frozen; bindings/moves arrive with issue 08's syntax work
 
 ### Track 4 — instances + MIR
 
@@ -117,7 +118,7 @@ Proposals are written as openspec changes:
 - [x] 4 — [collect-declaration-headers](../openspec/changes/archive/2026-08-05-collect-declaration-headers/proposal.md)
 - [x] 5 — [elaborate-bodies-to-hir](../openspec/changes/archive/2026-08-05-elaborate-bodies-to-hir/proposal.md)
 - [x] 6 — [establish-analysis-facade](../openspec/changes/archive/2026-08-05-establish-analysis-facade/proposal.md)
-- [ ] 7 — [check-ownership-and-cleanup](../openspec/changes/check-ownership-and-cleanup/proposal.md)
+- [x] 7 — [check-ownership-and-cleanup](../openspec/changes/archive/2026-08-05-check-ownership-and-cleanup/proposal.md)
 - [ ] 8 — [define-mir-and-encoder](../openspec/changes/define-mir-and-encoder/proposal.md)
 - [ ] 9 — [discover-instances-and-lower-to-mir](../openspec/changes/discover-instances-and-lower-to-mir/proposal.md)
 - [ ] 10 — [retarget-evaluator-to-mir](../openspec/changes/retarget-evaluator-to-mir/proposal.md)

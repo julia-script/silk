@@ -77,6 +77,10 @@
       "types": "./dist/SyntaxTree.d.ts",
       "import": "./dist/SyntaxTree.js"
     },
+    "./Ownership": {
+      "types": "./dist/Ownership.d.ts",
+      "import": "./dist/Ownership.js"
+    },
     "./Parser": {
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"

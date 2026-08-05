@@ -11,8 +11,9 @@ for tooling, so tools can grow without reimplementing Silk semantics.
 The facade SHALL build one immutable analysis snapshot from a compilation request (with a
 single-source convenience for one module) and SHALL answer queries over sources, syntax
 artifacts, import facts and cycles, collected declarations and lookups, elaborated function facts
-with their types, references, and contracts, and HIR facts. Query results SHALL be immutable
-values, and repeated snapshots of identical input SHALL answer every query identically.
+with their types, references, and contracts, HIR facts, and ownership facts with their cleanup
+plans. Query results SHALL be immutable values, and repeated snapshots of identical input SHALL
+answer every query identically.
 
 #### Scenario: Query a multi-module snapshot
 
@@ -23,6 +24,11 @@ values, and repeated snapshots of identical input SHALL answer every query ident
 
 - **WHEN** the same request is snapshotted repeatedly in fresh processes
 - **THEN** every supported query answers identically
+
+#### Scenario: Query ownership facts
+
+- **WHEN** a snapshot's module contains checked functions
+- **THEN** the facade answers the module's ownership facts and cleanup plans as immutable values
 
 ### Requirement: The facade merges the compilation's diagnostics
 

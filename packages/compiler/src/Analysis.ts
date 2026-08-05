@@ -4,6 +4,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import * as Ownership from './Ownership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 
 /**
@@ -19,6 +20,7 @@ export interface Snapshot {
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
   readonly results: ReadonlyMap<string, Elaboration.Result>
+  readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -28,6 +30,9 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
   const index = DeclarationIndex.collect(closure)
   const results = new Map(
     closure.modules.map((module) => [module.name, Elaboration.elaborateModule(module.syntax)]),
+  )
+  const ownership = new Map(
+    [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
   const diagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
@@ -40,6 +45,7 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     closure,
     index,
     results,
+    ownership,
     diagnostics,
   })
 }
@@ -77,6 +83,12 @@ export const rootAnalysis = (self: Snapshot): Elaboration.Result => {
 /** Returns one module's HIR, or `undefined` for an unknown identity. */
 export const hirOf = (self: Snapshot, module: string): Hir.Module | undefined =>
   self.results.get(module)?.hir
+
+/** Returns one module's ownership facts and cleanup plans, or `undefined` for an unknown identity. */
+export const ownershipOf = (
+  self: Snapshot,
+  module: string,
+): Ownership.ModuleOwnership | undefined => self.ownership.get(module)
 
 /** Looks up one declaration name within one module. */
 export const declarationByName = (
