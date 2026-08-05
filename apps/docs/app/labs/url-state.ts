@@ -53,12 +53,34 @@ const inflate = async (value: string): Promise<string> => {
   return new Response(stream).text()
 }
 
-export const encodeSource = (source: string): string =>
-  toBase64Url(new TextEncoder().encode(source))
+/** The program a link carries: every module of the request, and which one it is rooted at. */
+export interface SourceState {
+  readonly root: string
+  readonly modules: Readonly<Record<string, string>>
+}
 
-export const decodeSource = (value: string): string | undefined => {
+export const encodeSource = async (state: SourceState): Promise<string | undefined> => {
   try {
-    return new TextDecoder().decode(fromBase64Url(value))
+    return await deflate(JSON.stringify(state))
+  } catch {
+    return undefined
+  }
+}
+
+export const decodeSource = async (value: string): Promise<SourceState | undefined> => {
+  try {
+    const parsed: unknown = await inflate(value).then(JSON.parse)
+    if (typeof parsed !== 'object' || parsed === null) return undefined
+    const { root, modules } = parsed as { root?: unknown; modules?: unknown }
+    if (typeof root !== 'string') return undefined
+    if (typeof modules !== 'object' || modules === null) return undefined
+    const entries = Object.entries(modules).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    )
+    if (entries.length === 0) return undefined
+    // A root naming a module that is not in the map would make the request unloadable.
+    if (!entries.some(([name]) => name === root)) return undefined
+    return { root, modules: Object.fromEntries(entries) }
   } catch {
     return undefined
   }

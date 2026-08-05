@@ -6,18 +6,43 @@ import { decodeLayout, decodeSource, encodeLayout, encodeSource } from './url-st
 // is the property worth pinning: these encodings are what let a refresh land on the same view.
 
 describe('source encoding', () => {
-  it('round-trips a program, including newlines and non-ASCII', () => {
-    const source = 'pub fn main() -> I32 { return 42 }\n-- naïve ⇒ ok\n'
-    expect(decodeSource(encodeSource(source))).toBe(source)
+  it('round-trips a program, including newlines and non-ASCII', async () => {
+    const state = {
+      root: 'main',
+      modules: { main: 'pub fn main() -> I32 { return 42 }\n-- naïve ⇒ ok\n' },
+    }
+    expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
   })
 
-  it('produces no characters that a query string would have to escape', () => {
-    const encoded = encodeSource('pub fn main() -> I32 { return I32.add(1, 41) }')
+  it('round-trips a multi-module request', async () => {
+    const state = {
+      root: 'root',
+      modules: {
+        root: 'import lib\npub fn main() -> I32 { return 42 }',
+        lib: 'pub fn answer() -> I32 { return 1 }',
+      },
+    }
+    expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
+  })
+
+  it('produces no characters that a query string would have to escape', async () => {
+    const encoded = await encodeSource({
+      root: 'main',
+      modules: { main: 'pub fn main() -> I32 { return I32.add(1, 41) }' },
+    })
     expect(encoded).toMatch(/^[A-Za-z0-9\-_]*$/)
   })
 
-  it('reports damaged input rather than throwing', () => {
-    expect(decodeSource('!!!not base64!!!')).toBeUndefined()
+  it('rejects a root that names no module, which would not load', async () => {
+    const encoded = (await encodeSource({
+      root: 'absent',
+      modules: { main: 'pub fn main() -> I32 { return 42 }' },
+    })) as string
+    expect(await decodeSource(encoded)).toBeUndefined()
+  })
+
+  it('reports damaged input rather than throwing', async () => {
+    expect(await decodeSource('!!!not base64!!!')).toBeUndefined()
   })
 })
 

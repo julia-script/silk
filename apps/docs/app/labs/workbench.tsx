@@ -17,6 +17,8 @@ import type { ToolchainPlan } from '@silk-effect/compiler'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { PresetPalette } from './preset-palette'
+import { type Preset, presets } from './presets'
 import { type ViewContext, viewById, views } from './registry'
 import styles from './syntax-inspector/syntax-inspector.module.css'
 import {
@@ -29,26 +31,9 @@ import {
 } from './url-state'
 import shell from './workbench.module.css'
 
-const sourceId = 'memory://docs/workbench.silk'
 const encoder = new TextEncoder()
 
-const presets = [
-  {
-    label: 'Nested calls',
-    source: `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`,
-  },
-  {
-    label: 'Branch diamond',
-    source: 'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }',
-  },
-  {
-    label: 'Checked arithmetic',
-    source: 'pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }',
-  },
-  { label: 'Overflow traps', source: 'pub fn main() -> I32 { return I32.add(2147483647, 1) }' },
-  { label: 'Unknown call', source: 'pub fn main() -> I32 { return missing() }' },
-] as const
+const initialPreset = presets.find((preset) => preset.label === 'Nested calls') ?? presets[0]
 
 /**
  * Panes read live state through a ref rather than through panel params.
@@ -59,11 +44,15 @@ pub fn main() -> I32 { return identity(identity(42)) }`,
  * state without being recreated on each keystroke.
  */
 interface WorkbenchState extends ViewContext {
-  readonly setSource: (value: string) => void
+  readonly setModuleSource: (name: string, value: string) => void
   readonly setMode: (value: 'release' | 'debug') => void
   readonly setProfile: (value: ToolchainPlan.OptimizationProfile) => void
-  /** Bumped on every state change so open panes re-render. */
-  readonly version: number
+  readonly openPalette: () => void
+  readonly addModule: () => void
+  readonly removeModule: (name: string) => void
+  readonly setRoot: (name: string) => void
+  readonly activeModule: string
+  readonly setActiveModule: (name: string) => void
 }
 
 const stateRef: { current: WorkbenchState | undefined } = { current: undefined }
@@ -85,28 +74,68 @@ function usePaneState(): WorkbenchState | undefined {
   return stateRef.current
 }
 
-/** The source editor, itself a pane so it can be moved and resized like any other. */
+/**
+ * The source editor, itself a pane so it can be moved and resized like any other.
+ *
+ * A compilation request is a set of named modules, not one file, so the editor carries a tab per
+ * module. Most programs have exactly one and the tab strip stays out of the way; module closure
+ * and the declaration index only become explorable once more than one is possible.
+ */
 function SourcePane() {
   const state = usePaneState()
   if (state === undefined) return null
 
+  const names = Object.keys(state.modules)
+  const active = names.includes(state.activeModule) ? state.activeModule : (names[0] ?? '')
+
   return (
     <div className={shell.sourcePane}>
-      <div className={styles.exampleBar} aria-label="Source presets">
-        {presets.map((preset) => (
-          <button key={preset.label} type="button" onClick={() => state.setSource(preset.source)}>
-            {preset.label}
-          </button>
+      <div className={shell.moduleBar}>
+        {names.map((name) => (
+          <span key={name} className={shell.moduleTab} data-active={name === active}>
+            <button type="button" onClick={() => state.setActiveModule(name)}>
+              {name}
+              {name === state.root ? <i className={shell.rootDot} title="root module" /> : null}
+            </button>
+            {names.length > 1 ? (
+              <button
+                type="button"
+                className={shell.moduleClose}
+                aria-label={`Remove module ${name}`}
+                onClick={() => state.removeModule(name)}
+              >
+                ×
+              </button>
+            ) : null}
+          </span>
         ))}
+        <button
+          type="button"
+          className={shell.moduleAdd}
+          onClick={state.addModule}
+          aria-label="Add a module"
+        >
+          +
+        </button>
+        <span className={shell.toolbarSpacer} />
+        {active === state.root ? null : (
+          <button type="button" className={shell.moduleAdd} onClick={() => state.setRoot(active)}>
+            make root
+          </button>
+        )}
+        <button type="button" className={shell.moduleAdd} onClick={state.openPalette}>
+          presets…
+        </button>
       </div>
+
       <label className="sr-only" htmlFor="workbench-source">
         Silk source code
       </label>
       <textarea
         id="workbench-source"
         className={`${styles.editor} ${shell.editorFill}`}
-        value={state.source}
-        onChange={(event) => state.setSource(event.target.value)}
+        value={state.modules[active] ?? ''}
+        onChange={(event) => state.setModuleSource(active, event.target.value)}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
@@ -201,31 +230,102 @@ const defaultLayout = (api: DockviewApi): void => {
 const storageKey = 'silk-labs-workbench-layout'
 
 export function Workbench() {
-  const [source, setSource] = useState<string>(presets[0].source)
+  const [modules, setModules] = useState<Readonly<Record<string, string>>>(initialPreset.modules)
+  const [root, setRoot] = useState<string>(initialPreset.root)
+  const [activeModule, setActiveModule] = useState<string>(initialPreset.root)
   const [mode, setMode] = useState<'release' | 'debug'>('debug')
   const [profile, setProfile] = useState<ToolchainPlan.OptimizationProfile>('release')
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [api, setApi] = useState<DockviewApi>()
   const [theme, setTheme] = useState('dockview-theme-dark')
   const paneCounter = useRef(0)
   const dockRef = useRef<HTMLDivElement>(null)
 
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(source)), [source])
+  const snapshot = useMemo(
+    () =>
+      Analysis.make({
+        rootModule: root,
+        sources: new Map(
+          Object.entries(modules).map(([name, text]) => [name, encoder.encode(text)]),
+        ),
+      }),
+    [modules, root],
+  )
+
+  const loadPreset = useCallback((preset: Preset) => {
+    setModules(preset.modules)
+    setRoot(preset.root)
+    setActiveModule(preset.root)
+    setSelectedDiagnostic(undefined)
+  }, [])
+
+  const addModule = useCallback(() => {
+    setModules((current) => {
+      let index = current.lib === undefined ? 0 : 2
+      let name = index === 0 ? 'lib' : `lib${index}`
+      while (current[name] !== undefined) {
+        index += 1
+        name = `lib${index}`
+      }
+      setActiveModule(name)
+      return { ...current, [name]: 'pub fn answer() -> I32 { return 1 }' }
+    })
+  }, [])
+
+  const removeModule = useCallback(
+    (name: string) => {
+      setModules((current) => {
+        const { [name]: _removed, ...rest } = current
+        const remaining = Object.keys(rest)
+        if (remaining.length === 0) return current
+        // Removing the root would leave the request pointing at a module that is not there, so
+        // the root moves to whatever is left rather than the request becoming unloadable.
+        if (name === root) setRoot(remaining[0] as string)
+        setActiveModule((activeName) =>
+          activeName === name ? (remaining[0] as string) : activeName,
+        )
+        return rest
+      })
+    },
+    [root],
+  )
 
   // Publish current state to the panes, which live outside this component's React tree.
   stateRef.current = {
     snapshot,
-    source,
+    modules,
+    root,
     mode,
     profile,
     selectedDiagnostic,
     onSelectDiagnostic: setSelectedDiagnostic,
-    setSource,
+    setModuleSource: (name, value) => setModules((current) => ({ ...current, [name]: value })),
     setMode,
     setProfile,
-    version: 0,
+    openPalette: () => setPaletteOpen(true),
+    addModule,
+    removeModule,
+    setRoot,
+    activeModule,
+    setActiveModule,
   }
   useEffect(notify)
+
+  // A palette anywhere in the page, so a preset is reachable without hunting for the source pane.
+  //
+  // Not ⌘K: fumadocs binds that to the docs search, and this page still carries the site nav.
+  // ⌘P leaves that alone and matches the "go to file" muscle memory from editors.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'p' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        setPaletteOpen((current) => !current)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Follow the site's light/dark choice, which fumadocs writes onto <html>.
   useEffect(() => {
@@ -266,14 +366,19 @@ export function Workbench() {
     setApi(event.api)
 
     const params = new URLSearchParams(window.location.search)
-    const urlSource = params.get(sourceParam)
-    if (urlSource !== null) {
-      const decoded = decodeSource(urlSource)
-      if (decoded !== undefined) setSource(decoded)
-    }
 
     // A URL layout wins over the saved one: an explicit link is a request for that exact view.
     const restore = async (): Promise<void> => {
+      const urlSource = params.get(sourceParam)
+      if (urlSource !== null) {
+        const decoded = await decodeSource(urlSource)
+        if (decoded !== undefined) {
+          setModules(decoded.modules)
+          setRoot(decoded.root)
+          setActiveModule(decoded.root)
+        }
+      }
+
       const urlLayout = params.get(layoutParam)
       if (urlLayout !== null) {
         const layout = await decodeLayout(urlLayout)
@@ -317,16 +422,17 @@ export function Workbench() {
       // Layout events fire in bursts while dragging; one write per frame is plenty.
       frame = requestAnimationFrame(() => {
         void (async () => {
-          const encoded = await encodeLayout(api.toJSON())
-          if (encoded === undefined) return
+          const encodedLayout = await encodeLayout(api.toJSON())
+          if (encodedLayout === undefined) return
           try {
-            window.localStorage.setItem(storageKey, encoded)
+            window.localStorage.setItem(storageKey, encodedLayout)
           } catch {
             // Private-mode quota failures should not break the workbench.
           }
+          const encodedSource = await encodeSource({ root, modules })
           const next = new URLSearchParams(window.location.search)
-          next.set(layoutParam, encoded)
-          next.set(sourceParam, encodeSource(stateRef.current?.source ?? ''))
+          next.set(layoutParam, encodedLayout)
+          if (encodedSource !== undefined) next.set(sourceParam, encodedSource)
           window.history.replaceState(null, '', `${window.location.pathname}?${next}`)
         })()
       })
@@ -338,7 +444,7 @@ export function Workbench() {
       cancelAnimationFrame(frame)
       disposable.dispose()
     }
-  }, [api, source])
+  }, [api, modules, root])
 
   const addPane = useCallback(
     (viewId: string) => {
@@ -361,6 +467,10 @@ export function Workbench() {
     <div className={shell.workbench}>
       <div className={shell.toolbar}>
         <h1 className={shell.toolbarTitle}>Compiler workbench</h1>
+
+        <button type="button" className={shell.toggle} onClick={() => setPaletteOpen(true)}>
+          Presets… <kbd className={shell.kbd}>⌘P</kbd>
+        </button>
 
         <label className="sr-only" htmlFor="add-pane">
           Add a pane
@@ -430,6 +540,12 @@ export function Workbench() {
           <DockviewReact components={components} onReady={onReady} />
         </div>
       </div>
+
+      <PresetPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onPick={loadPreset}
+      />
     </div>
   )
 }

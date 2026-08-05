@@ -139,6 +139,88 @@
   padding: 0.6rem 0.75rem;
 }
 
+.kbd {
+  margin-left: 0.3rem;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.25rem;
+  padding: 0 0.22rem;
+  font-size: 0.62rem;
+}
+
+/* One tab per module of the compilation request. */
+.moduleBar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-fd-border);
+  padding: 0.3rem 0.5rem;
+}
+
+.moduleTab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+}
+
+.moduleTab button {
+  border: 0;
+  background: transparent;
+  padding: 0.15rem 0.4rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.moduleTab[data-active='true'] {
+  border-color: color-mix(in srgb, var(--color-fd-primary) 45%, transparent);
+  background: color-mix(in srgb, var(--color-fd-primary) 12%, transparent);
+}
+
+.moduleTab[data-active='true'] button {
+  color: var(--color-fd-foreground);
+}
+
+/* Marks the module the compilation request is rooted at. */
+.rootDot {
+  display: inline-block;
+  width: 0.32rem;
+  height: 0.32rem;
+  margin-left: 0.3rem;
+  border-radius: 50%;
+  background: var(--color-fd-primary);
+  vertical-align: middle;
+}
+
+.moduleClose {
+  opacity: 0.55;
+  padding: 0 0.25rem 0 0 !important;
+}
+
+.moduleClose:hover {
+  opacity: 1;
+}
+
+.moduleAdd {
+  flex: none;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.35rem;
+  background: transparent;
+  padding: 0.1rem 0.4rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.moduleAdd:hover {
+  border-color: color-mix(in srgb, var(--color-fd-primary) 45%, var(--color-fd-border));
+  color: var(--color-fd-foreground);
+}
+
 .sourcePane .editorFill {
   min-height: 0;
   flex: 1;

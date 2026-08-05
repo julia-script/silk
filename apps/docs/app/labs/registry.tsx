@@ -41,7 +41,10 @@ export type ViewId =
 /** Everything a view needs to render. Built once per source edit and shared by every pane. */
 export interface ViewContext {
   readonly snapshot: Analysis.Snapshot
-  readonly source: string
+  /** Every module of the compilation request, keyed by module name. */
+  readonly modules: Readonly<Record<string, string>>
+  /** Which module the request is rooted at — the entry the driver starts from. */
+  readonly root: string
   readonly mode: 'release' | 'debug'
   readonly profile: ToolchainPlan.OptimizationProfile
   /**
@@ -108,8 +111,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     id: 'mir',
     title: 'MIR control flow',
     phase: 'lowering',
-    render: ({ snapshot, source }) => (
-      <CfgView module={Analysis.loweredMir(snapshot)} source={source} />
+    // Provenance is rendered by slicing spans out of the text, and those spans are byte offsets
+    // into one module — the root, which is what lowering starts from.
+    render: ({ snapshot, modules, root }) => (
+      <CfgView module={Analysis.loweredMir(snapshot)} source={modules[root]} />
     ),
   },
   {
