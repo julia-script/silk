@@ -288,6 +288,12 @@ const visit = (element) => {
 visit(parse.root);
 const analysis = api.SemanticAnalysis.analyze(parse);
 const deepAnalysis = semanticModule.analyze(parse);
+const call = analysis.functions[1]?.returnedExpression;
+const unknownSource = api.SourceFile.make(
+  'memory://packed-unknown.silk',
+  new TextEncoder().encode('pub fn main() -> I32 { return missing() }'),
+);
+const unknownAnalysis = semanticModule.analyze(api.Parser.parse(api.Lexer.lex(unknownSource)));
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -306,7 +312,12 @@ console.log(
       names,
       ordinals: analysis.functions.map((fact) => fact.declaration.id.ordinal),
       returnedExpressionTags: analysis.functions.map((fact) => fact.returnedExpression._tag),
-      callReference: analysis.functions[1]?.returnedExpression.reference._tag,
+      callReference: call?.reference._tag,
+      callType: call?.type,
+      callTargetOrdinal:
+        call?.reference._tag === 'Resolved' ? call.reference.declaration.id.ordinal : null,
+      callCompatibility: analysis.functions[1]?.returnCompatibility._tag,
+      unknownDiagnosticCodes: unknownAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
       rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'answer')._tag,
       deepLookup: semanticModule.declarationByName(deepAnalysis, 'missing')._tag,
       legacyResultFields: ['declaration', 'integerExpression', 'returnCompatibility'].filter(
@@ -349,6 +360,7 @@ console.log(
     expect(api.deep['./Parser']).toContain('parse')
     expect(api.deep['./SemanticAnalysis']).toContain('analyze')
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownType')
+    expect(api.deep['./SemanticDiagnostic']).toContain('unknownFunction')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.functionCount).toBe(2)
@@ -357,7 +369,11 @@ console.log(
       names: ['answer', 'main'],
       ordinals: [0, 1],
       returnedExpressionTags: ['Integer', 'Call'],
-      callReference: 'Unresolved',
+      callReference: 'Resolved',
+      callType: { _tag: 'Available', type: 'I32' },
+      callTargetOrdinal: 0,
+      callCompatibility: 'Compatible',
+      unknownDiagnosticCodes: ['SEM0004'],
       rootLookup: 'Resolved',
       deepLookup: 'Missing',
       legacyResultFields: [],

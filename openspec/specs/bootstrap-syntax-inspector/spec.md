@@ -88,13 +88,31 @@ the ambiguous lookup state and its semantic diagnostic.
 
 ### Requirement: Inspect the first call expression
 The Syntax Inspector SHALL provide valid-call, missing-call-syntax, and unsupported-argument presets.
-It SHALL show the call's concrete subtree, exact token slices and spans, unresolved semantic fact,
-unavailable compatibility, and separate parser and semantic diagnostic collections.
+It SHALL show the call's concrete subtree, exact token slices and spans, reference and type facts,
+return compatibility, and separate parser and semantic diagnostic collections.
 
-#### Scenario: Inspect a valid unresolved call
+#### Scenario: Inspect valid call syntax
 - **WHEN** a developer selects the valid-call preset
-- **THEN** the concrete view shows `answer()` as a call expression and the semantic view labels its callee unresolved without displaying an unknown-name diagnostic
+- **THEN** the concrete view shows `answer()` as a call expression and the semantic view preserves its exact call-site facts
 
 #### Scenario: Inspect damaged call syntax
 - **WHEN** a developer selects a missing-parenthesis or unsupported-argument preset
 - **THEN** explicit missing or error syntax stays visible beside the unavailable call facts and parser-owned diagnostics
+
+### Requirement: Inspect the first resolved call relationship
+The Syntax Inspector SHALL visualize each present call as a directed caller-to-target relationship
+when uniquely resolved and as missing, ambiguous, or syntax-unavailable otherwise. The relationship
+view SHALL keep caller, call-site, and target declaration spans available and SHALL remain beside the
+concrete tree, function facts, and phase-separated diagnostics.
+
+#### Scenario: Inspect a resolved call edge
+- **WHEN** a developer selects the two-function resolved-call preset
+- **THEN** the semantic view shows `main → answer`, the target declaration identity, an `I32` call type, and compatible caller return
+
+#### Scenario: Inspect an unknown call target
+- **WHEN** a developer selects the unknown-call preset
+- **THEN** the relationship is shown as missing, compatibility is unavailable, and `SEM0004` identifies the call-site name
+
+#### Scenario: Inspect an ambiguous call target
+- **WHEN** a developer selects the ambiguous-call preset
+- **THEN** the relationship shows every matching declaration without choosing one and the existing duplicate-name diagnostics remain visible

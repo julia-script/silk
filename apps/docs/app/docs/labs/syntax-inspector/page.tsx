@@ -5,7 +5,7 @@ import { SyntaxInspector } from './syntax-inspector'
 export const metadata: Metadata = {
   title: 'Syntax Inspector',
   description:
-    'An internal lab for inspecting Silk concrete trees, call syntax, and ordered function facts.',
+    'An internal lab for inspecting Silk concrete trees, call resolution, and ordered function facts.',
   robots: {
     index: false,
     follow: false,
@@ -31,10 +31,10 @@ export default function SyntaxInspectorPage() {
         </h1>
         <p className="text-base leading-7 text-fd-muted-foreground">
           Edit one or more bootstrap functions and inspect their lossless concrete syntax tree
-          alongside ordered semantic facts, declaration lookup, and unresolved call references.
+          alongside ordered semantic facts, declaration lookup, and resolved call relationships.
           Every token stays attached to its original UTF-8 byte span; recovery appears as explicit
-          error nodes and missing leaves. This is not yet name resolution, a semantic AST, HIR, or a
-          code-generation pipeline.
+          error nodes and missing leaves. These relationships are not execution, a general scope
+          graph, semantic AST, HIR, or a code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />

@@ -30,5 +30,20 @@ pub fn same() -> I32 { return 2147483648 }`
 export const validCallSource = `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return answer() }`
 export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
-export const missingCallRightParenthesisSource = 'pub fn main() -> I32 { return answer( }'
-export const unsupportedCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
+export const missingCallRightParenthesisSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer( }`
+export const unsupportedCallArgumentSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer(42) }`
+export const forwardCallSource = `pub fn main() -> I32 { return answer() }
+pub fn answer() -> I32 { return 42 }`
+export const selfCallSource = 'pub fn main() -> I32 { return main() }'
+export const unknownCallSource = 'pub fn main() -> I32 { return missing() }'
+export const ambiguousCallSource = `pub fn same() -> I32 { return 1 }
+pub fn same() -> I32 { return 2 }
+pub fn main() -> I32 { return same() }`
+export const unresolvedTargetTypeCallSource = `pub fn answer() -> Mystery { return 42 }
+pub fn main() -> I32 { return answer() }`
+export const damagedTargetBodyCallSource = `pub fn answer() -> I32 { return 2147483648 }
+pub fn main() -> I32 { return answer() }`
+export const mixedResolutionDamageSource = `pub fn same() -> Mystery { return 2147483648 }
+pub fn same() -> I32 { return missing() }`

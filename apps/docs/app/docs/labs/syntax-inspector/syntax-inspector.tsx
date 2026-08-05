@@ -21,13 +21,34 @@ pub fn two() -> I32 { return 2 }
 pub fn three() -> I32 { return 3 }`,
   },
   {
-    label: 'Valid call',
+    label: 'Resolved backward',
     source: `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return answer() }`,
   },
+  {
+    label: 'Resolved forward',
+    source: `pub fn main() -> I32 { return answer() }
+pub fn answer() -> I32 { return 42 }`,
+  },
+  { label: 'Self call', source: 'pub fn main() -> I32 { return main() }' },
+  { label: 'Unknown call', source: 'pub fn main() -> I32 { return missing() }' },
+  {
+    label: 'Ambiguous call',
+    source: `pub fn same() -> I32 { return 1 }
+pub fn same() -> I32 { return 2 }
+pub fn main() -> I32 { return same() }`,
+  },
   { label: 'Missing callee', source: 'pub fn main() -> I32 { return () }' },
-  { label: 'Missing call )', source: 'pub fn main() -> I32 { return answer( }' },
-  { label: 'Unsupported argument', source: 'pub fn main() -> I32 { return answer(42) }' },
+  {
+    label: 'Missing call )',
+    source: `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer( }`,
+  },
+  {
+    label: 'Unsupported argument',
+    source: `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer(42) }`,
+  },
   {
     label: 'Missing name',
     source: `pub fn answer() -> I32 { return 42 }
@@ -154,6 +175,97 @@ function DiagnosticList({
   )
 }
 
+type CallReturnedExpression = Extract<
+  SemanticAnalysis.ReturnedExpressionFact,
+  { readonly _tag: 'Call' }
+>
+
+const declarationLabel = (declaration: SemanticAnalysis.DeclarationFact): string =>
+  declaration.name._tag === 'Present' ? declaration.name.spelling : 'Unavailable name'
+
+function CallRelationship({
+  caller,
+  returned,
+}: {
+  readonly caller: SemanticAnalysis.DeclarationFact
+  readonly returned: CallReturnedExpression
+}) {
+  const reference = returned.reference
+  const callerName = declarationLabel(caller)
+  const calleeName = reference._tag === 'Unavailable' ? 'Unavailable callee' : reference.spelling
+  const targetName =
+    reference._tag === 'Resolved' ? declarationLabel(reference.declaration) : calleeName
+
+  return (
+    <section
+      className={styles.callRelationship}
+      aria-label={`Call relationship from ${callerName} to ${targetName}`}
+    >
+      <div className={styles.relationshipHeading}>
+        <span>Semantic resolution</span>
+        <strong>
+          {callerName} <i aria-hidden="true">→</i> {targetName}
+        </strong>
+        <code>{reference._tag}</code>
+      </div>
+      <dl className={styles.relationshipFacts}>
+        <div>
+          <dt>Caller</dt>
+          <dd>
+            <code>#{caller.id.ordinal}</code>
+            <span>{spanLabel(caller.syntax)}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Call site</dt>
+          <dd>
+            <code>{calleeName}</code>
+            <span>
+              {reference._tag === 'Unavailable'
+                ? spanLabel(reference.syntax)
+                : spanLabel(reference.token)}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Call type</dt>
+          <dd>
+            <code>{returned.type._tag === 'Available' ? returned.type.type : 'Unavailable'}</code>
+            <span>{returned.type._tag}</span>
+          </dd>
+        </div>
+      </dl>
+      {reference._tag === 'Resolved' ? (
+        <div className={styles.relationshipTargets}>
+          <span>Target declaration</span>
+          <code>
+            #{reference.declaration.id.ordinal} · {spanLabel(reference.declaration.syntax)}
+          </code>
+        </div>
+      ) : reference._tag === 'Ambiguous' ? (
+        <div className={styles.relationshipTargets}>
+          <span>{reference.declarations.length} matching declarations</span>
+          <ul>
+            {reference.declarations.map((declaration) => (
+              <li key={`${declaration.id.sourceId}-${declaration.id.ordinal}`}>
+                <code>
+                  #{declaration.id.ordinal} · {spanLabel(declaration.syntax)}
+                </code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className={styles.relationshipNotice}>
+          {reference._tag === 'Missing'
+            ? 'No top-level declaration matches this call.'
+            : 'Parser recovery did not provide a usable callee.'}
+        </p>
+      )}
+    </section>
+  )
+}
+
 function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Result }) {
   const presentNames = Array.from(
     new Set(
@@ -219,6 +331,10 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                 <code>{spanLabel(declaration.syntax)}</code>
               </div>
 
+              {returned._tag === 'Call' ? (
+                <CallRelationship caller={declaration} returned={returned} />
+              ) : null}
+
               <dl className={styles.factGrid}>
                 <div>
                   <dt>Declaration</dt>
@@ -269,14 +385,17 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                   ) : (
                     <dd>
                       <strong>
-                        {returned.reference._tag === 'Unresolved'
+                        {returned.reference._tag !== 'Unavailable'
                           ? `${returned.reference.spelling}()`
                           : 'Unavailable call'}
                       </strong>
-                      <span>Call · {returned.reference._tag}</span>
+                      <span>
+                        Call · {returned.reference._tag} ·{' '}
+                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                      </span>
                       <small>
                         call {spanLabel(returned.syntax)}
-                        {returned.reference._tag === 'Unresolved'
+                        {returned.reference._tag !== 'Unavailable'
                           ? ` · callee ${spanLabel(returned.reference.token)}`
                           : ` · missing ${spanLabel(returned.reference.syntax)}`}
                       </small>
@@ -297,9 +416,8 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
       </div>
 
       <p className={styles.boundaryNote}>
-        Ordered facts over every concrete function branch. Call syntax is collected, but references
-        are intentionally unresolved; scope graphs, semantic AST, HIR, and code generation do not
-        exist yet.
+        These arrows record top-level name resolution, not execution order. Recursion policy, scope
+        graphs, semantic AST, HIR, and code generation do not exist yet.
       </p>
     </section>
   )

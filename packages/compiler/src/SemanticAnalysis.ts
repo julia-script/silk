@@ -69,17 +69,34 @@ export type IntegerExpressionFact =
       readonly syntax: SyntaxTree.Element
     }
 
-/** A call callee awaiting resolution or unavailable because syntax recovery inserted it. */
+/** A call callee resolved against top-level declarations or unavailable after syntax recovery. */
 export type CallReferenceFact =
   | {
-      readonly _tag: 'Unresolved'
+      readonly _tag: 'Resolved'
       readonly spelling: string
       readonly token: Token.Token
+      readonly declaration: DeclarationFact
+    }
+  | {
+      readonly _tag: 'Missing'
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly declarations: ReadonlyArray<DeclarationFact>
     }
   | {
       readonly _tag: 'Unavailable'
       readonly syntax: SyntaxTree.Element
     }
+
+/** The available or unavailable type of one returned expression. */
+export type ExpressionTypeFact =
+  | { readonly _tag: 'Available'; readonly type: SemanticType }
+  | { readonly _tag: 'Unavailable' }
 
 /** One returned integer or zero-argument call with exact concrete provenance. */
 export type ReturnedExpressionFact =
@@ -91,6 +108,7 @@ export type ReturnedExpressionFact =
   | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
+      readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
 
@@ -144,6 +162,11 @@ export interface Result {
 const i32Maximum = 2147483647
 const compatible: ReturnCompatibility = Object.freeze({ _tag: 'Compatible' })
 const unavailableCompatibility: ReturnCompatibility = Object.freeze({ _tag: 'Unavailable' })
+const availableI32ExpressionType: ExpressionTypeFact = Object.freeze({
+  _tag: 'Available',
+  type: 'I32',
+})
+const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
 
 const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
   const child = parent.children.find(
@@ -311,6 +334,7 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
 const analyzeReturnedExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
 ): ReturnedExpressionResult => {
   if (node.kind === 'IntegerLiteralExpression') {
     const integer = analyzeInteger(source, node)
@@ -326,25 +350,68 @@ const analyzeReturnedExpression = (
   }
 
   const token = directToken(node, 'Identifier')
-  const reference: CallReferenceFact =
-    token === undefined
-      ? Object.freeze({
+  if (token === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Call',
+        reference: Object.freeze({
           _tag: 'Unavailable',
           syntax: unavailableSyntax(node, 'Identifier'),
-        })
-      : Object.freeze({
-          _tag: 'Unresolved',
-          spelling: spelling(source, token),
+        }),
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+      type: undefined,
+    })
+  }
+
+  const tokenSpelling = spelling(source, token)
+  const lookup = lookupDeclaration(declarations, tokenSpelling)
+  const reference: CallReferenceFact =
+    lookup._tag === 'Resolved'
+      ? Object.freeze({
+          _tag: 'Resolved',
+          spelling: tokenSpelling,
           token,
+          declaration: lookup.declaration,
         })
+      : lookup._tag === 'Ambiguous'
+        ? Object.freeze({
+            _tag: 'Ambiguous',
+            spelling: tokenSpelling,
+            token,
+            declarations: lookup.declarations,
+          })
+        : Object.freeze({
+            _tag: 'Missing',
+            spelling: tokenSpelling,
+            token,
+          })
+  const syntaxAvailable = node.children.every(
+    (element) =>
+      !SyntaxTree.isMissingToken(element) &&
+      !(SyntaxTree.isNode(element) && element.kind === 'Error'),
+  )
+  const expressionType =
+    syntaxAvailable &&
+    reference._tag === 'Resolved' &&
+    reference.declaration.returnType._tag === 'Resolved'
+      ? availableI32ExpressionType
+      : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      type: expressionType,
       syntax: node,
     }),
-    diagnostics: Object.freeze([]),
-    type: undefined,
+    diagnostics: Object.freeze(
+      reference._tag === 'Missing'
+        ? [SemanticDiagnostic.unknownFunction(reference.spelling, reference.token.span)]
+        : [],
+    ),
+    type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
 }
 
@@ -373,17 +440,19 @@ interface FunctionAnalysis {
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
-const analyzeFunction = (
+interface DeclarationHeader {
+  readonly node: SyntaxTree.Node
+  readonly declaration: DeclarationFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+}
+
+const analyzeDeclarationHeader = (
   source: SourceFile.SourceFile,
   functionNode: SyntaxTree.Node,
   ordinal: number,
-): FunctionAnalysis => {
+): DeclarationHeader => {
   const returnTypeNode = childNode(functionNode, 'ReturnType')
-  const blockNode = childNode(functionNode, 'Block')
-  const returnStatementNode = childNode(blockNode, 'ReturnStatement')
-  const expressionNode = returnedExpressionNode(returnStatementNode)
   const returnType = analyzeReturnType(source, returnTypeNode)
-  const expression = analyzeReturnedExpression(source, expressionNode)
   const declaration: DeclarationFact = Object.freeze({
     _tag: 'FunctionDeclaration',
     id: Object.freeze({
@@ -397,19 +466,37 @@ const analyzeFunction = (
     returnType: returnType.fact,
     syntax: functionNode,
   })
+
+  return Object.freeze({
+    node: functionNode,
+    declaration,
+    diagnostics: returnType.diagnostics,
+  })
+}
+
+const analyzeFunctionBody = (
+  source: SourceFile.SourceFile,
+  header: DeclarationHeader,
+  declarations: ReadonlyArray<DeclarationFact>,
+): FunctionAnalysis => {
+  const blockNode = childNode(header.node, 'Block')
+  const returnStatementNode = childNode(blockNode, 'ReturnStatement')
+  const expressionNode = returnedExpressionNode(returnStatementNode)
+  const expression = analyzeReturnedExpression(source, expressionNode, declarations)
   const returnCompatibility =
-    returnType.fact._tag === 'Resolved' && expression.type === returnType.fact.type
+    header.declaration.returnType._tag === 'Resolved' &&
+    expression.type === header.declaration.returnType.type
       ? compatible
       : unavailableCompatibility
 
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FunctionFact',
-      declaration,
+      declaration: header.declaration,
       returnedExpression: expression.fact,
       returnCompatibility,
     }),
-    diagnostics: Object.freeze([...returnType.diagnostics, ...expression.diagnostics]),
+    diagnostics: Object.freeze([...header.diagnostics, ...expression.diagnostics]),
   })
 }
 
@@ -420,17 +507,17 @@ interface PresentNameEntry {
 }
 
 const presentNameEntries = (
-  functions: ReadonlyArray<FunctionFact>,
+  declarations: ReadonlyArray<DeclarationFact>,
 ): ReadonlyArray<PresentNameEntry> =>
   Object.freeze(
-    functions.flatMap((fact): ReadonlyArray<PresentNameEntry> => {
-      const name = fact.declaration.name
+    declarations.flatMap((declaration): ReadonlyArray<PresentNameEntry> => {
+      const name = declaration.name
       return name._tag === 'Present'
         ? [
             Object.freeze({
               spelling: name.spelling,
               token: name.token,
-              declaration: fact.declaration,
+              declaration,
             }),
           ]
         : []
@@ -462,16 +549,38 @@ const duplicateNameDiagnostics = (
   return diagnostics
 }
 
-/** Analyzes every direct bootstrap function into ordered immutable semantic facts. */
+const lookupDeclaration = (
+  declarations: ReadonlyArray<DeclarationFact>,
+  spelling: string,
+): DeclarationLookup => {
+  const matches = presentNameEntries(declarations)
+    .filter((entry) => entry.spelling === spelling)
+    .map((entry) => entry.declaration)
+  const first = matches.at(0)
+
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling })
+  if (matches.length === 1) {
+    return Object.freeze({ _tag: 'Resolved', spelling, declaration: first })
+  }
+  return Object.freeze({
+    _tag: 'Ambiguous',
+    spelling,
+    declarations: Object.freeze(matches),
+  })
+}
+
+/** Collects every declaration before resolving returned expressions into immutable facts. */
 export const analyze = (parse: Parser.ParseResult): Result => {
   const source = parse.lexical.source
-  const analyzed = directChildNodes(parse.root, 'FunctionDeclaration').map((node, ordinal) =>
-    analyzeFunction(source, node, ordinal),
+  const headers = directChildNodes(parse.root, 'FunctionDeclaration').map((node, ordinal) =>
+    analyzeDeclarationHeader(source, node, ordinal),
   )
+  const declarations = Object.freeze(headers.map((header) => header.declaration))
+  const analyzed = headers.map((header) => analyzeFunctionBody(source, header, declarations))
   const functions = Object.freeze(analyzed.map((result) => result.fact))
   const diagnostics = [
     ...analyzed.flatMap((result) => result.diagnostics),
-    ...duplicateNameDiagnostics(presentNameEntries(functions)),
+    ...duplicateNameDiagnostics(presentNameEntries(declarations)),
   ].sort(compareDiagnostics)
 
   return Object.freeze({
@@ -486,19 +595,9 @@ export const analyze = (parse: Parser.ParseResult): Result => {
 export const declarationByName = dual<
   (spelling: string) => (self: Result) => DeclarationLookup,
   (self: Result, spelling: string) => DeclarationLookup
->(2, (self, spelling) => {
-  const declarations = presentNameEntries(self.functions)
-    .filter((entry) => entry.spelling === spelling)
-    .map((entry) => entry.declaration)
-  const first = declarations.at(0)
-
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling })
-  if (declarations.length === 1) {
-    return Object.freeze({ _tag: 'Resolved', spelling, declaration: first })
-  }
-  return Object.freeze({
-    _tag: 'Ambiguous',
+>(2, (self, spelling) =>
+  lookupDeclaration(
+    self.functions.map((fact) => fact.declaration),
     spelling,
-    declarations: Object.freeze(declarations),
-  })
-})
+  ),
+)

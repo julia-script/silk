@@ -75,17 +75,31 @@ literal span. Analysis MUST NOT lose precision because of the host numeric repre
 
 ### Requirement: First return compatibility fact
 Every function fact SHALL publish return compatibility as `Compatible` only when that function's
-declared return type and returned expression type are both available and equal. It SHALL publish
-`Unavailable` when either input is unresolved, missing, or invalid and MUST NOT let one function's
-facts determine another function's compatibility.
+declared return type and returned expression type are both available and equal. An integer expression
+uses its existing `I32` type. A uniquely resolved call expression SHALL use its target declaration's
+resolved return type even for forward or self references. Compatibility SHALL be `Unavailable` when
+the caller type, expression type, or call target is unresolved, missing, ambiguous, or invalid, and
+one function's compatibility MUST NOT overwrite another function's facts.
 
-#### Scenario: Check two compatible returns
-- **WHEN** two functions declare `I32` and return available `I32` integers
-- **THEN** each function independently reports `Compatible`
+#### Scenario: Check an integer return
+- **WHEN** a function declares `I32` and returns an available `I32` integer
+- **THEN** that function reports `Compatible`
 
-#### Scenario: Withhold only damaged compatibility
-- **WHEN** one function's declared return type is unresolved and another function is valid
-- **THEN** the damaged function reports `Unavailable` and the valid function remains `Compatible`
+#### Scenario: Check a resolved call return
+- **WHEN** `answer` declares `I32` and `main` declares `I32` and returns a uniquely resolved call to `answer`
+- **THEN** the call expression has type `I32` and `main` reports `Compatible`
+
+#### Scenario: Withhold compatibility for an unknown call
+- **WHEN** a function returns a call whose reference is missing
+- **THEN** the call expression type and caller return compatibility are `Unavailable`
+
+#### Scenario: Withhold compatibility for an ambiguous call
+- **WHEN** a function returns a call whose reference is ambiguous
+- **THEN** the call expression type and caller return compatibility are `Unavailable` without selecting a declaration
+
+#### Scenario: Withhold compatibility for an unresolved callee type
+- **WHEN** a call resolves uniquely to a declaration whose return type is unresolved or unavailable
+- **THEN** the call reference remains resolved but its expression type and caller return compatibility are `Unavailable`
 
 ### Requirement: Semantic diagnostics are deterministic data
 The semantic result SHALL expose semantic diagnostics as a separate readonly collection while
@@ -108,21 +122,44 @@ Effect.
 - **WHEN** three declarations share the same present name
 - **THEN** the second and third names each produce one `SEM0003` diagnostic while the first remains the original declaration
 
-### Requirement: Unresolved call expression fact
-For every concrete call return expression, semantic analysis SHALL publish a call fact containing a
-present or unavailable callee-name state and exact call/callee syntax provenance. A present callee
-SHALL remain explicitly `Unresolved` in this syntax change, SHALL produce no unknown-name semantic
-diagnostic, and SHALL make the caller's return compatibility `Unavailable`. Missing or damaged call
-syntax SHALL remain unavailable without duplicating parser diagnostics.
+### Requirement: First top-level call reference fact
+Semantic analysis SHALL resolve every present zero-argument call callee against all collected
+top-level declarations without depending on declaration order. A call-reference fact SHALL be
+`Resolved` with the exact target declaration identity and callee syntax when exactly one declaration
+matches, `Missing` when none matches, `Ambiguous` when multiple declarations match, or unavailable
+when parser recovery did not supply a usable callee. Forward and self references SHALL resolve by
+the same rules because this phase records relationships and does not execute functions.
 
-#### Scenario: Preserve a present unresolved call
-- **WHEN** `main` returns the concrete call `answer()`
-- **THEN** its returned-expression fact preserves the spelling and provenance of `answer`, marks the reference unresolved, reports unavailable compatibility, and emits no semantic diagnostic for the callee
+#### Scenario: Resolve a call to an earlier declaration
+- **WHEN** `answer` is declared before `main` and `main` returns `answer()`
+- **THEN** the call reference resolves to `answer`'s exact declaration identity and preserves the call-site identifier span
 
-#### Scenario: Preserve a damaged call without semantic duplication
-- **WHEN** parser recovery inserts the call's callee or a parenthesis
-- **THEN** the call fact preserves unavailable syntax, return compatibility is unavailable, and parser diagnostics remain the only diagnostics for the missing syntax
+#### Scenario: Resolve a forward call
+- **WHEN** `main` returns `answer()` and `answer` is declared later in the same source
+- **THEN** the call resolves to the later declaration independently of source ordering
 
-#### Scenario: Keep integer facts available beside calls
-- **WHEN** one function returns `42` and another returns `answer()`
-- **THEN** the first function retains its exact available integer and compatibility facts while the call fact remains unresolved
+#### Scenario: Resolve a self reference as data
+- **WHEN** a function returns a call to its own unique name
+- **THEN** the reference resolves to that declaration without evaluating the call or deciding recursion policy
+
+#### Scenario: Preserve an ambiguous target
+- **WHEN** a call name matches multiple duplicate declarations
+- **THEN** the call reference is ambiguous, exposes all matching declaration identities in source order, and does not select one target
+
+### Requirement: Unknown call target diagnostic
+A present call name with no matching declaration SHALL produce one `SEM0004` semantic diagnostic at
+the callee identifier span and retain a `Missing` reference fact. An ambiguous call SHALL rely on the
+existing `SEM0003` duplicate-declaration diagnostics and MUST NOT add a second ambiguity diagnostic
+at the call site. Missing or damaged callee syntax SHALL not duplicate parser diagnostics.
+
+#### Scenario: Diagnose an unknown function
+- **WHEN** `main` returns `missing()` and no declaration is named `missing`
+- **THEN** the call reference is missing and one `SEM0004` diagnostic identifies the exact `missing` span
+
+#### Scenario: Avoid duplicate ambiguity diagnostics
+- **WHEN** a call targets a name already diagnosed as duplicated
+- **THEN** the call remains ambiguous and the semantic collection contains the declaration-owned `SEM0003` diagnostics without an additional call-site ambiguity diagnostic
+
+#### Scenario: Preserve parser ownership for a missing callee
+- **WHEN** parser recovery inserts the call's identifier
+- **THEN** the call reference is unavailable and no `SEM0004` diagnostic is emitted

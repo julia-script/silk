@@ -21,7 +21,7 @@ console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // t
 console.log(result.functions.length) // 2
 console.log(result.functions[0]?.declaration.name) // { _tag: 'Present', spelling: 'answer', ... }
 console.log(result.functions[0]?.returnedExpression) // { _tag: 'Integer', integer: { value: 42, ... }, ... }
-console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', reference: { _tag: 'Unresolved', ... }, ... }
+console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', reference: { _tag: 'Resolved', ... }, type: { _tag: 'Available', type: 'I32' }, ... }
 console.log(SemanticAnalysis.declarationByName(result, 'main')) // { _tag: 'Resolved', ... }
 ```
 
@@ -58,7 +58,6 @@ ReturnExpression    → DecimalInteger | Identifier ( )
 
 The result is a concrete syntax tree (CST), not a semantic AST. Its nodes group the source into one
 or more direct function declarations in source order. Each declaration contains a parameter list,
-return type, block, return statement, and integer literal expression. Every lexer
 return type, block, return statement, and either an integer literal or zero-argument call
 expression. A call node directly retains its callee, empty parentheses, and trivia; unexpected
 tokens between the parentheses remain one error region rather than becoming arguments. Every lexer
@@ -92,16 +91,23 @@ function is analyzed independently. Missing or damaged syntax remains unavailabl
 parser diagnostics, so lexical, parser, and semantic diagnostics remain separate ordered
 collections.
 
-A present call callee is preserved with exact syntax provenance as `Unresolved`; resolution against
-the declaration collection belongs to the next compiler slice. Calls therefore have unavailable
-return compatibility and do not produce an unknown-name semantic diagnostic yet. A recovered
-missing callee remains explicitly unavailable, while an integer returned expression keeps its
-existing exact value and compatibility behavior.
+Analysis collects every declaration header before resolving calls, so backward, forward, and self
+references follow the same rule. A call reference is `Resolved`, `Missing`, `Ambiguous`, or
+syntax-unavailable and retains exact call-site and target provenance. Resolution never silently
+selects the first duplicate. A missing target produces `SEM0004`; an ambiguous target relies on the
+declaration-owned `SEM0003` diagnostics without adding a redundant call-site error.
+
+A uniquely resolved call uses its target declaration's resolved return type. That type is available
+even when the target body has its own compatibility error, because this phase records a declaration
+relationship rather than executing the function. Missing, ambiguous, syntax-damaged, or
+unresolved-target-type calls remain unavailable. Integer returned expressions keep their existing
+exact value and compatibility behavior.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
-compilation. Call syntax exists, but reference resolution and a general scope graph remain deferred.
-Those layers follow only after this narrow source-to-fact contract proves useful.
+compilation. Top-level call resolution exists, but execution, recursion policy, a general scope graph, and
+dependency scheduling remain deferred. Those layers follow only after this narrow source-to-fact
+contract proves useful.
 
 Token families deliberately deferred with those later grammar decisions include string and
 character literals, floating-point numbers, general operators, separators, attributes, and any

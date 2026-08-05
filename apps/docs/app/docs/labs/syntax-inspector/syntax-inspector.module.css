@@ -253,6 +253,122 @@
   font-size: 0.82rem;
 }
 
+.callRelationship {
+  margin: 0.65rem 0.65rem 0;
+  border: 1px solid color-mix(in srgb, var(--color-fd-primary) 35%, var(--color-fd-border));
+  border-radius: 0.72rem;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-fd-primary) 12%, transparent), transparent 55%),
+    color-mix(in srgb, var(--color-fd-background) 78%, var(--color-fd-card));
+  padding: 0.7rem;
+}
+
+.relationshipHeading {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.12rem 0.65rem;
+}
+
+.relationshipHeading > span {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.relationshipHeading > strong {
+  grid-column: 1;
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.84rem;
+}
+
+.relationshipHeading i {
+  color: var(--color-fd-primary);
+  font-style: normal;
+}
+
+.relationshipHeading > code {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-fd-primary) 13%, transparent);
+  padding: 0.23rem 0.45rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.6rem;
+}
+
+.relationshipFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.65rem 0 0;
+}
+
+.relationshipFacts > div {
+  min-width: 0;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-fd-background) 76%, transparent);
+  padding: 0.45rem 0.5rem;
+}
+
+.relationshipFacts dt,
+.relationshipTargets > span {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.59rem;
+}
+
+.relationshipFacts dd {
+  display: grid;
+  gap: 0.05rem;
+  margin: 0.18rem 0 0;
+}
+
+.relationshipFacts code,
+.relationshipFacts span,
+.relationshipTargets code {
+  overflow: hidden;
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relationshipFacts span {
+  color: var(--color-fd-muted-foreground);
+}
+
+.relationshipTargets {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+  border-top: 1px solid var(--color-fd-border);
+  padding-top: 0.5rem;
+}
+
+.relationshipTargets ul {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relationshipNotice {
+  margin: 0.55rem 0 0;
+  border-top: 1px solid var(--color-fd-border);
+  padding-top: 0.5rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.63rem;
+}
+
 .factGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -578,6 +694,19 @@
 
   .factGrid {
     grid-template-columns: 1fr;
+  }
+
+  .relationshipFacts {
+    grid-template-columns: 1fr;
+  }
+
+  .relationshipTargets {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .relationshipTargets ul {
+    justify-content: flex-start;
   }
 
   .functionCardHeading {

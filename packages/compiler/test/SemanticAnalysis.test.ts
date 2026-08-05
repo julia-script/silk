@@ -8,9 +8,12 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 import type * as Token from '../src/Token.js'
 import {
   acceptedSource,
+  ambiguousCallSource,
   beyondSafeIntegerSource,
+  damagedTargetBodyCallSource,
   damagedTypeSource,
   duplicateNameSource,
+  forwardCallSource,
   i32BoundarySource,
   missingCallCalleeSource,
   missingCallRightParenthesisSource,
@@ -18,12 +21,16 @@ import {
   missingNameSource,
   missingSecondNameSource,
   mixedFunctionDamageSource,
+  mixedResolutionDamageSource,
   overflowSource,
   parserAndSemanticDamageSource,
+  selfCallSource,
   threeFunctionSource,
   tripleDuplicateNameSource,
   twoFunctionSource,
+  unknownCallSource,
   unknownTypeSource,
+  unresolvedTargetTypeCallSource,
   unsupportedCallArgumentSource,
   validCallSource,
 } from './fixtures/BootstrapSemanticFixture.js'
@@ -50,6 +57,13 @@ const integerFact = (
   fact.returnedExpression._tag === 'Integer'
     ? fact.returnedExpression.integer
     : raise('expected an integer returned expression')
+
+const callFact = (
+  fact: SemanticAnalysis.FunctionFact,
+): Extract<SemanticAnalysis.ReturnedExpressionFact, { readonly _tag: 'Call' }> =>
+  fact.returnedExpression._tag === 'Call'
+    ? fact.returnedExpression
+    : raise('expected a call returned expression')
 
 const diagnosticView = (result: SemanticAnalysis.Result) =>
   result.diagnostics.map((diagnostic) => ({
@@ -149,27 +163,116 @@ it('collects two and three declarations with deterministic source-order identiti
   )
 })
 
-it('preserves an unresolved call beside an available integer without semantic errors', () => {
+it('resolves a call to an earlier declaration and propagates its type', () => {
   const result = analyzeText('fixture://valid-call.silk', validCallSource)
   const answer = functionAt(result, 0)
   const main = functionAt(result, 1)
-  const returned = main.returnedExpression
+  const returned = callFact(main)
 
   assert.strictEqual(answer.returnedExpression._tag, 'Integer')
   assert.strictEqual(integerFact(answer)._tag, 'Available')
   assert.deepEqual(answer.returnCompatibility, { _tag: 'Compatible' })
-  assert.strictEqual(returned._tag, 'Call')
-  if (returned._tag !== 'Call') return
   assert.strictEqual(returned.syntax.kind, 'CallExpression')
-  assert.strictEqual(returned.reference._tag, 'Unresolved')
-  if (returned.reference._tag !== 'Unresolved') return
+  assert.strictEqual(returned.reference._tag, 'Resolved')
+  if (returned.reference._tag !== 'Resolved') return
   assert.strictEqual(returned.reference.spelling, 'answer')
   assert.strictEqual(returned.reference.token, directToken(returned.syntax, 'Identifier'))
-  assert.deepEqual(main.returnCompatibility, { _tag: 'Unavailable' })
+  assert.strictEqual(returned.reference.declaration, answer.declaration)
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(result.diagnostics, [])
   assert.deepEqual(result.parse.diagnostics, [])
   assert.strictEqual(Object.isFrozen(returned), true)
   assert.strictEqual(Object.isFrozen(returned.reference), true)
+})
+
+it('resolves forward and self calls without evaluating them', () => {
+  const forward = analyzeText('fixture://forward-call.silk', forwardCallSource)
+  const self = analyzeText('fixture://self-call.silk', selfCallSource)
+  const forwardCall = callFact(functionAt(forward, 0))
+  const selfCall = callFact(functionAt(self, 0))
+
+  assert.strictEqual(forwardCall.reference._tag, 'Resolved')
+  assert.strictEqual(selfCall.reference._tag, 'Resolved')
+  if (forwardCall.reference._tag !== 'Resolved' || selfCall.reference._tag !== 'Resolved') return
+  assert.strictEqual(forwardCall.reference.declaration, functionAt(forward, 1).declaration)
+  assert.strictEqual(selfCall.reference.declaration, functionAt(self, 0).declaration)
+  assert.deepEqual(forwardCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(selfCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(functionAt(forward, 0).returnCompatibility, { _tag: 'Compatible' })
+  assert.deepEqual(functionAt(self, 0).returnCompatibility, { _tag: 'Compatible' })
+  assert.deepEqual(forward.diagnostics, [])
+  assert.deepEqual(self.diagnostics, [])
+})
+
+it('diagnoses an unknown call target at the exact callee span', () => {
+  const result = analyzeText('fixture://unknown-call.silk', unknownCallSource)
+  const fact = functionAt(result, 0)
+  const returned = callFact(fact)
+
+  assert.strictEqual(returned.reference._tag, 'Missing')
+  if (returned.reference._tag !== 'Missing') return
+  assert.strictEqual(returned.reference.spelling, 'missing')
+  assert.deepEqual(returned.type, { _tag: 'Unavailable' })
+  assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(diagnosticView(result), [
+    {
+      code: 'SEM0004',
+      start: returned.reference.token.span.start,
+      end: returned.reference.token.span.end,
+      reason: { _tag: 'UnknownFunction', spelling: 'missing' },
+    },
+  ])
+})
+
+it('preserves every ambiguous target without adding a call-site diagnostic', () => {
+  const result = analyzeText('fixture://ambiguous-call.silk', ambiguousCallSource)
+  const fact = functionAt(result, 2)
+  const returned = callFact(fact)
+
+  assert.strictEqual(returned.reference._tag, 'Ambiguous')
+  if (returned.reference._tag !== 'Ambiguous') return
+  assert.deepEqual(
+    returned.reference.declarations.map((declaration) => declaration.id.ordinal),
+    [0, 1],
+  )
+  assert.deepEqual(returned.type, { _tag: 'Unavailable' })
+  assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0003'],
+  )
+  assert.strictEqual(Object.isFrozen(returned.reference.declarations), true)
+})
+
+it('keeps target type resolution separate from target body compatibility', () => {
+  const unresolvedType = analyzeText(
+    'fixture://unresolved-target-type-call.silk',
+    unresolvedTargetTypeCallSource,
+  )
+  const damagedBody = analyzeText(
+    'fixture://damaged-target-body-call.silk',
+    damagedTargetBodyCallSource,
+  )
+  const unresolvedCall = callFact(functionAt(unresolvedType, 1))
+  const damagedBodyCall = callFact(functionAt(damagedBody, 1))
+
+  assert.strictEqual(unresolvedCall.reference._tag, 'Resolved')
+  assert.deepEqual(unresolvedCall.type, { _tag: 'Unavailable' })
+  assert.deepEqual(functionAt(unresolvedType, 1).returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(
+    unresolvedType.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0001'],
+  )
+
+  assert.strictEqual(damagedBodyCall.reference._tag, 'Resolved')
+  assert.deepEqual(damagedBodyCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(functionAt(damagedBody, 0).returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(functionAt(damagedBody, 1).returnCompatibility, { _tag: 'Compatible' })
+  assert.deepEqual(
+    damagedBody.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0002'],
+  )
 })
 
 it('keeps a recovered call callee unavailable and parser-owned', () => {
@@ -190,7 +293,7 @@ it('keeps a recovered call callee unavailable and parser-owned', () => {
   assert.deepEqual(result.diagnostics, [])
 })
 
-it('preserves present callees through damaged call punctuation without resolving them', () => {
+it('resolves present callees but withholds types through damaged call punctuation', () => {
   const missingParenthesis = analyzeText(
     'fixture://missing-call-right-parenthesis.silk',
     missingCallRightParenthesisSource,
@@ -201,13 +304,13 @@ it('preserves present callees through damaged call punctuation without resolving
   )
 
   for (const result of [missingParenthesis, unsupportedArgument]) {
-    const fact = functionAt(result, 0)
-    const returned = fact.returnedExpression
-    assert.strictEqual(returned._tag, 'Call')
-    if (returned._tag !== 'Call') continue
-    assert.strictEqual(returned.reference._tag, 'Unresolved')
-    if (returned.reference._tag !== 'Unresolved') continue
+    const fact = functionAt(result, 1)
+    const returned = callFact(fact)
+    assert.strictEqual(returned.reference._tag, 'Resolved')
+    if (returned.reference._tag !== 'Resolved') continue
     assert.strictEqual(returned.reference.spelling, 'answer')
+    assert.strictEqual(returned.reference.declaration, functionAt(result, 0).declaration)
+    assert.deepEqual(returned.type, { _tag: 'Unavailable' })
     assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
     assert.deepEqual(result.diagnostics, [])
   }
@@ -222,12 +325,22 @@ it('preserves present callees through damaged call punctuation without resolving
   )
 })
 
-it('publishes deterministic unresolved call facts across fresh analyses', () => {
-  const first = analyzeText('fixture://deterministic-call.silk', validCallSource)
-  const second = analyzeText('fixture://deterministic-call.silk', validCallSource)
+it('publishes deterministic resolved and damaged call facts across fresh analyses', () => {
+  const first = analyzeText('fixture://deterministic-call.silk', ambiguousCallSource)
+  const second = analyzeText('fixture://deterministic-call.silk', ambiguousCallSource)
 
   assert.deepEqual(first.functions, second.functions)
   assert.deepEqual(diagnosticView(first), diagnosticView(second))
+})
+
+it('orders type, integer, duplicate, and unknown-call diagnostics by source span', () => {
+  const result = analyzeText('fixture://mixed-resolution-damage.silk', mixedResolutionDamageSource)
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0001', 'SEM0002', 'SEM0003', 'SEM0004'],
+  )
+  assert.deepEqual(result.parse.diagnostics, [])
 })
 
 it('uses deterministic source-local identities across fresh results', () => {

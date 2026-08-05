@@ -9,6 +9,9 @@ export const integerOutOfRangeCode = 'SEM0002' as const
 /** Stable code for a present declaration name repeated after its first occurrence. */
 export const duplicateDeclarationNameCode = 'SEM0003' as const
 
+/** Stable code for a present call name with no matching top-level declaration. */
+export const unknownFunctionCode = 'SEM0004' as const
+
 /** Why semantic analysis produced a diagnostic. */
 export type Reason =
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
@@ -22,6 +25,7 @@ export type Reason =
       readonly spelling: string
       readonly originalSpan: SourceSpan.SourceSpan
     }
+  | { readonly _tag: 'UnknownFunction'; readonly spelling: string }
 
 /** A recoverable semantic problem attached to one exact source span. */
 export interface SemanticDiagnostic {
@@ -30,6 +34,7 @@ export interface SemanticDiagnostic {
     | typeof unknownTypeCode
     | typeof integerOutOfRangeCode
     | typeof duplicateDeclarationNameCode
+    | typeof unknownFunctionCode
   readonly severity: 'error'
   readonly message: string
   readonly reason: Reason
@@ -81,5 +86,19 @@ export const duplicateDeclarationName = (
       spelling,
       originalSpan,
     }),
+    span,
+  })
+
+/** Creates the diagnostic for one present call name with no matching declaration. */
+export const unknownFunction = (
+  spelling: string,
+  span: SourceSpan.SourceSpan,
+): SemanticDiagnostic =>
+  Object.freeze({
+    _tag: 'SemanticDiagnostic',
+    code: unknownFunctionCode,
+    severity: 'error',
+    message: `Unknown function ${spelling}`,
+    reason: Object.freeze({ _tag: 'UnknownFunction', spelling }),
     span,
   })
