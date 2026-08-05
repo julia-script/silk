@@ -1,4 +1,4 @@
-import { Lexer, Parser, SemanticAnalysis, SourceFile } from '@silk-effect/compiler'
+import { BootstrapEvaluation, Lexer, Parser, SemanticAnalysis, SourceFile } from '@silk-effect/compiler'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from './flow-model'
 
@@ -10,11 +10,20 @@ const analyze = (id: string, text: string): SemanticAnalysis.Result =>
 const identitySource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
 
+const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
+
+const siblingSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
+
 describe('projectDataFlow', () => {
-  it('projects the complete literal-to-parameter-to-reference-to-return path', () => {
+  it('projects the canonical flat semantic path without evaluation claims', () => {
     const flow = projectDataFlow(analyze('memory://flow-complete.silk', identitySource))
 
+    expect(flow.mode).toBe('Semantic')
     expect(flow.status).toBe('Complete')
+    expect(flow.groups).toHaveLength(1)
     expect(flow.nodes.map((item) => item.kind)).toEqual([
       'Argument',
       'Parameter',
@@ -22,78 +31,114 @@ describe('projectDataFlow', () => {
       'CallResult',
       'FunctionReturn',
     ])
-    expect(flow.nodes.map((item) => item.label)).toEqual([
-      'Argument #0: 42',
-      'identity.value',
-      'Returned reference: value',
-      'identity call result',
-      'main return',
-    ])
     expect(flow.edges.map((item) => item.label)).toEqual([
       'binds positionally to',
       'is read by',
       'produces',
       'is returned by',
     ])
-    expect(flow.nodes.every((item) => item.span.sourceId === 'memory://flow-complete.silk')).toBe(
-      true,
-    )
+    expect(flow.groups.every((item) => item.evaluation === undefined)).toBe(true)
+    expect(flow.nodes.every((item) => item.evaluation === undefined)).toBe(true)
   })
 
-  it('keeps partial pairs and stops a wrong-arity path before a call result', () => {
+  it('groups nested calls and connects the inner result to the outer argument', () => {
+    const flow = projectDataFlow(analyze('memory://flow-nested.silk', nestedSource))
+
+    expect(flow.status).toBe('Complete')
+    expect(flow.groups.map((group) => [group.depth, group.ordinal])).toEqual([
+      [0, 0],
+      [1, 0],
+    ])
+    expect(new Set(flow.groups.map((group) => group.id)).size).toBe(2)
+    expect(flow.edges.some((item) => item.label === 'supplies nested result to')).toBe(true)
+  })
+
+  it('keeps repeated sibling call sites distinct and source ordered', () => {
+    const analysis = analyze('memory://flow-siblings.silk', siblingSource)
+    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const flow = projectDataFlow(analysis, outcome)
+    const children = flow.groups.filter((group) => group.depth === 1)
+
+    expect(children.map((group) => group.ordinal)).toEqual([0, 1])
+    expect(new Set(children.map((group) => group.id)).size).toBe(2)
+    expect(children.map((group) => group.evaluation?.order)).toEqual([3, 7])
+    expect(flow.mode).toBe('Evaluated')
+    expect(flow.nodes.some((item) => item.evaluation?.value === 2)).toBe(true)
+  })
+
+  it('terminates an unavailable inner type contract without inventing an enclosing result', () => {
+    const flow = projectDataFlow(
+      analyze(
+        'memory://flow-missing.silk',
+        `pub fn identity(value: I32) -> I32 { return value }
+pub fn uncertain(value: Mystery) -> I32 { return 0 }
+pub fn main() -> I32 { return identity(uncertain(42)) }`,
+      ),
+    )
+
+    expect(flow.status).toBe('Incomplete')
+    expect(flow.groups).toHaveLength(2)
+    expect(flow.nodes.some((item) => item.label === 'Flow stops: Unavailable')).toBe(true)
+    expect(flow.nodes.some((item) => item.kind === 'FunctionReturn')).toBe(false)
+  })
+
+  it('keeps positional facts but stops a wrong-arity nested call before results', () => {
     const flow = projectDataFlow(
       analyze(
         'memory://flow-arity.silk',
-        `pub fn choose(left: I32, right: I32) -> I32 { return left }
-pub fn main() -> I32 { return choose(1) }`,
-      ),
-    )
-
-    expect(flow.status).toBe('Incomplete')
-    expect(flow.edges.some((item) => item.label === 'binds positionally to')).toBe(true)
-    expect(flow.nodes.some((item) => item.label === 'choose.right' && item.state === 'Unmatched')).toBe(
-      true,
-    )
-    expect(flow.nodes.some((item) => item.kind === 'CallResult')).toBe(false)
-    expect(flow.nodes.at(-1)?.label).toBe('Flow stops: ArityMismatch')
-  })
-
-  it('does not invent bindings for a missing call target', () => {
-    const flow = projectDataFlow(
-      analyze('memory://flow-missing.silk', 'pub fn main() -> I32 { return missing(42) }'),
-    )
-
-    expect(flow.status).toBe('Incomplete')
-    expect(flow.edges.some((item) => item.label === 'binds positionally to')).toBe(false)
-    expect(flow.nodes.some((item) => item.label === 'Flow stops: no unique target')).toBe(true)
-  })
-
-  it('branches to every ambiguous local parameter without selecting a result edge', () => {
-    const flow = projectDataFlow(
-      analyze(
-        'memory://flow-ambiguous.silk',
-        `pub fn choose(value: I32, value: I32) -> I32 { return value }
-pub fn main() -> I32 { return choose(1, 2) }`,
-      ),
-    )
-
-    expect(flow.status).toBe('Incomplete')
-    expect(flow.edges.filter((item) => item.state === 'Branched')).toHaveLength(2)
-    expect(flow.nodes.some((item) => item.kind === 'CallResult')).toBe(false)
-  })
-
-  it('stops at parser-owned damaged call syntax without inventing an argument', () => {
-    const flow = projectDataFlow(
-      analyze(
-        'memory://flow-damaged.silk',
         `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(@) }`,
+pub fn main() -> I32 { return identity(identity()) }`,
       ),
     )
 
     expect(flow.status).toBe('Incomplete')
-    expect(flow.nodes.some((item) => item.kind === 'Argument')).toBe(false)
-    expect(flow.nodes.at(-1)?.detail).toBe('UnavailableCallSyntax')
+    expect(flow.nodes.some((item) => item.label === 'Flow stops: ArityMismatch')).toBe(true)
+    expect(
+      flow.nodes.some(
+        (item) => item.kind === 'Parameter' && item.state === 'Unmatched',
+      ),
+    ).toBe(true)
+    expect(flow.nodes.some((item) => item.kind === 'FunctionReturn')).toBe(false)
+  })
+
+  it('overlays only the completed prefix when a later sibling blocks', () => {
+    const analysis = analyze(
+      'memory://flow-blocked.silk',
+      `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
+    )
+    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const flow = projectDataFlow(analysis, outcome)
+    const outer = flow.groups.find((group) => group.depth === 0)
+
+    expect(outcome._tag).toBe('Blocked')
+    expect(flow.nodes.some((item) => item.evaluation?.value === 1)).toBe(true)
+    expect(flow.nodes.some((item) => item.label === 'Evaluation stops: MissingCallTarget')).toBe(true)
+    expect(
+      flow.edges.some(
+        (item) => item.groupId === outer?.id && item.label === 'binds positionally to' && item.evaluation !== undefined,
+      ),
+    ).toBe(false)
+    expect(flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined)).toBe(false)
+  })
+
+  it('renders a recursive cycle as one finite trace-backed terminal', () => {
+    const analysis = analyze(
+      'memory://flow-cycle.silk',
+      `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(main()) }`,
+    )
+    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const flow = projectDataFlow(analysis, outcome)
+    const terminals = flow.nodes.filter(
+      (item) => item.layer === 'Evaluated' && item.kind === 'Terminal',
+    )
+
+    expect(outcome._tag).toBe('Blocked')
+    expect(terminals).toHaveLength(1)
+    expect(terminals.at(0)?.detail).toContain('main → main')
+    expect(flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined)).toBe(false)
   })
 
   it('recomputes deterministically from equivalent disposable analysis state', () => {

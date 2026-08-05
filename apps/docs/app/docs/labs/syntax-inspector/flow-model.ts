@@ -1,60 +1,103 @@
-import type { SemanticAnalysis, SourceSpan } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, SemanticAnalysis, SourceSpan } from '@silk-effect/compiler'
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
+export type FlowLayer = 'Semantic' | 'Evaluated'
 
 export type FlowNodeKind =
   | 'Argument'
   | 'Parameter'
   | 'Reference'
+  | 'ReturnedValue'
   | 'CallResult'
   | 'FunctionReturn'
   | 'Terminal'
 
+export interface FlowEvidence {
+  readonly order: number
+  readonly value?: number
+}
+
+export interface FlowGroup {
+  readonly _tag: 'FlowGroup'
+  readonly id: string
+  readonly label: string
+  readonly detail: string
+  readonly depth: number
+  readonly ordinal: number
+  readonly parentId: string | undefined
+  readonly state: FlowItemState
+  readonly span: SourceSpan.SourceSpan
+  readonly nodeIds: ReadonlyArray<string>
+  readonly edgeIds: ReadonlyArray<string>
+  readonly evaluation?: FlowEvidence
+}
+
 export interface FlowNode {
   readonly _tag: 'FlowNode'
   readonly id: string
+  readonly groupId: string
   readonly kind: FlowNodeKind
   readonly label: string
   readonly detail: string
+  readonly depth: number
+  readonly ordinal: number | undefined
+  readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
+  readonly evaluation?: FlowEvidence
 }
 
 export interface FlowEdge {
   readonly _tag: 'FlowEdge'
   readonly id: string
+  readonly groupId: string
   readonly from: string
   readonly to: string
   readonly label: string
+  readonly depth: number
+  readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
+  readonly evaluation?: FlowEvidence
 }
 
 export interface FlowModel {
   readonly _tag: 'FlowModel'
+  readonly mode: 'Semantic' | 'Evaluated'
   readonly status: 'Complete' | 'Incomplete' | 'Empty'
   readonly summary: string
+  readonly groups: ReadonlyArray<FlowGroup>
   readonly nodes: ReadonlyArray<FlowNode>
   readonly edges: ReadonlyArray<FlowEdge>
 }
 
-const node = (
-  id: string,
-  kind: FlowNodeKind,
-  label: string,
-  detail: string,
-  state: FlowItemState,
-  span: SourceSpan.SourceSpan,
-): FlowNode => Object.freeze({ _tag: 'FlowNode', id, kind, label, detail, state, span })
+type CallFact = Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
 
-const edge = (
-  id: string,
-  from: string,
-  to: string,
-  label: string,
-  state: FlowItemState,
-  span: SourceSpan.SourceSpan,
-): FlowEdge => Object.freeze({ _tag: 'FlowEdge', id, from, to, label, state, span })
+interface GroupDraft {
+  readonly id: string
+  readonly label: string
+  readonly detail: string
+  readonly depth: number
+  readonly ordinal: number
+  readonly parentId: string | undefined
+  readonly state: FlowItemState
+  readonly span: SourceSpan.SourceSpan
+  readonly nodeIds: Array<string>
+  readonly edgeIds: Array<string>
+  readonly target: SemanticAnalysis.DeclarationFact | undefined
+}
+
+interface ProjectionDraft {
+  readonly groups: Array<GroupDraft>
+  readonly nodes: Array<FlowNode>
+  readonly edges: Array<FlowEdge>
+}
+
+interface CallProjection {
+  readonly groupId: string
+  readonly resultId: string | undefined
+  readonly complete: boolean
+}
 
 const declarationName = (declaration: SemanticAnalysis.DeclarationFact): string =>
   declaration.name._tag === 'Present'
@@ -66,6 +109,9 @@ const parameterName = (parameter: SemanticAnalysis.ParameterFact): string =>
     ? parameter.name.spelling
     : `parameter #${parameter.id.ordinal}`
 
+const callName = (call: CallFact): string =>
+  call.reference._tag === 'Unavailable' ? 'unavailable call' : call.reference.spelling
+
 const argumentLabel = (argument: SemanticAnalysis.ArgumentFact): string => {
   const expression = argument.expression
   if (expression._tag === 'Identifier') {
@@ -73,49 +119,181 @@ const argumentLabel = (argument: SemanticAnalysis.ArgumentFact): string => {
       ? 'unavailable reference'
       : expression.reference.spelling
   }
-  if (expression._tag === 'Call') {
-    return expression.reference._tag === 'Unavailable'
-      ? 'unavailable call'
-      : `${expression.reference.spelling}(…)`
-  }
+  if (expression._tag === 'Call') return `${callName(expression)}(…)`
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'
 }
 
-const emptyModel: FlowModel = Object.freeze({
-  _tag: 'FlowModel',
-  status: 'Empty',
-  summary: 'No call expression is available for data-flow projection.',
-  nodes: Object.freeze([]),
-  edges: Object.freeze([]),
-})
+const callId = (call: CallFact): string =>
+  `call-${call.syntax.span.start}-${call.syntax.span.end}`
 
-/** Projects existing semantic relationships into a small inspector-only flow model. */
-export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel => {
-  const caller = analysis.functions.find((fact) => fact.returnedExpression._tag === 'Call')
-  if (caller === undefined || caller.returnedExpression._tag !== 'Call') return emptyModel
+const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
+  left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
 
-  const call = caller.returnedExpression
-  const callerName = declarationName(caller.declaration)
-  const nodes: Array<FlowNode> = call.arguments.map((argument) =>
-    node(
-      `argument-${argument.id.ordinal}`,
-      'Argument',
-      `Argument #${argument.id.ordinal}: ${argumentLabel(argument)}`,
-      argument.type._tag === 'Available' ? argument.type.type : 'Unavailable type',
-      call.contract._tag === 'Compatible' ? 'Connected' : 'Unmatched',
-      argument.syntax.span,
-    ),
-  )
-  const edges: Array<FlowEdge> = []
+const sameDeclaration = (
+  left: SemanticAnalysis.DeclarationFact,
+  right: SemanticAnalysis.DeclarationFact,
+): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
+
+const groupState = (call: CallFact): FlowItemState =>
+  call.reference._tag === 'Ambiguous'
+    ? 'Branched'
+    : call.reference._tag !== 'Resolved' || call.contract._tag !== 'Compatible'
+      ? 'Stopped'
+      : 'Connected'
+
+const addNode = (draft: ProjectionDraft, group: GroupDraft, value: FlowNode): void => {
+  draft.nodes.push(Object.freeze(value))
+  group.nodeIds.push(value.id)
+}
+
+const addEdge = (draft: ProjectionDraft, group: GroupDraft, value: FlowEdge): void => {
+  draft.edges.push(Object.freeze(value))
+  group.edgeIds.push(value.id)
+}
+
+const semanticNode = (
+  group: GroupDraft,
+  id: string,
+  kind: FlowNodeKind,
+  label: string,
+  detail: string,
+  state: FlowItemState,
+  span: SourceSpan.SourceSpan,
+  ordinal?: number,
+): FlowNode =>
+  Object.freeze({
+    _tag: 'FlowNode',
+    id,
+    groupId: group.id,
+    kind,
+    label,
+    detail,
+    depth: group.depth,
+    ordinal,
+    layer: 'Semantic',
+    state,
+    span,
+  })
+
+const semanticEdge = (
+  group: GroupDraft,
+  id: string,
+  from: string,
+  to: string,
+  label: string,
+  state: FlowItemState,
+  span: SourceSpan.SourceSpan,
+): FlowEdge =>
+  Object.freeze({
+    _tag: 'FlowEdge',
+    id,
+    groupId: group.id,
+    from,
+    to,
+    label,
+    depth: group.depth,
+    layer: 'Semantic',
+    state,
+    span,
+  })
+
+const functionFor = (
+  analysis: SemanticAnalysis.Result,
+  declaration: SemanticAnalysis.DeclarationFact,
+): SemanticAnalysis.FunctionFact | undefined =>
+  analysis.functions.find((fact) => sameDeclaration(fact.declaration, declaration))
+
+const projectCall = (
+  analysis: SemanticAnalysis.Result,
+  draft: ProjectionDraft,
+  caller: SemanticAnalysis.DeclarationFact,
+  call: CallFact,
+  parentId: string | undefined,
+  depth: number,
+  ordinal: number,
+): CallProjection => {
+  const id = callId(call)
+  const groupTarget = call.reference._tag === 'Resolved' ? call.reference.declaration : undefined
+  const group: GroupDraft = {
+    id,
+    label: `${callName(call)} call site`,
+    detail: `${declarationName(caller)} call at [${call.syntax.span.start}, ${call.syntax.span.end})`,
+    depth,
+    ordinal,
+    parentId,
+    state: groupState(call),
+    span: call.syntax.span,
+    nodeIds: [],
+    edgeIds: [],
+    target: groupTarget,
+  }
+  draft.groups.push(group)
+
+  const nestedResults = new Map<number, string>()
+  const nestedCompleteness = new Map<number, boolean>()
+  for (const argument of call.arguments) {
+    if (argument.expression._tag !== 'Call') continue
+    const nested = projectCall(
+      analysis,
+      draft,
+      caller,
+      argument.expression,
+      id,
+      depth + 1,
+      argument.id.ordinal,
+    )
+    if (nested.resultId !== undefined) nestedResults.set(argument.id.ordinal, nested.resultId)
+    nestedCompleteness.set(argument.id.ordinal, nested.complete)
+  }
+
+  for (const argument of call.arguments) {
+    const argumentId = `${id}-argument-${argument.id.ordinal}`
+    const nestedComplete = nestedCompleteness.get(argument.id.ordinal)
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        argumentId,
+        'Argument',
+        `Argument #${argument.id.ordinal}: ${argumentLabel(argument)}`,
+        argument.type._tag === 'Available' ? argument.type.type : 'Unavailable type',
+        call.contract._tag === 'Compatible' && nestedComplete !== false ? 'Connected' : 'Unmatched',
+        argument.syntax.span,
+        argument.id.ordinal,
+      ),
+    )
+    const nestedResult = nestedResults.get(argument.id.ordinal)
+    if (nestedResult !== undefined) {
+      addEdge(
+        draft,
+        group,
+        semanticEdge(
+          group,
+          `${id}-nested-result-${argument.id.ordinal}`,
+          nestedResult,
+          argumentId,
+          'supplies nested result to',
+          'Connected',
+          argument.syntax.span,
+        ),
+      )
+    }
+  }
 
   if (call.reference._tag !== 'Resolved') {
     const referenceSpan =
-      call.reference._tag === 'Unavailable' ? call.reference.syntax.span : call.reference.token.span
-    const referenceId = 'call-reference'
-    nodes.push(
-      node(
+      call.reference._tag === 'Unavailable'
+        ? call.reference.syntax.span
+        : call.reference.token.span
+    const referenceId = `${id}-reference`
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
         referenceId,
         'Reference',
         call.reference._tag === 'Unavailable'
@@ -128,9 +306,12 @@ export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel =>
     )
     if (call.reference._tag === 'Ambiguous') {
       for (const declaration of call.reference.declarations) {
-        const candidateId = `call-candidate-${declaration.id.ordinal}`
-        nodes.push(
-          node(
+        const candidateId = `${id}-candidate-${declaration.id.ordinal}`
+        addNode(
+          draft,
+          group,
+          semanticNode(
+            group,
             candidateId,
             'Terminal',
             `Candidate ${declarationName(declaration)}`,
@@ -139,8 +320,11 @@ export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel =>
             declaration.syntax.span,
           ),
         )
-        edges.push(
-          edge(
+        addEdge(
+          draft,
+          group,
+          semanticEdge(
+            group,
             `${referenceId}-${candidateId}`,
             referenceId,
             candidateId,
@@ -151,9 +335,12 @@ export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel =>
         )
       }
     } else {
-      const terminalId = 'unavailable-call-target'
-      nodes.push(
-        node(
+      const terminalId = `${id}-target-stop`
+      addNode(
+        draft,
+        group,
+        semanticNode(
+          group,
           terminalId,
           'Terminal',
           'Flow stops: no unique target',
@@ -162,39 +349,52 @@ export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel =>
           call.syntax.span,
         ),
       )
-      edges.push(edge(`${referenceId}-stop`, referenceId, terminalId, 'stops at', 'Stopped', call.syntax.span))
+      addEdge(
+        draft,
+        group,
+        semanticEdge(
+          group,
+          `${referenceId}-stop`,
+          referenceId,
+          terminalId,
+          'stops at',
+          'Stopped',
+          call.syntax.span,
+        ),
+      )
     }
-    return Object.freeze({
-      _tag: 'FlowModel',
-      status: 'Incomplete',
-      summary: 'The call has no unique target, so no successful argument binding is shown.',
-      nodes: Object.freeze(nodes),
-      edges: Object.freeze(edges),
-    })
+    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
   }
 
   const target = call.reference.declaration
-  const targetName = declarationName(target)
+
   for (const parameter of target.parameters) {
-    nodes.push(
-      node(
-        `parameter-${parameter.id.ordinal}`,
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        `${id}-parameter-${parameter.id.ordinal}`,
         'Parameter',
-        `${targetName}.${parameterName(parameter)}`,
+        `${declarationName(target)}.${parameterName(parameter)}`,
         `parameter #${parameter.id.ordinal}`,
         call.mappings.some((mapping) => mapping.parameter === parameter)
           ? 'Connected'
           : 'Unmatched',
         parameter.syntax.span,
+        parameter.id.ordinal,
       ),
     )
   }
   for (const mapping of call.mappings) {
-    edges.push(
-      edge(
-        `mapping-${mapping.argument.id.ordinal}`,
-        `argument-${mapping.argument.id.ordinal}`,
-        `parameter-${mapping.parameter.id.ordinal}`,
+    addEdge(
+      draft,
+      group,
+      semanticEdge(
+        group,
+        `${id}-mapping-${mapping.argument.id.ordinal}`,
+        `${id}-argument-${mapping.argument.id.ordinal}`,
+        `${id}-parameter-${mapping.parameter.id.ordinal}`,
         'binds positionally to',
         'Connected',
         mapping.argument.syntax.span,
@@ -203,9 +403,12 @@ export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel =>
   }
 
   if (call.contract._tag !== 'Compatible') {
-    const terminalId = 'call-contract-stop'
-    nodes.push(
-      node(
+    const terminalId = `${id}-contract-stop`
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
         terminalId,
         'Terminal',
         `Flow stops: ${call.contract._tag}`,
@@ -216,80 +419,439 @@ export const projectDataFlow = (analysis: SemanticAnalysis.Result): FlowModel =>
         call.syntax.span,
       ),
     )
-    const origins = call.mappings.map((mapping) => `parameter-${mapping.parameter.id.ordinal}`)
-    for (const origin of origins.length === 0 ? call.arguments.map((argument) => `argument-${argument.id.ordinal}`) : origins) {
-      edges.push(edge(`${origin}-contract-stop`, origin, terminalId, 'contract stops at', 'Stopped', call.syntax.span))
+    const origins =
+      call.mappings.length === 0
+        ? call.arguments.map((argument) => `${id}-argument-${argument.id.ordinal}`)
+        : call.mappings.map((mapping) => `${id}-parameter-${mapping.parameter.id.ordinal}`)
+    for (const origin of origins) {
+      addEdge(
+        draft,
+        group,
+        semanticEdge(
+          group,
+          `${origin}-contract-stop`,
+          origin,
+          terminalId,
+          'contract stops at',
+          'Stopped',
+          call.syntax.span,
+        ),
+      )
     }
-    return Object.freeze({
-      _tag: 'FlowModel',
-      status: 'Incomplete',
-      summary: 'Known positional pairs remain visible, but the call contract stops the successful path.',
-      nodes: Object.freeze(nodes),
-      edges: Object.freeze(edges),
-    })
+    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
   }
 
-  const targetFact = analysis.functions.find((fact) => fact.declaration === target)
+  if (Array.from(nestedCompleteness.values()).some((complete) => !complete)) {
+    const terminalId = `${id}-nested-stop`
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        terminalId,
+        'Terminal',
+        'Flow stops: nested argument has no result',
+        'The enclosing semantic result is not drawn.',
+        'Stopped',
+        call.syntax.span,
+      ),
+    )
+    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
+  }
+
+  const targetFact = functionFor(analysis, target)
   const returned = targetFact?.returnedExpression
-  if (returned === undefined || returned._tag !== 'Identifier') {
-    const terminalId = 'target-return-stop'
-    nodes.push(node(terminalId, 'Terminal', 'Flow stops: target does not return a parameter reference', 'No recorded reference edge', 'Stopped', target.syntax.span))
-    return Object.freeze({ _tag: 'FlowModel', status: 'Incomplete', summary: 'The target has no parameter-reference return path.', nodes: Object.freeze(nodes), edges: Object.freeze(edges) })
+  if (returned === undefined || returned._tag === 'Call') {
+    const terminalId = `${id}-return-stop`
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        terminalId,
+        'Terminal',
+        'Flow stops: target return path is not directly available',
+        returned === undefined ? 'No function fact' : 'Nested target return call',
+        'Stopped',
+        target.syntax.span,
+      ),
+    )
+    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
   }
 
-  const referenceId = 'target-reference'
-  const referenceLabel =
-    returned.reference._tag === 'Unavailable' ? 'Unavailable reference' : returned.reference.spelling
-  nodes.push(
-    node(
-      referenceId,
-      'Reference',
-      `Returned reference: ${referenceLabel}`,
-      returned.reference._tag,
-      returned.reference._tag === 'Resolved'
-        ? 'Connected'
-        : returned.reference._tag === 'Ambiguous'
-          ? 'Branched'
-          : 'Stopped',
+  const returnedId = `${id}-target-returned`
+  if (returned._tag === 'Integer') {
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        returnedId,
+        'ReturnedValue',
+        returned.integer._tag === 'Available'
+          ? `Returned literal: ${returned.integer.value}`
+          : 'Unavailable returned literal',
+        returned.integer._tag,
+        returned.integer._tag === 'Available' ? 'Connected' : 'Stopped',
+        returned.syntax.span,
+      ),
+    )
+    if (returned.integer._tag !== 'Available') {
+      return Object.freeze({ groupId: id, resultId: undefined, complete: false })
+    }
+  } else {
+    const referenceLabel =
+      returned.reference._tag === 'Unavailable'
+        ? 'Unavailable reference'
+        : returned.reference.spelling
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        returnedId,
+        'Reference',
+        `Returned reference: ${referenceLabel}`,
+        returned.reference._tag,
+        returned.reference._tag === 'Resolved'
+          ? 'Connected'
+          : returned.reference._tag === 'Ambiguous'
+            ? 'Branched'
+            : 'Stopped',
+        returned.syntax.span,
+      ),
+    )
+    if (returned.reference._tag === 'Ambiguous') {
+      for (const parameter of returned.reference.parameters) {
+        addEdge(
+          draft,
+          group,
+          semanticEdge(
+            group,
+            `${id}-parameter-${parameter.id.ordinal}-branch`,
+            `${id}-parameter-${parameter.id.ordinal}`,
+            returnedId,
+            'could be read by',
+            'Branched',
+            returned.syntax.span,
+          ),
+        )
+      }
+    } else if (returned.reference._tag === 'Resolved') {
+      addEdge(
+        draft,
+        group,
+        semanticEdge(
+          group,
+          `${id}-parameter-reference`,
+          `${id}-parameter-${returned.reference.parameter.id.ordinal}`,
+          returnedId,
+          'is read by',
+          'Connected',
+          returned.syntax.span,
+        ),
+      )
+    }
+    if (returned.reference._tag !== 'Resolved') {
+      return Object.freeze({ groupId: id, resultId: undefined, complete: false })
+    }
+  }
+
+  const resultId = `${id}-result`
+  addNode(
+    draft,
+    group,
+    semanticNode(
+      group,
+      resultId,
+      'CallResult',
+      `${declarationName(target)} call result`,
+      call.type._tag === 'Available' ? call.type.type : 'Unavailable type',
+      'Connected',
+      call.syntax.span,
+    ),
+  )
+  addEdge(
+    draft,
+    group,
+    semanticEdge(
+      group,
+      `${id}-returned-result`,
+      returnedId,
+      resultId,
+      'produces',
+      'Connected',
       returned.syntax.span,
     ),
   )
+  return Object.freeze({ groupId: id, resultId, complete: true })
+}
 
-  if (returned.reference._tag === 'Ambiguous') {
-    for (const parameter of returned.reference.parameters) {
-      edges.push(edge(`parameter-${parameter.id.ordinal}-branch`, `parameter-${parameter.id.ordinal}`, referenceId, 'could be read by', 'Branched', returned.syntax.span))
+const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
+  switch (reason._tag) {
+    case 'RecursiveCycle':
+      return `RecursiveCycle: ${reason.cycle.map(declarationName).join(' → ')}`
+    case 'UnavailableCallContract':
+      return `${reason._tag}: ${reason.reason._tag}`
+    default:
+      return reason._tag
+  }
+}
+
+const blockedCall = (reason: BootstrapEvaluation.BlockedReason): CallFact | undefined => {
+  switch (reason._tag) {
+    case 'MissingCallTarget':
+    case 'AmbiguousCallTarget':
+    case 'UnavailableCallTarget':
+    case 'ArityMismatch':
+    case 'UnavailableCallContract':
+      return reason.call
+    case 'RecursiveCycle':
+      return reason.closingCall
+    default:
+      return undefined
+  }
+}
+
+const blockedSpan = (
+  reason: BootstrapEvaluation.BlockedReason,
+): SourceSpan.SourceSpan | undefined => {
+  const call = blockedCall(reason)
+  if (call !== undefined) return call.syntax.span
+  switch (reason._tag) {
+    case 'MissingEntry':
+      return undefined
+    case 'AmbiguousEntry':
+      return reason.lookup.declarations.at(0)?.syntax.span
+    case 'ParameterizedEntry':
+    case 'UnavailableEntryType':
+      return reason.declaration.syntax.span
+    case 'UnavailableInteger':
+      return reason.integer.syntax.span
+    case 'MissingParameterReference':
+    case 'AmbiguousParameterReference':
+      return reason.reference.token.span
+    case 'UnavailableParameterReference':
+    case 'UnboundParameter':
+      return reason.reference.syntax.span
+    case 'UnavailableFunction':
+      return reason.declaration.syntax.span
+    case 'MissingCallTarget':
+    case 'AmbiguousCallTarget':
+    case 'UnavailableCallTarget':
+    case 'ArityMismatch':
+    case 'UnavailableCallContract':
+    case 'RecursiveCycle':
+      return undefined
+  }
+}
+
+interface Overlay {
+  readonly groups: Map<string, FlowEvidence>
+  readonly items: Map<string, FlowEvidence>
+}
+
+const traceOverlay = (
+  draft: ProjectionDraft,
+  outcome: BootstrapEvaluation.Outcome,
+): Overlay => {
+  const groups = new Map<string, FlowEvidence>()
+  const items = new Map<string, FlowEvidence>()
+  const stack: Array<GroupDraft> = []
+
+  for (const [index, event] of outcome.trace.entries()) {
+    const evidence = Object.freeze({
+      order: index + 1,
+      ...(event._tag === 'Binding' || event._tag === 'ParameterRead' || event._tag === 'Return'
+        ? { value: event.value.value }
+        : {}),
+    })
+    if (event._tag === 'Call') {
+      const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.call.syntax.span))
+      if (group !== undefined) {
+        groups.set(group.id, evidence)
+        stack.push(group)
+      }
+      continue
     }
-  } else if (returned.reference._tag === 'Resolved') {
-    edges.push(edge('parameter-reference', `parameter-${returned.reference.parameter.id.ordinal}`, referenceId, 'is read by', 'Connected', returned.syntax.span))
-  } else {
-    const terminalId = 'reference-stop'
-    nodes.push(node(terminalId, 'Terminal', 'Flow stops: unresolved returned reference', returned.reference._tag, 'Stopped', returned.syntax.span))
-    edges.push(edge('reference-stop-edge', referenceId, terminalId, 'stops at', 'Stopped', returned.syntax.span))
+    if (event._tag === 'Binding') {
+      const group = draft.groups.find((candidate) =>
+        sameSpan(candidate.span, event.argument.id.callSpan),
+      )
+      if (group !== undefined) {
+        items.set(`${group.id}-argument-${event.argument.id.ordinal}`, evidence)
+        items.set(`${group.id}-parameter-${event.parameter.id.ordinal}`, evidence)
+        items.set(`${group.id}-mapping-${event.argument.id.ordinal}`, evidence)
+        if (event.argument.expression._tag === 'Call') {
+          items.set(`${group.id}-nested-result-${event.argument.id.ordinal}`, evidence)
+        }
+      }
+      continue
+    }
+    if (event._tag === 'ParameterRead') {
+      const group = stack.at(-1)
+      if (group !== undefined && group.target !== undefined && sameDeclaration(group.target, event.declaration)) {
+        if (!items.has(`${group.id}-target-returned`)) {
+          items.set(`${group.id}-target-returned`, evidence)
+        }
+        items.set(`${group.id}-parameter-reference`, evidence)
+      }
+      continue
+    }
+    if (event._tag === 'Return') {
+      const group = stack.at(-1)
+      if (group !== undefined && group.target !== undefined && sameDeclaration(group.target, event.declaration)) {
+        items.set(`${group.id}-target-returned`, evidence)
+        items.set(`${group.id}-result`, evidence)
+        items.set(`${group.id}-returned-result`, evidence)
+        stack.pop()
+      }
+    }
+  }
+  return Object.freeze({ groups, items })
+}
+
+const emptyModel = (evaluated: boolean): FlowModel =>
+  Object.freeze({
+    _tag: 'FlowModel',
+    mode: evaluated ? 'Evaluated' : 'Semantic',
+    status: 'Empty',
+    summary: 'No call expression is available for data-flow projection.',
+    groups: Object.freeze([]),
+    nodes: Object.freeze([]),
+    edges: Object.freeze([]),
+  })
+
+/** Projects semantic relationships and an optional trace-backed evaluation overlay for the inspector. */
+export const projectDataFlow = (
+  analysis: SemanticAnalysis.Result,
+  outcome?: BootstrapEvaluation.Outcome,
+): FlowModel => {
+  const caller = analysis.functions.find((fact) => fact.returnedExpression._tag === 'Call')
+  if (caller === undefined || caller.returnedExpression._tag !== 'Call') {
+    return emptyModel(outcome !== undefined)
   }
 
-  if (returned.reference._tag !== 'Resolved') {
-    return Object.freeze({ _tag: 'FlowModel', status: 'Incomplete', summary: 'The target return reference does not resolve uniquely.', nodes: Object.freeze(nodes), edges: Object.freeze(edges) })
+  const draft: ProjectionDraft = { groups: [], nodes: [], edges: [] }
+  const root = projectCall(
+    analysis,
+    draft,
+    caller.declaration,
+    caller.returnedExpression,
+    undefined,
+    0,
+    0,
+  )
+  if (root.resultId !== undefined) {
+    const group = draft.groups.find((candidate) => candidate.id === root.groupId)
+    if (group !== undefined) {
+      const returnId = `${group.id}-caller-return`
+      addNode(
+        draft,
+        group,
+        semanticNode(
+          group,
+          returnId,
+          'FunctionReturn',
+          `${declarationName(caller.declaration)} return`,
+          caller.returnCompatibility._tag,
+          'Connected',
+          caller.returnedExpression.syntax.span,
+        ),
+      )
+      addEdge(
+        draft,
+        group,
+        semanticEdge(
+          group,
+          `${group.id}-result-return`,
+          root.resultId,
+          returnId,
+          'is returned by',
+          'Connected',
+          caller.returnedExpression.syntax.span,
+        ),
+      )
+    }
   }
 
-  const resultId = 'call-result'
-  const callerReturnId = 'caller-return'
-  nodes.push(
-    node(resultId, 'CallResult', `${targetName} call result`, call.type._tag === 'Available' ? call.type.type : 'Unavailable type', 'Connected', call.syntax.span),
-    node(callerReturnId, 'FunctionReturn', `${callerName} return`, caller.returnCompatibility._tag, 'Connected', call.syntax.span),
-  )
-  edges.push(
-    edge('reference-result', referenceId, resultId, 'produces', 'Connected', returned.syntax.span),
-    edge('result-return', resultId, callerReturnId, 'is returned by', 'Connected', call.syntax.span),
-  )
+  const overlay = outcome === undefined ? undefined : traceOverlay(draft, outcome)
+  if (outcome?._tag === 'Completed') {
+    const order = outcome.trace.length
+    const evidence = Object.freeze({ order, value: outcome.result.value })
+    overlay?.items.set(`${root.groupId}-caller-return`, evidence)
+    overlay?.items.set(`${root.groupId}-result-return`, evidence)
+  }
 
-  const firstArgument = call.arguments.at(0)
+  if (outcome?._tag === 'Blocked') {
+    const reasonCall = blockedCall(outcome.reason)
+    const group =
+      reasonCall === undefined
+        ? draft.groups.at(0)
+        : draft.groups.find((candidate) => sameSpan(candidate.span, reasonCall.syntax.span))
+    const span = blockedSpan(outcome.reason)
+    if (group !== undefined && span !== undefined) {
+      const terminalId = `${group.id}-evaluated-stop`
+      const evidence = Object.freeze({ order: outcome.trace.length + 1 })
+      draft.nodes.push(
+        Object.freeze({
+          _tag: 'FlowNode',
+          id: terminalId,
+          groupId: group.id,
+          kind: 'Terminal',
+          label: `Evaluation stops: ${outcome.reason._tag}`,
+          detail: blockedLabel(outcome.reason),
+          depth: group.depth,
+          ordinal: undefined,
+          layer: 'Evaluated',
+          state: 'Stopped',
+          span,
+          evaluation: evidence,
+        }),
+      )
+      group.nodeIds.push(terminalId)
+    }
+  }
+
+  const groups = draft.groups.map((group): FlowGroup =>
+    Object.freeze({
+      _tag: 'FlowGroup',
+      id: group.id,
+      label: group.label,
+      detail: group.detail,
+      depth: group.depth,
+      ordinal: group.ordinal,
+      parentId: group.parentId,
+      state: group.state,
+      span: group.span,
+      nodeIds: Object.freeze([...group.nodeIds]),
+      edgeIds: Object.freeze([...group.edgeIds]),
+      ...(overlay?.groups.get(group.id) === undefined
+        ? {}
+        : { evaluation: overlay.groups.get(group.id) }),
+    }),
+  )
+  const nodes = draft.nodes.map((item): FlowNode => {
+    const evaluation = item.evaluation ?? overlay?.items.get(item.id)
+    return Object.freeze({ ...item, ...(evaluation === undefined ? {} : { evaluation }) })
+  })
+  const edges = draft.edges.map((item): FlowEdge => {
+    const evaluation = item.evaluation ?? overlay?.items.get(item.id)
+    return Object.freeze({ ...item, ...(evaluation === undefined ? {} : { evaluation }) })
+  })
+  const nestedCount = Math.max(0, groups.length - 1)
+  const modeSummary =
+    outcome === undefined
+      ? 'Semantic relationships only; evaluate explicitly to add reachable order and exact values.'
+      : outcome._tag === 'Completed'
+        ? `Evaluation completed with ${outcome.result.value}; trace-backed order and values are overlaid.`
+        : `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
   return Object.freeze({
     _tag: 'FlowModel',
-    status: 'Complete',
-    summary:
-      firstArgument === undefined
-        ? `${targetName} produces the value returned by ${callerName}.`
-        : `${argumentLabel(firstArgument)} flows through ${targetName} into ${callerName}.`,
+    mode: outcome === undefined ? 'Semantic' : 'Evaluated',
+    status: root.complete ? 'Complete' : 'Incomplete',
+    summary: `${nestedCount === 0 ? 'One call site' : `${nestedCount + 1} nested call sites`} projected. ${modeSummary}`,
+    groups: Object.freeze(groups),
     nodes: Object.freeze(nodes),
     edges: Object.freeze(edges),
   })

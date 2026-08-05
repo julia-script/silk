@@ -10,7 +10,12 @@ import {
 } from '@silk-effect/compiler'
 import type { SourceSpan } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
-import { projectDataFlow, type FlowEdge, type FlowNode } from './flow-model'
+import {
+  projectDataFlow,
+  type FlowEdge,
+  type FlowGroup,
+  type FlowNode,
+} from './flow-model'
 import styles from './syntax-inspector.module.css'
 
 const sourceId = 'memory://docs/syntax-inspector.silk'
@@ -138,17 +143,24 @@ pub fn other() -> I32 { return value }`,
 pub fn forward(value: I32) -> I32 { return identity(value) }`,
   },
   {
-    label: 'Nested call · analyzed',
+    label: 'Nested flow · complete',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`,
   },
   {
-    label: 'Nested call · unresolved',
+    label: 'Nested flow · siblings',
     source: `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(missing(42)) }`,
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), identity(2)) }`,
   },
   {
-    label: 'Nested call · wrong arity',
+    label: 'Nested flow · unavailable',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn uncertain(value: Mystery) -> I32 { return 0 }
+pub fn main() -> I32 { return identity(uncertain(42)) }`,
+  },
+  {
+    label: 'Nested flow · wrong arity',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity()) }`,
   },
@@ -163,13 +175,13 @@ pub fn main() -> I32 { return identity(identity(@)) }`,
 pub fn main() -> I32 { return identity(identity(42)) }`,
   },
   {
-    label: 'Nested evaluation · blocked',
+    label: 'Nested flow · inner blocked',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
   },
   {
-    label: 'Nested evaluation · cycle',
+    label: 'Nested flow · cycle',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(main()) }`,
   },
@@ -673,20 +685,32 @@ function CallRelationship({
   )
 }
 
-const flowSpanLabel = (item: FlowNode | FlowEdge): string =>
+type FlowItem = FlowGroup | FlowNode | FlowEdge
+
+const flowSpanLabel = (item: FlowItem): string =>
   `${item.span.sourceId}[${item.span.start}, ${item.span.end})`
+
+const evaluationLabel = (item: FlowItem): string | undefined => {
+  const evidence = item.evaluation
+  if (evidence === undefined) return undefined
+  return evidence.value === undefined
+    ? `evaluated #${evidence.order}`
+    : `evaluated #${evidence.order} · value ${evidence.value}`
+}
 
 export function DataFlow({
   analysis,
+  outcome,
   selectedId,
   onSelect,
 }: {
   readonly analysis: SemanticAnalysis.Result
+  readonly outcome?: BootstrapEvaluation.Outcome
   readonly selectedId: string | undefined
   readonly onSelect: (id: string | undefined) => void
 }) {
-  const flow = useMemo(() => projectDataFlow(analysis), [analysis])
-  const items: ReadonlyArray<FlowNode | FlowEdge> = [...flow.nodes, ...flow.edges]
+  const flow = useMemo(() => projectDataFlow(analysis, outcome), [analysis, outcome])
+  const items: ReadonlyArray<FlowItem> = [...flow.groups, ...flow.nodes, ...flow.edges]
   const selected = items.find((item) => item.id === selectedId)
   const source = analysis.parse.lexical.source
   const selectedSlice =
@@ -706,53 +730,103 @@ export function DataFlow({
         <code data-state={flow.status}>{flow.status}</code>
       </div>
       <p className={styles.dataFlowSummary}>{flow.summary}</p>
+      <div className={styles.flowLegend} aria-label="Value-flow legend">
+        <span data-layer="Semantic">Semantic relationship</span>
+        <span data-layer="Evaluated">
+          {flow.mode === 'Evaluated' ? 'Evaluated order + exact value' : 'Evaluated overlay not run'}
+        </span>
+      </div>
 
       {flow.status === 'Empty' ? (
         <p className={styles.emptyState}>Choose a call preset to inspect a value path.</p>
       ) : (
         <>
-          <div className={styles.flowLane} role="group" aria-label="Navigable value-flow nodes">
-            {flow.nodes.map((flowNode, index) => (
-              <div className={styles.flowLaneItem} key={flowNode.id}>
-                {index === 0 ? null : (
-                  <span className={styles.flowConnector} aria-hidden="true">
-                    →
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className={styles.flowNode}
-                  data-state={flowNode.state}
-                  aria-pressed={selectedId === flowNode.id}
-                  onClick={() => onSelect(selectedId === flowNode.id ? undefined : flowNode.id)}
-                >
-                  <span>{flowNode.kind}</span>
-                  <strong>{flowNode.label}</strong>
-                  <small>{flowNode.state}</small>
-                  <code>[{flowNode.span.start}, {flowNode.span.end})</code>
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <ol className={styles.flowRelationships} aria-label="Ordered value-flow relationships">
-            {flow.edges.map((flowEdge) => {
-              const from = flow.nodes.find((flowNode) => flowNode.id === flowEdge.from)
-              const to = flow.nodes.find((flowNode) => flowNode.id === flowEdge.to)
+          <ol className={styles.flowGroups} aria-label="Nested value-flow call groups">
+            {flow.groups.map((group) => {
+              const groupNodes = flow.nodes.filter((item) => item.groupId === group.id)
+              const groupEdges = flow.edges.filter((item) => item.groupId === group.id)
               return (
-                <li key={flowEdge.id}>
+                <li key={group.id} data-depth={Math.min(group.depth, 3)}>
                   <button
                     type="button"
-                    data-state={flowEdge.state}
-                    aria-pressed={selectedId === flowEdge.id}
-                    onClick={() => onSelect(selectedId === flowEdge.id ? undefined : flowEdge.id)}
+                    className={styles.flowGroupHeading}
+                    data-state={group.state}
+                    data-layer={group.evaluation === undefined ? 'Semantic' : 'Evaluated'}
+                    aria-pressed={selectedId === group.id}
+                    onClick={() => onSelect(selectedId === group.id ? undefined : group.id)}
                   >
-                    <strong>
-                      {from?.label ?? flowEdge.from} {flowEdge.label} {to?.label ?? flowEdge.to}
-                    </strong>
-                    <span>{flowEdge.state}</span>
-                    <code>{flowSpanLabel(flowEdge)}</code>
+                    <span>
+                      depth {group.depth} · argument ordinal {group.ordinal}
+                    </span>
+                    <strong>{group.label}</strong>
+                    <small>{evaluationLabel(group) ?? 'semantic only'}</small>
+                    <code>{flowSpanLabel(group)}</code>
                   </button>
+
+                  <div className={styles.flowLane} role="group" aria-label="Navigable value-flow nodes">
+                    {groupNodes.map((flowNode, index) => (
+                      <div className={styles.flowLaneItem} key={flowNode.id}>
+                        {index === 0 ? null : (
+                          <span className={styles.flowConnector} aria-hidden="true">
+                            →
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className={styles.flowNode}
+                          data-state={flowNode.state}
+                          data-layer={flowNode.evaluation === undefined ? flowNode.layer : 'Evaluated'}
+                          aria-pressed={selectedId === flowNode.id}
+                          onClick={() =>
+                            onSelect(selectedId === flowNode.id ? undefined : flowNode.id)
+                          }
+                        >
+                          <span>
+                            {flowNode.kind} · depth {flowNode.depth}
+                            {flowNode.ordinal === undefined ? '' : ` · ordinal ${flowNode.ordinal}`}
+                          </span>
+                          <strong>{flowNode.label}</strong>
+                          <small>
+                            {flowNode.state} · {evaluationLabel(flowNode) ?? 'semantic only'}
+                          </small>
+                          <code>[{flowNode.span.start}, {flowNode.span.end})</code>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <ol
+                    className={styles.flowRelationships}
+                    aria-label="Ordered value-flow relationships"
+                  >
+                    {groupEdges.map((flowEdge) => {
+                      const from = flow.nodes.find((flowNode) => flowNode.id === flowEdge.from)
+                      const to = flow.nodes.find((flowNode) => flowNode.id === flowEdge.to)
+                      return (
+                        <li key={flowEdge.id}>
+                          <button
+                            type="button"
+                            data-state={flowEdge.state}
+                            data-layer={flowEdge.evaluation === undefined ? flowEdge.layer : 'Evaluated'}
+                            aria-pressed={selectedId === flowEdge.id}
+                            onClick={() =>
+                              onSelect(selectedId === flowEdge.id ? undefined : flowEdge.id)
+                            }
+                          >
+                            <strong>
+                              {from?.label ?? flowEdge.from} {flowEdge.label}{' '}
+                              {to?.label ?? flowEdge.to}
+                            </strong>
+                            <span>
+                              depth {flowEdge.depth} · {flowEdge.state} ·{' '}
+                              {evaluationLabel(flowEdge) ?? 'semantic only'}
+                            </span>
+                            <code>{flowSpanLabel(flowEdge)}</code>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ol>
                 </li>
               )
             })}
@@ -767,10 +841,17 @@ export function DataFlow({
       ) : (
         <aside className={styles.flowSelection} aria-live="polite" aria-label="Selected flow source">
           <div>
-            <strong>Selected {selected._tag === 'FlowNode' ? selected.kind : 'relationship'}</strong>
+            <strong>
+              Selected{' '}
+              {selected._tag === 'FlowGroup'
+                ? 'call group'
+                : selected._tag === 'FlowNode'
+                  ? selected.kind
+                  : 'relationship'}
+            </strong>
             <code>{flowSpanLabel(selected)}</code>
           </div>
-          <p>{selected._tag === 'FlowNode' ? selected.detail : selected.label}</p>
+          <p>{selected._tag === 'FlowEdge' ? selected.label : selected.detail}</p>
           <pre>
             <code>
               {decoder.decode(Uint8Array.from(source.bytes.slice(0, selected.span.start)))}
@@ -1029,7 +1110,12 @@ function SemanticFacts({
         )}
       </section>
 
-      <DataFlow analysis={analysis} selectedId={selectedFlowId} onSelect={onSelectFlow} />
+      <DataFlow
+        analysis={analysis}
+        outcome={evaluation}
+        selectedId={selectedFlowId}
+        onSelect={onSelectFlow}
+      />
       <EvaluationPanel outcome={evaluation} onEvaluate={onEvaluate} />
 
       <div className={styles.functionList} aria-label="Collected function facts">
@@ -1179,9 +1265,13 @@ function SemanticFacts({
         reference links. Calls now expose recursive expression facts, ordered argument identities,
         positional mappings, contracts, and exact provenance at every parsed depth. Evaluation now
         follows those recursive facts left to right, producing nested trace groups and exact blocked
-        endpoints from the authoritative event sequence. These arrows record semantic relationships,
-        not execution order. Conversions, general scope graphs, semantic AST, HIR, and code
-        generation do not exist yet.
+        endpoints from the authoritative event sequence. Nested lanes always record semantic
+        relationships; the violet evaluated overlay appears only after explicit evaluation and only
+        for order, values, bindings, returns, and endpoints present in that trace. Stopped and
+        branched lanes preserve their exact source ranges without claiming an enclosing result.
+        Every call group, node, and relationship is keyboard-selectable and described in the same
+        ordered structure. Conversions, general scope graphs, semantic AST, HIR, and code generation
+        do not exist yet.
       </p>
     </section>
   )

@@ -32,16 +32,17 @@ export default function SyntaxInspectorPage() {
         <p className="text-base leading-7 text-fd-muted-foreground">
           Edit one or more bootstrap functions and inspect their lossless concrete syntax tree
           alongside ordered semantic facts, function-local parameter lookup, and resolved reference
-          relationships. A navigable value-flow lane joins the first literal argument to its mapped
-          parameter, returned reference, call result, and caller return without inventing execution.
-          Every declaration, reference, argument, separator, flow item, and token stays attached to
-          its original UTF-8 byte span; recovery appears as explicit stopped or branched states,
-          error nodes, and missing leaves. Calls show ordered arguments, positional parameter
-          mappings, and a contract state separately from their return compatibility. These
-          relationships are semantic provenance, not execution, conversions, a general scope graph,
-          semantic AST, HIR, or a code-generation pipeline. The explicit Evaluate action runs only
-          the closed browser-local bootstrap slice and shows its exact result, blocked reason, and
-          deterministic trace; it is not native compilation or a runtime.
+          relationships. Navigable nested lanes group every call site in argument order and connect
+          inner results to their owning outer arguments, mapped parameters, returned references,
+          call results, and the caller return. The green semantic layer never implies execution;
+          only the explicit Evaluate action adds the violet trace-backed order, exact values, and
+          blocked endpoint. Missing, ambiguous, incompatible, unavailable, and cyclic branches end
+          visibly without a fabricated enclosing binding or return. Every group, node, edge,
+          terminal, declaration, reference, argument, separator, and token stays keyboard-selectable
+          and attached to its original UTF-8 byte span, with the same depth, ordinal, state, value,
+          identity, and range available in reading order. The browser-local evaluator is still only
+          the closed bootstrap slice—not native compilation, a runtime, conversions, a general scope
+          graph, semantic AST, HIR, or a code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />

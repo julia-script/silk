@@ -7,6 +7,7 @@ import {
 } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { projectDataFlow } from './flow-model'
 import { DataFlow, EvaluationPanel, SyntaxInspector } from './syntax-inspector'
 
 const encoder = new TextEncoder()
@@ -19,10 +20,21 @@ const analyze = (text: string): SemanticAnalysis.Result =>
 const completeSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
 
-const renderFlow = (source: string, selectedId?: string): string =>
-  renderToStaticMarkup(
-    <DataFlow analysis={analyze(source)} selectedId={selectedId} onSelect={() => undefined} />,
+const renderFlow = (
+  source: string,
+  selectedId?: string,
+  evaluate = false,
+): string => {
+  const analysis = analyze(source)
+  return renderToStaticMarkup(
+    <DataFlow
+      analysis={analysis}
+      outcome={evaluate ? BootstrapEvaluation.evaluate(analysis) : undefined}
+      selectedId={selectedId}
+      onSelect={() => undefined}
+    />,
   )
+}
 
 describe('DataFlow', () => {
   it('renders the complete flow as accessible nodes and ordered relationships', () => {
@@ -37,11 +49,51 @@ describe('DataFlow', () => {
   })
 
   it('renders a selected item with its exact marked source slice', () => {
-    const markup = renderFlow(completeSource, 'argument-0')
+    const analysis = analyze(completeSource)
+    const selectedId = projectDataFlow(analysis).nodes.find((item) => item.kind === 'Argument')?.id
+    const markup = renderToStaticMarkup(
+      <DataFlow analysis={analysis} selectedId={selectedId} onSelect={() => undefined} />,
+    )
 
     expect(markup).toContain('aria-pressed="true"')
     expect(markup).toContain('aria-label="Selected flow source"')
     expect(markup).toContain('<mark>42</mark>')
+  })
+
+  it('renders nested groups and a trace-backed overlay from the same ordered structure', () => {
+    const markup = renderFlow(
+      `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`,
+      undefined,
+      true,
+    )
+
+    expect(markup).toContain('aria-label="Nested value-flow call groups"')
+    expect(markup).toContain('depth 1 · argument ordinal 0')
+    expect(markup).toContain('supplies nested result to')
+    expect(markup).toContain('Evaluated order + exact value')
+    expect(markup).toContain('value 42')
+  })
+
+  it('makes call groups, edges, and evaluated terminals source-selectable', () => {
+    const analysis = analyze('pub fn main() -> I32 { return missing(42) }')
+    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const flow = projectDataFlow(analysis, outcome)
+    const selectableIds = [flow.groups.at(0)?.id, flow.edges.at(0)?.id, flow.nodes.at(-1)?.id]
+
+    for (const selectedId of selectableIds) {
+      const markup = renderToStaticMarkup(
+        <DataFlow
+          analysis={analysis}
+          outcome={outcome}
+          selectedId={selectedId}
+          onSelect={() => undefined}
+        />,
+      )
+      expect(markup).toContain('aria-pressed="true"')
+      expect(markup).toContain('aria-label="Selected flow source"')
+      expect(markup).toContain('<mark> missing(42)</mark>')
+    }
   })
 
   it('recomputes incomplete input without inventing a successful result edge', () => {
@@ -117,13 +169,14 @@ describe('SyntaxInspector', () => {
   it('offers recursive semantic presets without advertising later compiler phases', () => {
     const markup = renderToStaticMarkup(<SyntaxInspector />)
 
-    expect(markup).toContain('Nested call · analyzed')
-    expect(markup).toContain('Nested call · unresolved')
-    expect(markup).toContain('Nested call · wrong arity')
+    expect(markup).toContain('Nested flow · complete')
+    expect(markup).toContain('Nested flow · siblings')
+    expect(markup).toContain('Nested flow · unavailable')
+    expect(markup).toContain('Nested flow · wrong arity')
     expect(markup).toContain('Damaged nested call')
     expect(markup).toContain('Nested evaluation · completed')
-    expect(markup).toContain('Nested evaluation · blocked')
-    expect(markup).toContain('Nested evaluation · cycle')
+    expect(markup).toContain('Nested flow · inner blocked')
+    expect(markup).toContain('Nested flow · cycle')
     expect(markup).toContain('semantic AST, HIR, and code generation do not exist yet')
   })
 })
