@@ -57,10 +57,25 @@ program MUST NOT affect the outcome.
 - **WHEN** `main` returns the compatible expression `identity(identity(42))`
 - **THEN** the inner call completes with `42`, that value binds to the outer parameter, and evaluation completes with `42`
 
+#### Scenario: Evaluate nested siblings left to right
+
+- **WHEN** a compatible call contains two nested call arguments
+- **THEN** the first nested expression completes before the second begins and both completed values are then bound to their matching outer parameters
+
 #### Scenario: Block at a lowered trap
 
 - **WHEN** a reachable function's body was unavailable and lowered to a generated trap
 - **THEN** evaluation is blocked at that trap with its function identity, reason, and causative span
+
+#### Scenario: Block at an inner unavailable fact
+
+- **WHEN** a body contains an unavailable fact anywhere in its returned expression
+- **THEN** lowering has already turned that body into a generated trap and evaluation blocks there before executing any enclosing target
+
+#### Scenario: Block wrong call arity
+
+- **WHEN** a call contract at any nesting depth is an arity mismatch
+- **THEN** the enclosing body's HIR is unavailable, its lowered function traps, and evaluation blocks with that trap's provenance
 
 #### Scenario: Ignore an unreachable broken function
 
@@ -84,6 +99,16 @@ interpreter.
 
 - **WHEN** `main` calls `other` and `other` calls `main`
 - **THEN** evaluation stops with the ordered cycle `main → other → main`
+
+#### Scenario: Block a cycle reached inside an argument
+
+- **WHEN** evaluating a nested argument call would re-enter an active function
+- **THEN** evaluation stops at that inner call with the complete active cycle and its exact call-site span
+
+#### Scenario: Do not enter an enclosing target before its arguments
+
+- **WHEN** an enclosing call's nested argument blocks before producing a value
+- **THEN** the enclosing target is absent from the active path unless it was already active for another reason
 
 #### Scenario: Repeat recursive evaluation
 
@@ -110,6 +135,11 @@ depending on object identity, wall-clock time, random state, I/O, or process-glo
 
 - **WHEN** `main` evaluates `identity(identity(42))` successfully
 - **THEN** the trace records the inner call and its return before the outer call's binding, with distinct call-site provenance and the outer binding marked as coming from a nested call
+
+#### Scenario: Trace nested siblings deterministically
+
+- **WHEN** two nested argument expressions both complete
+- **THEN** all events for the first argument precede all events for the second and both precede the enclosing call's binding events
 
 #### Scenario: Retain a partial blocked trace
 
