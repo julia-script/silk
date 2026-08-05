@@ -1,4 +1,5 @@
 import { baseOptions } from '@/lib/layout.shared'
+import 'dockview/dist/styles/dockview.css'
 import { HomeLayout } from 'fumadocs-ui/layouts/home'
 import type { ReactNode } from 'react'
 
