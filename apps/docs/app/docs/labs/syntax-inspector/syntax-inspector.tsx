@@ -2,6 +2,7 @@
 
 import {
   BootstrapEvaluation,
+  Diagnostic,
   Lexer,
   Parser,
   SemanticAnalysis,
@@ -285,38 +286,80 @@ function TreeElement({
   )
 }
 
-function DiagnosticList({
-  title,
-  diagnostics,
+export interface DiagnosticEntry {
+  readonly diagnostic: Diagnostic.Diagnostic
+  readonly identity: Diagnostic.Identity
+}
+
+export const diagnosticEntries = (
+  ...collections: ReadonlyArray<ReadonlyArray<Diagnostic.Diagnostic>>
+): ReadonlyArray<DiagnosticEntry> =>
+  collections
+    .flatMap((diagnostics) => {
+      const identities = Diagnostic.identify(diagnostics)
+      return diagnostics.map((diagnostic, index) => ({
+        diagnostic,
+        identity: identities[index] ?? Diagnostic.identity(diagnostic),
+      }))
+    })
+    .sort((left, right) => Diagnostic.compare(left.diagnostic, right.diagnostic))
+
+export function DiagnosticPanel({
+  entries,
+  selected,
+  onSelect,
 }: {
-  readonly title: string
-  readonly diagnostics: ReadonlyArray<{
-    readonly code: string
-    readonly message: string
-    readonly span: { readonly start: number; readonly end: number }
-  }>
+  readonly entries: ReadonlyArray<DiagnosticEntry>
+  readonly selected: number | undefined
+  readonly onSelect: (index: number | undefined) => void
 }) {
   return (
-    <section className={styles.diagnosticGroup} aria-labelledby={`${title}-diagnostics`}>
+    <section className={styles.diagnosticGroup} aria-labelledby="unified-diagnostics">
       <div className={styles.diagnosticHeading}>
-        <h3 id={`${title}-diagnostics`}>{title}</h3>
-        <span>{diagnostics.length}</span>
+        <h3 id="unified-diagnostics">Diagnostics</h3>
+        <span>{entries.length}</span>
       </div>
-      {diagnostics.length === 0 ? (
+      {entries.length === 0 ? (
         <p className={styles.emptyState}>No diagnostics</p>
       ) : (
         <ul className={styles.diagnosticList}>
-          {diagnostics.map((diagnostic, index) => (
-            <li key={`${diagnostic.code}-${diagnostic.span.start}-${index}`}>
-              <div>
-                <code>{diagnostic.code}</code>
-                <span>
-                  [{diagnostic.span.start}, {diagnostic.span.end})
-                </span>
-              </div>
-              <p>{diagnostic.message}</p>
-            </li>
-          ))}
+          {entries.map((entry, index) => {
+            const diagnostic = entry.diagnostic
+            const cause = diagnostic.cause
+            const origin =
+              cause === undefined
+                ? undefined
+                : entries.find((candidate) => Diagnostic.identityEquals(candidate.identity, cause))
+            return (
+              <li
+                key={`${diagnostic.phase}-${diagnostic.code}-${diagnostic.span.start}-${index}`}
+              >
+                <div>
+                  <code>{diagnostic.code}</code>
+                  <span>{diagnostic.phase}</span>
+                  <span>{diagnostic.severity}</span>
+                  <span>
+                    [{diagnostic.span.start}, {diagnostic.span.end})
+                  </span>
+                </div>
+                <p>{diagnostic.message}</p>
+                {cause === undefined ? null : (
+                  <button
+                    type="button"
+                    onClick={() => onSelect(selected === index ? undefined : index)}
+                  >
+                    {selected === index ? 'Hide cause' : 'Show cause'}
+                  </button>
+                )}
+                {selected === index && cause !== undefined ? (
+                  <p>
+                    Caused by <code>{cause.code}</code> at [{cause.span.start}, {cause.span.end})
+                    {origin === undefined ? '' : `: ${origin.diagnostic.message}`}
+                  </p>
+                ) : null}
+              </li>
+            )
+          })}
         </ul>
       )}
     </section>
@@ -1280,6 +1323,7 @@ function SemanticFacts({
 export function SyntaxInspector() {
   const [text, setText] = useState(acceptedSource)
   const [selectedFlowId, setSelectedFlowId] = useState<string>()
+  const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
   const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
   const analysis = useMemo(() => {
     const source = SourceFile.make(sourceId, encoder.encode(text))
@@ -1308,6 +1352,7 @@ export function SyntaxInspector() {
           onChange={(event) => {
             setText(event.target.value)
             setSelectedFlowId(undefined)
+            setSelectedDiagnostic(undefined)
             setEvaluation(undefined)
           }}
           spellCheck={false}
@@ -1323,6 +1368,7 @@ export function SyntaxInspector() {
               onClick={() => {
                 setText(example.source)
                 setSelectedFlowId(undefined)
+                setSelectedDiagnostic(undefined)
                 setEvaluation(undefined)
               }}
             >
@@ -1363,9 +1409,15 @@ export function SyntaxInspector() {
         />
 
         <div className={styles.diagnostics}>
-          <DiagnosticList title="Lexer" diagnostics={result.lexical.diagnostics} />
-          <DiagnosticList title="Parser" diagnostics={result.diagnostics} />
-          <DiagnosticList title="Semantic" diagnostics={analysis.diagnostics} />
+          <DiagnosticPanel
+            entries={diagnosticEntries(
+              result.lexical.diagnostics,
+              result.diagnostics,
+              analysis.diagnostics,
+            )}
+            selected={selectedDiagnostic}
+            onSelect={setSelectedDiagnostic}
+          />
         </div>
       </section>
 

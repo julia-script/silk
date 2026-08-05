@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import { pipe } from 'effect/Function'
+import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SemanticAnalysis from '../src/SemanticAnalysis.js'
@@ -1059,5 +1060,74 @@ it('is deterministic across repeated fresh multi-function results', () => {
   assert.deepEqual(
     SemanticAnalysis.declarationByName(first, 'same'),
     SemanticAnalysis.declarationByName(second, 'same'),
+  )
+})
+
+it('surfaces duplicate originals as labeled related spans', () => {
+  const declarations = analyzeText('fixture://duplicate-related.silk', duplicateNameSource)
+  const parameters = analyzeText(
+    'fixture://duplicate-parameter-related.silk',
+    duplicateParameterSource,
+  )
+  const firstName = functionAt(declarations, 0).declaration.name
+  const firstParameterName = functionAt(parameters, 0).declaration.parameters.at(0)?.name
+
+  assert.strictEqual(firstName._tag, 'Present')
+  assert.strictEqual(firstParameterName?._tag, 'Present')
+  if (firstName._tag !== 'Present' || firstParameterName?._tag !== 'Present') return
+  assert.deepEqual(declarations.diagnostics.at(0)?.relatedSpans, [
+    { label: 'first declared here', span: firstName.token.span },
+  ])
+  assert.deepEqual(parameters.diagnostics.at(0)?.relatedSpans, [
+    { label: 'first declared here', span: firstParameterName.token.span },
+  ])
+})
+
+it('links unavailable call contracts to the unresolved-target diagnostic without duplication', () => {
+  const result = analyzeText('fixture://caused-contract.silk', unknownCallSource)
+  const call = callFact(functionAt(result, 0))
+  const diagnostic = result.diagnostics.at(0) ?? raise('expected an unknown-function diagnostic')
+
+  assert.strictEqual(result.diagnostics.length, 1)
+  assert.strictEqual(diagnostic.code, 'SEM0004')
+  assert.strictEqual(call.reference._tag, 'Missing')
+  if (call.reference._tag !== 'Missing') return
+  const referenceCause = call.reference.cause ?? raise('expected a caused missing reference')
+  assert.strictEqual(
+    Diagnostic.identityEquals(referenceCause, Diagnostic.identity(diagnostic)),
+    true,
+  )
+  assert.strictEqual(call.contract._tag, 'Unavailable')
+  if (call.contract._tag !== 'Unavailable') return
+  const contractCause = call.contract.cause ?? raise('expected a caused unavailable contract')
+  assert.strictEqual(
+    Diagnostic.identityEquals(contractCause, Diagnostic.identity(diagnostic)),
+    true,
+  )
+})
+
+it('links unresolved types and missing parameter references to their diagnostics', () => {
+  const types = analyzeText('fixture://caused-type.silk', unknownTypeSource)
+  const references = analyzeText('fixture://caused-reference.silk', unknownParameterReferenceSource)
+  const returnType = functionAt(types, 0).declaration.returnType
+  const reference = identifierFact(functionAt(references, 0)).reference
+
+  assert.strictEqual(returnType._tag, 'Unresolved')
+  if (returnType._tag !== 'Unresolved') return
+  const typeDiagnostic = types.diagnostics.at(0) ?? raise('expected an unknown-type diagnostic')
+  const typeCause = returnType.cause ?? raise('expected a caused unresolved type')
+  assert.strictEqual(
+    Diagnostic.identityEquals(typeCause, Diagnostic.identity(typeDiagnostic)),
+    true,
+  )
+
+  assert.strictEqual(reference._tag, 'Missing')
+  if (reference._tag !== 'Missing') return
+  const referenceDiagnostic =
+    references.diagnostics.at(0) ?? raise('expected an unknown-parameter diagnostic')
+  const referenceCause = reference.cause ?? raise('expected a caused missing reference')
+  assert.strictEqual(
+    Diagnostic.identityEquals(referenceCause, Diagnostic.identity(referenceDiagnostic)),
+    true,
   )
 })

@@ -1,6 +1,6 @@
 import * as Option from 'effect/Option'
+import * as Diagnostic from './Diagnostic.js'
 import type * as Lexer from './Lexer.js'
-import * as ParseDiagnostic from './ParseDiagnostic.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
@@ -8,13 +8,13 @@ import type * as Token from './Token.js'
 export interface ParseResult {
   readonly lexical: Lexer.LexicalResult
   readonly root: SyntaxTree.Node
-  readonly diagnostics: ReadonlyArray<ParseDiagnostic.ParseDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 interface State {
   readonly lexical: Lexer.LexicalResult
   readonly index: number
-  readonly diagnostics: ReadonlyArray<ParseDiagnostic.ParseDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 interface ElementsResult {
@@ -51,7 +51,7 @@ const advance = (state: State): State =>
     index: state.index + 1,
   })
 
-const addDiagnostic = (state: State, diagnostic: ParseDiagnostic.ParseDiagnostic): State =>
+const addDiagnostic = (state: State, diagnostic: Diagnostic.Diagnostic): State =>
   Object.freeze({
     ...state,
     diagnostics: Object.freeze([...state.diagnostics, diagnostic]),
@@ -122,7 +122,7 @@ const expect = (
 
   if (unexpected.length > 0) {
     const error = syntaxNode(state, 'Error', unexpected)
-    state = addDiagnostic(state, ParseDiagnostic.unexpectedTokens(error.span))
+    state = addDiagnostic(state, Diagnostic.unexpectedTokens(error.span))
     elements = Object.freeze([...elements, error])
   }
 
@@ -135,7 +135,7 @@ const expect = (
 
   const missing = missingToken(state, expected)
   return Object.freeze({
-    state: addDiagnostic(state, ParseDiagnostic.missingToken(expected, missing.span)),
+    state: addDiagnostic(state, Diagnostic.missingToken(expected, missing.span)),
     elements: Object.freeze([...elements, missing]),
   })
 }
@@ -218,7 +218,7 @@ const expectCallRightParenthesis = (
     return Object.freeze({
       state: addDiagnostic(
         leading.state,
-        ParseDiagnostic.missingToken('RightParenthesis', missing.span),
+        Diagnostic.missingToken('RightParenthesis', missing.span),
       ),
       elements: Object.freeze([...leading.elements, missing]),
     })
@@ -413,10 +413,7 @@ const parseFunctionDeclaration = (initial: State): NodeResult => {
   })
 }
 
-const compareDiagnostics = (
-  left: ParseDiagnostic.ParseDiagnostic,
-  right: ParseDiagnostic.ParseDiagnostic,
-): number =>
+const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number =>
   left.span.start - right.span.start ||
   left.span.end - right.span.end ||
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)

@@ -4,9 +4,7 @@
 
 Give the first parsed Silk function deterministic declaration, type, value, and compatibility
 meaning while keeping incomplete syntax explicit and deferring semantic intermediate representations.
-
 ## Requirements
-
 ### Requirement: First function declaration fact
 Semantic analysis SHALL retain the parse result and publish one ordered function fact for every
 direct function declaration in the source-file tree. Each function fact SHALL expose its declaration,
@@ -314,11 +312,13 @@ one function's compatibility MUST NOT overwrite another function's facts.
 ### Requirement: Semantic diagnostics are deterministic data
 The semantic result SHALL expose semantic diagnostics as a separate readonly collection while
 retaining lexical and parser diagnostics through its original parse result. Every semantic
-diagnostic SHALL contain a stable code, severity, concise message, reason data, and source-owned
-primary span. Present duplicate names after the first occurrence SHALL produce `SEM0003` at each
-later name span. Semantic diagnostics SHALL be ordered by primary span and stable code, and semantic
-source mistakes SHALL return complete ordered facts and diagnostics rather than throw or fail an
-Effect.
+diagnostic SHALL be a unified `Diagnostic` value whose originating phase is semantic analysis,
+containing a stable code, severity, concise message, reason data, and source-owned primary span.
+A semantic diagnostic produced because a fact is unavailable SHALL carry the originating
+diagnostic's identity as its cause. Present duplicate names after the first occurrence SHALL
+produce `SEM0003` at each later name span. Within the semantic result, diagnostics SHALL be
+ordered by primary span and stable code, and semantic source mistakes SHALL return complete
+ordered facts and diagnostics rather than throw or fail an Effect.
 
 #### Scenario: Repeat multi-function semantic analysis
 - **WHEN** equivalent malformed multi-function parse results are analyzed repeatedly in fresh processes
@@ -326,11 +326,15 @@ Effect.
 
 #### Scenario: Keep diagnostic phases separate
 - **WHEN** one source contains parser recovery, a duplicate present name, and an unknown present return-type identifier
-- **THEN** lexical, parser, and semantic diagnostics remain in their owning collections and semantic diagnostics are ordered by their exact primary spans
+- **THEN** lexical, parser, and semantic diagnostics remain in their owning collections, each identifying its originating phase, and semantic diagnostics are ordered by their exact primary spans
 
 #### Scenario: Diagnose every later duplicate
 - **WHEN** three declarations share the same present name
 - **THEN** the second and third names each produce one `SEM0003` diagnostic while the first remains the original declaration
+
+#### Scenario: Unavailability links to its cause
+- **WHEN** a call target is unresolved and its argument-contract facts become unavailable as a result
+- **THEN** any diagnostic reported on those dependent facts carries the unresolved-target diagnostic's identity as its cause, and no duplicate diagnostic restates the unresolved target
 
 ### Requirement: First top-level call reference fact
 Semantic analysis SHALL resolve every present call callee against all collected
@@ -373,3 +377,4 @@ at the call site. Missing or damaged callee syntax SHALL not duplicate parser di
 #### Scenario: Preserve parser ownership for a missing callee
 - **WHEN** parser recovery inserts the call's identifier
 - **THEN** the call reference is unavailable and no `SEM0004` diagnostic is emitted
+

@@ -213,12 +213,10 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './BootstrapEvaluation',
+      './Diagnostic',
       './Lexer',
-      './LexicalDiagnostic',
-      './ParseDiagnostic',
       './Parser',
       './SemanticAnalysis',
-      './SemanticDiagnostic',
       './SourceFile',
       './SourceSpan',
       './SyntaxTree',
@@ -461,12 +459,10 @@ console.log(
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
       'BootstrapEvaluation',
+      'Diagnostic',
       'Lexer',
-      'LexicalDiagnostic',
-      'ParseDiagnostic',
       'Parser',
       'SemanticAnalysis',
-      'SemanticDiagnostic',
       'SourceFile',
       'SourceSpan',
       'SyntaxTree',
@@ -483,11 +479,12 @@ console.log(
     expect(api.deep['./Parser']).toContain('parse')
     expect(api.deep['./SemanticAnalysis']).toContain('analyze')
     expect(api.deep['./SemanticAnalysis']).toContain('parameterByName')
-    expect(api.deep['./SemanticDiagnostic']).toContain('unknownType')
-    expect(api.deep['./SemanticDiagnostic']).toContain('unknownFunction')
-    expect(api.deep['./SemanticDiagnostic']).toContain('duplicateParameterName')
-    expect(api.deep['./SemanticDiagnostic']).toContain('unknownParameterReference')
-    expect(api.deep['./SemanticDiagnostic']).toContain('wrongCallArity')
+    expect(api.deep['./Diagnostic']).toContain('unknownType')
+    expect(api.deep['./Diagnostic']).toContain('unknownFunction')
+    expect(api.deep['./Diagnostic']).toContain('duplicateParameterName')
+    expect(api.deep['./Diagnostic']).toContain('unknownParameterReference')
+    expect(api.deep['./Diagnostic']).toContain('wrongCallArity')
+    expect(api.deep['./Diagnostic']).toContain('merge')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.functionCount).toBe(2)

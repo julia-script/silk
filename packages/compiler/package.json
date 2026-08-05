@@ -49,9 +49,9 @@
       "types": "./dist/Token.d.ts",
       "import": "./dist/Token.js"
     },
-    "./LexicalDiagnostic": {
-      "types": "./dist/LexicalDiagnostic.d.ts",
-      "import": "./dist/LexicalDiagnostic.js"
+    "./Diagnostic": {
+      "types": "./dist/Diagnostic.d.ts",
+      "import": "./dist/Diagnostic.js"
     },
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
@@ -61,10 +61,6 @@
       "types": "./dist/SyntaxTree.d.ts",
       "import": "./dist/SyntaxTree.js"
     },
-    "./ParseDiagnostic": {
-      "types": "./dist/ParseDiagnostic.d.ts",
-      "import": "./dist/ParseDiagnostic.js"
-    },
     "./Parser": {
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
@@ -72,10 +68,6 @@
     "./SemanticAnalysis": {
       "types": "./dist/SemanticAnalysis.d.ts",
       "import": "./dist/SemanticAnalysis.js"
-    },
-    "./SemanticDiagnostic": {
-      "types": "./dist/SemanticDiagnostic.d.ts",
-      "import": "./dist/SemanticDiagnostic.js"
     }
   },
   "scripts": {

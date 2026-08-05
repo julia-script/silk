@@ -1,7 +1,7 @@
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
+import * as Diagnostic from './Diagnostic.js'
 import type * as Parser from './Parser.js'
-import * as SemanticDiagnostic from './SemanticDiagnostic.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -50,6 +50,7 @@ export type DeclaredTypeFact =
       readonly spelling: string
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Element
+      readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Unavailable'
@@ -97,6 +98,7 @@ export type ParameterReferenceFact =
       readonly _tag: 'Missing'
       readonly spelling: string
       readonly token: Token.Token
+      readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Ambiguous'
@@ -142,6 +144,7 @@ export type CallReferenceFact =
       readonly _tag: 'Missing'
       readonly spelling: string
       readonly token: Token.Token
+      readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Ambiguous'
@@ -231,6 +234,7 @@ export type CallContractFact =
   | {
       readonly _tag: 'Unavailable'
       readonly reason: UnavailableCallContractReason
+      readonly cause?: Diagnostic.Identity
     }
 
 /** Whether one returned expression is known to match its declared result type. */
@@ -278,7 +282,7 @@ export interface Result {
   readonly _tag: 'SemanticAnalysis'
   readonly parse: Parser.ParseResult
   readonly functions: ReadonlyArray<FunctionFact>
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const i32Maximum = 2147483647
@@ -346,7 +350,7 @@ const presentName = (source: SourceFile.SourceFile, node: SyntaxTree.Node): Decl
 
 interface ReturnTypeResult {
   readonly fact: DeclaredTypeFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const analyzeDeclaredType = (
@@ -378,14 +382,16 @@ const analyzeDeclaredType = (
     })
   }
 
+  const diagnostic = Diagnostic.unknownType(tokenSpelling, token.span)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Unresolved',
       spelling: tokenSpelling,
       token,
       syntax,
+      cause: Diagnostic.identity(diagnostic),
     }),
-    diagnostics: Object.freeze([SemanticDiagnostic.unknownType(tokenSpelling, token.span)]),
+    diagnostics: Object.freeze([diagnostic]),
   })
 }
 
@@ -411,25 +417,25 @@ const positiveI32Value = (bytes: Uint8Array): Option.Option<number> => {
 
 interface IntegerResult {
   readonly fact: IntegerExpressionFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 interface ExpressionResult {
   readonly fact: ExpressionFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly type: SemanticType | undefined
 }
 
 interface IdentifierResult {
   readonly fact: IdentifierExpressionFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly type: SemanticType | undefined
   readonly syntax: SyntaxTree.Node
 }
 
 interface ArgumentsResult {
   readonly facts: ReadonlyArray<ArgumentFact>
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): IntegerResult => {
@@ -471,7 +477,7 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
       token,
       syntax: node,
     }),
-    diagnostics: Object.freeze([SemanticDiagnostic.integerOutOfRange(tokenSpelling, token.span)]),
+    diagnostics: Object.freeze([Diagnostic.integerOutOfRange(tokenSpelling, token.span)]),
   })
 }
 
@@ -503,6 +509,10 @@ const analyzeIdentifier = (
 
   const tokenSpelling = spelling(source, token)
   const lookup = lookupParameter(parameters, tokenSpelling)
+  const missingDiagnostic =
+    lookup._tag === 'Missing'
+      ? Diagnostic.unknownParameterReference(tokenSpelling, token.span)
+      : undefined
   const reference: ParameterReferenceFact =
     lookup._tag === 'Resolved'
       ? Object.freeze({
@@ -522,6 +532,9 @@ const analyzeIdentifier = (
             _tag: 'Missing',
             spelling: tokenSpelling,
             token,
+            ...(missingDiagnostic === undefined
+              ? {}
+              : { cause: Diagnostic.identity(missingDiagnostic) }),
           })
   const expressionType =
     reference._tag === 'Resolved' && reference.parameter.declaredType._tag === 'Resolved'
@@ -535,11 +548,7 @@ const analyzeIdentifier = (
       type: expressionType,
       syntax: node,
     }),
-    diagnostics: Object.freeze(
-      reference._tag === 'Missing'
-        ? [SemanticDiagnostic.unknownParameterReference(reference.spelling, reference.token.span)]
-        : [],
-    ),
+    diagnostics: Object.freeze(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
     syntax: node,
   })
@@ -583,7 +592,7 @@ function analyzeArguments(
 interface CallContractResult {
   readonly mappings: ReadonlyArray<ArgumentMappingFact>
   readonly fact: CallContractFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const hasAvailableCallSyntax = (call: SyntaxTree.Node): boolean => {
@@ -616,11 +625,13 @@ const analyzeCallContract = (
     })
   }
   if (reference._tag !== 'Resolved') {
+    const cause = reference._tag === 'Missing' ? reference.cause : undefined
     return Object.freeze({
       mappings: Object.freeze([]),
       fact: Object.freeze({
         _tag: 'Unavailable',
         reason: Object.freeze({ _tag: 'UnavailableCallTarget', reference }),
+        ...(cause === undefined ? {} : { cause }),
       }),
       diagnostics: Object.freeze([]),
     })
@@ -661,12 +672,7 @@ const analyzeCallContract = (
       mappings,
       fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
       diagnostics: Object.freeze([
-        SemanticDiagnostic.wrongCallArity(
-          reference.declaration.id,
-          expectedCount,
-          actualCount,
-          call.span,
-        ),
+        Diagnostic.wrongCallArity(reference.declaration.id, expectedCount, actualCount, call.span),
       ]),
     })
   }
@@ -737,6 +743,8 @@ function analyzeExpression(
 
   const tokenSpelling = spelling(source, token)
   const lookup = lookupDeclaration(declarations, tokenSpelling)
+  const missingDiagnostic =
+    lookup._tag === 'Missing' ? Diagnostic.unknownFunction(tokenSpelling, token.span) : undefined
   const reference: CallReferenceFact =
     lookup._tag === 'Resolved'
       ? Object.freeze({
@@ -756,6 +764,9 @@ function analyzeExpression(
             _tag: 'Missing',
             spelling: tokenSpelling,
             token,
+            ...(missingDiagnostic === undefined
+              ? {}
+              : { cause: Diagnostic.identity(missingDiagnostic) }),
           })
   const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
   const syntaxAvailable = hasAvailableCallSyntax(node)
@@ -776,9 +787,7 @@ function analyzeExpression(
       syntax: node,
     }),
     diagnostics: Object.freeze([
-      ...(reference._tag === 'Missing'
-        ? [SemanticDiagnostic.unknownFunction(reference.spelling, reference.token.span)]
-        : []),
+      ...(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
       ...argumentsResult.diagnostics,
       ...callContract.diagnostics,
     ]),
@@ -810,28 +819,25 @@ function isAvailableSyntax(element: SyntaxTree.Element): boolean {
   )
 }
 
-const compareDiagnostics = (
-  left: SemanticDiagnostic.SemanticDiagnostic,
-  right: SemanticDiagnostic.SemanticDiagnostic,
-): number =>
+const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number =>
   left.span.start - right.span.start ||
   left.span.end - right.span.end ||
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
 
 interface FunctionAnalysis {
   readonly fact: FunctionFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 interface DeclarationHeader {
   readonly node: SyntaxTree.Node
   readonly declaration: DeclarationFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 interface ParameterResult {
   readonly fact: ParameterFact
-  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const isSeparator = (element: SyntaxTree.Element, kind: Token.TokenKind): boolean =>
@@ -997,9 +1003,9 @@ const presentParameterNameEntries = (
 
 const duplicateParameterDiagnostics = (
   parameters: ReadonlyArray<ParameterFact>,
-): ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> => {
+): ReadonlyArray<Diagnostic.Diagnostic> => {
   const firstBySpelling = new Map<string, PresentParameterNameEntry>()
-  let diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> = Object.freeze([])
+  let diagnostics: ReadonlyArray<Diagnostic.Diagnostic> = Object.freeze([])
 
   for (const entry of presentParameterNameEntries(parameters)) {
     const original = firstBySpelling.get(entry.spelling)
@@ -1008,11 +1014,7 @@ const duplicateParameterDiagnostics = (
     } else {
       diagnostics = Object.freeze([
         ...diagnostics,
-        SemanticDiagnostic.duplicateParameterName(
-          entry.spelling,
-          original.token.span,
-          entry.token.span,
-        ),
+        Diagnostic.duplicateParameterName(entry.spelling, original.token.span, entry.token.span),
       ])
     }
   }
@@ -1060,9 +1062,9 @@ const presentNameEntries = (
 
 const duplicateNameDiagnostics = (
   entries: ReadonlyArray<PresentNameEntry>,
-): ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> => {
+): ReadonlyArray<Diagnostic.Diagnostic> => {
   const firstBySpelling = new Map<string, PresentNameEntry>()
-  let diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> = Object.freeze([])
+  let diagnostics: ReadonlyArray<Diagnostic.Diagnostic> = Object.freeze([])
 
   for (const entry of entries) {
     const original = firstBySpelling.get(entry.spelling)
@@ -1071,11 +1073,7 @@ const duplicateNameDiagnostics = (
     } else {
       diagnostics = Object.freeze([
         ...diagnostics,
-        SemanticDiagnostic.duplicateDeclarationName(
-          entry.spelling,
-          original.token.span,
-          entry.token.span,
-        ),
+        Diagnostic.duplicateDeclarationName(entry.spelling, original.token.span, entry.token.span),
       ])
     }
   }

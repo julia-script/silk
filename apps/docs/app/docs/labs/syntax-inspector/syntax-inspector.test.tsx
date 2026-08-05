@@ -1,5 +1,6 @@
 import {
   BootstrapEvaluation,
+  Diagnostic,
   Lexer,
   Parser,
   SemanticAnalysis,
@@ -8,7 +9,13 @@ import {
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from './flow-model'
-import { DataFlow, EvaluationPanel, SyntaxInspector } from './syntax-inspector'
+import {
+  DataFlow,
+  DiagnosticPanel,
+  diagnosticEntries,
+  EvaluationPanel,
+  SyntaxInspector,
+} from './syntax-inspector'
 
 const encoder = new TextEncoder()
 
@@ -162,6 +169,77 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`),
     expect(markup).toContain('MissingCallTarget')
     expect(markup).toContain('aria-label="Blocked evaluation endpoint"')
     expect(markup).not.toContain('Nested result')
+  })
+})
+
+describe('DiagnosticPanel', () => {
+  const crossPhaseSource = '@ pub fn main( -> Mystery { return 42 }'
+
+  const crossPhaseEntries = () => {
+    const analysis = analyze(crossPhaseSource)
+    return diagnosticEntries(
+      analysis.parse.lexical.diagnostics,
+      analysis.parse.diagnostics,
+      analysis.diagnostics,
+    )
+  }
+
+  it('lists every phase in one deterministic driver-ordered stream', () => {
+    const entries = crossPhaseEntries()
+
+    expect(
+      entries.map((entry) => ({ phase: entry.diagnostic.phase, code: entry.diagnostic.code })),
+    ).toEqual([
+      { phase: 'lexical', code: 'LEX0001' },
+      { phase: 'parser', code: 'PAR0002' },
+      { phase: 'parser', code: 'PAR0001' },
+      { phase: 'semantic', code: 'SEM0001' },
+    ])
+    expect(entries).toEqual(crossPhaseEntries())
+  })
+
+  it('labels each entry with phase, code, severity, and primary span', () => {
+    const entries = crossPhaseEntries()
+    const markup = renderToStaticMarkup(
+      <DiagnosticPanel entries={entries} selected={undefined} onSelect={() => undefined} />,
+    )
+
+    for (const { diagnostic } of entries) {
+      expect(markup).toContain(diagnostic.code)
+      expect(markup).toContain(`<span>${diagnostic.phase}</span>`)
+      expect(markup).toContain(`[${diagnostic.span.start}, ${diagnostic.span.end})`)
+    }
+    expect(markup).toContain('<span>error</span>')
+    expect(markup).not.toContain('Show cause')
+  })
+
+  it('reveals the originating diagnostic and span for a selected caused entry', () => {
+    const analysis = analyze('pub fn main() -> I32 { return missing() }')
+    const origin =
+      analysis.diagnostics[0] ?? (() => {
+        throw new Error('expected an unknown-function diagnostic')
+      })()
+    const caused: Diagnostic.Diagnostic = Object.freeze({
+      ...Diagnostic.unknownType('Dependent', origin.span),
+      cause: Diagnostic.identity(origin),
+    })
+    const entries = diagnosticEntries(analysis.diagnostics, [caused])
+
+    const unselected = renderToStaticMarkup(
+      <DiagnosticPanel entries={entries} selected={undefined} onSelect={() => undefined} />,
+    )
+    expect(unselected).toContain('Show cause')
+    expect(unselected).not.toContain('Caused by')
+
+    const selectedIndex = entries.findIndex((entry) => entry.diagnostic.cause !== undefined)
+    const selected = renderToStaticMarkup(
+      <DiagnosticPanel entries={entries} selected={selectedIndex} onSelect={() => undefined} />,
+    )
+    expect(selected).toContain('Hide cause')
+    expect(selected).toContain(
+      `Caused by <code>${origin.code}</code> at [${origin.span.start}, ${origin.span.end})`,
+    )
+    expect(selected).toContain(origin.message)
   })
 })
 

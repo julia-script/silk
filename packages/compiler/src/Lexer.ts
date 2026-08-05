@@ -1,5 +1,5 @@
 import * as Option from 'effect/Option'
-import * as LexicalDiagnostic from './LexicalDiagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
 import type * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Token from './Token.js'
@@ -8,7 +8,7 @@ import * as Token from './Token.js'
 export interface LexicalResult {
   readonly source: SourceFile.SourceFile
   readonly tokens: ReadonlyArray<Token.Token>
-  readonly diagnostics: ReadonlyArray<LexicalDiagnostic.LexicalDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const isWhitespace = (byte: number | undefined): boolean =>
@@ -107,7 +107,7 @@ const spanAt = (source: SourceFile.SourceFile, start: number, end: number): Sour
 export const lex = (source: SourceFile.SourceFile): LexicalResult => {
   const bytes = source.bytes
   const tokens: Array<Token.Token> = []
-  const diagnostics: Array<LexicalDiagnostic.LexicalDiagnostic> = []
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
   let index = 0
 
   const pushToken = (kind: Token.TokenKind, start: number, end: number): SourceSpan.SourceSpan => {
@@ -163,7 +163,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     index += 1
     while (index < bytes.length && !isSupportedTokenStart(bytes, index)) index += 1
     const span = pushToken('Invalid', start, index)
-    diagnostics.push(LexicalDiagnostic.unsupportedBytes(span))
+    diagnostics.push(Diagnostic.unsupportedBytes(span))
   }
 
   pushToken('EndOfFile', bytes.length, bytes.length)
