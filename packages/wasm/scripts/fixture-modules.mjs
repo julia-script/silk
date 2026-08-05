@@ -19,6 +19,7 @@ import {
   ValType,
   WatText,
 } from '../dist/index.js'
+import * as InstructionTable from '../dist/internal/InstructionTable.js'
 
 const build = (name, program) => ({
   name,
@@ -334,3 +335,178 @@ export const fixtures = [
     }),
   ),
 ]
+
+/** One constant-producing instruction per value type, for table-driven operand setup. */
+const constFor = (type) => {
+  switch (type._tag) {
+    case 'I32':
+      return Instr.i32Const(1)
+    case 'I64':
+      return Instr.i64Const(1n)
+    case 'F32':
+      return Instr.f32Const(1.5)
+    case 'F64':
+      return Instr.f64Const(1.5)
+    case 'V128':
+      return Instr.v128Const(Array.from({ length: 16 }, (_, i) => i))
+    case 'FuncRef':
+      return Instr.refNull(ValType.funcref)
+    case 'ExternRef':
+      return Instr.refNull(ValType.externref)
+    default:
+      throw new Error(`No constant for ${type._tag}`)
+  }
+}
+
+const drops = (results) => results.map(() => Instr.op('drop'))
+
+fixtures.push(
+  build(
+    'exhaustive',
+    Effect.gen(function* () {
+      // Every table-driven instruction exactly once, so the oracle round-trip
+      // arbitrates every opcode byte in the instruction table.
+      const builder = yield* Builder.make({ moduleName: 'exhaustive' })
+      const memory = yield* Memory.make(builder, { min: 1 }, { name: 'memory' })
+      const body = []
+      for (const [mnemonic, row] of Object.entries(InstructionTable.plainOps)) {
+        if (row.typing._tag !== 'Uniform') continue
+        for (const param of row.typing.params) body.push(constFor(param))
+        body.push(Instr.op(mnemonic))
+        body.push(...drops(row.typing.results))
+      }
+      for (const [mnemonic, row] of Object.entries(InstructionTable.simdLaneOps)) {
+        body.push(constFor(ValType.v128))
+        if (row.kind === 'replace') {
+          body.push(constFor(row.scalar), Instr.simdLane(mnemonic, row.laneCount - 1))
+          body.push(Instr.op('drop'))
+        } else {
+          body.push(Instr.simdLane(mnemonic, 0), Instr.op('drop'))
+        }
+      }
+      for (const [mnemonic, row] of Object.entries(InstructionTable.simdMemoryAccessOps)) {
+        body.push(Instr.i32Const(0))
+        if (row.kind === 'store') body.push(constFor(ValType.v128))
+        body.push(Instr.simdMemoryAccess(mnemonic, memory, { offset: 8 }))
+        if (row.kind === 'load') body.push(Instr.op('drop'))
+      }
+      for (const [mnemonic, row] of Object.entries(InstructionTable.simdLaneMemoryOps)) {
+        body.push(Instr.i32Const(0), constFor(ValType.v128))
+        body.push(Instr.simdMemoryLane(mnemonic, memory, row.laneCount - 1))
+        if (row.kind === 'load') body.push(Instr.op('drop'))
+      }
+      for (const [mnemonic, row] of Object.entries(InstructionTable.atomicAccessOps)) {
+        body.push(Instr.i32Const(0))
+        switch (row.kind) {
+          case 'load':
+            break
+          case 'store':
+          case 'rmw':
+            body.push(constFor(row.valType))
+            break
+          case 'cmpxchg':
+            body.push(constFor(row.valType), constFor(row.valType))
+            break
+          case 'wait':
+            body.push(constFor(row.valType), Instr.i64Const(-1n))
+            break
+          case 'notify':
+            body.push(Instr.i32Const(1))
+            break
+          default:
+            throw new Error(`Unhandled atomic kind ${row.kind}`)
+        }
+        body.push(Instr.atomicAccess(mnemonic, memory))
+        if (row.kind !== 'store') body.push(Instr.op('drop'))
+      }
+      body.push(constFor(ValType.v128), constFor(ValType.v128))
+      body.push(Instr.i8x16Shuffle(Array.from({ length: 16 }, (_, i) => 31 - i)))
+      body.push(Instr.op('drop'))
+      const type = yield* Type.func(builder, [], [])
+      const everything = yield* Func.declare(builder, type, { name: 'everything' })
+      yield* Func.define(builder, everything, { body })
+      yield* Export.func(builder, 'everything', everything)
+      return builder
+    }),
+  ),
+
+  build(
+    'atomics',
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ moduleName: 'atomics' })
+      const shared = yield* Memory.make(
+        builder,
+        { min: 1, max: 4 },
+        {
+          name: 'shared',
+          shared: true,
+        },
+      )
+      const type = yield* Type.func(builder, [ValType.i32], [ValType.i32])
+      const bump = yield* Func.declare(builder, type, { name: 'bump' })
+      yield* Func.define(builder, bump, {
+        body: [
+          Instr.i32Const(0),
+          Instr.localGet(0),
+          Instr.atomicAccess('i32.atomic.rmw.add', shared),
+          Instr.op('atomic.fence'),
+          Instr.i32Const(0),
+          Instr.i32Const(1),
+          Instr.atomicAccess('memory.atomic.notify', shared, { offset: 4 }),
+          Instr.op('i32.add'),
+        ],
+      })
+      yield* Export.func(builder, 'bump', bump)
+      yield* Export.memory(builder, 'shared', shared)
+      return builder
+    }),
+  ),
+
+  build(
+    'memory64',
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ moduleName: 'memory64' })
+      const wide = yield* Memory.make(
+        builder,
+        { min: 1n, max: 2n ** 20n },
+        {
+          name: 'wide',
+          addressType: 'i64',
+        },
+      )
+      const narrow = yield* Memory.make(builder, { min: 1 }, { name: 'narrow' })
+      const bigTable = yield* Table.make(
+        builder,
+        ValType.funcref,
+        { min: 2 },
+        {
+          name: 'bigTable',
+          addressType: 'i64',
+        },
+      )
+      yield* Data.active(builder, wide, [Instr.i64Const(64n)], new Uint8Array([7, 7]))
+      const type = yield* Type.func(builder, [], [ValType.i64])
+      const probe = yield* Func.declare(builder, type, { name: 'probe' })
+      yield* Func.define(builder, probe, {
+        body: [
+          Instr.i64Const(0n),
+          Instr.i32Const(0),
+          Instr.i32Const(8),
+          Instr.memoryCopy(wide, narrow),
+          Instr.i64Const(64n),
+          Instr.memoryAccess('i64.load', wide, { offset: 2n ** 33n, align: 0 }),
+          Instr.memorySize(wide),
+          Instr.op('i64.add'),
+          Instr.i64Const(0n),
+          Instr.tableGet(bigTable),
+          Instr.op('ref.is_null'),
+          Instr.op('i64.extend_i32_u'),
+          Instr.op('i64.add'),
+        ],
+      })
+      yield* Elem.active(builder, bigTable, [Instr.i64Const(0n)], [probe])
+      yield* Export.func(builder, 'probe', probe)
+      return builder
+    }),
+  ),
+)

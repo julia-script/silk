@@ -34,6 +34,10 @@ const FEATURES = [
   'tail-call',
   'extended-const',
   'multi-memory',
+  'simd',
+  'relaxed-simd',
+  'threads',
+  'memory64',
 ]
 
 const run = (args, options = {}) => execFileSync(wasmTools, args, { stdio: 'pipe', ...options })

@@ -11,6 +11,6 @@
  * @since 0.0.0
  */
 export interface Limits {
-  readonly min: number
-  readonly max?: number
+  readonly min: number | bigint
+  readonly max?: number | bigint
 }

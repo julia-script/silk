@@ -167,6 +167,225 @@ export type PlainMnemonic =
   | 'i64.trunc_sat_f32_u'
   | 'i64.trunc_sat_f64_s'
   | 'i64.trunc_sat_f64_u'
+  | 'atomic.fence'
+  | 'i8x16.swizzle'
+  | 'i8x16.splat'
+  | 'i16x8.splat'
+  | 'i32x4.splat'
+  | 'i64x2.splat'
+  | 'f32x4.splat'
+  | 'f64x2.splat'
+  | 'i8x16.eq'
+  | 'i8x16.ne'
+  | 'i8x16.lt_s'
+  | 'i8x16.lt_u'
+  | 'i8x16.gt_s'
+  | 'i8x16.gt_u'
+  | 'i8x16.le_s'
+  | 'i8x16.le_u'
+  | 'i8x16.ge_s'
+  | 'i8x16.ge_u'
+  | 'i16x8.eq'
+  | 'i16x8.ne'
+  | 'i16x8.lt_s'
+  | 'i16x8.lt_u'
+  | 'i16x8.gt_s'
+  | 'i16x8.gt_u'
+  | 'i16x8.le_s'
+  | 'i16x8.le_u'
+  | 'i16x8.ge_s'
+  | 'i16x8.ge_u'
+  | 'i32x4.eq'
+  | 'i32x4.ne'
+  | 'i32x4.lt_s'
+  | 'i32x4.lt_u'
+  | 'i32x4.gt_s'
+  | 'i32x4.gt_u'
+  | 'i32x4.le_s'
+  | 'i32x4.le_u'
+  | 'i32x4.ge_s'
+  | 'i32x4.ge_u'
+  | 'f32x4.eq'
+  | 'f32x4.ne'
+  | 'f32x4.lt'
+  | 'f32x4.gt'
+  | 'f32x4.le'
+  | 'f32x4.ge'
+  | 'f64x2.eq'
+  | 'f64x2.ne'
+  | 'f64x2.lt'
+  | 'f64x2.gt'
+  | 'f64x2.le'
+  | 'f64x2.ge'
+  | 'v128.not'
+  | 'v128.and'
+  | 'v128.andnot'
+  | 'v128.or'
+  | 'v128.xor'
+  | 'v128.bitselect'
+  | 'v128.any_true'
+  | 'f32x4.demote_f64x2_zero'
+  | 'f64x2.promote_low_f32x4'
+  | 'i8x16.abs'
+  | 'i8x16.neg'
+  | 'i8x16.popcnt'
+  | 'i8x16.all_true'
+  | 'i8x16.bitmask'
+  | 'i8x16.narrow_i16x8_s'
+  | 'i8x16.narrow_i16x8_u'
+  | 'f32x4.ceil'
+  | 'f32x4.floor'
+  | 'f32x4.trunc'
+  | 'f32x4.nearest'
+  | 'i8x16.shl'
+  | 'i8x16.shr_s'
+  | 'i8x16.shr_u'
+  | 'i8x16.add'
+  | 'i8x16.add_sat_s'
+  | 'i8x16.add_sat_u'
+  | 'i8x16.sub'
+  | 'i8x16.sub_sat_s'
+  | 'i8x16.sub_sat_u'
+  | 'f64x2.ceil'
+  | 'f64x2.floor'
+  | 'i8x16.min_s'
+  | 'i8x16.min_u'
+  | 'i8x16.max_s'
+  | 'i8x16.max_u'
+  | 'f64x2.trunc'
+  | 'i8x16.avgr_u'
+  | 'i16x8.extadd_pairwise_i8x16_s'
+  | 'i16x8.extadd_pairwise_i8x16_u'
+  | 'i32x4.extadd_pairwise_i16x8_s'
+  | 'i32x4.extadd_pairwise_i16x8_u'
+  | 'i16x8.abs'
+  | 'i16x8.neg'
+  | 'i16x8.q15mulr_sat_s'
+  | 'i16x8.all_true'
+  | 'i16x8.bitmask'
+  | 'i16x8.narrow_i32x4_s'
+  | 'i16x8.narrow_i32x4_u'
+  | 'i16x8.extend_low_i8x16_s'
+  | 'i16x8.extend_high_i8x16_s'
+  | 'i16x8.extend_low_i8x16_u'
+  | 'i16x8.extend_high_i8x16_u'
+  | 'i16x8.shl'
+  | 'i16x8.shr_s'
+  | 'i16x8.shr_u'
+  | 'i16x8.add'
+  | 'i16x8.add_sat_s'
+  | 'i16x8.add_sat_u'
+  | 'i16x8.sub'
+  | 'i16x8.sub_sat_s'
+  | 'i16x8.sub_sat_u'
+  | 'f64x2.nearest'
+  | 'i16x8.mul'
+  | 'i16x8.min_s'
+  | 'i16x8.min_u'
+  | 'i16x8.max_s'
+  | 'i16x8.max_u'
+  | 'i16x8.avgr_u'
+  | 'i16x8.extmul_low_i8x16_s'
+  | 'i16x8.extmul_high_i8x16_s'
+  | 'i16x8.extmul_low_i8x16_u'
+  | 'i16x8.extmul_high_i8x16_u'
+  | 'i32x4.abs'
+  | 'i32x4.neg'
+  | 'i32x4.all_true'
+  | 'i32x4.bitmask'
+  | 'i32x4.extend_low_i16x8_s'
+  | 'i32x4.extend_high_i16x8_s'
+  | 'i32x4.extend_low_i16x8_u'
+  | 'i32x4.extend_high_i16x8_u'
+  | 'i32x4.shl'
+  | 'i32x4.shr_s'
+  | 'i32x4.shr_u'
+  | 'i32x4.add'
+  | 'i32x4.sub'
+  | 'i32x4.mul'
+  | 'i32x4.min_s'
+  | 'i32x4.min_u'
+  | 'i32x4.max_s'
+  | 'i32x4.max_u'
+  | 'i32x4.dot_i16x8_s'
+  | 'i32x4.extmul_low_i16x8_s'
+  | 'i32x4.extmul_high_i16x8_s'
+  | 'i32x4.extmul_low_i16x8_u'
+  | 'i32x4.extmul_high_i16x8_u'
+  | 'i64x2.abs'
+  | 'i64x2.neg'
+  | 'i64x2.all_true'
+  | 'i64x2.bitmask'
+  | 'i64x2.extend_low_i32x4_s'
+  | 'i64x2.extend_high_i32x4_s'
+  | 'i64x2.extend_low_i32x4_u'
+  | 'i64x2.extend_high_i32x4_u'
+  | 'i64x2.shl'
+  | 'i64x2.shr_s'
+  | 'i64x2.shr_u'
+  | 'i64x2.add'
+  | 'i64x2.sub'
+  | 'i64x2.mul'
+  | 'i64x2.eq'
+  | 'i64x2.ne'
+  | 'i64x2.lt_s'
+  | 'i64x2.gt_s'
+  | 'i64x2.le_s'
+  | 'i64x2.ge_s'
+  | 'i64x2.extmul_low_i32x4_s'
+  | 'i64x2.extmul_high_i32x4_s'
+  | 'i64x2.extmul_low_i32x4_u'
+  | 'i64x2.extmul_high_i32x4_u'
+  | 'f32x4.abs'
+  | 'f32x4.neg'
+  | 'f32x4.sqrt'
+  | 'f32x4.add'
+  | 'f32x4.sub'
+  | 'f32x4.mul'
+  | 'f32x4.div'
+  | 'f32x4.min'
+  | 'f32x4.max'
+  | 'f32x4.pmin'
+  | 'f32x4.pmax'
+  | 'f64x2.abs'
+  | 'f64x2.neg'
+  | 'f64x2.sqrt'
+  | 'f64x2.add'
+  | 'f64x2.sub'
+  | 'f64x2.mul'
+  | 'f64x2.div'
+  | 'f64x2.min'
+  | 'f64x2.max'
+  | 'f64x2.pmin'
+  | 'f64x2.pmax'
+  | 'i32x4.trunc_sat_f32x4_s'
+  | 'i32x4.trunc_sat_f32x4_u'
+  | 'f32x4.convert_i32x4_s'
+  | 'f32x4.convert_i32x4_u'
+  | 'i32x4.trunc_sat_f64x2_s_zero'
+  | 'i32x4.trunc_sat_f64x2_u_zero'
+  | 'f64x2.convert_low_i32x4_s'
+  | 'f64x2.convert_low_i32x4_u'
+  | 'i8x16.relaxed_swizzle'
+  | 'i32x4.relaxed_trunc_f32x4_s'
+  | 'i32x4.relaxed_trunc_f32x4_u'
+  | 'i32x4.relaxed_trunc_f64x2_s_zero'
+  | 'i32x4.relaxed_trunc_f64x2_u_zero'
+  | 'f32x4.relaxed_madd'
+  | 'f32x4.relaxed_nmadd'
+  | 'f64x2.relaxed_madd'
+  | 'f64x2.relaxed_nmadd'
+  | 'i8x16.relaxed_laneselect'
+  | 'i16x8.relaxed_laneselect'
+  | 'i32x4.relaxed_laneselect'
+  | 'i64x2.relaxed_laneselect'
+  | 'f32x4.relaxed_min'
+  | 'f32x4.relaxed_max'
+  | 'f64x2.relaxed_min'
+  | 'f64x2.relaxed_max'
+  | 'i16x8.relaxed_q15mulr_s'
+  | 'i16x8.relaxed_dot_i8x16_i7x16_s'
+  | 'i32x4.relaxed_dot_i8x16_i7x16_add_s'
 
 /**
  * Mnemonic of a memory load or store instruction.
@@ -198,6 +417,140 @@ export type MemoryAccessMnemonic =
   | 'i64.store8'
   | 'i64.store16'
   | 'i64.store32'
+
+/**
+ * Mnemonic of a SIMD memory load or store instruction.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export type SimdMemoryAccessMnemonic =
+  | 'v128.load'
+  | 'v128.load8x8_s'
+  | 'v128.load8x8_u'
+  | 'v128.load16x4_s'
+  | 'v128.load16x4_u'
+  | 'v128.load32x2_s'
+  | 'v128.load32x2_u'
+  | 'v128.load8_splat'
+  | 'v128.load16_splat'
+  | 'v128.load32_splat'
+  | 'v128.load64_splat'
+  | 'v128.load32_zero'
+  | 'v128.load64_zero'
+  | 'v128.store'
+
+/**
+ * Mnemonic of a SIMD lane-addressed memory load or store instruction.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export type SimdLaneMemoryMnemonic =
+  | 'v128.load8_lane'
+  | 'v128.load16_lane'
+  | 'v128.load32_lane'
+  | 'v128.load64_lane'
+  | 'v128.store8_lane'
+  | 'v128.store16_lane'
+  | 'v128.store32_lane'
+  | 'v128.store64_lane'
+
+/**
+ * Mnemonic of a SIMD lane extract or replace instruction.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export type SimdLaneMnemonic =
+  | 'i8x16.extract_lane_s'
+  | 'i8x16.extract_lane_u'
+  | 'i8x16.replace_lane'
+  | 'i16x8.extract_lane_s'
+  | 'i16x8.extract_lane_u'
+  | 'i16x8.replace_lane'
+  | 'i32x4.extract_lane'
+  | 'i32x4.replace_lane'
+  | 'i64x2.extract_lane'
+  | 'i64x2.replace_lane'
+  | 'f32x4.extract_lane'
+  | 'f32x4.replace_lane'
+  | 'f64x2.extract_lane'
+  | 'f64x2.replace_lane'
+
+/**
+ * Mnemonic of an atomic memory instruction.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export type AtomicAccessMnemonic =
+  | 'memory.atomic.notify'
+  | 'memory.atomic.wait32'
+  | 'memory.atomic.wait64'
+  | 'i32.atomic.load'
+  | 'i64.atomic.load'
+  | 'i32.atomic.load8_u'
+  | 'i32.atomic.load16_u'
+  | 'i64.atomic.load8_u'
+  | 'i64.atomic.load16_u'
+  | 'i64.atomic.load32_u'
+  | 'i32.atomic.store'
+  | 'i64.atomic.store'
+  | 'i32.atomic.store8'
+  | 'i32.atomic.store16'
+  | 'i64.atomic.store8'
+  | 'i64.atomic.store16'
+  | 'i64.atomic.store32'
+  | 'i32.atomic.rmw.add'
+  | 'i64.atomic.rmw.add'
+  | 'i32.atomic.rmw8.add_u'
+  | 'i32.atomic.rmw16.add_u'
+  | 'i64.atomic.rmw8.add_u'
+  | 'i64.atomic.rmw16.add_u'
+  | 'i64.atomic.rmw32.add_u'
+  | 'i32.atomic.rmw.sub'
+  | 'i64.atomic.rmw.sub'
+  | 'i32.atomic.rmw8.sub_u'
+  | 'i32.atomic.rmw16.sub_u'
+  | 'i64.atomic.rmw8.sub_u'
+  | 'i64.atomic.rmw16.sub_u'
+  | 'i64.atomic.rmw32.sub_u'
+  | 'i32.atomic.rmw.and'
+  | 'i64.atomic.rmw.and'
+  | 'i32.atomic.rmw8.and_u'
+  | 'i32.atomic.rmw16.and_u'
+  | 'i64.atomic.rmw8.and_u'
+  | 'i64.atomic.rmw16.and_u'
+  | 'i64.atomic.rmw32.and_u'
+  | 'i32.atomic.rmw.or'
+  | 'i64.atomic.rmw.or'
+  | 'i32.atomic.rmw8.or_u'
+  | 'i32.atomic.rmw16.or_u'
+  | 'i64.atomic.rmw8.or_u'
+  | 'i64.atomic.rmw16.or_u'
+  | 'i64.atomic.rmw32.or_u'
+  | 'i32.atomic.rmw.xor'
+  | 'i64.atomic.rmw.xor'
+  | 'i32.atomic.rmw8.xor_u'
+  | 'i32.atomic.rmw16.xor_u'
+  | 'i64.atomic.rmw8.xor_u'
+  | 'i64.atomic.rmw16.xor_u'
+  | 'i64.atomic.rmw32.xor_u'
+  | 'i32.atomic.rmw.xchg'
+  | 'i64.atomic.rmw.xchg'
+  | 'i32.atomic.rmw8.xchg_u'
+  | 'i32.atomic.rmw16.xchg_u'
+  | 'i64.atomic.rmw8.xchg_u'
+  | 'i64.atomic.rmw16.xchg_u'
+  | 'i64.atomic.rmw32.xchg_u'
+  | 'i32.atomic.rmw.cmpxchg'
+  | 'i64.atomic.rmw.cmpxchg'
+  | 'i32.atomic.rmw8.cmpxchg_u'
+  | 'i32.atomic.rmw16.cmpxchg_u'
+  | 'i64.atomic.rmw8.cmpxchg_u'
+  | 'i64.atomic.rmw16.cmpxchg_u'
+  | 'i64.atomic.rmw32.cmpxchg_u'
 
 /**
  * The type of a structured control-flow block.
@@ -265,12 +618,41 @@ export type Instr =
   | { readonly _tag: 'SelectTyped'; readonly types: ReadonlyArray<ValType.ValType> }
   | { readonly _tag: 'RefNull'; readonly refType: ValType.RefType }
   | { readonly _tag: 'RefFunc'; readonly func: Func.Func }
+  | { readonly _tag: 'V128Const'; readonly bytes: ReadonlyArray<number> }
+  | { readonly _tag: 'Shuffle'; readonly lanes: ReadonlyArray<number> }
+  | {
+      readonly _tag: 'SimdLane'
+      readonly mnemonic: SimdLaneMnemonic
+      readonly lane: number
+    }
+  | {
+      readonly _tag: 'SimdMemoryAccess'
+      readonly mnemonic: SimdMemoryAccessMnemonic
+      readonly memory: Memory.Memory
+      readonly align: number
+      readonly offset: number | bigint
+    }
+  | {
+      readonly _tag: 'SimdMemoryLane'
+      readonly mnemonic: SimdLaneMemoryMnemonic
+      readonly memory: Memory.Memory
+      readonly align: number
+      readonly offset: number | bigint
+      readonly lane: number
+    }
+  | {
+      readonly _tag: 'AtomicAccess'
+      readonly mnemonic: AtomicAccessMnemonic
+      readonly memory: Memory.Memory
+      readonly align: number
+      readonly offset: number | bigint
+    }
   | {
       readonly _tag: 'MemoryAccess'
       readonly mnemonic: MemoryAccessMnemonic
       readonly memory: Memory.Memory
       readonly align: number
-      readonly offset: number
+      readonly offset: number | bigint
     }
   | { readonly _tag: 'MemorySize'; readonly memory: Memory.Memory }
   | { readonly _tag: 'MemoryGrow'; readonly memory: Memory.Memory }
@@ -541,7 +923,7 @@ export const refFunc = (func: Func.Func): Instr => freeze({ _tag: 'RefFunc', fun
  */
 export interface MemoryAccessOptions {
   /** Static address offset in bytes. Defaults to zero. */
-  readonly offset?: number
+  readonly offset?: number | bigint
   /** Base-two logarithm of the alignment. Defaults to the access's natural alignment. */
   readonly align?: number
 }
@@ -691,3 +1073,90 @@ export const tableInit = (elem: Elem.Elem, table: Table.Table): Instr =>
  * @since 0.0.0
  */
 export const elemDrop = (elem: Elem.Elem): Instr => freeze({ _tag: 'ElemDrop', elem })
+
+/**
+ * Constructs `v128.const` from exactly 16 bytes.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const v128Const = (bytes: Uint8Array | ReadonlyArray<number>): Instr =>
+  freeze({ _tag: 'V128Const', bytes: Object.freeze([...bytes]) })
+
+/**
+ * Constructs `i8x16.shuffle` from exactly 16 lane selectors in `0..31`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const i8x16Shuffle = (lanes: ReadonlyArray<number>): Instr =>
+  freeze({ _tag: 'Shuffle', lanes: Object.freeze([...lanes]) })
+
+/**
+ * Constructs a SIMD lane extract or replace with an immediate lane index.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const simdLane = (mnemonic: SimdLaneMnemonic, lane: number): Instr =>
+  freeze({ _tag: 'SimdLane', mnemonic, lane })
+
+/**
+ * Constructs a SIMD memory load or store with optional offset and alignment.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const simdMemoryAccess = (
+  mnemonic: SimdMemoryAccessMnemonic,
+  memory: Memory.Memory,
+  options: MemoryAccessOptions = {},
+): Instr =>
+  freeze({
+    _tag: 'SimdMemoryAccess',
+    mnemonic,
+    memory,
+    align: options.align ?? InstructionTable.simdMemoryAccessOps[mnemonic].widthLog2,
+    offset: options.offset ?? 0,
+  })
+
+/**
+ * Constructs a SIMD lane-addressed memory load or store.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const simdMemoryLane = (
+  mnemonic: SimdLaneMemoryMnemonic,
+  memory: Memory.Memory,
+  lane: number,
+  options: MemoryAccessOptions = {},
+): Instr =>
+  freeze({
+    _tag: 'SimdMemoryLane',
+    mnemonic,
+    memory,
+    align: options.align ?? InstructionTable.simdLaneMemoryOps[mnemonic].widthLog2,
+    offset: options.offset ?? 0,
+    lane,
+  })
+
+/**
+ * Constructs an atomic memory instruction. Atomic accesses require their exact natural
+ * alignment; the default is always valid.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const atomicAccess = (
+  mnemonic: AtomicAccessMnemonic,
+  memory: Memory.Memory,
+  options: MemoryAccessOptions = {},
+): Instr =>
+  freeze({
+    _tag: 'AtomicAccess',
+    mnemonic,
+    memory,
+    align: options.align ?? InstructionTable.atomicAccessOps[mnemonic].widthLog2,
+    offset: options.offset ?? 0,
+  })

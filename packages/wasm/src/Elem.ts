@@ -118,7 +118,8 @@ export const active = Effect.fn('Elem.active')(function* (
           }),
         )
       }
-      yield* ConstExprCheck.check(state, owner, offset, ValType.i32, 'Elem.active')
+      const offsetType = tableEntry.addressType === 'i64' ? ValType.i64 : ValType.i32
+      yield* ConstExprCheck.check(state, owner, offset, offsetType, 'Elem.active')
       yield* NameCheck.ensureFresh(state.elems, options.name, 'Elem.active')
       const normalized = normalize(items)
       yield* checkItems(state, owner, normalized, tableEntry.refType, 'Elem.active')

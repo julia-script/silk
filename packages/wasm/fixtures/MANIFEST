@@ -3,3 +3,6 @@ arithmetic
 control-flow
 declarations
 segments
+exhaustive
+atomics
+memory64

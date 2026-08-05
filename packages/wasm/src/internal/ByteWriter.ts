@@ -50,6 +50,20 @@ export class ByteWriter {
     return this.s64(BigInt(value))
   }
 
+  /** Unsigned LEB128 over a 64-bit value. */
+  u64(value: bigint): this {
+    let remaining = BigInt.asUintN(64, value)
+    for (;;) {
+      const byte = Number(remaining & 0x7fn)
+      remaining >>= 7n
+      if (remaining === 0n) {
+        this.chunks.push(byte)
+        return this
+      }
+      this.chunks.push(byte | 0x80)
+    }
+  }
+
   /** Signed LEB128 over a 64-bit value. */
   s64(value: bigint): this {
     let remaining = BigInt.asIntN(64, value)

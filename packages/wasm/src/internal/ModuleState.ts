@@ -20,9 +20,11 @@ export interface FuncType {
 }
 
 export interface Limits {
-  readonly min: number
-  readonly max: number | undefined
+  readonly min: bigint
+  readonly max: bigint | undefined
 }
+
+export type AddressType = 'i32' | 'i64'
 
 export interface ImportSource {
   readonly module: string
@@ -39,6 +41,8 @@ export interface FuncDefinition {
   readonly body: ReadonlyArray<Instr.Instr>
   /** Entry indices of functions referenced by `ref.func` inside the body. */
   readonly refFuncs: ReadonlySet<number>
+  /** Whether the body uses `memory.init` or `data.drop`, requiring a data count section. */
+  readonly usesDataCount: boolean
 }
 
 export interface FuncEntry {
@@ -51,12 +55,15 @@ export interface FuncEntry {
 export interface TableEntry {
   readonly refType: ValType.RefType
   readonly limits: Limits
+  readonly addressType: AddressType
   readonly name: string | undefined
   readonly importSource: ImportSource | undefined
 }
 
 export interface MemoryEntry {
   readonly limits: Limits
+  readonly shared: boolean
+  readonly addressType: AddressType
   readonly name: string | undefined
   readonly importSource: ImportSource | undefined
 }

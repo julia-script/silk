@@ -44,6 +44,7 @@ interface Context {
   readonly valStack: Array<StackType>
   readonly ctrlStack: Array<Frame>
   readonly refFuncs: Set<number>
+  usesDataCount: boolean
 }
 
 const abort = (message: string): never => {
@@ -186,10 +187,29 @@ const tableEntry = (context: Context, handle: Parameters<typeof Handle.resolve>[
   return entry ?? abort('Table entry is missing')
 }
 
-const memoryIndex = (context: Context, handle: Parameters<typeof Handle.resolve>[1]): number => {
+const memoryEntry = (context: Context, handle: Parameters<typeof Handle.resolve>[1]) => {
   const index = orAbort(Handle.resolve(context.owner, handle, 'Memory', context.operation))
-  if (context.state.memories[index] === undefined) return abort('Memory entry is missing')
-  return index
+  const entry = context.state.memories[index]
+  return entry ?? abort('Memory entry is missing')
+}
+
+const addressValType = (entry: {
+  readonly addressType: ModuleState.AddressType
+}): ValType.ValType => (entry.addressType === 'i64' ? ValType.i64 : ValType.i32)
+
+const checkOffset = (
+  offset: number | bigint,
+  addressType: ModuleState.AddressType,
+  mnemonic: string,
+): undefined => {
+  const value =
+    typeof offset === 'bigint' ? offset : Number.isInteger(offset) ? BigInt(offset) : undefined
+  const bound = addressType === 'i64' ? 2n ** 64n - 1n : 0xffffffffn
+  if (value === undefined || value < 0n || value > bound) {
+    abort(
+      `The offset of ${mnemonic} must be an unsigned ${addressType === 'i64' ? 64 : 32}-bit integer`,
+    )
+  }
 }
 
 const elemEntry = (context: Context, handle: Parameters<typeof Handle.resolve>[1]) => {
@@ -424,76 +444,86 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
     }
     case 'MemoryAccess': {
       const row = InstructionTable.memoryAccessOps[instr.mnemonic]
-      memoryIndex(context, instr.memory)
+      const memory = memoryEntry(context, instr.memory)
       if (!Number.isInteger(instr.align) || instr.align < 0 || instr.align > row.widthLog2) {
         return abort(`The alignment of ${instr.mnemonic} must be between 0 and ${row.widthLog2}`)
       }
-      if (!Number.isInteger(instr.offset) || instr.offset < 0 || instr.offset > 0xffffffff) {
-        return abort('The memory access offset must be an unsigned 32-bit integer')
-      }
+      checkOffset(instr.offset, memory.addressType, instr.mnemonic)
+      const address = addressValType(memory)
       if (row.kind === 'load') {
-        popVal(context, ValType.i32)
+        popVal(context, address)
         pushVal(context, row.valType)
       } else {
         popVal(context, row.valType)
-        popVal(context, ValType.i32)
+        popVal(context, address)
       }
       return
     }
-    case 'MemorySize':
-      memoryIndex(context, instr.memory)
-      pushVal(context, ValType.i32)
+    case 'MemorySize': {
+      pushVal(context, addressValType(memoryEntry(context, instr.memory)))
       return
-    case 'MemoryGrow':
-      memoryIndex(context, instr.memory)
-      popVal(context, ValType.i32)
-      pushVal(context, ValType.i32)
+    }
+    case 'MemoryGrow': {
+      const address = addressValType(memoryEntry(context, instr.memory))
+      popVal(context, address)
+      pushVal(context, address)
       return
-    case 'MemoryInit':
+    }
+    case 'MemoryInit': {
+      context.usesDataCount = true
       dataIndex(context, instr.data)
-      memoryIndex(context, instr.memory)
-      popVals(context, [ValType.i32, ValType.i32, ValType.i32])
+      const address = addressValType(memoryEntry(context, instr.memory))
+      popVals(context, [address, ValType.i32, ValType.i32])
       return
+    }
     case 'DataDrop':
+      context.usesDataCount = true
       dataIndex(context, instr.data)
       return
-    case 'MemoryCopy':
-      memoryIndex(context, instr.destination)
-      memoryIndex(context, instr.source)
-      popVals(context, [ValType.i32, ValType.i32, ValType.i32])
+    case 'MemoryCopy': {
+      const destination = memoryEntry(context, instr.destination)
+      const source = memoryEntry(context, instr.source)
+      const count =
+        destination.addressType === 'i64' && source.addressType === 'i64'
+          ? ValType.i64
+          : ValType.i32
+      popVals(context, [addressValType(destination), addressValType(source), count])
       return
-    case 'MemoryFill':
-      memoryIndex(context, instr.memory)
-      popVals(context, [ValType.i32, ValType.i32, ValType.i32])
+    }
+    case 'MemoryFill': {
+      const address = addressValType(memoryEntry(context, instr.memory))
+      popVals(context, [address, ValType.i32, address])
       return
+    }
     case 'TableGet': {
       const table = tableEntry(context, instr.table)
-      popVal(context, ValType.i32)
+      popVal(context, addressValType(table))
       pushVal(context, table.refType)
       return
     }
     case 'TableSet': {
       const table = tableEntry(context, instr.table)
       popVal(context, table.refType)
-      popVal(context, ValType.i32)
+      popVal(context, addressValType(table))
       return
     }
     case 'TableSize':
-      tableEntry(context, instr.table)
-      pushVal(context, ValType.i32)
+      pushVal(context, addressValType(tableEntry(context, instr.table)))
       return
     case 'TableGrow': {
       const table = tableEntry(context, instr.table)
-      popVal(context, ValType.i32)
+      const address = addressValType(table)
+      popVal(context, address)
       popVal(context, table.refType)
-      pushVal(context, ValType.i32)
+      pushVal(context, address)
       return
     }
     case 'TableFill': {
       const table = tableEntry(context, instr.table)
-      popVal(context, ValType.i32)
+      const address = addressValType(table)
+      popVal(context, address)
       popVal(context, table.refType)
-      popVal(context, ValType.i32)
+      popVal(context, address)
       return
     }
     case 'TableCopy': {
@@ -502,7 +532,11 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
       if (!ValType.equals(destination.refType, source.refType)) {
         return abort('table.copy requires tables with the same reference type')
       }
-      popVals(context, [ValType.i32, ValType.i32, ValType.i32])
+      const count =
+        destination.addressType === 'i64' && source.addressType === 'i64'
+          ? ValType.i64
+          : ValType.i32
+      popVals(context, [addressValType(destination), addressValType(source), count])
       return
     }
     case 'TableInit': {
@@ -511,13 +545,125 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
       if (!ValType.equals(elem.refType, table.refType)) {
         return abort('table.init requires a segment matching the table reference type')
       }
-      popVals(context, [ValType.i32, ValType.i32, ValType.i32])
+      popVals(context, [addressValType(table), ValType.i32, ValType.i32])
       return
     }
     case 'ElemDrop':
       elemEntry(context, instr.elem)
       return
+    case 'V128Const': {
+      if (
+        instr.bytes.length !== 16 ||
+        instr.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 0xff)
+      ) {
+        return abort('v128.const requires exactly 16 bytes in 0..255')
+      }
+      pushVal(context, ValType.v128)
+      return
+    }
+    case 'Shuffle': {
+      if (
+        instr.lanes.length !== 16 ||
+        instr.lanes.some((lane) => !Number.isInteger(lane) || lane < 0 || lane > 31)
+      ) {
+        return abort('i8x16.shuffle requires exactly 16 lane selectors in 0..31')
+      }
+      popVal(context, ValType.v128)
+      popVal(context, ValType.v128)
+      pushVal(context, ValType.v128)
+      return
+    }
+    case 'SimdLane': {
+      const row = InstructionTable.simdLaneOps[instr.mnemonic]
+      if (!Number.isInteger(instr.lane) || instr.lane < 0 || instr.lane >= row.laneCount) {
+        return abort(`The lane index of ${instr.mnemonic} must be below ${row.laneCount}`)
+      }
+      if (row.kind === 'extract') {
+        popVal(context, ValType.v128)
+        pushVal(context, row.scalar)
+      } else {
+        popVal(context, row.scalar)
+        popVal(context, ValType.v128)
+        pushVal(context, ValType.v128)
+      }
+      return
+    }
+    case 'SimdMemoryAccess': {
+      const row = InstructionTable.simdMemoryAccessOps[instr.mnemonic]
+      const memory = memoryEntry(context, instr.memory)
+      if (!Number.isInteger(instr.align) || instr.align < 0 || instr.align > row.widthLog2) {
+        return abort(`The alignment of ${instr.mnemonic} must be between 0 and ${row.widthLog2}`)
+      }
+      checkOffset(instr.offset, memory.addressType, instr.mnemonic)
+      const address = addressValType(memory)
+      if (row.kind === 'load') {
+        popVal(context, address)
+        pushVal(context, ValType.v128)
+      } else {
+        popVal(context, ValType.v128)
+        popVal(context, address)
+      }
+      return
+    }
+    case 'SimdMemoryLane': {
+      const row = InstructionTable.simdLaneMemoryOps[instr.mnemonic]
+      const memory = memoryEntry(context, instr.memory)
+      if (!Number.isInteger(instr.align) || instr.align < 0 || instr.align > row.widthLog2) {
+        return abort(`The alignment of ${instr.mnemonic} must be between 0 and ${row.widthLog2}`)
+      }
+      if (!Number.isInteger(instr.lane) || instr.lane < 0 || instr.lane >= row.laneCount) {
+        return abort(`The lane index of ${instr.mnemonic} must be below ${row.laneCount}`)
+      }
+      checkOffset(instr.offset, memory.addressType, instr.mnemonic)
+      popVal(context, ValType.v128)
+      popVal(context, addressValType(memory))
+      if (row.kind === 'load') pushVal(context, ValType.v128)
+      return
+    }
+    case 'AtomicAccess': {
+      const row = InstructionTable.atomicAccessOps[instr.mnemonic]
+      const memory = memoryEntry(context, instr.memory)
+      if (instr.align !== row.widthLog2) {
+        return abort(`The alignment of ${instr.mnemonic} must be exactly ${row.widthLog2}`)
+      }
+      checkOffset(instr.offset, memory.addressType, instr.mnemonic)
+      const address = addressValType(memory)
+      switch (row.kind) {
+        case 'load':
+          popVal(context, address)
+          pushVal(context, row.valType)
+          return
+        case 'store':
+          popVal(context, row.valType)
+          popVal(context, address)
+          return
+        case 'rmw':
+          popVal(context, row.valType)
+          popVal(context, address)
+          pushVal(context, row.valType)
+          return
+        case 'cmpxchg':
+          popVal(context, row.valType)
+          popVal(context, row.valType)
+          popVal(context, address)
+          pushVal(context, row.valType)
+          return
+        case 'wait':
+          popVal(context, ValType.i64)
+          popVal(context, row.valType)
+          popVal(context, address)
+          pushVal(context, ValType.i32)
+          return
+        case 'notify':
+          popVal(context, ValType.i32)
+          popVal(context, address)
+          pushVal(context, ValType.i32)
+          return
+      }
+      return
+    }
   }
+  instr satisfies never
 }
 
 const checkTailResults = (context: Context, results: ReadonlyArray<ValType.ValType>): undefined => {
@@ -535,6 +681,8 @@ const checkTailResults = (context: Context, results: ReadonlyArray<ValType.ValTy
 export interface CheckedBody {
   /** Entry indices of functions referenced by `ref.func` inside the body. */
   readonly refFuncs: ReadonlySet<number>
+  /** Whether the body uses `memory.init` or `data.drop`. */
+  readonly usesDataCount: boolean
 }
 
 /**
@@ -559,12 +707,13 @@ export const checkBody = (
     valStack: [],
     ctrlStack: [],
     refFuncs: new Set(),
+    usesDataCount: false,
   }
   try {
     pushFrame(context, 'func', [], funcType.results)
     checkSequence(context, body)
     popFrame(context)
-    return Result.succeed({ refFuncs: context.refFuncs })
+    return Result.succeed({ refFuncs: context.refFuncs, usesDataCount: context.usesDataCount })
   } catch (failure) {
     if (failure instanceof Abort) {
       return Result.fail(

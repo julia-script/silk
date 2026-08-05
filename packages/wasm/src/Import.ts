@@ -22,7 +22,7 @@ import type * as Memory from './Memory.js'
 import type * as Table from './Table.js'
 import type * as Type from './Type.js'
 import type * as ValType from './ValType.js'
-import type { WasmError } from './WasmError.js'
+import { invalidInput, type WasmError } from './WasmError.js'
 
 /**
  * Options accepted by import declarations.
@@ -33,6 +33,30 @@ import type { WasmError } from './WasmError.js'
 export interface Options {
   /** Name used for text identifiers and the binary `name` custom section. */
   readonly name?: string
+}
+
+/**
+ * Options accepted by table imports.
+ *
+ * @category imports
+ * @since 0.0.0
+ */
+export interface TableOptions extends Options {
+  /** Address type used to index the table. Defaults to `'i32'`. */
+  readonly addressType?: 'i32' | 'i64'
+}
+
+/**
+ * Options accepted by memory imports.
+ *
+ * @category imports
+ * @since 0.0.0
+ */
+export interface MemoryOptions extends Options {
+  /** Marks the memory shared for use with atomic operations. Requires a maximum size. */
+  readonly shared?: boolean
+  /** Address type used to index the memory. Defaults to `'i32'`. */
+  readonly addressType?: 'i32' | 'i64'
 }
 
 /**
@@ -94,16 +118,18 @@ export const table = Effect.fn('Import.table')(function* (
   field: string,
   refType: ValType.RefType,
   limits: Limits.Limits,
-  options: Options = {},
+  options: TableOptions = {},
 ): Effect.fn.Return<Table.Table, WasmError> {
   return yield* ModuleState.mutate(builder, 'Import.table', (state, owner) =>
     Result.gen(function* () {
-      const checked = yield* LimitsCheck.check(limits, 0xffffffff, 'Import.table')
+      const addressType = options.addressType ?? 'i32'
+      const checked = yield* LimitsCheck.check(limits, 'table', addressType, 'Import.table')
       yield* NameCheck.ensureFresh(state.tables, options.name, 'Import.table')
       const index = state.tables.length
       state.tables.push({
         refType,
         limits: checked,
+        addressType,
         name: options.name,
         importSource: { module, field },
       })
@@ -125,15 +151,28 @@ export const memory = Effect.fn('Import.memory')(function* (
   module: string,
   field: string,
   limits: Limits.Limits,
-  options: Options = {},
+  options: MemoryOptions = {},
 ): Effect.fn.Return<Memory.Memory, WasmError> {
   return yield* ModuleState.mutate(builder, 'Import.memory', (state, owner) =>
     Result.gen(function* () {
-      const checked = yield* LimitsCheck.check(limits, 65536, 'Import.memory')
+      const addressType = options.addressType ?? 'i32'
+      const checked = yield* LimitsCheck.check(limits, 'memory', addressType, 'Import.memory')
       yield* NameCheck.ensureFresh(state.memories, options.name, 'Import.memory')
+      const shared = options.shared ?? false
+      if (shared && checked.max === undefined) {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Import.memory',
+            message: 'A shared memory must declare a maximum size',
+            input: limits,
+          }),
+        )
+      }
       const index = state.memories.length
       state.memories.push({
         limits: checked,
+        shared,
+        addressType,
         name: options.name,
         importSource: { module, field },
       })

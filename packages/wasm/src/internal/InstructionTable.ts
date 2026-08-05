@@ -57,6 +57,26 @@ const convert = (
   to: ValType.ValType,
 ): PlainRow => uniform(opcode, [from], [to])
 
+const { v128 } = ValType
+
+/** `0xFD`-prefixed SIMD opcode with its LEB128-encoded subopcode. */
+const simd = (subopcode: number): ReadonlyArray<number> =>
+  subopcode < 0x80 ? [0xfd, subopcode] : [0xfd, (subopcode & 0x7f) | 0x80, subopcode >> 7]
+
+const vBinary = (subopcode: number): PlainRow => uniform(simd(subopcode), [v128, v128], [v128])
+
+const vUnary = (subopcode: number): PlainRow => uniform(simd(subopcode), [v128], [v128])
+
+const vTest = (subopcode: number): PlainRow => uniform(simd(subopcode), [v128], [i32])
+
+const vShift = (subopcode: number): PlainRow => uniform(simd(subopcode), [v128, i32], [v128])
+
+const vSplat = (subopcode: number, scalar: ValType.ValType): PlainRow =>
+  uniform(simd(subopcode), [scalar], [v128])
+
+const vTernary = (subopcode: number): PlainRow =>
+  uniform(simd(subopcode), [v128, v128, v128], [v128])
+
 export const plainOps: Record<Instr.PlainMnemonic, PlainRow> = {
   unreachable: special([0x00]),
   nop: uniform([0x01], [], []),
@@ -200,6 +220,225 @@ export const plainOps: Record<Instr.PlainMnemonic, PlainRow> = {
   'i64.trunc_sat_f32_u': convert([0xfc, 5], f32, i64),
   'i64.trunc_sat_f64_s': convert([0xfc, 6], f64, i64),
   'i64.trunc_sat_f64_u': convert([0xfc, 7], f64, i64),
+  'atomic.fence': uniform([0xfe, 0x03, 0x00], [], []),
+  'i8x16.swizzle': vBinary(14),
+  'i8x16.splat': vSplat(15, i32),
+  'i16x8.splat': vSplat(16, i32),
+  'i32x4.splat': vSplat(17, i32),
+  'i64x2.splat': vSplat(18, i64),
+  'f32x4.splat': vSplat(19, f32),
+  'f64x2.splat': vSplat(20, f64),
+  'i8x16.eq': vBinary(35),
+  'i8x16.ne': vBinary(36),
+  'i8x16.lt_s': vBinary(37),
+  'i8x16.lt_u': vBinary(38),
+  'i8x16.gt_s': vBinary(39),
+  'i8x16.gt_u': vBinary(40),
+  'i8x16.le_s': vBinary(41),
+  'i8x16.le_u': vBinary(42),
+  'i8x16.ge_s': vBinary(43),
+  'i8x16.ge_u': vBinary(44),
+  'i16x8.eq': vBinary(45),
+  'i16x8.ne': vBinary(46),
+  'i16x8.lt_s': vBinary(47),
+  'i16x8.lt_u': vBinary(48),
+  'i16x8.gt_s': vBinary(49),
+  'i16x8.gt_u': vBinary(50),
+  'i16x8.le_s': vBinary(51),
+  'i16x8.le_u': vBinary(52),
+  'i16x8.ge_s': vBinary(53),
+  'i16x8.ge_u': vBinary(54),
+  'i32x4.eq': vBinary(55),
+  'i32x4.ne': vBinary(56),
+  'i32x4.lt_s': vBinary(57),
+  'i32x4.lt_u': vBinary(58),
+  'i32x4.gt_s': vBinary(59),
+  'i32x4.gt_u': vBinary(60),
+  'i32x4.le_s': vBinary(61),
+  'i32x4.le_u': vBinary(62),
+  'i32x4.ge_s': vBinary(63),
+  'i32x4.ge_u': vBinary(64),
+  'f32x4.eq': vBinary(65),
+  'f32x4.ne': vBinary(66),
+  'f32x4.lt': vBinary(67),
+  'f32x4.gt': vBinary(68),
+  'f32x4.le': vBinary(69),
+  'f32x4.ge': vBinary(70),
+  'f64x2.eq': vBinary(71),
+  'f64x2.ne': vBinary(72),
+  'f64x2.lt': vBinary(73),
+  'f64x2.gt': vBinary(74),
+  'f64x2.le': vBinary(75),
+  'f64x2.ge': vBinary(76),
+  'v128.not': vUnary(77),
+  'v128.and': vBinary(78),
+  'v128.andnot': vBinary(79),
+  'v128.or': vBinary(80),
+  'v128.xor': vBinary(81),
+  'v128.bitselect': vTernary(82),
+  'v128.any_true': vTest(83),
+  'f32x4.demote_f64x2_zero': vUnary(94),
+  'f64x2.promote_low_f32x4': vUnary(95),
+  'i8x16.abs': vUnary(96),
+  'i8x16.neg': vUnary(97),
+  'i8x16.popcnt': vUnary(98),
+  'i8x16.all_true': vTest(99),
+  'i8x16.bitmask': vTest(100),
+  'i8x16.narrow_i16x8_s': vBinary(101),
+  'i8x16.narrow_i16x8_u': vBinary(102),
+  'f32x4.ceil': vUnary(103),
+  'f32x4.floor': vUnary(104),
+  'f32x4.trunc': vUnary(105),
+  'f32x4.nearest': vUnary(106),
+  'i8x16.shl': vShift(107),
+  'i8x16.shr_s': vShift(108),
+  'i8x16.shr_u': vShift(109),
+  'i8x16.add': vBinary(110),
+  'i8x16.add_sat_s': vBinary(111),
+  'i8x16.add_sat_u': vBinary(112),
+  'i8x16.sub': vBinary(113),
+  'i8x16.sub_sat_s': vBinary(114),
+  'i8x16.sub_sat_u': vBinary(115),
+  'f64x2.ceil': vUnary(116),
+  'f64x2.floor': vUnary(117),
+  'i8x16.min_s': vBinary(118),
+  'i8x16.min_u': vBinary(119),
+  'i8x16.max_s': vBinary(120),
+  'i8x16.max_u': vBinary(121),
+  'f64x2.trunc': vUnary(122),
+  'i8x16.avgr_u': vBinary(123),
+  'i16x8.extadd_pairwise_i8x16_s': vUnary(124),
+  'i16x8.extadd_pairwise_i8x16_u': vUnary(125),
+  'i32x4.extadd_pairwise_i16x8_s': vUnary(126),
+  'i32x4.extadd_pairwise_i16x8_u': vUnary(127),
+  'i16x8.abs': vUnary(128),
+  'i16x8.neg': vUnary(129),
+  'i16x8.q15mulr_sat_s': vBinary(130),
+  'i16x8.all_true': vTest(131),
+  'i16x8.bitmask': vTest(132),
+  'i16x8.narrow_i32x4_s': vBinary(133),
+  'i16x8.narrow_i32x4_u': vBinary(134),
+  'i16x8.extend_low_i8x16_s': vUnary(135),
+  'i16x8.extend_high_i8x16_s': vUnary(136),
+  'i16x8.extend_low_i8x16_u': vUnary(137),
+  'i16x8.extend_high_i8x16_u': vUnary(138),
+  'i16x8.shl': vShift(139),
+  'i16x8.shr_s': vShift(140),
+  'i16x8.shr_u': vShift(141),
+  'i16x8.add': vBinary(142),
+  'i16x8.add_sat_s': vBinary(143),
+  'i16x8.add_sat_u': vBinary(144),
+  'i16x8.sub': vBinary(145),
+  'i16x8.sub_sat_s': vBinary(146),
+  'i16x8.sub_sat_u': vBinary(147),
+  'f64x2.nearest': vUnary(148),
+  'i16x8.mul': vBinary(149),
+  'i16x8.min_s': vBinary(150),
+  'i16x8.min_u': vBinary(151),
+  'i16x8.max_s': vBinary(152),
+  'i16x8.max_u': vBinary(153),
+  'i16x8.avgr_u': vBinary(155),
+  'i16x8.extmul_low_i8x16_s': vBinary(156),
+  'i16x8.extmul_high_i8x16_s': vBinary(157),
+  'i16x8.extmul_low_i8x16_u': vBinary(158),
+  'i16x8.extmul_high_i8x16_u': vBinary(159),
+  'i32x4.abs': vUnary(160),
+  'i32x4.neg': vUnary(161),
+  'i32x4.all_true': vTest(163),
+  'i32x4.bitmask': vTest(164),
+  'i32x4.extend_low_i16x8_s': vUnary(167),
+  'i32x4.extend_high_i16x8_s': vUnary(168),
+  'i32x4.extend_low_i16x8_u': vUnary(169),
+  'i32x4.extend_high_i16x8_u': vUnary(170),
+  'i32x4.shl': vShift(171),
+  'i32x4.shr_s': vShift(172),
+  'i32x4.shr_u': vShift(173),
+  'i32x4.add': vBinary(174),
+  'i32x4.sub': vBinary(177),
+  'i32x4.mul': vBinary(181),
+  'i32x4.min_s': vBinary(182),
+  'i32x4.min_u': vBinary(183),
+  'i32x4.max_s': vBinary(184),
+  'i32x4.max_u': vBinary(185),
+  'i32x4.dot_i16x8_s': vBinary(186),
+  'i32x4.extmul_low_i16x8_s': vBinary(188),
+  'i32x4.extmul_high_i16x8_s': vBinary(189),
+  'i32x4.extmul_low_i16x8_u': vBinary(190),
+  'i32x4.extmul_high_i16x8_u': vBinary(191),
+  'i64x2.abs': vUnary(192),
+  'i64x2.neg': vUnary(193),
+  'i64x2.all_true': vTest(195),
+  'i64x2.bitmask': vTest(196),
+  'i64x2.extend_low_i32x4_s': vUnary(199),
+  'i64x2.extend_high_i32x4_s': vUnary(200),
+  'i64x2.extend_low_i32x4_u': vUnary(201),
+  'i64x2.extend_high_i32x4_u': vUnary(202),
+  'i64x2.shl': vShift(203),
+  'i64x2.shr_s': vShift(204),
+  'i64x2.shr_u': vShift(205),
+  'i64x2.add': vBinary(206),
+  'i64x2.sub': vBinary(209),
+  'i64x2.mul': vBinary(213),
+  'i64x2.eq': vBinary(214),
+  'i64x2.ne': vBinary(215),
+  'i64x2.lt_s': vBinary(216),
+  'i64x2.gt_s': vBinary(217),
+  'i64x2.le_s': vBinary(218),
+  'i64x2.ge_s': vBinary(219),
+  'i64x2.extmul_low_i32x4_s': vBinary(220),
+  'i64x2.extmul_high_i32x4_s': vBinary(221),
+  'i64x2.extmul_low_i32x4_u': vBinary(222),
+  'i64x2.extmul_high_i32x4_u': vBinary(223),
+  'f32x4.abs': vUnary(224),
+  'f32x4.neg': vUnary(225),
+  'f32x4.sqrt': vUnary(227),
+  'f32x4.add': vBinary(228),
+  'f32x4.sub': vBinary(229),
+  'f32x4.mul': vBinary(230),
+  'f32x4.div': vBinary(231),
+  'f32x4.min': vBinary(232),
+  'f32x4.max': vBinary(233),
+  'f32x4.pmin': vBinary(234),
+  'f32x4.pmax': vBinary(235),
+  'f64x2.abs': vUnary(236),
+  'f64x2.neg': vUnary(237),
+  'f64x2.sqrt': vUnary(239),
+  'f64x2.add': vBinary(240),
+  'f64x2.sub': vBinary(241),
+  'f64x2.mul': vBinary(242),
+  'f64x2.div': vBinary(243),
+  'f64x2.min': vBinary(244),
+  'f64x2.max': vBinary(245),
+  'f64x2.pmin': vBinary(246),
+  'f64x2.pmax': vBinary(247),
+  'i32x4.trunc_sat_f32x4_s': vUnary(248),
+  'i32x4.trunc_sat_f32x4_u': vUnary(249),
+  'f32x4.convert_i32x4_s': vUnary(250),
+  'f32x4.convert_i32x4_u': vUnary(251),
+  'i32x4.trunc_sat_f64x2_s_zero': vUnary(252),
+  'i32x4.trunc_sat_f64x2_u_zero': vUnary(253),
+  'f64x2.convert_low_i32x4_s': vUnary(254),
+  'f64x2.convert_low_i32x4_u': vUnary(255),
+  'i8x16.relaxed_swizzle': vBinary(256),
+  'i32x4.relaxed_trunc_f32x4_s': vUnary(257),
+  'i32x4.relaxed_trunc_f32x4_u': vUnary(258),
+  'i32x4.relaxed_trunc_f64x2_s_zero': vUnary(259),
+  'i32x4.relaxed_trunc_f64x2_u_zero': vUnary(260),
+  'f32x4.relaxed_madd': vTernary(261),
+  'f32x4.relaxed_nmadd': vTernary(262),
+  'f64x2.relaxed_madd': vTernary(263),
+  'f64x2.relaxed_nmadd': vTernary(264),
+  'i8x16.relaxed_laneselect': vTernary(265),
+  'i16x8.relaxed_laneselect': vTernary(266),
+  'i32x4.relaxed_laneselect': vTernary(267),
+  'i64x2.relaxed_laneselect': vTernary(268),
+  'f32x4.relaxed_min': vBinary(269),
+  'f32x4.relaxed_max': vBinary(270),
+  'f64x2.relaxed_min': vBinary(271),
+  'f64x2.relaxed_max': vBinary(272),
+  'i16x8.relaxed_q15mulr_s': vBinary(273),
+  'i16x8.relaxed_dot_i8x16_i7x16_s': vBinary(274),
+  'i32x4.relaxed_dot_i8x16_i7x16_add_s': vTernary(275),
 }
 
 export interface MemoryAccessRow {
@@ -250,6 +489,169 @@ export const memoryAccessOps: Record<Instr.MemoryAccessMnemonic, MemoryAccessRow
   'i64.store32': store(0x3e, i64, 2),
 }
 
+export interface SimdMemoryAccessRow {
+  readonly subopcode: number
+  /** Base-two logarithm of the access width; the natural and maximum allowed alignment. */
+  readonly widthLog2: number
+  readonly kind: 'load' | 'store'
+}
+
+const simdLoad = (subopcode: number, widthLog2: number): SimdMemoryAccessRow => ({
+  subopcode,
+  widthLog2,
+  kind: 'load',
+})
+
+export const simdMemoryAccessOps: Record<Instr.SimdMemoryAccessMnemonic, SimdMemoryAccessRow> = {
+  'v128.load': simdLoad(0, 4),
+  'v128.load8x8_s': simdLoad(1, 3),
+  'v128.load8x8_u': simdLoad(2, 3),
+  'v128.load16x4_s': simdLoad(3, 3),
+  'v128.load16x4_u': simdLoad(4, 3),
+  'v128.load32x2_s': simdLoad(5, 3),
+  'v128.load32x2_u': simdLoad(6, 3),
+  'v128.load8_splat': simdLoad(7, 0),
+  'v128.load16_splat': simdLoad(8, 1),
+  'v128.load32_splat': simdLoad(9, 2),
+  'v128.load64_splat': simdLoad(10, 3),
+  'v128.load32_zero': simdLoad(92, 2),
+  'v128.load64_zero': simdLoad(93, 3),
+  'v128.store': { subopcode: 11, widthLog2: 4, kind: 'store' },
+}
+
+export interface SimdLaneMemoryRow {
+  readonly subopcode: number
+  readonly widthLog2: number
+  readonly laneCount: number
+  readonly kind: 'load' | 'store'
+}
+
+export const simdLaneMemoryOps: Record<Instr.SimdLaneMemoryMnemonic, SimdLaneMemoryRow> = {
+  'v128.load8_lane': { subopcode: 84, widthLog2: 0, laneCount: 16, kind: 'load' },
+  'v128.load16_lane': { subopcode: 85, widthLog2: 1, laneCount: 8, kind: 'load' },
+  'v128.load32_lane': { subopcode: 86, widthLog2: 2, laneCount: 4, kind: 'load' },
+  'v128.load64_lane': { subopcode: 87, widthLog2: 3, laneCount: 2, kind: 'load' },
+  'v128.store8_lane': { subopcode: 88, widthLog2: 0, laneCount: 16, kind: 'store' },
+  'v128.store16_lane': { subopcode: 89, widthLog2: 1, laneCount: 8, kind: 'store' },
+  'v128.store32_lane': { subopcode: 90, widthLog2: 2, laneCount: 4, kind: 'store' },
+  'v128.store64_lane': { subopcode: 91, widthLog2: 3, laneCount: 2, kind: 'store' },
+}
+
+export interface SimdLaneRow {
+  readonly subopcode: number
+  readonly laneCount: number
+  readonly scalar: ValType.ValType
+  readonly kind: 'extract' | 'replace'
+}
+
+const lane = (
+  subopcode: number,
+  laneCount: number,
+  scalar: ValType.ValType,
+  kind: 'extract' | 'replace',
+): SimdLaneRow => ({ subopcode, laneCount, scalar, kind })
+
+export const simdLaneOps: Record<Instr.SimdLaneMnemonic, SimdLaneRow> = {
+  'i8x16.extract_lane_s': lane(21, 16, i32, 'extract'),
+  'i8x16.extract_lane_u': lane(22, 16, i32, 'extract'),
+  'i8x16.replace_lane': lane(23, 16, i32, 'replace'),
+  'i16x8.extract_lane_s': lane(24, 8, i32, 'extract'),
+  'i16x8.extract_lane_u': lane(25, 8, i32, 'extract'),
+  'i16x8.replace_lane': lane(26, 8, i32, 'replace'),
+  'i32x4.extract_lane': lane(27, 4, i32, 'extract'),
+  'i32x4.replace_lane': lane(28, 4, i32, 'replace'),
+  'i64x2.extract_lane': lane(29, 2, i64, 'extract'),
+  'i64x2.replace_lane': lane(30, 2, i64, 'replace'),
+  'f32x4.extract_lane': lane(31, 4, f32, 'extract'),
+  'f32x4.replace_lane': lane(32, 4, f32, 'replace'),
+  'f64x2.extract_lane': lane(33, 2, f64, 'extract'),
+  'f64x2.replace_lane': lane(34, 2, f64, 'replace'),
+}
+
+export interface AtomicAccessRow {
+  readonly subopcode: number
+  readonly valType: ValType.ValType
+  /** Atomic accesses require exactly this alignment. */
+  readonly widthLog2: number
+  readonly kind: 'load' | 'store' | 'rmw' | 'cmpxchg' | 'wait' | 'notify'
+}
+
+const atomicRow = (
+  subopcode: number,
+  valType: ValType.ValType,
+  widthLog2: number,
+  kind: AtomicAccessRow['kind'],
+): AtomicAccessRow => ({ subopcode, valType, widthLog2, kind })
+
+export const atomicAccessOps: Record<Instr.AtomicAccessMnemonic, AtomicAccessRow> = {
+  'memory.atomic.notify': atomicRow(0, i32, 2, 'notify'),
+  'memory.atomic.wait32': atomicRow(1, i32, 2, 'wait'),
+  'memory.atomic.wait64': atomicRow(2, i64, 3, 'wait'),
+  'i32.atomic.load': atomicRow(16, i32, 2, 'load'),
+  'i64.atomic.load': atomicRow(17, i64, 3, 'load'),
+  'i32.atomic.load8_u': atomicRow(18, i32, 0, 'load'),
+  'i32.atomic.load16_u': atomicRow(19, i32, 1, 'load'),
+  'i64.atomic.load8_u': atomicRow(20, i64, 0, 'load'),
+  'i64.atomic.load16_u': atomicRow(21, i64, 1, 'load'),
+  'i64.atomic.load32_u': atomicRow(22, i64, 2, 'load'),
+  'i32.atomic.store': atomicRow(23, i32, 2, 'store'),
+  'i64.atomic.store': atomicRow(24, i64, 3, 'store'),
+  'i32.atomic.store8': atomicRow(25, i32, 0, 'store'),
+  'i32.atomic.store16': atomicRow(26, i32, 1, 'store'),
+  'i64.atomic.store8': atomicRow(27, i64, 0, 'store'),
+  'i64.atomic.store16': atomicRow(28, i64, 1, 'store'),
+  'i64.atomic.store32': atomicRow(29, i64, 2, 'store'),
+  'i32.atomic.rmw.add': atomicRow(30, i32, 2, 'rmw'),
+  'i64.atomic.rmw.add': atomicRow(31, i64, 3, 'rmw'),
+  'i32.atomic.rmw8.add_u': atomicRow(32, i32, 0, 'rmw'),
+  'i32.atomic.rmw16.add_u': atomicRow(33, i32, 1, 'rmw'),
+  'i64.atomic.rmw8.add_u': atomicRow(34, i64, 0, 'rmw'),
+  'i64.atomic.rmw16.add_u': atomicRow(35, i64, 1, 'rmw'),
+  'i64.atomic.rmw32.add_u': atomicRow(36, i64, 2, 'rmw'),
+  'i32.atomic.rmw.sub': atomicRow(37, i32, 2, 'rmw'),
+  'i64.atomic.rmw.sub': atomicRow(38, i64, 3, 'rmw'),
+  'i32.atomic.rmw8.sub_u': atomicRow(39, i32, 0, 'rmw'),
+  'i32.atomic.rmw16.sub_u': atomicRow(40, i32, 1, 'rmw'),
+  'i64.atomic.rmw8.sub_u': atomicRow(41, i64, 0, 'rmw'),
+  'i64.atomic.rmw16.sub_u': atomicRow(42, i64, 1, 'rmw'),
+  'i64.atomic.rmw32.sub_u': atomicRow(43, i64, 2, 'rmw'),
+  'i32.atomic.rmw.and': atomicRow(44, i32, 2, 'rmw'),
+  'i64.atomic.rmw.and': atomicRow(45, i64, 3, 'rmw'),
+  'i32.atomic.rmw8.and_u': atomicRow(46, i32, 0, 'rmw'),
+  'i32.atomic.rmw16.and_u': atomicRow(47, i32, 1, 'rmw'),
+  'i64.atomic.rmw8.and_u': atomicRow(48, i64, 0, 'rmw'),
+  'i64.atomic.rmw16.and_u': atomicRow(49, i64, 1, 'rmw'),
+  'i64.atomic.rmw32.and_u': atomicRow(50, i64, 2, 'rmw'),
+  'i32.atomic.rmw.or': atomicRow(51, i32, 2, 'rmw'),
+  'i64.atomic.rmw.or': atomicRow(52, i64, 3, 'rmw'),
+  'i32.atomic.rmw8.or_u': atomicRow(53, i32, 0, 'rmw'),
+  'i32.atomic.rmw16.or_u': atomicRow(54, i32, 1, 'rmw'),
+  'i64.atomic.rmw8.or_u': atomicRow(55, i64, 0, 'rmw'),
+  'i64.atomic.rmw16.or_u': atomicRow(56, i64, 1, 'rmw'),
+  'i64.atomic.rmw32.or_u': atomicRow(57, i64, 2, 'rmw'),
+  'i32.atomic.rmw.xor': atomicRow(58, i32, 2, 'rmw'),
+  'i64.atomic.rmw.xor': atomicRow(59, i64, 3, 'rmw'),
+  'i32.atomic.rmw8.xor_u': atomicRow(60, i32, 0, 'rmw'),
+  'i32.atomic.rmw16.xor_u': atomicRow(61, i32, 1, 'rmw'),
+  'i64.atomic.rmw8.xor_u': atomicRow(62, i64, 0, 'rmw'),
+  'i64.atomic.rmw16.xor_u': atomicRow(63, i64, 1, 'rmw'),
+  'i64.atomic.rmw32.xor_u': atomicRow(64, i64, 2, 'rmw'),
+  'i32.atomic.rmw.xchg': atomicRow(65, i32, 2, 'rmw'),
+  'i64.atomic.rmw.xchg': atomicRow(66, i64, 3, 'rmw'),
+  'i32.atomic.rmw8.xchg_u': atomicRow(67, i32, 0, 'rmw'),
+  'i32.atomic.rmw16.xchg_u': atomicRow(68, i32, 1, 'rmw'),
+  'i64.atomic.rmw8.xchg_u': atomicRow(69, i64, 0, 'rmw'),
+  'i64.atomic.rmw16.xchg_u': atomicRow(70, i64, 1, 'rmw'),
+  'i64.atomic.rmw32.xchg_u': atomicRow(71, i64, 2, 'rmw'),
+  'i32.atomic.rmw.cmpxchg': atomicRow(72, i32, 2, 'cmpxchg'),
+  'i64.atomic.rmw.cmpxchg': atomicRow(73, i64, 3, 'cmpxchg'),
+  'i32.atomic.rmw8.cmpxchg_u': atomicRow(74, i32, 0, 'cmpxchg'),
+  'i32.atomic.rmw16.cmpxchg_u': atomicRow(75, i32, 1, 'cmpxchg'),
+  'i64.atomic.rmw8.cmpxchg_u': atomicRow(76, i64, 0, 'cmpxchg'),
+  'i64.atomic.rmw16.cmpxchg_u': atomicRow(77, i64, 1, 'cmpxchg'),
+  'i64.atomic.rmw32.cmpxchg_u': atomicRow(78, i64, 2, 'cmpxchg'),
+}
+
 /** Opcodes for instructions whose typing is handled by named validator procedures. */
 export const opcodes = {
   block: 0x02,
@@ -279,8 +681,12 @@ export const opcodes = {
   f32Const: 0x43,
   f64Const: 0x44,
   refNull: 0xd0,
+  v128Const: 12,
+  i8x16Shuffle: 13,
   refFunc: 0xd2,
   prefixFc: 0xfc,
+  prefixSimd: 0xfd,
+  prefixAtomic: 0xfe,
 } as const
 
 /** Second bytes of `0xFC`-prefixed instructions that carry immediates. */

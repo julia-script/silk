@@ -80,14 +80,14 @@ emission, so an emitted module is guaranteed valid.
 ## Feature baseline
 
 WebAssembly core 2.0 (multi-value, bulk memory, reference types, sign extension, saturating
-float-to-int, mutable globals) plus tail calls, extended constant expressions, and multiple
-memories.
+float-to-int, mutable globals) plus tail calls, extended constant expressions, multiple
+memories, fixed-width SIMD, relaxed SIMD, threads (shared memories and atomics), and memory64
+(64-bit addressed memories and tables).
 
 The package's destination surface is everything Chrome ships unflagged (Wasm 3.0 plus threads,
-relaxed SIMD, and branch hinting). SIMD, atomics and shared memories, memory64, exception
-handling, branch hinting, and GC with typed function references arrive in planned follow-up
-changes. Legacy exception handling and JS-API-only features are permanently out of scope, as are
-proposals below phase 4.
+relaxed SIMD, and branch hinting). Exception handling, branch hinting, and GC with typed
+function references arrive in planned follow-up changes. Legacy exception handling and
+JS-API-only features are permanently out of scope, as are proposals below phase 4.
 
 ## Scope and compatibility
 

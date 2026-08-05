@@ -23,7 +23,8 @@ if it is not on `PATH`.
 
 Validation runs with exactly these `wasm-tools` features, matching the package's supported
 surface: `mutable-global`, `saturating-float-to-int`, `sign-extension`, `multi-value`,
-`bulk-memory`, `reference-types`, `tail-call`, `extended-const`, `multi-memory`.
+`bulk-memory`, `reference-types`, `tail-call`, `extended-const`, `multi-memory`, `simd`,
+`relaxed-simd`, `threads`, `memory64`.
 
 ## Verification layers
 

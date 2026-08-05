@@ -149,15 +149,19 @@ const heapTypeText = (refType: ValType.RefType): string =>
 
 const memArgText = (
   context: Context,
-  mnemonic: Instr.MemoryAccessMnemonic,
-  instr: Instr.Instr & { readonly _tag: 'MemoryAccess' },
+  mnemonic: string,
+  naturalAlign: number,
+  instr: {
+    readonly memory: Parameters<typeof resolveRef>[1]
+    readonly align: number
+    readonly offset: number | bigint
+  },
 ): string => {
   const memory = resolveRef(context, instr.memory, 'Memory')
-  const row = InstructionTable.memoryAccessOps[mnemonic]
   let text = mnemonic
   if (memory.emitted !== 0) text += ` ${memory.text}`
-  if (instr.offset !== 0) text += ` offset=${instr.offset}`
-  if (instr.align !== row.widthLog2) text += ` align=${2 ** instr.align}`
+  if (BigInt(instr.offset) !== 0n) text += ` offset=${instr.offset}`
+  if (instr.align !== naturalAlign) text += ` align=${2 ** instr.align}`
   return text
 }
 
@@ -208,7 +212,39 @@ const instrText = (context: Context, instr: Instr.Instr): string => {
     case 'RefFunc':
       return `ref.func ${resolveRef(context, instr.func, 'Func').text}`
     case 'MemoryAccess':
-      return memArgText(context, instr.mnemonic, instr)
+      return memArgText(
+        context,
+        instr.mnemonic,
+        InstructionTable.memoryAccessOps[instr.mnemonic].widthLog2,
+        instr,
+      )
+    case 'V128Const':
+      return `v128.const i8x16 ${instr.bytes.join(' ')}`
+    case 'Shuffle':
+      return `i8x16.shuffle ${instr.lanes.join(' ')}`
+    case 'SimdLane':
+      return `${instr.mnemonic} ${instr.lane}`
+    case 'SimdMemoryAccess':
+      return memArgText(
+        context,
+        instr.mnemonic,
+        InstructionTable.simdMemoryAccessOps[instr.mnemonic].widthLog2,
+        instr,
+      )
+    case 'SimdMemoryLane':
+      return `${memArgText(
+        context,
+        instr.mnemonic,
+        InstructionTable.simdLaneMemoryOps[instr.mnemonic].widthLog2,
+        instr,
+      )} ${instr.lane}`
+    case 'AtomicAccess':
+      return memArgText(
+        context,
+        instr.mnemonic,
+        InstructionTable.atomicAccessOps[instr.mnemonic].widthLog2,
+        instr,
+      )
     case 'MemorySize': {
       const memory = resolveRef(context, instr.memory, 'Memory')
       return memory.emitted === 0 ? 'memory.size' : `memory.size ${memory.text}`
@@ -305,6 +341,25 @@ const constExprText = (context: Context, expr: ReadonlyArray<Instr.Instr>): stri
 const limitsText = (limits: ModuleState.Limits): string =>
   limits.max === undefined ? `${limits.min}` : `${limits.min} ${limits.max}`
 
+const memoryTypeText = (entry: {
+  readonly limits: ModuleState.Limits
+  readonly shared: boolean
+  readonly addressType: ModuleState.AddressType
+}): string => {
+  const address = entry.addressType === 'i64' ? 'i64 ' : ''
+  const shared = entry.shared ? ' shared' : ''
+  return `${address}${limitsText(entry.limits)}${shared}`
+}
+
+const tableTypeText = (entry: {
+  readonly limits: ModuleState.Limits
+  readonly addressType: ModuleState.AddressType
+  readonly refType: Parameters<typeof ValType.text>[0]
+}): string => {
+  const address = entry.addressType === 'i64' ? 'i64 ' : ''
+  return `${address}${limitsText(entry.limits)} ${ValType.text(entry.refType)}`
+}
+
 const globalTypeText = (entry: {
   readonly valType: ValType.ValType
   readonly mutable: boolean
@@ -385,7 +440,7 @@ export const renderModule = (
       const id = importable(ref(context, context.tables, entryIndex))
       lines.push(
         `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
-          `(table${id} ${limitsText(entry.limits)} ${ValType.text(entry.refType)}))`,
+          `(table${id} ${tableTypeText(entry)}))`,
       )
     }
     for (const entryIndex of spaces.memoryOrder) {
@@ -395,7 +450,7 @@ export const renderModule = (
       const id = importable(ref(context, context.memories, entryIndex))
       lines.push(
         `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
-          `(memory${id} ${limitsText(entry.limits)}))`,
+          `(memory${id} ${memoryTypeText(entry)}))`,
       )
     }
     for (const entryIndex of spaces.globalOrder) {
@@ -428,13 +483,13 @@ export const renderModule = (
       const entry = snapshot.tables[entryIndex]
       if (entry === undefined || entry.importSource !== undefined) continue
       const id = importable(ref(context, context.tables, entryIndex))
-      lines.push(`  (table${id} ${limitsText(entry.limits)} ${ValType.text(entry.refType)})`)
+      lines.push(`  (table${id} ${tableTypeText(entry)})`)
     }
     for (const entryIndex of spaces.memoryOrder) {
       const entry = snapshot.memories[entryIndex]
       if (entry === undefined || entry.importSource !== undefined) continue
       const id = importable(ref(context, context.memories, entryIndex))
-      lines.push(`  (memory${id} ${limitsText(entry.limits)})`)
+      lines.push(`  (memory${id} ${memoryTypeText(entry)})`)
     }
     for (const entryIndex of spaces.globalOrder) {
       const entry = snapshot.globals[entryIndex]

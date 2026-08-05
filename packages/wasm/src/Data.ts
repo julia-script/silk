@@ -16,7 +16,7 @@ import * as ModuleState from './internal/ModuleState.js'
 import * as NameCheck from './internal/NameCheck.js'
 import type * as Memory from './Memory.js'
 import * as ValType from './ValType.js'
-import type { WasmError } from './WasmError.js'
+import { invalidState, type WasmError } from './WasmError.js'
 
 /**
  * Opaque builder-owned identity for a data segment.
@@ -53,8 +53,19 @@ export const active = Effect.fn('Data.active')(function* (
   return yield* ModuleState.mutate(builder, 'Data.active', (state, owner) =>
     Result.gen(function* () {
       const memoryIndex = yield* Handle.resolve(owner, memory, 'Memory', 'Data.active')
+      const memoryEntry = state.memories[memoryIndex]
+      if (memoryEntry === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Data.active',
+            message: 'Memory entry is missing',
+            state: memoryIndex,
+          }),
+        )
+      }
       yield* NameCheck.ensureFresh(state.datas, options.name, 'Data.active')
-      yield* ConstExprCheck.check(state, owner, offset, ValType.i32, 'Data.active')
+      const offsetType = memoryEntry.addressType === 'i64' ? ValType.i64 : ValType.i32
+      yield* ConstExprCheck.check(state, owner, offset, offsetType, 'Data.active')
       const index = state.datas.length
       state.datas.push({
         mode: { _tag: 'Active', memory: memoryIndex, offset: Object.freeze([...offset]) },

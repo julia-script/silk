@@ -79,7 +79,7 @@ const encodeBlockType = (
 const encodeMemArg = (
   writer: ByteWriter,
   align: number,
-  offset: number,
+  offset: number | bigint,
   memoryIndex: number,
 ): void => {
   if (memoryIndex === 0) {
@@ -88,7 +88,7 @@ const encodeMemArg = (
     writer.u32(align | 0x40)
     writer.u32(memoryIndex)
   }
-  writer.u32(offset)
+  writer.u64(BigInt(offset))
 }
 
 export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.Instr): void => {
@@ -267,7 +267,42 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
         .u32(fc.elemDrop)
         .u32(spaceIndex(context, instr.elem, 'Elem'))
       return
+    case 'V128Const': {
+      writer.byte(ops.prefixSimd).u32(ops.v128Const)
+      for (const byte of instr.bytes) writer.byte(byte)
+      return
+    }
+    case 'Shuffle': {
+      writer.byte(ops.prefixSimd).u32(ops.i8x16Shuffle)
+      for (const laneIndex of instr.lanes) writer.byte(laneIndex)
+      return
+    }
+    case 'SimdLane': {
+      const row = InstructionTable.simdLaneOps[instr.mnemonic]
+      writer.byte(ops.prefixSimd).u32(row.subopcode).byte(instr.lane)
+      return
+    }
+    case 'SimdMemoryAccess': {
+      const row = InstructionTable.simdMemoryAccessOps[instr.mnemonic]
+      writer.byte(ops.prefixSimd).u32(row.subopcode)
+      encodeMemArg(writer, instr.align, instr.offset, spaceIndex(context, instr.memory, 'Memory'))
+      return
+    }
+    case 'SimdMemoryLane': {
+      const row = InstructionTable.simdLaneMemoryOps[instr.mnemonic]
+      writer.byte(ops.prefixSimd).u32(row.subopcode)
+      encodeMemArg(writer, instr.align, instr.offset, spaceIndex(context, instr.memory, 'Memory'))
+      writer.byte(instr.lane)
+      return
+    }
+    case 'AtomicAccess': {
+      const row = InstructionTable.atomicAccessOps[instr.mnemonic]
+      writer.byte(ops.prefixAtomic).u32(row.subopcode)
+      encodeMemArg(writer, instr.align, instr.offset, spaceIndex(context, instr.memory, 'Memory'))
+      return
+    }
   }
+  instr satisfies never
 }
 
 const encodeExpr = (
@@ -279,12 +314,16 @@ const encodeExpr = (
   writer.byte(InstructionTable.opcodes.end)
 }
 
-const encodeLimits = (writer: ByteWriter, limits: ModuleState.Limits): void => {
-  if (limits.max === undefined) {
-    writer.byte(0x00).u32(limits.min)
-  } else {
-    writer.byte(0x01).u32(limits.min).u32(limits.max)
-  }
+const encodeLimits = (
+  writer: ByteWriter,
+  limits: ModuleState.Limits,
+  shared: boolean,
+  addressType: ModuleState.AddressType,
+): void => {
+  const flags =
+    (limits.max === undefined ? 0 : 0x01) | (shared ? 0x02 : 0) | (addressType === 'i64' ? 0x04 : 0)
+  writer.byte(flags).u64(limits.min)
+  if (limits.max !== undefined) writer.u64(limits.max)
 }
 
 const section = (module: ByteWriter, id: number, contents: ByteWriter): void => {
@@ -449,7 +488,7 @@ export const encodeModule = (
       imports.push((contents) => {
         contents.name(source.module).name(source.field).byte(0x01)
         contents.byte(refTypeByte(entry.refType))
-        encodeLimits(contents, entry.limits)
+        encodeLimits(contents, entry.limits, false, entry.addressType)
       })
     }
     for (const entryIndex of spaces.memoryOrder) {
@@ -458,7 +497,7 @@ export const encodeModule = (
       if (entry === undefined || source === undefined) continue
       imports.push((contents) => {
         contents.name(source.module).name(source.field).byte(0x02)
-        encodeLimits(contents, entry.limits)
+        encodeLimits(contents, entry.limits, entry.shared, entry.addressType)
       })
     }
     for (const entryIndex of spaces.globalOrder) {
@@ -492,7 +531,7 @@ export const encodeModule = (
         const entry = snapshot.tables[entryIndex]
         if (entry === undefined) continue
         contents.byte(refTypeByte(entry.refType))
-        encodeLimits(contents, entry.limits)
+        encodeLimits(contents, entry.limits, false, entry.addressType)
       }
     })
 
@@ -502,7 +541,8 @@ export const encodeModule = (
     vectorSection(module, 5, definedMemories.length, (contents) => {
       for (const entryIndex of definedMemories) {
         const entry = snapshot.memories[entryIndex]
-        if (entry !== undefined) encodeLimits(contents, entry.limits)
+        if (entry !== undefined)
+          encodeLimits(contents, entry.limits, entry.shared, entry.addressType)
       }
     })
 
@@ -572,7 +612,8 @@ export const encodeModule = (
       }
     })
 
-    if (snapshot.datas.length > 0) {
+    const needsDataCount = snapshot.funcs.some((entry) => entry.definition?.usesDataCount === true)
+    if (needsDataCount) {
       const contents = new ByteWriter()
       contents.u32(snapshot.datas.length)
       section(module, 12, contents)

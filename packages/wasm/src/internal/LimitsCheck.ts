@@ -3,16 +3,26 @@ import type * as Limits from '../Limits.js'
 import { invalidInput, type WasmError } from '../WasmError.js'
 import type * as ModuleState from './ModuleState.js'
 
-const isU32 = (value: number): boolean =>
-  Number.isInteger(value) && value >= 0 && value <= 0xffffffff
+/** The page bound of a 32-bit memory (2^16) and a 64-bit memory (2^48). */
+const memoryBounds = { i32: 65536n, i64: 2n ** 48n }
+/** The element bound of a 32-bit table and a 64-bit table. */
+const tableBounds = { i32: 0xffffffffn, i64: 2n ** 64n - 1n }
+
+const normalize = (value: number | bigint): bigint | undefined => {
+  if (typeof value === 'bigint') return value >= 0n ? value : undefined
+  return Number.isInteger(value) && value >= 0 ? BigInt(value) : undefined
+}
 
 /** @internal */
 export const check = (
   limits: Limits.Limits,
-  bound: number,
+  entity: 'memory' | 'table',
+  addressType: ModuleState.AddressType,
   operation: string,
 ): Result.Result<ModuleState.Limits, WasmError> => {
-  if (!isU32(limits.min) || limits.min > bound) {
+  const bound = entity === 'memory' ? memoryBounds[addressType] : tableBounds[addressType]
+  const min = normalize(limits.min)
+  if (min === undefined || min > bound) {
     return Result.fail(
       invalidInput({
         operation,
@@ -22,7 +32,8 @@ export const check = (
     )
   }
   if (limits.max !== undefined) {
-    if (!isU32(limits.max) || limits.max > bound) {
+    const max = normalize(limits.max)
+    if (max === undefined || max > bound) {
       return Result.fail(
         invalidInput({
           operation,
@@ -31,7 +42,7 @@ export const check = (
         }),
       )
     }
-    if (limits.max < limits.min) {
+    if (max < min) {
       return Result.fail(
         invalidInput({
           operation,
@@ -40,6 +51,7 @@ export const check = (
         }),
       )
     }
+    return Result.succeed({ min, max })
   }
-  return Result.succeed({ min: limits.min, max: limits.max })
+  return Result.succeed({ min, max: undefined })
 }

@@ -113,4 +113,35 @@ export const negativeCorpus = [
     name: 'data-offset-type',
     wat: '(module (memory 1) (data (offset i64.const 0) "x"))',
   },
+  {
+    name: 'simd-lane-out-of-range',
+    wat: `(module (func
+      v128.const i64x2 0 0
+      f32x4.extract_lane 4
+      drop))`,
+  },
+  {
+    name: 'simd-shuffle-selector-out-of-range',
+    wat: `(module (func
+      v128.const i64x2 0 0
+      v128.const i64x2 0 0
+      i8x16.shuffle 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 32
+      drop))`,
+  },
+  {
+    name: 'atomic-misaligned',
+    wat: '(module (memory 1) (func i32.const 0 i32.atomic.load align=2 drop))',
+  },
+  {
+    name: 'shared-memory-without-max',
+    wat: '(module (memory 1 shared))',
+  },
+  {
+    name: 'memory64-i32-address',
+    wat: '(module (memory i64 1) (func (result i64) i32.const 0 i64.load))',
+  },
+  {
+    name: 'table64-i32-index',
+    wat: '(module (table i64 1 funcref) (func i32.const 0 table.get 0 drop))',
+  },
 ]

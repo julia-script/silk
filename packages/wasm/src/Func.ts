@@ -178,6 +178,7 @@ export const define = Effect.fn('Func.define')(function* (
         locals,
         body: Object.freeze([...definition.body]),
         refFuncs: checked.refFuncs,
+        usesDataCount: checked.usesDataCount,
       }
     }),
   )

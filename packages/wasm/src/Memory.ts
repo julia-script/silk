@@ -6,7 +6,7 @@ import * as LimitsCheck from './internal/LimitsCheck.js'
 import * as ModuleState from './internal/ModuleState.js'
 import * as NameCheck from './internal/NameCheck.js'
 import type * as Limits from './Limits.js'
-import type { WasmError } from './WasmError.js'
+import { invalidInput, type WasmError } from './WasmError.js'
 
 /**
  * Opaque builder-owned identity for an imported or defined memory.
@@ -25,13 +25,15 @@ export interface Memory extends Handle.Handle<'Memory'> {}
 export interface Options {
   /** Name used for text identifiers and the binary `name` custom section. */
   readonly name?: string
+  /** Marks the memory shared for use with atomic operations. Requires a maximum size. */
+  readonly shared?: boolean
+  /** Address type used to index the memory. Defaults to `'i32'`. */
+  readonly addressType?: 'i32' | 'i64'
 }
 
-/** The maximum number of 64 KiB pages addressable by a 32-bit memory. */
-const maxPages = 65536
-
 /**
- * Declares a defined memory sized in 64 KiB pages. A module may declare several memories.
+ * Declares a defined memory sized in 64 KiB pages. A module may declare several memories, and a
+ * memory may be shared (for atomics) or 64-bit addressed.
  *
  * @category memories
  * @since 0.0.0
@@ -43,11 +45,24 @@ export const make = Effect.fn('Memory.make')(function* (
 ): Effect.fn.Return<Memory, WasmError> {
   return yield* ModuleState.mutate(builder, 'Memory.make', (state, owner) =>
     Result.gen(function* () {
-      const checked = yield* LimitsCheck.check(limits, maxPages, 'Memory.make')
+      const addressType = options.addressType ?? 'i32'
+      const checked = yield* LimitsCheck.check(limits, 'memory', addressType, 'Memory.make')
       yield* NameCheck.ensureFresh(state.memories, options.name, 'Memory.make')
+      const shared = options.shared ?? false
+      if (shared && checked.max === undefined) {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'Memory.make',
+            message: 'A shared memory must declare a maximum size',
+            input: limits,
+          }),
+        )
+      }
       const index = state.memories.length
       state.memories.push({
         limits: checked,
+        shared,
+        addressType,
         name: options.name,
         importSource: undefined,
       })
