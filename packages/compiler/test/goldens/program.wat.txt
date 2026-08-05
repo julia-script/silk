@@ -1,0 +1,29 @@
+(module
+  (type (func (result i32)))
+  (type (func (param i32) (result i32)))
+  (func (type 0)
+    (local i32)
+    (local i32)
+    (local i32)
+    (local i32)
+    i32.const 42
+    local.set 0
+    local.get 0
+    call 1
+    local.set 1
+    local.get 1
+    call 1
+    local.set 2
+    local.get 2
+    return
+    unreachable
+  )
+  (func (type 1)
+    (local i32)
+    local.get 0
+    return
+    unreachable
+  )
+  (export "silk_main" (func 0))
+  (export "silk_1_identity" (func 1))
+)

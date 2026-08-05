@@ -10,6 +10,7 @@ import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as Ownership from './Ownership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
+import * as WasmBackend from './WasmBackend.js'
 
 /**
  * The supported analysis facade. Tooling consumes compiler phases exclusively through this
@@ -157,6 +158,17 @@ export const codegen = (
         ]),
       ),
   })
+
+/**
+ * Emits the snapshot's lowered program as WebAssembly. The artifact's `ir` carries the WAT
+ * inspection text and its `bitcode` carries the instantiable wasm binary, mirroring how
+ * {@link codegen} pairs LLVM IR text with bitcode.
+ */
+export const codegenWasm = (
+  self: Snapshot,
+  request: Backend.CodegenRequest,
+  layout: Mir.TargetLayout = defaultLayout,
+): Backend.Artifact => codegen(self, request, layout, WasmBackend.WasmBackend)
 
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>

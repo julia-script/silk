@@ -1,0 +1,33 @@
+(module
+  (type (func (result i32)))
+  (func (type 0)
+    (local i32)
+    (local i32)
+    (local i32)
+    (local i32)
+    (local i32)
+    (local i32)
+    i32.const 1
+    local.set 0
+    i32.const 1
+    local.set 1
+    local.get 0
+    local.get 1
+    i32.eq
+    local.set 2
+    local.get 2
+    if
+      i32.const 42
+      local.set 3
+      local.get 3
+      return
+    else
+      i32.const 0
+      local.set 4
+      local.get 4
+      return
+    end
+    unreachable
+  )
+  (export "silk_main" (func 0))
+)

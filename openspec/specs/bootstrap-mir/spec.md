@@ -16,6 +16,14 @@ metadata nodes, or physical field offsets, and MUST NOT adopt WebAssembly stack 
 control shapes. The operation vocabulary is restricted to the frozen slice's needs while its
 closed unions leave room for the full pinned vocabulary.
 
+This prohibition constrains MIR's own vocabulary — no target's instruction, type, or control
+constructs appear in the data model — and does NOT mean the graph is shapeless. MIR preserves
+the control structure lowering derived from the source, and backends MAY rely on the structural
+guarantees the verifier and lowering establish. Consuming that shape is each backend's own
+responsibility, done as its target demands: a backend targeting an arbitrary-CFG form emits the
+blocks directly, while one targeting structured control flow recovers the source's constructs
+from the same graph. Neither target's control shape belongs in MIR.
+
 #### Scenario: Model a straight-line function
 
 - **WHEN** a hand-built sample models `main` returning a called constant

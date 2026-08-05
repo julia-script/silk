@@ -120,6 +120,10 @@
     "./ToolchainPlan": {
       "types": "./dist/ToolchainPlan.d.ts",
       "import": "./dist/ToolchainPlan.js"
+    },
+    "./WasmBackend": {
+      "types": "./dist/WasmBackend.d.ts",
+      "import": "./dist/WasmBackend.js"
     }
   },
   "scripts": {
@@ -132,6 +136,7 @@
   },
   "dependencies": {
     "@silk-effect/llvm": "workspace:*",
+    "@silk-effect/wasm": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
