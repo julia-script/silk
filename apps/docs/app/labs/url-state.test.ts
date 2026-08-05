@@ -33,6 +33,26 @@ describe('source encoding', () => {
     expect(encoded).toMatch(/^[A-Za-z0-9\-_]*$/)
   })
 
+  it('carries the target, since the same program lowers differently for each', async () => {
+    const state = {
+      root: 'main',
+      modules: { main: 'pub fn main() -> I32 { return 42 }' },
+      target: 'wasm32-unknown-unknown',
+    }
+    expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
+  })
+
+  it('keeps an unknown target rather than silently compiling for the default', async () => {
+    // `Target.select` turns this into an unavailable selection the panes already render, which is
+    // a better answer than quietly emitting for some other target.
+    const encoded = (await encodeSource({
+      root: 'main',
+      modules: { main: 'pub fn main() -> I32 { return 42 }' },
+      target: 'sparc-unknown-none',
+    })) as string
+    expect((await decodeSource(encoded))?.target).toBe('sparc-unknown-none')
+  })
+
   it('rejects a root that names no module, which would not load', async () => {
     const encoded = (await encodeSource({
       root: 'absent',

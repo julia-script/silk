@@ -30,7 +30,6 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       cwd: packageRoot,
       stdio: 'pipe',
     })
-
     const archive = readdirSync(archiveRoot).find((file) => file.endsWith('.tgz'))
     expect(archive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
@@ -204,6 +203,10 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       cwd: packageRoot,
       stdio: 'pipe',
     })
+    execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+      cwd: wasmPackageRoot,
+      stdio: 'pipe',
+    })
 
     const archive = readdirSync(archiveRoot).find(
       (file) => file.startsWith('silk-effect-compiler-') && file.endsWith('.tgz'),
@@ -211,8 +214,12 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     const llvmArchive = readdirSync(archiveRoot).find(
       (file) => file.startsWith('silk-effect-llvm-') && file.endsWith('.tgz'),
     )
+    const wasmArchive = readdirSync(archiveRoot).find(
+      (file) => file.startsWith('silk-effect-wasm-') && file.endsWith('.tgz'),
+    )
     expect(archive).toBeDefined()
     expect(llvmArchive).toBeDefined()
+    expect(wasmArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
@@ -220,7 +227,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
 
     expect(manifest.name).toBe('@silk-effect/compiler')
     expect(manifest.private).not.toBe(true)
-    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual(['@silk-effect/llvm', 'effect'])
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
+      '@silk-effect/llvm',
+      '@silk-effect/wasm',
+      'effect',
+    ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './Analysis',
@@ -232,6 +243,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Elaboration',
       './Hir',
       './Instances',
+      './Layout',
       './Lexer',
       './Lower',
       './Mir',
@@ -243,8 +255,10 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SourceSpan',
       './SyntaxFile',
       './SyntaxTree',
+      './Target',
       './Token',
       './ToolchainPlan',
+      './WasmBackend',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
@@ -275,7 +289,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n`,
+      `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
     )
     execFileSync('pnpm', ['install', '--offline'], {
       cwd: consumerRoot,
@@ -515,6 +529,7 @@ console.log(
       'Elaboration',
       'Hir',
       'Instances',
+      'Layout',
       'Lexer',
       'Lower',
       'Mir',
@@ -525,8 +540,10 @@ console.log(
       'SourceSpan',
       'SyntaxFile',
       'SyntaxTree',
+      'Target',
       'Token',
       'ToolchainPlan',
+      'WasmBackend',
     ])
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
       readonly [string, ReadonlyArray<string>]

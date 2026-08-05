@@ -11,6 +11,7 @@ import type * as Token from './Token.js'
 export interface CompilationRequest {
   readonly rootModule: string
   readonly sources: ReadonlyMap<string, Uint8Array>
+  readonly target?: string
 }
 
 /** The resolved, diagnosed, or syntax-unavailable target of one import declaration. */

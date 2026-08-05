@@ -596,6 +596,8 @@ const projectCall = (
 
 const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
   switch (reason._tag) {
+    case 'InvalidMir':
+      return `InvalidMir: ${reason.violations.length} violations`
     case 'RecursiveCycle':
       return `RecursiveCycle: ${reason.cycle.map((id) => id.name).join(' → ')}`
     case 'Trap':
@@ -611,6 +613,8 @@ const blockedSpan = (
   reason: BootstrapEvaluation.BlockedReason,
 ): SourceSpan.SourceSpan | undefined => {
   switch (reason._tag) {
+    case 'InvalidMir':
+      return undefined
     case 'UnavailableEntry':
       return undefined
     case 'Trap':

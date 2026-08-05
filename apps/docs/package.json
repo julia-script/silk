@@ -16,6 +16,7 @@
     "@silk-effect/compiler": "workspace:*",
     "dockview": "^7.0.4",
     "dockview-react": "^7.0.4",
+    "effect": "catalog:",
     "fumadocs-core": "^16.14.0",
     "fumadocs-mdx": "^15.2.2",
     "fumadocs-ui": "^16.14.0",

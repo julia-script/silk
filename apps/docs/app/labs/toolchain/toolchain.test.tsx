@@ -1,4 +1,4 @@
-import { ToolchainPlan } from '@silk-effect/compiler'
+import { Target, ToolchainPlan } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ToolchainLab } from './toolchain'
@@ -8,6 +8,7 @@ describe('ToolchainLab', () => {
     const markup = renderToStaticMarkup(<ToolchainLab />)
 
     expect(markup).toContain('aria-label="Planned toolchain commands"')
+    expect(markup).toContain('--target=aarch64-apple-darwin')
     expect(markup).toContain('-c -x ir')
     expect(markup).toContain('-O2')
     expect(markup).toContain('silk_shim.o')
@@ -17,9 +18,16 @@ describe('ToolchainLab', () => {
   })
 
   it('plans debug and release-with-debug profiles distinctly', () => {
-    const debug = ToolchainPlan.objectCommand('/usr/bin/clang', 'debug', 'in.bc', 'out.o')
+    const debug = ToolchainPlan.objectCommand(
+      '/usr/bin/clang',
+      Target.aarch64AppleDarwin,
+      'debug',
+      'in.bc',
+      'out.o',
+    )
     const releaseDebug = ToolchainPlan.objectCommand(
       '/usr/bin/clang',
+      Target.aarch64AppleDarwin,
       'release-with-debug',
       'in.bc',
       'out.o',

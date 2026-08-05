@@ -21,6 +21,7 @@ it('reports broken graphs deterministically as data', () => {
   const broken: Mir.Module = {
     _tag: 'MirModule',
     module: 'sample://broken.silk',
+    layout: straight?.layout ?? raise('expected the sample layout'),
     functions: [
       { ...fn, blocks: [] },
       {
@@ -53,18 +54,13 @@ it('reports broken graphs deterministically as data', () => {
   assert.deepEqual(Mir.verify(broken), violations)
 })
 
-it('keeps MIR layout-free while the layout input exists independently', () => {
-  const layout: Mir.TargetLayout = {
-    _tag: 'TargetLayout',
-    triple: 'arm64-apple-darwin',
-    pointerWidth: 64,
-    endianness: 'little',
-    i32: { size: 4, alignment: 4 },
-  }
+it('carries and encodes exactly one compiler-owned target layout plan', () => {
   const [straight] = Mir.samples()
+  const sample = straight ?? raise('expected sample')
 
-  assert.strictEqual(layout.i32.size, 4)
-  assert.notInclude(Mir.encode(straight ?? raise('expected sample')), 'arm64')
+  assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
+  assert.include(Mir.encode(sample), 'target aarch64-apple-darwin')
+  assert.include(Mir.encode(sample), 'layout I32 size=4 align=4 repr=signed-i32')
 })
 
 it('marks generated operations and preserves programmer provenance', () => {

@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as Target from '../src/Target.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
 const clang = '/usr/bin/clang'
@@ -15,100 +17,208 @@ const ascii = (value: string): Uint8Array =>
 const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 
-const bitcodeFor = (profile: ToolchainPlan.OptimizationProfile): Uint8Array => {
-  const snapshot = Analysis.ofSource('memory://native.silk', ascii(nestedSource))
-  return Analysis.codegen(
-    snapshot,
-    { mode: ToolchainPlan.codegenModeFor(profile) },
-    NativeToolchain.hostLayout(),
-  ).bitcode
-}
+const artifactFor = Effect.fnUntraced(function* (
+  target: Target.Target,
+  profile: ToolchainPlan.OptimizationProfile,
+) {
+  const snapshot = Analysis.ofSource('memory://native.silk', ascii(nestedSource), target.id)
+  return yield* Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) })
+})
 
 it('plans fixed profile arguments and nothing else varies', () => {
-  const debug = ToolchainPlan.objectCommand(clang, 'debug', 'in.bc', 'out.o')
-  const release = ToolchainPlan.objectCommand(clang, 'release', 'in.bc', 'out.o')
-  const releaseDebug = ToolchainPlan.objectCommand(clang, 'release-with-debug', 'in.bc', 'out.o')
+  const target = Target.aarch64AppleDarwin
+  const debug = ToolchainPlan.objectCommand(clang, target, 'debug', 'in.bc', 'out.o')
+  const release = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')
+  const releaseDebug = ToolchainPlan.objectCommand(
+    clang,
+    target,
+    'release-with-debug',
+    'in.bc',
+    'out.o',
+  )
 
-  assert.deepEqual(debug.arguments, ['-c', '-x', 'ir', 'in.bc', '-O0', '-g', '-o', 'out.o'])
-  assert.deepEqual(release.arguments, ['-c', '-x', 'ir', 'in.bc', '-O2', '-o', 'out.o'])
-  assert.deepEqual(releaseDebug.arguments, ['-c', '-x', 'ir', 'in.bc', '-O2', '-g', '-o', 'out.o'])
+  assert.deepEqual(debug.arguments, [
+    '--target=aarch64-apple-darwin',
+    '-c',
+    '-x',
+    'ir',
+    'in.bc',
+    '-O0',
+    '-g',
+    '-o',
+    'out.o',
+  ])
+  assert.deepEqual(release.arguments, [
+    '--target=aarch64-apple-darwin',
+    '-c',
+    '-x',
+    'ir',
+    'in.bc',
+    '-O2',
+    '-o',
+    'out.o',
+  ])
+  assert.deepEqual(releaseDebug.arguments, [
+    '--target=aarch64-apple-darwin',
+    '-c',
+    '-x',
+    'ir',
+    'in.bc',
+    '-O2',
+    '-g',
+    '-o',
+    'out.o',
+  ])
 })
 
-it('emits a release object through the pinned Clang with provenance', () => {
-  NativeToolchain.withBuildScope('emit-object', (scope) => {
-    const outcome = NativeToolchain.emitObject(toolchain, scope, bitcodeFor('release'), 'release')
-
-    assert.strictEqual(outcome._tag, 'ObjectArtifact')
-    if (outcome._tag !== 'ObjectArtifact') return
-    assert.strictEqual(existsSync(outcome.artifact.path), true)
-    assert.strictEqual(outcome.planned.command, clang)
-    assert.include(outcome.planned.arguments, '-c')
-    assert.include(outcome.planned.arguments, '-O2')
-  })
+it('plans every native profile for each canonical native target', () => {
+  for (const target of Target.native) {
+    const object = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')
+    const link = ToolchainPlan.linkCommand(clang, target, ['in.o'], [], 'program')
+    assert.strictEqual(object.target, target)
+    assert.strictEqual(link.target, target)
+    assert.strictEqual(object.arguments.at(0), `--target=${target.triple}`)
+    assert.strictEqual(link.arguments.at(0), `--target=${target.triple}`)
+  }
 })
 
-it('surfaces a failed process as data with command provenance', () => {
-  const missing: NativeToolchain.Toolchain = Object.freeze({
-    _tag: 'Toolchain',
-    clang: '/nonexistent/clang',
-  })
-  NativeToolchain.withBuildScope('emit-failure', (scope) => {
-    const outcome = NativeToolchain.emitObject(missing, scope, bitcodeFor('release'), 'release')
+it.effect('emits a release object through the pinned Clang with provenance', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    const artifact = yield* artifactFor(target, 'release')
+    NativeToolchain.withBuildScope('emit-object', (scope) => {
+      const outcome = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+
+      assert.strictEqual(outcome._tag, 'ObjectArtifact')
+      if (outcome._tag !== 'ObjectArtifact') return
+      assert.strictEqual(existsSync(outcome.artifact.path), true)
+      assert.strictEqual(outcome.planned.command, clang)
+      assert.include(outcome.planned.arguments, '-c')
+      assert.include(outcome.planned.arguments, '-O2')
+    })
+  }),
+)
+
+it.effect('surfaces a failed process as data with command provenance', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    const artifact = yield* artifactFor(target, 'release')
+    const missing: NativeToolchain.Toolchain = Object.freeze({
+      _tag: 'Toolchain',
+      clang: '/nonexistent/clang',
+    })
+    NativeToolchain.withBuildScope('emit-failure', (scope) => {
+      const outcome = NativeToolchain.emitObject(missing, scope, artifact, target, 'release')
+
+      assert.strictEqual(outcome._tag, 'ToolchainFailure')
+      if (outcome._tag !== 'ToolchainFailure') return
+      assert.strictEqual(outcome.planned.command, '/nonexistent/clang')
+      assert.isAbove(outcome.output.length, 0)
+    })
+  }),
+)
+
+it.effect('removes scope-owned intermediates at exit and honors promotion', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    const artifact = yield* artifactFor(target, 'release')
+    let scopeRoot = ''
+    let promoted = ''
+    NativeToolchain.withBuildScope('cleanup', (scope) => {
+      scopeRoot = scope.root
+      const outcome = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+      assert.strictEqual(outcome._tag, 'ObjectArtifact')
+      if (outcome._tag !== 'ObjectArtifact') return
+      promoted = NativeToolchain.promote(outcome.artifact, join(scope.root, '..', 'promoted.o'))
+    })
+
+    assert.strictEqual(existsSync(scopeRoot), false)
+    assert.strictEqual(existsSync(promoted), true)
+  }),
+)
+
+it.effect('rejects a missing linker input as data without invoking the driver', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    const outcome = NativeToolchain.ClangLinker.link(
+      toolchain,
+      target,
+      [
+        Object.freeze({
+          _tag: 'PathArtifact' as const,
+          scope: 'x',
+          path: '/nonexistent/input.o',
+          target,
+        }),
+      ],
+      [],
+      '/tmp/never-written',
+    )
 
     assert.strictEqual(outcome._tag, 'ToolchainFailure')
     if (outcome._tag !== 'ToolchainFailure') return
-    assert.strictEqual(outcome.planned.command, '/nonexistent/clang')
-    assert.isAbove(outcome.output.length, 0)
-  })
-})
+    assert.include(outcome.output, 'missing linker input')
+  }),
+)
 
-it('removes scope-owned intermediates at exit and honors promotion', () => {
-  let scopeRoot = ''
-  let promoted = ''
-  NativeToolchain.withBuildScope('cleanup', (scope) => {
-    scopeRoot = scope.root
-    const outcome = NativeToolchain.emitObject(toolchain, scope, bitcodeFor('release'), 'release')
-    assert.strictEqual(outcome._tag, 'ObjectArtifact')
-    if (outcome._tag !== 'ObjectArtifact') return
-    promoted = NativeToolchain.promote(outcome.artifact, join(scope.root, '..', 'promoted.o'))
-  })
+it.effect('rejects target-mismatched bitcode and linker inputs before invoking Clang', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    const other = Target.native.find((candidate) => candidate.id !== target.id)
+    if (other === undefined) return assert.fail('expected a second native target')
+    const artifact = yield* artifactFor(other, 'release')
 
-  assert.strictEqual(existsSync(scopeRoot), false)
-  assert.strictEqual(existsSync(promoted), true)
-})
+    NativeToolchain.withBuildScope('target-mismatch', (scope) => {
+      const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+      assert.strictEqual(object._tag, 'ToolchainFailure')
+      if (object._tag !== 'ToolchainFailure') return
+      assert.strictEqual(object.reason._tag, 'TargetMismatch')
+    })
 
-it('rejects a missing linker input as data without invoking the driver', () => {
-  const outcome = NativeToolchain.ClangLinker.link(
-    toolchain,
-    [Object.freeze({ _tag: 'PathArtifact' as const, scope: 'x', path: '/nonexistent/input.o' })],
-    [],
-    '/tmp/never-written',
-  )
-
-  assert.strictEqual(outcome._tag, 'ToolchainFailure')
-  if (outcome._tag !== 'ToolchainFailure') return
-  assert.include(outcome.output, 'missing linker input')
-})
-
-it('links the shim with the program and the executable exits with the I32 result', () => {
-  NativeToolchain.withBuildScope('link-run', (scope) => {
-    const object = NativeToolchain.emitObject(toolchain, scope, bitcodeFor('release'), 'release')
-    const shim = NativeToolchain.compileShim(toolchain, scope)
-    assert.strictEqual(object._tag, 'ObjectArtifact')
-    assert.strictEqual(shim._tag, 'ObjectArtifact')
-    if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
-
-    const destination = join(scope.root, 'program')
     const linked = NativeToolchain.ClangLinker.link(
       toolchain,
-      [object.artifact, shim.artifact],
+      target,
+      [
+        Object.freeze({
+          _tag: 'PathArtifact' as const,
+          scope: 'mismatch',
+          path: '/nonexistent/other-target.o',
+          target: other,
+        }),
+      ],
       [],
-      destination,
+      '/tmp/never-written-target-mismatch',
     )
-    assert.strictEqual(linked._tag, 'Executable')
-    if (linked._tag !== 'Executable') return
+    assert.strictEqual(linked._tag, 'ToolchainFailure')
+    if (linked._tag !== 'ToolchainFailure') return
+    assert.strictEqual(linked.reason._tag, 'TargetMismatch')
+  }),
+)
 
-    const run = spawnSync(linked.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42)
-  })
-})
+it.effect('links the shim with the program and the executable exits with the I32 result', () =>
+  Effect.gen(function* () {
+    const target = yield* Target.host()
+    const artifact = yield* artifactFor(target, 'release')
+    NativeToolchain.withBuildScope('link-run', (scope) => {
+      const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+      const shim = NativeToolchain.compileShim(toolchain, scope, target)
+      assert.strictEqual(object._tag, 'ObjectArtifact')
+      assert.strictEqual(shim._tag, 'ObjectArtifact')
+      if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
+
+      const destination = join(scope.root, 'program')
+      const linked = NativeToolchain.ClangLinker.link(
+        toolchain,
+        target,
+        [object.artifact, shim.artifact],
+        [],
+        destination,
+      )
+      assert.strictEqual(linked._tag, 'Executable')
+      if (linked._tag !== 'Executable') return
+
+      const run = spawnSync(linked.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42)
+    })
+  }),
+)

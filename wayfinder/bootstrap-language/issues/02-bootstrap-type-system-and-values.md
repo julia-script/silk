@@ -30,6 +30,13 @@ reflection over types, and user-defined type-level computation are excluded. Abs
 `Option<T>` is the union `Some<T> | None`, using a nominal `Some<T>` wrapper so nested options do
 not collapse.
 
+Union injection and widening are contextual rather than inference-changing conversions. A nominal
+`A` may be used where an immediate expected type is a union containing `A`, and an existing union
+may widen to an expected union containing all of its members. A binding with no declared or other
+immediate expected type retains the precise type of its initializer; a later use cannot
+retroactively widen that binding. Narrowing occurs only through pattern analysis such as `match`.
+Moving a non-Copy value into an owned union consumes that value.
+
 At runtime, a bootstrap union uses a compiler-owned discriminant plus storage sized and aligned for
 its largest member. Canonical nominal type identity, not alias spelling order, determines the
 internal member order. Numeric tag values are not observable and the layout has no stable external
@@ -106,6 +113,13 @@ and cross-linked compiler structures should use owned collections plus stable co
 access uses an explicit shared or exclusive place projection and never implicitly dereferences or
 converts to another type.
 
+Only the module defining a nominal struct may assemble it with a raw struct literal. Other modules
+construct values through ordinary public actor functions exported by that module. Literal fields
+are labeled and complete: every field appears exactly once, although source order need not match
+declaration order. A field projection is a place. Copy fields may be read by copy, shared or
+exclusive borrows may project fields, and moving an individual field out of a non-Copy struct is
+excluded during bootstrap; ownership moves the whole value.
+
 `RawPointer<T>` is a copyable, non-owning, non-null default-address-space pointer invariant in `T`.
 Safe code may hold, pass, copy, and compare raw pointers, and may obtain one from a current borrow
 without extending that borrow's lifetime. Address interpretation, arithmetic, dereferencing,
@@ -127,3 +141,9 @@ owned allocations cannot expose partial or uninitialized state. Low-level constr
 use an explicit unsafe `MaybeUninitialized<T>` abstraction, which is not interchangeable with `T`.
 All syntax in this answer is illustrative; concrete spelling remains the responsibility of the
 bootstrap syntax prototype.
+
+## Amendment — 2026-08-05
+
+The data-slice planning session made contextual union widening and nominal struct construction
+boundaries explicit. It also confirmed that concrete struct and union layout is selected by the
+compiler's target-aware layout phase described by issue 06, not independently by a backend.

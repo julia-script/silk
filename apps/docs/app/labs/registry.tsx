@@ -15,7 +15,7 @@ import { DiscoveryView } from './instances/instances'
 import { CfgView } from './mir-cfg/mir-cfg'
 import { ClosureView } from './module-closure/module-closure'
 import { OwnershipView } from './ownership/ownership'
-import { LlvmView, ToolchainView, WasmView } from './panels'
+import { LayoutSummary, LlvmView, ToolchainView, WasmView } from './panels'
 import {
   DiagnosticPanel,
   diagnosticEntries,
@@ -33,6 +33,7 @@ export type ViewId =
   | 'hir'
   | 'ownership'
   | 'instances'
+  | 'layout'
   | 'mir'
   | 'llvm'
   | 'wasm'
@@ -108,14 +109,30 @@ export const views: ReadonlyArray<ViewDefinition> = [
     render: ({ snapshot }) => <DiscoveryView discovery={Analysis.instancesOf(snapshot)} />,
   },
   {
+    id: 'layout',
+    title: 'Target layout',
+    phase: 'layout',
+    render: ({ snapshot }) => (
+      <LayoutSummary snapshot={snapshot} id="layout-plan" label="Target layout plan" />
+    ),
+  },
+  {
     id: 'mir',
     title: 'MIR control flow',
     phase: 'lowering',
     // Provenance is rendered by slicing spans out of the text, and those spans are byte offsets
     // into one module — the root, which is what lowering starts from.
-    render: ({ snapshot, modules, root }) => (
-      <CfgView module={Analysis.loweredMir(snapshot)} source={modules[root]} />
-    ),
+    //
+    // Lowering is target-aware, so MIR is absent whenever the target did not resolve; the pane
+    // says which failure it was rather than rendering an empty graph.
+    render: ({ snapshot, modules, root }) => {
+      const mir = Analysis.mirOf(snapshot)
+      return mir._tag === 'Available' ? (
+        <CfgView module={mir.value} source={modules[root]} />
+      ) : (
+        <p className={styles.emptyState}>{mir.error.message}</p>
+      )
+    },
   },
   {
     id: 'llvm',

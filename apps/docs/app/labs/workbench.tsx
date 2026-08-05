@@ -13,7 +13,7 @@
  */
 
 import { Analysis } from '@silk-effect/compiler'
-import type { ToolchainPlan } from '@silk-effect/compiler'
+import type { Target, ToolchainPlan } from '@silk-effect/compiler'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -235,6 +235,9 @@ export function Workbench() {
   const [activeModule, setActiveModule] = useState<string>(initialPreset.root)
   const [mode, setMode] = useState<'release' | 'debug'>('debug')
   const [profile, setProfile] = useState<ToolchainPlan.OptimizationProfile>('release')
+  // The target belongs to the request, not to a backend: the same program lowers differently for
+  // each, which is exactly the comparison the layout and MIR panes are for.
+  const [target, setTarget] = useState<Target.Id>('aarch64-apple-darwin')
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [api, setApi] = useState<DockviewApi>()
@@ -249,8 +252,9 @@ export function Workbench() {
         sources: new Map(
           Object.entries(modules).map(([name, text]) => [name, encoder.encode(text)]),
         ),
+        target,
       }),
-    [modules, root],
+    [modules, root, target],
   )
 
   const loadPreset = useCallback((preset: Preset) => {
@@ -376,6 +380,7 @@ export function Workbench() {
           setModules(decoded.modules)
           setRoot(decoded.root)
           setActiveModule(decoded.root)
+          if (decoded.target !== undefined) setTarget(decoded.target as Target.Id)
         }
       }
 
@@ -429,7 +434,7 @@ export function Workbench() {
           } catch {
             // Private-mode quota failures should not break the workbench.
           }
-          const encodedSource = await encodeSource({ root, modules })
+          const encodedSource = await encodeSource({ root, modules, target })
           const next = new URLSearchParams(window.location.search)
           next.set(layoutParam, encodedLayout)
           if (encodedSource !== undefined) next.set(sourceParam, encodedSource)
@@ -444,7 +449,7 @@ export function Workbench() {
       cancelAnimationFrame(frame)
       disposable.dispose()
     }
-  }, [api, modules, root])
+  }, [api, modules, root, target])
 
   const addPane = useCallback(
     (viewId: string) => {
@@ -507,6 +512,29 @@ export function Workbench() {
         </button>
 
         <span className={shell.toolbarSpacer} />
+
+        <label className="sr-only" htmlFor="target">
+          Compilation target
+        </label>
+        <select
+          id="target"
+          className={shell.toggle}
+          value={target}
+          onChange={(event) => setTarget(event.target.value as Target.Id)}
+        >
+          {(
+            [
+              'aarch64-apple-darwin',
+              'x86_64-unknown-linux-gnu',
+              'aarch64-unknown-linux-gnu',
+              'wasm32-unknown-unknown',
+            ] as const
+          ).map((candidate) => (
+            <option key={candidate} value={candidate}>
+              {candidate}
+            </option>
+          ))}
+        </select>
 
         <button
           type="button"

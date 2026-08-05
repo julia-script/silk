@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
@@ -18,21 +19,37 @@ export function ToolchainLab() {
   const [text, setText] = useState<string>(defaultSource)
   const [profile, setProfile] = useState<ToolchainPlan.OptimizationProfile>('release')
 
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
+  const snapshot = useMemo(
+    () => Analysis.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin'),
+    [text],
+  )
   const artifact = useMemo(
-    () => Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) }),
+    () =>
+      Effect.runSync(
+        Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) }),
+      ),
     [snapshot, profile],
   )
+  const selected = Analysis.targetOf(snapshot)
+  if (selected._tag === 'Unavailable') return null
+  const target = selected.target
 
   const objectPlan = ToolchainPlan.objectCommand(
     clang,
+    target,
     profile,
     '<scope>/program.bc',
     '<scope>/program.o',
   )
-  const shimPlan = ToolchainPlan.shimCommand(clang, '<scope>/silk_shim.c', '<scope>/silk_shim.o')
+  const shimPlan = ToolchainPlan.shimCommand(
+    clang,
+    target,
+    '<scope>/silk_shim.c',
+    '<scope>/silk_shim.o',
+  )
   const linkPlan = ToolchainPlan.linkCommand(
     clang,
+    target,
     ['<scope>/program.o', '<scope>/silk_shim.o'],
     [],
     '<destination>/program',

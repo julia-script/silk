@@ -13,10 +13,10 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** widen the bootstrap language over the accepted compiler spine — the full
-source-to-native pipeline shipped 2026-08-05 with every phase inspectable, so growth now means
-grammar and semantics (bindings, arithmetic, control flow, and onward toward issues 01–04 and 08)
-riding an unchanged, determinism-gated architecture.
+**Current objective:** give the bootstrap language compiler-shaped data over the accepted compiler
+spine. The next work first standardizes target-aware layout in the compiler, then resolves
+cross-module declarations before nominal structs, structural unions, and exhaustive matching grow
+through the same inspectable, determinism-gated architecture.
 
 ## Column rules
 
@@ -29,7 +29,6 @@ riding an unchanged, determinism-gated architecture.
 ### Widen the language, slice 1: bindings, arithmetic, branching
 
 **Status: complete (2026-08-05).** All three changes shipped and archived; see the changelog.
-The Next item below is the candidate for promotion at the next review.
 
 - **Problem:** The realigned spine (diagnostics through native link, all 13 changes archived
   2026-08-05) runs end to end over a grammar too small to exercise it: ownership is trivially
@@ -51,21 +50,38 @@ The Next item below is the candidate for promotion at the next review.
   [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md) ·
   [realignment record](compiler-realignment.md)
 
-## Next
-
 ### Give the language its data: structs, unions, and matching
 
+**Status: shaped; first change ready to propose.** The semantic choices are pinned in Wayfinder,
+including compiler-owned target layout and the concrete import, construction, and matching forms.
+
 - **Problem:** A compiler-shaped program is mostly data manipulation; expressions and branches
-  alone cannot express tokens, trees, or facts.
-- **Hypothesis:** Nominal structs first, then normalized structural unions with mode-aware
-  exhaustive matching (issue 02), will force the first real type-layout decisions in MIR and the
-  backend and make instance discovery meaningful.
-- **Confidence:** medium — the semantic decisions are pinned; the MIR/layout consequences are not
-  yet designed.
-- **Assumes:** The slice-1 widening loop proves the extend-don't-replace economics of growing
-  grammar, HIR, MIR, interpreter, backend, and labs together.
-- **Open questions:** Where aggregate layout lives (MIR `TargetLayout` vs backend), and when typed
-  failure rows (issue 03) and cross-module resolution (issue 04) interleave with the data work.
+  alone cannot express tokens, trees, or facts. The current backend-owned layout seam also hides
+  target facts until emission, where multiple backends could repeat or disagree on Silk layout.
+- **Outcome & done-when:** the compiler selects a supported target before lowering, computes one
+  backend-neutral layout plan after concrete instance discovery, and embeds it in MIR. The language
+  then gains cross-module resolution, nominal structs, struct values, normalized structural unions,
+  and exhaustive mode-aware matching without allowing a backend to reinterpret their layouts.
+- **Sequence:**
+  1. `standardize-target-aware-layouts`
+  2. `resolve-cross-module-declarations`
+  3. `declare-nominal-struct-types`
+  4. `construct-and-project-struct-values`
+  5. `normalize-structural-unions`
+  6. `match-exhaustively`
+- **Dependencies:** layout and cross-module resolution both precede struct declarations; struct
+  declarations precede construction; construction and layout precede unions; unions precede match.
+- **Appetite:** one focused OpenSpec change at a time, followed by implementation, inspection,
+  archive, and reassessment before proposing the next ticket.
+- **Links:** [type and value decision](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
+  [module decision](../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md) ·
+  [pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
+  [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
+
+## Next
+
+No item is promoted yet. Reassess after each data-slice change is implemented and archived; the
+six-item Now sequence is intentionally allowed to change when implementation evidence demands it.
 
 ## Later
 
@@ -117,6 +133,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-05: Promoted the compiler-data slice to Now and shaped six dependency-ordered changes.
+  Settled that the compiler is backend-agnostic but target-aware: canonical target and concrete
+  layout are computed before MIR lowering and embedded in MIR. Also fixed the bootstrap import,
+  nominal construction, union widening, and mode-aware match decisions in Wayfinder.
 - 2026-08-05: Shipped and archived `branch-on-boolean-conditions` — slice 1 complete. `Bool` as
   the second scalar (literals, declared types, comparisons, `Bool.not`), `if`/`else` statements
   with brace arms, condition and argument type checking (`SEM0011`/`SEM0012`), arm-scoped

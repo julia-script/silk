@@ -34,6 +34,8 @@ describe('MirCfgLab', () => {
 
     expect(markup).toContain('aria-label="MIR samples"')
     expect(markup).toContain('aria-label="Deterministic MIR encoding"')
+    expect(markup).toContain('aria-label="MIR target layout plan"')
+    expect(markup).toContain('aarch64-apple-darwin')
     expect(markup).toContain('mir-module sample://straight.silk')
   })
 })

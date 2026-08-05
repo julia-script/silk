@@ -7,6 +7,8 @@
  */
 
 import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import type { Backend } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { useMemo } from 'react'
 import styles from './syntax-inspector/syntax-inspector.module.css'
 
@@ -56,6 +58,67 @@ const execute = (bytes: Uint8Array): Execution => {
   }
 }
 
+/**
+ * Emission is an Effect that fails on a target the backend cannot serve — a native backend asked
+ * for a wasm target, say. Running it here turns that into data the pane can render, instead of an
+ * exception that takes the pane down with it.
+ */
+const emit = (
+  run: () => Effect.Effect<Backend.Artifact, unknown>,
+):
+  | { readonly _tag: 'Emitted'; readonly artifact: Backend.Artifact }
+  | { readonly _tag: 'Rejected'; readonly message: string } => {
+  try {
+    return { _tag: 'Emitted', artifact: Effect.runSync(run()) }
+  } catch (error) {
+    return { _tag: 'Rejected', message: messageOf(error) }
+  }
+}
+
+/** The target and its scalar plan, which is what makes an emission reproducible. */
+export function LayoutSummary({
+  snapshot,
+  id,
+  label,
+}: {
+  readonly snapshot: Analysis.Snapshot
+  readonly id: string
+  readonly label: string
+}) {
+  const layout = Analysis.layoutOf(snapshot)
+  if (layout._tag !== 'Available') {
+    return (
+      <section className={styles.diagnosticGroup} aria-labelledby={id}>
+        <div className={styles.diagnosticHeading}>
+          <h3 id={id}>Compiler target and scalar plan</h3>
+        </div>
+        <p className={styles.emptyState}>{layout.error.message}</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className={styles.diagnosticGroup} aria-labelledby={id}>
+      <div className={styles.diagnosticHeading}>
+        <h3 id={id}>Compiler target and scalar plan</h3>
+        <span>{layout.value.target.id}</span>
+      </div>
+      <ul className={styles.diagnosticList} aria-label={label}>
+        {layout.value.entries.map((entry) => (
+          <li key={entry.type}>
+            <div>
+              <code>{entry.type}</code>
+              <span>
+                {entry.size} bytes · align {entry.alignment} · i{entry.representation.bits}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export function LlvmView({
   snapshot,
   mode,
@@ -63,11 +126,31 @@ export function LlvmView({
   readonly snapshot: Analysis.Snapshot
   readonly mode: 'release' | 'debug'
 }) {
-  const artifact = useMemo(() => Analysis.codegen(snapshot, { mode }), [snapshot, mode])
+  const emission = useMemo(
+    () => emit(() => Analysis.codegen(snapshot, { mode })),
+    [snapshot, mode],
+  )
+
+  if (emission._tag === 'Rejected') {
+    return (
+      <div>
+        <LayoutSummary snapshot={snapshot} id="llvm-target-layout" label="LLVM target layout plan" />
+        <section className={styles.diagnosticGroup} aria-labelledby="llvm-rejected">
+          <div className={styles.diagnosticHeading}>
+            <h3 id="llvm-rejected">Emission rejected</h3>
+          </div>
+          <pre aria-label="LLVM emission error">{emission.message}</pre>
+        </section>
+      </div>
+    )
+  }
+
+  const artifact = emission.artifact
 
   return (
     <div>
       <div className={styles.diagnostics}>
+        <LayoutSummary snapshot={snapshot} id="llvm-target-layout" label="LLVM target layout plan" />
         <section className={styles.diagnosticGroup} aria-labelledby="llvm-symbols">
           <div className={styles.diagnosticHeading}>
             <h3 id="llvm-symbols">Symbols</h3>
@@ -106,15 +189,12 @@ export function WasmView({
   readonly snapshot: Analysis.Snapshot
   readonly mode: 'release' | 'debug'
 }) {
-  // Emission can fail on a program the backend does not cover; the panel reports that as data
-  // rather than breaking the page.
-  const emission = useMemo(() => {
-    try {
-      return { _tag: 'Emitted' as const, artifact: Analysis.codegenWasm(snapshot, { mode }) }
-    } catch (error) {
-      return { _tag: 'Rejected' as const, message: messageOf(error) }
-    }
-  }, [snapshot, mode])
+  // Emission can fail on a program the backend does not cover, and on a snapshot whose target is
+  // not one this backend serves; the panel reports either as data rather than breaking the page.
+  const emission = useMemo(
+    () => emit(() => Analysis.codegenWasm(snapshot, { mode })),
+    [snapshot, mode],
+  )
 
   const execution = useMemo(
     () => (emission._tag === 'Emitted' ? execute(emission.artifact.bitcode) : undefined),
@@ -122,9 +202,18 @@ export function WasmView({
   )
 
   // The interpreter runs the same MIR the backend emitted from, so a disagreement is a backend
-  // bug and is worth surfacing directly.
-  const interpreted = useMemo(() => Analysis.evaluate(snapshot), [snapshot])
-  const expected = interpreted._tag === 'Completed' ? interpreted.result.value : 'trap'
+  // bug and is worth surfacing directly. `evaluate` throws when MIR is unavailable — an
+  // unresolved target, say — so availability is checked rather than assumed.
+  const interpreted = useMemo(
+    () => (Analysis.mirOf(snapshot)._tag === 'Available' ? Analysis.evaluate(snapshot) : undefined),
+    [snapshot],
+  )
+  const expected =
+    interpreted === undefined
+      ? undefined
+      : interpreted._tag === 'Completed'
+        ? interpreted.result.value
+        : 'trap'
   const observed =
     execution === undefined
       ? undefined
@@ -137,17 +226,30 @@ export function WasmView({
 
   if (emission._tag === 'Rejected') {
     return (
-      <section className={styles.diagnosticGroup} aria-labelledby="wasm-rejected">
-        <div className={styles.diagnosticHeading}>
-          <h3 id="wasm-rejected">Emission rejected</h3>
-        </div>
-        <pre aria-label="WebAssembly emission error">{emission.message}</pre>
-      </section>
+      <div>
+        <LayoutSummary
+          snapshot={snapshot}
+          id="wasm-target-layout"
+          label="WebAssembly target layout plan"
+        />
+        <section className={styles.diagnosticGroup} aria-labelledby="wasm-rejected">
+          <div className={styles.diagnosticHeading}>
+            <h3 id="wasm-rejected">Emission rejected</h3>
+          </div>
+          <pre aria-label="WebAssembly emission error">{emission.message}</pre>
+        </section>
+      </div>
     )
   }
 
   return (
     <div>
+      <LayoutSummary
+        snapshot={snapshot}
+        id="wasm-target-layout"
+        label="WebAssembly target layout plan"
+      />
+
       <section className={styles.diagnosticGroup} aria-labelledby="wasm-execution">
         <div className={styles.diagnosticHeading}>
           <h3 id="wasm-execution">Execution</h3>
@@ -172,9 +274,11 @@ export function WasmView({
             <div>
               <code>bootstrap interpreter</code>
               <span aria-label="Interpreter result">
-                {interpreted._tag === 'Completed'
-                  ? `returned ${interpreted.result.value}`
-                  : 'trapped'}
+                {interpreted === undefined
+                  ? 'not run — MIR unavailable'
+                  : interpreted._tag === 'Completed'
+                    ? `returned ${interpreted.result.value}`
+                    : 'trapped'}
               </span>
             </div>
           </li>
@@ -217,20 +321,59 @@ export function ToolchainView({
   readonly snapshot: Analysis.Snapshot
   readonly profile: ToolchainPlan.OptimizationProfile
 }) {
-  const artifact = useMemo(
-    () => Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) }),
+  const emission = useMemo(
+    () => emit(() => Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) })),
     [snapshot, profile],
   )
+  const selection = Analysis.targetOf(snapshot)
+
+  // Every planned command is issued *for* a target, so there is nothing to plan until one
+  // resolves. The native toolchain also cannot serve a WebAssembly target — saying so beats
+  // rendering a clang line that would never be run.
+  if (selection._tag !== 'Resolved') {
+    return (
+      <section className={styles.diagnosticGroup} aria-labelledby="toolchain-unavailable">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="toolchain-unavailable">Toolchain unavailable</h3>
+        </div>
+        <p className={styles.emptyState}>{selection.error.message}</p>
+      </section>
+    )
+  }
+
+  const target = selection.target
+
+  if (target.kind !== 'Native') {
+    return (
+      <section className={styles.diagnosticGroup} aria-labelledby="toolchain-non-native">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="toolchain-non-native">Toolchain unavailable</h3>
+          <span>{target.id}</span>
+        </div>
+        <p className={styles.emptyState}>
+          The native toolchain orchestrates a link driver, which the {target.id} target has no use
+          for. Pick a native target to see its planned commands.
+        </p>
+      </section>
+    )
+  }
 
   const objectPlan = ToolchainPlan.objectCommand(
     clang,
+    target,
     profile,
     '<scope>/program.bc',
     '<scope>/program.o',
   )
-  const shimPlan = ToolchainPlan.shimCommand(clang, '<scope>/silk_shim.c', '<scope>/silk_shim.o')
+  const shimPlan = ToolchainPlan.shimCommand(
+    clang,
+    target,
+    '<scope>/silk_shim.c',
+    '<scope>/silk_shim.o',
+  )
   const linkPlan = ToolchainPlan.linkCommand(
     clang,
+    target,
     ['<scope>/program.o', '<scope>/silk_shim.o'],
     [],
     '<destination>/program',
@@ -242,7 +385,11 @@ export function ToolchainView({
         <section className={styles.diagnosticGroup} aria-labelledby="toolchain-commands">
           <div className={styles.diagnosticHeading}>
             <h3 id="toolchain-commands">Planned commands · {profile}</h3>
-            <span>{artifact.bitcode.length} bitcode bytes</span>
+            <span>
+              {emission._tag === 'Emitted'
+                ? `${emission.artifact.bitcode.length} bitcode bytes`
+                : 'emission rejected'}
+            </span>
           </div>
           <ul className={styles.diagnosticList} aria-label="Planned toolchain commands">
             <li>

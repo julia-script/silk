@@ -1,26 +1,19 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as Layout from './Layout.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
+import * as Target from './Target.js'
 
 /**
  * MIR: the monomorphic, backend-neutral basic-block control-flow graph over logical Silk types.
  * It contains no LLVM types, instructions, intrinsics, attributes, metadata, or physical field
- * offsets, and adopts no WebAssembly control shapes. The target layout is a separate input
- * consumed only at emission time.
+ * offsets, and adopts no WebAssembly control shapes. It carries the compiler-owned concrete
+ * target and layout plan that every consumer must realize.
  */
 
 /** A logical Silk type at the MIR level. */
 export type Type = { readonly _tag: 'I32' } | { readonly _tag: 'Bool' }
-
-/** The explicit emission-time target-layout input. Never read by MIR itself. */
-export interface TargetLayout {
-  readonly _tag: 'TargetLayout'
-  readonly triple: string
-  readonly pointerWidth: 32 | 64
-  readonly endianness: 'little' | 'big'
-  readonly i32: { readonly size: number; readonly alignment: number }
-}
 
 /** One ordinal-indexed virtual register local to a function. */
 export interface LocalId {
@@ -133,14 +126,20 @@ export interface MirFunction {
 export interface Module {
   readonly _tag: 'MirModule'
   readonly module: string
+  readonly layout: Layout.Plan
   readonly functions: ReadonlyArray<MirFunction>
 }
 
 /** One structural invariant violation, reported as data. */
 export interface Violation {
   readonly _tag: 'Violation'
-  readonly rule: 'MissingEntryBlock' | 'UnknownBlockTarget' | 'UndeclaredLocal'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly rule:
+    | 'InvalidLayout'
+    | 'MissingTypeLayout'
+    | 'MissingEntryBlock'
+    | 'UnknownBlockTarget'
+    | 'UndeclaredLocal'
+  readonly function?: DeclarationIndex.CanonicalId
   readonly block?: BlockId
   readonly detail: string
 }
@@ -171,8 +170,29 @@ const blockTargets = (block: Block): ReadonlyArray<BlockId> =>
 
 /** Verifies structural invariants, returning an ordered deterministic violation collection. */
 export const verify = (self: Module): ReadonlyArray<Violation> => {
-  const violations: Array<Violation> = []
+  const violations: Array<Violation> = Layout.verify(self.layout).map((violation) =>
+    Object.freeze({
+      _tag: 'Violation',
+      rule: 'InvalidLayout',
+      detail: `${violation.rule}: ${violation.detail}`,
+    }),
+  )
   for (const fn of self.functions) {
+    const missingTypes = new Set(
+      [...fn.localTypes, fn.result]
+        .map((type) => type._tag)
+        .filter((type) => Layout.entry(self.layout, type) === undefined),
+    )
+    for (const type of [...missingTypes].sort()) {
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'MissingTypeLayout',
+          function: fn.id,
+          detail: `function references ${type} without a layout entry`,
+        }),
+      )
+    }
     if (fn.blocks.length === 0) {
       violations.push(
         Object.freeze({
@@ -256,11 +276,13 @@ const terminatorText = (terminator: Terminator): string => {
 
 /**
  * Deterministic textual encoding of one MIR module for debugging, inspection, and golden tests.
- * Layout-free by construction; no compatibility promise attaches to this format.
+ * The compiler-selected target and canonical layout lead the encoding; no compatibility promise
+ * attaches to this inspection format.
  */
 export const encode = (self: Module): string =>
   [
     `mir-module ${self.module}`,
+    ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
       `fn ${targetText(fn.id)} params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${fn.result._tag}`,
       ...fn.blocks.flatMap((block) => [
@@ -304,6 +326,7 @@ export const samples = (): ReadonlyArray<Module> => {
   const straight: Module = Object.freeze({
     _tag: 'MirModule',
     module: 'sample://straight.silk',
+    layout: Layout.make(Target.aarch64AppleDarwin, ['I32']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,
@@ -384,6 +407,7 @@ export const samples = (): ReadonlyArray<Module> => {
   const branching: Module = Object.freeze({
     _tag: 'MirModule',
     module: 'sample://branching.silk',
+    layout: Layout.make(Target.aarch64AppleDarwin, ['I32']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,

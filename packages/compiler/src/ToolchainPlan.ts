@@ -3,6 +3,7 @@
  * structured commands the orchestration issues (never a shell string), and the minimal C runtime
  * shim source. Browser-safe by construction — execution lives in `NativeToolchain`.
  */
+import type * as Target from './Target.js'
 
 /** The fixed optimization profiles. There is no configurable pass pipeline. */
 export type OptimizationProfile = 'debug' | 'release' | 'release-with-debug'
@@ -10,6 +11,7 @@ export type OptimizationProfile = 'debug' | 'release' | 'release-with-debug'
 /** One planned process invocation: the pinned command and its structured arguments. */
 export interface PlannedCommand {
   readonly _tag: 'PlannedCommand'
+  readonly target: Target.Target
   readonly command: string
   readonly arguments: ReadonlyArray<string>
 }
@@ -32,14 +34,17 @@ const profileArguments = (profile: OptimizationProfile): ReadonlyArray<string> =
 /** Plans the pinned Clang `-c` invocation that turns bitcode into a target object. */
 export const objectCommand = (
   clang: string,
+  target: Target.Target,
   profile: OptimizationProfile,
   bitcodePath: string,
   objectPath: string,
 ): PlannedCommand =>
   Object.freeze({
     _tag: 'PlannedCommand',
+    target,
     command: clang,
     arguments: Object.freeze([
+      `--target=${target.triple}`,
       '-c',
       '-x',
       'ir',
@@ -53,14 +58,17 @@ export const objectCommand = (
 /** Plans the pinned Clang driver invocation that links objects into an executable. */
 export const linkCommand = (
   clang: string,
+  target: Target.Target,
   objects: ReadonlyArray<string>,
   libraries: ReadonlyArray<string>,
   destination: string,
 ): PlannedCommand =>
   Object.freeze({
     _tag: 'PlannedCommand',
+    target,
     command: clang,
     arguments: Object.freeze([
+      `--target=${target.triple}`,
       ...objects,
       ...libraries.map((library) => `-l${library}`),
       '-o',
@@ -71,13 +79,24 @@ export const linkCommand = (
 /** Plans the pinned Clang invocation that compiles the runtime shim. */
 export const shimCommand = (
   clang: string,
+  target: Target.Target,
   shimSourcePath: string,
   objectPath: string,
 ): PlannedCommand =>
   Object.freeze({
     _tag: 'PlannedCommand',
+    target,
     command: clang,
-    arguments: Object.freeze(['-c', '-x', 'c', shimSourcePath, '-O2', '-o', objectPath]),
+    arguments: Object.freeze([
+      `--target=${target.triple}`,
+      '-c',
+      '-x',
+      'c',
+      shimSourcePath,
+      '-O2',
+      '-o',
+      objectPath,
+    ]),
   })
 
 /**

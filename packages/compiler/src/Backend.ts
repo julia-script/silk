@@ -10,15 +10,18 @@ import * as IrText from '@silk-effect/llvm/IrText'
 import * as LlvmMetadata from '@silk-effect/llvm/Metadata'
 import * as LlvmType from '@silk-effect/llvm/Type'
 import * as Value from '@silk-effect/llvm/Value'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Mir from './Mir.js'
+import * as Layout from './Layout.js'
+import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Target from './Target.js'
 
 /**
  * Code generation as a nominal `Backend` service: one operation consuming the whole
- * monomorphized MIR program plus the explicit target layout and codegen request, producing one
- * program artifact. The bootstrap `LlvmBackend` lowers MIR through the Silk LLVM builder and
+ * monomorphized MIR program plus its compiler-owned target/layout plan and codegen request,
+ * producing one program artifact. The bootstrap `LlvmBackend` lowers MIR through the Silk LLVM builder and
  * emits deterministic bitcode directly — no `libLLVM`, no LLVM C API, no compiler-private
  * native FFI. Textual LLVM IR is an implementation-specific inspection artifact.
  */
@@ -39,19 +42,60 @@ export interface SymbolEntry {
 export interface Artifact {
   readonly _tag: 'BackendArtifact'
   readonly module: string
+  readonly target: Target.Target
   readonly symbols: ReadonlyArray<SymbolEntry>
   readonly bitcode: Uint8Array
   readonly ir: string
 }
 
-/** The nominal backend service contract. Consumers never inspect backend identity. */
+/** An expected failure at the backend boundary. */
+export class BackendError extends Data.TaggedError('BackendError')<{
+  readonly operation: 'Backend.emit'
+  readonly backend: string
+  readonly message: string
+  readonly reason:
+    | { readonly _tag: 'InvalidMir'; readonly violations: ReadonlyArray<Mir.Violation> }
+    | { readonly _tag: 'UnsupportedMir'; readonly detail: string }
+    | { readonly _tag: 'UnsupportedTarget'; readonly target: Target.Id }
+    | { readonly _tag: 'WrappedFailure'; readonly cause: unknown }
+}> {}
+
+/** The nominal backend service contract. */
 export interface Backend {
+  readonly _tag: 'Backend'
+  readonly name: string
+  readonly targets: ReadonlyArray<Target.Id>
   readonly emit: (
     program: Mir.Module,
-    layout: Mir.TargetLayout,
     request: CodegenRequest,
-  ) => Artifact
+  ) => Effect.Effect<Artifact, BackendError>
 }
+
+/** Validates shared MIR/target invariants before dispatching to one backend implementation. */
+export const emit = Effect.fn('Backend.emit')(function* (
+  self: Backend,
+  program: Mir.Module,
+  request: CodegenRequest,
+): Effect.fn.Return<Artifact, BackendError> {
+  const violations = Mir.verify(program)
+  if (violations.length > 0) {
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: self.name,
+      message: `${self.name} cannot emit invalid MIR`,
+      reason: { _tag: 'InvalidMir', violations },
+    })
+  }
+  if (!self.targets.includes(program.layout.target.id)) {
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: self.name,
+      message: `${self.name} does not support target ${program.layout.target.id}`,
+      reason: { _tag: 'UnsupportedTarget', target: program.layout.target.id },
+    })
+  }
+  return yield* self.emit(program, request)
+})
 
 const sanitize = (name: string): string => name.replace(/[^A-Za-z0-9_]/g, '_')
 
@@ -81,14 +125,35 @@ const positionOf = (table: LineTable, offset: number): { line: number; column: n
   return { line: line + 1, column: offset - (table.lineStarts[line] ?? 0) + 1 }
 }
 
-const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: CodegenRequest) =>
+const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
   Effect.gen(function* () {
+    const i32Layout = Layout.entry(program.layout, 'I32')
+    if (i32Layout === undefined) {
+      return yield* new BackendError({
+        operation: 'Backend.emit',
+        backend: 'LLVM',
+        message: 'LLVM requires the planned I32 representation',
+        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
+      })
+    }
+    if (
+      program.layout.entries.some(
+        (entry) => entry.representation.bits !== i32Layout.representation.bits,
+      )
+    ) {
+      return yield* new BackendError({
+        operation: 'Backend.emit',
+        backend: 'LLVM',
+        message: 'LLVM requires compatible planned scalar widths',
+        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
+      })
+    }
     const builder = yield* Builder.make({
       sourceFilename: program.module,
-      targetTriple: layout.triple,
+      targetTriple: program.layout.target.triple,
       strip: request.mode !== 'debug',
     })
-    const i32 = yield* LlvmType.integer(builder, 32)
+    const i32 = yield* LlvmType.integer(builder, i32Layout.representation.bits)
     let overflowSignature:
       | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
       | undefined
@@ -439,14 +504,32 @@ const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: Cod
 
 /** The bootstrap LLVM backend over the Silk LLVM builder. */
 export const LlvmBackend: Backend = Object.freeze({
-  emit: (program: Mir.Module, layout: Mir.TargetLayout, request: CodegenRequest): Artifact => {
-    const output = Effect.runSync(emitProgram(program, layout, request))
+  _tag: 'Backend',
+  name: 'LLVM',
+  targets: Object.freeze(Target.native.map((target) => target.id)),
+  emit: Effect.fn('Backend.LLVM.emit')(function* (
+    program: Mir.Module,
+    request: CodegenRequest,
+  ): Effect.fn.Return<Artifact, BackendError> {
+    const output = yield* emitProgram(program, request).pipe(
+      Effect.mapError((cause) =>
+        cause._tag === 'BackendError'
+          ? cause
+          : new BackendError({
+              operation: 'Backend.emit',
+              backend: 'LLVM',
+              message: `LLVM emission failed for ${program.module}`,
+              reason: { _tag: 'WrappedFailure', cause },
+            }),
+      ),
+    )
     return Object.freeze({
       _tag: 'BackendArtifact',
       module: program.module,
+      target: program.layout.target,
       symbols: Object.freeze(output.symbols),
       bitcode: output.bitcode,
       ir: output.ir,
     })
-  },
+  }),
 })

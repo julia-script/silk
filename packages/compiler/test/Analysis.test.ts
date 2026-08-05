@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 
@@ -105,16 +106,56 @@ it('answers ownership facts and cleanup plans through the facade', () => {
   assert.strictEqual(Analysis.ownershipOf(self, 'absent'), undefined)
 })
 
-it('emits codegen artifacts through the facade', () => {
-  const self = Analysis.ofSource(
-    'memory://codegen.silk',
-    ascii('pub fn main() -> I32 { return 42 }'),
-  )
-  const release = Analysis.codegen(self, { mode: 'release' })
-  const debug = Analysis.codegen(self, { mode: 'debug' })
+it.effect('emits codegen artifacts through the facade', () =>
+  Effect.gen(function* () {
+    const self = Analysis.ofSource(
+      'memory://codegen.silk',
+      ascii('pub fn main() -> I32 { return 42 }'),
+      'aarch64-apple-darwin',
+    )
+    const release = yield* Analysis.codegen(self, { mode: 'release' })
+    const debug = yield* Analysis.codegen(self, { mode: 'debug' })
 
-  assert.strictEqual(release._tag, 'BackendArtifact')
-  assert.include(release.ir, 'silk_main')
-  assert.isAbove(release.bitcode.length, 0)
-  assert.include(debug.ir, '!DICompileUnit(')
+    assert.strictEqual(release._tag, 'BackendArtifact')
+    assert.include(release.ir, 'silk_main')
+    assert.isAbove(release.bitcode.length, 0)
+    assert.include(debug.ir, '!DICompileUnit(')
+  }),
+)
+
+it('preserves one exact target and layout plan across facade queries and MIR', () => {
+  const self = Analysis.ofSource(
+    'memory://plan.silk',
+    ascii('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
+    'wasm32-unknown-unknown',
+  )
+  const target = Analysis.targetOf(self)
+  const layout = Analysis.layoutOf(self)
+  const mir = Analysis.mirOf(self)
+
+  assert.strictEqual(target._tag, 'Resolved')
+  assert.strictEqual(layout._tag, 'Available')
+  assert.strictEqual(mir._tag, 'Available')
+  if (target._tag !== 'Resolved' || layout._tag !== 'Available' || mir._tag !== 'Available') return
+  assert.strictEqual(layout.value.target, target.target)
+  assert.strictEqual(mir.value.layout, layout.value)
+  assert.deepEqual(
+    layout.value.entries.map((entry) => [entry.type, entry.size, entry.alignment]),
+    [
+      ['Bool', 4, 4],
+      ['I32', 4, 4],
+    ],
+  )
+})
+
+it('keeps unsupported targets explicit and queryable without manufacturing MIR', () => {
+  const self = Analysis.ofSource(
+    'memory://unsupported.silk',
+    ascii('pub fn main() -> I32 { return 42 }'),
+    'mips-unknown-none',
+  )
+
+  assert.strictEqual(Analysis.targetOf(self)._tag, 'Unavailable')
+  assert.strictEqual(Analysis.layoutOf(self)._tag, 'Unavailable')
+  assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
 })

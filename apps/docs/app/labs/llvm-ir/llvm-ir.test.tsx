@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { LlvmIrLab } from './llvm-ir'
@@ -14,6 +15,8 @@ describe('LlvmIrLab', () => {
     expect(markup).toContain('aria-label="Backend symbol table"')
     expect(markup).toContain('silk_1_identity')
     expect(markup).toContain('main · bb0')
+    expect(markup).toContain('aria-label="LLVM target layout plan"')
+    expect(markup).toContain('aarch64-apple-darwin')
   })
 
   it('shows the checked arithmetic expansion through the facade', () => {
@@ -21,7 +24,7 @@ describe('LlvmIrLab', () => {
       'memory://llvm-arith-test.silk',
       encoder.encode('pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
     )
-    const artifact = Analysis.codegen(snapshot, { mode: 'release' })
+    const artifact = Effect.runSync(Analysis.codegen(snapshot, { mode: 'release' }))
 
     expect(artifact.ir).toContain('llvm.sadd.with.overflow')
     expect(artifact.ir).toContain('arith_trap')
@@ -43,7 +46,7 @@ describe('LlvmIrLab', () => {
 
     expect(main?.blocks.length).toBe(3)
     expect(main?.blocks.at(0)?.terminator._tag).toBe('Branch')
-    expect(Analysis.codegen(snapshot, { mode: 'release' }).ir).toContain('br i1')
+    expect(Effect.runSync(Analysis.codegen(snapshot, { mode: 'release' })).ir).toContain('br i1')
     const outcome = Analysis.evaluate(snapshot)
     expect(outcome._tag).toBe('Completed')
     expect(outcome._tag === 'Completed' ? outcome.result.value : -1).toBe(42)
@@ -54,8 +57,8 @@ describe('LlvmIrLab', () => {
       'memory://llvm-ir-test.silk',
       encoder.encode('pub fn main() -> I32 { return 42 }'),
     )
-    const debug = Analysis.codegen(snapshot, { mode: 'debug' })
-    const release = Analysis.codegen(snapshot, { mode: 'release' })
+    const debug = Effect.runSync(Analysis.codegen(snapshot, { mode: 'debug' }))
+    const release = Effect.runSync(Analysis.codegen(snapshot, { mode: 'release' }))
 
     expect(debug.ir).toContain('!DICompileUnit(')
     expect(release.ir).not.toContain('DICompileUnit')

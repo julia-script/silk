@@ -53,10 +53,15 @@ const inflate = async (value: string): Promise<string> => {
   return new Response(stream).text()
 }
 
-/** The program a link carries: every module of the request, and which one it is rooted at. */
+/**
+ * The program a link carries: every module of the request, which one it is rooted at, and the
+ * target it is compiled for. The target belongs here because the same program lowers differently
+ * for each one — a link without it would reproduce the wrong artifacts.
+ */
 export interface SourceState {
   readonly root: string
   readonly modules: Readonly<Record<string, string>>
+  readonly target?: string
 }
 
 export const encodeSource = async (state: SourceState): Promise<string | undefined> => {
@@ -71,7 +76,11 @@ export const decodeSource = async (value: string): Promise<SourceState | undefin
   try {
     const parsed: unknown = await inflate(value).then(JSON.parse)
     if (typeof parsed !== 'object' || parsed === null) return undefined
-    const { root, modules } = parsed as { root?: unknown; modules?: unknown }
+    const { root, modules, target } = parsed as {
+      root?: unknown
+      modules?: unknown
+      target?: unknown
+    }
     if (typeof root !== 'string') return undefined
     if (typeof modules !== 'object' || modules === null) return undefined
     const entries = Object.entries(modules).filter(
@@ -80,7 +89,13 @@ export const decodeSource = async (value: string): Promise<SourceState | undefin
     if (entries.length === 0) return undefined
     // A root naming a module that is not in the map would make the request unloadable.
     if (!entries.some(([name]) => name === root)) return undefined
-    return { root, modules: Object.fromEntries(entries) }
+    return {
+      root,
+      modules: Object.fromEntries(entries),
+      // An unknown target id is left for `Target.select` to reject as an unavailable selection,
+      // which the panes already render; dropping it here would silently compile for the default.
+      ...(typeof target === 'string' ? { target } : {}),
+    }
   } catch {
     return undefined
   }

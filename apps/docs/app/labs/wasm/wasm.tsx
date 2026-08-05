@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -78,13 +79,19 @@ export function WasmLab() {
   const [text, setText] = useState<string>(presets[0].source)
   const [mode, setMode] = useState<'release' | 'debug'>('debug')
 
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
+  const snapshot = useMemo(
+    () => Analysis.ofSource(sourceId, encoder.encode(text), 'wasm32-unknown-unknown'),
+    [text],
+  )
 
   // Emission can fail on a program the backend does not cover; the lab reports that as data
   // rather than breaking the page.
   const emission = useMemo(() => {
     try {
-      return { _tag: 'Emitted' as const, artifact: Analysis.codegenWasm(snapshot, { mode }) }
+      return {
+        _tag: 'Emitted' as const,
+        artifact: Effect.runSync(Analysis.codegenWasm(snapshot, { mode })),
+      }
     } catch (error) {
       return { _tag: 'Rejected' as const, message: messageOf(error) }
     }
@@ -98,6 +105,7 @@ export function WasmLab() {
   // The interpreter runs the same MIR the backend emitted from, so a disagreement is a backend
   // bug and is worth surfacing directly in the lab.
   const interpreted = useMemo(() => Analysis.evaluate(snapshot), [snapshot])
+  const layout = Analysis.layoutOf(snapshot)
   const expected = interpreted._tag === 'Completed' ? interpreted.result.value : 'trap'
   const observed =
     execution === undefined
@@ -148,6 +156,27 @@ export function WasmLab() {
         </section>
       ) : (
         <>
+          {layout._tag === 'Available' ? (
+            <section className={styles.diagnosticGroup} aria-labelledby="wasm-target-layout">
+              <div className={styles.diagnosticHeading}>
+                <h3 id="wasm-target-layout">Compiler target and scalar plan</h3>
+                <span>{layout.value.target.id}</span>
+              </div>
+              <ul className={styles.diagnosticList} aria-label="WebAssembly target layout plan">
+                {layout.value.entries.map((entry) => (
+                  <li key={entry.type}>
+                    <div>
+                      <code>{entry.type}</code>
+                      <span>
+                        {entry.size} bytes · align {entry.alignment} · wasm i
+                        {entry.representation.bits}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           <section className={styles.diagnosticGroup} aria-labelledby="wasm-execution">
             <div className={styles.diagnosticHeading}>
               <h3 id="wasm-execution">Execution</h3>
