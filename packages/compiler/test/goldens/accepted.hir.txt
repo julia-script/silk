@@ -1,0 +1,7 @@
+hir-module golden://accepted.silk
+fn golden://accepted.silk.identity (I32) -> I32
+  param fn0.p0 : I32 [43, 49)
+fn golden://accepted.silk.main () -> I32
+  call golden://accepted.silk.identity : I32 [81, 104)
+    call golden://accepted.silk.identity : I32 [91, 103)
+      literal 42 : I32 [100, 102)

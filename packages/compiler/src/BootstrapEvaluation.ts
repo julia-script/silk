@@ -1,4 +1,4 @@
-import * as SemanticAnalysis from './SemanticAnalysis.js'
+import * as Elaboration from './Elaboration.js'
 import type * as SourceSpan from './SourceSpan.js'
 
 /** The exact value produced by the closed bootstrap evaluator. */
@@ -10,25 +10,25 @@ export interface I32Value {
 /** Entered the selected bootstrap entry point. */
 export interface EntryTraceEvent {
   readonly _tag: 'Entry'
-  readonly declaration: SemanticAnalysis.DeclarationFact
+  readonly declaration: Elaboration.DeclarationFact
   readonly span: SourceSpan.SourceSpan
 }
 
 /** Reached one checked caller-to-target relationship. */
 export interface CallTraceEvent {
   readonly _tag: 'Call'
-  readonly caller: SemanticAnalysis.DeclarationFact
-  readonly target: SemanticAnalysis.DeclarationFact
-  readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+  readonly caller: Elaboration.DeclarationFact
+  readonly target: Elaboration.DeclarationFact
+  readonly call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
   readonly span: SourceSpan.SourceSpan
 }
 
 /** Bound one evaluated argument to its checked positional parameter. */
 export interface BindingTraceEvent {
   readonly _tag: 'Binding'
-  readonly target: SemanticAnalysis.DeclarationFact
-  readonly argument: SemanticAnalysis.ArgumentFact
-  readonly parameter: SemanticAnalysis.ParameterFact
+  readonly target: Elaboration.DeclarationFact
+  readonly argument: Elaboration.ArgumentFact
+  readonly parameter: Elaboration.ParameterFact
   readonly value: I32Value
   readonly span: SourceSpan.SourceSpan
 }
@@ -36,9 +36,9 @@ export interface BindingTraceEvent {
 /** Read one resolved parameter from the current immutable call frame. */
 export interface ParameterReadTraceEvent {
   readonly _tag: 'ParameterRead'
-  readonly declaration: SemanticAnalysis.DeclarationFact
-  readonly reference: SemanticAnalysis.IdentifierExpressionFact
-  readonly parameter: SemanticAnalysis.ParameterFact
+  readonly declaration: Elaboration.DeclarationFact
+  readonly reference: Elaboration.IdentifierExpressionFact
+  readonly parameter: Elaboration.ParameterFact
   readonly value: I32Value
   readonly span: SourceSpan.SourceSpan
 }
@@ -46,8 +46,8 @@ export interface ParameterReadTraceEvent {
 /** Returned one evaluated value from a reachable function. */
 export interface ReturnTraceEvent {
   readonly _tag: 'Return'
-  readonly declaration: SemanticAnalysis.DeclarationFact
-  readonly expression: SemanticAnalysis.ExpressionFact
+  readonly declaration: Elaboration.DeclarationFact
+  readonly expression: Elaboration.ExpressionFact
   readonly value: I32Value
   readonly span: SourceSpan.SourceSpan
 }
@@ -64,102 +64,99 @@ export type TraceEvent =
 export type BlockedReason =
   | {
       readonly _tag: 'MissingEntry'
-      readonly lookup: Extract<SemanticAnalysis.DeclarationLookup, { readonly _tag: 'Missing' }>
+      readonly lookup: Extract<Elaboration.DeclarationLookup, { readonly _tag: 'Missing' }>
     }
   | {
       readonly _tag: 'AmbiguousEntry'
-      readonly lookup: Extract<SemanticAnalysis.DeclarationLookup, { readonly _tag: 'Ambiguous' }>
+      readonly lookup: Extract<Elaboration.DeclarationLookup, { readonly _tag: 'Ambiguous' }>
     }
   | {
       readonly _tag: 'ParameterizedEntry'
-      readonly declaration: SemanticAnalysis.DeclarationFact
+      readonly declaration: Elaboration.DeclarationFact
       readonly actualCount: number
     }
   | {
       readonly _tag: 'UnavailableEntryType'
-      readonly declaration: SemanticAnalysis.DeclarationFact
-      readonly returnType: SemanticAnalysis.ReturnTypeFact
+      readonly declaration: Elaboration.DeclarationFact
+      readonly returnType: Elaboration.ReturnTypeFact
     }
   | {
       readonly _tag: 'UnavailableInteger'
-      readonly declaration: SemanticAnalysis.DeclarationFact
-      readonly integer: SemanticAnalysis.IntegerExpressionFact
+      readonly declaration: Elaboration.DeclarationFact
+      readonly integer: Elaboration.IntegerExpressionFact
     }
   | {
       readonly _tag: 'MissingParameterReference'
-      readonly declaration: SemanticAnalysis.DeclarationFact
-      readonly reference: Extract<
-        SemanticAnalysis.ParameterReferenceFact,
-        { readonly _tag: 'Missing' }
-      >
+      readonly declaration: Elaboration.DeclarationFact
+      readonly reference: Extract<Elaboration.ParameterReferenceFact, { readonly _tag: 'Missing' }>
     }
   | {
       readonly _tag: 'AmbiguousParameterReference'
-      readonly declaration: SemanticAnalysis.DeclarationFact
+      readonly declaration: Elaboration.DeclarationFact
       readonly reference: Extract<
-        SemanticAnalysis.ParameterReferenceFact,
+        Elaboration.ParameterReferenceFact,
         { readonly _tag: 'Ambiguous' }
       >
     }
   | {
       readonly _tag: 'UnavailableParameterReference'
-      readonly declaration: SemanticAnalysis.DeclarationFact
+      readonly declaration: Elaboration.DeclarationFact
       readonly reference: Extract<
-        SemanticAnalysis.ParameterReferenceFact,
+        Elaboration.ParameterReferenceFact,
         { readonly _tag: 'Unavailable' }
       >
     }
   | {
       readonly _tag: 'UnboundParameter'
-      readonly declaration: SemanticAnalysis.DeclarationFact
-      readonly parameter: SemanticAnalysis.ParameterFact
-      readonly reference: SemanticAnalysis.IdentifierExpressionFact
+      readonly declaration: Elaboration.DeclarationFact
+      readonly parameter: Elaboration.ParameterFact
+      readonly reference: Elaboration.IdentifierExpressionFact
     }
   | {
       readonly _tag: 'MissingCallTarget'
-      readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly caller: Elaboration.DeclarationFact
+      readonly call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
     }
   | {
       readonly _tag: 'AmbiguousCallTarget'
-      readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly caller: Elaboration.DeclarationFact
+      readonly call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
     }
   | {
       readonly _tag: 'UnavailableCallTarget'
-      readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly caller: Elaboration.DeclarationFact
+      readonly call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
     }
   | {
       readonly _tag: 'ArityMismatch'
-      readonly caller: SemanticAnalysis.DeclarationFact
-      readonly target: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly caller: Elaboration.DeclarationFact
+      readonly target: Elaboration.DeclarationFact
+      readonly call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
       readonly expectedCount: number
       readonly actualCount: number
     }
   | {
       readonly _tag: 'UnavailableCallContract'
-      readonly caller: SemanticAnalysis.DeclarationFact
-      readonly target: SemanticAnalysis.DeclarationFact | undefined
-      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
-      readonly reason: SemanticAnalysis.UnavailableCallContractReason
+      readonly caller: Elaboration.DeclarationFact
+      readonly target: Elaboration.DeclarationFact | undefined
+      readonly call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly reason: Elaboration.UnavailableCallContractReason
     }
   | {
       readonly _tag: 'UnavailableFunction'
-      readonly declaration: SemanticAnalysis.DeclarationFact
+      readonly declaration: Elaboration.DeclarationFact
     }
   | {
       readonly _tag: 'RecursiveCycle'
-      readonly cycle: ReadonlyArray<SemanticAnalysis.DeclarationFact>
-      readonly closingCall: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+      readonly cycle: ReadonlyArray<Elaboration.DeclarationFact>
+      readonly closingCall: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
       readonly closingCallSpan: SourceSpan.SourceSpan
     }
 
 /** A completed exact bootstrap result. */
 export interface Completed {
   readonly _tag: 'Completed'
-  readonly entry: SemanticAnalysis.DeclarationFact
+  readonly entry: Elaboration.DeclarationFact
   readonly result: I32Value
   readonly trace: ReadonlyArray<TraceEvent>
 }
@@ -167,7 +164,7 @@ export interface Completed {
 /** A normal, inspectable reason bootstrap evaluation could not complete. */
 export interface Blocked {
   readonly _tag: 'Blocked'
-  readonly entry: SemanticAnalysis.DeclarationFact | undefined
+  readonly entry: Elaboration.DeclarationFact | undefined
   readonly reason: BlockedReason
   readonly trace: ReadonlyArray<TraceEvent>
 }
@@ -176,7 +173,7 @@ export interface Blocked {
 export type Outcome = Completed | Blocked
 
 interface Binding {
-  readonly parameter: SemanticAnalysis.ParameterFact
+  readonly parameter: Elaboration.ParameterFact
   readonly value: I32Value
 }
 
@@ -192,19 +189,19 @@ const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
 
 const sameDeclaration = (
-  left: SemanticAnalysis.DeclarationFact,
-  right: SemanticAnalysis.DeclarationFact,
+  left: Elaboration.DeclarationFact,
+  right: Elaboration.DeclarationFact,
 ): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
 
 const sameParameter = (
-  left: SemanticAnalysis.ParameterFact,
-  right: SemanticAnalysis.ParameterFact,
+  left: Elaboration.ParameterFact,
+  right: Elaboration.ParameterFact,
 ): boolean =>
   sameDeclarationId(left.id.function, right.id.function) && left.id.ordinal === right.id.ordinal
 
 const sameDeclarationId = (
-  left: SemanticAnalysis.DeclarationId,
-  right: SemanticAnalysis.DeclarationId,
+  left: Elaboration.DeclarationId,
+  right: Elaboration.DeclarationId,
 ): boolean => left.sourceId === right.sourceId && left.ordinal === right.ordinal
 
 const append = (trace: Array<TraceEvent>, event: TraceEvent): void => {
@@ -212,14 +209,14 @@ const append = (trace: Array<TraceEvent>, event: TraceEvent): void => {
 }
 
 const functionFor = (
-  analysis: SemanticAnalysis.Result,
-  declaration: SemanticAnalysis.DeclarationFact,
-): SemanticAnalysis.FunctionFact | undefined =>
+  analysis: Elaboration.Result,
+  declaration: Elaboration.DeclarationFact,
+): Elaboration.FunctionFact | undefined =>
   analysis.functions.find((fact) => sameDeclaration(fact.declaration, declaration))
 
 const readParameter = (
-  declaration: SemanticAnalysis.DeclarationFact,
-  expression: SemanticAnalysis.IdentifierExpressionFact,
+  declaration: Elaboration.DeclarationFact,
+  expression: Elaboration.IdentifierExpressionFact,
   frame: Frame,
   trace: Array<TraceEvent>,
 ): Step => {
@@ -256,17 +253,17 @@ const readParameter = (
 }
 
 interface EvaluatedArgument {
-  readonly argument: SemanticAnalysis.ArgumentFact
-  readonly mapping: SemanticAnalysis.ArgumentMappingFact
+  readonly argument: Elaboration.ArgumentFact
+  readonly mapping: Elaboration.ArgumentMappingFact
   readonly value: I32Value
 }
 
 function evaluateCall(
-  analysis: SemanticAnalysis.Result,
-  declaration: SemanticAnalysis.DeclarationFact,
-  call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>,
+  analysis: Elaboration.Result,
+  declaration: Elaboration.DeclarationFact,
+  call: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>,
   frame: Frame,
-  active: ReadonlyArray<SemanticAnalysis.DeclarationFact>,
+  active: ReadonlyArray<Elaboration.DeclarationFact>,
   trace: Array<TraceEvent>,
 ): Step {
   const reference = call.reference
@@ -385,11 +382,11 @@ function evaluateCall(
 }
 
 function evaluateExpression(
-  analysis: SemanticAnalysis.Result,
-  declaration: SemanticAnalysis.DeclarationFact,
-  expression: SemanticAnalysis.ExpressionFact,
+  analysis: Elaboration.Result,
+  declaration: Elaboration.DeclarationFact,
+  expression: Elaboration.ExpressionFact,
   frame: Frame,
-  active: ReadonlyArray<SemanticAnalysis.DeclarationFact>,
+  active: ReadonlyArray<Elaboration.DeclarationFact>,
   trace: Array<TraceEvent>,
 ): Step {
   if (expression._tag === 'Identifier') {
@@ -409,10 +406,10 @@ function evaluateExpression(
 }
 
 function evaluateFunction(
-  analysis: SemanticAnalysis.Result,
-  fact: SemanticAnalysis.FunctionFact,
+  analysis: Elaboration.Result,
+  fact: Elaboration.FunctionFact,
   frame: Frame,
-  active: ReadonlyArray<SemanticAnalysis.DeclarationFact>,
+  active: ReadonlyArray<Elaboration.DeclarationFact>,
   trace: Array<TraceEvent>,
 ): Step {
   const declaration = fact.declaration
@@ -430,7 +427,7 @@ function evaluateFunction(
 }
 
 const blockedOutcome = (
-  entry: SemanticAnalysis.DeclarationFact | undefined,
+  entry: Elaboration.DeclarationFact | undefined,
   reason: BlockedReason,
   trace: ReadonlyArray<TraceEvent>,
 ): Blocked =>
@@ -442,8 +439,8 @@ const blockedOutcome = (
   })
 
 /** Evaluates the reachable closed bootstrap slice from one analyzed `main`. */
-export const evaluate = (analysis: SemanticAnalysis.Result): Outcome => {
-  const lookup = SemanticAnalysis.declarationByName(analysis, 'main')
+export const evaluate = (analysis: Elaboration.Result): Outcome => {
+  const lookup = Elaboration.declarationByName(analysis, 'main')
   if (lookup._tag === 'Missing') {
     return blockedOutcome(undefined, { _tag: 'MissingEntry', lookup }, [])
   }

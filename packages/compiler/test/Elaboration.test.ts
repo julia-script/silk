@@ -1,9 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import { pipe } from 'effect/Function'
 import * as Diagnostic from '../src/Diagnostic.js'
+import * as Elaboration from '../src/Elaboration.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
-import * as SemanticAnalysis from '../src/SemanticAnalysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -65,37 +65,32 @@ const ascii = (value: string): Uint8Array =>
 const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
   Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source))))
 
-const analyzeText = (id: string, source: string): SemanticAnalysis.Result =>
-  SemanticAnalysis.analyze(parseText(id, source))
+const analyzeText = (id: string, source: string): Elaboration.Result =>
+  Elaboration.elaborateModule(parseText(id, source))
 
-const functionAt = (
-  result: SemanticAnalysis.Result,
-  index: number,
-): SemanticAnalysis.FunctionFact =>
+const functionAt = (result: Elaboration.Result, index: number): Elaboration.FunctionFact =>
   result.functions.at(index) ?? raise(`expected function fact at index ${index}`)
 
-const integerFact = (
-  fact: SemanticAnalysis.FunctionFact,
-): SemanticAnalysis.IntegerExpressionFact =>
+const integerFact = (fact: Elaboration.FunctionFact): Elaboration.IntegerExpressionFact =>
   fact.returnedExpression._tag === 'Integer'
     ? fact.returnedExpression.integer
     : raise('expected an integer returned expression')
 
 const callFact = (
-  fact: SemanticAnalysis.FunctionFact,
-): Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }> =>
+  fact: Elaboration.FunctionFact,
+): Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }> =>
   fact.returnedExpression._tag === 'Call'
     ? fact.returnedExpression
     : raise('expected a call returned expression')
 
 const identifierFact = (
-  fact: SemanticAnalysis.FunctionFact,
-): Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Identifier' }> =>
+  fact: Elaboration.FunctionFact,
+): Extract<Elaboration.ExpressionFact, { readonly _tag: 'Identifier' }> =>
   fact.returnedExpression._tag === 'Identifier'
     ? fact.returnedExpression
     : raise('expected an identifier returned expression')
 
-const diagnosticView = (result: SemanticAnalysis.Result) =>
+const diagnosticView = (result: Elaboration.Result) =>
   result.diagnostics.map((diagnostic) => ({
     code: diagnostic.code,
     start: diagnostic.span.start,
@@ -110,7 +105,7 @@ const directToken = (node: SyntaxTree.Node, kind: Token.TokenKind): Token.Token 
 
 it('publishes one immutable function fact with exact accepted provenance', () => {
   const parse = parseText('fixture://semantic-accepted.silk', acceptedSource)
-  const result = SemanticAnalysis.analyze(parse)
+  const result = Elaboration.elaborateModule(parse)
   const fact = functionAt(result, 0)
   const declaration = fact.declaration
   const name = declaration.name
@@ -141,14 +136,14 @@ it('publishes one immutable function fact with exact accepted provenance', () =>
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(result.diagnostics, [])
 
-  const directLookup = SemanticAnalysis.declarationByName(result, 'main')
-  const pipedLookup = pipe(result, SemanticAnalysis.declarationByName('main'))
+  const directLookup = Elaboration.declarationByName(result, 'main')
+  const pipedLookup = pipe(result, Elaboration.declarationByName('main'))
   assert.strictEqual(directLookup._tag, 'Resolved')
   assert.strictEqual(pipedLookup._tag, 'Resolved')
   if (directLookup._tag !== 'Resolved' || pipedLookup._tag !== 'Resolved') return
   assert.strictEqual(directLookup.declaration, declaration)
   assert.strictEqual(pipedLookup.declaration, declaration)
-  assert.deepEqual(SemanticAnalysis.declarationByName(result, 'other'), {
+  assert.deepEqual(Elaboration.declarationByName(result, 'other'), {
     _tag: 'Missing',
     spelling: 'other',
   })
@@ -219,8 +214,8 @@ it('publishes ordered function-local parameter identities, types, and lookup', (
   const second = functionAt(result, 1).declaration
   const firstParameter = first.parameters.at(0) ?? raise('expected first parameter')
   const secondParameter = second.parameters.at(0) ?? raise('expected second parameter')
-  const directLookup = SemanticAnalysis.parameterByName(first, 'value')
-  const pipedLookup = pipe(second, SemanticAnalysis.parameterByName('value'))
+  const directLookup = Elaboration.parameterByName(first, 'value')
+  const pipedLookup = pipe(second, Elaboration.parameterByName('value'))
 
   assert.deepEqual(firstParameter.id, {
     _tag: 'ParameterId',
@@ -241,7 +236,7 @@ it('publishes ordered function-local parameter identities, types, and lookup', (
   if (directLookup._tag !== 'Resolved' || pipedLookup._tag !== 'Resolved') return
   assert.strictEqual(directLookup.parameter, firstParameter)
   assert.strictEqual(pipedLookup.parameter, secondParameter)
-  assert.deepEqual(SemanticAnalysis.parameterByName(first, 'missing'), {
+  assert.deepEqual(Elaboration.parameterByName(first, 'missing'), {
     _tag: 'Missing',
     spelling: 'missing',
   })
@@ -429,7 +424,7 @@ it('analyzes representative deep nesting deterministically', () => {
 pub fn main() -> I32 { return ${expression} }`
   const first = analyzeText('fixture://deep-nested-semantic.silk', source)
   const second = analyzeText('fixture://deep-nested-semantic.silk', source)
-  let current: SemanticAnalysis.ExpressionFact = functionAt(first, 1).returnedExpression
+  let current: Elaboration.ExpressionFact = functionAt(first, 1).returnedExpression
   let calls = 0
 
   while (current._tag === 'Call') {
@@ -643,7 +638,7 @@ it('preserves duplicate parameters and reports declaration-owned ambiguity', () 
     tripleDuplicateParameterSource,
   )
   const declaration = functionAt(duplicate, 0).declaration
-  const lookup = SemanticAnalysis.parameterByName(declaration, 'value')
+  const lookup = Elaboration.parameterByName(declaration, 'value')
   const reference = identifierFact(functionAt(duplicate, 0)).reference
 
   assert.strictEqual(lookup._tag, 'Ambiguous')
@@ -908,7 +903,7 @@ it('keeps missing declaration names unavailable and out of lookup', () => {
 
   assert.strictEqual(functionAt(single, 0).declaration.name._tag, 'Unavailable')
   assert.strictEqual(functionAt(multiple, 1).declaration.name._tag, 'Unavailable')
-  assert.deepEqual(SemanticAnalysis.declarationByName(multiple, ''), {
+  assert.deepEqual(Elaboration.declarationByName(multiple, ''), {
     _tag: 'Missing',
     spelling: '',
   })
@@ -923,9 +918,9 @@ it('keeps missing declaration names unavailable and out of lookup', () => {
 it('resolves unique names and reports every duplicate as ambiguous', () => {
   const unique = analyzeText('fixture://unique.silk', twoFunctionSource)
   const duplicate = analyzeText('fixture://duplicate.silk', duplicateNameSource)
-  const answer = SemanticAnalysis.declarationByName(unique, 'answer')
-  const main = SemanticAnalysis.declarationByName(unique, 'main')
-  const same = SemanticAnalysis.declarationByName(duplicate, 'same')
+  const answer = Elaboration.declarationByName(unique, 'answer')
+  const main = Elaboration.declarationByName(unique, 'main')
+  const same = Elaboration.declarationByName(duplicate, 'same')
 
   assert.strictEqual(answer._tag, 'Resolved')
   assert.strictEqual(main._tag, 'Resolved')
@@ -964,7 +959,7 @@ it('diagnoses later duplicate names at their exact spans with original provenanc
 
 it('diagnoses the second and third occurrence of one name', () => {
   const result = analyzeText('fixture://triple-duplicate.silk', tripleDuplicateNameSource)
-  const lookup = SemanticAnalysis.declarationByName(result, 'same')
+  const lookup = Elaboration.declarationByName(result, 'same')
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -1059,8 +1054,8 @@ it('is deterministic across repeated fresh multi-function results', () => {
   assert.deepEqual(first.functions, second.functions)
   assert.deepEqual(diagnosticView(first), diagnosticView(second))
   assert.deepEqual(
-    SemanticAnalysis.declarationByName(first, 'same'),
-    SemanticAnalysis.declarationByName(second, 'same'),
+    Elaboration.declarationByName(first, 'same'),
+    Elaboration.declarationByName(second, 'same'),
   )
 })
 

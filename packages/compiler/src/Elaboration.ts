@@ -2,6 +2,7 @@ import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as Hir from './Hir.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -200,11 +201,12 @@ export interface FunctionFact {
 /** The closed result of looking up one declaration spelling. */
 export type DeclarationLookup = DeclarationIndex.DeclarationLookup
 
-/** The complete deterministic semantic result for all direct bootstrap declarations. */
+/** The complete deterministic elaboration result for all direct bootstrap declarations. */
 export interface Result {
-  readonly _tag: 'SemanticAnalysis'
+  readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
   readonly functions: ReadonlyArray<FunctionFact>
+  readonly hir: Hir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -685,8 +687,65 @@ const analyzeFunctionBody = (
   })
 }
 
-/** Collects every declaration before resolving returned expressions into immutable facts. */
-export const analyze = (syntax: SyntaxFile.SyntaxFile): Result => {
+const hirExpression = (fact: ExpressionFact): Hir.Expression => {
+  if (fact._tag === 'Integer') {
+    return fact.integer._tag === 'Available'
+      ? Object.freeze({
+          _tag: 'IntegerLiteral',
+          value: fact.integer.value,
+          type: fact.integer.type,
+          span: fact.syntax.span,
+        })
+      : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
+  if (fact._tag === 'Identifier') {
+    if (fact.reference._tag === 'Resolved' && fact.type._tag === 'Available') {
+      return Object.freeze({
+        _tag: 'ParameterReference',
+        parameter: fact.reference.parameter.id,
+        type: fact.type.type,
+        span: fact.syntax.span,
+      })
+    }
+    return Object.freeze({
+      _tag: 'Unavailable',
+      span: fact.syntax.span,
+      ...(fact.reference._tag === 'Missing' && fact.reference.cause !== undefined
+        ? { cause: fact.reference.cause }
+        : {}),
+    })
+  }
+  if (
+    fact.reference._tag === 'Resolved' &&
+    fact.reference.declaration.canonical._tag === 'Canonical' &&
+    fact.contract._tag === 'Compatible' &&
+    fact.type._tag === 'Available'
+  ) {
+    return Object.freeze({
+      _tag: 'Call',
+      target: fact.reference.declaration.canonical.id,
+      arguments: Object.freeze(
+        fact.arguments.map((argument) => hirExpression(argument.expression)),
+      ),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  const cause =
+    fact.reference._tag === 'Missing'
+      ? fact.reference.cause
+      : fact.contract._tag === 'Unavailable'
+        ? fact.contract.cause
+        : undefined
+  return Object.freeze({
+    _tag: 'Unavailable',
+    span: fact.syntax.span,
+    ...(cause === undefined ? {} : { cause }),
+  })
+}
+
+/** Elaborates every declaration body into immutable facts and the module's HIR. */
+export const elaborateModule = (syntax: SyntaxFile.SyntaxFile): Result => {
   const source = syntax.source
   const headers = DeclarationIndex.collectModule(syntax)
   const declarations = headers.declarations
@@ -698,11 +757,26 @@ export const analyze = (syntax: SyntaxFile.SyntaxFile): Result => {
     ...headers.diagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
   ].sort(compareDiagnostics)
+  const hir: Hir.Module = Object.freeze({
+    _tag: 'HirModule',
+    module: source.id,
+    functions: Object.freeze(
+      functions.map((fact) =>
+        Object.freeze({
+          _tag: 'HirFunction' as const,
+          declaration: fact.declaration,
+          contract: Hir.contractOf(fact.declaration),
+          body: hirExpression(fact.returnedExpression),
+        }),
+      ),
+    ),
+  })
 
   return Object.freeze({
-    _tag: 'SemanticAnalysis',
+    _tag: 'Elaboration',
     syntax,
     functions,
+    hir,
     diagnostics: Object.freeze(diagnostics),
   })
 }

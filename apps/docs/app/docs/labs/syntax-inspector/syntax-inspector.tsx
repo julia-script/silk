@@ -5,11 +5,11 @@ import {
   Diagnostic,
   Lexer,
   Parser,
-  SemanticAnalysis,
+  Elaboration,
   SourceFile,
   SyntaxTree,
 } from '@silk-effect/compiler'
-import type { SourceSpan, SyntaxFile } from '@silk-effect/compiler'
+import type { Hir, SourceSpan, SyntaxFile } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import {
   projectDataFlow,
@@ -304,6 +304,96 @@ export const diagnosticEntries = (
     })
     .sort((left, right) => Diagnostic.compare(left.diagnostic, right.diagnostic))
 
+const hirSpanLabel = (span: {
+  readonly start: number
+  readonly end: number
+}): string => `[${span.start}, ${span.end})`
+
+const hirIdentityLabel = (declaration: Hir.HirFunction['declaration']): string => {
+  switch (declaration.canonical._tag) {
+    case 'Canonical':
+      return declaration.canonical.id.name
+    case 'Duplicate':
+      return `duplicate of ${declaration.canonical.original.name}`
+    case 'Unidentified':
+      return 'unidentified'
+  }
+}
+
+const hirContractLabel = (contract: Hir.ContractFact): string =>
+  contract._tag === 'Contract'
+    ? `(${contract.parameters.join(', ')}) -> ${contract.result}`
+    : 'contract unavailable'
+
+function HirExpressionRows({
+  expression,
+  depth,
+}: {
+  readonly expression: Hir.Expression
+  readonly depth: number
+}) {
+  const reveal =
+    expression._tag === 'Unavailable'
+      ? `unavailable ${hirSpanLabel(expression.span)}`
+      : `${expression.type} ${hirSpanLabel(expression.span)}`
+  const label =
+    expression._tag === 'IntegerLiteral'
+      ? `literal ${expression.value}`
+      : expression._tag === 'ParameterReference'
+        ? `param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal}`
+        : expression._tag === 'Call'
+          ? `call ${expression.target.name}`
+          : 'unavailable'
+  return (
+    <>
+      <li style={{ paddingLeft: `${depth * 16}px` }}>
+        <div>
+          <code tabIndex={0} title={reveal} aria-label={`${label} : ${reveal}`}>
+            {label}
+          </code>
+        </div>
+      </li>
+      {expression._tag === 'Call'
+        ? expression.arguments.map((argument, index) => (
+            <HirExpressionRows
+              key={`${argument._tag}-${argument.span.start}-${index}`}
+              expression={argument}
+              depth={depth + 1}
+            />
+          ))
+        : null}
+    </>
+  )
+}
+
+export function HirPanel({ hir }: { readonly hir: Hir.Module }) {
+  return (
+    <section className={styles.diagnosticGroup} aria-labelledby="hir-view">
+      <div className={styles.diagnosticHeading}>
+        <h3 id="hir-view">HIR</h3>
+        <span>{hir.functions.length}</span>
+      </div>
+      {hir.functions.length === 0 ? (
+        <p className={styles.emptyState}>No functions</p>
+      ) : (
+        <ul className={styles.diagnosticList} aria-label="Elaborated HIR functions">
+          {hir.functions.map((fn) => (
+            <li key={`hir-${fn.declaration.id.ordinal}`}>
+              <div>
+                <code>{hirIdentityLabel(fn.declaration)}</code>
+                <span>{hirContractLabel(fn.contract)}</span>
+              </div>
+              <ul className={styles.diagnosticList} aria-label={`HIR body of function ${fn.declaration.id.ordinal}`}>
+                <HirExpressionRows expression={fn.body} depth={0} />
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export function TokenStream({ syntax }: { readonly syntax: SyntaxFile.SyntaxFile }) {
   return (
     <section className={styles.diagnosticGroup} aria-labelledby="token-stream">
@@ -390,16 +480,16 @@ export function DiagnosticPanel({
 }
 
 type CallReturnedExpression = Extract<
-  SemanticAnalysis.ExpressionFact,
+  Elaboration.ExpressionFact,
   { readonly _tag: 'Call' }
 >
 
-type IdentifierExpression = SemanticAnalysis.IdentifierExpressionFact
+type IdentifierExpression = Elaboration.IdentifierExpressionFact
 
-const declarationLabel = (declaration: SemanticAnalysis.DeclarationFact): string =>
+const declarationLabel = (declaration: Elaboration.DeclarationFact): string =>
   declaration.name._tag === 'Present' ? declaration.name.spelling : 'Unavailable name'
 
-const parameterLabel = (parameter: SemanticAnalysis.ParameterFact): string =>
+const parameterLabel = (parameter: Elaboration.ParameterFact): string =>
   parameter.name._tag === 'Present' ? parameter.name.spelling : 'Unavailable name'
 
 function ParameterRelationship({ expression }: { readonly expression: IdentifierExpression }) {
@@ -494,7 +584,7 @@ function ParameterRelationship({ expression }: { readonly expression: Identifier
   )
 }
 
-function ParameterFacts({ declaration }: { readonly declaration: SemanticAnalysis.DeclarationFact }) {
+function ParameterFacts({ declaration }: { readonly declaration: Elaboration.DeclarationFact }) {
   if (declaration.parameters.length === 0) {
     return <p className={styles.noParameters}>No parameters</p>
   }
@@ -514,7 +604,7 @@ function ParameterFacts({ declaration }: { readonly declaration: SemanticAnalysi
           const type = parameter.declaredType
           const lookup =
             name._tag === 'Present'
-              ? SemanticAnalysis.parameterByName(declaration, name.spelling)
+              ? Elaboration.parameterByName(declaration, name.spelling)
               : undefined
           return (
             <article
@@ -580,7 +670,7 @@ function CallRelationship({
   returned,
   nested = false,
 }: {
-  readonly caller: SemanticAnalysis.DeclarationFact
+  readonly caller: Elaboration.DeclarationFact
   readonly returned: CallReturnedExpression
   readonly nested?: boolean
 }) {
@@ -770,7 +860,7 @@ export function DataFlow({
   selectedId,
   onSelect,
 }: {
-  readonly analysis: SemanticAnalysis.Result
+  readonly analysis: Elaboration.Result
   readonly outcome?: BootstrapEvaluation.Outcome
   readonly selectedId: string | undefined
   readonly onSelect: (id: string | undefined) => void
@@ -1007,12 +1097,12 @@ interface TraceRow {
 }
 
 const sameDeclarationIdentity = (
-  left: SemanticAnalysis.DeclarationFact,
-  right: SemanticAnalysis.DeclarationFact,
+  left: Elaboration.DeclarationFact,
+  right: Elaboration.DeclarationFact,
 ): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
 
 const traceRows = (trace: ReadonlyArray<BootstrapEvaluation.TraceEvent>): ReadonlyArray<TraceRow> => {
-  const openCalls: Array<SemanticAnalysis.DeclarationFact> = []
+  const openCalls: Array<Elaboration.DeclarationFact> = []
   return trace.map((event) => {
     const row = Object.freeze({ event, depth: openCalls.length })
     if (event._tag === 'Call') {
@@ -1128,7 +1218,7 @@ function SemanticFacts({
   evaluation,
   onEvaluate,
 }: {
-  readonly analysis: SemanticAnalysis.Result
+  readonly analysis: Elaboration.Result
   readonly selectedFlowId: string | undefined
   readonly onSelectFlow: (id: string | undefined) => void
   readonly evaluation: BootstrapEvaluation.Outcome | undefined
@@ -1142,7 +1232,7 @@ function SemanticFacts({
     ),
   )
   const lookups = presentNames.map((spelling) =>
-    SemanticAnalysis.declarationByName(analysis, spelling),
+    Elaboration.declarationByName(analysis, spelling),
   )
 
   return (
@@ -1192,7 +1282,7 @@ function SemanticFacts({
           const returned = fact.returnedExpression
           const nameLabel = name._tag === 'Present' ? name.spelling : 'Unavailable name'
           const collectIdentifiers = (
-            expression: SemanticAnalysis.ExpressionFact,
+            expression: Elaboration.ExpressionFact,
           ): ReadonlyArray<IdentifierExpression> =>
             expression._tag === 'Identifier'
               ? [expression]
@@ -1350,7 +1440,7 @@ export function SyntaxInspector() {
   const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
   const analysis = useMemo(() => {
     const source = SourceFile.make(sourceId, encoder.encode(text))
-    return SemanticAnalysis.analyze(Parser.parse(Lexer.lex(source)))
+    return Elaboration.elaborateModule(Parser.parse(Lexer.lex(source)))
   }, [text])
   const result = analysis.syntax
 
@@ -1442,6 +1532,7 @@ export function SyntaxInspector() {
             onSelect={setSelectedDiagnostic}
           />
           <TokenStream syntax={result} />
+          <HirPanel hir={analysis.hir} />
         </div>
       </section>
 

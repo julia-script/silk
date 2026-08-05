@@ -3,7 +3,7 @@ import {
   Diagnostic,
   Lexer,
   Parser,
-  SemanticAnalysis,
+  Elaboration,
   SourceFile,
 } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -14,14 +14,15 @@ import {
   DiagnosticPanel,
   diagnosticEntries,
   EvaluationPanel,
+  HirPanel,
   SyntaxInspector,
   TokenStream,
 } from './syntax-inspector'
 
 const encoder = new TextEncoder()
 
-const analyze = (text: string): SemanticAnalysis.Result =>
-  SemanticAnalysis.analyze(
+const analyze = (text: string): Elaboration.Result =>
+  Elaboration.elaborateModule(
     Parser.parse(Lexer.lex(SourceFile.make('memory://component-flow.silk', encoder.encode(text)))),
   )
 
@@ -262,6 +263,35 @@ describe('TokenStream', () => {
     const markup = renderToStaticMarkup(<TokenStream syntax={analysis.syntax} />)
 
     expect(markup).toContain('Invalid')
+  })
+})
+
+describe('HirPanel', () => {
+  it('lists typed functions with contracts and canonical call targets', () => {
+    const analysis = analyze(completeSource)
+    const markup = renderToStaticMarkup(<HirPanel hir={analysis.hir} />)
+
+    expect(markup).toContain('aria-label="Elaborated HIR functions"')
+    expect(markup).toContain('(I32) -&gt; I32')
+    expect(markup).toContain('call identity')
+    expect(markup).toContain('literal 42')
+  })
+
+  it('reveals resolved type and span on hover and focus', () => {
+    const analysis = analyze(completeSource)
+    const markup = renderToStaticMarkup(<HirPanel hir={analysis.hir} />)
+
+    expect(markup).toMatch(/title="I32 \[\d+, \d+\)"/)
+    expect(markup).toMatch(/aria-label="literal 42 : I32 \[\d+, \d+\)"/)
+    expect(markup).toContain('tabindex="0"')
+  })
+
+  it('marks unavailable HIR explicitly for unknown call targets', () => {
+    const analysis = analyze('pub fn main() -> I32 { return missing() }')
+    const markup = renderToStaticMarkup(<HirPanel hir={analysis.hir} />)
+
+    expect(markup).toContain('>unavailable</code>')
+    expect(markup).not.toContain('call missing')
   })
 })
 

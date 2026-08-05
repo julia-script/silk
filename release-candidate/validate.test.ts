@@ -215,10 +215,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './BootstrapEvaluation',
       './DeclarationIndex',
       './Diagnostic',
+      './Elaboration',
+      './Hir',
       './Lexer',
       './ModuleClosure',
       './Parser',
-      './SemanticAnalysis',
       './SourceFile',
       './SourceSpan',
       './SyntaxFile',
@@ -268,7 +269,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         `import * as api from '@silk-effect/compiler';
 import * as evaluationModule from '@silk-effect/compiler/BootstrapEvaluation';
 import * as parserModule from '@silk-effect/compiler/Parser';
-import * as semanticModule from '@silk-effect/compiler/SemanticAnalysis';
+import * as semanticModule from '@silk-effect/compiler/Elaboration';
 import * as syntaxTreeModule from '@silk-effect/compiler/SyntaxTree';
 const paths = ${JSON.stringify(deepPaths)};
 const modules = await Promise.all(
@@ -291,8 +292,8 @@ const visit = (element) => {
   for (const child of element.children) visit(child);
 };
 visit(parse.root);
-const analysis = api.SemanticAnalysis.analyze(parse);
-const deepAnalysis = semanticModule.analyze(parse);
+const analysis = api.Elaboration.elaborateModule(parse);
+const deepAnalysis = semanticModule.elaborateModule(parse);
 const evaluation = api.BootstrapEvaluation.evaluate(analysis);
 const deepEvaluation = evaluationModule.evaluate(deepAnalysis);
 const call = analysis.functions[1]?.returnedExpression;
@@ -300,12 +301,12 @@ const unknownSource = api.SourceFile.make(
   'memory://packed-unknown.silk',
   new TextEncoder().encode('pub fn main() -> I32 { return missing() }'),
 );
-const unknownAnalysis = semanticModule.analyze(api.Parser.parse(api.Lexer.lex(unknownSource)));
+const unknownAnalysis = semanticModule.elaborateModule(api.Parser.parse(api.Lexer.lex(unknownSource)));
 const unknownLocalSource = api.SourceFile.make(
   'memory://packed-unknown-local.silk',
   new TextEncoder().encode('pub fn main() -> I32 { return missing }'),
 );
-const unknownLocalAnalysis = semanticModule.analyze(
+const unknownLocalAnalysis = semanticModule.elaborateModule(
   api.Parser.parse(api.Lexer.lex(unknownLocalSource)),
 );
 const wrongAritySource = api.SourceFile.make(
@@ -314,7 +315,7 @@ const wrongAritySource = api.SourceFile.make(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity() }',
   ),
 );
-const wrongArityAnalysis = semanticModule.analyze(
+const wrongArityAnalysis = semanticModule.elaborateModule(
   api.Parser.parse(api.Lexer.lex(wrongAritySource)),
 );
 const cycleSource = api.SourceFile.make(
@@ -322,7 +323,7 @@ const cycleSource = api.SourceFile.make(
   new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
 );
 const cycleEvaluation = evaluationModule.evaluate(
-  semanticModule.analyze(api.Parser.parse(api.Lexer.lex(cycleSource))),
+  semanticModule.elaborateModule(api.Parser.parse(api.Lexer.lex(cycleSource))),
 );
 const nestedSource = api.SourceFile.make(
   'memory://packed-nested.silk',
@@ -338,7 +339,7 @@ const visitNested = (element) => {
   for (const child of element.children) visitNested(child);
 };
 visitNested(nestedParse.root);
-const nestedAnalysis = semanticModule.analyze(nestedParse);
+const nestedAnalysis = semanticModule.elaborateModule(nestedParse);
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
 const nestedEvaluation = evaluationModule.evaluate(nestedAnalysis);
@@ -367,7 +368,7 @@ console.log(
       parameterLookup:
         analysis.functions[0] === undefined
           ? null
-          : api.SemanticAnalysis.parameterByName(
+          : api.Elaboration.parameterByName(
               analysis.functions[0].declaration,
               'value',
             )._tag,
@@ -405,7 +406,7 @@ console.log(
       wrongArityDiagnosticCodes: wrongArityAnalysis.diagnostics.map(
         (diagnostic) => diagnostic.code,
       ),
-      rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'identity')._tag,
+      rootLookup: api.Elaboration.declarationByName(analysis, 'identity')._tag,
       deepLookup: semanticModule.declarationByName(deepAnalysis, 'missing')._tag,
       legacyResultFields: ['declaration', 'integerExpression', 'returnCompatibility'].filter(
         (key) => key in analysis,
@@ -464,10 +465,11 @@ console.log(
       'BootstrapEvaluation',
       'DeclarationIndex',
       'Diagnostic',
+      'Elaboration',
+      'Hir',
       'Lexer',
       'ModuleClosure',
       'Parser',
-      'SemanticAnalysis',
       'SourceFile',
       'SourceSpan',
       'SyntaxFile',
@@ -483,8 +485,9 @@ console.log(
     expect(api.deep['./Lexer']).toContain('lex')
     expect(api.deep['./BootstrapEvaluation']).toContain('evaluate')
     expect(api.deep['./Parser']).toContain('parse')
-    expect(api.deep['./SemanticAnalysis']).toContain('analyze')
-    expect(api.deep['./SemanticAnalysis']).toContain('parameterByName')
+    expect(api.deep['./Elaboration']).toContain('elaborateModule')
+    expect(api.deep['./Elaboration']).toContain('parameterByName')
+    expect(api.deep['./Hir']).toContain('encode')
     expect(api.deep['./Diagnostic']).toContain('unknownType')
     expect(api.deep['./Diagnostic']).toContain('unknownFunction')
     expect(api.deep['./Diagnostic']).toContain('duplicateParameterName')

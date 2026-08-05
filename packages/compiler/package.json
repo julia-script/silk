@@ -77,9 +77,13 @@
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
     },
-    "./SemanticAnalysis": {
-      "types": "./dist/SemanticAnalysis.d.ts",
-      "import": "./dist/SemanticAnalysis.js"
+    "./Elaboration": {
+      "types": "./dist/Elaboration.d.ts",
+      "import": "./dist/Elaboration.js"
+    },
+    "./Hir": {
+      "types": "./dist/Hir.d.ts",
+      "import": "./dist/Hir.js"
     }
   },
   "scripts": {

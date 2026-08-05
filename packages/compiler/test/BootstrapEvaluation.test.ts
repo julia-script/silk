@@ -1,15 +1,15 @@
 import { assert, it } from '@effect/vitest'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import * as Elaboration from '../src/Elaboration.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
-import * as SemanticAnalysis from '../src/SemanticAnalysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyze = (id: string, source: string): SemanticAnalysis.Result =>
-  SemanticAnalysis.analyze(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source)))))
+const analyze = (id: string, source: string): Elaboration.Result =>
+  Elaboration.elaborateModule(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source)))))
 
 const evaluate = (id: string, source: string): BootstrapEvaluation.Outcome =>
   BootstrapEvaluation.evaluate(analyze(id, source))

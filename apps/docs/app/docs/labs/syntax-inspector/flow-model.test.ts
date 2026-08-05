@@ -1,11 +1,11 @@
-import { BootstrapEvaluation, Lexer, Parser, SemanticAnalysis, SourceFile } from '@silk-effect/compiler'
+import { BootstrapEvaluation, Lexer, Parser, Elaboration, SourceFile } from '@silk-effect/compiler'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from './flow-model'
 
 const encoder = new TextEncoder()
 
-const analyze = (id: string, text: string): SemanticAnalysis.Result =>
-  SemanticAnalysis.analyze(Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(text)))))
+const analyze = (id: string, text: string): Elaboration.Result =>
+  Elaboration.elaborateModule(Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(text)))))
 
 const identitySource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`

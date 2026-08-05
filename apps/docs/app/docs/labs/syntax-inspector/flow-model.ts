@@ -1,4 +1,4 @@
-import type { BootstrapEvaluation, SemanticAnalysis, SourceSpan } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Elaboration, SourceSpan } from '@silk-effect/compiler'
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -71,7 +71,7 @@ export interface FlowModel {
   readonly edges: ReadonlyArray<FlowEdge>
 }
 
-type CallFact = Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
+type CallFact = Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
 
 interface GroupDraft {
   readonly id: string
@@ -84,7 +84,7 @@ interface GroupDraft {
   readonly span: SourceSpan.SourceSpan
   readonly nodeIds: Array<string>
   readonly edgeIds: Array<string>
-  readonly target: SemanticAnalysis.DeclarationFact | undefined
+  readonly target: Elaboration.DeclarationFact | undefined
 }
 
 interface ProjectionDraft {
@@ -99,12 +99,12 @@ interface CallProjection {
   readonly complete: boolean
 }
 
-const declarationName = (declaration: SemanticAnalysis.DeclarationFact): string =>
+const declarationName = (declaration: Elaboration.DeclarationFact): string =>
   declaration.name._tag === 'Present'
     ? declaration.name.spelling
     : `function #${declaration.id.ordinal}`
 
-const parameterName = (parameter: SemanticAnalysis.ParameterFact): string =>
+const parameterName = (parameter: Elaboration.ParameterFact): string =>
   parameter.name._tag === 'Present'
     ? parameter.name.spelling
     : `parameter #${parameter.id.ordinal}`
@@ -112,7 +112,7 @@ const parameterName = (parameter: SemanticAnalysis.ParameterFact): string =>
 const callName = (call: CallFact): string =>
   call.reference._tag === 'Unavailable' ? 'unavailable call' : call.reference.spelling
 
-const argumentLabel = (argument: SemanticAnalysis.ArgumentFact): string => {
+const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   const expression = argument.expression
   if (expression._tag === 'Identifier') {
     return expression.reference._tag === 'Unavailable'
@@ -132,8 +132,8 @@ const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): bo
   left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
 
 const sameDeclaration = (
-  left: SemanticAnalysis.DeclarationFact,
-  right: SemanticAnalysis.DeclarationFact,
+  left: Elaboration.DeclarationFact,
+  right: Elaboration.DeclarationFact,
 ): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
 
 const groupState = (call: CallFact): FlowItemState =>
@@ -200,15 +200,15 @@ const semanticEdge = (
   })
 
 const functionFor = (
-  analysis: SemanticAnalysis.Result,
-  declaration: SemanticAnalysis.DeclarationFact,
-): SemanticAnalysis.FunctionFact | undefined =>
+  analysis: Elaboration.Result,
+  declaration: Elaboration.DeclarationFact,
+): Elaboration.FunctionFact | undefined =>
   analysis.functions.find((fact) => sameDeclaration(fact.declaration, declaration))
 
 const projectCall = (
-  analysis: SemanticAnalysis.Result,
+  analysis: Elaboration.Result,
   draft: ProjectionDraft,
-  caller: SemanticAnalysis.DeclarationFact,
+  caller: Elaboration.DeclarationFact,
   call: CallFact,
   parentId: string | undefined,
   depth: number,
@@ -724,7 +724,7 @@ const emptyModel = (evaluated: boolean): FlowModel =>
 
 /** Projects semantic relationships and an optional trace-backed evaluation overlay for the inspector. */
 export const projectDataFlow = (
-  analysis: SemanticAnalysis.Result,
+  analysis: Elaboration.Result,
   outcome?: BootstrapEvaluation.Outcome,
 ): FlowModel => {
   const caller = analysis.functions.find((fact) => fact.returnedExpression._tag === 'Call')

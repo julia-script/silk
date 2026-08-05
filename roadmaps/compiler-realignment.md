@@ -115,7 +115,7 @@ Proposals are written as openspec changes:
 - [x] 2 — [establish-syntax-file-artifact](../openspec/changes/archive/2026-08-05-establish-syntax-file-artifact/proposal.md)
 - [x] 3 — [load-module-closure](../openspec/changes/archive/2026-08-05-load-module-closure/proposal.md)
 - [x] 4 — [collect-declaration-headers](../openspec/changes/archive/2026-08-05-collect-declaration-headers/proposal.md)
-- [ ] 5 — [elaborate-bodies-to-hir](../openspec/changes/elaborate-bodies-to-hir/proposal.md)
+- [x] 5 — [elaborate-bodies-to-hir](../openspec/changes/archive/2026-08-05-elaborate-bodies-to-hir/proposal.md)
 - [ ] 6 — [establish-analysis-facade](../openspec/changes/establish-analysis-facade/proposal.md)
 - [ ] 7 — [check-ownership-and-cleanup](../openspec/changes/check-ownership-and-cleanup/proposal.md)
 - [ ] 8 — [define-mir-and-encoder](../openspec/changes/define-mir-and-encoder/proposal.md)
