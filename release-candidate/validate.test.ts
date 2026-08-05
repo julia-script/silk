@@ -15,6 +15,7 @@ import { expect, test } from 'vitest'
 const workspaceRoot = resolve(dirname(new URL(import.meta.url).pathname), '..')
 const packageRoot = resolve(workspaceRoot, 'packages/llvm')
 const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
+const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 
 test('the llvm release candidate is a self-contained ESM package', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-release-candidate-'))
@@ -294,6 +295,146 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownType')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
+test('the wasm release candidate is a self-contained ESM package', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-wasm-release-candidate-'))
+
+  try {
+    const archiveRoot = resolve(temporary, 'archives')
+    const unpackRoot = resolve(temporary, 'unpacked')
+    mkdirSync(archiveRoot)
+    mkdirSync(unpackRoot)
+
+    execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+      cwd: wasmPackageRoot,
+      stdio: 'pipe',
+    })
+
+    const archive = readdirSync(archiveRoot).find((file) => file.endsWith('.tgz'))
+    expect(archive).toBeDefined()
+    execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
+
+    const packedRoot = resolve(unpackRoot, 'package')
+    const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
+
+    expect(manifest.name).toBe('@silk-effect/wasm')
+    expect(manifest.private).not.toBe(true)
+    expect(Object.keys(manifest.dependencies ?? {})).toEqual(['effect'])
+    expect(Object.keys(manifest.exports).sort()).toEqual([
+      '.',
+      './Binary',
+      './Builder',
+      './ConstExpr',
+      './Data',
+      './Elem',
+      './Export',
+      './Func',
+      './Global',
+      './Import',
+      './Instr',
+      './Limits',
+      './Memory',
+      './Table',
+      './Type',
+      './ValType',
+      './WasmError',
+      './WatText',
+    ])
+    expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'UPSTREAM.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'fixtures'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'scripts'))).toBe(false)
+
+    const packedFiles = (directory: string): ReadonlyArray<string> =>
+      readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const path = resolve(directory, entry.name)
+        return entry.isDirectory() ? packedFiles(path) : [path]
+      })
+    expect(
+      packedFiles(packedRoot).filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts')),
+    ).toEqual([])
+
+    const consumerRoot = resolve(temporary, 'consumer')
+    mkdirSync(consumerRoot)
+    writeFileSync(
+      resolve(consumerRoot, 'package.json'),
+      JSON.stringify({
+        private: true,
+        type: 'module',
+        dependencies: { '@silk-effect/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
+      }),
+    )
+    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
+      cwd: consumerRoot,
+      stdio: 'pipe',
+    })
+
+    const deepPaths = Object.keys(manifest.exports)
+      .filter((path) => path !== '.')
+      .sort()
+    const inspectApi = () =>
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import * as api from '@silk-effect/wasm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-effect/wasm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './WasmError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
+        ],
+        {
+          cwd: consumerRoot,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: dirname(process.execPath),
+            WASM_TOOLS: '/unavailable/wasm-tools',
+          },
+        },
+      )
+
+    const first = inspectApi()
+    const second = inspectApi()
+    expect(first).toBe(second)
+    const api = JSON.parse(first)
+    expect(api.root).toEqual([
+      'Binary',
+      'Builder',
+      'ConstExpr',
+      'Data',
+      'Elem',
+      'Export',
+      'Func',
+      'Global',
+      'Import',
+      'Instr',
+      'Limits',
+      'Memory',
+      'Table',
+      'Type',
+      'ValType',
+      'WasmError',
+      'WatText',
+    ])
+    for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
+      readonly [string, ReadonlyArray<string>]
+    >) {
+      const rootName = path.slice(2)
+      if (rootName === 'ConstExpr' || rootName === 'Limits') continue
+      expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
+      if (rootName === 'WasmError') expect(exports).toContain('WasmError')
+      else expect(api.rootNamespaces[path]).toEqual(exports)
+    }
+    expect(api.deep['./Builder']).toContain('make')
+    expect(api.deep['./Binary']).toContain('encode')
+    expect(api.deep['./WatText']).toContain('render')
+    expect(api.deep['./Instr']).toContain('i32Const')
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }

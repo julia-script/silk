@@ -1,0 +1,206 @@
+import * as Effect from 'effect/Effect'
+import type * as Result from 'effect/Result'
+import type * as Semaphore from 'effect/Semaphore'
+import type * as Builder from '../Builder.js'
+import type * as DataActor from '../Data.js'
+import type * as Elem from '../Elem.js'
+import type * as Func from '../Func.js'
+import type * as Global from '../Global.js'
+import type * as Instr from '../Instr.js'
+import type * as Memory from '../Memory.js'
+import type * as Table from '../Table.js'
+import type * as Type from '../Type.js'
+import type * as ValType from '../ValType.js'
+import { invalidState, type WasmError } from '../WasmError.js'
+import type * as OwnedHandle from './OwnedHandle.js'
+
+export interface FuncType {
+  readonly params: ReadonlyArray<ValType.ValType>
+  readonly results: ReadonlyArray<ValType.ValType>
+}
+
+export interface Limits {
+  readonly min: number
+  readonly max: number | undefined
+}
+
+export interface ImportSource {
+  readonly module: string
+  readonly field: string
+}
+
+export interface LocalDeclaration {
+  readonly type: ValType.ValType
+  readonly name: string | undefined
+}
+
+export interface FuncDefinition {
+  readonly locals: ReadonlyArray<LocalDeclaration>
+  readonly body: ReadonlyArray<Instr.Instr>
+  /** Entry indices of functions referenced by `ref.func` inside the body. */
+  readonly refFuncs: ReadonlySet<number>
+}
+
+export interface FuncEntry {
+  readonly typeIndex: number
+  readonly name: string | undefined
+  readonly importSource: ImportSource | undefined
+  definition: FuncDefinition | undefined
+}
+
+export interface TableEntry {
+  readonly refType: ValType.RefType
+  readonly limits: Limits
+  readonly name: string | undefined
+  readonly importSource: ImportSource | undefined
+}
+
+export interface MemoryEntry {
+  readonly limits: Limits
+  readonly name: string | undefined
+  readonly importSource: ImportSource | undefined
+}
+
+export interface GlobalEntry {
+  readonly valType: ValType.ValType
+  readonly mutable: boolean
+  readonly name: string | undefined
+  readonly importSource: ImportSource | undefined
+  readonly init: ReadonlyArray<Instr.Instr> | undefined
+}
+
+export type ElemMode =
+  | { readonly _tag: 'Active'; readonly table: number; readonly offset: ReadonlyArray<Instr.Instr> }
+  | { readonly _tag: 'Passive' }
+  | { readonly _tag: 'Declarative' }
+
+export interface ElemEntry {
+  readonly refType: ValType.RefType
+  readonly mode: ElemMode
+  readonly items: ReadonlyArray<ReadonlyArray<Instr.Instr>>
+  readonly name: string | undefined
+}
+
+export type DataMode =
+  | {
+      readonly _tag: 'Active'
+      readonly memory: number
+      readonly offset: ReadonlyArray<Instr.Instr>
+    }
+  | { readonly _tag: 'Passive' }
+
+export interface DataEntry {
+  readonly mode: DataMode
+  readonly bytes: Uint8Array
+  readonly name: string | undefined
+}
+
+export type ExportKind = 'func' | 'table' | 'memory' | 'global'
+
+export interface ExportEntry {
+  readonly name: string
+  readonly kind: ExportKind
+  readonly entryIndex: number
+}
+
+export interface MutableState {
+  moduleName: string | undefined
+  types: Array<FuncType>
+  typeHandles: Array<Type.Type>
+  typeKeys: Map<string, number>
+  funcs: Array<FuncEntry>
+  funcHandles: Array<Func.Func>
+  tables: Array<TableEntry>
+  tableHandles: Array<Table.Table>
+  memories: Array<MemoryEntry>
+  memoryHandles: Array<Memory.Memory>
+  globals: Array<GlobalEntry>
+  globalHandles: Array<Global.Global>
+  elems: Array<ElemEntry>
+  elemHandles: Array<Elem.Elem>
+  datas: Array<DataEntry>
+  dataHandles: Array<DataActor.Data>
+  exports: Array<ExportEntry>
+  exportNames: Set<string>
+  start: number | undefined
+}
+
+export interface State {
+  readonly owner: OwnedHandle.Owner
+  readonly gate: Semaphore.Semaphore
+  readonly value: MutableState
+}
+
+export interface Snapshot {
+  readonly owner: OwnedHandle.Owner
+  readonly moduleName: string | undefined
+  readonly types: ReadonlyArray<FuncType>
+  readonly typeHandles: ReadonlyArray<Type.Type>
+  readonly funcs: ReadonlyArray<FuncEntry>
+  readonly tables: ReadonlyArray<TableEntry>
+  readonly memories: ReadonlyArray<MemoryEntry>
+  readonly globals: ReadonlyArray<GlobalEntry>
+  readonly elems: ReadonlyArray<ElemEntry>
+  readonly datas: ReadonlyArray<DataEntry>
+  readonly exports: ReadonlyArray<ExportEntry>
+  readonly start: number | undefined
+}
+
+const states = new WeakMap<Builder.Builder, State>()
+
+/** @internal */
+export const register = (self: Builder.Builder, state: State): void => {
+  states.set(self, state)
+}
+
+/** @internal */
+const lookup = Effect.fnUntraced(function* (
+  self: Builder.Builder,
+  operation: string,
+): Effect.fn.Return<State, WasmError> {
+  const state = states.get(self)
+  if (state === undefined) {
+    return yield* Effect.fail(
+      invalidState({ operation, message: 'Unknown WebAssembly builder value', state: self }),
+    )
+  }
+  return state
+})
+
+/** @internal */
+export const mutate = Effect.fnUntraced(function* <A>(
+  self: Builder.Builder,
+  operation: string,
+  transition: (state: MutableState, owner: OwnedHandle.Owner) => Result.Result<A, WasmError>,
+): Effect.fn.Return<A, WasmError> {
+  return yield* Effect.flatMap(lookup(self, operation), (state) =>
+    state.gate.withPermit(
+      Effect.suspend(() => Effect.fromResult(transition(state.value, state.owner))),
+    ),
+  )
+})
+
+/** @internal */
+export const snapshot = Effect.fnUntraced(function* (
+  self: Builder.Builder,
+  operation: string,
+): Effect.fn.Return<Snapshot, WasmError> {
+  return yield* Effect.flatMap(lookup(self, operation), (state) =>
+    state.gate.withPermit(
+      Effect.sync(() => ({
+        owner: state.owner,
+        moduleName: state.value.moduleName,
+        types: Object.freeze([...state.value.types]),
+        typeHandles: Object.freeze([...state.value.typeHandles]),
+        funcs: Object.freeze([...state.value.funcs]),
+        tables: Object.freeze([...state.value.tables]),
+        memories: Object.freeze([...state.value.memories]),
+        globals: Object.freeze([...state.value.globals]),
+        elems: Object.freeze([...state.value.elems]),
+        datas: Object.freeze([...state.value.datas]),
+        exports: Object.freeze([...state.value.exports]),
+        start: state.value.start,
+      })),
+    ),
+  )
+})
