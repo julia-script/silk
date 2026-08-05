@@ -13,7 +13,7 @@
  */
 
 import { Analysis } from '@silk-effect/compiler'
-import type { Target, ToolchainPlan } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Target, ToolchainPlan } from '@silk-effect/compiler'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -241,6 +241,8 @@ export function Workbench() {
   // each, which is exactly the comparison the layout and MIR panes are for.
   const [target, setTarget] = useState<Target.Id>('aarch64-apple-darwin')
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
+  const [selectedFlowId, setSelectedFlowId] = useState<string>()
+  const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [api, setApi] = useState<DockviewApi>()
   const [theme, setTheme] = useState('dockview-theme-dark')
@@ -258,6 +260,16 @@ export function Workbench() {
       }),
     [modules, root, target],
   )
+
+  // An evaluation describes the program that produced it, so it cannot outlive that program: a
+  // trace still on screen after an edit would be claiming results for source that no longer
+  // exists. Keying on the snapshot catches every path that changes it — preset, edit, module
+  // add/remove, target — rather than relying on each one to remember.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the snapshot IS the dependency here
+  useEffect(() => {
+    setEvaluation(undefined)
+    setSelectedFlowId(undefined)
+  }, [snapshot])
 
   const loadPreset = useCallback((preset: Preset) => {
     setModules(preset.modules)
@@ -306,6 +318,14 @@ export function Workbench() {
     profile,
     selectedDiagnostic,
     onSelectDiagnostic: setSelectedDiagnostic,
+    selectedFlowId,
+    onSelectFlow: setSelectedFlowId,
+    evaluation,
+    // Evaluation runs the lowered MIR, which is absent when the target did not resolve.
+    onEvaluate: () =>
+      setEvaluation(
+        Analysis.mirOf(snapshot)._tag === 'Available' ? Analysis.evaluate(snapshot) : undefined,
+      ),
     setModuleSource: (name, value) => setModules((current) => ({ ...current, [name]: value })),
     setMode,
     setProfile,

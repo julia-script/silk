@@ -229,7 +229,7 @@ const sliceLabel = (source: SourceFile.SourceFile, element: SyntaxTree.Element):
   return JSON.stringify(decoder.decode(bytes))
 }
 
-function TreeElement({
+export function TreeElement({
   element,
   source,
 }: {
@@ -459,6 +459,32 @@ export function HirPanel({ hir }: { readonly hir: Hir.Module }) {
           ))}
         </ul>
       )}
+    </section>
+  )
+}
+
+/**
+ * The lossless concrete syntax tree, with the legend that tells a real token from a missing one
+ * the parser recovered over. Recovery is the point of the tree being lossless, so the legend
+ * travels with it rather than living in a panel heading somewhere else.
+ */
+export function ConcreteTree({ syntax }: { readonly syntax: SyntaxFile.SyntaxFile }) {
+  return (
+    <section aria-labelledby="concrete-tree">
+      <div className={styles.diagnosticHeading}>
+        <h3 id="concrete-tree">Concrete tree</h3>
+        <div className={styles.legend} aria-label="Tree legend">
+          <span>
+            <i className={styles.tokenDot} /> token
+          </span>
+          <span>
+            <i className={styles.missingDot} /> missing
+          </span>
+        </div>
+      </div>
+      <ol className={styles.treeRoot} aria-label="Concrete syntax tree">
+        <TreeElement element={syntax.root} source={syntax.source} />
+      </ol>
     </section>
   )
 }

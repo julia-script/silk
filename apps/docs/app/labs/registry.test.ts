@@ -26,4 +26,12 @@ describe('view registry', () => {
   it('reports a genuinely unknown id as missing', () => {
     expect(viewById('not-a-view')).toBeUndefined()
   })
+
+  // The syntax inspector was two panels, and the consolidation first ported only the left one.
+  // These are the panels that made it a *syntax* lab rather than a token list.
+  it('carries every panel the syntax inspector shipped', () => {
+    for (const id of ['tokens', 'tree', 'flow', 'evaluation', 'hir', 'diagnostics']) {
+      expect(viewById(id)?.id, id).toBe(id)
+    }
+  })
 })

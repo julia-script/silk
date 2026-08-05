@@ -9,7 +9,7 @@
  */
 
 import { Analysis } from '@silk-effect/compiler'
-import type { ToolchainPlan } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, ToolchainPlan } from '@silk-effect/compiler'
 import { IndexView } from './declaration-index/declaration-index'
 import { DiscoveryView } from './instances/instances'
 import { CfgView } from './mir-cfg/mir-cfg'
@@ -17,8 +17,11 @@ import { ClosureView } from './module-closure/module-closure'
 import { OwnershipView } from './ownership/ownership'
 import { BackendView, LayoutSummary, ToolchainView } from './panels'
 import {
+  ConcreteTree,
+  DataFlow,
   DiagnosticPanel,
   diagnosticEntries,
+  EvaluationPanel,
   HirPanel,
   TokenStream,
 } from './syntax-inspector/syntax-inspector'
@@ -28,6 +31,9 @@ export type ViewId =
   | 'source'
   | 'diagnostics'
   | 'tokens'
+  | 'tree'
+  | 'flow'
+  | 'evaluation'
   | 'closure'
   | 'index'
   | 'hir'
@@ -54,6 +60,15 @@ export interface ViewContext {
    */
   readonly selectedDiagnostic: number | undefined
   readonly onSelectDiagnostic: (index: number | undefined) => void
+  /** Selected data-flow node, shared for the same reason diagnostic selection is. */
+  readonly selectedFlowId: string | undefined
+  readonly onSelectFlow: (id: string | undefined) => void
+  /**
+   * Evaluation is an explicit action, never implied by editing: the green semantic layer states
+   * what the program means, and only an actual run may claim what it does.
+   */
+  readonly evaluation: BootstrapEvaluation.Outcome | undefined
+  readonly onEvaluate: () => void
 }
 
 export interface ViewDefinition {
@@ -70,6 +85,33 @@ export const views: ReadonlyArray<ViewDefinition> = [
     title: 'Tokens',
     phase: 'syntax',
     render: ({ snapshot }) => <TokenStream syntax={Analysis.rootAnalysis(snapshot).syntax} />,
+  },
+  {
+    id: 'tree',
+    title: 'Concrete tree',
+    phase: 'syntax',
+    render: ({ snapshot }) => <ConcreteTree syntax={Analysis.rootAnalysis(snapshot).syntax} />,
+  },
+  {
+    id: 'flow',
+    title: 'Data flow',
+    phase: 'semantics',
+    render: ({ snapshot, selectedFlowId, onSelectFlow, evaluation }) => (
+      <DataFlow
+        analysis={Analysis.rootAnalysis(snapshot)}
+        outcome={evaluation}
+        selectedId={selectedFlowId}
+        onSelect={onSelectFlow}
+      />
+    ),
+  },
+  {
+    id: 'evaluation',
+    title: 'Bootstrap evaluation',
+    phase: 'interpretation',
+    render: ({ evaluation, onEvaluate }) => (
+      <EvaluationPanel outcome={evaluation} onEvaluate={onEvaluate} />
+    ),
   },
   {
     id: 'closure',
