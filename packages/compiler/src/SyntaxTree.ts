@@ -12,6 +12,7 @@ export type NodeKind =
   | 'Block'
   | 'ReturnStatement'
   | 'IntegerLiteralExpression'
+  | 'CallExpression'
   | 'Error'
 
 /** An absent required token at one exact source position. */

@@ -21,6 +21,14 @@ pub fn two() -> I32 { return 2 }
 pub fn three() -> I32 { return 3 }`,
   },
   {
+    label: 'Valid call',
+    source: `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer() }`,
+  },
+  { label: 'Missing callee', source: 'pub fn main() -> I32 { return () }' },
+  { label: 'Missing call )', source: 'pub fn main() -> I32 { return answer( }' },
+  { label: 'Unsupported argument', source: 'pub fn main() -> I32 { return answer(42) }' },
+  {
     label: 'Missing name',
     source: `pub fn answer() -> I32 { return 42 }
 pub fn () -> I32 { return 0 }`,
@@ -194,7 +202,7 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
           const declaration = fact.declaration
           const name = declaration.name
           const returnType = declaration.returnType
-          const integer = fact.integerExpression
+          const returned = fact.returnedExpression
           const nameLabel = name._tag === 'Present' ? name.spelling : 'Unavailable name'
 
           return (
@@ -242,16 +250,38 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                   </dd>
                 </div>
                 <div>
-                  <dt>Integer expression</dt>
-                  <dd>
-                    <strong>{integer._tag === 'Available' ? integer.value : 'Unavailable'}</strong>
-                    <span>
-                      {integer._tag === 'Unavailable'
-                        ? integer._tag
-                        : `${integer.type} · ${integer._tag}`}
-                    </span>
-                    <small>{spanLabel(integer.syntax)}</small>
-                  </dd>
+                  <dt>Returned expression</dt>
+                  {returned._tag === 'Integer' ? (
+                    <dd>
+                      <strong>
+                        {returned.integer._tag === 'Available'
+                          ? returned.integer.value
+                          : 'Unavailable'}
+                      </strong>
+                      <span>
+                        Integer ·{' '}
+                        {returned.integer._tag === 'Unavailable'
+                          ? returned.integer._tag
+                          : `${returned.integer.type} · ${returned.integer._tag}`}
+                      </span>
+                      <small>{spanLabel(returned.syntax)}</small>
+                    </dd>
+                  ) : (
+                    <dd>
+                      <strong>
+                        {returned.reference._tag === 'Unresolved'
+                          ? `${returned.reference.spelling}()`
+                          : 'Unavailable call'}
+                      </strong>
+                      <span>Call · {returned.reference._tag}</span>
+                      <small>
+                        call {spanLabel(returned.syntax)}
+                        {returned.reference._tag === 'Unresolved'
+                          ? ` · callee ${spanLabel(returned.reference.token)}`
+                          : ` · missing ${spanLabel(returned.reference.syntax)}`}
+                      </small>
+                    </dd>
+                  )}
                 </div>
                 <div>
                   <dt>Return</dt>
@@ -267,8 +297,9 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
       </div>
 
       <p className={styles.boundaryNote}>
-        Ordered facts over every concrete function branch. Calls, scope graphs, semantic AST, HIR,
-        and code generation do not exist yet.
+        Ordered facts over every concrete function branch. Call syntax is collected, but references
+        are intentionally unresolved; scope graphs, semantic AST, HIR, and code generation do not
+        exist yet.
       </p>
     </section>
   )

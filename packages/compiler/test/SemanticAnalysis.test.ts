@@ -12,6 +12,8 @@ import {
   damagedTypeSource,
   duplicateNameSource,
   i32BoundarySource,
+  missingCallCalleeSource,
+  missingCallRightParenthesisSource,
   missingIntegerSource,
   missingNameSource,
   missingSecondNameSource,
@@ -22,6 +24,8 @@ import {
   tripleDuplicateNameSource,
   twoFunctionSource,
   unknownTypeSource,
+  unsupportedCallArgumentSource,
+  validCallSource,
 } from './fixtures/BootstrapSemanticFixture.js'
 import { raise } from './support/raise.js'
 
@@ -39,6 +43,13 @@ const functionAt = (
   index: number,
 ): SemanticAnalysis.FunctionFact =>
   result.functions.at(index) ?? raise(`expected function fact at index ${index}`)
+
+const integerFact = (
+  fact: SemanticAnalysis.FunctionFact,
+): SemanticAnalysis.IntegerExpressionFact =>
+  fact.returnedExpression._tag === 'Integer'
+    ? fact.returnedExpression.integer
+    : raise('expected an integer returned expression')
 
 const diagnosticView = (result: SemanticAnalysis.Result) =>
   result.diagnostics.map((diagnostic) => ({
@@ -60,7 +71,7 @@ it('publishes one immutable function fact with exact accepted provenance', () =>
   const declaration = fact.declaration
   const name = declaration.name
   const returnType = declaration.returnType
-  const integer = fact.integerExpression
+  const integer = integerFact(fact)
 
   assert.strictEqual(result.parse, parse)
   assert.strictEqual(result.functions.length, 1)
@@ -125,9 +136,10 @@ it('collects two and three declarations with deterministic source-order identiti
     ['one', 'two', 'three'],
   )
   assert.deepEqual(
-    three.functions.map((fact) =>
-      fact.integerExpression._tag === 'Available' ? fact.integerExpression.value : undefined,
-    ),
+    three.functions.map((fact) => {
+      const integer = integerFact(fact)
+      return integer._tag === 'Available' ? integer.value : undefined
+    }),
     [1, 2, 3],
   )
   assert.strictEqual(
@@ -135,6 +147,87 @@ it('collects two and three declarations with deterministic source-order identiti
       functionAt(two, 1).declaration.syntax.span.start,
     true,
   )
+})
+
+it('preserves an unresolved call beside an available integer without semantic errors', () => {
+  const result = analyzeText('fixture://valid-call.silk', validCallSource)
+  const answer = functionAt(result, 0)
+  const main = functionAt(result, 1)
+  const returned = main.returnedExpression
+
+  assert.strictEqual(answer.returnedExpression._tag, 'Integer')
+  assert.strictEqual(integerFact(answer)._tag, 'Available')
+  assert.deepEqual(answer.returnCompatibility, { _tag: 'Compatible' })
+  assert.strictEqual(returned._tag, 'Call')
+  if (returned._tag !== 'Call') return
+  assert.strictEqual(returned.syntax.kind, 'CallExpression')
+  assert.strictEqual(returned.reference._tag, 'Unresolved')
+  if (returned.reference._tag !== 'Unresolved') return
+  assert.strictEqual(returned.reference.spelling, 'answer')
+  assert.strictEqual(returned.reference.token, directToken(returned.syntax, 'Identifier'))
+  assert.deepEqual(main.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(result.parse.diagnostics, [])
+  assert.strictEqual(Object.isFrozen(returned), true)
+  assert.strictEqual(Object.isFrozen(returned.reference), true)
+})
+
+it('keeps a recovered call callee unavailable and parser-owned', () => {
+  const result = analyzeText('fixture://missing-call-callee.silk', missingCallCalleeSource)
+  const fact = functionAt(result, 0)
+  const returned = fact.returnedExpression
+
+  assert.strictEqual(returned._tag, 'Call')
+  if (returned._tag !== 'Call') return
+  assert.strictEqual(returned.reference._tag, 'Unavailable')
+  if (returned.reference._tag !== 'Unavailable') return
+  assert.strictEqual(SyntaxTree.isMissingToken(returned.reference.syntax), true)
+  assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(
+    result.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('preserves present callees through damaged call punctuation without resolving them', () => {
+  const missingParenthesis = analyzeText(
+    'fixture://missing-call-right-parenthesis.silk',
+    missingCallRightParenthesisSource,
+  )
+  const unsupportedArgument = analyzeText(
+    'fixture://unsupported-call-argument.silk',
+    unsupportedCallArgumentSource,
+  )
+
+  for (const result of [missingParenthesis, unsupportedArgument]) {
+    const fact = functionAt(result, 0)
+    const returned = fact.returnedExpression
+    assert.strictEqual(returned._tag, 'Call')
+    if (returned._tag !== 'Call') continue
+    assert.strictEqual(returned.reference._tag, 'Unresolved')
+    if (returned.reference._tag !== 'Unresolved') continue
+    assert.strictEqual(returned.reference.spelling, 'answer')
+    assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
+    assert.deepEqual(result.diagnostics, [])
+  }
+
+  assert.deepEqual(
+    missingParenthesis.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assert.deepEqual(
+    unsupportedArgument.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+})
+
+it('publishes deterministic unresolved call facts across fresh analyses', () => {
+  const first = analyzeText('fixture://deterministic-call.silk', validCallSource)
+  const second = analyzeText('fixture://deterministic-call.silk', validCallSource)
+
+  assert.deepEqual(first.functions, second.functions)
+  assert.deepEqual(diagnosticView(first), diagnosticView(second))
 })
 
 it('uses deterministic source-local identities across fresh results', () => {
@@ -235,10 +328,10 @@ it('analyzes return types, integers, and compatibility independently', () => {
   const damaged = functionAt(result, 1)
 
   assert.strictEqual(valid.declaration.returnType._tag, 'Resolved')
-  assert.strictEqual(valid.integerExpression._tag, 'Available')
+  assert.strictEqual(integerFact(valid)._tag, 'Available')
   assert.deepEqual(valid.returnCompatibility, { _tag: 'Compatible' })
   assert.strictEqual(damaged.declaration.returnType._tag, 'Unresolved')
-  assert.strictEqual(damaged.integerExpression._tag, 'OutOfRange')
+  assert.strictEqual(integerFact(damaged)._tag, 'OutOfRange')
   assert.deepEqual(damaged.returnCompatibility, { _tag: 'Unavailable' })
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -262,12 +355,13 @@ it('preserves existing type and integer edge behavior per function', () => {
     damaged.parse.diagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002', 'PAR0001'],
   )
-  assert.strictEqual(boundary.integerExpression._tag, 'Available')
-  if (boundary.integerExpression._tag !== 'Available') return
-  assert.strictEqual(boundary.integerExpression.value, 2147483647)
+  const boundaryInteger = integerFact(boundary)
+  assert.strictEqual(boundaryInteger._tag, 'Available')
+  if (boundaryInteger._tag !== 'Available') return
+  assert.strictEqual(boundaryInteger.value, 2147483647)
   assert.deepEqual(boundary.returnCompatibility, { _tag: 'Compatible' })
-  assert.strictEqual(functionAt(overflow, 0).integerExpression._tag, 'OutOfRange')
-  assert.strictEqual(functionAt(beyondSafe, 0).integerExpression._tag, 'OutOfRange')
+  assert.strictEqual(integerFact(functionAt(overflow, 0))._tag, 'OutOfRange')
+  assert.strictEqual(integerFact(functionAt(beyondSafe, 0))._tag, 'OutOfRange')
   assert.deepEqual(
     diagnosticView(beyondSafe).map((diagnostic) => diagnostic.reason),
     [
@@ -278,7 +372,7 @@ it('preserves existing type and integer edge behavior per function', () => {
       },
     ],
   )
-  assert.strictEqual(functionAt(missingInteger, 0).integerExpression._tag, 'Unavailable')
+  assert.strictEqual(integerFact(functionAt(missingInteger, 0))._tag, 'Unavailable')
   assert.deepEqual(missingInteger.diagnostics, [])
 })
 
@@ -298,7 +392,7 @@ it('keeps parser and semantic diagnostics in their owning ordered collections', 
   )
   assert.strictEqual(functionAt(result, 1).declaration.name._tag, 'Unavailable')
   assert.strictEqual(functionAt(result, 1).declaration.returnType._tag, 'Unresolved')
-  assert.strictEqual(functionAt(result, 2).integerExpression._tag, 'OutOfRange')
+  assert.strictEqual(integerFact(functionAt(result, 2))._tag, 'OutOfRange')
 })
 
 it('is deterministic across repeated fresh multi-function results', () => {

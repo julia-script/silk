@@ -8,18 +8,24 @@ import type * as Token from '../src/Token.js'
 import {
   acceptedShape,
   acceptedSource,
+  damagedCallBeforeNextFunctionSource,
   denseTriviaSource,
   type ExpectedNodeShape,
   emptySource,
   interFunctionPunctuationSource,
   invalidUtf8Source,
+  missingCallCalleeSource,
+  missingCallRightParenthesisSource,
   missingFirstRightBraceSource,
   missingNameSource,
   missingRightBraceSource,
   threeFunctionSource,
   trailingTriviaSource,
+  triviaCallSource,
   twoFunctionSource,
   unexpectedPunctuationSource,
+  unsupportedCallArgumentSource,
+  validCallSource,
   whollyUnrelatedSource,
 } from './fixtures/BootstrapParserFixture.js'
 
@@ -168,6 +174,181 @@ it('parses three declarations without imposing a temporary source-file limit', (
   assert.deepEqual(result.diagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(threeFunctionSource))
+})
+
+it('parses a zero-argument call as one lossless concrete expression', () => {
+  const result = parseText('fixture://valid-call.silk', validCallSource)
+  const calls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+  const call = calls.at(0)
+
+  assert.strictEqual(calls.length, 1)
+  assert.notStrictEqual(call, undefined)
+  if (call === undefined) return
+  assert.deepEqual(nodeShape(call), {
+    kind: 'CallExpression',
+    children: ['Whitespace', 'Identifier', 'LeftParenthesis', 'RightParenthesis'],
+  })
+  assert.strictEqual(directTokenText(result, call, 'Identifier'), 'answer')
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(validCallSource))
+})
+
+it('retains trivia between every concrete call element', () => {
+  const result = parseText('fixture://trivia-call.silk', triviaCallSource)
+  const call = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+
+  assert.notStrictEqual(call, undefined)
+  if (call === undefined) return
+  assert.deepEqual(
+    call.children.map((element) =>
+      SyntaxTree.isNode(element)
+        ? element.kind
+        : SyntaxTree.isToken(element)
+          ? element.kind
+          : `Missing(${element.expected})`,
+    ),
+    [
+      'Whitespace',
+      'Identifier',
+      'Whitespace',
+      'LineComment',
+      'Whitespace',
+      'LeftParenthesis',
+      'Whitespace',
+      'LineComment',
+      'Whitespace',
+      'LineComment',
+      'Whitespace',
+      'RightParenthesis',
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(triviaCallSource))
+})
+
+it('recovers a missing call callee without inventing a name', () => {
+  const result = parseText('fixture://missing-call-callee.silk', missingCallCalleeSource)
+  const call = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+
+  assert.notStrictEqual(call, undefined)
+  if (call === undefined) return
+  assert.deepEqual(
+    missingLeaves(call).map((leaf) => ({
+      expected: leaf.expected,
+      start: leaf.span.start,
+      end: leaf.span.end,
+    })),
+    [
+      {
+        expected: 'Identifier',
+        start: missingCallCalleeSource.lastIndexOf('()'),
+        end: missingCallCalleeSource.lastIndexOf('()'),
+      },
+    ],
+  )
+  assert.deepEqual(
+    SyntaxTree.tokens(call).map((token) => token.kind),
+    ['Whitespace', 'LeftParenthesis', 'RightParenthesis'],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('inserts a missing call parenthesis without consuming the block brace', () => {
+  const result = parseText(
+    'fixture://missing-call-right-parenthesis.silk',
+    missingCallRightParenthesisSource,
+  )
+  const call = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+  const block = descendants(result.root).find(
+    (element): element is SyntaxTree.Node => SyntaxTree.isNode(element) && element.kind === 'Block',
+  )
+
+  assert.notStrictEqual(call, undefined)
+  assert.notStrictEqual(block, undefined)
+  if (call === undefined || block === undefined) return
+  assert.deepEqual(
+    missingLeaves(call).map((leaf) => leaf.expected),
+    ['RightParenthesis'],
+  )
+  assert.strictEqual(
+    block.children.some((element) => SyntaxTree.isToken(element) && element.kind === 'RightBrace'),
+    true,
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('retains unsupported call arguments in one error region', () => {
+  const result = parseText(
+    'fixture://unsupported-call-argument.silk',
+    unsupportedCallArgumentSource,
+  )
+  const call = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+
+  assert.notStrictEqual(call, undefined)
+  if (call === undefined) return
+  assert.deepEqual(
+    errorNodes(call)
+      .flatMap((node) => SyntaxTree.tokens(node))
+      .map((token) => token.kind),
+    ['DecimalInteger'],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(unsupportedCallArgumentSource))
+})
+
+it('bounds damaged call recovery before the following function', () => {
+  const result = parseText(
+    'fixture://damaged-call-before-next-function.silk',
+    damagedCallBeforeNextFunctionSource,
+  )
+  const declarations = directFunctionDeclarations(result.root)
+  const first = declarations.at(0)
+  const second = declarations.at(1)
+
+  assert.notStrictEqual(first, undefined)
+  assert.notStrictEqual(second, undefined)
+  if (first === undefined || second === undefined) return
+  assert.deepEqual(
+    missingLeaves(first).map((leaf) => leaf.expected),
+    ['RightParenthesis', 'RightBrace'],
+  )
+  assert.deepEqual(missingLeaves(second), [])
+  assert.strictEqual(directTokenText(result, second, 'Identifier'), 'after')
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001', 'PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(damagedCallBeforeNextFunctionSource))
 })
 
 it('keeps trailing trivia with the end-of-file expectation', () => {

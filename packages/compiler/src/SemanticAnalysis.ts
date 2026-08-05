@@ -69,6 +69,31 @@ export type IntegerExpressionFact =
       readonly syntax: SyntaxTree.Element
     }
 
+/** A call callee awaiting resolution or unavailable because syntax recovery inserted it. */
+export type CallReferenceFact =
+  | {
+      readonly _tag: 'Unresolved'
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly syntax: SyntaxTree.Element
+    }
+
+/** One returned integer or zero-argument call with exact concrete provenance. */
+export type ReturnedExpressionFact =
+  | {
+      readonly _tag: 'Integer'
+      readonly integer: IntegerExpressionFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'Call'
+      readonly reference: CallReferenceFact
+      readonly syntax: SyntaxTree.Node
+    }
+
 /** Whether one returned expression is known to match its declared result type. */
 export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _tag: 'Unavailable' }
 
@@ -83,11 +108,11 @@ export interface DeclarationFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** One function's declaration, returned integer, and compatibility facts. */
+/** One function's declaration, returned expression, and compatibility facts. */
 export interface FunctionFact {
   readonly _tag: 'FunctionFact'
   readonly declaration: DeclarationFact
-  readonly integerExpression: IntegerExpressionFact
+  readonly returnedExpression: ReturnedExpressionFact
   readonly returnCompatibility: ReturnCompatibility
 }
 
@@ -234,6 +259,12 @@ interface IntegerResult {
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
+interface ReturnedExpressionResult {
+  readonly fact: ReturnedExpressionFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly type: SemanticType | undefined
+}
+
 const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): IntegerResult => {
   const token = directToken(node, 'DecimalInteger')
   if (token === undefined) {
@@ -277,6 +308,58 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
   })
 }
 
+const analyzeReturnedExpression = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): ReturnedExpressionResult => {
+  if (node.kind === 'IntegerLiteralExpression') {
+    const integer = analyzeInteger(source, node)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Integer',
+        integer: integer.fact,
+        syntax: node,
+      }),
+      diagnostics: integer.diagnostics,
+      type: integer.fact._tag === 'Available' ? integer.fact.type : undefined,
+    })
+  }
+
+  const token = directToken(node, 'Identifier')
+  const reference: CallReferenceFact =
+    token === undefined
+      ? Object.freeze({
+          _tag: 'Unavailable',
+          syntax: unavailableSyntax(node, 'Identifier'),
+        })
+      : Object.freeze({
+          _tag: 'Unresolved',
+          spelling: spelling(source, token),
+          token,
+        })
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Call',
+      reference,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([]),
+    type: undefined,
+  })
+}
+
+const returnedExpressionNode = (returnStatement: SyntaxTree.Node): SyntaxTree.Node => {
+  const expression = returnStatement.children.find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'IntegerLiteralExpression' || element.kind === 'CallExpression'),
+  )
+  if (expression === undefined) {
+    throw new RangeError('Semantic analysis expected a returned expression')
+  }
+  return expression
+}
+
 const compareDiagnostics = (
   left: SemanticDiagnostic.SemanticDiagnostic,
   right: SemanticDiagnostic.SemanticDiagnostic,
@@ -298,9 +381,9 @@ const analyzeFunction = (
   const returnTypeNode = childNode(functionNode, 'ReturnType')
   const blockNode = childNode(functionNode, 'Block')
   const returnStatementNode = childNode(blockNode, 'ReturnStatement')
-  const integerNode = childNode(returnStatementNode, 'IntegerLiteralExpression')
+  const expressionNode = returnedExpressionNode(returnStatementNode)
   const returnType = analyzeReturnType(source, returnTypeNode)
-  const integer = analyzeInteger(source, integerNode)
+  const expression = analyzeReturnedExpression(source, expressionNode)
   const declaration: DeclarationFact = Object.freeze({
     _tag: 'FunctionDeclaration',
     id: Object.freeze({
@@ -315,7 +398,7 @@ const analyzeFunction = (
     syntax: functionNode,
   })
   const returnCompatibility =
-    returnType.fact._tag === 'Resolved' && integer.fact._tag === 'Available'
+    returnType.fact._tag === 'Resolved' && expression.type === returnType.fact.type
       ? compatible
       : unavailableCompatibility
 
@@ -323,10 +406,10 @@ const analyzeFunction = (
     fact: Object.freeze({
       _tag: 'FunctionFact',
       declaration,
-      integerExpression: integer.fact,
+      returnedExpression: expression.fact,
       returnCompatibility,
     }),
-    diagnostics: Object.freeze([...returnType.diagnostics, ...integer.diagnostics]),
+    diagnostics: Object.freeze([...returnType.diagnostics, ...expression.diagnostics]),
   })
 }
 

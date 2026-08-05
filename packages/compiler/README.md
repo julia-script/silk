@@ -10,7 +10,7 @@ import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-e
 const source = SourceFile.make(
   'memory://example.silk',
   new TextEncoder().encode(`pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return 0 }`),
+pub fn main() -> I32 { return answer() }`),
 )
 const lexical = Lexer.lex(source)
 const parse = Parser.parse(lexical)
@@ -20,7 +20,8 @@ console.log(parse.root.kind) // SourceFile
 console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // true
 console.log(result.functions.length) // 2
 console.log(result.functions[0]?.declaration.name) // { _tag: 'Present', spelling: 'answer', ... }
-console.log(result.functions[0]?.integerExpression) // { _tag: 'Available', type: 'I32', value: 42, ... }
+console.log(result.functions[0]?.returnedExpression) // { _tag: 'Integer', integer: { value: 42, ... }, ... }
+console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', reference: { _tag: 'Unresolved', ... }, ... }
 console.log(SemanticAnalysis.declarationByName(result, 'main')) // { _tag: 'Resolved', ... }
 ```
 
@@ -51,15 +52,19 @@ allowed between its elements:
 
 ```text
 File                → FunctionDeclaration+ EOF
-FunctionDeclaration → pub fn Identifier() -> Identifier { return DecimalInteger }
+FunctionDeclaration → pub fn Identifier() -> Identifier { return ReturnExpression }
+ReturnExpression    → DecimalInteger | Identifier ( )
 ```
 
 The result is a concrete syntax tree (CST), not a semantic AST. Its nodes group the source into one
 or more direct function declarations in source order. Each declaration contains a parameter list,
 return type, block, return statement, and integer literal expression. Every lexer
+return type, block, return statement, and either an integer literal or zero-argument call
+expression. A call node directly retains its callee, empty parentheses, and trivia; unexpected
+tokens between the parentheses remain one error region rather than becoming arguments. Every lexer
 token—including trivia, invalid tokens, and EOF—remains the same object in the tree and appears
-exactly once in source order. A following `pub` also bounds recovery when the prior function is
-missing its closing brace.
+exactly once in source order. A following `pub` bounds both block and damaged-call recovery so the
+next declaration remains separate.
 
 Ordinary source mistakes remain data. A required absent token becomes a `MissingToken` leaf with an
 empty span and a `PAR0001` diagnostic. Unexpected concrete input becomes a lossless `Error` node
@@ -69,8 +74,8 @@ and a `PAR0002` diagnostic. Lexical diagnostics remain separate on the retained 
 ## Bootstrap semantic facts
 
 `SemanticAnalysis.analyze` retains the exact parse result and publishes an immutable ordered
-`functions` collection. Each `FunctionFact` groups one declaration, returned integer expression,
-and return compatibility. Declaration identities combine the source identity with the function's
+`functions` collection. Each `FunctionFact` groups one declaration, a closed integer-or-call
+`returnedExpression`, and return compatibility. Declaration identities combine the source identity with the function's
 zero-based concrete-source ordinal; missing names do not change later ordinals. Each declaration
 also retains public visibility, zero parameters, a present or unavailable name, and a resolved,
 unresolved, or unavailable declared return type.
@@ -87,9 +92,15 @@ function is analyzed independently. Missing or damaged syntax remains unavailabl
 parser diagnostics, so lexical, parser, and semantic diagnostics remain separate ordered
 collections.
 
+A present call callee is preserved with exact syntax provenance as `Unresolved`; resolution against
+the declaration collection belongs to the next compiler slice. Calls therefore have unavailable
+return compatibility and do not produce an unknown-name semantic diagnostic yet. A recovered
+missing callee remains explicitly unavailable, while an integer returned expression keeps its
+existing exact value and compatibility behavior.
+
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
-compilation. Calls, reference resolution, and a general scope graph are also intentionally deferred.
+compilation. Call syntax exists, but reference resolution and a general scope graph remain deferred.
 Those layers follow only after this narrow source-to-fact contract proves useful.
 
 Token families deliberately deferred with those later grammar decisions include string and

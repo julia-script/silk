@@ -80,6 +80,18 @@ pub fn main() -> I32 { return 0 }`
 export const trailingTriviaSource = `pub fn main() -> I32 { return 42 }
 // trailing source trivia
 `
+export const validCallSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer() }`
+export const triviaCallSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer // callee
+  ( // open call
+  // empty call
+  ) }`
+export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
+export const missingCallRightParenthesisSource = 'pub fn main() -> I32 { return answer( }'
+export const unsupportedCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
+export const damagedCallBeforeNextFunctionSource = `pub fn main() -> I32 { return answer(
+pub fn after() -> I32 { return 0 }`
 
 export const invalidUtf8Source = Uint8Array.of(
   ...Array.from('pub fn ', (character) => character.charCodeAt(0)),

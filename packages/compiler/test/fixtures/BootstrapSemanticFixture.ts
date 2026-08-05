@@ -27,3 +27,8 @@ pub fn damaged() -> Mystery { return 2147483648 }`
 export const parserAndSemanticDamageSource = `pub fn same() -> I32 { return 1 }
 pub fn () -> Mystery { return 2 }
 pub fn same() -> I32 { return 2147483648 }`
+export const validCallSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer() }`
+export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
+export const missingCallRightParenthesisSource = 'pub fn main() -> I32 { return answer( }'
+export const unsupportedCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
