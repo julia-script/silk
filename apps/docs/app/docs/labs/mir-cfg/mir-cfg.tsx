@@ -132,10 +132,12 @@ export function MirCfgLab() {
   const samples = useMemo(() => Mir.samples(), [])
   const [selected, setSelected] = useState(0)
   const [text, setText] = useState<string>(defaultProgram)
-  const program = useMemo(
-    () => Analysis.loweredMir(Analysis.ofSource(programSourceId, new TextEncoder().encode(text))),
+  const snapshot = useMemo(
+    () =>
+      Analysis.ofSource(programSourceId, new TextEncoder().encode(text), 'aarch64-apple-darwin'),
     [text],
   )
+  const program = useMemo(() => Analysis.loweredMir(snapshot), [snapshot])
   const module = selected < samples.length ? samples[selected] : program
   const isProgram = selected >= samples.length
 
@@ -171,6 +173,25 @@ export function MirCfgLab() {
       ) : null}
 
       <CfgView module={module} source={isProgram ? text : undefined} />
+
+      <section className={styles.diagnosticGroup} aria-labelledby="mir-target-layout">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="mir-target-layout">Canonical target and layout</h3>
+          <span>{module.layout.target.id}</span>
+        </div>
+        <ul className={styles.diagnosticList} aria-label="MIR target layout plan">
+          {module.layout.entries.map((entry) => (
+            <li key={entry.type}>
+              <div>
+                <code>{entry.type}</code>
+                <span>
+                  {entry.size} bytes · align {entry.alignment} · {entry.representation._tag}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section className={styles.diagnosticGroup} aria-labelledby="mir-encoding">
         <div className={styles.diagnosticHeading}>

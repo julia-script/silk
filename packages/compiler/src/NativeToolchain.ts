@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { arch, platform, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type * as Mir from './Mir.js'
+import type * as Backend from './Backend.js'
+import type * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
 
 /**
@@ -11,22 +12,6 @@ import * as ToolchainPlan from './ToolchainPlan.js'
  * `ClangLinker` implementation. Node-only by construction — reachable as a deep import so the
  * package root stays browser-safe. Failures are data with full command provenance.
  */
-
-/** Derives the target layout for the machine running the driver. */
-export const hostLayout = (): Mir.TargetLayout => {
-  const cpu = arch() === 'arm64' ? 'arm64' : 'x86_64'
-  const triple =
-    platform() === 'darwin'
-      ? `${cpu === 'arm64' ? 'arm64' : 'x86_64'}-apple-darwin`
-      : `${cpu === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`
-  return Object.freeze({
-    _tag: 'TargetLayout',
-    triple,
-    pointerWidth: 64,
-    endianness: 'little',
-    i32: Object.freeze({ size: 4, alignment: 4 }),
-  })
-}
 
 /** The caller-pinned external toolchain. No PATH discovery is performed. */
 export interface Toolchain {
@@ -39,6 +24,7 @@ export interface PathArtifact {
   readonly _tag: 'PathArtifact'
   readonly scope: string
   readonly path: string
+  readonly target: Target.Target
 }
 
 /** One named build scope owning its intermediates until exit. */
@@ -52,6 +38,14 @@ export interface BuildScope {
 export interface ToolchainFailure {
   readonly _tag: 'ToolchainFailure'
   readonly planned: ToolchainPlan.PlannedCommand
+  readonly reason:
+    | { readonly _tag: 'ProcessFailure' }
+    | { readonly _tag: 'MissingInput'; readonly path: string }
+    | {
+        readonly _tag: 'TargetMismatch'
+        readonly expected: Target.Id
+        readonly actual: Target.Id
+      }
   readonly status: number | null
   readonly output: string
 }
@@ -67,6 +61,7 @@ export interface ObjectArtifact {
 export interface Executable {
   readonly _tag: 'Executable'
   readonly path: string
+  readonly target: Target.Target
   readonly planned: ToolchainPlan.PlannedCommand
 }
 
@@ -94,12 +89,13 @@ export const withBuildScope = <A>(
 /** Writes bytes to a scope-owned path artifact. */
 export const writeArtifact = (
   scope: BuildScope,
+  target: Target.Target,
   fileName: string,
   bytes: Uint8Array | string,
 ): PathArtifact => {
   const path = join(scope.root, fileName)
   writeFileSync(path, bytes)
-  return Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path })
+  return Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path, target })
 }
 
 /** Promotes a scope-owned artifact to a durable destination that survives scope exit. */
@@ -121,7 +117,8 @@ const failure = (
   planned: ToolchainPlan.PlannedCommand,
   status: number | null,
   output: string,
-): ToolchainFailure => Object.freeze({ _tag: 'ToolchainFailure', planned, status, output })
+  reason: ToolchainFailure['reason'] = { _tag: 'ProcessFailure' },
+): ToolchainFailure => Object.freeze({ _tag: 'ToolchainFailure', planned, reason, status, output })
 
 /**
  * Completes the backend's object contract: writes the bitcode into the scope and invokes the
@@ -130,25 +127,40 @@ const failure = (
 export const emitObject = (
   toolchain: Toolchain,
   scope: BuildScope,
-  bitcode: Uint8Array,
+  artifact: Backend.Artifact,
+  target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
   baseName = 'program',
 ): ObjectArtifact | ToolchainFailure => {
-  const bitcodeArtifact = writeArtifact(scope, `${baseName}.bc`, bitcode)
   const objectPath = join(scope.root, `${baseName}.o`)
   const planned = ToolchainPlan.objectCommand(
     toolchain.clang,
+    target,
     profile,
-    bitcodeArtifact.path,
+    join(scope.root, `${baseName}.bc`),
     objectPath,
   )
+  if (artifact.target.id !== target.id) {
+    return failure(
+      planned,
+      null,
+      `bitcode target ${artifact.target.id} does not match requested target ${target.id}`,
+      { _tag: 'TargetMismatch', expected: target.id, actual: artifact.target.id },
+    )
+  }
+  writeArtifact(scope, target, `${baseName}.bc`, artifact.bitcode)
   const result = runPlanned(planned)
   if (result.status !== 0 || !existsSync(objectPath)) {
     return failure(planned, result.status, result.output)
   }
   return Object.freeze({
     _tag: 'ObjectArtifact',
-    artifact: Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path: objectPath }),
+    artifact: Object.freeze({
+      _tag: 'PathArtifact',
+      scope: scope.name,
+      path: objectPath,
+      target,
+    }),
     planned,
   })
 }
@@ -157,17 +169,23 @@ export const emitObject = (
 export const compileShim = (
   toolchain: Toolchain,
   scope: BuildScope,
+  target: Target.Target,
 ): ObjectArtifact | ToolchainFailure => {
-  const source = writeArtifact(scope, 'silk_shim.c', ToolchainPlan.shimSource)
+  const source = writeArtifact(scope, target, 'silk_shim.c', ToolchainPlan.shimSource)
   const objectPath = join(scope.root, 'silk_shim.o')
-  const planned = ToolchainPlan.shimCommand(toolchain.clang, source.path, objectPath)
+  const planned = ToolchainPlan.shimCommand(toolchain.clang, target, source.path, objectPath)
   const result = runPlanned(planned)
   if (result.status !== 0 || !existsSync(objectPath)) {
     return failure(planned, result.status, result.output)
   }
   return Object.freeze({
     _tag: 'ObjectArtifact',
-    artifact: Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path: objectPath }),
+    artifact: Object.freeze({
+      _tag: 'PathArtifact',
+      scope: scope.name,
+      path: objectPath,
+      target,
+    }),
     planned,
   })
 }
@@ -176,6 +194,7 @@ export const compileShim = (
 export interface NativeLinker {
   readonly link: (
     toolchain: Toolchain,
+    target: Target.Target,
     objects: ReadonlyArray<PathArtifact>,
     libraries: ReadonlyArray<string>,
     destination: string,
@@ -186,26 +205,44 @@ export interface NativeLinker {
 export const ClangLinker: NativeLinker = Object.freeze({
   link: (
     toolchain: Toolchain,
+    target: Target.Target,
     objects: ReadonlyArray<PathArtifact>,
     libraries: ReadonlyArray<string>,
     destination: string,
   ): Executable | ToolchainFailure => {
-    const target = resolve(destination)
+    const destinationPath = resolve(destination)
     const planned = ToolchainPlan.linkCommand(
       toolchain.clang,
+      target,
       objects.map((object) => object.path),
       libraries,
-      target,
+      destinationPath,
     )
     for (const object of objects) {
+      if (object.target.id !== target.id) {
+        return failure(
+          planned,
+          null,
+          `linker input ${object.path} targets ${object.target.id}; expected ${target.id}`,
+          { _tag: 'TargetMismatch', expected: target.id, actual: object.target.id },
+        )
+      }
       if (!existsSync(object.path)) {
-        return failure(planned, null, `missing linker input: ${object.path}`)
+        return failure(planned, null, `missing linker input: ${object.path}`, {
+          _tag: 'MissingInput',
+          path: object.path,
+        })
       }
     }
     const result = runPlanned(planned)
-    if (result.status !== 0 || !existsSync(target)) {
+    if (result.status !== 0 || !existsSync(destinationPath)) {
       return failure(planned, result.status, result.output)
     }
-    return Object.freeze({ _tag: 'Executable', path: target, planned })
+    return Object.freeze({
+      _tag: 'Executable',
+      path: destinationPath,
+      target: planned.target,
+      planned,
+    })
   },
 })

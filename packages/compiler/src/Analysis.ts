@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
@@ -5,11 +6,13 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as Ownership from './Ownership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
+import * as Target from './Target.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
@@ -19,6 +22,11 @@ import * as WasmBackend from './WasmBackend.js'
  * answers; running phase modules directly is not a supported consumer surface.
  */
 
+/** An available phase artifact or the target failure that prevented its construction. */
+export type Targeted<A> =
+  | { readonly _tag: 'Available'; readonly value: A }
+  | { readonly _tag: 'Unavailable'; readonly error: Target.TargetError }
+
 /** One immutable analysis snapshot of one compilation request. */
 export interface Snapshot {
   readonly _tag: 'AnalysisSnapshot'
@@ -27,7 +35,9 @@ export interface Snapshot {
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly instances: Instances.Discovery
-  readonly mir: Mir.Module
+  readonly target: Target.Selection
+  readonly layout: Targeted<Layout.Plan>
+  readonly mir: Targeted<Mir.Module>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -42,7 +52,18 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
   const instances = Instances.discover(request.rootModule, results)
-  const mir = Lower.lowerProgram(instances, ownership)
+  const target = Target.select(request.target)
+  const layout: Targeted<Layout.Plan> =
+    target._tag === 'Resolved'
+      ? Object.freeze({ _tag: 'Available', value: Layout.plan(target.target, instances) })
+      : Object.freeze({ _tag: 'Unavailable', error: target.error })
+  const mir: Targeted<Mir.Module> =
+    layout._tag === 'Available'
+      ? Object.freeze({
+          _tag: 'Available',
+          value: Lower.lowerProgram(instances, ownership, layout.value),
+        })
+      : layout
   const diagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
@@ -57,14 +78,18 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     results,
     ownership,
     instances,
+    target,
+    layout,
     mir,
     diagnostics,
   })
 }
 
 /** Builds the snapshot of one single-module source. */
-export const ofSource = (sourceId: string, bytes: Uint8Array): Snapshot =>
-  make({ rootModule: sourceId, sources: new Map([[sourceId, bytes]]) })
+export const ofSource = (sourceId: string, bytes: Uint8Array, target?: string): Snapshot =>
+  target === undefined
+    ? make({ rootModule: sourceId, sources: new Map([[sourceId, bytes]]) })
+    : make({ rootModule: sourceId, sources: new Map([[sourceId, bytes]]), target })
 
 /** Returns every loaded module of the snapshot in canonical identity order. */
 export const modules = (self: Snapshot): ReadonlyArray<ModuleClosure.Module> => self.closure.modules
@@ -105,8 +130,20 @@ export const ownershipOf = (
 /** Returns the snapshot's instance discovery: entry state and ordered instances. */
 export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
 
-/** Returns the snapshot's lowered MIR program module. */
-export const loweredMir = (self: Snapshot): Mir.Module => self.mir
+/** Returns the snapshot's resolved or unavailable target selection. */
+export const targetOf = (self: Snapshot): Target.Selection => self.target
+
+/** Returns the snapshot's available or explicitly unavailable layout plan. */
+export const layoutOf = (self: Snapshot): Targeted<Layout.Plan> => self.layout
+
+/** Returns the snapshot's available or explicitly unavailable lowered MIR state. */
+export const mirOf = (self: Snapshot): Targeted<Mir.Module> => self.mir
+
+/** Returns the snapshot's lowered MIR program for callers that already established availability. */
+export const loweredMir = (self: Snapshot): Mir.Module => {
+  if (self.mir._tag === 'Available') return self.mir.value
+  throw new RangeError(self.mir.error.message)
+}
 
 /** Looks up one declaration name within one module. */
 export const declarationByName = (
@@ -131,23 +168,14 @@ export const parameterLookup = (
 export const diagnostics = (self: Snapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
   self.diagnostics
 
-/** The default target layout used by facade codegen until the driver owns target selection. */
-export const defaultLayout: Mir.TargetLayout = Object.freeze({
-  _tag: 'TargetLayout',
-  triple: 'arm64-apple-darwin',
-  pointerWidth: 64,
-  endianness: 'little',
-  i32: Object.freeze({ size: 4, alignment: 4 }),
-})
-
 /** Emits the snapshot's lowered program through the nominal backend service. */
-export const codegen = (
+export const codegen = Effect.fn('Analysis.codegen')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
-  layout: Mir.TargetLayout = defaultLayout,
   backend: Backend.Backend = Backend.LlvmBackend,
-): Backend.Artifact =>
-  backend.emit(self.mir, layout, {
+): Effect.fn.Return<Backend.Artifact, Backend.BackendError | Target.TargetError> {
+  if (self.mir._tag === 'Unavailable') return yield* self.mir.error
+  return yield* Backend.emit(backend, self.mir.value, {
     ...request,
     sources:
       request.sources ??
@@ -158,18 +186,20 @@ export const codegen = (
         ]),
       ),
   })
+})
 
 /**
  * Emits the snapshot's lowered program as WebAssembly. The artifact's `ir` carries the WAT
  * inspection text and its `bitcode` carries the instantiable wasm binary, mirroring how
  * {@link codegen} pairs LLVM IR text with bitcode.
  */
-export const codegenWasm = (
+export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
-  layout: Mir.TargetLayout = defaultLayout,
-): Backend.Artifact => codegen(self, request, layout, WasmBackend.WasmBackend)
+): Effect.fn.Return<Backend.Artifact, Backend.BackendError | Target.TargetError> {
+  return yield* codegen(self, request, WasmBackend.WasmBackend)
+})
 
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>
-  BootstrapEvaluation.evaluate(self.instances, self.mir)
+  BootstrapEvaluation.evaluate(self.instances, loweredMir(self))

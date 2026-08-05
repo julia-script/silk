@@ -77,6 +77,10 @@
       "types": "./dist/Instances.d.ts",
       "import": "./dist/Instances.js"
     },
+    "./Layout": {
+      "types": "./dist/Layout.d.ts",
+      "import": "./dist/Layout.js"
+    },
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
@@ -120,6 +124,10 @@
     "./ToolchainPlan": {
       "types": "./dist/ToolchainPlan.d.ts",
       "import": "./dist/ToolchainPlan.js"
+    },
+    "./Target": {
+      "types": "./dist/Target.d.ts",
+      "import": "./dist/Target.js"
     },
     "./WasmBackend": {
       "types": "./dist/WasmBackend.d.ts",

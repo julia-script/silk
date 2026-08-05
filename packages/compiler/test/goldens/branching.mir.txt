@@ -1,4 +1,6 @@
 mir-module sample://branching.silk
+target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
+layout I32 size=4 align=4 repr=signed-i32
 fn sample://branching.silk.choose params=1 locals=2 -> I32
   bb0:
     branch %0 ? bb1 : bb2 [34, 45)

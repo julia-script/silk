@@ -1,5 +1,6 @@
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
+import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -403,10 +404,12 @@ const lowerInstance = (
 export const lowerProgram = (
   discovery: Instances.Discovery,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
+  layout: Layout.Plan,
 ): Mir.Module =>
   Object.freeze({
     _tag: 'MirModule',
     module: discovery.rootModule,
+    layout,
     functions: Object.freeze(
       discovery.instances.map((instance) =>
         lowerInstance(instance, ownership.get(instance.key.declaration.module)),

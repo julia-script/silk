@@ -145,13 +145,55 @@ The rest of the accepted surface follows the same low-keyword direction:
 - `pub struct Name { ... }` declares nominal data with explicit `pub` fields.
 - `pub impl Copy for Name` requests compiler-sealed Copy conformance and is accepted only when every
   field is Copy and cleanup-free; users cannot supply custom copying behavior.
-- Runtime alternatives retain the visually union-like `A | B` spelling and are normalized by the
-  compiler.
+- Runtime alternatives retain the visually union-like `A | B` spelling, are normalized by the
+  compiler, and widen only from an immediate expected union context.
 - Generic arguments use angle brackets where inference is insufficient; actor construction remains
   a qualified call rather than special allocation syntax.
-- `import path.Module` binds `Module`; `as Alias` appears only when the name is actually changed.
+- `import path.Module` binds `Module`; `as Alias` appears only when the name is actually changed;
+  `{ Member, other as renamed }` selects public members; and `import path.Module as Alias {
+  Member }` is the hybrid form that binds both the namespace and selected members.
 - Unsafe operations remain qualified actor operations inside the explicit unsafe boundary settled
   by the earlier semantic issues rather than gaining unrelated special call syntax.
+
+The concrete import forms are therefore:
+
+```silk
+import compiler.Syntax
+import compiler.Syntax as Tree
+import compiler.Syntax { Node, parse, encode as encodeSyntax }
+import compiler.Syntax as Tree { Node, parse }
+```
+
+Nominal struct construction uses a labeled literal only inside the defining module. External code
+uses an ordinary public actor function such as `Token.make`; field access remains `value.field`.
+Literals must name every field exactly once, while `..` in a pattern explicitly acknowledges
+omitted fields.
+
+```silk
+pub struct Token {
+  pub kind: U32
+  lexeme: String
+}
+
+pub fn make(kind: U32, lexeme: own String) -> Token {
+  return Token { kind: kind, lexeme: move lexeme }
+}
+```
+
+Matching states the scrutinee access mode explicitly for affine values. `match move value`
+consumes it, `match &value` shares it, and `match &mut value` borrows it exclusively. Bare
+`match value` is accepted only when the value is Copy. Arms are newline-separated expressions,
+guards precede `=>`, and nested nominal patterns use `field`, `field: localName`, and `..`.
+
+```silk
+let code = match move event {
+  Token { kind, .. } => kind
+  End {} => 0
+}
+```
+
+Arms run in source order. Guarded arms do not contribute to exhaustiveness, `_` is the universal
+pattern, and the result type is the normalized union of reachable arm result types.
 
 The accepted comparison is preserved as a throwaway primary source under
 [`prototype-syntax`](../prototype-syntax/README.md) and runs with
@@ -162,3 +204,9 @@ example. The isolated capture is branch `julia/prototype-bootstrap-syntax-202608
 its run script. This answer supersedes issue 03's original direct-execution assumption for
 effectful functions and issue 02's blanket deferral of owned environments, narrowly for typed flow
 values.
+
+## Amendment — 2026-08-05
+
+The data-slice planning session fixed the concrete import, nominal struct construction, and
+mode-aware match spellings above. File-derived module identities and semantic normalization remain
+owned by issues 04 and 02 respectively.

@@ -1094,6 +1094,8 @@ export function DataFlow({
 
 const blockedSummary = (reason: BootstrapEvaluation.BlockedReason): string => {
   switch (reason._tag) {
+    case 'InvalidMir':
+      return `MIR verification found ${reason.violations.length} violations.`
     case 'UnavailableEntry':
       switch (reason.reason) {
         case 'MissingEntry':

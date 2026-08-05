@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -30,8 +31,15 @@ export function LlvmIrLab() {
   const [text, setText] = useState<string>(presets[0].source)
   const [mode, setMode] = useState<'release' | 'debug'>('release')
 
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
-  const artifact = useMemo(() => Analysis.codegen(snapshot, { mode }), [snapshot, mode])
+  const snapshot = useMemo(
+    () => Analysis.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin'),
+    [text],
+  )
+  const artifact = useMemo(
+    () => Effect.runSync(Analysis.codegen(snapshot, { mode })),
+    [snapshot, mode],
+  )
+  const layout = Analysis.layoutOf(snapshot)
 
   return (
     <div>
@@ -64,6 +72,27 @@ export function LlvmIrLab() {
       />
 
       <div className={styles.diagnostics}>
+        {layout._tag === 'Available' ? (
+          <section className={styles.diagnosticGroup} aria-labelledby="llvm-target-layout">
+            <div className={styles.diagnosticHeading}>
+              <h3 id="llvm-target-layout">Compiler target and scalar plan</h3>
+              <span>{layout.value.target.id}</span>
+            </div>
+            <ul className={styles.diagnosticList} aria-label="LLVM target layout plan">
+              {layout.value.entries.map((entry) => (
+                <li key={entry.type}>
+                  <div>
+                    <code>{entry.type}</code>
+                    <span>
+                      {entry.size} bytes · align {entry.alignment} · LLVM i
+                      {entry.representation.bits}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <section className={styles.diagnosticGroup} aria-labelledby="llvm-symbols">
           <div className={styles.diagnosticHeading}>
             <h3 id="llvm-symbols">Symbols</h3>

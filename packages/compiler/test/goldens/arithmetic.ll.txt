@@ -1,5 +1,5 @@
 source_filename = "golden://program.silk"
-target triple = "arm64-apple-darwin"
+target triple = "aarch64-apple-darwin"
 
 define i32 @silk_main() {
 bb0:

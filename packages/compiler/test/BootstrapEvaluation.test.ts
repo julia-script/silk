@@ -1,6 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '../src/Analysis.js'
-import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import { corpus } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -125,4 +125,31 @@ pub fn main() -> I32 { return identity(identity(42)) }`
   const second = evaluateSource(source)
 
   assert.deepEqual(first, second)
+})
+
+it('refuses malformed target-aware MIR before executing any operation', () => {
+  const snapshot = Analysis.ofSource(
+    'memory://invalid-layout.silk',
+    ascii('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
+    'wasm32-unknown-unknown',
+  )
+  const mir = Analysis.mirOf(snapshot)
+  if (mir._tag !== 'Available') return assert.fail('expected target-aware MIR')
+  const bool = mir.value.layout.entries.find((entry) => entry.type === 'Bool')
+  if (bool === undefined) return assert.fail('expected Bool layout')
+  const malformed = {
+    ...mir.value,
+    layout: {
+      ...mir.value.layout,
+      entries: mir.value.layout.entries.map((entry) =>
+        entry.type === 'Bool' ? { ...bool, size: 1 } : entry,
+      ),
+    },
+  }
+
+  const outcome = BootstrapEvaluation.evaluate(snapshot.instances, malformed)
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'InvalidMir')
+  assert.deepEqual(outcome.trace, [])
 })

@@ -53,7 +53,9 @@ normalized function contracts and rows, core semantic operations, and source pro
 retaining type and contract-row parameters. MIR is a monomorphic, backend-neutral control-flow
 graph. It makes moves, borrows, drops, cleanup paths, success/failure branches, service slots,
 witness calls, matches, traps, and runtime-helper calls explicit without containing LLVM types,
-instructions, intrinsics, attributes, metadata nodes, or physical field offsets.
+instructions, intrinsics, attributes, or metadata nodes. MIR is backend-neutral but target-aware:
+the complete compiler-selected target and concrete data-layout plan are part of the MIR program,
+including physical field offsets when aggregate types require them.
 
 Frontend checking proceeds in this order:
 
@@ -77,23 +79,31 @@ Frontend checking proceeds in this order:
    type and contract-row arguments. The deterministic worklist records an instance before following
    it so ordinary recursion terminates; the existing restriction that recursive generics preserve
    their parameters prevents polymorphic instance expansion.
-6. Lower reachable instances to MIR, turning structured control flow into basic blocks and inserting
+6. Select the canonical target profile and compute one backend-neutral layout plan for every
+   concrete runtime type discovered by the instance worklist. This phase runs before MIR lowering
+   so layout facts and diagnostics are available to the compiler and its analysis facade early,
+   while generic types that have no concrete runtime instance need no speculative layout.
+7. Lower reachable instances to MIR, turning structured control flow into basic blocks and inserting
    concrete drops and cleanup edges from the generic ownership proof. Typed failures become
    explicit success/failure branches, requirements become canonical hidden service slots, and
    source and semantic provenance remain attached to lowered operations.
 
-MIR uses logical Silk types and operations. A small explicit target-layout input supplies the
-target triple, pointer width, endianness, size and alignment rules, and private ABI decisions. A
-backend chooses physical aggregate and union layouts at emission time. MIR does not adopt LLVM
-control flow merely because LLVM is the bootstrap backend, nor WebAssembly stack and structured
-control flow in anticipation of a future backend. A direct WebAssembly backend may require its own
-CFG-structuring and ABI work, but it does not need the frontend or MIR semantics redesigned.
+MIR uses logical Silk types and operations together with the compiler's canonical target and layout
+table. The layout plan supplies target triple, pointer width, endianness, concrete sizes,
+alignments, field offsets, union discriminant and payload placement, scalar representations, and
+private ABI decisions without using LLVM or another backend's types. A backend must realize this
+plan exactly and cannot independently choose physical layouts at emission time. MIR does not adopt
+LLVM control flow merely because LLVM is the bootstrap backend, nor WebAssembly stack and
+structured control flow in anticipation of a future backend. A direct WebAssembly backend may
+reject an unsupported target or require its own CFG-structuring and ABI work, but it does not need
+the frontend or MIR semantics redesigned.
 
 Code generation is selected through a nominal `Backend` service. Its bootstrap operation consumes
-the whole monomorphized MIR program plus an explicit target and codegen request and produces one
-relocatable object artifact. Source modules are semantic namespaces rather than codegen units: one
-compilation request produces one MIR program, one LLVM module, and one program object. A later
-backend may partition MIR internally without changing source semantics or the service contract.
+the whole target-aware monomorphized MIR program plus a codegen request and produces one relocatable
+object artifact. It does not receive a second independently selectable layout input. Source modules
+are semantic namespaces rather than codegen units: one compilation request produces one MIR
+program, one LLVM module, and one program object. A later backend may partition MIR internally
+without changing source semantics or the service contract.
 
 The bootstrap `LlvmBackend` lowers MIR into the existing Silk LLVM builder, emits deterministic
 LLVM bitcode directly, writes it to a scoped build artifact, and invokes a pinned external Clang
@@ -174,3 +184,10 @@ The Rust tooling comparison that informed the incomplete-program and public-anal
 recorded in [the research note](../research/rust-tooling-resilience.md).
 All source spelling remains issue 08's responsibility; the exact runtime capabilities and shim ABI
 belong to issue 07, and final staged-build commands and acceptance fixtures belong to issue 09.
+
+## Amendment — 2026-08-05
+
+The compiler is backend-agnostic, not target-agnostic. This amendment moves canonical target and
+all concrete layout decisions from backend emission into an explicit compiler phase after concrete
+instance discovery and before MIR lowering. It supersedes the earlier backend-owned aggregate and
+union layout wording.

@@ -37,14 +37,16 @@ contain private supporting declarations even though its public design should rem
 one actor. Consequently a `Target` module containing a `Target` type and `matches` function exposes
 them as `Target.Target` and `Target.matches` through a namespace import.
 
-Imports are unconditional top-level declarations and have exactly two semantic forms. A namespace
-import binds one mandatory explicit local alias for the imported module. A selective import binds
-an explicit finite list of public module members, each under its declared name unless the import
-gives it a local alias. A source file may name a canonical module in at most one import declaration.
-Namespace aliases, selected members, and local top-level declarations share the same namespace, so
-every collision is an error. Wildcard imports, implicit preludes, side-effect-only imports,
-re-exports, local imports, and conditional imports are excluded from bootstrap. Issue 08 owns the
-concrete spelling of the two forms.
+Imports are unconditional top-level declarations with three binding outcomes. A namespace import
+binds the imported module under its final path segment by default or under an explicit changed
+alias. A selective import binds an explicit finite list of public module members, each under its
+declared name unless the member import gives it a changed local alias. A hybrid import performs
+both outcomes in one declaration: it binds the module namespace and selected members. An alias
+identical to the default name is redundant and invalid. A source file may name a canonical module
+in at most one import declaration. Namespace bindings, selected members, and local top-level
+declarations share the same namespace, so every collision is an error. Wildcard imports, implicit
+preludes, side-effect-only imports, re-exports, local imports, and conditional imports are excluded
+from bootstrap. Issue 08 owns their concrete spelling.
 
 Name resolution never uses overload selection, declaration-kind priority, import order, or source
 order to choose between candidates. Top-level declarations are order-independent. Local bindings
@@ -64,7 +66,7 @@ module-private. All operations declared by a public interface belong to that pub
 than having separate per-operation visibility.
 
 Imports never activate behavior. Behavior defined outside a nominal type's source module is an
-ordinary data-first function and must be called through an explicitly imported namespace alias or
+ordinary data-first function and must be called through an explicitly imported namespace binding or
 selected function binding. Importing its module does not add a method, operator, overload candidate,
 or conformance to another type. A conformance remains legal only in the nominal type's defining
 module. A public conformance is a canonical fact about that type and is available wherever the type
@@ -97,3 +99,10 @@ constructed explicitly by functions and owned within ordinary lexical scopes, no
 native entry path. Issue 07 owns the exact constant-expression and static-data subset.
 
 All import and declaration syntax above is semantic notation only. Issue 08 owns concrete spelling.
+
+## Amendment — 2026-08-05
+
+The import model now admits namespace, selective, and hybrid bindings in one explicit declaration.
+The canonical path-derived module identity remains unchanged: case must match exactly even on a
+case-insensitive filesystem, and moving or renaming a file deliberately changes its declarations'
+canonical identities.

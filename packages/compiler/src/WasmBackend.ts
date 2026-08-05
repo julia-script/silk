@@ -7,9 +7,11 @@ import * as WasmType from '@silk-effect/wasm/Type'
 import * as ValType from '@silk-effect/wasm/ValType'
 import * as WatText from '@silk-effect/wasm/WatText'
 import * as Effect from 'effect/Effect'
-import type * as Backend from './Backend.js'
+import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
-import type * as Mir from './Mir.js'
+import * as LayoutPlan from './Layout.js'
+import * as Mir from './Mir.js'
+import * as Target from './Target.js'
 
 /**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
@@ -254,16 +256,15 @@ const successors = (terminator: Mir.Terminator): ReadonlyArray<number> => {
  * or sideways means the language grew loops or arbitrary jumps, and the `if`/`else` recovery
  * below would silently emit the wrong control flow rather than fail.
  */
-const requireForwardDag = (fn: Mir.MirFunction): void => {
+const forwardDagViolation = (fn: Mir.MirFunction): string | undefined => {
   for (const block of fn.blocks) {
     for (const target of successors(block.terminator)) {
       if (target <= block.id.ordinal) {
-        throw new RangeError(
-          `WasmBackend requires a forward-only CFG, but ${fn.id.name} jumps from bb${block.id.ordinal} to bb${target}`,
-        )
+        return `WasmBackend requires a forward-only CFG, but ${fn.id.name} jumps from bb${block.id.ordinal} to bb${target}`
       }
     }
   }
+  return undefined
 }
 
 /**
@@ -367,16 +368,40 @@ const emitBody = (
   layout: Layout,
   resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
 ): ReadonlyArray<Instr.Instr> => {
-  requireForwardDag(fn)
   return [...emitRange(fn, 0, fn.blocks.length, layout, resolve), Instr.op('unreachable')]
 }
 
-const emitProgram = (
-  program: Mir.Module,
-  _layout: Mir.TargetLayout,
-  request: Backend.CodegenRequest,
-) =>
+const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
   Effect.gen(function* () {
+    for (const fn of program.functions) {
+      const violation = forwardDagViolation(fn)
+      if (violation !== undefined) {
+        return yield* new Backend.BackendError({
+          operation: 'Backend.emit',
+          backend: 'WebAssembly',
+          message: violation,
+          reason: { _tag: 'UnsupportedMir', detail: violation },
+        })
+      }
+    }
+    const i32Layout = LayoutPlan.entry(program.layout, 'I32')
+    if (i32Layout === undefined) {
+      return yield* new Backend.BackendError({
+        operation: 'Backend.emit',
+        backend: 'WebAssembly',
+        message: 'WebAssembly requires the planned I32 representation',
+        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
+      })
+    }
+    // WebAssembly realizes both canonical scalar entries as its four-byte i32 value type.
+    if (program.layout.entries.some((entry) => entry.representation.bits !== 32)) {
+      return yield* new Backend.BackendError({
+        operation: 'Backend.emit',
+        backend: 'WebAssembly',
+        message: 'WebAssembly requires the canonical 32-bit I32 representation',
+        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
+      })
+    }
     // WebAssembly's debug-information equivalent of the LLVM backend's native debug metadata is
     // the `name` custom section, which the builder emits from the names given here. Debug builds
     // name the module, its functions, and their locals; release builds omit every name, which is
@@ -451,18 +476,32 @@ const emitProgram = (
  * the LLVM backend with no other change.
  */
 export const WasmBackend: Backend.Backend = Object.freeze({
-  emit: (
+  _tag: 'Backend',
+  name: 'WebAssembly',
+  targets: Object.freeze([Target.wasm32UnknownUnknown.id]),
+  emit: Effect.fn('Backend.WebAssembly.emit')(function* (
     program: Mir.Module,
-    layout: Mir.TargetLayout,
     request: Backend.CodegenRequest,
-  ): Backend.Artifact => {
-    const output = Effect.runSync(emitProgram(program, layout, request))
+  ): Effect.fn.Return<Backend.Artifact, Backend.BackendError> {
+    const output = yield* emitProgram(program, request).pipe(
+      Effect.mapError((cause) =>
+        cause._tag === 'BackendError'
+          ? cause
+          : new Backend.BackendError({
+              operation: 'Backend.emit',
+              backend: 'WebAssembly',
+              message: `WebAssembly emission failed for ${program.module}`,
+              reason: { _tag: 'WrappedFailure', cause },
+            }),
+      ),
+    )
     return Object.freeze({
       _tag: 'BackendArtifact',
       module: program.module,
+      target: program.layout.target,
       symbols: Object.freeze(output.symbols),
       bitcode: output.bitcode,
       ir: output.ir,
     })
-  },
+  }),
 })

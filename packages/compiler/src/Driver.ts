@@ -1,14 +1,16 @@
 import { memoryUsage } from 'node:process'
+import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Instances from './Instances.js'
+import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
-import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as NativeToolchain from './NativeToolchain.js'
 import * as Ownership from './Ownership.js'
+import * as Target from './Target.js'
 import type * as ToolchainPlan from './ToolchainPlan.js'
 
 /**
@@ -36,7 +38,6 @@ export interface CompileRequest {
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly destination: string
   readonly backend?: Backend.Backend
-  readonly layout?: Mir.TargetLayout
   readonly scopeName?: string
   readonly saveTemps?: boolean
 }
@@ -45,6 +46,7 @@ export interface CompileRequest {
 export interface Compiled {
   readonly _tag: 'Compiled'
   readonly executable: string
+  readonly target: Target.Target
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport>
@@ -66,11 +68,29 @@ export interface Failed {
   readonly report: ReadonlyArray<PhaseReport>
 }
 
+/** Target selection or native-kind validation stopped compilation before MIR lowering. */
+export interface TargetFailed {
+  readonly _tag: 'TargetFailed'
+  readonly error: Target.TargetError
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly report: ReadonlyArray<PhaseReport>
+}
+
+/** Shared MIR validation, compatibility, or backend construction stopped native emission. */
+export interface BackendFailed {
+  readonly _tag: 'BackendFailed'
+  readonly error: Backend.BackendError
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly report: ReadonlyArray<PhaseReport>
+}
+
 /** The closed outcome of one driver run. */
-export type Outcome = Compiled | NoEntry | Failed
+export type Outcome = Compiled | NoEntry | TargetFailed | BackendFailed | Failed
 
 /** Compiles one request end to end, writing the executable to the durable destination. */
-export const compile = (request: CompileRequest): Outcome => {
+export const compile = Effect.fn('Driver.compile')(function* (
+  request: CompileRequest,
+): Effect.fn.Return<Outcome> {
   const report: Array<PhaseReport> = []
   const phase = <A>(
     name: string,
@@ -151,29 +171,77 @@ export const compile = (request: CompileRequest): Outcome => {
     })
   }
 
+  const targetAndLayout = phase(
+    'target-layout',
+    discovery.instances.length,
+    () => {
+      const selection = Target.select(request.compilation.target)
+      if (selection._tag === 'Unavailable') return selection
+      if (!Target.isNative(selection.target)) {
+        return Object.freeze({
+          _tag: 'Unavailable' as const,
+          error: new Target.TargetError({
+            operation: 'Target.requireNative',
+            requested: selection.target.id,
+            message: `Native compilation does not support target ${selection.target.id}`,
+          }),
+        })
+      }
+      return Object.freeze({
+        _tag: 'Available' as const,
+        target: selection.target,
+        layout: Layout.plan(selection.target, discovery),
+      })
+    },
+    (result) => (result._tag === 'Available' ? result.layout.entries.length : 0),
+  )
+  if (targetAndLayout._tag === 'Unavailable') {
+    return Object.freeze({
+      _tag: 'TargetFailed',
+      error: targetAndLayout.error,
+      diagnostics,
+      report: Object.freeze([...report]),
+    })
+  }
+
   const program = phase(
     'mir-lowering',
     discovery.instances.length,
-    () => Lower.lowerProgram(discovery, ownership),
+    () => Lower.lowerProgram(discovery, ownership, targetAndLayout.layout),
     (result) => result.functions.length,
   )
-  const layout = request.layout ?? NativeToolchain.hostLayout()
   const backend = request.backend ?? Backend.LlvmBackend
-  const artifact = phase(
-    'backend',
-    program.functions.length,
-    () =>
-      backend.emit(program, layout, {
-        mode: request.profile === 'release' ? 'release' : 'debug',
-        sources: new Map(
-          closure.modules.map((module) => [
-            module.name,
-            Uint8Array.from(module.syntax.source.bytes),
-          ]),
-        ),
-      }),
-    (result) => result.symbols.length,
+  const backendStartedAt = performance.now()
+  const emitted = yield* Backend.emit(backend, program, {
+    mode: request.profile === 'release' ? 'release' : 'debug',
+    sources: new Map(
+      closure.modules.map((module) => [module.name, Uint8Array.from(module.syntax.source.bytes)]),
+    ),
+  }).pipe(
+    Effect.map((artifact) => Object.freeze({ _tag: 'Emitted' as const, artifact })),
+    Effect.catchTag('BackendError', (error) =>
+      Effect.succeed(Object.freeze({ _tag: 'Rejected' as const, error })),
+    ),
   )
+  report.push(
+    Object.freeze({
+      phase: 'backend',
+      elapsedMs: performance.now() - backendStartedAt,
+      inputs: program.functions.length,
+      outputs: emitted._tag === 'Emitted' ? emitted.artifact.symbols.length : 0,
+      diagnostics: 0,
+      heapBytes: memoryUsage().heapUsed,
+    }),
+  )
+  if (emitted._tag === 'Rejected') {
+    return Object.freeze({
+      _tag: 'BackendFailed',
+      error: emitted.error,
+      diagnostics,
+      report: Object.freeze([...report]),
+    })
+  }
+  const artifact = emitted.artifact
 
   return NativeToolchain.withBuildScope(
     request.scopeName ?? 'driver',
@@ -182,7 +250,13 @@ export const compile = (request: CompileRequest): Outcome => {
         'object',
         1,
         () =>
-          NativeToolchain.emitObject(request.toolchain, scope, artifact.bitcode, request.profile),
+          NativeToolchain.emitObject(
+            request.toolchain,
+            scope,
+            artifact,
+            targetAndLayout.target,
+            request.profile,
+          ),
         (result) => (result._tag === 'ObjectArtifact' ? 1 : 0),
       )
       if (object._tag === 'ToolchainFailure') {
@@ -196,7 +270,7 @@ export const compile = (request: CompileRequest): Outcome => {
       const shim = phase(
         'shim',
         1,
-        () => NativeToolchain.compileShim(request.toolchain, scope),
+        () => NativeToolchain.compileShim(request.toolchain, scope, targetAndLayout.target),
         (result) => (result._tag === 'ObjectArtifact' ? 1 : 0),
       )
       if (shim._tag === 'ToolchainFailure') {
@@ -213,6 +287,7 @@ export const compile = (request: CompileRequest): Outcome => {
         () =>
           NativeToolchain.ClangLinker.link(
             request.toolchain,
+            targetAndLayout.target,
             [object.artifact, shim.artifact],
             [],
             request.destination,
@@ -230,6 +305,7 @@ export const compile = (request: CompileRequest): Outcome => {
       return Object.freeze({
         _tag: 'Compiled',
         executable: linked.path,
+        target: linked.target,
         symbols: artifact.symbols,
         diagnostics,
         report: Object.freeze([...report]),
@@ -237,4 +313,4 @@ export const compile = (request: CompileRequest): Outcome => {
     },
     { saveTemps: request.saveTemps ?? false },
   )
-}
+})

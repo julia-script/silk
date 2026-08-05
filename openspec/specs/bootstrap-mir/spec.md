@@ -3,7 +3,7 @@
 ## Purpose
 MIR: the monomorphic, backend-neutral basic-block control-flow graph over logical Silk types that
 every backend and the interpreter consume — its data model, structural invariants and verifier,
-the explicit target-layout input, and the deterministic textual encoder, stabilized against
+the compiler-owned target/layout plan, and the deterministic textual encoder, stabilized against
 hand-built samples before lowering exists.
 ## Requirements
 ### Requirement: MIR is a backend-neutral CFG over logical types
@@ -11,39 +11,29 @@ hand-built samples before lowering exists.
 A MIR module SHALL represent each function as a basic-block control-flow graph over logical Silk
 types with typed locals: explicit operations (integer literals, moves, canonical-target calls,
 drops) and explicit terminators (return, jump, conditional branch, trap), with cleanup paths as
-marked cleanup blocks. MIR MUST NOT contain LLVM types, instructions, intrinsics, attributes,
-metadata nodes, or physical field offsets, and MUST NOT adopt WebAssembly stack or structured
-control shapes. The operation vocabulary is restricted to the frozen slice's needs while its
-closed unions leave room for the full pinned vocabulary.
+marked cleanup blocks. MIR SHALL carry a compiler-selected target and layout table, but MUST NOT
+contain LLVM types, instructions, intrinsics, attributes, metadata nodes, WebAssembly value types,
+or backend-owned physical representations. Physical facts in the canonical layout table belong to
+Silk rather than to any backend. The operation vocabulary is restricted to the frozen slice's needs
+while its closed unions leave room for the full pinned vocabulary.
 
-This prohibition constrains MIR's own vocabulary — no target's instruction, type, or control
-constructs appear in the data model — and does NOT mean the graph is shapeless. MIR preserves
-the control structure lowering derived from the source, and backends MAY rely on the structural
-guarantees the verifier and lowering establish. Consuming that shape is each backend's own
-responsibility, done as its target demands: a backend targeting an arbitrary-CFG form emits the
-blocks directly, while one targeting structured control flow recovers the source's constructs
-from the same graph. Neither target's control shape belongs in MIR.
+This prohibition constrains MIR's own operation and control vocabulary, not the compiler-owned
+layout facts attached to the program. MIR preserves the control structure lowering derived from
+the source, and backends MAY rely on the structural guarantees the verifier and lowering establish.
+Consuming that shape is each backend's own responsibility, done as its target demands: a backend
+targeting an arbitrary-CFG form emits the blocks directly, while one targeting structured control
+flow recovers the source's constructs from the same graph. Neither target's control shape belongs
+in MIR.
 
 #### Scenario: Model a straight-line function
 
 - **WHEN** a hand-built sample models `main` returning a called constant
-- **THEN** its function has one entry block whose operations are a literal and a canonical-target call ending in a return terminator, all over logical `I32`
+- **THEN** its function has one entry block whose operations are a literal and a canonical-target call ending in a return terminator, all over logical `I32`, while the program carries the selected target and `I32` layout
 
 #### Scenario: Model a cleanup path
 
 - **WHEN** a hand-built sample routes an exit through a cleanup block
-- **THEN** the cleanup block is explicitly marked, contains ordered drops, and ends in a jump — with no target-specific representation anywhere
-
-### Requirement: Target layout is a separate emission-time input
-
-The target-layout input SHALL be defined alongside MIR — target triple, pointer width,
-endianness, and logical-type size and alignment rules — and SHALL NOT be part of the MIR module
-itself; it is consumed only at emission time.
-
-#### Scenario: Keep MIR layout-free
-
-- **WHEN** a MIR module is constructed and encoded
-- **THEN** neither the module nor its encoding depends on any target-layout value, while a layout value can be constructed independently for emission
+- **THEN** the cleanup block is explicitly marked, contains ordered drops, and ends in a jump without introducing a backend-specific representation
 
 ### Requirement: Every operation carries provenance
 
@@ -73,20 +63,38 @@ deterministic collection of violations rather than throwing. Valid samples SHALL
 
 ### Requirement: MIR encodes deterministically
 
-MIR SHALL expose a deterministic textual encoder covering functions, blocks, operations,
-terminators, types, and provenance including generated markers. Identical modules SHALL encode
-byte-identically across fresh processes, gated by committed golden files over the hand-built
-samples.
+MIR SHALL expose a deterministic textual encoder covering the selected target, complete ordered
+layout table, functions, blocks, operations, terminators, types, and provenance including generated
+markers. Identical target-aware modules SHALL encode byte-identically across fresh processes, gated
+by committed golden files over the hand-built samples.
 
 #### Scenario: Match the MIR golden encodings
 
 - **WHEN** the hand-built samples are encoded
-- **THEN** each encoding equals its committed golden text byte-for-byte
+- **THEN** each encoding includes the canonical target and layout table and equals its committed golden text byte-for-byte
 
 #### Scenario: Repeat encoding
 
-- **WHEN** the same sample is constructed and encoded repeatedly in fresh processes
+- **WHEN** the same target-aware sample is constructed and encoded repeatedly in fresh processes
 - **THEN** the encoded texts are byte-identical
+
+### Requirement: MIR carries the completed compiler layout plan
+
+Every lowered MIR program SHALL carry exactly one complete layout plan containing its canonical
+target and the entries computed for its discovered runtime instances. The verifier SHALL reject a
+program whose function types or operations reference a runtime type missing from the plan or whose
+scalar facts conflict with the plan's target profile. MIR MUST NOT duplicate the target outside the
+plan.
+
+#### Scenario: Lower with the completed plan
+
+- **WHEN** discovered instances using `I32` and `Bool` lower successfully
+- **THEN** the resulting MIR program carries the selected target and verified entries for both types
+
+#### Scenario: Reject a missing type layout
+
+- **WHEN** a hand-built MIR program uses `Bool` but omits its layout entry
+- **THEN** verification reports the missing layout deterministically as data
 
 ### Requirement: Lowering constructs MIR from elaborated instances
 
@@ -177,4 +185,3 @@ deterministically, gated by committed golden files.
 
 - **WHEN** the committed conditional fixture is lowered and encoded
 - **THEN** the encoding equals the committed golden text byte-for-byte
-

@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
@@ -21,9 +22,17 @@ export const pipelineRows = (snapshot: Analysis.Snapshot): ReadonlyArray<PhaseRo
   const rootModule = snapshot.closure.rootModule
   const analysis = Analysis.rootAnalysis(snapshot)
   const discovery = Analysis.instancesOf(snapshot)
+  const layout = Analysis.layoutOf(snapshot)
   const ownership = Analysis.ownershipOf(snapshot, rootModule)
   const phaseDiagnostics = (phase: string): number =>
     Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.phase === phase).length
+  const backendOutput = (() => {
+    try {
+      return `${Effect.runSync(Analysis.codegen(snapshot, { mode: 'release' })).bitcode.length} bitcode bytes`
+    } catch {
+      return 'emission unavailable'
+    }
+  })()
 
   return [
     {
@@ -69,6 +78,15 @@ export const pipelineRows = (snapshot: Analysis.Snapshot): ReadonlyArray<PhaseRo
       diagnostics: 0,
     },
     {
+      phase: 'target layout',
+      lab: '/docs/labs/mir-cfg',
+      outputs:
+        layout._tag === 'Available'
+          ? `${layout.value.target.id} · ${layout.value.entries.length} scalar entries`
+          : layout.error.message,
+      diagnostics: 0,
+    },
+    {
       phase: 'MIR lowering',
       lab: '/docs/labs/mir-cfg',
       outputs: `${Analysis.loweredMir(snapshot).functions.length} lowered functions`,
@@ -77,7 +95,7 @@ export const pipelineRows = (snapshot: Analysis.Snapshot): ReadonlyArray<PhaseRo
     {
       phase: 'backend (LLVM bitcode)',
       lab: '/docs/labs/llvm-ir',
-      outputs: `${Analysis.codegen(snapshot, { mode: 'release' }).bitcode.length} bitcode bytes`,
+      outputs: backendOutput,
       diagnostics: 0,
     },
     {
@@ -94,7 +112,7 @@ export function PipelineLab() {
 
   const { snapshot, elapsedMs } = useMemo(() => {
     const startedAt = performance.now()
-    const built = Analysis.ofSource(sourceId, encoder.encode(text))
+    const built = Analysis.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin')
     return { snapshot: built, elapsedMs: performance.now() - startedAt }
   }, [text])
   const rows = pipelineRows(snapshot)

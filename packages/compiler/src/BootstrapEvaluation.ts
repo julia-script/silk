@@ -1,6 +1,6 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Instances from './Instances.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
 
 /**
@@ -56,6 +56,10 @@ export type TraceEvent = EntryTraceEvent | CallTraceEvent | BindingTraceEvent | 
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
+  | {
+      readonly _tag: 'InvalidMir'
+      readonly violations: ReadonlyArray<Mir.Violation>
+    }
   | {
       readonly _tag: 'UnavailableEntry'
       readonly reason: 'MissingEntry' | 'AmbiguousEntry' | 'ParameterizedEntry' | 'UntypedEntry'
@@ -320,6 +324,15 @@ const argumentSpanFallback = (fn: Mir.MirFunction): SourceSpan.SourceSpan => {
 
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
 export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): Outcome => {
+  const violations = Mir.verify(program)
+  if (violations.length > 0) {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+      reason: Object.freeze({ _tag: 'InvalidMir', violations }),
+      trace: Object.freeze([]),
+    })
+  }
   if (discovery.entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'Blocked',
