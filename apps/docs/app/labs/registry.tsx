@@ -15,7 +15,7 @@ import { DiscoveryView } from './instances/instances'
 import { CfgView } from './mir-cfg/mir-cfg'
 import { ClosureView } from './module-closure/module-closure'
 import { OwnershipView } from './ownership/ownership'
-import { LayoutSummary, LlvmView, ToolchainView, WasmView } from './panels'
+import { BackendView, LayoutSummary, ToolchainView } from './panels'
 import {
   DiagnosticPanel,
   diagnosticEntries,
@@ -35,8 +35,8 @@ export type ViewId =
   | 'instances'
   | 'layout'
   | 'mir'
-  | 'llvm'
-  | 'wasm'
+  // One backend view, not one per backend: the target picks the backend.
+  | 'backend'
   | 'toolchain'
 
 /** Everything a view needs to render. Built once per source edit and shared by every pane. */
@@ -135,16 +135,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     },
   },
   {
-    id: 'llvm',
-    title: 'LLVM IR',
+    id: 'backend',
+    title: 'Backend output',
     phase: 'backend',
-    render: ({ snapshot, mode }) => <LlvmView snapshot={snapshot} mode={mode} />,
-  },
-  {
-    id: 'wasm',
-    title: 'WebAssembly',
-    phase: 'backend',
-    render: ({ snapshot, mode }) => <WasmView snapshot={snapshot} mode={mode} />,
+    render: ({ snapshot, mode }) => <BackendView snapshot={snapshot} mode={mode} />,
   },
   {
     id: 'toolchain',
@@ -177,4 +171,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
 
 const byId = new Map(views.map((view) => [view.id, view]))
 
-export const viewById = (id: string): ViewDefinition | undefined => byId.get(id as ViewId)
+/**
+ * Views that used to exist, and what replaced them.
+ *
+ * Layouts live in URLs and in localStorage, so a renamed view id outlives the rename: a link
+ * shared before the backend panes merged still names `wasm`, and resolving it to a dead view
+ * would turn a working link into an "unknown view" pane.
+ */
+const renamed: Readonly<Record<string, ViewId>> = { llvm: 'backend', wasm: 'backend' }
+
+export const viewById = (id: string): ViewDefinition | undefined =>
+  byId.get(id as ViewId) ?? byId.get(renamed[id] as ViewId)

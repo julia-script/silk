@@ -6,7 +6,7 @@
  * only its phase — the five labs that already exported a `*View` are reused as-is.
  */
 
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, BackendRegistry, ToolchainPlan } from '@silk-effect/compiler'
 import type { Backend } from '@silk-effect/compiler'
 import * as Effect from 'effect/Effect'
 import { useMemo } from 'react'
@@ -119,7 +119,15 @@ export function LayoutSummary({
   )
 }
 
-export function LlvmView({
+/**
+ * Backend emission for whatever target the snapshot was built for.
+ *
+ * There is no LLVM pane and no WebAssembly pane, because there was never a real choice to make:
+ * a target implies its backend, and letting both be picked separately only ever allowed a pair
+ * that rejects itself. The facade selects, and this renders whatever came back — symbols and
+ * emitted text for any target, plus the parts that only mean something for one.
+ */
+export function BackendView({
   snapshot,
   mode,
 }: {
@@ -130,75 +138,18 @@ export function LlvmView({
     () => emit(() => Analysis.codegen(snapshot, { mode })),
     [snapshot, mode],
   )
+  const selection = Analysis.targetOf(snapshot)
+  const target = selection._tag === 'Resolved' ? selection.target : undefined
+  const backend = target === undefined ? undefined : BackendRegistry.forTarget(target)
 
-  if (emission._tag === 'Rejected') {
-    return (
-      <div>
-        <LayoutSummary snapshot={snapshot} id="llvm-target-layout" label="LLVM target layout plan" />
-        <section className={styles.diagnosticGroup} aria-labelledby="llvm-rejected">
-          <div className={styles.diagnosticHeading}>
-            <h3 id="llvm-rejected">Emission rejected</h3>
-          </div>
-          <pre aria-label="LLVM emission error">{emission.message}</pre>
-        </section>
-      </div>
-    )
-  }
-
-  const artifact = emission.artifact
-
-  return (
-    <div>
-      <div className={styles.diagnostics}>
-        <LayoutSummary snapshot={snapshot} id="llvm-target-layout" label="LLVM target layout plan" />
-        <section className={styles.diagnosticGroup} aria-labelledby="llvm-symbols">
-          <div className={styles.diagnosticHeading}>
-            <h3 id="llvm-symbols">Symbols</h3>
-            <span>{artifact.symbols.length}</span>
-          </div>
-          <ul className={styles.diagnosticList} aria-label="Backend symbol table">
-            {artifact.symbols.map((entry) => (
-              <li key={entry.symbol}>
-                <div>
-                  <code>{entry.symbol}</code>
-                  <span>
-                    {entry.declaration.module}.{entry.declaration.name}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      </div>
-
-      <section className={styles.diagnosticGroup} aria-labelledby="llvm-ir-text">
-        <div className={styles.diagnosticHeading}>
-          <h3 id="llvm-ir-text">Emitted LLVM IR ({mode})</h3>
-          <span>{artifact.bitcode.length} bitcode bytes</span>
-        </div>
-        <pre aria-label="Emitted LLVM IR">{artifact.ir}</pre>
-      </section>
-    </div>
-  )
-}
-
-export function WasmView({
-  snapshot,
-  mode,
-}: {
-  readonly snapshot: Analysis.Snapshot
-  readonly mode: 'release' | 'debug'
-}) {
-  // Emission can fail on a program the backend does not cover, and on a snapshot whose target is
-  // not one this backend serves; the panel reports either as data rather than breaking the page.
-  const emission = useMemo(
-    () => emit(() => Analysis.codegenWasm(snapshot, { mode })),
-    [snapshot, mode],
-  )
+  // Only a WebAssembly module can be run right here, so the execute-and-compare check is a
+  // WebAssembly-target extra rather than something every backend can answer.
+  const runnable = target?.kind === 'WebAssembly'
 
   const execution = useMemo(
-    () => (emission._tag === 'Emitted' ? execute(emission.artifact.bitcode) : undefined),
-    [emission],
+    () =>
+      runnable && emission._tag === 'Emitted' ? execute(emission.artifact.bitcode) : undefined,
+    [emission, runnable],
   )
 
   // The interpreter runs the same MIR the backend emitted from, so a disagreement is a backend
@@ -224,92 +175,119 @@ export function WasmView({
           : 'failed'
   const agrees = observed !== undefined && observed === expected
 
+  const layout = (
+    <LayoutSummary snapshot={snapshot} id="backend-target-layout" label="Target layout plan" />
+  )
+
   if (emission._tag === 'Rejected') {
     return (
       <div>
-        <LayoutSummary
-          snapshot={snapshot}
-          id="wasm-target-layout"
-          label="WebAssembly target layout plan"
-        />
-        <section className={styles.diagnosticGroup} aria-labelledby="wasm-rejected">
+        {layout}
+        <section className={styles.diagnosticGroup} aria-labelledby="backend-rejected">
           <div className={styles.diagnosticHeading}>
-            <h3 id="wasm-rejected">Emission rejected</h3>
+            <h3 id="backend-rejected">Emission rejected</h3>
+            {backend === undefined ? null : <span>{backend.name}</span>}
           </div>
-          <pre aria-label="WebAssembly emission error">{emission.message}</pre>
+          <pre aria-label="Backend emission error">{emission.message}</pre>
         </section>
       </div>
     )
   }
 
+  const artifact = emission.artifact
+
   return (
     <div>
-      <LayoutSummary
-        snapshot={snapshot}
-        id="wasm-target-layout"
-        label="WebAssembly target layout plan"
-      />
+      {layout}
 
-      <section className={styles.diagnosticGroup} aria-labelledby="wasm-execution">
+      <div className={styles.diagnostics}>
+        <section className={styles.diagnosticGroup} aria-labelledby="backend-symbols">
+          <div className={styles.diagnosticHeading}>
+            <h3 id="backend-symbols">Symbols</h3>
+            <span>{artifact.symbols.length}</span>
+          </div>
+          <ul className={styles.diagnosticList} aria-label="Backend symbol table">
+            {artifact.symbols.map((entry) => (
+              <li key={entry.symbol}>
+                <div>
+                  <code>{entry.symbol}</code>
+                  <span>
+                    {entry.declaration.module}.{entry.declaration.name}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      {runnable ? (
+        <section className={styles.diagnosticGroup} aria-labelledby="backend-execution">
+          <div className={styles.diagnosticHeading}>
+            <h3 id="backend-execution">Execution</h3>
+            <span>{agrees ? '=' : '≠'}</span>
+          </div>
+          <ul className={styles.diagnosticList} aria-label="WebAssembly execution result">
+            <li>
+              <div>
+                <code>silk_main()</code>
+                <span aria-label="WebAssembly result">
+                  {execution === undefined
+                    ? 'not run'
+                    : execution._tag === 'Completed'
+                      ? `returned ${execution.value}`
+                      : execution._tag === 'Trapped'
+                        ? `trapped — ${execution.message}`
+                        : `instantiation failed — ${execution.message}`}
+                </span>
+              </div>
+            </li>
+            <li>
+              <div>
+                <code>bootstrap interpreter</code>
+                <span aria-label="Interpreter result">
+                  {interpreted === undefined
+                    ? 'not run — MIR unavailable'
+                    : interpreted._tag === 'Completed'
+                      ? `returned ${interpreted.result.value}`
+                      : 'trapped'}
+                </span>
+              </div>
+            </li>
+            <li>
+              <div>
+                <code>agreement</code>
+                <span aria-label="Backend agreement">
+                  {agrees
+                    ? 'the backend and the interpreter agree'
+                    : 'the backend and the interpreter disagree'}
+                </span>
+              </div>
+            </li>
+          </ul>
+        </section>
+      ) : null}
+
+      <section className={styles.diagnosticGroup} aria-labelledby="backend-text">
         <div className={styles.diagnosticHeading}>
-          <h3 id="wasm-execution">Execution</h3>
-          <span>{agrees ? '=' : '≠'}</span>
+          <h3 id="backend-text">
+            {backend?.name === 'WebAssembly' ? 'Emitted WebAssembly text' : 'Emitted LLVM IR'} (
+            {mode})
+          </h3>
+          <span>{artifact.bitcode.length} bytes</span>
         </div>
-        <ul className={styles.diagnosticList} aria-label="WebAssembly execution result">
-          <li>
-            <div>
-              <code>silk_main()</code>
-              <span aria-label="WebAssembly result">
-                {execution === undefined
-                  ? 'not run'
-                  : execution._tag === 'Completed'
-                    ? `returned ${execution.value}`
-                    : execution._tag === 'Trapped'
-                      ? `trapped — ${execution.message}`
-                      : `instantiation failed — ${execution.message}`}
-              </span>
-            </div>
-          </li>
-          <li>
-            <div>
-              <code>bootstrap interpreter</code>
-              <span aria-label="Interpreter result">
-                {interpreted === undefined
-                  ? 'not run — MIR unavailable'
-                  : interpreted._tag === 'Completed'
-                    ? `returned ${interpreted.result.value}`
-                    : 'trapped'}
-              </span>
-            </div>
-          </li>
-          <li>
-            <div>
-              <code>agreement</code>
-              <span aria-label="Backend agreement">
-                {agrees
-                  ? 'the backend and the interpreter agree'
-                  : 'the backend and the interpreter disagree'}
-              </span>
-            </div>
-          </li>
-        </ul>
+        <pre aria-label="Emitted backend text">{artifact.ir}</pre>
       </section>
 
-      <section className={styles.diagnosticGroup} aria-labelledby="wasm-text">
-        <div className={styles.diagnosticHeading}>
-          <h3 id="wasm-text">Emitted WebAssembly text ({mode})</h3>
-          <span>{emission.artifact.bitcode.length} binary bytes</span>
-        </div>
-        <pre aria-label="Emitted WebAssembly text">{emission.artifact.ir}</pre>
-      </section>
-
-      <section className={styles.diagnosticGroup} aria-labelledby="wasm-binary">
-        <div className={styles.diagnosticHeading}>
-          <h3 id="wasm-binary">Emitted binary</h3>
-          <span>{emission.artifact.bitcode.length} bytes</span>
-        </div>
-        <pre aria-label="Emitted WebAssembly binary">{hex(emission.artifact.bitcode)}</pre>
-      </section>
+      {runnable ? (
+        <section className={styles.diagnosticGroup} aria-labelledby="backend-binary">
+          <div className={styles.diagnosticHeading}>
+            <h3 id="backend-binary">Emitted binary</h3>
+            <span>{artifact.bitcode.length} bytes</span>
+          </div>
+          <pre aria-label="Emitted WebAssembly binary">{hex(artifact.bitcode)}</pre>
+        </section>
+      ) : null}
     </div>
   )
 }

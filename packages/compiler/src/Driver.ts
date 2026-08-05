@@ -1,6 +1,7 @@
 import { memoryUsage } from 'node:process'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
+import * as BackendRegistry from './BackendRegistry.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -210,7 +211,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
     () => Lower.lowerProgram(discovery, ownership, targetAndLayout.layout),
     (result) => result.functions.length,
   )
-  const backend = request.backend ?? Backend.LlvmBackend
+  // The backend follows from the resolved target unless the request names one; defaulting to
+  // LLVM would send a WebAssembly build to a backend that rejects it.
+  const backend =
+    request.backend ?? BackendRegistry.forTarget(targetAndLayout.target) ?? Backend.LlvmBackend
   const backendStartedAt = performance.now()
   const emitted = yield* Backend.emit(backend, program, {
     mode: request.profile === 'release' ? 'release' : 'debug',

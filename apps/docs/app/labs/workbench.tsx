@@ -175,7 +175,9 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
         <select
           id={`pick-${props.api.id}`}
           className={shell.panePicker}
-          value={viewId}
+          // A pane restored from an older layout carries a retired id; showing the view it
+          // resolved to keeps the picker honest about what is actually rendered below.
+          value={definition?.id ?? viewId}
           onChange={(event) => onPick(event.target.value)}
         >
           {views.map((view) => (
@@ -212,10 +214,10 @@ const defaultLayout = (api: DockviewApi): void => {
     position: { direction: 'right', referencePanel: source },
   })
   api.addPanel({
-    id: 'pane-wasm',
+    id: 'pane-backend',
     component: 'view',
-    title: 'WebAssembly',
-    params: { view: 'wasm' },
+    title: 'Backend output',
+    params: { view: 'backend' },
     position: { direction: 'below', referencePanel: mir },
   })
   api.addPanel({

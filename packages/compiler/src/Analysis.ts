@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
+import * as BackendRegistry from './BackendRegistry.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -169,13 +170,29 @@ export const diagnostics = (self: Snapshot): ReadonlyArray<Diagnostic.Diagnostic
   self.diagnostics
 
 /** Emits the snapshot's lowered program through the nominal backend service. */
+/**
+ * Emits the snapshot's lowered program.
+ *
+ * The backend follows from the snapshot's target unless one is named explicitly, so the ordinary
+ * call site picks a target and is done: pairing the two by hand is what lets them disagree.
+ */
 export const codegen = Effect.fn('Analysis.codegen')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
-  backend: Backend.Backend = Backend.LlvmBackend,
+  backend?: Backend.Backend,
 ): Effect.fn.Return<Backend.Artifact, Backend.BackendError | Target.TargetError> {
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
-  return yield* Backend.emit(backend, self.mir.value, {
+  const target = self.mir.value.layout.target
+  const selected = backend ?? BackendRegistry.forTarget(target)
+  if (selected === undefined) {
+    return yield* new Backend.BackendError({
+      operation: 'Backend.emit',
+      backend: 'Analysis.codegen',
+      message: `no backend supports target ${target.id}`,
+      reason: { _tag: 'UnsupportedTarget', target: target.id },
+    })
+  }
+  return yield* Backend.emit(selected, self.mir.value, {
     ...request,
     sources:
       request.sources ??
@@ -192,6 +209,10 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
  * Emits the snapshot's lowered program as WebAssembly. The artifact's `ir` carries the WAT
  * inspection text and its `bitcode` carries the instantiable wasm binary, mirroring how
  * {@link codegen} pairs LLVM IR text with bitcode.
+ *
+ * Prefer {@link codegen} on a snapshot built for a WebAssembly target: the backend follows from
+ * the target, so naming both is redundant and lets them disagree. This forces the WebAssembly
+ * backend regardless of target, which fails on a snapshot lowered for a native one.
  */
 export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
   self: Snapshot,
