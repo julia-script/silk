@@ -145,3 +145,20 @@ it('matches the binding lowered golden encoding byte-for-byte', () => {
 
   assert.strictEqual(encoded, golden('bindings.mir.txt'))
 })
+
+it('lowers built-in calls to trapping binary operations', () => {
+  const program = Analysis.loweredMir(
+    snapshot('pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }'),
+  )
+  const main = program.functions.at(0)
+
+  assert.deepEqual(Mir.verify(program), [])
+  const operations = main?.blocks.at(0)?.operations ?? []
+  assert.deepEqual(
+    operations.map((operation) =>
+      operation._tag === 'Binary' ? `Binary:${operation.operator}` : operation._tag,
+    ),
+    ['Literal', 'Literal', 'Binary:Multiply', 'Literal', 'Binary:Subtract'],
+  )
+  assert.strictEqual(Mir.encode(program).includes('= multiply'), true)
+})

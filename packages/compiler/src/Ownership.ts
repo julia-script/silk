@@ -130,7 +130,8 @@ const checkExpression = (state: CheckState, expression: Hir.Expression): void =>
       if (site !== undefined) checkUse(state, site, expression.span, true)
       return
     }
-    case 'Call': {
+    case 'Call':
+    case 'BuiltinCall': {
       for (const argument of expression.arguments) checkExpression(state, argument)
       return
     }

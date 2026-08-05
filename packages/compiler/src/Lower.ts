@@ -80,6 +80,33 @@ const lowerExpression = (
       )
       return { operations, result: destination, nextLocal: cursor + 1 }
     }
+    case 'BuiltinCall': {
+      const operations: Array<Mir.Operation> = []
+      const argumentLocals: Array<Mir.LocalId> = []
+      let cursor = nextLocal
+      for (const argument of expression.arguments) {
+        const lowered = lowerExpression(argument, cursor, bindingLocals)
+        if (lowered === undefined) return undefined
+        operations.push(...lowered.operations)
+        argumentLocals.push(lowered.result)
+        cursor = lowered.nextLocal
+      }
+      const [left, right] = argumentLocals
+      if (left === undefined || right === undefined) return undefined
+      const destination = local(cursor)
+      operations.push(
+        Object.freeze({
+          _tag: 'Binary',
+          operator: expression.operation,
+          destination,
+          left,
+          right,
+          type: i32,
+          provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      )
+      return { operations, result: destination, nextLocal: cursor + 1 }
+    }
     case 'Unavailable':
       return undefined
   }

@@ -1059,3 +1059,59 @@ it('keeps statements after the return statement as concrete branches', () => {
     ascii('pub fn main() -> I32 { return 0 let late = 1 }'),
   )
 })
+
+it('parses signed literals and qualified callees', () => {
+  const result = parseText(
+    'fixture://arith.silk',
+    'pub fn main() -> I32 { return I32.add(-8, 50) }',
+  )
+  const fn = directFunctionDeclarations(result.root).at(0)
+  const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
+  const returnStatement =
+    block === undefined ? undefined : SyntaxTree.directNode(block, 'ReturnStatement')
+  const call =
+    returnStatement === undefined
+      ? undefined
+      : SyntaxTree.directNode(returnStatement, 'CallExpression')
+
+  assert.notStrictEqual(call, undefined)
+  if (call === undefined) return
+  assert.notStrictEqual(SyntaxTree.directToken(call, 'Dot'), undefined)
+  const identifiers = call.children.filter(
+    (element) => SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  assert.strictEqual(identifiers.length, 2)
+  const argumentList = SyntaxTree.directNode(call, 'ArgumentList')
+  const firstArgument =
+    argumentList === undefined
+      ? undefined
+      : SyntaxTree.directNode(argumentList, 'IntegerLiteralExpression')
+  assert.notStrictEqual(firstArgument, undefined)
+  if (firstArgument === undefined) return
+  assert.notStrictEqual(SyntaxTree.directToken(firstArgument, 'Minus'), undefined)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers a missing operation name after the dot', () => {
+  const result = parseText(
+    'fixture://missing-operation.silk',
+    'pub fn main() -> I32 { return I32.(1, 2) }',
+  )
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers a dangling minus before the closing brace', () => {
+  const result = parseText('fixture://dangling-minus.silk', 'pub fn main() -> I32 { return - }')
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+})

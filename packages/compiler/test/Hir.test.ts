@@ -137,3 +137,71 @@ it('elaborates and encodes byte-identically across repeated fresh runs', () => {
   assert.deepEqual(first, second)
   assert.strictEqual(Hir.encode(first.hir), Hir.encode(second.hir))
 })
+
+it('elaborates built-in arithmetic calls with signed literals', () => {
+  const result = elaborate('golden://arith.silk', 'pub fn main() -> I32 { return I32.add(-8, 50) }')
+  const main = result.hir.functions.at(0)
+  const returned = main === undefined ? undefined : Hir.returned(main)
+
+  assert.strictEqual(result.diagnostics.length, 0)
+  assert.strictEqual(returned?._tag, 'BuiltinCall')
+  if (returned?._tag !== 'BuiltinCall') return
+  assert.strictEqual(returned.operation, 'Add')
+  const first = returned.arguments.at(0)
+  assert.strictEqual(first?._tag, 'IntegerLiteral')
+  if (first?._tag !== 'IntegerLiteral') return
+  assert.strictEqual(first.value, -8)
+  assert.include(Hir.encode(result.hir), 'builtin I32.Add : I32')
+})
+
+it('accepts the signed minimum and rejects one below it', () => {
+  const minimum = elaborate('golden://min.silk', 'pub fn main() -> I32 { return -2147483648 }')
+  const below = elaborate('golden://below.silk', 'pub fn main() -> I32 { return -2147483649 }')
+
+  assert.deepEqual(minimum.diagnostics, [])
+  const fn = minimum.hir.functions.at(0)
+  const returned = fn === undefined ? undefined : Hir.returned(fn)
+  assert.strictEqual(returned?._tag, 'IntegerLiteral')
+  if (returned?._tag !== 'IntegerLiteral') return
+  assert.strictEqual(returned.value, -2147483648)
+  assert.deepEqual(
+    below.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0002'],
+  )
+})
+
+it('diagnoses unknown actors and unknown operations distinctly', () => {
+  const actor = elaborate('golden://actor.silk', 'pub fn main() -> I32 { return Math.add(1, 2) }')
+  const operation = elaborate(
+    'golden://operation.silk',
+    'pub fn main() -> I32 { return I32.frobnicate(1, 2) }',
+  )
+  const arity = elaborate('golden://arity.silk', 'pub fn main() -> I32 { return I32.add(1) }')
+
+  assert.deepEqual(
+    actor.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0009'],
+  )
+  assert.deepEqual(
+    operation.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0010'],
+  )
+  assert.deepEqual(
+    arity.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0007'],
+  )
+  for (const result of [actor, operation, arity]) {
+    const fn = result.hir.functions.at(0)
+    const returned = fn === undefined ? undefined : Hir.returned(fn)
+    assert.strictEqual(returned?._tag, 'Unavailable')
+  }
+})
+
+it('keeps bare built-in operation names unresolved', () => {
+  const result = elaborate('golden://bare.silk', 'pub fn main() -> I32 { return add(1, 2) }')
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0004'],
+  )
+})

@@ -9,10 +9,11 @@ slice while retaining trivia and recoverable lexical errors.
 
 The lexer SHALL recognize ASCII whitespace, `//` line comments, `///` documentation comments as a
 distinct token kind, the keywords `pub`, `fn`, `return`, `let`, `move`, and the provisional
-`import`, ASCII identifiers, decimal integer literals, `(`, `)`, `{`, `}`, `:`, `,`, `=`, `->`,
-and end-of-file. An identifier SHALL begin with an ASCII letter or underscore and continue with
-ASCII letters, digits, or underscores. A decimal integer literal SHALL contain one or more ASCII
-digits.
+`import`, ASCII identifiers, decimal integer literals, `(`, `)`, `{`, `}`, `:`, `,`, `=`, `.`,
+`-`, `->`, and end-of-file. An identifier SHALL begin with an ASCII letter or underscore and
+continue with ASCII letters, digits, or underscores. A decimal integer literal SHALL contain one
+or more ASCII digits. A `-` immediately followed by `>` SHALL remain one arrow token; any other
+`-` SHALL be one minus token.
 
 #### Scenario: Lex the first parser fixture
 
@@ -48,6 +49,16 @@ digits.
 
 - **WHEN** the source bytes spell `= ->` separated by a space
 - **THEN** the stream contains one equals token and one arrow token, each with its exact span
+
+#### Scenario: Lex a signed literal and a qualified callee
+
+- **WHEN** the source bytes spell `-42 I32.add`
+- **THEN** the stream contains one minus token, one integer literal, one identifier, one dot token, and one identifier, each with its exact span
+
+#### Scenario: Distinguish minus from the arrow
+
+- **WHEN** the source bytes spell `- -> -5`
+- **THEN** the stream contains one minus token, one arrow token, and a minus token followed by an integer literal
 
 ### Requirement: Lossless token coverage
 Every non-end-of-file token SHALL own a non-empty span, token spans SHALL be contiguous and

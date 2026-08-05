@@ -77,3 +77,25 @@ it('emits native debug metadata only for debug requests', () => {
   assert.notInclude(release.ir, 'DICompileUnit')
   assert.notInclude(release.ir, '!dbg')
 })
+
+const arithmeticSource = 'pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }'
+
+it('emits checked arithmetic through overflow intrinsics and guarded division', () => {
+  const artifact = emit(arithmeticSource, { mode: 'release' })
+  const division = emit('pub fn main() -> I32 { return I32.divide(1, 0) }', { mode: 'release' })
+
+  assert.include(artifact.ir, 'llvm.smul.with.overflow')
+  assert.include(artifact.ir, 'llvm.ssub.with.overflow')
+  assert.include(artifact.ir, 'arith_trap')
+  assert.include(division.ir, 'sdiv')
+  assert.include(division.ir, 'icmp eq')
+  assert.include(division.ir, '@llvm.trap()')
+})
+
+it('matches the arithmetic IR golden and stays deterministic', () => {
+  const first = emit(arithmeticSource, { mode: 'release' })
+  const second = emit(arithmeticSource, { mode: 'release' })
+
+  assert.strictEqual(first.ir, golden('arithmetic.ll.txt'))
+  assert.deepEqual(first.bitcode, second.bitcode)
+})

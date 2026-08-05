@@ -1021,6 +1021,7 @@ it('preserves existing type and integer edge behavior per function', () => {
         _tag: 'IntegerOutOfRange',
         spelling: '90071992547409931234567890',
         maximum: 2147483647,
+        minimum: -2147483648,
       },
     ],
   )

@@ -99,6 +99,36 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
     expected: { _tag: 'Trap' },
   },
   {
+    name: 'arithmetic',
+    source: 'pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'signed-truncation',
+    source: 'pub fn main() -> I32 { return I32.add(I32.divide(-7, 2), 45) }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'remainder-sign',
+    source: 'pub fn main() -> I32 { return I32.add(I32.remainder(-7, 2), 43) }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'overflow-trap',
+    source: 'pub fn main() -> I32 { return I32.add(2147483647, 1) }',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'divide-by-zero-trap',
+    source: 'pub fn main() -> I32 { return I32.divide(1, 0) }',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'minimum-division-trap',
+    source: 'pub fn main() -> I32 { return I32.divide(-2147483648, -1) }',
+    expected: { _tag: 'Trap' },
+  },
+  {
     name: 'missing-entry',
     source: 'pub fn answer() -> I32 { return 42 }',
     expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },

@@ -89,6 +89,9 @@ const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: Cod
       strip: request.mode !== 'debug',
     })
     const i32 = yield* LlvmType.integer(builder, 32)
+    let overflowSignature:
+      | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
+      | undefined
 
     const declared: Array<{
       readonly fn: Mir.MirFunction
@@ -155,6 +158,8 @@ const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: Cod
               ),
             )
           }
+          let trapBlock: LlvmBlock.Block | undefined
+          let checkOrdinal = 0
           const locals = new Map<number, Value.Input>()
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
             locals.set(ordinal, yield* Value.argument(body, ordinal))
@@ -198,6 +203,120 @@ const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: Cod
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
+                case 'Binary': {
+                  const left = readLocal(operation.left)
+                  const right = readLocal(operation.right)
+                  if (trapBlock === undefined) {
+                    trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+                  }
+                  const ordinal = checkOrdinal
+                  checkOrdinal += 1
+                  let result: Value.Value
+                  if (
+                    operation.operator === 'Add' ||
+                    operation.operator === 'Subtract' ||
+                    operation.operator === 'Multiply'
+                  ) {
+                    const intrinsicId =
+                      operation.operator === 'Add'
+                        ? ('sadd.with.overflow' as const)
+                        : operation.operator === 'Subtract'
+                          ? ('ssub.with.overflow' as const)
+                          : ('smul.with.overflow' as const)
+                    if (overflowSignature === undefined) {
+                      const i1 = yield* LlvmType.integer(builder, 1)
+                      overflowSignature = Object.freeze({
+                        returnType: yield* LlvmType.structure(builder, [i32, i1]),
+                        parameters: Object.freeze([i32, i32]),
+                      })
+                    }
+                    const pair = yield* Intrinsic.call(
+                      body,
+                      intrinsicId,
+                      [i32],
+                      [left, right],
+                      `arith${ordinal}_pair`,
+                      { signature: overflowSignature },
+                    )
+                    if (pair === undefined) {
+                      throw new RangeError('Backend overflow intrinsic produced no value')
+                    }
+                    const valuePart = yield* FunctionBody.extractValue(
+                      body,
+                      pair,
+                      [0],
+                      `arith${ordinal}`,
+                    )
+                    const overflowed = yield* FunctionBody.extractValue(
+                      body,
+                      pair,
+                      [1],
+                      `arith${ordinal}_flag`,
+                    )
+                    const continueBlock = yield* LlvmBlock.make(body, `arith${ordinal}_ok`)
+                    yield* FunctionBody.conditionalBranch(
+                      body,
+                      overflowed,
+                      trapBlock,
+                      continueBlock,
+                    )
+                    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+                    result = valuePart
+                  } else {
+                    const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                    const minimum = yield* Constant.integerSigned(builder, i32, -2147483648n)
+                    const negativeOne = yield* Constant.integerSigned(builder, i32, -1n)
+                    const zeroDivisor = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      right,
+                      zero,
+                      `div${ordinal}_zero`,
+                    )
+                    const minimumDividend = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      left,
+                      minimum,
+                      `div${ordinal}_min`,
+                    )
+                    const negativeOneDivisor = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      right,
+                      negativeOne,
+                      `div${ordinal}_negone`,
+                    )
+                    const overflowCase = yield* FunctionBody.binary(
+                      body,
+                      'and',
+                      minimumDividend,
+                      negativeOneDivisor,
+                      `div${ordinal}_overflow`,
+                    )
+                    const trapping = yield* FunctionBody.binary(
+                      body,
+                      'or',
+                      zeroDivisor,
+                      overflowCase,
+                      `div${ordinal}_trapping`,
+                    )
+                    const continueBlock = yield* LlvmBlock.make(body, `div${ordinal}_ok`)
+                    yield* FunctionBody.conditionalBranch(body, trapping, trapBlock, continueBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+                    result = yield* FunctionBody.binary(
+                      body,
+                      operation.operator === 'Divide' ? 'sdiv' : 'srem',
+                      left,
+                      right,
+                      `arith${ordinal}`,
+                    )
+                  }
+                  const instruction = yield* Value.instruction(body, result)
+                  yield* locate(operation.provenance.span, instruction)
+                  locals.set(operation.destination.ordinal, result)
+                  break
+                }
                 case 'Drop':
                   break
                 case 'Call': {
@@ -267,6 +386,12 @@ const emitProgram = (program: Mir.Module, layout: Mir.TargetLayout, request: Cod
                 break
               }
             }
+          }
+
+          if (trapBlock !== undefined) {
+            yield* LlvmBlock.setInsertionPoint(body, trapBlock)
+            yield* Intrinsic.call(body, 'trap', [], [])
+            yield* FunctionBody.unreachable(body)
           }
         }),
       )

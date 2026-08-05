@@ -11,12 +11,13 @@ followed by end-of-file. Every function SHALL have the form `pub fn <name>(<para
 <return-type> { <statements> }`, where `<statements>` is zero or more binding statements followed
 by exactly one return statement. A binding statement SHALL have the form `let <name> =
 <expression>`. A parameter SHALL have the form `<name>: <type>` and parameters SHALL be
-comma-separated. An expression SHALL be a decimal integer, a bare identifier, a `move <name>`
-operand, or a call. A call SHALL have the form `<callee>(<arguments>)`; arguments SHALL be
-comma-separated expressions. Empty parameter and argument lists SHALL remain valid. Lexer trivia
-SHALL be permitted between grammar elements, statements, and declarations. Names and types SHALL
-remain uninterpreted identifier tokens, and declaration, statement, parameter, and argument order
-SHALL match concrete source order.
+comma-separated. An expression SHALL be a decimal integer with an optional directly applied `-`
+sign, a bare identifier, a `move <name>` operand, or a call. A call SHALL have the form
+`<callee>(<arguments>)`, where `<callee>` is one identifier or a qualified actor path
+`<actor>.<operation>`; arguments SHALL be comma-separated expressions. Empty parameter and
+argument lists SHALL remain valid. Lexer trivia SHALL be permitted between grammar elements,
+statements, and declarations. Names and types SHALL remain uninterpreted identifier tokens, and
+declaration, statement, parameter, and argument order SHALL match concrete source order.
 
 #### Scenario: Parse the accepted integer fixture
 - **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
@@ -51,6 +52,16 @@ SHALL match concrete source order.
 
 - **WHEN** a binding initializer or call argument spells `move value`
 - **THEN** the expression is a move operand retaining the keyword and the moved name with exact spans
+
+#### Scenario: Parse a signed literal
+
+- **WHEN** a return expression or call argument spells `-42`
+- **THEN** the integer literal expression retains the minus token and the decimal token as one concrete branch with exact spans
+
+#### Scenario: Parse a qualified callee
+
+- **WHEN** a body spells `I32.add(1, 2)`
+- **THEN** the call expression retains the actor identifier, the dot, the operation identifier, and the argument list in concrete order
 
 ### Requirement: First call syntax remains explicit and recoverable
 A call expression SHALL retain its callee identifier, left parenthesis, ordered arguments,
@@ -265,4 +276,22 @@ missing return statement becomes an explicit recovered return structure with par
 
 - **WHEN** an initializer spells `move` immediately before the statement boundary
 - **THEN** the move operand retains its keyword and a missing identifier with one parser diagnostic
+
+### Requirement: Qualified callees and signed literals remain recoverable
+
+A qualified callee SHALL retain its actor identifier, dot, and operation identifier with exact
+spans; a dot with a missing operation identifier SHALL become an explicit missing token with a
+parser diagnostic while the argument list keeps parsing. A minus token not directly applicable to
+a decimal literal in expression position SHALL remain recoverable: the minus stays in the tree
+and the expression recovers at the existing statement and argument boundaries.
+
+#### Scenario: Recover a missing operation name
+
+- **WHEN** a body spells `I32.(1, 2)`
+- **THEN** the callee retains the actor identifier and dot with an explicit missing identifier and one parser diagnostic, and both arguments remain parseable
+
+#### Scenario: Recover a dangling minus
+
+- **WHEN** a return expression spells `-` immediately before the closing brace
+- **THEN** the minus token stays in the tree with an explicit missing decimal literal and one parser diagnostic
 

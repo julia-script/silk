@@ -156,6 +156,44 @@ function executeFunction(
         case 'Move':
           locals.set(operation.destination.ordinal, read(operation.source))
           break
+        case 'Binary': {
+          const left = BigInt(read(operation.left).value.value)
+          const right = BigInt(read(operation.right).value.value)
+          if (
+            (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
+            right === 0n
+          ) {
+            return blockedStep({
+              _tag: 'Trap',
+              function: fn.id,
+              reason: 'division by zero',
+              span: operation.provenance.span,
+            })
+          }
+          const exact =
+            operation.operator === 'Add'
+              ? left + right
+              : operation.operator === 'Subtract'
+                ? left - right
+                : operation.operator === 'Multiply'
+                  ? left * right
+                  : operation.operator === 'Divide'
+                    ? left / right
+                    : left % right
+          if (exact < -2147483648n || exact > 2147483647n) {
+            return blockedStep({
+              _tag: 'Trap',
+              function: fn.id,
+              reason: 'arithmetic overflow',
+              span: operation.provenance.span,
+            })
+          }
+          locals.set(operation.destination.ordinal, {
+            value: value(Number(exact)),
+            fromCall: false,
+          })
+          break
+        }
         case 'Drop':
           break
         case 'Call': {

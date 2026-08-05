@@ -229,3 +229,22 @@ it('distinguishes documentation comments from plain line comments', () => {
     ['DocComment', 'EndOfFile'],
   )
 })
+
+it('lexes signed literals and qualified callees with minus and dot tokens', () => {
+  const result = Lexer.lex(SourceFile.make('memory://arith.silk', ascii('-42 I32.add')))
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Minus', 'DecimalInteger', 'Identifier', 'Dot', 'Identifier', 'EndOfFile'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('distinguishes minus from the arrow', () => {
+  const result = Lexer.lex(SourceFile.make('memory://minus.silk', ascii('- -> -5')))
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Minus', 'Arrow', 'Minus', 'DecimalInteger', 'EndOfFile'],
+  )
+})

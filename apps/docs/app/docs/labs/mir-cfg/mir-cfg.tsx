@@ -20,6 +20,8 @@ const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
     case 'Literal':
       return `${localText(operation.destination)} = literal ${operation.value}`
+    case 'Binary':
+      return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)}`
     case 'Call':

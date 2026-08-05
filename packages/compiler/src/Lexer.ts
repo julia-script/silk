@@ -39,7 +39,9 @@ const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x7d ||
   byte === 0x3a ||
   byte === 0x2c ||
-  byte === 0x3d
+  byte === 0x3d ||
+  byte === 0x2d ||
+  byte === 0x2e
 
 const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boolean => {
   const byte = bytes[index]
@@ -123,6 +125,10 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'Comma'
     case 0x3d:
       return 'Equals'
+    case 0x2d:
+      return 'Minus'
+    case 0x2e:
+      return 'Dot'
     default:
       return 'Invalid'
   }

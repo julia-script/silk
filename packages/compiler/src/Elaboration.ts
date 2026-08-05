@@ -4,7 +4,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import * as SourceFile from './SourceFile.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -104,6 +104,13 @@ export type CallReferenceFact =
       readonly declaration: DeclarationFact
     }
   | {
+      readonly _tag: 'ResolvedBuiltin'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly actor: string
+      readonly operation: Hir.BuiltinOperation
+    }
+  | {
       readonly _tag: 'Missing'
       readonly spelling: string
       readonly token: Token.Token
@@ -190,6 +197,7 @@ export type UnavailableCallContractReason =
   | { readonly _tag: 'UnavailableCallSyntax'; readonly syntax: SyntaxTree.Node }
   | { readonly _tag: 'UnavailableCallTarget'; readonly reference: CallReferenceFact }
   | { readonly _tag: 'UnavailableMappedType'; readonly mapping: ArgumentMappingFact }
+  | { readonly _tag: 'UnavailableBuiltinArgument'; readonly argument: ArgumentFact }
 
 /** The complete positional contract outcome for one call. */
 export type CallContractFact =
@@ -271,14 +279,15 @@ const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
     () => new RangeError(`Semantic token span does not belong to source ${source.id}`),
   )
 
-const positiveI32Value = (bytes: Uint8Array): Option.Option<number> => {
+const signedI32Value = (bytes: Uint8Array, negative: boolean): Option.Option<number> => {
+  const limit = negative ? 2147483648 : i32Maximum
   let value = 0
   for (const byte of bytes) {
     const digit = byte - 0x30
-    if (value > Math.floor((i32Maximum - digit) / 10)) return Option.none()
+    if (value > Math.floor((limit - digit) / 10)) return Option.none()
     value = value * 10 + digit
   }
-  return Option.some(value)
+  return Option.some(negative ? -value : value)
 }
 
 interface IntegerResult {
@@ -316,11 +325,20 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
     })
   }
 
+  const minusToken = directToken(node, 'Minus')
+  const negative = minusToken !== undefined
+  const literalSpan =
+    minusToken === undefined
+      ? token.span
+      : Option.getOrElse(
+          SourceSpan.make(source, minusToken.span.start, token.span.end),
+          () => token.span,
+        )
   const bytes = Option.getOrThrowWith(
     SourceFile.slice(source, token.span),
     () => new RangeError(`Semantic integer span does not belong to source ${source.id}`),
   )
-  const value = positiveI32Value(bytes)
+  const value = signedI32Value(bytes, negative)
   if (Option.isSome(value)) {
     return Object.freeze({
       fact: Object.freeze({
@@ -334,7 +352,8 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
     })
   }
 
-  const tokenSpelling = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  const digits = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  const tokenSpelling = negative ? `-${digits}` : digits
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'OutOfRange',
@@ -343,7 +362,7 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
       token,
       syntax: node,
     }),
-    diagnostics: Object.freeze([Diagnostic.integerOutOfRange(tokenSpelling, token.span)]),
+    diagnostics: Object.freeze([Diagnostic.integerOutOfRange(tokenSpelling, literalSpan)]),
   })
 }
 
@@ -581,6 +600,48 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([]),
     })
   }
+  if (reference._tag === 'ResolvedBuiltin') {
+    const unavailableArgument = argumentsList.find((argument) => argument.type._tag !== 'Available')
+    if (unavailableArgument !== undefined) {
+      return Object.freeze({
+        mappings: Object.freeze([]),
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({
+            _tag: 'UnavailableBuiltinArgument',
+            argument: unavailableArgument,
+          }),
+        }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const expectedCount = 2
+    const actualCount = argumentsList.length
+    if (expectedCount !== actualCount) {
+      return Object.freeze({
+        mappings: Object.freeze([]),
+        fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
+        diagnostics: Object.freeze([
+          Diagnostic.wrongCallArity(
+            Object.freeze({
+              _tag: 'BuiltinTarget',
+              actor: reference.actor,
+              operation: reference.operation,
+            }),
+            expectedCount,
+            actualCount,
+            call.span,
+          ),
+        ]),
+      })
+    }
+    return Object.freeze({
+      mappings: Object.freeze([]),
+      fact: Object.freeze({ _tag: 'Compatible', expectedCount, actualCount }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+
   if (reference._tag !== 'Resolved') {
     const cause = reference._tag === 'Missing' ? reference.cause : undefined
     return Object.freeze({
@@ -641,6 +702,105 @@ const analyzeCallContract = (
   })
 }
 
+/** The compiler-known built-in actor table. Issue 07's runtime actors extend this shape. */
+const builtinActors: Readonly<
+  Record<string, Readonly<Record<string, Hir.BuiltinOperation>> | undefined>
+> = Object.freeze({
+  I32: Object.freeze({
+    add: 'Add',
+    subtract: 'Subtract',
+    multiply: 'Multiply',
+    divide: 'Divide',
+    remainder: 'Remainder',
+  } as const),
+})
+
+function analyzeBuiltinCall(
+  source: SourceFile.SourceFile,
+  call: SyntaxTree.Node,
+  argumentsResult: ArgumentsResult,
+): ExpressionResult {
+  const identifiers = call.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const actorToken = identifiers.at(0)
+  const operationToken = identifiers.at(1)
+
+  if (actorToken === undefined || operationToken === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Call',
+        reference: Object.freeze({
+          _tag: 'Unavailable',
+          syntax: unavailableSyntax(call, 'Identifier'),
+        }),
+        arguments: argumentsResult.facts,
+        mappings: Object.freeze([]),
+        contract: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+        }),
+        type: unavailableExpressionType,
+        syntax: call,
+      }),
+      diagnostics: argumentsResult.diagnostics,
+      type: undefined,
+    })
+  }
+
+  const actorSpelling = spelling(source, actorToken)
+  const operationSpelling = spelling(source, operationToken)
+  const actor = builtinActors[actorSpelling]
+  const operation = actor?.[operationSpelling]
+  const missingDiagnostic =
+    actor === undefined
+      ? Diagnostic.unknownActor(actorSpelling, actorToken.span)
+      : operation === undefined
+        ? Diagnostic.unknownActorOperation(actorSpelling, operationSpelling, operationToken.span)
+        : undefined
+  const reference: CallReferenceFact =
+    operation !== undefined
+      ? Object.freeze({
+          _tag: 'ResolvedBuiltin',
+          spelling: `${actorSpelling}.${operationSpelling}`,
+          token: operationToken,
+          actor: actorSpelling,
+          operation,
+        })
+      : Object.freeze({
+          _tag: 'Missing',
+          spelling: `${actorSpelling}.${operationSpelling}`,
+          token: actor === undefined ? actorToken : operationToken,
+          ...(missingDiagnostic === undefined
+            ? {}
+            : { cause: Diagnostic.identity(missingDiagnostic) }),
+        })
+  const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
+  const expressionType =
+    hasAvailableCallSyntax(call) && reference._tag === 'ResolvedBuiltin'
+      ? availableI32ExpressionType
+      : unavailableExpressionType
+
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Call',
+      reference,
+      arguments: argumentsResult.facts,
+      mappings: callContract.mappings,
+      contract: callContract.fact,
+      type: expressionType,
+      syntax: call,
+    }),
+    diagnostics: Object.freeze([
+      ...(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
+      ...argumentsResult.diagnostics,
+      ...callContract.diagnostics,
+    ]),
+    type: expressionType._tag === 'Available' ? expressionType.type : undefined,
+  })
+}
+
 function analyzeExpression(
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -681,6 +841,11 @@ function analyzeExpression(
   if (node.kind !== 'CallExpression') return undefined
 
   const argumentsResult = analyzeArguments(source, node, declarations, declaration, scope)
+
+  const dotToken = directToken(node, 'Dot')
+  if (dotToken !== undefined) {
+    return analyzeBuiltinCall(source, node, argumentsResult)
+  }
 
   const token = directToken(node, 'Identifier')
   if (token === undefined) {
@@ -943,6 +1108,21 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     return Object.freeze({
       _tag: 'Move',
       subject,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (
+    fact.reference._tag === 'ResolvedBuiltin' &&
+    fact.contract._tag === 'Compatible' &&
+    fact.type._tag === 'Available'
+  ) {
+    return Object.freeze({
+      _tag: 'BuiltinCall',
+      operation: fact.reference.operation,
+      arguments: Object.freeze(
+        fact.arguments.map((argument) => hirExpression(argument.expression)),
+      ),
       type: fact.type.type,
       span: fact.syntax.span,
     })

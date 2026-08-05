@@ -1,0 +1,23 @@
+source_filename = "golden://program.silk"
+target triple = "arm64-apple-darwin"
+
+define i32 @silk_main() {
+bb0:
+  %arith0_pair = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 6, i32 7)
+  %arith0 = extractvalue { i32, i1 } %arith0_pair, 0
+  %arith0_flag = extractvalue { i32, i1 } %arith0_pair, 1
+  br i1 %arith0_flag, label %arith_trap, label %arith0_ok
+arith_trap:
+  call void @llvm.trap()
+  unreachable
+arith0_ok:
+  %arith1_pair = call { i32, i1 } @llvm.ssub.with.overflow.i32(i32 %arith0, i32 0)
+  %arith1 = extractvalue { i32, i1 } %arith1_pair, 0
+  %arith1_flag = extractvalue { i32, i1 } %arith1_pair, 1
+  br i1 %arith1_flag, label %arith_trap, label %arith1_ok
+arith1_ok:
+  ret i32 %arith1
+}
+declare { i32, i1 } @llvm.smul.with.overflow.i32(i32, i32)
+declare { i32, i1 } @llvm.ssub.with.overflow.i32(i32, i32)
+declare void @llvm.trap()

@@ -147,6 +147,17 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
 ])
 
 const parseIntegerLiteralExpression = (initial: State): NodeResult => {
+  if (nextSignificantKind(initial) === 'Minus') {
+    const minus = expect(initial, 'Minus', ['DecimalInteger', ...expressionFollowing])
+    const integer = expect(minus.state, 'DecimalInteger', expressionFollowing)
+    return Object.freeze({
+      state: integer.state,
+      node: syntaxNode(integer.state, 'IntegerLiteralExpression', [
+        ...minus.elements,
+        ...integer.elements,
+      ]),
+    })
+  }
   const integer = expect(initial, 'DecimalInteger', expressionFollowing)
   return Object.freeze({
     state: integer.state,
@@ -179,7 +190,7 @@ const expressionKind = (
   let token = state.lexical.tokens.at(index)
 
   while (token !== undefined) {
-    if (token.kind === 'DecimalInteger') return 'Integer'
+    if (token.kind === 'DecimalInteger' || token.kind === 'Minus') return 'Integer'
     if (token.kind === 'MoveKeyword') return 'Move'
     if (token.kind === 'Identifier') {
       index += 1
@@ -188,7 +199,7 @@ const expressionKind = (
         index += 1
         token = state.lexical.tokens.at(index)
       }
-      return token?.kind === 'LeftParenthesis' ? 'Call' : 'Identifier'
+      return token?.kind === 'LeftParenthesis' || token?.kind === 'Dot' ? 'Call' : 'Identifier'
     }
     if (token.kind === 'LeftParenthesis') return 'Call'
     if (
@@ -295,17 +306,23 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
 function parseCallExpression(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const callee = expect(initial, 'Identifier', [
     'LeftParenthesis',
+    'Dot',
     'RightParenthesis',
     'RightBrace',
     'PubKeyword',
   ])
-  const argumentsList = parseArgumentList(callee.state, reservedForEnclosingCalls)
+  let state = callee.state
+  let elements: ReadonlyArray<SyntaxTree.Element> = callee.elements
+  if (nextSignificantKind(state) === 'Dot') {
+    const dot = expect(state, 'Dot', ['Identifier', 'LeftParenthesis'])
+    const operation = expect(dot.state, 'Identifier', ['LeftParenthesis'])
+    state = operation.state
+    elements = Object.freeze([...elements, ...dot.elements, ...operation.elements])
+  }
+  const argumentsList = parseArgumentList(state, reservedForEnclosingCalls)
   return Object.freeze({
     state: argumentsList.state,
-    node: syntaxNode(argumentsList.state, 'CallExpression', [
-      ...callee.elements,
-      argumentsList.node,
-    ]),
+    node: syntaxNode(argumentsList.state, 'CallExpression', [...elements, argumentsList.node]),
   })
 }
 

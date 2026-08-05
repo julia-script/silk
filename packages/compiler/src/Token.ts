@@ -20,6 +20,8 @@ export type TokenKind =
   | 'Colon'
   | 'Comma'
   | 'Equals'
+  | 'Minus'
+  | 'Dot'
   | 'Arrow'
   | 'Invalid'
   | 'EndOfFile'

@@ -27,6 +27,9 @@ export interface BindingId {
   readonly ordinal: number
 }
 
+/** The closed built-in operation vocabulary of the compiler-known `I32` actor. */
+export type BuiltinOperation = 'Add' | 'Subtract' | 'Multiply' | 'Divide' | 'Remainder'
+
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
   | {
@@ -56,6 +59,13 @@ export type Expression =
   | {
       readonly _tag: 'Call'
       readonly target: DeclarationIndex.CanonicalId
+      readonly arguments: ReadonlyArray<Expression>
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'BuiltinCall'
+      readonly operation: BuiltinOperation
       readonly arguments: ReadonlyArray<Expression>
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
@@ -107,6 +117,7 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'Move':
         return walk(expression.subject)
       case 'Call':
+      case 'BuiltinCall':
         return expression.arguments.some(walk)
       default:
         return false
@@ -129,7 +140,8 @@ export const firstUnavailable = (
         return expression
       case 'Move':
         return walk(expression.subject)
-      case 'Call': {
+      case 'Call':
+      case 'BuiltinCall': {
         for (const argument of expression.arguments) {
           const found = walk(argument)
           if (found !== undefined) return found
@@ -219,6 +231,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
     case 'Call':
       return [
         `${indent}call ${expression.target.module}.${expression.target.name} : ${expression.type} ${spanText(expression.span)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
+    case 'BuiltinCall':
+      return [
+        `${indent}builtin I32.${expression.operation} : ${expression.type} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'Unavailable':

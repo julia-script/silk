@@ -144,7 +144,8 @@ const sameDeclaration = (
 const groupState = (call: CallFact): FlowItemState =>
   call.reference._tag === 'Ambiguous'
     ? 'Branched'
-    : call.reference._tag !== 'Resolved' || call.contract._tag !== 'Compatible'
+    : (call.reference._tag !== 'Resolved' && call.reference._tag !== 'ResolvedBuiltin') ||
+        call.contract._tag !== 'Compatible'
       ? 'Stopped'
       : 'Connected'
 

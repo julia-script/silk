@@ -114,6 +114,15 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-05: Shipped and archived `compute-integer-arithmetic` — slice 1's second change.
+  Signed literals with full `I32` range, qualified callees, and the compiler-known `I32` actor
+  (`add`/`subtract`/`multiply`/`divide`/`remainder`) as HIR builtin calls lowering to a trapping
+  MIR `Binary` operation; the interpreter traps exactly on overflow, division by zero, and
+  MIN/-1, and the backend expands to overflow intrinsics plus guarded division branching to trap
+  blocks. Six new corpus programs hold interpreter/native parity including native trap behavior.
+  Two recorded design deviations: built-ins live in an elaboration table (not the declaration
+  index), and the checked expansion is visible at the LLVM level (MIR stays compact). Next:
+  `Bool`, comparisons, `if`/`else`.
 - 2026-08-05: Shipped and archived `bind-local-values` — slice 1's first change. `let` bindings
   and `move` now run through the whole spine: statement sequences in grammar and HIR, initializer
   inference, non-shadowing (`SEM0008`), the first real ownership analysis (liveness ranges, moves,

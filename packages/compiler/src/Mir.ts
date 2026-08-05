@@ -40,6 +40,9 @@ export interface Provenance {
   readonly generated: boolean
 }
 
+/** The closed binary arithmetic operator vocabulary. */
+export type BinaryOperator = 'Add' | 'Subtract' | 'Multiply' | 'Divide' | 'Remainder'
+
 /** One MIR operation. */
 export type Operation =
   | {
@@ -47,6 +50,20 @@ export type Operation =
       readonly destination: LocalId
       readonly type: Type
       readonly value: number
+      readonly provenance: Provenance
+    }
+  | {
+      /**
+       * Trapping arithmetic: signed overflow, division by zero, and MIN divided or remaindered
+       * by -1 abort the function like an explicit trap. Division truncates toward zero and
+       * remainder takes the dividend's sign.
+       */
+      readonly _tag: 'Binary'
+      readonly operator: BinaryOperator
+      readonly destination: LocalId
+      readonly left: LocalId
+      readonly right: LocalId
+      readonly type: Type
       readonly provenance: Provenance
     }
   | {
@@ -120,6 +137,9 @@ export interface Violation {
 const localUses = (block: Block): ReadonlyArray<LocalId> => [
   ...block.operations.flatMap((operation): ReadonlyArray<LocalId> => {
     if (operation._tag === 'Literal') return [operation.destination]
+    if (operation._tag === 'Binary') {
+      return [operation.destination, operation.left, operation.right]
+    }
     if (operation._tag === 'Move') return [operation.destination, operation.source]
     if (operation._tag === 'Call') return [operation.destination, ...operation.arguments]
     return [operation.local]
@@ -199,6 +219,8 @@ const operationText = (operation: Operation): string => {
   switch (operation._tag) {
     case 'Literal':
       return `${localText(operation.destination)} = literal ${operation.value} : ${operation.type._tag} ${provenanceText(operation.provenance)}`
+    case 'Binary':
+      return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${operation.type._tag} ${provenanceText(operation.provenance)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
     case 'Call':

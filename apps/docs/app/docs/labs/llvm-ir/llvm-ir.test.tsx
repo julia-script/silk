@@ -16,6 +16,23 @@ describe('LlvmIrLab', () => {
     expect(markup).toContain('main · bb0')
   })
 
+  it('shows the checked arithmetic expansion through the facade', () => {
+    const snapshot = Analysis.ofSource(
+      'memory://llvm-arith-test.silk',
+      encoder.encode('pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
+    )
+    const artifact = Analysis.codegen(snapshot, { mode: 'release' })
+
+    expect(artifact.ir).toContain('llvm.sadd.with.overflow')
+    expect(artifact.ir).toContain('arith_trap')
+    expect(artifact.ir).toContain('sdiv')
+    const mir = Analysis.loweredMir(snapshot)
+    const operations = mir.functions.at(0)?.blocks.at(0)?.operations ?? []
+    expect(
+      operations.flatMap((operation) => (operation._tag === 'Binary' ? [operation.operator] : [])),
+    ).toEqual(['Add', 'Divide'])
+  })
+
   it('answers debug emission with metadata through the facade', () => {
     const snapshot = Analysis.ofSource(
       'memory://llvm-ir-test.silk',

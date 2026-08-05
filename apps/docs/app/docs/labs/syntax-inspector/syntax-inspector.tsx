@@ -340,7 +340,9 @@ function HirExpressionRows({
             ? 'move'
             : expression._tag === 'Call'
               ? `call ${expression.target.name}`
-              : 'unavailable'
+              : expression._tag === 'BuiltinCall'
+                ? `builtin I32.${expression.operation}`
+                : 'unavailable'
   return (
     <>
       <li style={{ paddingLeft: `${depth * 16}px` }}>
@@ -350,7 +352,7 @@ function HirExpressionRows({
           </code>
         </div>
       </li>
-      {expression._tag === 'Call'
+      {expression._tag === 'Call' || expression._tag === 'BuiltinCall'
         ? expression.arguments.map((argument, index) => (
             <HirExpressionRows
               key={`${argument._tag}-${argument.span.start}-${index}`}
