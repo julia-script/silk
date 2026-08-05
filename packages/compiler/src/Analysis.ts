@@ -3,6 +3,9 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
+import * as Instances from './Instances.js'
+import * as Lower from './Lower.js'
+import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as Ownership from './Ownership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -21,6 +24,8 @@ export interface Snapshot {
   readonly index: DeclarationIndex.Index
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
+  readonly instances: Instances.Discovery
+  readonly mir: Mir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -34,6 +39,8 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
   const ownership = new Map(
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
+  const instances = Instances.discover(request.rootModule, results)
+  const mir = Lower.lowerProgram(instances, ownership)
   const diagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
@@ -46,6 +53,8 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     index,
     results,
     ownership,
+    instances,
+    mir,
     diagnostics,
   })
 }
@@ -89,6 +98,12 @@ export const ownershipOf = (
   self: Snapshot,
   module: string,
 ): Ownership.ModuleOwnership | undefined => self.ownership.get(module)
+
+/** Returns the snapshot's instance discovery: entry state and ordered instances. */
+export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
+
+/** Returns the snapshot's lowered MIR program module. */
+export const loweredMir = (self: Snapshot): Mir.Module => self.mir
 
 /** Looks up one declaration name within one module. */
 export const declarationByName = (

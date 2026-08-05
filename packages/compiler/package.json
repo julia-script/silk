@@ -61,9 +61,17 @@
       "types": "./dist/Diagnostic.d.ts",
       "import": "./dist/Diagnostic.js"
     },
+    "./Instances": {
+      "types": "./dist/Instances.d.ts",
+      "import": "./dist/Instances.js"
+    },
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
+    },
+    "./Lower": {
+      "types": "./dist/Lower.d.ts",
+      "import": "./dist/Lower.js"
     },
     "./Mir": {
       "types": "./dist/Mir.d.ts",

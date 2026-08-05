@@ -69,3 +69,18 @@ be reachable as a facade query rather than by invoking the evaluator phase direc
 - **WHEN** the docs labs are checked for compiler imports
 - **THEN** no lab or flow model value-imports a phase module (lexer, parser, closure loading, header collection, elaboration, evaluation); only facade queries and data-model types appear
 
+### Requirement: Discovery and lowered MIR are facade queries
+
+The facade SHALL answer the snapshot's instance discovery (entry state and ordered instances)
+and its lowered MIR program as immutable values, alongside the existing queries.
+
+#### Scenario: Query discovery and lowered MIR
+
+- **WHEN** a snapshot's root module has a valid entry
+- **THEN** the facade answers the ordered instances and a lowered MIR program containing one function per instance
+
+#### Scenario: Answer an unavailable entry
+
+- **WHEN** the root module has no valid entry
+- **THEN** the facade answers the explicit unavailable entry state and an empty lowered program
+

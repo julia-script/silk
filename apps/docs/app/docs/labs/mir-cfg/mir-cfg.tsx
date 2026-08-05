@@ -1,8 +1,12 @@
 'use client'
 
-import { Mir } from '@silk-effect/compiler'
+import { Analysis, Mir } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
+
+const programSourceId = 'memory://docs/mir-program.silk'
+const defaultProgram = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
 
 const spanText = (span: { readonly start: number; readonly end: number }): string =>
   `[${span.start}, ${span.end})`
@@ -52,11 +56,15 @@ const edgeLabels = (terminator: Mir.Terminator): ReadonlyArray<string> => {
 function ProvenanceEntry({
   label,
   provenance,
+  source,
 }: {
   readonly label: string
   readonly provenance: Mir.Provenance
+  readonly source?: string
 }) {
-  const reveal = provenanceText(provenance)
+  const slice =
+    source === undefined ? '' : ` · "${source.slice(provenance.span.start, provenance.span.end)}"`
+  const reveal = `${provenanceText(provenance)}${slice}`
   return (
     <li>
       <div>
@@ -68,7 +76,13 @@ function ProvenanceEntry({
   )
 }
 
-export function CfgView({ module }: { readonly module: Mir.Module }) {
+export function CfgView({
+  module,
+  source,
+}: {
+  readonly module: Mir.Module
+  readonly source?: string
+}) {
   return (
     <div>
       {module.functions.map((fn) => (
@@ -95,11 +109,13 @@ export function CfgView({ module }: { readonly module: Mir.Module }) {
                     key={`op-${index}`}
                     label={operationLabel(operation)}
                     provenance={operation.provenance}
+                    source={source}
                   />
                 ))}
                 <ProvenanceEntry
                   label={terminatorLabel(block.terminator)}
                   provenance={block.terminator.provenance}
+                  source={source}
                 />
               </ul>
             </section>
@@ -113,7 +129,13 @@ export function CfgView({ module }: { readonly module: Mir.Module }) {
 export function MirCfgLab() {
   const samples = useMemo(() => Mir.samples(), [])
   const [selected, setSelected] = useState(0)
-  const module = samples[selected] ?? samples[0]
+  const [text, setText] = useState<string>(defaultProgram)
+  const program = useMemo(
+    () => Analysis.loweredMir(Analysis.ofSource(programSourceId, new TextEncoder().encode(text))),
+    [text],
+  )
+  const module = selected < samples.length ? samples[selected] : program
+  const isProgram = selected >= samples.length
 
   if (module === undefined) return null
   return (
@@ -124,9 +146,29 @@ export function MirCfgLab() {
             {candidate.module.replace('sample://', '').replace('.silk', '')}
           </button>
         ))}
+        <button type="button" onClick={() => setSelected(samples.length)}>
+          lowered program
+        </button>
       </div>
 
-      <CfgView module={module} />
+      {isProgram ? (
+        <>
+          <label className="sr-only" htmlFor="mir-program-source">
+            Silk source code
+          </label>
+          <textarea
+            id="mir-program-source"
+            className={styles.editor}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
+        </>
+      ) : null}
+
+      <CfgView module={module} source={isProgram ? text : undefined} />
 
       <section className={styles.diagnosticGroup} aria-labelledby="mir-encoding">
         <div className={styles.diagnosticHeading}>
