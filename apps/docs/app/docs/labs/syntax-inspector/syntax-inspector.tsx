@@ -1,6 +1,13 @@
 'use client'
 
-import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-effect/compiler'
+import {
+  BootstrapEvaluation,
+  Lexer,
+  Parser,
+  SemanticAnalysis,
+  SourceFile,
+  SyntaxTree,
+} from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { projectDataFlow, type FlowEdge, type FlowNode } from './flow-model'
 import styles from './syntax-inspector.module.css'
@@ -9,7 +16,7 @@ const sourceId = 'memory://docs/syntax-inspector.silk'
 const acceptedSource = 'pub fn main() -> I32 { return 42 }'
 
 const examples = [
-  { label: 'Valid', source: acceptedSource },
+  { label: 'Literal result', source: acceptedSource },
   {
     label: 'Two functions',
     source: `pub fn answer() -> I32 { return 42 }
@@ -31,7 +38,7 @@ pub fn main() -> I32 { return answer() }`,
     source: `pub fn main() -> I32 { return answer() }
 pub fn answer() -> I32 { return 42 }`,
   },
-  { label: 'Self call', source: 'pub fn main() -> I32 { return main() }' },
+  { label: 'Direct cycle', source: 'pub fn main() -> I32 { return main() }' },
   { label: 'Unknown call', source: 'pub fn main() -> I32 { return missing() }' },
   {
     label: 'Ambiguous call',
@@ -51,7 +58,7 @@ pub fn main() -> I32 { return answer( }`,
 pub fn main() -> I32 { return identity(42) }`,
   },
   {
-    label: 'Compatible contract',
+    label: 'Identity result',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`,
   },
@@ -71,7 +78,7 @@ pub fn main() -> I32 { return choose(1, 2) }`,
 pub fn main() -> I32 { return identity(@) }`,
   },
   {
-    label: 'Too few arguments',
+    label: 'Wrong arity',
     source: `pub fn choose(left: I32, right: I32) -> I32 { return left }
 pub fn main() -> I32 { return choose(1) }`,
   },
@@ -81,9 +88,23 @@ pub fn main() -> I32 { return choose(1) }`,
 pub fn main() -> I32 { return identity(1, 2) }`,
   },
   {
-    label: 'Unavailable contract type',
+    label: 'Unavailable evaluation',
     source: `pub fn identity(value: Mystery) -> I32 { return 0 }
 pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Second argument result',
+    source: `pub fn second(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return second(10, 42) }`,
+  },
+  {
+    label: 'Missing entry',
+    source: 'pub fn answer() -> I32 { return 42 }',
+  },
+  {
+    label: 'Mutual cycle',
+    source: `pub fn main() -> I32 { return other() }
+pub fn other() -> I32 { return main() }`,
   },
   {
     label: 'Unresolved contract call',
@@ -717,14 +738,132 @@ export function DataFlow({
   )
 }
 
+const blockedSummary = (reason: BootstrapEvaluation.BlockedReason): string => {
+  switch (reason._tag) {
+    case 'MissingEntry':
+      return 'No top-level declaration named main is available.'
+    case 'AmbiguousEntry':
+      return `${reason.lookup.declarations.length} declarations named main are available; none was selected.`
+    case 'ParameterizedEntry':
+      return `main has ${reason.actualCount} parameters; bootstrap entry requires exactly zero.`
+    case 'UnavailableEntryType':
+      return `main does not have an available resolved I32 return type (${reason.returnType._tag}).`
+    case 'UnavailableInteger':
+      return `An integer on the reachable path is ${reason.integer._tag}.`
+    case 'MissingParameterReference':
+      return `No local parameter matches ${reason.reference.spelling}.`
+    case 'AmbiguousParameterReference':
+      return `${reason.reference.parameters.length} local parameters match ${reason.reference.spelling}.`
+    case 'UnavailableParameterReference':
+      return 'Parser recovery did not provide a usable parameter reference.'
+    case 'UnboundParameter':
+      return `Parameter #${reason.parameter.id.ordinal} has no value in the current call frame.`
+    case 'MissingCallTarget':
+      return 'The reachable call target is missing.'
+    case 'AmbiguousCallTarget':
+      return 'The reachable call target is ambiguous.'
+    case 'UnavailableCallTarget':
+      return 'Parser recovery did not provide a usable call target.'
+    case 'ArityMismatch':
+      return `The reachable call has ${reason.actualCount} arguments but requires ${reason.expectedCount}.`
+    case 'UnavailableCallContract':
+      return `The reachable call contract is unavailable: ${reason.reason._tag}.`
+    case 'UnavailableFunction':
+      return `No body fact is available for ${declarationLabel(reason.declaration)}.`
+    case 'RecursiveCycle':
+      return `Recursive cycle: ${reason.cycle.map(declarationLabel).join(' → ')}.`
+  }
+}
+
+const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
+  switch (event._tag) {
+    case 'Entry':
+      return `Enter ${declarationLabel(event.declaration)}`
+    case 'Call':
+      return `${declarationLabel(event.caller)} calls ${declarationLabel(event.target)}`
+    case 'Binding':
+      return `Argument #${event.argument.id.ordinal} binds ${event.value.value} to ${declarationLabel(event.target)}.${parameterLabel(event.parameter)}`
+    case 'ParameterRead':
+      return `${declarationLabel(event.declaration)} reads ${parameterLabel(event.parameter)} as ${event.value.value}`
+    case 'Return':
+      return `${declarationLabel(event.declaration)} returns ${event.value.value}`
+  }
+}
+
+export function EvaluationPanel({
+  outcome,
+  onEvaluate,
+}: {
+  readonly outcome: BootstrapEvaluation.Outcome | undefined
+  readonly onEvaluate: () => void
+}) {
+  return (
+    <section className={styles.evaluation} aria-labelledby="evaluation-heading">
+      <div className={styles.evaluationHeading}>
+        <div>
+          <span className={styles.eyebrow}>Direct interpretation</span>
+          <h3 id="evaluation-heading">Bootstrap evaluation</h3>
+        </div>
+        <button type="button" onClick={onEvaluate}>
+          Evaluate current source
+        </button>
+      </div>
+
+      {outcome === undefined ? (
+        <p className={styles.evaluationIdle}>
+          Evaluation is explicit and local. Static analysis above does not execute the program.
+        </p>
+      ) : (
+        <div aria-live="polite">
+          <div className={styles.evaluationOutcome} data-state={outcome._tag}>
+            <span>{outcome._tag}</span>
+            {outcome._tag === 'Completed' ? (
+              <strong>
+                {outcome.result.value} <code>I32</code>
+              </strong>
+            ) : (
+              <>
+                <strong>{outcome.reason._tag}</strong>
+                <p>{blockedSummary(outcome.reason)}</p>
+              </>
+            )}
+          </div>
+
+          <ol className={styles.evaluationTrace} aria-label="Ordered bootstrap evaluation trace">
+            {outcome.trace.map((event, index) => (
+              <li key={`${event._tag}-${event.span.start}-${index}`}>
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{traceLabel(event)}</strong>
+                  <code>
+                    {event.span.sourceId}[{event.span.start}, {event.span.end})
+                  </code>
+                </div>
+                <small>{event._tag}</small>
+              </li>
+            ))}
+          </ol>
+          {outcome.trace.length === 0 ? (
+            <p className={styles.evaluationIdle}>No reachable evaluation events occurred.</p>
+          ) : null}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function SemanticFacts({
   analysis,
   selectedFlowId,
   onSelectFlow,
+  evaluation,
+  onEvaluate,
 }: {
   readonly analysis: SemanticAnalysis.Result
   readonly selectedFlowId: string | undefined
   readonly onSelectFlow: (id: string | undefined) => void
+  readonly evaluation: BootstrapEvaluation.Outcome | undefined
+  readonly onEvaluate: () => void
 }) {
   const presentNames = Array.from(
     new Set(
@@ -769,6 +908,7 @@ function SemanticFacts({
       </section>
 
       <DataFlow analysis={analysis} selectedId={selectedFlowId} onSelect={onSelectFlow} />
+      <EvaluationPanel outcome={evaluation} onEvaluate={onEvaluate} />
 
       <div className={styles.functionList} aria-label="Collected function facts">
         {analysis.functions.map((fact) => {
@@ -925,6 +1065,7 @@ function SemanticFacts({
 export function SyntaxInspector() {
   const [text, setText] = useState(acceptedSource)
   const [selectedFlowId, setSelectedFlowId] = useState<string>()
+  const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
   const analysis = useMemo(() => {
     const source = SourceFile.make(sourceId, encoder.encode(text))
     return SemanticAnalysis.analyze(Parser.parse(Lexer.lex(source)))
@@ -952,6 +1093,7 @@ export function SyntaxInspector() {
           onChange={(event) => {
             setText(event.target.value)
             setSelectedFlowId(undefined)
+            setEvaluation(undefined)
           }}
           spellCheck={false}
           autoCapitalize="off"
@@ -966,6 +1108,7 @@ export function SyntaxInspector() {
               onClick={() => {
                 setText(example.source)
                 setSelectedFlowId(undefined)
+                setEvaluation(undefined)
               }}
             >
               {example.label}
@@ -1000,6 +1143,8 @@ export function SyntaxInspector() {
           analysis={analysis}
           selectedFlowId={selectedFlowId}
           onSelectFlow={setSelectedFlowId}
+          evaluation={evaluation}
+          onEvaluate={() => setEvaluation(BootstrapEvaluation.evaluate(analysis))}
         />
 
         <div className={styles.diagnostics}>

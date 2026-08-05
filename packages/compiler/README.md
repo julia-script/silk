@@ -5,7 +5,14 @@ source bytes, source-owned spans, tokens, lexical diagnostics, a deterministic l
 lossless concrete parser and ordered semantic facts for one or more public functions.
 
 ```ts
-import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-effect/compiler'
+import {
+  BootstrapEvaluation,
+  Lexer,
+  Parser,
+  SemanticAnalysis,
+  SourceFile,
+  SyntaxTree,
+} from '@silk-effect/compiler'
 
 const source = SourceFile.make(
   'memory://example.silk',
@@ -15,6 +22,7 @@ pub fn main() -> I32 { return identity(42) }`),
 const lexical = Lexer.lex(source)
 const parse = Parser.parse(lexical)
 const result = SemanticAnalysis.analyze(parse)
+const evaluation = BootstrapEvaluation.evaluate(result)
 const identity = result.functions[0]
 
 console.log(parse.root.kind) // SourceFile
@@ -27,12 +35,14 @@ console.log(SemanticAnalysis.declarationByName(result, 'main')) // { _tag: 'Reso
 if (identity !== undefined) {
   console.log(SemanticAnalysis.parameterByName(identity.declaration, 'value')) // { _tag: 'Resolved', ... }
 }
+console.log(evaluation._tag) // Completed
 ```
 
 The same actors are available through explicit deep imports such as
 `@silk-effect/compiler/SourceFile`, `@silk-effect/compiler/Lexer`, and
 `@silk-effect/compiler/Parser`. Semantic facts and diagnostics are available through
 `@silk-effect/compiler/SemanticAnalysis` and `@silk-effect/compiler/SemanticDiagnostic`.
+The closed direct evaluator is available through `@silk-effect/compiler/BootstrapEvaluation`.
 
 ## Byte and span conventions
 
@@ -140,9 +150,22 @@ changing the call's expression type or the caller's return compatibility.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
-compilation. Top-level call resolution and positional contract checking exist, but execution,
-recursion policy, conversions, a general scope graph, and dependency scheduling remain deferred.
-Those layers follow only after this narrow source-to-fact contract proves useful.
+compilation. Top-level call resolution and positional contract checking exist, but conversions, a
+general scope graph, and dependency scheduling remain deferred.
+
+## Bootstrap evaluation is not compilation
+
+`BootstrapEvaluation.evaluate` is a pure, direct interpreter over the existing semantic facts. It
+selects one zero-parameter `main: I32`, follows only reachable decimal literals, resolved parameter
+reads, and compatible calls, and returns either an exact `Completed` value or closed `Blocked`
+reason. Its immutable trace records entry, call, positional binding, parameter read, and return
+events with existing semantic provenance. Unreachable broken declarations do not block a valid
+entry path, and direct or mutual recursion becomes a bounded `RecursiveCycle` outcome.
+
+This bootstrap evaluator proves that the frontend facts compose into one source-to-result vertical
+slice. It is not lowering, bytecode, LLVM, native compilation, a process runtime, a general
+interpreter, or a promise about future execution semantics. It performs no I/O and creates no AST,
+HIR, MIR, runtime service, or persistent state.
 
 Token families deliberately deferred with those later grammar decisions include string and
 character literals, floating-point numbers, general operators, separators, attributes, and any

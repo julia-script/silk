@@ -425,6 +425,152 @@
   color: inherit;
 }
 
+.evaluation {
+  margin-top: 0.8rem;
+  border: 1px solid color-mix(in srgb, #8b5cf6 38%, var(--color-fd-border));
+  border-radius: 0.85rem;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, #8b5cf6 12%, transparent), transparent 42%),
+    color-mix(in srgb, var(--color-fd-background) 72%, var(--color-fd-card));
+  padding: 0.8rem;
+}
+
+.evaluationHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.evaluationHeading h3 {
+  margin: 0.12rem 0 0;
+  color: var(--color-fd-foreground);
+  font-size: 0.88rem;
+}
+
+.evaluationHeading button {
+  border: 1px solid color-mix(in srgb, #8b5cf6 58%, var(--color-fd-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, #8b5cf6 13%, var(--color-fd-background));
+  padding: 0.42rem 0.7rem;
+  color: var(--color-fd-foreground);
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.evaluationHeading button:hover,
+.evaluationHeading button:focus-visible {
+  border-color: #8b5cf6;
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #8b5cf6 18%, transparent);
+}
+
+.evaluationIdle {
+  margin: 0.65rem 0 0;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.evaluationOutcome {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 0.2rem 0.65rem;
+  margin-top: 0.7rem;
+  border-left: 3px solid #2ca58d;
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, #2ca58d 8%, var(--color-fd-background));
+  padding: 0.65rem 0.7rem;
+}
+
+.evaluationOutcome[data-state='Blocked'] {
+  border-left-color: #d97706;
+  background: color-mix(in srgb, #d97706 8%, var(--color-fd-background));
+}
+
+.evaluationOutcome > span {
+  grid-row: 1 / span 2;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-fd-background) 75%, transparent);
+  padding: 0.22rem 0.45rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.evaluationOutcome strong {
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 1.05rem;
+}
+
+.evaluationOutcome strong code {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.58rem;
+}
+
+.evaluationOutcome p {
+  grid-column: 2;
+  margin: 0;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.64rem;
+}
+
+.evaluationTrace {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evaluationTrace li {
+  display: grid;
+  grid-template-columns: 1.35rem 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-fd-background) 66%, transparent);
+  padding: 0.45rem 0.55rem;
+}
+
+.evaluationTrace li > span {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, #8b5cf6 16%, transparent);
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+}
+
+.evaluationTrace li > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.evaluationTrace strong {
+  overflow-wrap: anywhere;
+  color: var(--color-fd-foreground);
+  font-size: 0.64rem;
+}
+
+.evaluationTrace code,
+.evaluationTrace small {
+  overflow: hidden;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.55rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .functionList {
   display: grid;
   gap: 0.7rem;
@@ -1144,6 +1290,19 @@
   .flowSelection > div {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .evaluationHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .evaluationTrace li {
+    grid-template-columns: 1.35rem 1fr;
+  }
+
+  .evaluationTrace small {
+    grid-column: 2;
   }
 
   .functionCardHeading {

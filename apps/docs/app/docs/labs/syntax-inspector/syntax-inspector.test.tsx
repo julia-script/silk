@@ -1,7 +1,13 @@
-import { Lexer, Parser, SemanticAnalysis, SourceFile } from '@silk-effect/compiler'
+import {
+  BootstrapEvaluation,
+  Lexer,
+  Parser,
+  SemanticAnalysis,
+  SourceFile,
+} from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { DataFlow } from './syntax-inspector'
+import { DataFlow, EvaluationPanel } from './syntax-inspector'
 
 const encoder = new TextEncoder()
 
@@ -45,5 +51,34 @@ describe('DataFlow', () => {
     expect(incomplete).toContain('Flow stops: no unique target')
     expect(incomplete).not.toContain('binds positionally to')
     expect(incomplete).not.toContain('is returned by')
+  })
+})
+
+describe('EvaluationPanel', () => {
+  it('renders an exact completed result and ordered accessible trace', () => {
+    const outcome = BootstrapEvaluation.evaluate(analyze(completeSource))
+    const markup = renderToStaticMarkup(
+      <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
+    )
+
+    expect(markup).toContain('Completed')
+    expect(markup).toContain('42 <code>I32</code>')
+    expect(markup).toContain('aria-label="Ordered bootstrap evaluation trace"')
+    expect(markup).toContain('main calls identity')
+    expect(markup).toContain('identity returns 42')
+  })
+
+  it('renders a bounded recursive cycle with its partial trace', () => {
+    const outcome = BootstrapEvaluation.evaluate(
+      analyze('pub fn main() -> I32 { return main() }'),
+    )
+    const markup = renderToStaticMarkup(
+      <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
+    )
+
+    expect(markup).toContain('Blocked')
+    expect(markup).toContain('RecursiveCycle')
+    expect(markup).toContain('Recursive cycle: main → main.')
+    expect(markup).toContain('main calls main')
   })
 })

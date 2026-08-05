@@ -5,7 +5,7 @@ import { SyntaxInspector } from './syntax-inspector'
 export const metadata: Metadata = {
   title: 'Syntax Inspector',
   description:
-    'An internal lab for inspecting Silk concrete trees, function-local parameter references, call resolution, and ordered semantic facts.',
+    'An internal lab for inspecting Silk concrete trees, semantic facts, data flow, and closed bootstrap evaluation.',
   robots: {
     index: false,
     follow: false,
@@ -39,7 +39,9 @@ export default function SyntaxInspectorPage() {
           error nodes, and missing leaves. Calls show ordered arguments, positional parameter
           mappings, and a contract state separately from their return compatibility. These
           relationships are semantic provenance, not execution, conversions, a general scope graph,
-          semantic AST, HIR, or a code-generation pipeline.
+          semantic AST, HIR, or a code-generation pipeline. The explicit Evaluate action runs only
+          the closed browser-local bootstrap slice and shows its exact result, blocked reason, and
+          deterministic trace; it is not native compilation or a runtime.
         </p>
       </header>
       <SyntaxInspector />

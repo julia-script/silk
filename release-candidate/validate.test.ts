@@ -212,6 +212,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(Object.keys(manifest.dependencies ?? {})).toEqual(['effect'])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
+      './BootstrapEvaluation',
       './Lexer',
       './LexicalDiagnostic',
       './ParseDiagnostic',
@@ -264,6 +265,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         '--input-type=module',
         '--eval',
         `import * as api from '@silk-effect/compiler';
+import * as evaluationModule from '@silk-effect/compiler/BootstrapEvaluation';
 import * as semanticModule from '@silk-effect/compiler/SemanticAnalysis';
 const paths = ${JSON.stringify(deepPaths)};
 const modules = await Promise.all(
@@ -288,6 +290,8 @@ const visit = (element) => {
 visit(parse.root);
 const analysis = api.SemanticAnalysis.analyze(parse);
 const deepAnalysis = semanticModule.analyze(parse);
+const evaluation = api.BootstrapEvaluation.evaluate(analysis);
+const deepEvaluation = evaluationModule.evaluate(deepAnalysis);
 const call = analysis.functions[1]?.returnedExpression;
 const unknownSource = api.SourceFile.make(
   'memory://packed-unknown.silk',
@@ -304,11 +308,18 @@ const unknownLocalAnalysis = semanticModule.analyze(
 const wrongAritySource = api.SourceFile.make(
   'memory://packed-wrong-arity.silk',
   new TextEncoder().encode(
-    'pub fn identity(value: I32) -> I32 { return value }\npub fn main() -> I32 { return identity() }',
+    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity() }',
   ),
 );
 const wrongArityAnalysis = semanticModule.analyze(
   api.Parser.parse(api.Lexer.lex(wrongAritySource)),
+);
+const cycleSource = api.SourceFile.make(
+  'memory://packed-cycle.silk',
+  new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
+);
+const cycleEvaluation = evaluationModule.evaluate(
+  semanticModule.analyze(api.Parser.parse(api.Lexer.lex(cycleSource))),
 );
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
@@ -382,6 +393,20 @@ console.log(
         ['integerExpression'].filter((key) => key in fact),
       ),
     },
+    evaluation: {
+      rootTag: evaluation._tag,
+      rootResult: evaluation._tag === 'Completed' ? evaluation.result : null,
+      rootTrace: evaluation.trace.map((event) => event._tag),
+      deepTag: deepEvaluation._tag,
+      deepResult: deepEvaluation._tag === 'Completed' ? deepEvaluation.result : null,
+      cycleTag: cycleEvaluation._tag,
+      cycleReason: cycleEvaluation._tag === 'Blocked' ? cycleEvaluation.reason._tag : null,
+      cycleOrdinals:
+        cycleEvaluation._tag === 'Blocked' && cycleEvaluation.reason._tag === 'RecursiveCycle'
+          ? cycleEvaluation.reason.cycle.map((declaration) => declaration.id.ordinal)
+          : [],
+      cycleTrace: cycleEvaluation.trace.map((event) => event._tag),
+    },
     parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code),
   }),
 );`,
@@ -394,6 +419,7 @@ console.log(
     )
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
+      'BootstrapEvaluation',
       'Lexer',
       'LexicalDiagnostic',
       'ParseDiagnostic',
@@ -412,6 +438,7 @@ console.log(
       expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
+    expect(api.deep['./BootstrapEvaluation']).toContain('evaluate')
     expect(api.deep['./Parser']).toContain('parse')
     expect(api.deep['./SemanticAnalysis']).toContain('analyze')
     expect(api.deep['./SemanticAnalysis']).toContain('parameterByName')
@@ -448,6 +475,17 @@ console.log(
       deepLookup: 'Missing',
       legacyResultFields: [],
       legacyFunctionFields: [[], []],
+    })
+    expect(api.evaluation).toEqual({
+      rootTag: 'Completed',
+      rootResult: { _tag: 'I32Value', value: 42 },
+      rootTrace: ['Entry', 'Call', 'Binding', 'ParameterRead', 'Return', 'Return'],
+      deepTag: 'Completed',
+      deepResult: { _tag: 'I32Value', value: 42 },
+      cycleTag: 'Blocked',
+      cycleReason: 'RecursiveCycle',
+      cycleOrdinals: [0, 0],
+      cycleTrace: ['Entry', 'Call'],
     })
     expect(api.parserDiagnostics).toEqual([])
   } finally {
