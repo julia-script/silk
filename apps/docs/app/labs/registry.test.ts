@@ -1,3 +1,4 @@
+import { ToolchainPlan } from '@silk-effect/compiler'
 import { describe, expect, it } from 'vitest'
 import { viewById, views } from './registry'
 
@@ -33,5 +34,16 @@ describe('view registry', () => {
     for (const id of ['tokens', 'tree', 'flow', 'evaluation', 'hir', 'diagnostics']) {
       expect(viewById(id)?.id, id).toBe(id)
     }
+  })
+})
+
+describe('optimization profile', () => {
+  // The workbench derives codegen's debug-info mode from the profile instead of carrying a second
+  // control. That only stays honest while `-g` profiles map to debug mode: if they diverged, the
+  // backend pane would show stripped IR for a build the toolchain plans with debug info.
+  it('keeps debug info whenever the profile asks clang for -g', () => {
+    expect(ToolchainPlan.codegenModeFor('debug')).toBe('debug')
+    expect(ToolchainPlan.codegenModeFor('release-with-debug')).toBe('debug')
+    expect(ToolchainPlan.codegenModeFor('release')).toBe('release')
   })
 })

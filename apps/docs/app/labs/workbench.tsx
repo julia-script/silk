@@ -13,7 +13,8 @@
  */
 
 import { Analysis } from '@silk-effect/compiler'
-import type { BootstrapEvaluation, Target, ToolchainPlan } from '@silk-effect/compiler'
+import { ToolchainPlan } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Target } from '@silk-effect/compiler'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -45,7 +46,6 @@ const initialPreset = presets.find((preset) => preset.label === 'Nested calls') 
  */
 interface WorkbenchState extends ViewContext {
   readonly setModuleSource: (name: string, value: string) => void
-  readonly setMode: (value: 'release' | 'debug') => void
   readonly setProfile: (value: ToolchainPlan.OptimizationProfile) => void
   readonly openPalette: () => void
   readonly addModule: () => void
@@ -235,8 +235,12 @@ export function Workbench() {
   const [modules, setModules] = useState<Readonly<Record<string, string>>>(initialPreset.modules)
   const [root, setRoot] = useState<string>(initialPreset.root)
   const [activeModule, setActiveModule] = useState<string>(initialPreset.root)
-  const [mode, setMode] = useState<'release' | 'debug'>('debug')
+  // One optimization profile drives both panes. Codegen's debug-info mode is *derived* from it
+  // rather than being its own control: the profile already says whether debug info is wanted
+  // (`-g`), so a separate toggle only adds states where the two disagree — the backend pane
+  // showing stripped IR for a build the toolchain plans with `-g`.
   const [profile, setProfile] = useState<ToolchainPlan.OptimizationProfile>('release')
+  const mode = ToolchainPlan.codegenModeFor(profile)
   // The target belongs to the request, not to a backend: the same program lowers differently for
   // each, which is exactly the comparison the layout and MIR panes are for.
   const [target, setTarget] = useState<Target.Id>('aarch64-apple-darwin')
@@ -327,7 +331,6 @@ export function Workbench() {
         Analysis.mirOf(snapshot)._tag === 'Available' ? Analysis.evaluate(snapshot) : undefined,
       ),
     setModuleSource: (name, value) => setModules((current) => ({ ...current, [name]: value })),
-    setMode,
     setProfile,
     openPalette: () => setPaletteOpen(true),
     addModule,
@@ -558,14 +561,6 @@ export function Workbench() {
           ))}
         </select>
 
-        <button
-          type="button"
-          className={shell.toggle}
-          onClick={() => setMode(mode === 'release' ? 'debug' : 'release')}
-          aria-pressed={mode === 'debug'}
-        >
-          {mode}
-        </button>
         <label className="sr-only" htmlFor="profile">
           Optimization profile
         </label>
@@ -573,9 +568,7 @@ export function Workbench() {
           id="profile"
           className={shell.toggle}
           value={profile}
-          onChange={(event) =>
-            setProfile(event.target.value as ToolchainPlan.OptimizationProfile)
-          }
+          onChange={(event) => setProfile(event.target.value as ToolchainPlan.OptimizationProfile)}
         >
           {(['debug', 'release', 'release-with-debug'] as const).map((candidate) => (
             <option key={candidate} value={candidate}>
