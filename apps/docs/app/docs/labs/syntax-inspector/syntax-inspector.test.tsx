@@ -82,7 +82,7 @@ describe('EvaluationPanel', () => {
     expect(markup).toContain('main calls main')
   })
 
-  it('renders the temporary nested-expression boundary with its trace prefix', () => {
+  it('renders completed nested evaluation with call depth and result binding', () => {
     const outcome = BootstrapEvaluation.evaluate(
       analyze(`pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`),
@@ -91,9 +91,25 @@ pub fn main() -> I32 { return identity(identity(42)) }`),
       <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
     )
 
-    expect(markup).toContain('UnsupportedNestedExpression')
-    expect(markup).toContain('Nested call evaluation is not available yet at')
+    expect(markup).toContain('Completed')
+    expect(markup).toContain('Nested result 42 from')
+    expect(markup).toContain('depth 1 · Call')
     expect(markup).toContain('main calls identity')
+  })
+
+  it('renders an inner blocked endpoint without an enclosing nested-result binding', () => {
+    const outcome = BootstrapEvaluation.evaluate(
+      analyze(`pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`),
+    )
+    const markup = renderToStaticMarkup(
+      <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
+    )
+
+    expect(markup).toContain('MissingCallTarget')
+    expect(markup).toContain('aria-label="Blocked evaluation endpoint"')
+    expect(markup).not.toContain('Nested result')
   })
 })
 
@@ -105,6 +121,9 @@ describe('SyntaxInspector', () => {
     expect(markup).toContain('Nested call · unresolved')
     expect(markup).toContain('Nested call · wrong arity')
     expect(markup).toContain('Damaged nested call')
+    expect(markup).toContain('Nested evaluation · completed')
+    expect(markup).toContain('Nested evaluation · blocked')
+    expect(markup).toContain('Nested evaluation · cycle')
     expect(markup).toContain('semantic AST, HIR, and code generation do not exist yet')
   })
 })

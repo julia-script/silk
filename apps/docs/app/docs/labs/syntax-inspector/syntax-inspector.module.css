@@ -537,6 +537,18 @@
   padding: 0.45rem 0.55rem;
 }
 
+.evaluationTrace li[data-depth='1'] {
+  margin-inline-start: 0.7rem;
+}
+
+.evaluationTrace li[data-depth='2'] {
+  margin-inline-start: 1.4rem;
+}
+
+.evaluationTrace li[data-depth='3'] {
+  margin-inline-start: 2.1rem;
+}
+
 .evaluationTrace li > span {
   display: grid;
   width: 1.25rem;
@@ -567,6 +579,30 @@
   color: var(--color-fd-muted-foreground);
   font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 0.55rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evaluationEndpoint {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  border: 1px dashed color-mix(in srgb, #d97706 58%, var(--color-fd-border));
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.6rem;
+}
+
+.evaluationEndpoint strong {
+  color: var(--color-fd-foreground);
+}
+
+.evaluationEndpoint code {
+  margin-inline-start: auto;
+  overflow: hidden;
+  font-family: var(--font-mono), ui-monospace, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

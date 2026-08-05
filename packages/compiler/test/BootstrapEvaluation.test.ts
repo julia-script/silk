@@ -79,25 +79,39 @@ pub fn main() -> I32 { return second(10, 42) }`,
   )
 })
 
-it('blocks at a reachable analyzed nested expression with exact provenance', () => {
+it('evaluates a nested call inside out with exact trace provenance', () => {
   const outcome = evaluate(
     'fixture://evaluation-nested.silk',
     `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`,
   )
 
-  assert.strictEqual(outcome._tag, 'Blocked')
-  if (outcome._tag !== 'Blocked') return
-  assert.strictEqual(outcome.reason._tag, 'UnsupportedNestedExpression')
-  if (outcome.reason._tag !== 'UnsupportedNestedExpression') return
-  assert.strictEqual(outcome.reason.expression._tag, 'Call')
-  assert.strictEqual(outcome.reason.argument.expression, outcome.reason.expression)
-  assert.deepEqual(outcome.reason.expressionSpan, outcome.reason.expression.syntax.span)
-  assert.deepEqual(outcome.reason.argument.id.callSpan, outcome.reason.call.syntax.span)
+  assert.strictEqual(outcome._tag, 'Completed')
+  if (outcome._tag !== 'Completed') return
+  assert.strictEqual(outcome.result.value, 42)
   assert.deepEqual(
     outcome.trace.map((event) => event._tag),
-    ['Entry', 'Call'],
+    [
+      'Entry',
+      'Call',
+      'Call',
+      'Binding',
+      'ParameterRead',
+      'Return',
+      'Binding',
+      'ParameterRead',
+      'Return',
+      'Return',
+    ],
   )
+  const calls = outcome.trace.filter((event) => event._tag === 'Call')
+  const bindings = outcome.trace.filter((event) => event._tag === 'Binding')
+  assert.strictEqual(calls.length, 2)
+  assert.notDeepEqual(calls.at(0)?.span, calls.at(1)?.span)
+  assert.strictEqual(bindings.at(0)?.argument.expression._tag, 'Integer')
+  assert.strictEqual(bindings.at(1)?.argument.expression._tag, 'Call')
+  assert.strictEqual(bindings.at(0)?.value.value, 42)
+  assert.strictEqual(bindings.at(1)?.value.value, 42)
 })
 
 it('ignores nested expressions outside the reachable declaration graph', () => {
@@ -113,13 +127,134 @@ pub fn main() -> I32 { return 42 }`,
   assert.strictEqual(outcome.result.value, 42)
 })
 
-it('repeats the transitional nested-expression outcome deterministically', () => {
+it('repeats successful nested evaluation deterministically', () => {
   const source = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
   const first = evaluate('fixture://evaluation-repeat-nested.silk', source)
   const second = evaluate('fixture://evaluation-repeat-nested.silk', source)
 
   assert.deepEqual(first, second)
+})
+
+it('evaluates nested siblings left to right before emitting enclosing bindings', () => {
+  const outcome = evaluate(
+    'fixture://evaluation-nested-siblings.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), identity(2)) }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Completed')
+  if (outcome._tag !== 'Completed') return
+  assert.strictEqual(outcome.result.value, 2)
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    [
+      'Entry',
+      'Call',
+      'Call',
+      'Binding',
+      'ParameterRead',
+      'Return',
+      'Call',
+      'Binding',
+      'ParameterRead',
+      'Return',
+      'Binding',
+      'Binding',
+      'ParameterRead',
+      'Return',
+      'Return',
+    ],
+  )
+  const calls = outcome.trace.filter((event) => event._tag === 'Call')
+  const bindings = outcome.trace.filter((event) => event._tag === 'Binding')
+  assert.ok((calls.at(1)?.span.start ?? 0) < (calls.at(2)?.span.start ?? 0))
+  assert.deepEqual(
+    bindings.slice(-2).map((event) => [event.argument.id.ordinal, event.value.value]),
+    [
+      [0, 1],
+      [1, 2],
+    ],
+  )
+})
+
+it('retains earlier nested work when a later inner target blocks', () => {
+  const outcome = evaluate(
+    'fixture://evaluation-later-inner-block.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'MissingCallTarget')
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    ['Entry', 'Call', 'Call', 'Binding', 'ParameterRead', 'Return'],
+  )
+  assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Binding').length, 1)
+  assert.strictEqual(outcome.trace.at(-1)?._tag, 'Return')
+})
+
+it('blocks at wrong arity at nested depth without an enclosing binding', () => {
+  const outcome = evaluate(
+    'fixture://evaluation-inner-arity.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity()) }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'ArityMismatch')
+  if (outcome.reason._tag !== 'ArityMismatch') return
+  assert.strictEqual(outcome.reason.expectedCount, 1)
+  assert.strictEqual(outcome.reason.actualCount, 0)
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    ['Entry', 'Call'],
+  )
+})
+
+it('bounds a cycle reached inside an argument before entering the enclosing target', () => {
+  const outcome = evaluate(
+    'fixture://evaluation-nested-cycle.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(main()) }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'RecursiveCycle')
+  if (outcome.reason._tag !== 'RecursiveCycle') return
+  assert.deepEqual(
+    outcome.reason.cycle.map((declaration) => declaration.id.ordinal),
+    [1, 1],
+  )
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    ['Entry', 'Call', 'Call'],
+  )
+  assert.strictEqual(
+    outcome.trace.some((event) => event._tag === 'Binding'),
+    false,
+  )
+})
+
+it('evaluates representative deep nesting without losing the exact result', () => {
+  const depth = 64
+  const expression = `${'identity('.repeat(depth)}42${')'.repeat(depth)}`
+  const outcome = evaluate(
+    'fixture://evaluation-deep-nested.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return ${expression} }`,
+  )
+
+  assert.strictEqual(outcome._tag, 'Completed')
+  if (outcome._tag !== 'Completed') return
+  assert.strictEqual(outcome.result.value, 42)
+  assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Call').length, depth)
 })
 
 it('returns precise closed entry reasons', () => {

@@ -169,11 +169,12 @@ general scope graph, and dependency scheduling remain deferred.
 selects one zero-parameter `main: I32`, follows only reachable decimal literals, resolved parameter
 reads, and compatible calls, and returns either an exact `Completed` value or closed `Blocked`
 reason. Its immutable trace records entry, call, positional binding, parameter read, and return
-events with existing semantic provenance. Unreachable broken declarations do not block a valid
-entry path, and direct or mutual recursion becomes a bounded `RecursiveCycle` outcome. Recursive
-semantic expressions are deliberately one increment ahead of execution: reaching a nested call
-argument currently returns `UnsupportedNestedExpression` with its exact argument identity, call
-span, and deterministic trace prefix. Unreachable nested syntax is ignored.
+events with existing semantic provenance. Arguments, including nested calls, are evaluated fully
+from left to right before their values are bound to the enclosing target. The trace records the
+enclosing call first, then every nested argument event, then the enclosing bindings and target body.
+An inner blocked reason propagates unchanged without claiming enclosing bindings or returns that did
+not happen. Unreachable broken declarations do not block a valid entry path, and direct, mutual, or
+nested-argument recursion becomes a bounded `RecursiveCycle` outcome.
 
 This bootstrap evaluator proves that the frontend facts compose into one source-to-result vertical
 slice. It is not lowering, bytecode, LLVM, native compilation, a process runtime, a general

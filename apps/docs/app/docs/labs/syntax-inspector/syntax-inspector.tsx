@@ -8,6 +8,7 @@ import {
   SourceFile,
   SyntaxTree,
 } from '@silk-effect/compiler'
+import type { SourceSpan } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { projectDataFlow, type FlowEdge, type FlowNode } from './flow-model'
 import styles from './syntax-inspector.module.css'
@@ -155,6 +156,22 @@ pub fn main() -> I32 { return identity(identity()) }`,
     label: 'Damaged nested call',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(@)) }`,
+  },
+  {
+    label: 'Nested evaluation · completed',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`,
+  },
+  {
+    label: 'Nested evaluation · blocked',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
+  },
+  {
+    label: 'Nested evaluation · cycle',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(main()) }`,
   },
   {
     label: 'Missing parameter type',
@@ -797,13 +814,70 @@ const blockedSummary = (reason: BootstrapEvaluation.BlockedReason): string => {
       return `The reachable call has ${reason.actualCount} arguments but requires ${reason.expectedCount}.`
     case 'UnavailableCallContract':
       return `The reachable call contract is unavailable: ${reason.reason._tag}.`
-    case 'UnsupportedNestedExpression':
-      return `Nested call evaluation is not available yet at [${reason.expressionSpan.start}, ${reason.expressionSpan.end}).`
     case 'UnavailableFunction':
       return `No body fact is available for ${declarationLabel(reason.declaration)}.`
     case 'RecursiveCycle':
       return `Recursive cycle: ${reason.cycle.map(declarationLabel).join(' → ')}.`
   }
+}
+
+const blockedSpan = (
+  reason: BootstrapEvaluation.BlockedReason,
+): SourceSpan.SourceSpan | undefined => {
+  switch (reason._tag) {
+    case 'MissingEntry':
+      return undefined
+    case 'AmbiguousEntry':
+      return reason.lookup.declarations.at(0)?.syntax.span
+    case 'ParameterizedEntry':
+    case 'UnavailableEntryType':
+      return reason.declaration.syntax.span
+    case 'UnavailableInteger':
+      return reason.integer.syntax.span
+    case 'MissingParameterReference':
+    case 'AmbiguousParameterReference':
+      return reason.reference.token.span
+    case 'UnavailableParameterReference':
+      return reason.reference.syntax.span
+    case 'UnboundParameter':
+      return reason.reference.syntax.span
+    case 'MissingCallTarget':
+    case 'AmbiguousCallTarget':
+    case 'UnavailableCallTarget':
+    case 'ArityMismatch':
+    case 'UnavailableCallContract':
+      return reason.call.syntax.span
+    case 'UnavailableFunction':
+      return reason.declaration.syntax.span
+    case 'RecursiveCycle':
+      return reason.closingCallSpan
+  }
+}
+
+interface TraceRow {
+  readonly event: BootstrapEvaluation.TraceEvent
+  readonly depth: number
+}
+
+const sameDeclarationIdentity = (
+  left: SemanticAnalysis.DeclarationFact,
+  right: SemanticAnalysis.DeclarationFact,
+): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
+
+const traceRows = (trace: ReadonlyArray<BootstrapEvaluation.TraceEvent>): ReadonlyArray<TraceRow> => {
+  const openCalls: Array<SemanticAnalysis.DeclarationFact> = []
+  return trace.map((event) => {
+    const row = Object.freeze({ event, depth: openCalls.length })
+    if (event._tag === 'Call') {
+      openCalls.push(event.target)
+    } else if (event._tag === 'Return') {
+      const current = openCalls.at(-1)
+      if (current !== undefined && sameDeclarationIdentity(current, event.declaration)) {
+        openCalls.pop()
+      }
+    }
+    return row
+  })
 }
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
@@ -813,7 +887,9 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
     case 'Call':
       return `${declarationLabel(event.caller)} calls ${declarationLabel(event.target)}`
     case 'Binding':
-      return `Argument #${event.argument.id.ordinal} binds ${event.value.value} to ${declarationLabel(event.target)}.${parameterLabel(event.parameter)}`
+      return event.argument.expression._tag === 'Call'
+        ? `Nested result ${event.value.value} from [${event.argument.syntax.span.start}, ${event.argument.syntax.span.end}) binds to ${declarationLabel(event.target)}.${parameterLabel(event.parameter)}`
+        : `Argument #${event.argument.id.ordinal} binds ${event.value.value} to ${declarationLabel(event.target)}.${parameterLabel(event.parameter)}`
     case 'ParameterRead':
       return `${declarationLabel(event.declaration)} reads ${parameterLabel(event.parameter)} as ${event.value.value}`
     case 'Return':
@@ -828,6 +904,8 @@ export function EvaluationPanel({
   readonly outcome: BootstrapEvaluation.Outcome | undefined
   readonly onEvaluate: () => void
 }) {
+  const rows = outcome === undefined ? [] : traceRows(outcome.trace)
+  const endpoint = outcome?._tag === 'Blocked' ? blockedSpan(outcome.reason) : undefined
   return (
     <section className={styles.evaluation} aria-labelledby="evaluation-heading">
       <div className={styles.evaluationHeading}>
@@ -861,8 +939,8 @@ export function EvaluationPanel({
           </div>
 
           <ol className={styles.evaluationTrace} aria-label="Ordered bootstrap evaluation trace">
-            {outcome.trace.map((event, index) => (
-              <li key={`${event._tag}-${event.span.start}-${index}`}>
+            {rows.map(({ event, depth }, index) => (
+              <li key={`${event._tag}-${event.span.start}-${index}`} data-depth={Math.min(depth, 3)}>
                 <span>{index + 1}</span>
                 <div>
                   <strong>{traceLabel(event)}</strong>
@@ -870,10 +948,23 @@ export function EvaluationPanel({
                     {event.span.sourceId}[{event.span.start}, {event.span.end})
                   </code>
                 </div>
-                <small>{event._tag}</small>
+                <small>
+                  depth {depth} · {event._tag}
+                </small>
               </li>
             ))}
           </ol>
+          {outcome._tag === 'Blocked' ? (
+            <aside className={styles.evaluationEndpoint} aria-label="Blocked evaluation endpoint">
+              <span>Stopped at</span>
+              <strong>{outcome.reason._tag}</strong>
+              {endpoint === undefined ? null : (
+                <code>
+                  {endpoint.sourceId}[{endpoint.start}, {endpoint.end})
+                </code>
+              )}
+            </aside>
+          ) : null}
           {outcome.trace.length === 0 ? (
             <p className={styles.evaluationIdle}>No reachable evaluation events occurred.</p>
           ) : null}
@@ -1086,10 +1177,11 @@ function SemanticFacts({
       <p className={styles.boundaryNote}>
         Parameters have function-local identities, declared types, closed lookup, and exact
         reference links. Calls now expose recursive expression facts, ordered argument identities,
-        positional mappings, contracts, and exact provenance at every parsed depth. Evaluation of a
-        reachable nested call is deliberately blocked until the next milestone. These arrows record
-        semantic relationships, not execution order. Conversions, general scope graphs, semantic
-        AST, HIR, and code generation do not exist yet.
+        positional mappings, contracts, and exact provenance at every parsed depth. Evaluation now
+        follows those recursive facts left to right, producing nested trace groups and exact blocked
+        endpoints from the authoritative event sequence. These arrows record semantic relationships,
+        not execution order. Conversions, general scope graphs, semantic AST, HIR, and code
+        generation do not exist yet.
       </p>
     </section>
   )

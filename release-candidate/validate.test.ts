@@ -444,6 +444,8 @@ console.log(
       type: nestedOuter?._tag === 'Call' ? nestedOuter.type : null,
       evaluationReason:
         nestedEvaluation._tag === 'Blocked' ? nestedEvaluation.reason._tag : null,
+      evaluationResult:
+        nestedEvaluation._tag === 'Completed' ? nestedEvaluation.result : null,
       evaluationTrace: nestedEvaluation.trace.map((event) => event._tag),
     },
     parserDiagnostics: parse.diagnostics.map((diagnostic) => diagnostic.code),
@@ -537,8 +539,20 @@ console.log(
       outerContract: 'Compatible',
       mappingCount: 1,
       type: { _tag: 'Available', type: 'I32' },
-      evaluationReason: 'UnsupportedNestedExpression',
-      evaluationTrace: ['Entry', 'Call'],
+      evaluationReason: null,
+      evaluationResult: { _tag: 'I32Value', value: 42 },
+      evaluationTrace: [
+        'Entry',
+        'Call',
+        'Call',
+        'Binding',
+        'ParameterRead',
+        'Return',
+        'Binding',
+        'ParameterRead',
+        'Return',
+        'Return',
+      ],
     })
     expect(api.parserDiagnostics).toEqual([])
   } finally {

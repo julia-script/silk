@@ -146,14 +146,6 @@ export type BlockedReason =
       readonly reason: SemanticAnalysis.UnavailableCallContractReason
     }
   | {
-      readonly _tag: 'UnsupportedNestedExpression'
-      readonly caller: SemanticAnalysis.DeclarationFact
-      readonly call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
-      readonly argument: SemanticAnalysis.ArgumentFact
-      readonly expression: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>
-      readonly expressionSpan: SourceSpan.SourceSpan
-    }
-  | {
       readonly _tag: 'UnavailableFunction'
       readonly declaration: SemanticAnalysis.DeclarationFact
     }
@@ -263,24 +255,148 @@ const readParameter = (
   return Object.freeze({ _tag: 'Value', value: binding.value })
 }
 
-const evaluateArgument = (
+interface EvaluatedArgument {
+  readonly argument: SemanticAnalysis.ArgumentFact
+  readonly mapping: SemanticAnalysis.ArgumentMappingFact
+  readonly value: I32Value
+}
+
+function evaluateCall(
+  analysis: SemanticAnalysis.Result,
   declaration: SemanticAnalysis.DeclarationFact,
   call: Extract<SemanticAnalysis.ExpressionFact, { readonly _tag: 'Call' }>,
-  argument: SemanticAnalysis.ArgumentFact,
   frame: Frame,
+  active: ReadonlyArray<SemanticAnalysis.DeclarationFact>,
   trace: Array<TraceEvent>,
-): Step => {
-  const expression = argument.expression
-  if (expression._tag === 'Identifier') return readParameter(declaration, expression, frame, trace)
-  if (expression._tag === 'Call') {
+): Step {
+  const reference = call.reference
+  if (reference._tag === 'Missing') {
+    return blockedStep({ _tag: 'MissingCallTarget', caller: declaration, call })
+  }
+  if (reference._tag === 'Ambiguous') {
+    return blockedStep({ _tag: 'AmbiguousCallTarget', caller: declaration, call })
+  }
+  if (reference._tag === 'Unavailable') {
+    return blockedStep({ _tag: 'UnavailableCallTarget', caller: declaration, call })
+  }
+
+  const target = reference.declaration
+  if (call.contract._tag === 'ArityMismatch') {
     return blockedStep({
-      _tag: 'UnsupportedNestedExpression',
+      _tag: 'ArityMismatch',
       caller: declaration,
+      target,
       call,
-      argument,
-      expression,
-      expressionSpan: expression.syntax.span,
+      expectedCount: call.contract.expectedCount,
+      actualCount: call.contract.actualCount,
     })
+  }
+  if (
+    call.contract._tag === 'Unavailable' &&
+    call.contract.reason._tag !== 'UnavailableMappedType'
+  ) {
+    return blockedStep({
+      _tag: 'UnavailableCallContract',
+      caller: declaration,
+      target,
+      call,
+      reason: call.contract.reason,
+    })
+  }
+
+  append(trace, {
+    _tag: 'Call',
+    caller: declaration,
+    target,
+    call,
+    span: call.syntax.span,
+  })
+
+  const evaluatedArguments: Array<EvaluatedArgument> = []
+  for (const argument of call.arguments) {
+    const mapping = call.mappings.find(
+      (candidate) => candidate.argument.id.ordinal === argument.id.ordinal,
+    )
+    if (mapping === undefined) {
+      return blockedStep({
+        _tag: 'UnavailableCallContract',
+        caller: declaration,
+        target,
+        call,
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call.syntax }),
+      })
+    }
+    const argumentResult = evaluateExpression(
+      analysis,
+      declaration,
+      argument.expression,
+      frame,
+      active,
+      trace,
+    )
+    if (argumentResult._tag === 'Blocked') return argumentResult
+    evaluatedArguments.push(Object.freeze({ argument, mapping, value: argumentResult.value }))
+  }
+
+  if (call.contract._tag === 'Unavailable') {
+    return blockedStep({
+      _tag: 'UnavailableCallContract',
+      caller: declaration,
+      target,
+      call,
+      reason: call.contract.reason,
+    })
+  }
+
+  const cycleStart = active.findIndex((candidate) => sameDeclaration(candidate, target))
+  if (cycleStart >= 0) {
+    return blockedStep({
+      _tag: 'RecursiveCycle',
+      cycle: Object.freeze([...active.slice(cycleStart), target]),
+      closingCall: call,
+      closingCallSpan: call.syntax.span,
+    })
+  }
+
+  const targetFact = functionFor(analysis, target)
+  if (targetFact === undefined) {
+    return blockedStep({ _tag: 'UnavailableFunction', declaration: target })
+  }
+
+  const bindings = evaluatedArguments.map(({ argument, mapping, value: argumentValue }) => {
+    append(trace, {
+      _tag: 'Binding',
+      target,
+      argument,
+      parameter: mapping.parameter,
+      value: argumentValue,
+      span: argument.syntax.span,
+    })
+    return Object.freeze({ parameter: mapping.parameter, value: argumentValue })
+  })
+
+  return evaluateFunction(
+    analysis,
+    targetFact,
+    Object.freeze(bindings),
+    Object.freeze([...active, target]),
+    trace,
+  )
+}
+
+function evaluateExpression(
+  analysis: SemanticAnalysis.Result,
+  declaration: SemanticAnalysis.DeclarationFact,
+  expression: SemanticAnalysis.ExpressionFact,
+  frame: Frame,
+  active: ReadonlyArray<SemanticAnalysis.DeclarationFact>,
+  trace: Array<TraceEvent>,
+): Step {
+  if (expression._tag === 'Identifier') {
+    return readParameter(declaration, expression, frame, trace)
+  }
+  if (expression._tag === 'Call') {
+    return evaluateCall(analysis, declaration, expression, frame, active, trace)
   }
   if (expression.integer._tag !== 'Available') {
     return blockedStep({
@@ -292,117 +408,16 @@ const evaluateArgument = (
   return Object.freeze({ _tag: 'Value', value: value(expression.integer.value) })
 }
 
-const evaluateFunction = (
+function evaluateFunction(
   analysis: SemanticAnalysis.Result,
   fact: SemanticAnalysis.FunctionFact,
   frame: Frame,
   active: ReadonlyArray<SemanticAnalysis.DeclarationFact>,
   trace: Array<TraceEvent>,
-): Step => {
+): Step {
   const declaration = fact.declaration
   const expression = fact.returnedExpression
-  let evaluated: Step
-
-  if (expression._tag === 'Integer') {
-    evaluated =
-      expression.integer._tag === 'Available'
-        ? Object.freeze({ _tag: 'Value', value: value(expression.integer.value) })
-        : blockedStep({ _tag: 'UnavailableInteger', declaration, integer: expression.integer })
-  } else if (expression._tag === 'Identifier') {
-    evaluated = readParameter(declaration, expression, frame, trace)
-  } else {
-    const call = expression
-    const reference = call.reference
-    if (reference._tag === 'Missing') {
-      return blockedStep({ _tag: 'MissingCallTarget', caller: declaration, call })
-    }
-    if (reference._tag === 'Ambiguous') {
-      return blockedStep({ _tag: 'AmbiguousCallTarget', caller: declaration, call })
-    }
-    if (reference._tag === 'Unavailable') {
-      return blockedStep({ _tag: 'UnavailableCallTarget', caller: declaration, call })
-    }
-
-    const target = reference.declaration
-    if (call.contract._tag === 'ArityMismatch') {
-      return blockedStep({
-        _tag: 'ArityMismatch',
-        caller: declaration,
-        target,
-        call,
-        expectedCount: call.contract.expectedCount,
-        actualCount: call.contract.actualCount,
-      })
-    }
-    if (call.contract._tag === 'Unavailable') {
-      return blockedStep({
-        _tag: 'UnavailableCallContract',
-        caller: declaration,
-        target,
-        call,
-        reason: call.contract.reason,
-      })
-    }
-
-    append(trace, {
-      _tag: 'Call',
-      caller: declaration,
-      target,
-      call,
-      span: call.syntax.span,
-    })
-
-    const bindings: Array<Binding> = []
-    for (const argument of call.arguments) {
-      const mapping = call.mappings.find(
-        (candidate) => candidate.argument.id.ordinal === argument.id.ordinal,
-      )
-      if (mapping === undefined) {
-        return blockedStep({
-          _tag: 'UnavailableCallContract',
-          caller: declaration,
-          target,
-          call,
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call.syntax }),
-        })
-      }
-      const argumentResult = evaluateArgument(declaration, call, argument, frame, trace)
-      if (argumentResult._tag === 'Blocked') return argumentResult
-      const binding = Object.freeze({ parameter: mapping.parameter, value: argumentResult.value })
-      bindings.push(binding)
-      append(trace, {
-        _tag: 'Binding',
-        target,
-        argument,
-        parameter: mapping.parameter,
-        value: argumentResult.value,
-        span: argument.syntax.span,
-      })
-    }
-
-    const cycleStart = active.findIndex((candidate) => sameDeclaration(candidate, target))
-    if (cycleStart >= 0) {
-      return blockedStep({
-        _tag: 'RecursiveCycle',
-        cycle: Object.freeze([...active.slice(cycleStart), target]),
-        closingCall: call,
-        closingCallSpan: call.syntax.span,
-      })
-    }
-
-    const targetFact = functionFor(analysis, target)
-    if (targetFact === undefined) {
-      return blockedStep({ _tag: 'UnavailableFunction', declaration: target })
-    }
-    evaluated = evaluateFunction(
-      analysis,
-      targetFact,
-      Object.freeze(bindings),
-      Object.freeze([...active, target]),
-      trace,
-    )
-  }
-
+  const evaluated = evaluateExpression(analysis, declaration, expression, frame, active, trace)
   if (evaluated._tag === 'Blocked') return evaluated
   append(trace, {
     _tag: 'Return',
