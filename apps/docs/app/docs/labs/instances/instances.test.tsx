@@ -7,7 +7,7 @@ import { DiscoveryView, InstancesLab } from './instances'
 const encoder = new TextEncoder()
 
 const snapshot = (text: string): Analysis.Snapshot =>
-  Analysis.ofSource('memory://instances-test.silk', encoder.encode(text))
+  Analysis.ofSource('memory/instances-test', encoder.encode(text))
 
 const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
@@ -18,8 +18,8 @@ describe('DiscoveryView', () => {
     const markup = renderToStaticMarkup(<DiscoveryView discovery={discovery} />)
 
     expect(markup).toContain('resolved · main')
-    expect(markup.indexOf('memory://instances-test.silk.main')).toBeLessThan(
-      markup.indexOf('memory://instances-test.silk.identity'),
+    expect(markup.indexOf('memory/instances-test.main')).toBeLessThan(
+      markup.indexOf('memory/instances-test.identity'),
     )
     expect(markup).toContain('&lt;&gt;[]')
   })

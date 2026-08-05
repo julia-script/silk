@@ -85,12 +85,12 @@ export interface ParameterFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** One public function declaration header and its syntax-owned semantic facts. */
+/** One function declaration header and its syntax-owned semantic facts. */
 export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
   readonly id: DeclarationId
   readonly canonical: CanonicalState
-  readonly visibility: 'Public'
+  readonly visibility: 'Public' | 'Private'
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly name: DeclaredName
@@ -403,11 +403,12 @@ interface PendingHeader {
   readonly name: DeclaredName
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly returnType: ReturnTypeFact
+  readonly visibility: 'Public' | 'Private'
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 /** Collects one module's ordered declaration headers with canonical identity states. */
-export const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
+const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const pending = SyntaxTree.directNodes(syntax.root, 'FunctionDeclaration').map(
     (node, ordinal): PendingHeader => {
@@ -432,6 +433,10 @@ export const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         name: presentName(source, node),
         parameters,
         returnType: returnType.fact,
+        visibility:
+          SyntaxTree.directToken(node, 'PubKeyword') === undefined
+            ? ('Private' as const)
+            : ('Public' as const),
         diagnostics: Object.freeze([
           ...analyzedParameters.flatMap((result) => result.diagnostics),
           ...duplicateParameterDiagnostics(parameters),
@@ -478,7 +483,7 @@ export const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       _tag: 'FunctionDeclaration',
       id: header.id,
       canonical,
-      visibility: 'Public',
+      visibility: header.visibility,
       parameterCount: header.parameters.length,
       parameters: header.parameters,
       name: header.name,

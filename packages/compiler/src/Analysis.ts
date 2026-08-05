@@ -10,9 +10,11 @@ import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as Target from './Target.js'
+import type * as Token from './Token.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
@@ -32,6 +34,7 @@ export interface Snapshot {
   readonly _tag: 'AnalysisSnapshot'
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
+  readonly resolution: NameResolution.Resolution
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly instances: Instances.Discovery
@@ -45,8 +48,18 @@ export interface Snapshot {
 export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
   const closure = ModuleClosure.load(request)
   const index = DeclarationIndex.collect(closure)
+  const resolution = NameResolution.resolve(closure, index)
   const results = new Map(
-    closure.modules.map((module) => [module.name, Elaboration.elaborateModule(module.syntax)]),
+    closure.modules.map((module) => {
+      const headers = index.modules.find((candidate) => candidate.module === module.name)
+      const scope = NameResolution.scopeOf(resolution, module.name)
+      if (headers === undefined || scope === undefined)
+        throw new RangeError(`Analysis lost module facts for ${module.name}`)
+      return [
+        module.name,
+        Elaboration.elaborateModule({ syntax: module.syntax, headers, scope, index }),
+      ]
+    }),
   )
   const ownership = new Map(
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
@@ -68,6 +81,7 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
+    resolution.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
@@ -75,6 +89,7 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     _tag: 'AnalysisSnapshot',
     closure,
     index,
+    resolution,
     results,
     ownership,
     instances,
@@ -99,6 +114,34 @@ export const cycles = (self: Snapshot): ReadonlyArray<ReadonlyArray<string>> => 
 
 /** Returns the closure's declaration index. */
 export const declarationIndex = (self: Snapshot): DeclarationIndex.Index => self.index
+
+export const nameResolution = (self: Snapshot): NameResolution.Resolution => self.resolution
+export const moduleScope = (
+  self: Snapshot,
+  module: string,
+): NameResolution.ModuleScope | undefined => NameResolution.scopeOf(self.resolution, module)
+export const lookupName = (
+  self: Snapshot,
+  module: string,
+  spelling: string,
+): NameResolution.Lookup => {
+  const scope = moduleScope(self, module)
+  return scope === undefined
+    ? Object.freeze({ _tag: 'Missing', spelling })
+    : NameResolution.lookup(scope, spelling)
+}
+export const lookupQualifiedName = (
+  self: Snapshot,
+  module: string,
+  namespace: string,
+  member: string,
+  token: Token.Token,
+): NameResolution.Lookup => {
+  const scope = moduleScope(self, module)
+  return scope === undefined
+    ? Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
+    : NameResolution.lookupQualified(scope, self.index, namespace, member, token)
+}
 
 /** Returns one module's syntax artifact, or `undefined` for an unknown identity. */
 export const syntaxOf = (self: Snapshot, module: string): SyntaxFile.SyntaxFile | undefined =>

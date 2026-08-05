@@ -3,6 +3,7 @@ import * as Option from 'effect/Option'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceSpan from '../src/SourceSpan.js'
+import { raise } from './support/raise.js'
 
 const source = SourceFile.make('memory://diagnostic.silk', new Uint8Array(64))
 
@@ -72,14 +73,16 @@ it('assigns identity ordinals among equal phase, code, and span', () => {
   const equal = Diagnostic.unknownFunction('twice', span)
   const other = Diagnostic.unknownType('Other', spanAt(2, 3))
   const identities = Diagnostic.identify([equal, other, equal])
+  const first = identities.at(0) ?? raise('expected first diagnostic identity')
+  const repeated = identities.at(2) ?? raise('expected repeated diagnostic identity')
 
   assert.deepEqual(
     identities.map((identity) => identity.ordinal),
     [0, 0, 1],
   )
-  assert.strictEqual(Diagnostic.identityEquals(identities[0]!, Diagnostic.identity(equal)), true)
-  assert.strictEqual(Diagnostic.identityEquals(identities[0]!, identities[2]!), false)
-  assert.isBelow(Diagnostic.compareIdentity(identities[0]!, identities[2]!), 0)
+  assert.strictEqual(Diagnostic.identityEquals(first, Diagnostic.identity(equal)), true)
+  assert.strictEqual(Diagnostic.identityEquals(first, repeated), false)
+  assert.isBelow(Diagnostic.compareIdentity(first, repeated), 0)
 })
 
 it('merges ownership diagnostics after the semantic phase at the same span', () => {

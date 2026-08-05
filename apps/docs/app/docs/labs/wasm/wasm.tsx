@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
-const sourceId = 'memory://docs/wasm.silk'
+const sourceId = 'memory/docs/wasm'
 
 const presets = [
   {
@@ -21,6 +21,14 @@ pub fn main() -> I32 { return identity(identity(42)) }`,
   {
     label: 'Checked arithmetic',
     source: 'pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }',
+  },
+  {
+    label: 'Operator pipeline',
+    source: 'pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }',
+  },
+  {
+    label: 'Operator condition',
+    source: 'pub fn main() -> I32 { if !(1 == 2) { return 42 } return 0 }',
   },
   {
     label: 'Overflow traps',

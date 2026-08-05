@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
-const sourceId = 'memory://docs/ownership.silk'
+const sourceId = 'memory/docs/ownership'
 
 const presets = [
   {

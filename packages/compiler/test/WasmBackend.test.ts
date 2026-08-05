@@ -11,7 +11,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshotOf = (text: string) =>
-  Analysis.ofSource('wasm://program.silk', ascii(text), 'wasm32-unknown-unknown')
+  Analysis.ofSource('wasm/program', ascii(text), 'wasm32-unknown-unknown')
 
 const emit = (text: string) => Analysis.codegenWasm(snapshotOf(text), { mode: 'release' })
 
@@ -45,7 +45,7 @@ it.effect('emits an instantiable module whose entry is exported as silk_main', (
   Effect.gen(function* () {
     const artifact = yield* emit('pub fn main() -> I32 { return 42 }')
 
-    assert.strictEqual(artifact.module, 'wasm://program.silk')
+    assert.strictEqual(artifact.module, 'wasm/program')
     assert.deepEqual(
       artifact.symbols.map((entry) => entry.symbol),
       ['silk_main'],
@@ -171,7 +171,7 @@ it.effect('rejects a CFG with a back-edge instead of emitting wrong control flow
 it.effect('rejects native-target MIR before constructing a WebAssembly module', () =>
   Effect.gen(function* () {
     const snapshot = Analysis.ofSource(
-      'wasm://native-plan.silk',
+      'wasm/native-plan',
       ascii('pub fn main() -> I32 { return 42 }'),
       'aarch64-apple-darwin',
     )
@@ -249,6 +249,9 @@ pub fn main() -> I32 { return identity(identity(42)) }`,
 pub fn main() -> I32 { return choose(1, 42) }`,
   ],
   ['addition', 'pub fn main() -> I32 { return I32.add(40, 2) }'],
+  ['operator precedence', 'pub fn main() -> I32 { return 2 + 3 * 4 }'],
+  ['operator pipeline', 'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }'],
+  ['operator negation', 'pub fn main() -> I32 { return -(40 + 2) }'],
   ['subtraction', 'pub fn main() -> I32 { return I32.subtract(50, 8) }'],
   ['multiplication', 'pub fn main() -> I32 { return I32.multiply(6, 7) }'],
   ['division', 'pub fn main() -> I32 { return I32.divide(84, 2) }'],

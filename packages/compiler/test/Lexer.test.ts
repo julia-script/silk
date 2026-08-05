@@ -249,6 +249,45 @@ it('distinguishes minus from the arrow', () => {
   )
 })
 
+it('lexes the closed operator vocabulary with longest match', () => {
+  const source = SourceFile.make('memory/operators', ascii('+ - * / % ! < <= > >= == != |> = ->'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'Plus',
+      'Minus',
+      'Star',
+      'Slash',
+      'Percent',
+      'Bang',
+      'Less',
+      'LessEqual',
+      'Greater',
+      'GreaterEqual',
+      'EqualEqual',
+      'BangEqual',
+      'PipeGreater',
+      'Equals',
+      'Arrow',
+      'EndOfFile',
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('distinguishes division from line comments', () => {
+  const source = SourceFile.make('memory/operator-comments', ascii('/ // comment\n/'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.map((token) => token.kind),
+    ['Slash', 'Whitespace', 'LineComment', 'Whitespace', 'Slash', 'EndOfFile'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
 it('lexes conditional keywords as complete identifiers only', () => {
   const conditional = Lexer.lex(
     SourceFile.make(

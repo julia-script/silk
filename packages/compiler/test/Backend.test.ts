@@ -12,7 +12,7 @@ const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 
 const emit = Effect.fnUntraced(function* (text: string, request: Backend.CodegenRequest) {
-  const snapshot = Analysis.ofSource('golden://program.silk', ascii(text), 'aarch64-apple-darwin')
+  const snapshot = Analysis.ofSource('golden/program', ascii(text), 'aarch64-apple-darwin')
   return yield* Analysis.codegen(snapshot, request)
 })
 
@@ -23,7 +23,7 @@ it.effect('emits one artifact per program with deterministic symbols', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(nestedSource, { mode: 'release' })
 
-    assert.strictEqual(artifact.module, 'golden://program.silk')
+    assert.strictEqual(artifact.module, 'golden/program')
     assert.deepEqual(
       artifact.symbols.map((entry) => entry.symbol),
       ['silk_main', 'silk_1_identity'],
@@ -68,7 +68,7 @@ it.effect('emits native debug metadata only for debug requests', () =>
   Effect.gen(function* () {
     const debug = yield* emit(nestedSource, {
       mode: 'debug',
-      sources: new Map([['golden://program.silk', ascii(nestedSource)]]),
+      sources: new Map([['golden/program', ascii(nestedSource)]]),
     })
     const release = yield* emit(nestedSource, { mode: 'release' })
 

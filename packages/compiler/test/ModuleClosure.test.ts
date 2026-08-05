@@ -125,3 +125,67 @@ it('records mutual import cycles as canonical facts without error diagnostics', 
     ['beta', 'gamma', 'root'],
   )
 })
+
+it('maps dotted paths to exact slash-separated canonical identities', () => {
+  const closure = ModuleClosure.load(
+    request('app/Main', [
+      ['app/Main', `import compiler.Syntax as Tree { parse }\n${fn}`],
+      ['compiler/Syntax', 'pub fn parse() -> I32 { return 42 }'],
+    ]),
+  )
+  const imported = closure.modules.find((module) => module.name === 'app/Main')?.imports.at(0)
+  assert.strictEqual(imported?.sourceSpelling, 'compiler.Syntax')
+  assert.strictEqual(imported?.canonicalTarget, 'compiler/Syntax')
+  assert.strictEqual(imported?.target._tag, 'Resolved')
+})
+
+it('preserves exact case and rejects malformed request identities before parsing', () => {
+  const mismatch = ModuleClosure.load(
+    request('app/Main', [
+      ['app/Main', `import compiler.Syntax\n${fn}`],
+      ['compiler/syntax', fn],
+    ]),
+  )
+  assert.deepEqual(
+    mismatch.diagnostics.map((diagnostic) => diagnostic.code),
+    ['MOD0001'],
+  )
+  for (const invalid of [
+    '/absolute',
+    'with.ext',
+    'empty//segment',
+    'dot/../segment',
+    'scheme://module',
+  ]) {
+    assert.throws(() => ModuleClosure.load(request(invalid, [[invalid, fn]])), RangeError)
+  }
+})
+
+it('treats rename and binding clauses independently from closure loading', () => {
+  const namespace = ModuleClosure.load(
+    request('root', [
+      ['root', `import library.One as Lib\n${fn}`],
+      ['library/One', fn],
+    ]),
+  )
+  const selective = ModuleClosure.load(
+    request('root', [
+      ['root', `import library.One { main as entry }\n${fn}`],
+      ['library/One', fn],
+    ]),
+  )
+  assert.deepEqual(
+    namespace.modules.map((module) => module.name),
+    selective.modules.map((module) => module.name),
+  )
+  const renamed = ModuleClosure.load(
+    request('root', [
+      ['root', `import library.Two\n${fn}`],
+      ['library/Two', fn],
+    ]),
+  )
+  assert.notDeepEqual(
+    namespace.modules.map((module) => module.name),
+    renamed.modules.map((module) => module.name),
+  )
+})

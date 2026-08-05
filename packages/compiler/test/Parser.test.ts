@@ -794,11 +794,11 @@ it('groups unexpected punctuation and following trivia before the function name'
 it('terminates with explicit missing structure for empty input', () => {
   const result = parseBytes('fixture://empty.silk', emptySource)
 
-  assert.strictEqual(missingLeaves(result.root).length, 11)
-  assert.strictEqual(result.parserDiagnostics.length, 11)
+  assert.strictEqual(missingLeaves(result.root).length, 10)
+  assert.strictEqual(result.parserDiagnostics.length, 10)
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    Array.from({ length: 11 }, () => 'PAR0001'),
+    Array.from({ length: 10 }, () => 'PAR0001'),
   )
   assertOriginalTokenTraversal(result)
 })
@@ -809,7 +809,7 @@ it('terminates on wholly unrelated input and retains it in one error region', ()
 
   assert.strictEqual(errors.length, 1)
   assert.deepEqual(errors.at(0)?.span, result.tokens.at(0)?.span)
-  assert.strictEqual(missingLeaves(result.root).length, 11)
+  assert.strictEqual(missingLeaves(result.root).length, 10)
   assert.strictEqual(result.parserDiagnostics.at(0)?.code, 'PAR0002')
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(whollyUnrelatedSource))
@@ -880,7 +880,7 @@ it('recovers a missing import name and keeps the following function parseable', 
   assert.notStrictEqual(importNode, undefined)
   assert.notStrictEqual(functionNode, undefined)
   assert.strictEqual(
-    importNode?.children.some(
+    SyntaxTree.directNode(importNode ?? result.root, 'ImportPath')?.children.some(
       (element) => SyntaxTree.isMissingToken(element) && element.expected === 'Identifier',
     ),
     true,
@@ -901,6 +901,54 @@ it('keeps import as a keyword only when spelled completely', () => {
     lexical.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
     ['ImportKeyword', 'Identifier', 'EndOfFile'],
   )
+})
+
+it('parses namespace, selective, member-alias, and hybrid imports losslessly', () => {
+  const source = `import compiler.Syntax
+import compiler.Tree as Ast
+import compiler.Parse { Node, parse, encode as encodeSyntax }
+import compiler.Hir as Ir { lower, inspect as show }
+pub fn main() -> I32 { return 42 }`
+  const result = parseText('fixture://full-imports.silk', source)
+  const imports = SyntaxTree.directNodes(result.root, 'ImportDeclaration')
+  assert.strictEqual(imports.length, 4)
+  assert.deepEqual(
+    imports.map((node) => {
+      const list = SyntaxTree.directNode(node, 'ImportMemberList')
+      return list === undefined ? 0 : SyntaxTree.directNodes(list, 'ImportMember').length
+    }),
+    [0, 0, 3, 2],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('parses private functions without fabricating a public modifier', () => {
+  const result = parseText('fixture://private.silk', 'fn helper() -> I32 { return 42 }')
+  const declaration = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
+  assert.notStrictEqual(declaration, undefined)
+  assert.strictEqual(
+    declaration === undefined ? undefined : SyntaxTree.directToken(declaration, 'PubKeyword'),
+    undefined,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+})
+
+it('bounds import recovery and preserves the following declaration', () => {
+  const cases = [
+    'import compiler. as Tree\nfn helper() -> I32 { return 1 }',
+    'import compiler.Syntax as\nfn helper() -> I32 { return 1 }',
+    'import compiler.Syntax { Node, , parse }\nfn helper() -> I32 { return 1 }',
+    'import compiler.Syntax { Node parse }\nfn helper() -> I32 { return 1 }',
+    'import compiler.Syntax { Node\nfn helper() -> I32 { return 1 }',
+  ]
+  for (const [ordinal, source] of cases.entries()) {
+    const result = parseText(`fixture://damaged-import-${ordinal}.silk`, source)
+    assert.strictEqual(SyntaxTree.directNodes(result.root, 'ImportDeclaration').length, 1)
+    assert.strictEqual(SyntaxTree.directNodes(result.root, 'FunctionDeclaration').length, 1)
+    assert.isAtLeast(result.parserDiagnostics.length, 1)
+    assertOriginalTokenTraversal(result)
+  }
 })
 
 it('parses a binding sequence as ordered statement branches', () => {
@@ -1176,4 +1224,102 @@ it('recovers an arm missing its closing brace before the trailing return', () =>
     true,
   )
   assertOriginalTokenTraversal(result)
+})
+
+it('parses arithmetic and equality by the closed precedence table', () => {
+  const source = 'pub fn main() -> Bool { return 1 + 2 * 3 == 7 }'
+  const result = parseText('memory/operators-precedence', source)
+  const expressions = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'InfixExpression',
+  )
+  const [equality, addition, multiplication] = expressions
+
+  assert.strictEqual(expressions.length, 3)
+  assert.notStrictEqual(equality, undefined)
+  assert.notStrictEqual(addition, undefined)
+  assert.notStrictEqual(multiplication, undefined)
+  if (equality === undefined || addition === undefined || multiplication === undefined) return
+  assert.notStrictEqual(SyntaxTree.directToken(equality, 'EqualEqual'), undefined)
+  assert.notStrictEqual(SyntaxTree.directToken(addition, 'Plus'), undefined)
+  assert.notStrictEqual(SyntaxTree.directToken(multiplication, 'Star'), undefined)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses grouping and right-associative prefix expressions losslessly', () => {
+  const source = 'pub fn main(value: I32) -> I32 { return -(-(value + 1)) }'
+  const result = parseText('memory/operator-prefix', source)
+  const prefixes = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'PrefixExpression',
+  )
+  const groups = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'GroupedExpression',
+  )
+
+  assert.strictEqual(prefixes.length, 2)
+  assert.strictEqual(groups.length, 2)
+  assert.strictEqual(
+    prefixes.every((node) => SyntaxTree.directToken(node, 'Minus') !== undefined),
+    true,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses qualified pipelines left-to-right with optional argument lists', () => {
+  const source =
+    'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }\n' +
+    'pub fn flag() -> Bool { return true |> Bool.not }'
+  const result = parseText('memory/operator-pipelines', source)
+  const pipelines = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'PipelineExpression',
+  )
+  const targets = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'PipelineTarget',
+  )
+
+  assert.strictEqual(pipelines.length, 3)
+  assert.strictEqual(targets.length, 3)
+  assert.deepEqual(
+    targets.map((target) => SyntaxTree.directNodes(target, 'ArgumentList').length),
+    [1, 1, 0],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('bounds operator recovery at expression and declaration boundaries', () => {
+  const source =
+    'pub fn missingOperand() -> I32 { return 1 + }\n' +
+    'pub fn missingGroup() -> I32 { return (1 + 2 }\n' +
+    'pub fn chained() -> Bool { return 1 < 2 < 3 }\n' +
+    'pub fn after() -> I32 { return 4 }'
+  const result = parseText('memory/operator-recovery', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const after = declarations.at(-1)
+
+  assert.strictEqual(declarations.length, 4)
+  assert.strictEqual(
+    missingLeaves(result.root).some((leaf) => leaf.expected === 'DecimalInteger'),
+    true,
+  )
+  assert.strictEqual(
+    missingLeaves(result.root).some((leaf) => leaf.expected === 'RightParenthesis'),
+    true,
+  )
+  assert.strictEqual(errorNodes(result.root).length > 0, true)
+  assert.notStrictEqual(after, undefined)
+  if (after === undefined) return
+  assert.strictEqual(directTokenText(result, after, 'Identifier'), 'after')
+  assert.deepEqual(missingLeaves(after), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
 })

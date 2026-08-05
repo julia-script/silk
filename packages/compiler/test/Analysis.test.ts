@@ -82,10 +82,7 @@ it('answers every query identically across repeated snapshots', () => {
 })
 
 it('evaluates the root module through the facade', () => {
-  const self = Analysis.ofSource(
-    'memory://facade.silk',
-    ascii('pub fn main() -> I32 { return 42 }'),
-  )
+  const self = Analysis.ofSource('memory/facade', ascii('pub fn main() -> I32 { return 42 }'))
   const outcome = Analysis.evaluate(self)
 
   assert.strictEqual(outcome._tag, 'Completed')
@@ -95,10 +92,10 @@ it('evaluates the root module through the facade', () => {
 
 it('answers ownership facts and cleanup plans through the facade', () => {
   const self = Analysis.ofSource(
-    'memory://ownership.silk',
+    'memory/ownership',
     ascii('pub fn identity(value: I32) -> I32 { return value }'),
   )
-  const facts = Analysis.ownershipOf(self, 'memory://ownership.silk')
+  const facts = Analysis.ownershipOf(self, 'memory/ownership')
 
   assert.strictEqual(facts?.functions.at(0)?.verdict._tag, 'Satisfied')
   assert.strictEqual(facts?.functions.at(0)?.bindings.at(0)?.category._tag, 'Copyable')
@@ -109,7 +106,7 @@ it('answers ownership facts and cleanup plans through the facade', () => {
 it.effect('emits codegen artifacts through the facade', () =>
   Effect.gen(function* () {
     const self = Analysis.ofSource(
-      'memory://codegen.silk',
+      'memory/codegen',
       ascii('pub fn main() -> I32 { return 42 }'),
       'aarch64-apple-darwin',
     )
@@ -125,7 +122,7 @@ it.effect('emits codegen artifacts through the facade', () =>
 
 it('preserves one exact target and layout plan across facade queries and MIR', () => {
   const self = Analysis.ofSource(
-    'memory://plan.silk',
+    'memory/plan',
     ascii('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
     'wasm32-unknown-unknown',
   )
@@ -150,7 +147,7 @@ it('preserves one exact target and layout plan across facade queries and MIR', (
 
 it('keeps unsupported targets explicit and queryable without manufacturing MIR', () => {
   const self = Analysis.ofSource(
-    'memory://unsupported.silk',
+    'memory/unsupported',
     ascii('pub fn main() -> I32 { return 42 }'),
     'mips-unknown-none',
   )

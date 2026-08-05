@@ -6,22 +6,28 @@ Turn the bootstrap lexer result into the smallest source-faithful grammatical st
 recover from ordinary mistakes without introducing semantic or lowering representations.
 ## Requirements
 ### Requirement: First function grammar
-The parser SHALL recognize a source file containing one or more public function declarations
-followed by end-of-file. Every function SHALL have the form `pub fn <name>(<parameters>) ->
-<return-type> { <statements> }`, where `<statements>` is zero or more binding statements followed
-by exactly one return statement. A binding statement SHALL have the form `let <name> =
-<expression>`. A parameter SHALL have the form `<name>: <type>` and parameters SHALL be
+The parser SHALL recognize a source file containing one or more top-level import or function
+declarations followed by end-of-file. Every function SHALL have the form `[pub] fn <name>(<parameters>)
+-> <return-type> { <statements> }`, where `pub` is optional and `<statements>` is zero or more binding
+statements followed by exactly one return statement. A binding statement SHALL have the form `let
+<name> = <expression>`. A parameter SHALL have the form `<name>: <type>` and parameters SHALL be
 comma-separated. An expression SHALL be a decimal integer with an optional directly applied `-`
 sign, a bare identifier, a `move <name>` operand, or a call. A call SHALL have the form
-`<callee>(<arguments>)`, where `<callee>` is one identifier or a qualified actor path
-`<actor>.<operation>`; arguments SHALL be comma-separated expressions. Empty parameter and
+`<callee>(<arguments>)`, where `<callee>` is one identifier or a qualified path
+`<namespace>.<member>`; arguments SHALL be comma-separated expressions. Empty parameter and
 argument lists SHALL remain valid. Lexer trivia SHALL be permitted between grammar elements,
-statements, and declarations. Names and types SHALL remain uninterpreted identifier tokens, and
-declaration, statement, parameter, and argument order SHALL match concrete source order.
+statements, and declarations. Names, qualifiers, members, and types SHALL remain uninterpreted
+identifier tokens, and declaration, statement, parameter, and argument order SHALL match concrete
+source order.
 
 #### Scenario: Parse the accepted integer fixture
 - **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
 - **THEN** the result contains one complete function declaration with an empty parameter list, an integer literal return expression, and end-of-file
+
+#### Scenario: Parse a private function
+
+- **WHEN** the source bytes spell `fn helper() -> I32 { return 42 }`
+- **THEN** the result contains one complete function declaration with no public-modifier token and exact source provenance
 
 #### Scenario: Parse trivia between grammar elements
 - **WHEN** whitespace and line comments appear between every pair of grammar elements in the accepted fixture
@@ -224,22 +230,50 @@ source mistakes.
 
 ### Requirement: Minimal import declarations parse losslessly
 
-The parser SHALL accept `import <module>` as an unconditional top-level declaration wherever a
-function declaration may begin, where `<module>` is one identifier naming a logical module
-identity. The spelling is deliberately provisional and owned by the syntax-prototype issue. The
-import declaration SHALL retain its keyword, name, and adjacent trivia with exact source-owned
-spans as its own concrete branch. A missing import name SHALL become an explicit missing token
-with a parser diagnostic, and recovery SHALL keep following top-level declarations parseable.
+The parser SHALL accept the accepted unconditional top-level forms: `import <path>`, `import <path>
+as <namespace>`, `import <path> { <members> }`, and `import <path> as <namespace> { <members> }`.
+`<path>` SHALL contain one or more identifier segments separated by dots. `<members>` SHALL contain
+one or more comma-separated identifiers, each optionally followed by `as <local-name>`. The import
+declaration SHALL retain its keyword, ordered path segments and dots, optional namespace alias,
+optional selected-member list with aliases and separators, adjacent trivia, and exact source-owned
+span as one concrete branch. The concrete tree MUST NOT decide what any path, alias, or member
+resolves to. Missing segments, aliases, members, separators, and closing braces SHALL become
+explicit parser recovery data while following top-level declarations remain parseable.
 
-#### Scenario: Parse an import before a function
+#### Scenario: Parse a namespace import
 
-- **WHEN** the source spells `import math` followed by a complete function declaration
-- **THEN** the tree contains one import-declaration branch retaining the keyword and name, followed by the complete function branch
+- **WHEN** the source spells `import compiler.Syntax` before a complete function declaration
+- **THEN** the import branch retains both path segments and their dot followed by the complete function branch
 
-#### Scenario: Recover a missing import name
+#### Scenario: Parse a changed namespace alias
 
-- **WHEN** the source spells `import` immediately followed by a function declaration
-- **THEN** the import branch contains a missing identifier with one parser diagnostic and the following function remains a separate complete branch
+- **WHEN** the source spells `import compiler.Syntax as Tree`
+- **THEN** the import branch retains the `as` keyword and `Tree` alias after the complete path
+
+#### Scenario: Parse selected members with an alias
+
+- **WHEN** the source spells `import compiler.Syntax { Node, parse, encode as encodeSyntax }`
+- **THEN** the import branch retains three ordered member entries, both commas, and the changed local alias without inventing a namespace binding
+
+#### Scenario: Parse a hybrid import
+
+- **WHEN** the source spells `import compiler.Syntax as Tree { Node, parse }`
+- **THEN** one import branch retains the complete path, namespace alias, and both selected members in concrete order
+
+#### Scenario: Recover a missing path segment
+
+- **WHEN** the source spells `import compiler. as Tree` before a function declaration
+- **THEN** the import path contains an explicit missing identifier after the dot and recovery retains the alias and following function
+
+#### Scenario: Recover a missing alias
+
+- **WHEN** the source spells `import compiler.Syntax as` before a following declaration
+- **THEN** the import branch contains a missing alias identifier with one parser diagnostic and the following declaration remains separate
+
+#### Scenario: Recover a damaged selected list
+
+- **WHEN** a selected-member list has a missing member, comma, alias, or closing brace
+- **THEN** the damaged element remains explicit and recovery resumes at the next member boundary, closing brace, or following top-level declaration
 
 #### Scenario: Parse multiple imports losslessly
 
@@ -331,3 +365,60 @@ anchors, and every token SHALL be retained losslessly.
 - **WHEN** an arm omits its closing brace before the trailing return statement
 - **THEN** recovery inserts the missing brace and the trailing return remains a separate statement
 
+### Requirement: Operator expressions parse losslessly by precedence
+
+Every expression position SHALL accept grouped, prefix, infix, and pipeline expressions in the
+closed precedence and associativity order defined by `bootstrap-operator-semantics`. The concrete
+tree SHALL retain a grouped expression's parentheses, a prefix expression's operator and operand,
+an infix expression's left operand, operator, and right operand, and a pipeline expression's left
+operand, pipe token, qualified target path, and optional later-argument list. Every token and trivia
+slice SHALL remain owned exactly once, and concrete structure SHALL not claim that an operator or
+pipeline target resolves successfully.
+
+#### Scenario: Parse a precedence ladder
+
+- **WHEN** a body returns `1 + 2 * 3 == 7`
+- **THEN** the concrete tree nests multiplication inside addition and addition inside equality with every token retained
+
+#### Scenario: Parse grouped prefix syntax
+
+- **WHEN** a body returns `-(value + 1)` and another returns `!(left == right)`
+- **THEN** each prefix expression owns one grouped operand with exact parentheses and source spans
+
+#### Scenario: Parse a no-argument pipeline target
+
+- **WHEN** a body returns `flag |> Bool.not`
+- **THEN** the pipeline retains the qualified `Bool.not` target with no explicit argument list
+
+#### Scenario: Parse a pipeline chain
+
+- **WHEN** a body returns `2 |> I32.add(3) |> I32.multiply(4)`
+- **THEN** the concrete tree associates the two pipeline branches left-to-right in source order
+
+### Requirement: Operator recovery stays inside the containing expression
+
+A missing prefix operand, infix right operand, grouping parenthesis, pipeline qualifier, pipeline
+member, or pipeline argument delimiter SHALL become explicit parser recovery data at the nearest
+expression boundary. Unexpected operator sequences SHALL remain in error regions. Recovery SHALL
+resume at the next operand, comma, closing parenthesis, statement keyword, closing brace, top-level
+declaration, or end-of-file, preserving following statements and declarations.
+
+#### Scenario: Recover a missing infix operand
+
+- **WHEN** a return expression spells `1 +` immediately before its block's closing brace
+- **THEN** the infix expression contains an explicit missing operand and the block retains its closing brace
+
+#### Scenario: Recover a missing grouped parenthesis
+
+- **WHEN** a return expression spells `(1 + 2` before the block's closing brace
+- **THEN** the group contains a missing right parenthesis and the block boundary remains separate
+
+#### Scenario: Recover a damaged pipeline target
+
+- **WHEN** a body spells `value |> .apply(1)` before a following declaration
+- **THEN** the missing qualifier and diagnostic remain in the pipeline branch while the following declaration parses independently
+
+#### Scenario: Reject ungrouped comparison chaining
+
+- **WHEN** a body spells `1 < 2 < 3`
+- **THEN** the second comparison is retained as recovered unexpected syntax with a parser diagnostic

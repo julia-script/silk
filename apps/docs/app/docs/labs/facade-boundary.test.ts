@@ -11,6 +11,7 @@ const phaseModules = [
   'Parser',
   'ModuleClosure',
   'DeclarationIndex',
+  'NameResolution',
   'Elaboration',
   'BootstrapEvaluation',
 ]

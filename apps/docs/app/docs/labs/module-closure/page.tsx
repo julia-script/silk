@@ -33,8 +33,8 @@ export default function ModuleClosurePage() {
           Edit a small set of module sources and inspect the loaded closure of one compilation
           request: every reachable module in canonical identity order, each import resolved to its
           target or diagnosed, import cycles marked on their participating modules, and the
-          module-phase diagnostics in driver order. The provisional <code>import</code> spelling is
-          owned by the syntax-prototype issue; everything here stays in browser memory.
+          module-phase diagnostics in driver order. Dotted source paths map exactly to canonical
+          slash-separated module identities; everything here stays in browser memory.
         </p>
       </header>
       <ModuleClosureLab />

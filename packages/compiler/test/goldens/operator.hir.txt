@@ -1,0 +1,10 @@
+hir-module golden/operator
+fn golden/operator.main () -> I32
+  return [29, 53)
+    builtin I32.Add : I32 [29, 53)
+      builtin I32.Add : I32 [29, 39)
+        literal 2 : I32 [29, 31)
+        builtin I32.Multiply : I32 [33, 39)
+          literal 3 : I32 [33, 35)
+          literal 4 : I32 [37, 39)
+      literal 1 : I32 [51, 52)

@@ -12,7 +12,7 @@ import {
 } from './flow-model'
 import styles from './syntax-inspector.module.css'
 
-const sourceId = 'memory://docs/syntax-inspector.silk'
+const sourceId = 'memory/docs/syntax-inspector'
 const acceptedSource = 'pub fn main() -> I32 { return 42 }'
 
 const examples = [
@@ -162,6 +162,38 @@ pub fn main() -> I32 { return identity(identity()) }`,
     label: 'Damaged nested call',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(@)) }`,
+  },
+  {
+    label: 'Operator precedence',
+    source: 'pub fn main() -> I32 { return 2 + 3 * 4 }',
+  },
+  {
+    label: 'Grouping and prefix',
+    source: 'pub fn main() -> I32 { return -(2 + 3) }',
+  },
+  {
+    label: 'Scalar equality',
+    source: 'pub fn main() -> Bool { return true == !false }',
+  },
+  {
+    label: 'Pipeline chain',
+    source: 'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }',
+  },
+  {
+    label: 'Unary pipeline',
+    source: 'pub fn main() -> Bool { return true |> Bool.not }',
+  },
+  {
+    label: 'Operator type error',
+    source: 'pub fn main() -> I32 { return true + 1 }',
+  },
+  {
+    label: 'Missing operator operand',
+    source: 'pub fn main() -> I32 { return 1 + }',
+  },
+  {
+    label: 'Damaged pipeline',
+    source: 'pub fn main() -> I32 { return 1 |> I32. }',
   },
   {
     label: 'Nested evaluation · completed',
@@ -555,6 +587,24 @@ type CallReturnedExpression = Extract<
 
 type IdentifierExpression = Elaboration.IdentifierExpressionFact
 
+const expressionLabel = (expression: Elaboration.ExpressionFact): string => {
+  if (expression._tag === 'Integer')
+    return expression.integer._tag === 'Available'
+      ? String(expression.integer.value)
+      : expression.integer._tag
+  if (expression._tag === 'Boolean') return String(expression.value)
+  if (expression._tag === 'Identifier' || expression._tag === 'Move')
+    return expression.reference._tag === 'Unavailable'
+      ? 'Unavailable reference'
+      : expression.reference.spelling
+  if (expression._tag === 'Grouped') return `Grouped ${expressionLabel(expression.expression)}`
+  if (expression._tag === 'Operator') return `${expression.operator} expression`
+  if (expression._tag === 'Pipeline') return 'Pipeline expression'
+  return expression.reference._tag === 'Unavailable'
+    ? 'Unavailable nested call'
+    : `${expression.reference.spelling}(…)`
+}
+
 const declarationLabel = (declaration: Elaboration.DeclarationFact): string =>
   declaration.name._tag === 'Present' ? declaration.name.spelling : 'Unavailable name'
 
@@ -824,25 +874,11 @@ function CallRelationship({
             {returned.arguments.map((argument) => {
               const mapping = returned.mappings.find((candidate) => candidate.argument === argument)
               const expression = argument.expression
-              const expressionLabel =
-                expression._tag === 'Integer'
-                  ? expression.integer._tag === 'Available'
-                    ? String(expression.integer.value)
-                    : expression.integer._tag
-                  : expression._tag === 'Boolean'
-                    ? String(expression.value)
-                    : expression._tag === 'Call'
-                      ? expression.reference._tag === 'Unavailable'
-                        ? 'Unavailable nested call'
-                        : `${expression.reference.spelling}(…)`
-                      : expression.reference._tag === 'Unavailable'
-                        ? 'Unavailable reference'
-                        : expression.reference.spelling
               return (
                 <li key={`${argument.id.callSpan.start}-${argument.id.ordinal}`}>
                   <div>
                     <span>Argument #{argument.id.ordinal}</span>
-                    <strong>{expressionLabel}</strong>
+                    <strong>{expressionLabel(expression)}</strong>
                     <code>{argument.type._tag === 'Available' ? argument.type.type : 'Unavailable'}</code>
                   </div>
                   <div>
@@ -1322,7 +1358,11 @@ function SemanticFacts({
           ): ReadonlyArray<IdentifierExpression> =>
             expression._tag === 'Identifier'
               ? [expression]
-              : expression._tag === 'Call'
+              : expression._tag === 'Grouped'
+                ? collectIdentifiers(expression.expression)
+                : expression._tag === 'Call' ||
+                    expression._tag === 'Operator' ||
+                    expression._tag === 'Pipeline'
                 ? expression.arguments.flatMap((argument) =>
                     collectIdentifiers(argument.expression),
                   )
@@ -1427,6 +1467,30 @@ function SemanticFacts({
                         {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
+                    </dd>
+                  ) : returned._tag === 'Grouped' ? (
+                    <dd>
+                      <strong>{expressionLabel(returned.expression)}</strong>
+                      <span>
+                        Grouped ·{' '}
+                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                      </span>
+                      <small>{spanLabel(returned.syntax)}</small>
+                    </dd>
+                  ) : returned._tag === 'Operator' || returned._tag === 'Pipeline' ? (
+                    <dd>
+                      <strong>
+                        {returned.reference._tag === 'Unavailable'
+                          ? 'Unavailable'
+                          : returned.reference.spelling}
+                      </strong>
+                      <span>
+                        {returned._tag} · {returned.contract._tag} ·{' '}
+                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                      </span>
+                      <small>
+                        {returned.arguments.length} effective arguments · {spanLabel(returned.syntax)}
+                      </small>
                     </dd>
                   ) : (
                     <dd>

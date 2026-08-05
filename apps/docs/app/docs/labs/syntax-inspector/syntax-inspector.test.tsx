@@ -16,7 +16,7 @@ import {
 const encoder = new TextEncoder()
 
 const snap = (text: string): Analysis.Snapshot =>
-  Analysis.ofSource('memory://component-flow.silk', encoder.encode(text))
+  Analysis.ofSource('memory/component-flow', encoder.encode(text))
 
 const analyze = (text: string): Elaboration.Result => Analysis.rootAnalysis(snap(text))
 

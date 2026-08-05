@@ -126,6 +126,9 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
       : `move ${expression.reference.spelling}`
   }
   if (expression._tag === 'Boolean') return String(expression.value)
+  if (expression._tag === 'Grouped') return `(${argumentLabel({ ...argument, expression: expression.expression })})`
+  if (expression._tag === 'Operator') return `${expression.operator} expression`
+  if (expression._tag === 'Pipeline') return 'pipeline result'
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'
@@ -468,7 +471,10 @@ const projectCall = (
 
   const targetFact = functionFor(analysis, target)
   const returned = targetFact?.returnedExpression
-  if (returned === undefined || returned._tag === 'Call' || returned._tag === 'Boolean') {
+  if (
+    returned === undefined ||
+    (returned._tag !== 'Integer' && returned._tag !== 'Identifier' && returned._tag !== 'Move')
+  ) {
     const terminalId = `${id}-return-stop`
     addNode(
       draft,
@@ -478,7 +484,7 @@ const projectCall = (
         terminalId,
         'Terminal',
         'Flow stops: target return path is not directly available',
-        returned === undefined ? 'No function fact' : 'Nested target return call',
+        returned === undefined ? 'No function fact' : `${returned._tag} target return`,
         'Stopped',
         target.syntax.span,
       ),

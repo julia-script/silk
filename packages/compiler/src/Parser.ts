@@ -1,6 +1,7 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Lexer from './Lexer.js'
+import * as Operator from './Operator.js'
 import * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -146,7 +147,39 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LetKeyword',
   'IfKeyword',
   'ReturnKeyword',
+  'ElseKeyword',
+  'PubKeyword',
+  'FnKeyword',
+  'ImportKeyword',
 ])
+
+const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'DecimalInteger',
+  'Identifier',
+  'MoveKeyword',
+  'TrueKeyword',
+  'FalseKeyword',
+  'Minus',
+  'Bang',
+  'LeftParenthesis',
+])
+
+const significantKindAfter = (
+  state: State,
+  significantCount: number,
+): Token.TokenKind | undefined => {
+  let index = state.index
+  let remaining = significantCount
+  while (index < state.lexical.tokens.length) {
+    const token = state.lexical.tokens.at(index)
+    if (token === undefined) return undefined
+    index += 1
+    if (isTrivia(token.kind)) continue
+    if (remaining === 0) return token.kind
+    remaining -= 1
+  }
+  return undefined
+}
 
 const parseIntegerLiteralExpression = (initial: State): NodeResult => {
   if (nextSignificantKind(initial) === 'Minus') {
@@ -196,15 +229,18 @@ const parseMoveExpression = (initial: State): NodeResult => {
   })
 }
 
-const expressionKind = (
+const primaryKind = (
   state: State,
   recoveryKind: 'Integer' | 'Identifier',
-): 'Integer' | 'Boolean' | 'Identifier' | 'Move' | 'Call' => {
+): 'Integer' | 'Boolean' | 'Identifier' | 'Move' | 'Call' | 'Grouped' | 'Prefix' => {
   let index = state.index
   let token = state.lexical.tokens.at(index)
 
   while (token !== undefined) {
-    if (token.kind === 'DecimalInteger' || token.kind === 'Minus') return 'Integer'
+    if (token.kind === 'DecimalInteger') return 'Integer'
+    if (token.kind === 'Minus')
+      return significantKindAfter(state, 1) === 'DecimalInteger' ? 'Integer' : 'Prefix'
+    if (token.kind === 'Bang') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
     if (token.kind === 'Identifier') {
@@ -216,7 +252,8 @@ const expressionKind = (
       }
       return token?.kind === 'LeftParenthesis' || token?.kind === 'Dot' ? 'Call' : 'Identifier'
     }
-    if (token.kind === 'LeftParenthesis') return 'Call'
+    if (token.kind === 'LeftParenthesis')
+      return significantKindAfter(state, 1) === 'RightParenthesis' ? 'Call' : 'Grouped'
     if (
       token.kind === 'Comma' ||
       token.kind === 'RightParenthesis' ||
@@ -226,6 +263,8 @@ const expressionKind = (
       token.kind === 'IfKeyword' ||
       token.kind === 'ReturnKeyword' ||
       token.kind === 'PubKeyword' ||
+      token.kind === 'FnKeyword' ||
+      token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
     ) {
       return recoveryKind
@@ -243,7 +282,13 @@ const remainingRightParentheses = (state: State): number => {
     const token = state.lexical.tokens.at(index)
     if (token === undefined) break
     if (token.kind === 'RightParenthesis') count += 1
-    if (token.kind === 'RightBrace' || token.kind === 'PubKeyword' || token.kind === 'EndOfFile') {
+    if (
+      token.kind === 'RightBrace' ||
+      token.kind === 'PubKeyword' ||
+      token.kind === 'FnKeyword' ||
+      token.kind === 'ImportKeyword' ||
+      token.kind === 'EndOfFile'
+    ) {
       break
     }
   }
@@ -269,16 +314,22 @@ const expectCallRightParenthesis = (
       elements: Object.freeze([...leading.elements, missing]),
     })
   }
-  return expect(initial, 'RightParenthesis', ['RightBrace', 'PubKeyword'])
+  return expect(initial, 'RightParenthesis', [
+    'RightBrace',
+    'PubKeyword',
+    'FnKeyword',
+    'ImportKeyword',
+  ])
 }
 
 function parseArgumentList(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
-    'DecimalInteger',
-    'Identifier',
+    ...expressionStarts,
     'RightParenthesis',
     'RightBrace',
     'PubKeyword',
+    'FnKeyword',
+    'ImportKeyword',
   ])
   let state = leftParenthesis.state
   let children: ReadonlyArray<SyntaxTree.Element> = leftParenthesis.elements
@@ -289,6 +340,8 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     kind !== 'RightParenthesis' &&
     kind !== 'RightBrace' &&
     kind !== 'PubKeyword' &&
+    kind !== 'FnKeyword' &&
+    kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
     const argument = parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
@@ -296,14 +349,22 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     state = argument.state
     kind = nextSignificantKind(state)
 
-    if (kind === 'RightParenthesis' || kind === 'RightBrace' || kind === 'PubKeyword') break
+    if (
+      kind === 'RightParenthesis' ||
+      kind === 'RightBrace' ||
+      kind === 'PubKeyword' ||
+      kind === 'FnKeyword' ||
+      kind === 'ImportKeyword'
+    )
+      break
 
     const comma = expect(state, 'Comma', [
-      'DecimalInteger',
-      'Identifier',
+      ...expressionStarts,
       'RightParenthesis',
       'RightBrace',
       'PubKeyword',
+      'FnKeyword',
+      'ImportKeyword',
     ])
     children = Object.freeze([...children, ...comma.elements])
     state = comma.state
@@ -327,6 +388,8 @@ function parseCallExpression(initial: State, reservedForEnclosingCalls: number):
     'RightParenthesis',
     'RightBrace',
     'PubKeyword',
+    'FnKeyword',
+    'ImportKeyword',
   ])
   let state = callee.state
   let elements: ReadonlyArray<SyntaxTree.Element> = callee.elements
@@ -343,27 +406,141 @@ function parseCallExpression(initial: State, reservedForEnclosingCalls: number):
   })
 }
 
+function parseGroupedExpression(initial: State, reservedForEnclosingCalls: number): NodeResult {
+  const left = expect(initial, 'LeftParenthesis', [...expressionStarts, 'RightParenthesis'])
+  const expression = parseExpression(left.state, reservedForEnclosingCalls + 1, 'Identifier')
+  const right = expectCallRightParenthesis(expression.state, reservedForEnclosingCalls)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'GroupedExpression', [
+      ...left.elements,
+      expression.node,
+      ...right.elements,
+    ]),
+  })
+}
+
+function parsePrimaryExpression(
+  initial: State,
+  reservedForEnclosingCalls: number,
+  recoveryKind: 'Integer' | 'Identifier',
+): NodeResult {
+  const kind = primaryKind(initial, recoveryKind)
+  if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls)
+  if (kind === 'Move') return parseMoveExpression(initial)
+  if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
+  if (kind === 'Identifier') return parseIdentifierExpression(initial)
+  if (kind === 'Grouped') return parseGroupedExpression(initial, reservedForEnclosingCalls)
+  return parseIntegerLiteralExpression(initial)
+}
+
+function parsePrefixExpression(
+  initial: State,
+  reservedForEnclosingCalls: number,
+  recoveryKind: 'Integer' | 'Identifier',
+): NodeResult {
+  const kind = primaryKind(initial, recoveryKind)
+  if (kind !== 'Prefix')
+    return parsePrimaryExpression(initial, reservedForEnclosingCalls, recoveryKind)
+  const tokenKind = nextSignificantKind(initial) === 'Bang' ? 'Bang' : 'Minus'
+  const operator = expect(initial, tokenKind, [...expressionStarts, ...expressionFollowing])
+  const operand = parsePrefixExpression(operator.state, reservedForEnclosingCalls, recoveryKind)
+  return Object.freeze({
+    state: operand.state,
+    node: syntaxNode(operand.state, 'PrefixExpression', [...operator.elements, operand.node]),
+  })
+}
+
+function parseInfixExpression(
+  initial: State,
+  reservedForEnclosingCalls: number,
+  recoveryKind: 'Integer' | 'Identifier',
+  minimumPrecedence: number,
+): NodeResult {
+  let left = parsePrefixExpression(initial, reservedForEnclosingCalls, recoveryKind)
+  let nonAssociativePrecedence: number | undefined
+
+  for (;;) {
+    const kind = nextSignificantKind(left.state)
+    if (kind === undefined) break
+    const info = Operator.infix(kind)
+    if (info === undefined || info.precedence < minimumPrecedence) break
+    if (info.associativity === 'None' && nonAssociativePrecedence === info.precedence) break
+
+    const operator = expect(left.state, kind, [...expressionStarts, ...expressionFollowing])
+    const right = parseInfixExpression(
+      operator.state,
+      reservedForEnclosingCalls,
+      recoveryKind,
+      info.precedence + 1,
+    )
+    left = Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'InfixExpression', [
+        left.node,
+        ...operator.elements,
+        right.node,
+      ]),
+    })
+    if (info.associativity === 'None') nonAssociativePrecedence = info.precedence
+  }
+
+  return left
+}
+
+function parsePipelineTarget(initial: State, reservedForEnclosingCalls: number): NodeResult {
+  const qualifier = expect(initial, 'Identifier', [
+    'Dot',
+    'LeftParenthesis',
+    ...expressionFollowing,
+  ])
+  const dot = expect(qualifier.state, 'Dot', [
+    'Identifier',
+    'LeftParenthesis',
+    ...expressionFollowing,
+  ])
+  const member = expect(dot.state, 'Identifier', [
+    'LeftParenthesis',
+    'PipeGreater',
+    ...expressionFollowing,
+  ])
+  let state = member.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...qualifier.elements,
+    ...dot.elements,
+    ...member.elements,
+  ])
+  if (nextSignificantKind(state) === 'LeftParenthesis') {
+    const argumentsList = parseArgumentList(state, reservedForEnclosingCalls)
+    state = argumentsList.state
+    children = Object.freeze([...children, argumentsList.node])
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'PipelineTarget', children) })
+}
+
 function parseExpression(
   initial: State,
   reservedForEnclosingCalls: number,
   recoveryKind: 'Integer' | 'Identifier',
 ): NodeResult {
-  const kind = expressionKind(initial, recoveryKind)
-  if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls)
-  if (kind === 'Move') return parseMoveExpression(initial)
-  if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
-  if (kind === 'Identifier') return parseIdentifierExpression(initial)
-  return parseIntegerLiteralExpression(initial)
+  let left = parseInfixExpression(initial, reservedForEnclosingCalls, recoveryKind, 0)
+  while (nextSignificantKind(left.state) === 'PipeGreater') {
+    const pipe = expect(left.state, 'PipeGreater', ['Identifier', ...expressionFollowing])
+    const target = parsePipelineTarget(pipe.state, reservedForEnclosingCalls)
+    left = Object.freeze({
+      state: target.state,
+      node: syntaxNode(target.state, 'PipelineExpression', [
+        left.node,
+        ...pipe.elements,
+        target.node,
+      ]),
+    })
+  }
+  return left
 }
 
 const parseReturnStatement = (initial: State): NodeResult => {
-  const keyword = expect(initial, 'ReturnKeyword', [
-    'DecimalInteger',
-    'Identifier',
-    'MoveKeyword',
-    'LeftParenthesis',
-    'RightBrace',
-  ])
+  const keyword = expect(initial, 'ReturnKeyword', [...expressionStarts, 'RightBrace'])
   const expression = parseExpression(keyword.state, 0, 'Integer')
   return Object.freeze({
     state: expression.state,
@@ -385,9 +562,7 @@ const parseBindingStatement = (initial: State): NodeResult => {
     'RightBrace',
   ])
   const equals = expect(name.state, 'Equals', [
-    'DecimalInteger',
-    'Identifier',
-    'MoveKeyword',
+    ...expressionStarts,
     'LetKeyword',
     'ReturnKeyword',
     'RightBrace',
@@ -405,14 +580,7 @@ const parseBindingStatement = (initial: State): NodeResult => {
 }
 
 function parseConditionalStatement(initial: State): NodeResult {
-  const keyword = expect(initial, 'IfKeyword', [
-    'Identifier',
-    'DecimalInteger',
-    'TrueKeyword',
-    'FalseKeyword',
-    'LeftBrace',
-    'RightBrace',
-  ])
+  const keyword = expect(initial, 'IfKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
   const condition = parseExpression(keyword.state, 0, 'Identifier')
   const taken = parseBlock(condition.state, false)
   let state = taken.state
@@ -440,9 +608,7 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
     'LetKeyword',
     'IfKeyword',
     'ReturnKeyword',
-    'DecimalInteger',
-    'Identifier',
-    'LeftParenthesis',
+    ...expressionStarts,
     'RightBrace',
   ])
   let state = leftBrace.state
@@ -475,6 +641,8 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
     'ReturnKeyword',
     'ElseKeyword',
     'PubKeyword',
+    'FnKeyword',
+    'ImportKeyword',
   ])
   return Object.freeze({
     state: rightBrace.state,
@@ -506,6 +674,8 @@ const parseParameterList = (initial: State): NodeResult => {
     kind !== 'RightParenthesis' &&
     kind !== 'Arrow' &&
     kind !== 'PubKeyword' &&
+    kind !== 'FnKeyword' &&
+    kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
     const name = expect(state, 'Identifier', ['Colon', 'Comma', 'RightParenthesis', 'Arrow'])
@@ -520,15 +690,34 @@ const parseParameterList = (initial: State): NodeResult => {
     state = type.state
     kind = nextSignificantKind(state)
 
-    if (kind === 'RightParenthesis' || kind === 'Arrow' || kind === 'PubKeyword') break
+    if (
+      kind === 'RightParenthesis' ||
+      kind === 'Arrow' ||
+      kind === 'PubKeyword' ||
+      kind === 'FnKeyword' ||
+      kind === 'ImportKeyword'
+    )
+      break
 
-    const comma = expect(state, 'Comma', ['Identifier', 'RightParenthesis', 'Arrow', 'PubKeyword'])
+    const comma = expect(state, 'Comma', [
+      'Identifier',
+      'RightParenthesis',
+      'Arrow',
+      'PubKeyword',
+      'FnKeyword',
+      'ImportKeyword',
+    ])
     children = Object.freeze([...children, ...comma.elements])
     state = comma.state
     kind = nextSignificantKind(state)
   }
 
-  const rightParenthesis = expect(state, 'RightParenthesis', ['Arrow', 'PubKeyword'])
+  const rightParenthesis = expect(state, 'RightParenthesis', [
+    'Arrow',
+    'PubKeyword',
+    'FnKeyword',
+    'ImportKeyword',
+  ])
   return Object.freeze({
     state: rightParenthesis.state,
     node: syntaxNode(rightParenthesis.state, 'ParameterList', [
@@ -538,13 +727,110 @@ const parseParameterList = (initial: State): NodeResult => {
   })
 }
 
-const parseImportDeclaration = (initial: State): NodeResult => {
-  const keyword = expect(initial, 'ImportKeyword', ['Identifier', 'PubKeyword', 'FnKeyword'])
-  const name = expect(keyword.state, 'Identifier', ['PubKeyword', 'ImportKeyword', 'FnKeyword'])
+const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'ImportKeyword',
+  'PubKeyword',
+  'FnKeyword',
+  'EndOfFile',
+])
+
+const parseImportAlias = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'AsKeyword', ['Identifier', 'LeftBrace', ...topLevelFollowing])
+  const name = expect(keyword.state, 'Identifier', ['LeftBrace', ...topLevelFollowing])
   return Object.freeze({
     state: name.state,
-    node: syntaxNode(name.state, 'ImportDeclaration', [...keyword.elements, ...name.elements]),
+    node: syntaxNode(name.state, 'ImportAlias', [...keyword.elements, ...name.elements]),
   })
+}
+
+const parseImportPath = (initial: State): NodeResult => {
+  const first = expect(initial, 'Identifier', [
+    'Dot',
+    'AsKeyword',
+    'LeftBrace',
+    ...topLevelFollowing,
+  ])
+  let state = first.state
+  let children: ReadonlyArray<SyntaxTree.Element> = first.elements
+  while (nextSignificantKind(state) === 'Dot') {
+    const dot = expect(state, 'Dot', ['Identifier', 'AsKeyword', 'LeftBrace', ...topLevelFollowing])
+    const segment = expect(dot.state, 'Identifier', [
+      'Dot',
+      'AsKeyword',
+      'LeftBrace',
+      ...topLevelFollowing,
+    ])
+    children = Object.freeze([...children, ...dot.elements, ...segment.elements])
+    state = segment.state
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'ImportPath', children) })
+}
+
+const parseImportMember = (initial: State): NodeResult => {
+  const name = expect(initial, 'Identifier', [
+    'AsKeyword',
+    'Comma',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  let state = name.state
+  let children: ReadonlyArray<SyntaxTree.Element> = name.elements
+  if (nextSignificantKind(state) === 'AsKeyword') {
+    const alias = parseImportAlias(state)
+    state = alias.state
+    children = Object.freeze([...children, alias.node])
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'ImportMember', children) })
+}
+
+const parseImportMemberList = (initial: State): NodeResult => {
+  const left = expect(initial, 'LeftBrace', ['Identifier', 'RightBrace', ...topLevelFollowing])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = left.elements
+  let first = true
+  while (
+    nextSignificantKind(state) !== 'RightBrace' &&
+    !topLevelFollowing.includes(nextSignificantKind(state) ?? 'EndOfFile')
+  ) {
+    if (!first) {
+      const comma = expect(state, 'Comma', ['Identifier', 'RightBrace', ...topLevelFollowing])
+      children = Object.freeze([...children, ...comma.elements])
+      state = comma.state
+      if (nextSignificantKind(state) === 'RightBrace') break
+    }
+    const member = parseImportMember(state)
+    children = Object.freeze([...children, member.node])
+    state = member.state
+    first = false
+  }
+  if (first) {
+    const member = parseImportMember(state)
+    children = Object.freeze([...children, member.node])
+    state = member.state
+  }
+  const right = expect(state, 'RightBrace', topLevelFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'ImportMemberList', [...children, ...right.elements]),
+  })
+}
+
+const parseImportDeclaration = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'ImportKeyword', ['Identifier', ...topLevelFollowing])
+  const path = parseImportPath(keyword.state)
+  let state = path.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([...keyword.elements, path.node])
+  if (nextSignificantKind(state) === 'AsKeyword') {
+    const alias = parseImportAlias(state)
+    state = alias.state
+    children = Object.freeze([...children, alias.node])
+  }
+  if (nextSignificantKind(state) === 'LeftBrace') {
+    const members = parseImportMemberList(state)
+    state = members.state
+    children = Object.freeze([...children, members.node])
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'ImportDeclaration', children) })
 }
 
 const parseTopLevelDeclaration = (state: State): NodeResult =>
@@ -553,7 +839,24 @@ const parseTopLevelDeclaration = (state: State): NodeResult =>
     : parseFunctionDeclaration(state)
 
 const parseFunctionDeclaration = (initial: State): NodeResult => {
-  const pubKeyword = expect(initial, 'PubKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+  let lookahead = initial.index
+  let lookaheadToken = initial.lexical.tokens.at(lookahead)
+  let hasPublicModifier = false
+  while (
+    lookaheadToken !== undefined &&
+    lookaheadToken.kind !== 'FnKeyword' &&
+    lookaheadToken.kind !== 'EndOfFile'
+  ) {
+    if (lookaheadToken.kind === 'PubKeyword') {
+      hasPublicModifier = true
+      break
+    }
+    lookahead += 1
+    lookaheadToken = initial.lexical.tokens.at(lookahead)
+  }
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
   const fnKeyword = expect(pubKeyword.state, 'FnKeyword', ['Identifier', 'LeftParenthesis'])
   const name = expect(fnKeyword.state, 'Identifier', ['LeftParenthesis'])
   const parameters = parseParameterList(name.state)

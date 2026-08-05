@@ -104,6 +104,39 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'operator-precedence',
+    source: 'pub fn main() -> I32 { return 2 + 5 * 8 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'operator-pipeline',
+    source: 'pub fn main() -> I32 { return 2 |> I32.add(40) }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'closed-operator-surface',
+    source: `pub fn main() -> I32 {
+if 6 * 7 != 42 { return 0 }
+if 84 / 2 != 42 { return 0 }
+if 85 % 43 != 42 { return 0 }
+if 44 - 2 != 42 { return 0 }
+if 40 + 2 != 42 { return 0 }
+if !(1 < 2) { return 0 }
+if !(2 <= 2) { return 0 }
+if !(3 > 2) { return 0 }
+if !(3 >= 3) { return 0 }
+if true != true { return 0 }
+if false == true { return 0 }
+return (40 + 2) * 1
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'unary-bool-pipeline',
+    source: 'pub fn main() -> I32 { if true |> Bool.not { return 0 } return 42 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'signed-truncation',
     source: 'pub fn main() -> I32 { return I32.add(I32.divide(-7, 2), 45) }',
     expected: { _tag: 'Completes', result: 42 },
@@ -116,6 +149,11 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
   {
     name: 'overflow-trap',
     source: 'pub fn main() -> I32 { return I32.add(2147483647, 1) }',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'operator-negation-overflow-trap',
+    source: 'pub fn main() -> I32 { return -(-2147483648) }',
     expected: { _tag: 'Trap' },
   },
   {
@@ -147,6 +185,11 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
   {
     name: 'bool-not',
     source: 'pub fn main() -> I32 { if Bool.not(I32.equals(1, 2)) { return 42 } return 0 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'operator-bool-not',
+    source: 'pub fn main() -> I32 { if !(1 == 2) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {

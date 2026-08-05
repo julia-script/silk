@@ -8,6 +8,7 @@ import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import * as NameResolution from './NameResolution.js'
 import * as NativeToolchain from './NativeToolchain.js'
 import * as Ownership from './Ownership.js'
 import * as Target from './Target.js'
@@ -128,12 +129,28 @@ export const compile = Effect.fn('Driver.compile')(function* (
     (result) => result.modules.reduce((sum, module) => sum + module.declarations.length, 0),
     (result) => result.diagnostics.length,
   )
+  const resolution = phase(
+    'name-resolution',
+    index.modules.length,
+    () => NameResolution.resolve(closure, index),
+    (result) => result.modules.reduce((sum, module) => sum + module.bindings.length, 0),
+    (result) => result.diagnostics.length,
+  )
   const results = phase(
     'elaboration',
     index.modules.length,
     () =>
       new Map(
-        closure.modules.map((module) => [module.name, Elaboration.elaborateModule(module.syntax)]),
+        closure.modules.map((module) => {
+          const headers = index.modules.find((candidate) => candidate.module === module.name)
+          const scope = NameResolution.scopeOf(resolution, module.name)
+          if (headers === undefined || scope === undefined)
+            throw new RangeError(`Driver lost module facts for ${module.name}`)
+          return [
+            module.name,
+            Elaboration.elaborateModule({ syntax: module.syntax, headers, scope, index }),
+          ]
+        }),
       ),
     (result) => [...result.values()].reduce((sum, module) => sum + module.functions.length, 0),
     (result) => [...result.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
@@ -158,6 +175,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
+    resolution.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )

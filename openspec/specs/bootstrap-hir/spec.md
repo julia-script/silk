@@ -8,16 +8,24 @@ deterministic textual encoder.
 ## Requirements
 ### Requirement: One integrated elaboration phase constructs HIR
 
-Elaboration SHALL consume collected declaration headers and resolve every function body in one
-integrated phase: local and referenced-name resolution, expression typing, and positional
-contract validation together with HIR construction. Elaboration SHALL preserve the existing body
-diagnostics (`SEM0002`, `SEM0004`, `SEM0006`, `SEM0007`) with their codes, spans, and reasons,
-and SHALL return complete ordered facts and diagnostics rather than throw for source mistakes.
+Elaboration SHALL consume the closure-wide declaration index and the containing module's completed
+name-resolution scope, then resolve every function body in one integrated phase: local bindings,
+unqualified or namespace-qualified declaration references, expression typing, and positional
+contract validation together with HIR construction. It MUST NOT recollect declaration headers or
+construct import bindings independently. Elaboration SHALL preserve the existing body diagnostics
+(`SEM0002`, `SEM0004`, `SEM0006`, `SEM0007`) with their codes, spans, and reasons while adding the
+stable name-resolution diagnostics required by imported references. It SHALL return complete ordered
+facts and diagnostics rather than throw for source mistakes.
 
 #### Scenario: Elaborate the accepted fixture
 
 - **WHEN** `pub fn main() -> I32 { return 42 }` is elaborated
 - **THEN** the result contains one HIR function whose body is a typed `I32` integer-literal return with exact source provenance and no diagnostics
+
+#### Scenario: Elaborate against the published module scope
+
+- **WHEN** a module scope contains a valid selected public function binding used by one body
+- **THEN** elaboration resolves that call through the existing binding and does not rebuild the imported module's headers
 
 #### Scenario: Preserve body diagnostics
 
@@ -127,3 +135,73 @@ literals, gated by committed golden files.
 - **WHEN** an arm declares `let inner = 1` after two body bindings
 - **THEN** the arm binding's identity does not collide with any other binding in the function
 
+### Requirement: Cross-module calls are ordinary canonical HIR calls
+
+A call resolved through a selected-member binding or namespace binding SHALL lower into the same HIR
+call operation as a local function call, carrying the imported function's indexed canonical
+declaration identity, typed ordered arguments, result type, and exact call-site provenance. The HIR
+MUST NOT carry import aliases, module traversal state, runtime namespace objects, or a distinct
+cross-module call operation. Missing, conflicting, unknown-member, and inaccessible-member lookups
+SHALL remain explicit unavailable HIR expressions carrying their originating diagnostic cause.
+
+#### Scenario: Elaborate a selected imported call
+
+- **WHEN** root `main` calls a uniquely selected public `answer()` from module `library/Answer`
+- **THEN** HIR contains an ordinary typed call targeting canonical declaration `library/Answer.answer`
+
+#### Scenario: Elaborate a namespace-qualified call
+
+- **WHEN** root imports `library.Answer as Answers` and calls `Answers.answer()`
+- **THEN** HIR contains the same canonical call target as the selective form while retaining the qualified call's source span
+
+#### Scenario: Elaborate a private local call
+
+- **WHEN** a public function calls a unique private helper in its own module
+- **THEN** HIR resolves the helper's canonical local identity and preserves its private visibility only as declaration metadata
+
+#### Scenario: Keep an inaccessible imported call unavailable
+
+- **WHEN** a qualified call names a private function in another module
+- **THEN** HIR contains an unavailable expression caused by the inaccessible-member diagnostic and no call target
+
+#### Scenario: Encode cross-module HIR deterministically
+
+- **WHEN** equivalent cyclic or acyclic closures are elaborated repeatedly in fresh processes
+- **THEN** every module's HIR encoding names identical canonical call targets and is byte-identical
+
+### Requirement: Surface operators erase into canonical HIR operations
+
+A resolved prefix, infix, or equality expression SHALL produce the same typed HIR builtin-call
+operation and ordered argument expressions as its canonical qualified actor-call form. A resolved
+pipeline SHALL produce the same ordinary builtin or declaration call with its left expression
+inserted as argument zero. HIR MUST NOT retain a surface operator token, precedence node, pipeline
+node, implicit namespace object, or distinct operator-call kind. The resulting operation SHALL
+retain the complete surface expression span, and unavailable operator or pipeline facts SHALL
+produce an unavailable HIR expression carrying their originating cause. Deterministic HIR encoding
+SHALL therefore be independent of whether equivalent behavior was authored with operator,
+pipeline, or complete qualified-call syntax except for source provenance.
+
+#### Scenario: Erase infix addition
+
+- **WHEN** a body returns `40 + 2`
+- **THEN** HIR contains `BuiltinCall Add` with two typed literal arguments and the infix expression span
+
+#### Scenario: Erase prefix negation
+
+- **WHEN** a body returns `-value`
+- **THEN** HIR contains the canonical trapping `Negate` builtin operation over the resolved `I32` value
+
+#### Scenario: Erase a builtin pipeline
+
+- **WHEN** a body returns `2 |> I32.add(3)`
+- **THEN** HIR contains the same `BuiltinCall Add` arguments as `I32.add(2, 3)` and no pipeline-specific operation
+
+#### Scenario: Erase an imported pipeline
+
+- **WHEN** a body pipes a value into a resolved public namespace-qualified function
+- **THEN** HIR contains one ordinary canonical declaration call with the inserted argument first
+
+#### Scenario: Encode nested operator HIR deterministically
+
+- **WHEN** equivalent grouped and precedence-driven operator programs are elaborated repeatedly
+- **THEN** their resolved operation nesting and encodings remain deterministic with exact source provenance

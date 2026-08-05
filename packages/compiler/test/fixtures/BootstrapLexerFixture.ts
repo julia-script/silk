@@ -33,7 +33,7 @@ export const expectedTokens: ReadonlyArray<ExpectedToken> = Object.freeze([
   { kind: 'EndOfFile', start: 45, end: 45, slice: '' },
 ])
 
-export const recoverySource = Uint8Array.of(0xff, 0xfe, 0x20, 0x2f, 0x3e, 0x20, 0x2d, 0x3e, 0x61)
+export const recoverySource = Uint8Array.of(0xff, 0xfe, 0x20, 0x5b, 0x5d, 0x20, 0x2d, 0x3e, 0x61)
 
 export interface ExpectedDiagnostic {
   readonly code: string

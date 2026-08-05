@@ -7,7 +7,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const evaluateSource = (text: string): BootstrapEvaluation.Outcome =>
-  Analysis.evaluate(Analysis.ofSource('memory://evaluation.silk', ascii(text)))
+  Analysis.evaluate(Analysis.ofSource('memory/evaluation', ascii(text)))
 
 it('reproduces every pinned corpus outcome', () => {
   for (const program of corpus) {
@@ -129,7 +129,7 @@ pub fn main() -> I32 { return identity(identity(42)) }`
 
 it('refuses malformed target-aware MIR before executing any operation', () => {
   const snapshot = Analysis.ofSource(
-    'memory://invalid-layout.silk',
+    'memory/invalid-layout',
     ascii('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
     'wasm32-unknown-unknown',
   )
@@ -152,4 +152,24 @@ it('refuses malformed target-aware MIR before executing any operation', () => {
   if (outcome._tag !== 'Blocked') return
   assert.strictEqual(outcome.reason._tag, 'InvalidMir')
   assert.deepEqual(outcome.trace, [])
+})
+
+it('evaluates operator precedence, prefix operations, and pipeline chains', () => {
+  const arithmetic = evaluateSource('pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }')
+  const boolean = evaluateSource('pub fn main() -> I32 { if !(2 * 3 == 7) { return 42 } return 0 }')
+
+  assert.strictEqual(arithmetic._tag, 'Completed')
+  assert.strictEqual(arithmetic._tag === 'Completed' ? arithmetic.result.value : undefined, 15)
+  assert.strictEqual(boolean._tag, 'Completed')
+  assert.strictEqual(boolean._tag === 'Completed' ? boolean.result.value : undefined, 42)
+})
+
+it('preserves trapping arithmetic through operator sugar', () => {
+  const division = evaluateSource('pub fn main() -> I32 { return 1 / 0 }')
+  const negation = evaluateSource('pub fn main() -> I32 { return -(-2147483648) }')
+
+  assert.strictEqual(division._tag, 'Blocked')
+  assert.strictEqual(division._tag === 'Blocked' ? division.reason._tag : undefined, 'Trap')
+  assert.strictEqual(negation._tag, 'Blocked')
+  assert.strictEqual(negation._tag === 'Blocked' ? negation.reason._tag : undefined, 'Trap')
 })
