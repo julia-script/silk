@@ -253,7 +253,8 @@
   font-size: 0.82rem;
 }
 
-.callRelationship {
+.callRelationship,
+.parameterRelationship {
   margin: 0.65rem 0.65rem 0;
   border: 1px solid color-mix(in srgb, var(--color-fd-primary) 35%, var(--color-fd-border));
   border-radius: 0.72rem;
@@ -261,6 +262,106 @@
     linear-gradient(135deg, color-mix(in srgb, var(--color-fd-primary) 12%, transparent), transparent 55%),
     color-mix(in srgb, var(--color-fd-background) 78%, var(--color-fd-card));
   padding: 0.7rem;
+}
+
+.parameterRelationship {
+  border-color: color-mix(in srgb, #2ca58d 42%, var(--color-fd-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #2ca58d 12%, transparent), transparent 55%),
+    color-mix(in srgb, var(--color-fd-background) 78%, var(--color-fd-card));
+}
+
+.parameterFacts {
+  margin: 0.65rem 0.65rem 0;
+  border: 1px solid color-mix(in srgb, #2ca58d 30%, var(--color-fd-border));
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, #2ca58d 5%, transparent);
+  padding: 0.7rem;
+}
+
+.parameterFactsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.parameterFactsHeading code {
+  border-radius: 999px;
+  background: color-mix(in srgb, #2ca58d 15%, transparent);
+  padding: 0.2rem 0.42rem;
+  color: var(--color-fd-foreground);
+  font-size: 0.6rem;
+}
+
+.parameterList {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.parameterCard {
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--color-fd-background) 78%, transparent);
+  padding: 0.55rem;
+}
+
+.parameterCard > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.parameterCard > div span,
+.parameterCard dt,
+.parameterCard dd span {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.59rem;
+}
+
+.parameterCard > div strong,
+.parameterCard code {
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.67rem;
+}
+
+.parameterCard dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0.45rem 0 0;
+}
+
+.parameterCard dl > div {
+  min-width: 0;
+  border-top: 1px solid var(--color-fd-border);
+  padding-top: 0.35rem;
+}
+
+.parameterCard dd {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+  margin: 0.15rem 0 0;
+}
+
+.parameterCard dd code,
+.parameterCard dd span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noParameters {
+  margin: 0.55rem 0.65rem 0;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.63rem;
 }
 
 .relationshipHeading {
@@ -707,6 +808,10 @@
 
   .relationshipTargets ul {
     justify-content: flex-start;
+  }
+
+  .parameterCard dl {
+    grid-template-columns: 1fr;
   }
 
   .functionCardHeading {

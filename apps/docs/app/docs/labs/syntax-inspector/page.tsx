@@ -5,7 +5,7 @@ import { SyntaxInspector } from './syntax-inspector'
 export const metadata: Metadata = {
   title: 'Syntax Inspector',
   description:
-    'An internal lab for inspecting Silk concrete trees, parameter and argument syntax, call resolution, and ordered function facts.',
+    'An internal lab for inspecting Silk concrete trees, function-local parameter references, call resolution, and ordered semantic facts.',
   robots: {
     index: false,
     follow: false,
@@ -31,11 +31,11 @@ export default function SyntaxInspectorPage() {
         </h1>
         <p className="text-base leading-7 text-fd-muted-foreground">
           Edit one or more bootstrap functions and inspect their lossless concrete syntax tree
-          alongside ordered semantic facts, parameter counts, declaration lookup, and resolved call
-          relationships. Every parameter, argument, separator, and token stays attached to its
-          original UTF-8 byte span; recovery appears as explicit error nodes and missing leaves.
-          Parameter resolution and argument checking are still deferred. These relationships are
-          not execution, a general scope graph, semantic AST, HIR, or a code-generation pipeline.
+          alongside ordered semantic facts, function-local parameter lookup, and resolved reference
+          relationships. Every declaration, reference, argument, separator, and token stays attached
+          to its original UTF-8 byte span; recovery appears as explicit error nodes and missing
+          leaves. Positional argument binding and checking are still deferred. These relationships
+          are not execution, a general scope graph, semantic AST, HIR, or a code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />

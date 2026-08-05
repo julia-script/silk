@@ -35,6 +35,19 @@ pub fn main() -> I32 { return answer( }`
 export const identityCallSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
 export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
+export const duplicateParameterSource =
+  'pub fn choose(value: I32, value: I32) -> I32 { return value }'
+export const tripleDuplicateParameterSource =
+  'pub fn choose(value: I32, value: I32, value: I32) -> I32 { return value }'
+export const unknownParameterReferenceSource = 'pub fn main() -> I32 { return missing }'
+export const crossFunctionParameterSource = `pub fn owner(value: I32) -> I32 { return value }
+pub fn other() -> I32 { return value }`
+export const sameParameterNamesSource = `pub fn first(value: I32) -> I32 { return value }
+pub fn second(value: I32) -> I32 { return value }`
+export const unknownParameterTypeSource = 'pub fn identity(value: Mystery) -> I32 { return value }'
+export const missingParameterNameSource = 'pub fn identity(: I32) -> I32 { return 0 }'
+export const missingParameterTypeSource = 'pub fn identity(value:) -> I32 { return 0 }'
+export const damagedIdentifierSource = 'pub fn main(value: I32) -> I32 { return @ value }'
 export const forwardCallSource = `pub fn main() -> I32 { return answer() }
 pub fn answer() -> I32 { return 42 }`
 export const selfCallSource = 'pub fn main() -> I32 { return main() }'

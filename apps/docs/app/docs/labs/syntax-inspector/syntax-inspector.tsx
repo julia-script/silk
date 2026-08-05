@@ -45,9 +45,26 @@ pub fn main() -> I32 { return same() }`,
 pub fn main() -> I32 { return answer( }`,
   },
   {
-    label: 'Identity syntax',
+    label: 'Resolved parameter',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Unknown parameter',
+    source: 'pub fn main() -> I32 { return missing }',
+  },
+  {
+    label: 'Duplicate parameter',
+    source: 'pub fn choose(value: I32, value: I32) -> I32 { return value }',
+  },
+  {
+    label: 'Cross-function parameter',
+    source: `pub fn owner(value: I32) -> I32 { return value }
+pub fn other() -> I32 { return value }`,
+  },
+  {
+    label: 'Recovered reference',
+    source: 'pub fn identity(value: I32) -> I32 { return @ value }',
   },
   {
     label: 'Two parameters',
@@ -201,8 +218,186 @@ type CallReturnedExpression = Extract<
   { readonly _tag: 'Call' }
 >
 
+type IdentifierExpression = SemanticAnalysis.IdentifierExpressionFact
+
 const declarationLabel = (declaration: SemanticAnalysis.DeclarationFact): string =>
   declaration.name._tag === 'Present' ? declaration.name.spelling : 'Unavailable name'
+
+const parameterLabel = (parameter: SemanticAnalysis.ParameterFact): string =>
+  parameter.name._tag === 'Present' ? parameter.name.spelling : 'Unavailable name'
+
+function ParameterRelationship({ expression }: { readonly expression: IdentifierExpression }) {
+  const reference = expression.reference
+  const referenceName = reference._tag === 'Unavailable' ? 'Unavailable reference' : reference.spelling
+  const targetName =
+    reference._tag === 'Resolved' ? parameterLabel(reference.parameter) : referenceName
+
+  return (
+    <section
+      className={styles.parameterRelationship}
+      aria-label={`Parameter relationship from ${referenceName} to ${targetName}`}
+    >
+      <div className={styles.relationshipHeading}>
+        <span>Local parameter resolution</span>
+        <strong>
+          {referenceName} <i aria-hidden="true">→</i> {targetName}
+        </strong>
+        <code>{reference._tag}</code>
+      </div>
+      <dl className={styles.relationshipFacts}>
+        <div>
+          <dt>Reference</dt>
+          <dd>
+            <code>{referenceName}</code>
+            <span>
+              {reference._tag === 'Unavailable'
+                ? spanLabel(reference.syntax)
+                : spanLabel(reference.token)}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Expression type</dt>
+          <dd>
+            <code>{expression.type._tag === 'Available' ? expression.type.type : 'Unavailable'}</code>
+            <span>{expression.type._tag}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Scope</dt>
+          <dd>
+            <code>Function-local</code>
+            <span>Parameters only</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Matches</dt>
+          <dd>
+            <code>
+              {reference._tag === 'Resolved'
+                ? 1
+                : reference._tag === 'Ambiguous'
+                  ? reference.parameters.length
+                  : 0}
+            </code>
+            <span>{reference._tag}</span>
+          </dd>
+        </div>
+      </dl>
+      {reference._tag === 'Resolved' ? (
+        <div className={styles.relationshipTargets}>
+          <span>Parameter declaration</span>
+          <code>
+            function #{reference.parameter.id.function.ordinal} · parameter #
+            {reference.parameter.id.ordinal} · {spanLabel(reference.parameter.syntax)}
+          </code>
+        </div>
+      ) : reference._tag === 'Ambiguous' ? (
+        <div className={styles.relationshipTargets}>
+          <span>{reference.parameters.length} matching parameters</span>
+          <ul>
+            {reference.parameters.map((parameter) => (
+              <li
+                key={`${parameter.id.function.sourceId}-${parameter.id.function.ordinal}-${parameter.id.ordinal}`}
+              >
+                <code>
+                  parameter #{parameter.id.ordinal} · {spanLabel(parameter.syntax)}
+                </code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className={styles.relationshipNotice}>
+          {reference._tag === 'Missing'
+            ? 'No parameter in this function matches the reference.'
+            : 'Parser recovery did not provide a usable local reference.'}
+        </p>
+      )}
+    </section>
+  )
+}
+
+function ParameterFacts({ declaration }: { readonly declaration: SemanticAnalysis.DeclarationFact }) {
+  if (declaration.parameters.length === 0) {
+    return <p className={styles.noParameters}>No parameters</p>
+  }
+
+  return (
+    <section
+      className={styles.parameterFacts}
+      aria-label={`Parameters for function ${declaration.id.ordinal}`}
+    >
+      <div className={styles.parameterFactsHeading}>
+        <span>Local parameter declarations</span>
+        <code>{declaration.parameters.length}</code>
+      </div>
+      <div className={styles.parameterList}>
+        {declaration.parameters.map((parameter) => {
+          const name = parameter.name
+          const type = parameter.declaredType
+          const lookup =
+            name._tag === 'Present'
+              ? SemanticAnalysis.parameterByName(declaration, name.spelling)
+              : undefined
+          return (
+            <article
+              className={styles.parameterCard}
+              key={`${parameter.id.function.sourceId}-${parameter.id.function.ordinal}-${parameter.id.ordinal}`}
+              aria-label={`Parameter ${parameter.id.ordinal}: ${parameterLabel(parameter)}`}
+            >
+              <div>
+                <span>Parameter #{parameter.id.ordinal}</span>
+                <strong>{parameterLabel(parameter)}</strong>
+              </div>
+              <dl>
+                <div>
+                  <dt>Identity</dt>
+                  <dd>
+                    <code>
+                      function #{parameter.id.function.ordinal} · parameter #{parameter.id.ordinal}
+                    </code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Declared type</dt>
+                  <dd>
+                    <code>
+                      {type._tag === 'Resolved'
+                        ? type.type
+                        : type._tag === 'Unresolved'
+                          ? type.spelling
+                          : 'Unavailable'}
+                    </code>
+                    <span>{type._tag}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Lookup</dt>
+                  <dd>
+                    <code>{lookup?._tag ?? 'Unavailable'}</code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Provenance</dt>
+                  <dd>
+                    <code>{spanLabel(parameter.syntax)}</code>
+                    <span>
+                      {name._tag === 'Present'
+                        ? `name ${spanLabel(name.token)}`
+                        : `name ${spanLabel(name.syntax)}`}
+                    </span>
+                    <span>type {spanLabel(type.syntax)}</span>
+                  </dd>
+                </div>
+              </dl>
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 function CallRelationship({
   caller,
@@ -269,7 +464,7 @@ function CallRelationship({
           <dt>Arguments</dt>
           <dd>
             <code>{argumentCount}</code>
-            <span>Preserved · unchecked</span>
+            <span>Expressions resolved · binding unchecked</span>
           </dd>
         </div>
       </dl>
@@ -354,6 +549,14 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
           const returnType = declaration.returnType
           const returned = fact.returnedExpression
           const nameLabel = name._tag === 'Present' ? name.spelling : 'Unavailable name'
+          const identifierExpressions: ReadonlyArray<IdentifierExpression> =
+            returned._tag === 'Identifier'
+              ? [returned]
+              : returned._tag === 'Call'
+                ? returned.argumentExpressions.filter(
+                    (argument): argument is IdentifierExpression => argument._tag === 'Identifier',
+                  )
+                : []
 
           return (
             <article
@@ -368,6 +571,15 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                 </div>
                 <code>{spanLabel(declaration.syntax)}</code>
               </div>
+
+              <ParameterFacts declaration={declaration} />
+
+              {identifierExpressions.map((expression, index) => (
+                <ParameterRelationship
+                  key={`${expression.syntax.span.start}-${expression.syntax.span.end}-${index}`}
+                  expression={expression}
+                />
+              ))}
 
               {returned._tag === 'Call' ? (
                 <CallRelationship caller={declaration} returned={returned} />
@@ -425,8 +637,15 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
                     </dd>
                   ) : returned._tag === 'Identifier' ? (
                     <dd>
-                      <strong>Unavailable</strong>
-                      <span>Identifier · resolution deferred</span>
+                      <strong>
+                        {returned.reference._tag === 'Unavailable'
+                          ? 'Unavailable'
+                          : returned.reference.spelling}
+                      </strong>
+                      <span>
+                        Identifier · {returned.reference._tag} ·{' '}
+                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                      </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
                   ) : (
@@ -463,10 +682,11 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
       </div>
 
       <p className={styles.boundaryNote}>
-        Parameters and arguments are concrete syntax in this slice: counts are available, while
-        local identifier resolution, argument binding, and argument checking are deliberately
-        deferred. These arrows record top-level call-name resolution, not execution order. Scope
-        graphs, semantic AST, HIR, and code generation do not exist yet.
+        Parameters now have function-local identities, declared types, closed lookup, and exact
+        reference links. Call arguments expose their local expression facts, while positional
+        argument binding and checking remain deliberately deferred. These arrows record name
+        resolution, not execution order. General scope graphs, semantic AST, HIR, and code
+        generation do not exist yet.
       </p>
     </section>
   )

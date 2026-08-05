@@ -10,9 +10,12 @@ import {
   acceptedSource,
   ambiguousCallSource,
   beyondSafeIntegerSource,
+  crossFunctionParameterSource,
+  damagedIdentifierSource,
   damagedTargetBodyCallSource,
   damagedTypeSource,
   duplicateNameSource,
+  duplicateParameterSource,
   forwardCallSource,
   i32BoundarySource,
   identityCallSource,
@@ -20,17 +23,23 @@ import {
   missingCallRightParenthesisSource,
   missingIntegerSource,
   missingNameSource,
+  missingParameterNameSource,
+  missingParameterTypeSource,
   missingSecondNameSource,
   mixedFunctionDamageSource,
   mixedResolutionDamageSource,
   overflowSource,
   parserAndSemanticDamageSource,
+  sameParameterNamesSource,
   selfCallSource,
   threeFunctionSource,
   tripleDuplicateNameSource,
+  tripleDuplicateParameterSource,
   twoFunctionSource,
   twoParameterSource,
   unknownCallSource,
+  unknownParameterReferenceSource,
+  unknownParameterTypeSource,
   unknownTypeSource,
   unresolvedTargetTypeCallSource,
   validCallSource,
@@ -171,7 +180,7 @@ it('collects two and three declarations with deterministic source-order identiti
   )
 })
 
-it('counts concrete parameters while leaving identifier meaning unavailable', () => {
+it('collects typed parameters and resolves returned identifiers', () => {
   const identity = analyzeText('fixture://identity-parameters.silk', identityCallSource)
   const multiple = analyzeText('fixture://two-parameters.silk', twoParameterSource)
   const identityFunction = functionAt(identity, 0)
@@ -181,13 +190,180 @@ it('counts concrete parameters while leaving identifier meaning unavailable', ()
 
   assert.strictEqual(identityFunction.declaration.parameterCount, 1)
   assert.strictEqual(functionAt(multiple, 0).declaration.parameterCount, 2)
-  assert.deepEqual(returnedIdentifier.type, { _tag: 'Unavailable' })
-  assert.deepEqual(identityFunction.returnCompatibility, { _tag: 'Unavailable' })
+  assert.strictEqual(returnedIdentifier.reference._tag, 'Resolved')
+  assert.deepEqual(returnedIdentifier.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(identityFunction.returnCompatibility, { _tag: 'Compatible' })
   assert.strictEqual(returnedCall.reference._tag, 'Resolved')
   assert.deepEqual(returnedCall.type, { _tag: 'Available', type: 'I32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(identity.diagnostics, [])
   assert.deepEqual(identity.parse.diagnostics, [])
+})
+
+it('publishes ordered function-local parameter identities, types, and lookup', () => {
+  const result = analyzeText('fixture://same-parameter-names.silk', sameParameterNamesSource)
+  const first = functionAt(result, 0).declaration
+  const second = functionAt(result, 1).declaration
+  const firstParameter = first.parameters.at(0) ?? raise('expected first parameter')
+  const secondParameter = second.parameters.at(0) ?? raise('expected second parameter')
+  const directLookup = SemanticAnalysis.parameterByName(first, 'value')
+  const pipedLookup = pipe(second, SemanticAnalysis.parameterByName('value'))
+
+  assert.deepEqual(firstParameter.id, {
+    _tag: 'ParameterId',
+    function: first.id,
+    ordinal: 0,
+  })
+  assert.deepEqual(secondParameter.id, {
+    _tag: 'ParameterId',
+    function: second.id,
+    ordinal: 0,
+  })
+  assert.notDeepEqual(firstParameter.id.function, secondParameter.id.function)
+  assert.strictEqual(firstParameter.name._tag, 'Present')
+  assert.strictEqual(firstParameter.declaredType._tag, 'Resolved')
+  assert.strictEqual(firstParameter.syntax.kind, 'ParameterDeclaration')
+  assert.strictEqual(directLookup._tag, 'Resolved')
+  assert.strictEqual(pipedLookup._tag, 'Resolved')
+  if (directLookup._tag !== 'Resolved' || pipedLookup._tag !== 'Resolved') return
+  assert.strictEqual(directLookup.parameter, firstParameter)
+  assert.strictEqual(pipedLookup.parameter, secondParameter)
+  assert.deepEqual(SemanticAnalysis.parameterByName(first, 'missing'), {
+    _tag: 'Missing',
+    spelling: 'missing',
+  })
+  assert.strictEqual(Object.isFrozen(first.parameters), true)
+  assert.strictEqual(Object.isFrozen(firstParameter), true)
+  assert.strictEqual(Object.isFrozen(firstParameter.id), true)
+})
+
+it('resolves identifier arguments against the caller parameter collection', () => {
+  const result = analyzeText(
+    'fixture://identifier-argument.silk',
+    `pub fn identity(value: I32) -> I32 { return value }
+pub fn forward(value: I32) -> I32 { return identity(value) }`,
+  )
+  const forward = functionAt(result, 1)
+  const call = callFact(forward)
+  const argument = call.argumentExpressions.at(0) ?? raise('expected argument expression')
+
+  assert.strictEqual(argument._tag, 'Identifier')
+  if (argument._tag !== 'Identifier') return
+  assert.strictEqual(argument.reference._tag, 'Resolved')
+  if (argument.reference._tag !== 'Resolved') return
+  assert.strictEqual(argument.reference.parameter, forward.declaration.parameters.at(0))
+  assert.deepEqual(argument.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps parameter lookup isolated to its owning function', () => {
+  const result = analyzeText(
+    'fixture://cross-function-parameter.silk',
+    crossFunctionParameterSource,
+  )
+  const owner = functionAt(result, 0)
+  const other = functionAt(result, 1)
+  const ownerReference = identifierFact(owner)
+  const otherReference = identifierFact(other)
+
+  assert.strictEqual(ownerReference.reference._tag, 'Resolved')
+  assert.strictEqual(otherReference.reference._tag, 'Missing')
+  assert.deepEqual(other.returnCompatibility, { _tag: 'Unavailable' })
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0006'],
+  )
+})
+
+it('diagnoses unknown local names at their exact reference spans', () => {
+  const result = analyzeText(
+    'fixture://unknown-parameter-reference.silk',
+    unknownParameterReferenceSource,
+  )
+  const reference = identifierFact(functionAt(result, 0)).reference
+
+  assert.strictEqual(reference._tag, 'Missing')
+  if (reference._tag !== 'Missing') return
+  assert.deepEqual(diagnosticView(result), [
+    {
+      code: 'SEM0006',
+      start: reference.token.span.start,
+      end: reference.token.span.end,
+      reason: { _tag: 'UnknownParameterReference', spelling: 'missing' },
+    },
+  ])
+})
+
+it('preserves duplicate parameters and reports declaration-owned ambiguity', () => {
+  const duplicate = analyzeText('fixture://duplicate-parameter.silk', duplicateParameterSource)
+  const triple = analyzeText(
+    'fixture://triple-duplicate-parameter.silk',
+    tripleDuplicateParameterSource,
+  )
+  const declaration = functionAt(duplicate, 0).declaration
+  const lookup = SemanticAnalysis.parameterByName(declaration, 'value')
+  const reference = identifierFact(functionAt(duplicate, 0)).reference
+
+  assert.strictEqual(lookup._tag, 'Ambiguous')
+  assert.strictEqual(reference._tag, 'Ambiguous')
+  if (lookup._tag !== 'Ambiguous' || reference._tag !== 'Ambiguous') return
+  assert.deepEqual(
+    lookup.parameters.map((parameter) => parameter.id.ordinal),
+    [0, 1],
+  )
+  assert.deepEqual(
+    reference.parameters.map((parameter) => parameter.id.ordinal),
+    [0, 1],
+  )
+  assert.deepEqual(
+    duplicate.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0005'],
+  )
+  assert.deepEqual(
+    triple.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0005', 'SEM0005'],
+  )
+})
+
+it('resolves parameter types and preserves parser-owned damaged states', () => {
+  const unknown = analyzeText('fixture://unknown-parameter-type.silk', unknownParameterTypeSource)
+  const missingName = analyzeText(
+    'fixture://missing-parameter-name.silk',
+    missingParameterNameSource,
+  )
+  const missingType = analyzeText(
+    'fixture://missing-parameter-type.silk',
+    missingParameterTypeSource,
+  )
+  const damagedReference = analyzeText('fixture://damaged-identifier.silk', damagedIdentifierSource)
+  const unknownParameter = functionAt(unknown, 0).declaration.parameters.at(0)
+  const missingNameParameter = functionAt(missingName, 0).declaration.parameters.at(0)
+  const missingTypeParameter = functionAt(missingType, 0).declaration.parameters.at(0)
+
+  assert.strictEqual(unknownParameter?.declaredType._tag, 'Unresolved')
+  assert.deepEqual(
+    unknown.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0001'],
+  )
+  assert.strictEqual(missingNameParameter?.name._tag, 'Unavailable')
+  assert.strictEqual(missingTypeParameter?.declaredType._tag, 'Unavailable')
+  assert.deepEqual(missingName.diagnostics, [])
+  assert.deepEqual(missingType.diagnostics, [])
+  assert.strictEqual(identifierFact(functionAt(damagedReference, 0)).reference._tag, 'Unavailable')
+  assert.deepEqual(damagedReference.diagnostics, [])
+  assert.deepEqual(
+    damagedReference.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+})
+
+it('keeps parameter facts and diagnostics deterministic across fresh analyses', () => {
+  const source = `${duplicateParameterSource}\n${unknownParameterReferenceSource}`
+  const first = analyzeText('fixture://parameter-determinism.silk', source)
+  const second = analyzeText('fixture://parameter-determinism.silk', source)
+
+  assert.deepEqual(first.functions, second.functions)
+  assert.deepEqual(diagnosticView(first), diagnosticView(second))
 })
 
 it('resolves a call to an earlier declaration and propagates its type', () => {

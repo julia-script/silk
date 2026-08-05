@@ -9,20 +9,24 @@ import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-e
 
 const source = SourceFile.make(
   'memory://example.silk',
-  new TextEncoder().encode(`pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer() }`),
+  new TextEncoder().encode(`pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`),
 )
 const lexical = Lexer.lex(source)
 const parse = Parser.parse(lexical)
 const result = SemanticAnalysis.analyze(parse)
+const identity = result.functions[0]
 
 console.log(parse.root.kind) // SourceFile
 console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // true
 console.log(result.functions.length) // 2
-console.log(result.functions[0]?.declaration.name) // { _tag: 'Present', spelling: 'answer', ... }
-console.log(result.functions[0]?.returnedExpression) // { _tag: 'Integer', integer: { value: 42, ... }, ... }
-console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', reference: { _tag: 'Resolved', ... }, type: { _tag: 'Available', type: 'I32' }, ... }
+console.log(identity?.declaration.parameters[0]?.id) // { _tag: 'ParameterId', function: { ... }, ordinal: 0 }
+console.log(identity?.returnedExpression) // { _tag: 'Identifier', reference: { _tag: 'Resolved', ... }, type: { _tag: 'Available', type: 'I32' }, ... }
+console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', argumentExpressions: [{ _tag: 'Integer', ... }], ... }
 console.log(SemanticAnalysis.declarationByName(result, 'main')) // { _tag: 'Resolved', ... }
+if (identity !== undefined) {
+  console.log(SemanticAnalysis.parameterByName(identity.declaration, 'value')) // { _tag: 'Resolved', ... }
+}
 ```
 
 The same actors are available through explicit deep imports such as
@@ -84,6 +88,17 @@ zero-based concrete-source ordinal; missing names do not change later ordinals. 
 also retains public visibility, its exact concrete parameter count, a present or unavailable name, and a resolved,
 unresolved, or unavailable declared return type.
 
+Each declaration publishes its ordered parameter facts. A parameter identity nests its concrete
+ordinal under the owning function identity, so same-spelled parameters in different functions stay
+independent. Parameter names and declared types retain exact concrete provenance. The exact `I32`
+type resolves through the same type rule as function returns; unknown present types produce
+`SEM0001`, while parser-damaged names and types remain unavailable without duplicate diagnostics.
+
+`SemanticAnalysis.parameterByName` performs function-local lookup with closed `Resolved`, `Missing`,
+and `Ambiguous` outcomes. It never sees parameters from another function or top-level function
+names. Every later duplicate present parameter name produces `SEM0005` at its declaration while all
+matches remain available in source order.
+
 `SemanticAnalysis.declarationByName` supports data-first and pipeable lookup with closed `Resolved`,
 `Missing`, and `Ambiguous` outcomes. It never silently selects the first duplicate. Missing recovered
 names do not enter lookup, while every present duplicate after the first produces `SEM0003` at the
@@ -108,10 +123,13 @@ relationship rather than executing the function. Missing, ambiguous, syntax-dama
 unresolved-target-type calls remain unavailable. Integer returned expressions keep their existing
 exact value and compatibility behavior.
 
-Typed parameter declarations, bare identifier expressions, and call arguments are concrete-only in
-this slice. Semantic analysis publishes the exact parameter count but deliberately leaves local
-identifier meaning, argument binding, argument compatibility, and argument values unavailable. A
-valid call with arguments can still resolve its top-level callee and result type independently.
+Every usable bare identifier expression resolves only against the complete parameter collection of
+its enclosing function. A unique match retains the exact parameter identity and supplies its
+declared type to the expression; a missing match produces `SEM0006`; duplicate matches stay
+ambiguous and rely on the declaration-owned `SEM0005`. Missing or damaged reference syntax remains
+parser-owned and unavailable. The same rule applies to returned identifiers and identifier call
+arguments. Calls expose their ordered integer or identifier argument expression facts, but
+positional argument-to-parameter binding, arity checking, and execution remain deferred.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native

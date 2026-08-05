@@ -62,11 +62,11 @@ playground.
 The Syntax Inspector SHALL provide valid and malformed presets for typed parameter declarations,
 bare-identifier expressions, and value-carrying calls. It SHALL show the concrete parameter and
 argument branches, every separator and token span, local recovery nodes, exact declaration parameter
-counts, and the explicitly deferred semantic state.
+counts, local parameter-resolution states, and the explicitly deferred positional-checking boundary.
 
 #### Scenario: Inspect the identity syntax slice
 - **WHEN** a developer selects the parameter-and-argument preset
-- **THEN** the concrete view shows `value: I32`, the returned `value`, and the `42` in `identity(42)` while semantic panels clearly mark parameter resolution and argument checking as deferred
+- **THEN** the concrete view shows `value: I32`, the returned `value`, and the `42` in `identity(42)` while semantic panels show the local parameter relationship and clearly mark positional argument checking as deferred
 
 #### Scenario: Inspect malformed list recovery
 - **WHEN** a developer selects a preset with a missing parameter type, comma, or call parenthesis
@@ -74,13 +74,12 @@ counts, and the explicitly deferred semantic state.
 
 ### Requirement: Inspect multiple concrete function branches
 The Syntax Inspector SHALL provide a two-function preset and display each parsed function as a
-separate top-level concrete branch in source order. Until declaration collection is implemented,
-the semantic panel SHALL state that it describes only the first function and MUST NOT imply that
-later declarations have semantic facts.
+separate top-level concrete branch in source order. The semantic panel SHALL show one ordered
+function fact for each branch without collapsing or reordering later declarations.
 
 #### Scenario: Inspect two parsed functions
 - **WHEN** a developer selects the two-function preset
-- **THEN** the concrete tree shows two function-declaration branches while the semantic panel clearly identifies its first-function-only boundary
+- **THEN** the concrete tree shows two function-declaration branches while the semantic panel shows their two corresponding ordered function facts
 
 #### Scenario: Inspect recovery at a function boundary
 - **WHEN** the first function in a two-function source is missing its closing brace
@@ -99,6 +98,25 @@ the ambiguous lookup state and its semantic diagnostic.
 #### Scenario: Inspect a duplicate declaration name
 - **WHEN** a developer selects the duplicate-name preset
 - **THEN** both declarations remain visible, name lookup is shown as ambiguous, and `SEM0003` identifies the later name
+
+### Requirement: Inspect parameter declarations and references
+The Syntax Inspector SHALL render each function's ordered parameter facts and every bare-identifier
+reference relationship. It SHALL show owning function and parameter identities, declaration and
+reference spans, declared and expression types, lookup outcome, return compatibility, and
+phase-separated diagnostics. Presets SHALL cover resolved, unknown, duplicate, cross-function, and
+syntax-unavailable references.
+
+#### Scenario: Inspect a resolved parameter reference
+- **WHEN** a developer selects the identity-function preset
+- **THEN** the semantic view links the returned `value` to parameter zero and shows `I32` expression type and compatible return
+
+#### Scenario: Inspect an unknown local name
+- **WHEN** a developer selects the unknown-parameter-reference preset
+- **THEN** the relationship is missing and `SEM0006` identifies the exact returned identifier
+
+#### Scenario: Inspect duplicate local parameters
+- **WHEN** a developer selects the duplicate-parameter preset
+- **THEN** both declarations remain visible, the reference lists both matches without choosing one, and `SEM0005` identifies the later declaration
 
 ### Requirement: Inspect the first call expression
 The Syntax Inspector SHALL provide valid-call, missing-call-syntax, and unsupported-argument presets.

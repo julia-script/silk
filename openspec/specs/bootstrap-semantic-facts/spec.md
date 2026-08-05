@@ -20,9 +20,9 @@ discarding any collected declaration.
 - **WHEN** the accepted fixture `pub fn main() -> I32 { return 42 }` is analyzed
 - **THEN** one public function fact named `main` is available at ordinal zero with zero parameters and provenance to its original function and name syntax
 
-#### Scenario: Count typed parameters without resolving them
+#### Scenario: Count and collect typed parameters
 - **WHEN** a function has two complete typed parameters
-- **THEN** its declaration fact reports parameter count two while parameter declaration meaning remains deferred
+- **THEN** its declaration fact reports parameter count two and publishes two ordered parameter declaration facts
 
 #### Scenario: Collect two declarations in order
 - **WHEN** parsed `answer` and `main` functions appear in that source order
@@ -36,20 +36,105 @@ discarding any collected declaration.
 - **WHEN** two declarations have the same present name
 - **THEN** both function facts remain in source order, lookup reports multiple matches, and one `SEM0003` diagnostic identifies the later duplicate name
 
-### Requirement: New value-carrying syntax remains explicitly deferred
-Before parameter resolution and call checking are implemented, semantic analysis SHALL retain the
-parse result and declaration facts for functions containing parameters, bare identifiers, or call
-arguments without inventing parameter identities, bindings, argument compatibility, or values.
-Bare-identifier expression meaning SHALL be unavailable. Existing top-level call-name resolution
-and target-return-type facts SHALL remain available independently of the unchecked argument list.
+### Requirement: Call argument binding remains explicitly deferred
+Semantic analysis SHALL retain local expression facts for concrete integer and identifier call
+arguments without mapping them to target parameters or claiming argument compatibility. Existing
+top-level call-name resolution and target-return-type facts SHALL remain available independently of
+the unchecked argument list.
 
-#### Scenario: Analyze an unresolved parameter reference
-- **WHEN** `identity(value: I32)` returns `value`
-- **THEN** the declaration reports one parameter while the bare-identifier expression and return compatibility remain explicitly unavailable without a semantic error
-
-#### Scenario: Retain an unchecked call argument
+#### Scenario: Retain an unbound literal argument
 - **WHEN** `main` returns a uniquely resolved call `identity(42)`
-- **THEN** the call relationship still resolves to `identity` while no argument binding or compatibility is claimed
+- **THEN** the call relationship resolves to `identity` and the literal has its existing `I32` expression fact while no target-parameter binding or argument compatibility is claimed
+
+#### Scenario: Resolve a local argument independently
+- **WHEN** a function passes its own parameter `value` as a call argument
+- **THEN** the argument resolves locally to `value` without being mapped to a parameter of the call target
+
+### Requirement: Function-local parameter declaration facts
+Every function fact SHALL publish one ordered parameter declaration fact for every concrete
+parameter declaration. A parameter identity SHALL combine its owning function identity with its
+zero-based concrete parameter ordinal. Each fact SHALL expose its name state, declared-type state,
+and exact syntax provenance. The exact spelling `I32` SHALL resolve to the bootstrap type, an unknown
+present type SHALL produce `SEM0001`, and missing or damaged syntax SHALL remain unavailable without
+duplicating parser diagnostics.
+
+#### Scenario: Collect one typed parameter
+- **WHEN** `identity` declares `value: I32`
+- **THEN** its first parameter has ordinal zero, a present name `value`, a resolved `I32` type, and provenance to the exact parameter, name, and type syntax
+
+#### Scenario: Keep parameter identities function-local
+- **WHEN** two functions each declare a first parameter named `value`
+- **THEN** both parameters have ordinal zero under different owning function identities and do not conflict
+
+#### Scenario: Diagnose an unknown parameter type
+- **WHEN** a present parameter type spells `Mystery`
+- **THEN** that parameter type is unresolved and one `SEM0001` diagnostic identifies its exact type span
+
+#### Scenario: Preserve damaged parameter syntax
+- **WHEN** parser recovery inserts a parameter name or type
+- **THEN** the parameter fact remains ordered with the affected state unavailable and no duplicate semantic diagnostic
+
+### Requirement: Function-local parameter lookup
+Parameter lookup SHALL consider only the complete parameter collection of the enclosing function
+and SHALL distinguish exactly one match, no match, and multiple matches. Every later present
+duplicate parameter name SHALL produce one `SEM0005` diagnostic at the later declaration while all
+matching parameter identities remain available in source order. Parameters in other functions and
+top-level function declarations MUST NOT participate in this lookup.
+
+#### Scenario: Resolve one local parameter name
+- **WHEN** a function declares exactly one present parameter named `value`
+- **THEN** lookup for `value` in that function resolves to its exact parameter identity
+
+#### Scenario: Do not see another function's parameter
+- **WHEN** only a different function declares a parameter named `value`
+- **THEN** lookup for `value` in the current function reports no match
+
+#### Scenario: Preserve duplicate parameters
+- **WHEN** one function declares two parameters named `value`
+- **THEN** lookup is ambiguous, both identities remain in order, and `SEM0005` identifies the second name
+
+### Requirement: First parameter reference fact
+Every present bare-identifier expression SHALL resolve against the parameters of its enclosing
+function. Its reference fact SHALL be `Resolved` with the exact parameter identity and reference
+syntax when exactly one declaration matches, `Missing` when none matches, `Ambiguous` with all
+matching identities when multiple match, or unavailable when parser recovery did not supply usable
+syntax. A resolved reference SHALL use its parameter's resolved declared type; all other reference
+or type states SHALL keep the expression type unavailable.
+
+#### Scenario: Resolve a returned parameter
+- **WHEN** `identity(value: I32) -> I32` returns `value`
+- **THEN** the returned expression resolves to parameter zero, has type `I32`, and the function return is compatible
+
+#### Scenario: Resolve a parameter used as an argument
+- **WHEN** a function passes its parameter `value` as a call argument
+- **THEN** that argument's identifier reference resolves to the enclosing function's exact parameter declaration independently of the call target
+
+#### Scenario: Preserve an ambiguous reference
+- **WHEN** a bare identifier matches duplicate parameters in its enclosing function
+- **THEN** the reference exposes every match, selects none, and its expression type remains unavailable
+
+#### Scenario: Preserve parser ownership for a missing reference
+- **WHEN** parser recovery inserts the identifier expression's token
+- **THEN** the reference and type are unavailable without a semantic diagnostic
+
+### Requirement: Unknown parameter reference diagnostic
+A present bare identifier with no matching local parameter SHALL retain a `Missing` reference fact
+and produce one `SEM0006` diagnostic at the exact reference span. Duplicate declarations SHALL rely
+on declaration-owned `SEM0005` diagnostics without adding a second ambiguity diagnostic at the
+reference. Diagnostics SHALL remain deterministic and phase-separated with existing lexical,
+parser, and semantic diagnostics.
+
+#### Scenario: Diagnose an unknown value name
+- **WHEN** a function returns `missing` without declaring a parameter named `missing`
+- **THEN** the reference is missing and one `SEM0006` diagnostic identifies the exact identifier span
+
+#### Scenario: Avoid duplicate ambiguity diagnostics
+- **WHEN** a reference matches duplicate parameter declarations
+- **THEN** only the later declarations carry `SEM0005` and no reference-site ambiguity diagnostic is added
+
+#### Scenario: Repeat parameter analysis
+- **WHEN** equivalent parameter declarations and references are analyzed repeatedly in fresh processes
+- **THEN** parameter identities, lookup outcomes, reference facts, types, compatibility, and diagnostic ordering are identical
 
 ### Requirement: Built-in I32 type fact
 Semantic analysis SHALL resolve the exact return-type spelling `I32` for every function to the
@@ -142,7 +227,7 @@ Effect.
 - **THEN** the second and third names each produce one `SEM0003` diagnostic while the first remains the original declaration
 
 ### Requirement: First top-level call reference fact
-Semantic analysis SHALL resolve every present zero-argument call callee against all collected
+Semantic analysis SHALL resolve every present call callee against all collected
 top-level declarations without depending on declaration order. A call-reference fact SHALL be
 `Resolved` with the exact target declaration identity and callee syntax when exactly one declaration
 matches, `Missing` when none matches, `Ambiguous` when multiple declarations match, or unavailable

@@ -12,6 +12,12 @@ export const duplicateDeclarationNameCode = 'SEM0003' as const
 /** Stable code for a present call name with no matching top-level declaration. */
 export const unknownFunctionCode = 'SEM0004' as const
 
+/** Stable code for a present parameter name repeated after its first occurrence. */
+export const duplicateParameterNameCode = 'SEM0005' as const
+
+/** Stable code for a present value name with no matching local parameter. */
+export const unknownParameterReferenceCode = 'SEM0006' as const
+
 /** Why semantic analysis produced a diagnostic. */
 export type Reason =
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
@@ -26,6 +32,12 @@ export type Reason =
       readonly originalSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'UnknownFunction'; readonly spelling: string }
+  | {
+      readonly _tag: 'DuplicateParameterName'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'UnknownParameterReference'; readonly spelling: string }
 
 /** A recoverable semantic problem attached to one exact source span. */
 export interface SemanticDiagnostic {
@@ -35,6 +47,8 @@ export interface SemanticDiagnostic {
     | typeof integerOutOfRangeCode
     | typeof duplicateDeclarationNameCode
     | typeof unknownFunctionCode
+    | typeof duplicateParameterNameCode
+    | typeof unknownParameterReferenceCode
   readonly severity: 'error'
   readonly message: string
   readonly reason: Reason
@@ -100,5 +114,38 @@ export const unknownFunction = (
     severity: 'error',
     message: `Unknown function ${spelling}`,
     reason: Object.freeze({ _tag: 'UnknownFunction', spelling }),
+    span,
+  })
+
+/** Creates the diagnostic for a parameter name repeated after its first occurrence. */
+export const duplicateParameterName = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): SemanticDiagnostic =>
+  Object.freeze({
+    _tag: 'SemanticDiagnostic',
+    code: duplicateParameterNameCode,
+    severity: 'error',
+    message: `Duplicate parameter name ${spelling}`,
+    reason: Object.freeze({
+      _tag: 'DuplicateParameterName',
+      spelling,
+      originalSpan,
+    }),
+    span,
+  })
+
+/** Creates the diagnostic for one present value name with no matching local parameter. */
+export const unknownParameterReference = (
+  spelling: string,
+  span: SourceSpan.SourceSpan,
+): SemanticDiagnostic =>
+  Object.freeze({
+    _tag: 'SemanticDiagnostic',
+    code: unknownParameterReferenceCode,
+    severity: 'error',
+    message: `Unknown parameter ${spelling}`,
+    reason: Object.freeze({ _tag: 'UnknownParameterReference', spelling }),
     span,
   })

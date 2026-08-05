@@ -294,6 +294,13 @@ const unknownSource = api.SourceFile.make(
   new TextEncoder().encode('pub fn main() -> I32 { return missing() }'),
 );
 const unknownAnalysis = semanticModule.analyze(api.Parser.parse(api.Lexer.lex(unknownSource)));
+const unknownLocalSource = api.SourceFile.make(
+  'memory://packed-unknown-local.silk',
+  new TextEncoder().encode('pub fn main() -> I32 { return missing }'),
+);
+const unknownLocalAnalysis = semanticModule.analyze(
+  api.Parser.parse(api.Lexer.lex(unknownLocalSource)),
+);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -313,12 +320,37 @@ console.log(
       ordinals: analysis.functions.map((fact) => fact.declaration.id.ordinal),
       returnedExpressionTags: analysis.functions.map((fact) => fact.returnedExpression._tag),
       parameterCounts: analysis.functions.map((fact) => fact.declaration.parameterCount),
+      parameterOrdinals: analysis.functions.map((fact) =>
+        fact.declaration.parameters.map((parameter) => parameter.id.ordinal),
+      ),
+      parameterLookup:
+        analysis.functions[0] === undefined
+          ? null
+          : api.SemanticAnalysis.parameterByName(
+              analysis.functions[0].declaration,
+              'value',
+            )._tag,
+      identifierReference:
+        analysis.functions[0]?.returnedExpression._tag === 'Identifier'
+          ? analysis.functions[0].returnedExpression.reference._tag
+          : null,
+      identifierType:
+        analysis.functions[0]?.returnedExpression._tag === 'Identifier'
+          ? analysis.functions[0].returnedExpression.type
+          : null,
       callReference: call?.reference._tag,
+      argumentExpressionTags:
+        call?._tag === 'Call'
+          ? call.argumentExpressions.map((argument) => argument._tag)
+          : [],
       callType: call?.type,
       callTargetOrdinal:
         call?.reference._tag === 'Resolved' ? call.reference.declaration.id.ordinal : null,
       callCompatibility: analysis.functions[1]?.returnCompatibility._tag,
       unknownDiagnosticCodes: unknownAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
+      unknownLocalDiagnosticCodes: unknownLocalAnalysis.diagnostics.map(
+        (diagnostic) => diagnostic.code,
+      ),
       rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'identity')._tag,
       deepLookup: semanticModule.declarationByName(deepAnalysis, 'missing')._tag,
       legacyResultFields: ['declaration', 'integerExpression', 'returnCompatibility'].filter(
@@ -360,8 +392,11 @@ console.log(
     expect(api.deep['./Lexer']).toContain('lex')
     expect(api.deep['./Parser']).toContain('parse')
     expect(api.deep['./SemanticAnalysis']).toContain('analyze')
+    expect(api.deep['./SemanticAnalysis']).toContain('parameterByName')
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownType')
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownFunction')
+    expect(api.deep['./SemanticDiagnostic']).toContain('duplicateParameterName')
+    expect(api.deep['./SemanticDiagnostic']).toContain('unknownParameterReference')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.functionCount).toBe(2)
@@ -371,11 +406,17 @@ console.log(
       ordinals: [0, 1],
       returnedExpressionTags: ['Identifier', 'Call'],
       parameterCounts: [1, 0],
+      parameterOrdinals: [[0], []],
+      parameterLookup: 'Resolved',
+      identifierReference: 'Resolved',
+      identifierType: { _tag: 'Available', type: 'I32' },
       callReference: 'Resolved',
+      argumentExpressionTags: ['Integer'],
       callType: { _tag: 'Available', type: 'I32' },
       callTargetOrdinal: 0,
       callCompatibility: 'Compatible',
       unknownDiagnosticCodes: ['SEM0004'],
+      unknownLocalDiagnosticCodes: ['SEM0006'],
       rootLookup: 'Resolved',
       deepLookup: 'Missing',
       legacyResultFields: [],

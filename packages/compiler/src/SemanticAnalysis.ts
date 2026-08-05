@@ -16,6 +16,13 @@ export interface DeclarationId {
   readonly ordinal: number
 }
 
+/** A deterministic parameter identity nested under its owning function declaration. */
+export interface ParameterId {
+  readonly _tag: 'ParameterId'
+  readonly function: DeclarationId
+  readonly ordinal: number
+}
+
 /** A declaration name supplied by syntax or explicitly unavailable after recovery. */
 export type DeclaredName =
   | {
@@ -29,19 +36,72 @@ export type DeclaredName =
     }
 
 /** The resolved, unresolved, or syntax-unavailable declared return type. */
-export type ReturnTypeFact =
+export type DeclaredTypeFact =
   | {
       readonly _tag: 'Resolved'
       readonly type: SemanticType
       readonly spelling: string
       readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly syntax: SyntaxTree.Element
     }
   | {
       readonly _tag: 'Unresolved'
       readonly spelling: string
       readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly syntax: SyntaxTree.Element
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly syntax: SyntaxTree.Element
+    }
+
+/** The declared type fact attached to a function return. */
+export type ReturnTypeFact = DeclaredTypeFact
+
+/** One ordered parameter declaration with exact concrete provenance. */
+export interface ParameterFact {
+  readonly _tag: 'ParameterDeclaration'
+  readonly id: ParameterId
+  readonly name: DeclaredName
+  readonly declaredType: DeclaredTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** The closed result of looking up a parameter spelling within one function. */
+export type ParameterLookup =
+  | {
+      readonly _tag: 'Resolved'
+      readonly spelling: string
+      readonly parameter: ParameterFact
+    }
+  | {
+      readonly _tag: 'Missing'
+      readonly spelling: string
+    }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly parameters: ReadonlyArray<ParameterFact>
+    }
+
+/** A bare identifier resolved against its enclosing function's parameters. */
+export type ParameterReferenceFact =
+  | {
+      readonly _tag: 'Resolved'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly parameter: ParameterFact
+    }
+  | {
+      readonly _tag: 'Missing'
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly parameters: ReadonlyArray<ParameterFact>
     }
   | {
       readonly _tag: 'Unavailable'
@@ -98,6 +158,24 @@ export type ExpressionTypeFact =
   | { readonly _tag: 'Available'; readonly type: SemanticType }
   | { readonly _tag: 'Unavailable' }
 
+/** One bare identifier expression with its local reference and type facts. */
+export interface IdentifierExpressionFact {
+  readonly _tag: 'Identifier'
+  readonly reference: ParameterReferenceFact
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One concrete call argument expression before positional call binding exists. */
+export type ArgumentExpressionFact =
+  | {
+      readonly _tag: 'Integer'
+      readonly integer: IntegerExpressionFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | IdentifierExpressionFact
+
 /** One returned expression with exact concrete provenance. */
 export type ReturnedExpressionFact =
   | {
@@ -105,14 +183,11 @@ export type ReturnedExpressionFact =
       readonly integer: IntegerExpressionFact
       readonly syntax: SyntaxTree.Node
     }
-  | {
-      readonly _tag: 'Identifier'
-      readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
-    }
+  | IdentifierExpressionFact
   | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
+      readonly argumentExpressions: ReadonlyArray<ArgumentExpressionFact>
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
@@ -126,6 +201,7 @@ export interface DeclarationFact {
   readonly id: DeclarationId
   readonly visibility: 'Public'
   readonly parameterCount: number
+  readonly parameters: ReadonlyArray<ParameterFact>
   readonly name: DeclaredName
   readonly returnType: ReturnTypeFact
   readonly syntax: SyntaxTree.Node
@@ -228,20 +304,20 @@ const presentName = (source: SourceFile.SourceFile, node: SyntaxTree.Node): Decl
 }
 
 interface ReturnTypeResult {
-  readonly fact: ReturnTypeFact
+  readonly fact: DeclaredTypeFact
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
-const analyzeReturnType = (
+const analyzeDeclaredType = (
   source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  token: Token.Token | undefined,
+  syntax: SyntaxTree.Element,
 ): ReturnTypeResult => {
-  const token = directToken(node, 'Identifier')
   if (token === undefined) {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Unavailable',
-        syntax: unavailableSyntax(node, 'Identifier'),
+        syntax,
       }),
       diagnostics: Object.freeze([]),
     })
@@ -255,7 +331,7 @@ const analyzeReturnType = (
         type: 'I32',
         spelling: tokenSpelling,
         token,
-        syntax: node,
+        syntax,
       }),
       diagnostics: Object.freeze([]),
     })
@@ -266,11 +342,21 @@ const analyzeReturnType = (
       _tag: 'Unresolved',
       spelling: tokenSpelling,
       token,
-      syntax: node,
+      syntax,
     }),
     diagnostics: Object.freeze([SemanticDiagnostic.unknownType(tokenSpelling, token.span)]),
   })
 }
+
+const analyzeReturnType = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): ReturnTypeResult =>
+  analyzeDeclaredType(
+    source,
+    directToken(node, 'Identifier'),
+    directToken(node, 'Identifier') === undefined ? unavailableSyntax(node, 'Identifier') : node,
+  )
 
 const positiveI32Value = (bytes: Uint8Array): Option.Option<number> => {
   let value = 0
@@ -291,6 +377,18 @@ interface ReturnedExpressionResult {
   readonly fact: ReturnedExpressionFact
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
   readonly type: SemanticType | undefined
+}
+
+interface IdentifierResult {
+  readonly fact: IdentifierExpressionFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+  readonly type: SemanticType | undefined
+  readonly syntax: SyntaxTree.Node
+}
+
+interface ArgumentExpressionsResult {
+  readonly facts: ReadonlyArray<ArgumentExpressionFact>
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
 const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): IntegerResult => {
@@ -336,10 +434,127 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
   })
 }
 
+const analyzeIdentifier = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  parameters: ReadonlyArray<ParameterFact>,
+): IdentifierResult => {
+  const token = directToken(node, 'Identifier')
+  if (token === undefined || !node.children.every(isAvailableSyntax)) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Identifier',
+        reference: Object.freeze({
+          _tag: 'Unavailable',
+          syntax:
+            token === undefined
+              ? unavailableSyntax(node, 'Identifier')
+              : unavailableElement(node.children, node),
+        }),
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+      type: undefined,
+      syntax: node,
+    })
+  }
+
+  const tokenSpelling = spelling(source, token)
+  const lookup = lookupParameter(parameters, tokenSpelling)
+  const reference: ParameterReferenceFact =
+    lookup._tag === 'Resolved'
+      ? Object.freeze({
+          _tag: 'Resolved',
+          spelling: tokenSpelling,
+          token,
+          parameter: lookup.parameter,
+        })
+      : lookup._tag === 'Ambiguous'
+        ? Object.freeze({
+            _tag: 'Ambiguous',
+            spelling: tokenSpelling,
+            token,
+            parameters: lookup.parameters,
+          })
+        : Object.freeze({
+            _tag: 'Missing',
+            spelling: tokenSpelling,
+            token,
+          })
+  const expressionType =
+    reference._tag === 'Resolved' && reference.parameter.declaredType._tag === 'Resolved'
+      ? availableI32ExpressionType
+      : unavailableExpressionType
+
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Identifier',
+      reference,
+      type: expressionType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(
+      reference._tag === 'Missing'
+        ? [SemanticDiagnostic.unknownParameterReference(reference.spelling, reference.token.span)]
+        : [],
+    ),
+    type: expressionType._tag === 'Available' ? expressionType.type : undefined,
+    syntax: node,
+  })
+}
+
+const analyzeArgumentExpressions = (
+  source: SourceFile.SourceFile,
+  call: SyntaxTree.Node,
+  parameters: ReadonlyArray<ParameterFact>,
+): ArgumentExpressionsResult => {
+  const argumentList = childNode(call, 'ArgumentList')
+  const analyzed = argumentList.children.flatMap(
+    (
+      element,
+    ): ReadonlyArray<
+      | IdentifierResult
+      | (IntegerResult & {
+          readonly type: SemanticType | undefined
+          readonly syntax: SyntaxTree.Node
+        })
+    > => {
+      if (!SyntaxTree.isNode(element)) return []
+      if (element.kind === 'IdentifierExpression')
+        return [analyzeIdentifier(source, element, parameters)]
+      if (element.kind !== 'IntegerLiteralExpression') return []
+      const integer = analyzeInteger(source, element)
+      return [
+        Object.freeze({
+          ...integer,
+          type: integer.fact._tag === 'Available' ? integer.fact.type : undefined,
+          syntax: element,
+        }),
+      ]
+    },
+  )
+  const facts = analyzed.map((result): ArgumentExpressionFact => {
+    if ('reference' in result.fact) return result.fact
+    return Object.freeze({
+      _tag: 'Integer',
+      integer: result.fact,
+      type: result.type === undefined ? unavailableExpressionType : availableI32ExpressionType,
+      syntax: result.syntax,
+    })
+  })
+
+  return Object.freeze({
+    facts: Object.freeze(facts),
+    diagnostics: Object.freeze(analyzed.flatMap((result) => result.diagnostics)),
+  })
+}
+
 const analyzeReturnedExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
+  parameters: ReadonlyArray<ParameterFact>,
 ): ReturnedExpressionResult => {
   if (node.kind === 'IntegerLiteralExpression') {
     const integer = analyzeInteger(source, node)
@@ -355,16 +570,10 @@ const analyzeReturnedExpression = (
   }
 
   if (node.kind === 'IdentifierExpression') {
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Identifier',
-        type: unavailableExpressionType,
-        syntax: node,
-      }),
-      diagnostics: Object.freeze([]),
-      type: undefined,
-    })
+    return analyzeIdentifier(source, node, parameters)
   }
+
+  const argumentExpressions = analyzeArgumentExpressions(source, node, parameters)
 
   const token = directToken(node, 'Identifier')
   if (token === undefined) {
@@ -375,10 +584,11 @@ const analyzeReturnedExpression = (
           _tag: 'Unavailable',
           syntax: unavailableSyntax(node, 'Identifier'),
         }),
+        argumentExpressions: argumentExpressions.facts,
         type: unavailableExpressionType,
         syntax: node,
       }),
-      diagnostics: Object.freeze([]),
+      diagnostics: argumentExpressions.diagnostics,
       type: undefined,
     })
   }
@@ -416,14 +626,16 @@ const analyzeReturnedExpression = (
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      argumentExpressions: argumentExpressions.facts,
       type: expressionType,
       syntax: node,
     }),
-    diagnostics: Object.freeze(
-      reference._tag === 'Missing'
+    diagnostics: Object.freeze([
+      ...(reference._tag === 'Missing'
         ? [SemanticDiagnostic.unknownFunction(reference.spelling, reference.token.span)]
-        : [],
-    ),
+        : []),
+      ...argumentExpressions.diagnostics,
+    ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
 }
@@ -442,12 +654,15 @@ const returnedExpressionNode = (returnStatement: SyntaxTree.Node): SyntaxTree.No
   return expression
 }
 
-const isAvailableSyntax = (element: SyntaxTree.Element): boolean =>
-  !SyntaxTree.isMissingToken(element) &&
-  !(
-    SyntaxTree.isNode(element) &&
-    (element.kind === 'Error' || !element.children.every(isAvailableSyntax))
+function isAvailableSyntax(element: SyntaxTree.Element): boolean {
+  return (
+    !SyntaxTree.isMissingToken(element) &&
+    !(
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'Error' || !element.children.every(isAvailableSyntax))
+    )
   )
+}
 
 const compareDiagnostics = (
   left: SemanticDiagnostic.SemanticDiagnostic,
@@ -468,6 +683,74 @@ interface DeclarationHeader {
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
+interface ParameterResult {
+  readonly fact: ParameterFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+}
+
+const isSeparator = (element: SyntaxTree.Element, kind: Token.TokenKind): boolean =>
+  (SyntaxTree.isToken(element) && element.kind === kind) ||
+  (SyntaxTree.isMissingToken(element) && element.expected === kind)
+
+const identifierToken = (elements: ReadonlyArray<SyntaxTree.Element>): Token.Token | undefined =>
+  elements.every(isAvailableSyntax)
+    ? elements.find(
+        (element): element is Token.Token =>
+          SyntaxTree.isToken(element) && element.kind === 'Identifier',
+      )
+    : undefined
+
+const unavailableElement = (
+  elements: ReadonlyArray<SyntaxTree.Element>,
+  fallback: SyntaxTree.Node,
+): SyntaxTree.Element =>
+  elements.find((element) => SyntaxTree.isMissingToken(element) || !isAvailableSyntax(element)) ??
+  fallback
+
+const analyzeParameter = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  functionId: DeclarationId,
+  ordinal: number,
+): ParameterResult => {
+  const colonIndex = node.children.findIndex((element) => isSeparator(element, 'Colon'))
+  const nameElements = colonIndex < 0 ? node.children : node.children.slice(0, colonIndex)
+  const typeElements = colonIndex < 0 ? Object.freeze([]) : node.children.slice(colonIndex + 1)
+  const nameToken = identifierToken(nameElements)
+  const typeToken = identifierToken(typeElements)
+  const name: DeclaredName =
+    nameToken === undefined
+      ? Object.freeze({
+          _tag: 'Unavailable',
+          syntax: unavailableElement(nameElements, node),
+        })
+      : Object.freeze({
+          _tag: 'Present',
+          spelling: spelling(source, nameToken),
+          token: nameToken,
+        })
+  const declaredType = analyzeDeclaredType(
+    source,
+    typeToken,
+    typeToken ?? unavailableElement(typeElements, node),
+  )
+
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'ParameterDeclaration',
+      id: Object.freeze({
+        _tag: 'ParameterId',
+        function: functionId,
+        ordinal,
+      }),
+      name,
+      declaredType: declaredType.fact,
+      syntax: node,
+    }),
+    diagnostics: declaredType.diagnostics,
+  })
+}
+
 const analyzeDeclarationHeader = (
   source: SourceFile.SourceFile,
   functionNode: SyntaxTree.Node,
@@ -476,15 +759,21 @@ const analyzeDeclarationHeader = (
   const returnTypeNode = childNode(functionNode, 'ReturnType')
   const parameterListNode = childNode(functionNode, 'ParameterList')
   const returnType = analyzeReturnType(source, returnTypeNode)
+  const id: DeclarationId = Object.freeze({
+    _tag: 'DeclarationId',
+    sourceId: source.id,
+    ordinal,
+  })
+  const analyzedParameters = directChildNodes(parameterListNode, 'ParameterDeclaration').map(
+    (node, parameterOrdinal) => analyzeParameter(source, node, id, parameterOrdinal),
+  )
+  const parameters = Object.freeze(analyzedParameters.map((result) => result.fact))
   const declaration: DeclarationFact = Object.freeze({
     _tag: 'FunctionDeclaration',
-    id: Object.freeze({
-      _tag: 'DeclarationId',
-      sourceId: source.id,
-      ordinal,
-    }),
+    id,
     visibility: 'Public',
-    parameterCount: directChildNodes(parameterListNode, 'ParameterDeclaration').length,
+    parameterCount: parameters.length,
+    parameters,
     name: presentName(source, functionNode),
     returnType: returnType.fact,
     syntax: functionNode,
@@ -493,7 +782,11 @@ const analyzeDeclarationHeader = (
   return Object.freeze({
     node: functionNode,
     declaration,
-    diagnostics: returnType.diagnostics,
+    diagnostics: Object.freeze([
+      ...analyzedParameters.flatMap((result) => result.diagnostics),
+      ...duplicateParameterDiagnostics(parameters),
+      ...returnType.diagnostics,
+    ]),
   })
 }
 
@@ -505,7 +798,12 @@ const analyzeFunctionBody = (
   const blockNode = childNode(header.node, 'Block')
   const returnStatementNode = childNode(blockNode, 'ReturnStatement')
   const expressionNode = returnedExpressionNode(returnStatementNode)
-  const expression = analyzeReturnedExpression(source, expressionNode, declarations)
+  const expression = analyzeReturnedExpression(
+    source,
+    expressionNode,
+    declarations,
+    header.declaration.parameters,
+  )
   const returnCompatibility =
     header.declaration.returnType._tag === 'Resolved' &&
     expression.type === header.declaration.returnType.type
@@ -527,6 +825,75 @@ interface PresentNameEntry {
   readonly spelling: string
   readonly token: Token.Token
   readonly declaration: DeclarationFact
+}
+
+interface PresentParameterNameEntry {
+  readonly spelling: string
+  readonly token: Token.Token
+  readonly parameter: ParameterFact
+}
+
+const presentParameterNameEntries = (
+  parameters: ReadonlyArray<ParameterFact>,
+): ReadonlyArray<PresentParameterNameEntry> =>
+  Object.freeze(
+    parameters.flatMap((parameter): ReadonlyArray<PresentParameterNameEntry> => {
+      const name = parameter.name
+      return name._tag === 'Present'
+        ? [
+            Object.freeze({
+              spelling: name.spelling,
+              token: name.token,
+              parameter,
+            }),
+          ]
+        : []
+    }),
+  )
+
+const duplicateParameterDiagnostics = (
+  parameters: ReadonlyArray<ParameterFact>,
+): ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> => {
+  const firstBySpelling = new Map<string, PresentParameterNameEntry>()
+  let diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic> = Object.freeze([])
+
+  for (const entry of presentParameterNameEntries(parameters)) {
+    const original = firstBySpelling.get(entry.spelling)
+    if (original === undefined) {
+      firstBySpelling.set(entry.spelling, entry)
+    } else {
+      diagnostics = Object.freeze([
+        ...diagnostics,
+        SemanticDiagnostic.duplicateParameterName(
+          entry.spelling,
+          original.token.span,
+          entry.token.span,
+        ),
+      ])
+    }
+  }
+
+  return diagnostics
+}
+
+const lookupParameter = (
+  parameters: ReadonlyArray<ParameterFact>,
+  spelling: string,
+): ParameterLookup => {
+  const matches = presentParameterNameEntries(parameters)
+    .filter((entry) => entry.spelling === spelling)
+    .map((entry) => entry.parameter)
+  const first = matches.at(0)
+
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling })
+  if (matches.length === 1) {
+    return Object.freeze({ _tag: 'Resolved', spelling, parameter: first })
+  }
+  return Object.freeze({
+    _tag: 'Ambiguous',
+    spelling,
+    parameters: Object.freeze(matches),
+  })
 }
 
 const presentNameEntries = (
@@ -624,3 +991,9 @@ export const declarationByName = dual<
     spelling,
   ),
 )
+
+/** Looks up every present parameter with the exact requested spelling in one function. */
+export const parameterByName = dual<
+  (spelling: string) => (self: DeclarationFact) => ParameterLookup,
+  (self: DeclarationFact, spelling: string) => ParameterLookup
+>(2, (self, spelling) => lookupParameter(self.parameters, spelling))
