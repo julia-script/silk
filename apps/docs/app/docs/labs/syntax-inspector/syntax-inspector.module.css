@@ -213,6 +213,218 @@
   font-size: 0.64rem;
 }
 
+.dataFlow {
+  margin-top: 0.8rem;
+  border: 1px solid color-mix(in srgb, #2ca58d 34%, var(--color-fd-border));
+  border-radius: 0.85rem;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, #2ca58d 11%, transparent), transparent 38%),
+    color-mix(in srgb, var(--color-fd-background) 70%, var(--color-fd-card));
+  padding: 0.8rem;
+}
+
+.dataFlowHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dataFlowHeading h3 {
+  margin: 0.12rem 0 0;
+  color: var(--color-fd-foreground);
+  font-size: 0.88rem;
+}
+
+.dataFlowHeading > code {
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.dataFlowHeading > code[data-state='Complete'] {
+  background: color-mix(in srgb, #2ca58d 17%, transparent);
+  color: color-mix(in srgb, #2ca58d 70%, var(--color-fd-foreground));
+}
+
+.dataFlowHeading > code[data-state='Incomplete'] {
+  background: color-mix(in srgb, #d97706 16%, transparent);
+  color: color-mix(in srgb, #d97706 75%, var(--color-fd-foreground));
+}
+
+.dataFlowHeading > code[data-state='Empty'] {
+  background: var(--color-fd-muted);
+  color: var(--color-fd-muted-foreground);
+}
+
+.dataFlowSummary {
+  margin: 0.55rem 0 0;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.flowLane {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  overflow-x: auto;
+  margin-top: 0.75rem;
+  padding: 0.15rem 0 0.4rem;
+}
+
+.flowLaneItem {
+  display: flex;
+  flex: 1 0 8rem;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.flowConnector {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, #2ca58d 65%, var(--color-fd-muted-foreground));
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.flowNode {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 6.4rem;
+  align-content: space-between;
+  gap: 0.25rem;
+  border: 1px solid color-mix(in srgb, #2ca58d 34%, var(--color-fd-border));
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--color-fd-background) 82%, transparent);
+  padding: 0.55rem;
+  text-align: left;
+}
+
+.flowNode:hover,
+.flowNode:focus-visible,
+.flowNode[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--color-fd-primary) 70%, var(--color-fd-border));
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-fd-primary) 18%, transparent);
+}
+
+.flowNode[data-state='Stopped'],
+.flowNode[data-state='Unmatched'] {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #d97706 55%, var(--color-fd-border));
+}
+
+.flowNode[data-state='Branched'] {
+  border-style: double;
+  border-color: color-mix(in srgb, #8b5cf6 60%, var(--color-fd-border));
+}
+
+.flowNode > span,
+.flowNode > small,
+.flowNode > code {
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.56rem;
+}
+
+.flowNode > span {
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.flowNode > strong {
+  overflow-wrap: anywhere;
+  color: var(--color-fd-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.66rem;
+}
+
+.flowRelationships {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowRelationships button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  width: 100%;
+  gap: 0.15rem 0.6rem;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-fd-background) 62%, transparent);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.flowRelationships button:hover,
+.flowRelationships button:focus-visible,
+.flowRelationships button[aria-pressed='true'] {
+  border-color: var(--color-fd-primary);
+  outline: none;
+}
+
+.flowRelationships strong {
+  color: var(--color-fd-foreground);
+  font-size: 0.63rem;
+}
+
+.flowRelationships span,
+.flowRelationships code {
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.56rem;
+}
+
+.flowRelationships code {
+  grid-column: 1 / -1;
+}
+
+.flowSelection {
+  margin: 0.6rem 0 0;
+  border-top: 1px solid var(--color-fd-border);
+  padding-top: 0.55rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.64rem;
+}
+
+.flowSelection > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.flowSelection strong {
+  color: var(--color-fd-foreground);
+}
+
+.flowSelection p {
+  margin: 0.25rem 0 0;
+}
+
+.flowSelection pre {
+  overflow-x: auto;
+  margin: 0.45rem 0 0;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-fd-background) 90%, black 4%);
+  padding: 0.55rem;
+  white-space: pre-wrap;
+}
+
+.flowSelection mark {
+  border: 1px solid color-mix(in srgb, #f1c40f 65%, transparent);
+  border-radius: 0.18rem;
+  background: color-mix(in srgb, #f1c40f 32%, transparent);
+  color: inherit;
+}
+
 .functionList {
   display: grid;
   gap: 0.7rem;
@@ -904,6 +1116,34 @@
 
   .parameterCard dl {
     grid-template-columns: 1fr;
+  }
+
+  .flowLane {
+    display: grid;
+    overflow: visible;
+  }
+
+  .flowLaneItem {
+    display: grid;
+    grid-template-columns: 1.1rem 1fr;
+  }
+
+  .flowLaneItem:first-child {
+    grid-template-columns: 1fr;
+  }
+
+  .flowConnector {
+    transform: rotate(90deg);
+    text-align: center;
+  }
+
+  .flowNode {
+    min-height: 5.2rem;
+  }
+
+  .flowSelection > div {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .functionCardHeading {

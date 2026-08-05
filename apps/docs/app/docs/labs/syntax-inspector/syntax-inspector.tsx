@@ -2,6 +2,7 @@
 
 import { Lexer, Parser, SemanticAnalysis, SourceFile, SyntaxTree } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
+import { projectDataFlow, type FlowEdge, type FlowNode } from './flow-model'
 import styles from './syntax-inspector.module.css'
 
 const sourceId = 'memory://docs/syntax-inspector.silk'
@@ -53,6 +54,21 @@ pub fn main() -> I32 { return identity(42) }`,
     label: 'Compatible contract',
     source: `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Flow unknown reference',
+    source: `pub fn identity(value: I32) -> I32 { return missing }
+pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Flow ambiguous reference',
+    source: `pub fn choose(value: I32, value: I32) -> I32 { return value }
+pub fn main() -> I32 { return choose(1, 2) }`,
+  },
+  {
+    label: 'Flow damaged syntax',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(@) }`,
   },
   {
     label: 'Too few arguments',
@@ -590,7 +606,126 @@ function CallRelationship({
   )
 }
 
-function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Result }) {
+const flowSpanLabel = (item: FlowNode | FlowEdge): string =>
+  `${item.span.sourceId}[${item.span.start}, ${item.span.end})`
+
+export function DataFlow({
+  analysis,
+  selectedId,
+  onSelect,
+}: {
+  readonly analysis: SemanticAnalysis.Result
+  readonly selectedId: string | undefined
+  readonly onSelect: (id: string | undefined) => void
+}) {
+  const flow = useMemo(() => projectDataFlow(analysis), [analysis])
+  const items: ReadonlyArray<FlowNode | FlowEdge> = [...flow.nodes, ...flow.edges]
+  const selected = items.find((item) => item.id === selectedId)
+  const source = analysis.parse.lexical.source
+  const selectedSlice =
+    selected === undefined
+      ? undefined
+      : decoder.decode(
+          Uint8Array.from(source.bytes.slice(selected.span.start, selected.span.end)),
+        )
+
+  return (
+    <section className={styles.dataFlow} aria-labelledby="data-flow-heading">
+      <div className={styles.dataFlowHeading}>
+        <div>
+          <span className={styles.eyebrow}>Semantic path</span>
+          <h3 id="data-flow-heading">Value flow</h3>
+        </div>
+        <code data-state={flow.status}>{flow.status}</code>
+      </div>
+      <p className={styles.dataFlowSummary}>{flow.summary}</p>
+
+      {flow.status === 'Empty' ? (
+        <p className={styles.emptyState}>Choose a call preset to inspect a value path.</p>
+      ) : (
+        <>
+          <div className={styles.flowLane} role="group" aria-label="Navigable value-flow nodes">
+            {flow.nodes.map((flowNode, index) => (
+              <div className={styles.flowLaneItem} key={flowNode.id}>
+                {index === 0 ? null : (
+                  <span className={styles.flowConnector} aria-hidden="true">
+                    →
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className={styles.flowNode}
+                  data-state={flowNode.state}
+                  aria-pressed={selectedId === flowNode.id}
+                  onClick={() => onSelect(selectedId === flowNode.id ? undefined : flowNode.id)}
+                >
+                  <span>{flowNode.kind}</span>
+                  <strong>{flowNode.label}</strong>
+                  <small>{flowNode.state}</small>
+                  <code>[{flowNode.span.start}, {flowNode.span.end})</code>
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <ol className={styles.flowRelationships} aria-label="Ordered value-flow relationships">
+            {flow.edges.map((flowEdge) => {
+              const from = flow.nodes.find((flowNode) => flowNode.id === flowEdge.from)
+              const to = flow.nodes.find((flowNode) => flowNode.id === flowEdge.to)
+              return (
+                <li key={flowEdge.id}>
+                  <button
+                    type="button"
+                    data-state={flowEdge.state}
+                    aria-pressed={selectedId === flowEdge.id}
+                    onClick={() => onSelect(selectedId === flowEdge.id ? undefined : flowEdge.id)}
+                  >
+                    <strong>
+                      {from?.label ?? flowEdge.from} {flowEdge.label} {to?.label ?? flowEdge.to}
+                    </strong>
+                    <span>{flowEdge.state}</span>
+                    <code>{flowSpanLabel(flowEdge)}</code>
+                  </button>
+                </li>
+              )
+            })}
+          </ol>
+        </>
+      )}
+
+      {selected === undefined ? (
+        <p className={styles.flowSelection}>
+          Activate any node or relationship to inspect its source.
+        </p>
+      ) : (
+        <aside className={styles.flowSelection} aria-live="polite" aria-label="Selected flow source">
+          <div>
+            <strong>Selected {selected._tag === 'FlowNode' ? selected.kind : 'relationship'}</strong>
+            <code>{flowSpanLabel(selected)}</code>
+          </div>
+          <p>{selected._tag === 'FlowNode' ? selected.detail : selected.label}</p>
+          <pre>
+            <code>
+              {decoder.decode(Uint8Array.from(source.bytes.slice(0, selected.span.start)))}
+              <mark>{selectedSlice}</mark>
+              {decoder.decode(Uint8Array.from(source.bytes.slice(selected.span.end)))}
+            </code>
+          </pre>
+        </aside>
+      )}
+    </section>
+  )
+}
+
+function SemanticFacts({
+  analysis,
+  selectedFlowId,
+  onSelectFlow,
+}: {
+  readonly analysis: SemanticAnalysis.Result
+  readonly selectedFlowId: string | undefined
+  readonly onSelectFlow: (id: string | undefined) => void
+}) {
   const presentNames = Array.from(
     new Set(
       analysis.functions.flatMap((fact) =>
@@ -632,6 +767,8 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
           </ul>
         )}
       </section>
+
+      <DataFlow analysis={analysis} selectedId={selectedFlowId} onSelect={onSelectFlow} />
 
       <div className={styles.functionList} aria-label="Collected function facts">
         {analysis.functions.map((fact) => {
@@ -787,6 +924,7 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
 
 export function SyntaxInspector() {
   const [text, setText] = useState(acceptedSource)
+  const [selectedFlowId, setSelectedFlowId] = useState<string>()
   const analysis = useMemo(() => {
     const source = SourceFile.make(sourceId, encoder.encode(text))
     return SemanticAnalysis.analyze(Parser.parse(Lexer.lex(source)))
@@ -811,7 +949,10 @@ export function SyntaxInspector() {
           id="syntax-source"
           className={styles.editor}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value)
+            setSelectedFlowId(undefined)
+          }}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -819,7 +960,14 @@ export function SyntaxInspector() {
 
         <div className={styles.exampleBar} aria-label="Source examples">
           {examples.map((example) => (
-            <button key={example.label} type="button" onClick={() => setText(example.source)}>
+            <button
+              key={example.label}
+              type="button"
+              onClick={() => {
+                setText(example.source)
+                setSelectedFlowId(undefined)
+              }}
+            >
               {example.label}
             </button>
           ))}
@@ -848,7 +996,11 @@ export function SyntaxInspector() {
           </div>
         </dl>
 
-        <SemanticFacts analysis={analysis} />
+        <SemanticFacts
+          analysis={analysis}
+          selectedFlowId={selectedFlowId}
+          onSelectFlow={setSelectedFlowId}
+        />
 
         <div className={styles.diagnostics}>
           <DiagnosticList title="Lexer" diagnostics={result.lexical.diagnostics} />

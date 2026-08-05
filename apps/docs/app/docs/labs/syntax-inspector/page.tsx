@@ -32,11 +32,14 @@ export default function SyntaxInspectorPage() {
         <p className="text-base leading-7 text-fd-muted-foreground">
           Edit one or more bootstrap functions and inspect their lossless concrete syntax tree
           alongside ordered semantic facts, function-local parameter lookup, and resolved reference
-          relationships. Every declaration, reference, argument, separator, and token stays attached
-          to its original UTF-8 byte span; recovery appears as explicit error nodes and missing
-          leaves. Calls show ordered arguments, positional parameter mappings, and a contract state
-          separately from their return compatibility. These relationships are not execution,
-          conversions, a general scope graph, semantic AST, HIR, or a code-generation pipeline.
+          relationships. A navigable value-flow lane joins the first literal argument to its mapped
+          parameter, returned reference, call result, and caller return without inventing execution.
+          Every declaration, reference, argument, separator, flow item, and token stays attached to
+          its original UTF-8 byte span; recovery appears as explicit stopped or branched states,
+          error nodes, and missing leaves. Calls show ordered arguments, positional parameter
+          mappings, and a contract state separately from their return compatibility. These
+          relationships are semantic provenance, not execution, conversions, a general scope graph,
+          semantic AST, HIR, or a code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />
