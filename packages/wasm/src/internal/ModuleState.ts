@@ -20,6 +20,44 @@ export interface FuncType {
   readonly results: ReadonlyArray<ValType.ValType>
 }
 
+export type StorageType =
+  | ValType.ValType
+  | { readonly _tag: 'Packed'; readonly width: 'i8' | 'i16' }
+
+export interface FieldType {
+  readonly storage: StorageType
+  readonly mutable: boolean
+}
+
+export type CompositeType =
+  | {
+      readonly _tag: 'Func'
+      readonly params: ReadonlyArray<ValType.ValType>
+      readonly results: ReadonlyArray<ValType.ValType>
+    }
+  | { readonly _tag: 'Struct'; readonly fields: ReadonlyArray<FieldType> }
+  | { readonly _tag: 'Array'; readonly field: FieldType }
+
+export interface SubType {
+  readonly composite: CompositeType
+  readonly supertype: number | undefined
+  readonly final: boolean
+  readonly name: string | undefined
+}
+
+export interface RecGroup {
+  readonly start: number
+  readonly length: number
+}
+
+/** Unwraps a function composite at a type index, or undefined for non-function types. */
+export const funcTypeAt = (types: ReadonlyArray<SubType>, index: number): FuncType | undefined => {
+  const composite = types[index]?.composite
+  return composite?._tag === 'Func'
+    ? { params: composite.params, results: composite.results }
+    : undefined
+}
+
 export interface Limits {
   readonly min: bigint
   readonly max: bigint | undefined
@@ -119,9 +157,10 @@ export interface ExportEntry {
 
 export interface MutableState {
   moduleName: string | undefined
-  types: Array<FuncType>
+  types: Array<SubType>
   typeHandles: Array<Type.Type>
   typeKeys: Map<string, number>
+  recGroups: Array<RecGroup>
   funcs: Array<FuncEntry>
   funcHandles: Array<Func.Func>
   tables: Array<TableEntry>
@@ -150,8 +189,9 @@ export interface State {
 export interface Snapshot {
   readonly owner: OwnedHandle.Owner
   readonly moduleName: string | undefined
-  readonly types: ReadonlyArray<FuncType>
+  readonly types: ReadonlyArray<SubType>
   readonly typeHandles: ReadonlyArray<Type.Type>
+  readonly recGroups: ReadonlyArray<RecGroup>
   readonly funcs: ReadonlyArray<FuncEntry>
   readonly tables: ReadonlyArray<TableEntry>
   readonly memories: ReadonlyArray<MemoryEntry>
@@ -209,6 +249,7 @@ export const snapshot = Effect.fnUntraced(function* (
         moduleName: state.value.moduleName,
         types: Object.freeze([...state.value.types]),
         typeHandles: Object.freeze([...state.value.typeHandles]),
+        recGroups: Object.freeze([...state.value.recGroups]),
         funcs: Object.freeze([...state.value.funcs]),
         tables: Object.freeze([...state.value.tables]),
         memories: Object.freeze([...state.value.memories]),

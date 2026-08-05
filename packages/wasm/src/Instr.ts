@@ -17,7 +17,7 @@ import type * as Memory from './Memory.js'
 import type * as Table from './Table.js'
 import type * as Tag from './Tag.js'
 import type * as Type from './Type.js'
-import type * as ValType from './ValType.js'
+import * as ValType from './ValType.js'
 
 /**
  * Mnemonic of an instruction that carries no immediate operand.
@@ -33,6 +33,14 @@ export type PlainMnemonic =
   | 'select'
   | 'ref.is_null'
   | 'throw_ref'
+  | 'ref.eq'
+  | 'ref.as_non_null'
+  | 'any.convert_extern'
+  | 'extern.convert_any'
+  | 'ref.i31'
+  | 'i31.get_s'
+  | 'i31.get_u'
+  | 'array.len'
   | 'i32.eqz'
   | 'i32.eq'
   | 'i32.ne'
@@ -640,7 +648,7 @@ export type Instr =
       readonly defaultDepth: number
     }
   | { readonly _tag: 'SelectTyped'; readonly types: ReadonlyArray<ValType.ValType> }
-  | { readonly _tag: 'RefNull'; readonly refType: ValType.RefType }
+  | { readonly _tag: 'RefNull'; readonly heapType: ValType.HeapType }
   | { readonly _tag: 'RefFunc'; readonly func: Func.Func }
   | { readonly _tag: 'V128Const'; readonly bytes: ReadonlyArray<number> }
   | { readonly _tag: 'Shuffle'; readonly lanes: ReadonlyArray<number> }
@@ -699,6 +707,45 @@ export type Instr =
       readonly catches: ReadonlyArray<Catch>
       readonly body: ReadonlyArray<Instr>
     }
+  | { readonly _tag: 'StructNew'; readonly type: Type.Type; readonly defaults: boolean }
+  | {
+      readonly _tag: 'StructGet'
+      readonly type: Type.Type
+      readonly field: number
+      readonly sign: 's' | 'u' | undefined
+    }
+  | { readonly _tag: 'StructSet'; readonly type: Type.Type; readonly field: number }
+  | { readonly _tag: 'ArrayNew'; readonly type: Type.Type; readonly defaults: boolean }
+  | { readonly _tag: 'ArrayNewFixed'; readonly type: Type.Type; readonly length: number }
+  | { readonly _tag: 'ArrayNewData'; readonly type: Type.Type; readonly data: Data.Data }
+  | { readonly _tag: 'ArrayNewElem'; readonly type: Type.Type; readonly elem: Elem.Elem }
+  | {
+      readonly _tag: 'ArrayGet'
+      readonly type: Type.Type
+      readonly sign: 's' | 'u' | undefined
+    }
+  | { readonly _tag: 'ArraySet'; readonly type: Type.Type }
+  | { readonly _tag: 'ArrayFill'; readonly type: Type.Type }
+  | {
+      readonly _tag: 'ArrayCopy'
+      readonly destination: Type.Type
+      readonly source: Type.Type
+    }
+  | { readonly _tag: 'ArrayInitData'; readonly type: Type.Type; readonly data: Data.Data }
+  | { readonly _tag: 'ArrayInitElem'; readonly type: Type.Type; readonly elem: Elem.Elem }
+  | { readonly _tag: 'RefTest'; readonly refType: ValType.RefType }
+  | { readonly _tag: 'RefCast'; readonly refType: ValType.RefType }
+  | {
+      readonly _tag: 'BrOnCast'
+      readonly depth: number
+      readonly from: ValType.RefType
+      readonly to: ValType.RefType
+      readonly fail: boolean
+    }
+  | { readonly _tag: 'BrOnNull'; readonly depth: number }
+  | { readonly _tag: 'BrOnNonNull'; readonly depth: number }
+  | { readonly _tag: 'CallRef'; readonly type: Type.Type }
+  | { readonly _tag: 'ReturnCallRef'; readonly type: Type.Type }
   | { readonly _tag: 'TableGet'; readonly table: Table.Table }
   | { readonly _tag: 'TableSet'; readonly table: Table.Table }
   | { readonly _tag: 'TableSize'; readonly table: Table.Table }
@@ -950,7 +997,14 @@ export const selectTyped = (types: ReadonlyArray<ValType.ValType>): Instr =>
  * @category constructors
  * @since 0.0.0
  */
-export const refNull = (refType: ValType.RefType): Instr => freeze({ _tag: 'RefNull', refType })
+export const refNull = (input: ValType.HeapTypeInput | ValType.RefType): Instr =>
+  freeze({
+    _tag: 'RefNull',
+    heapType:
+      typeof input !== 'string' && '_tag' in input && input._tag === 'Ref'
+        ? input.heapType
+        : ValType.heapType(input as ValType.HeapTypeInput),
+  })
 
 /**
  * Constructs `ref.func` producing a reference to a function.
@@ -1284,3 +1338,186 @@ export const tryTable = (
     catches: Object.freeze([...catches]),
     body: Object.freeze([...body]),
   })
+
+/**
+ * Constructs `struct.new`, popping one value per field, or `struct.new_default` with
+ * `defaults: true`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const structNew = (type: Type.Type, options: { readonly defaults?: boolean } = {}): Instr =>
+  freeze({ _tag: 'StructNew', type, defaults: options.defaults ?? false })
+
+/**
+ * Constructs `struct.get` (or `struct.get_s`/`struct.get_u` for packed fields).
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const structGet = (type: Type.Type, field: number, sign?: 's' | 'u'): Instr =>
+  freeze({ _tag: 'StructGet', type, field, sign })
+
+/**
+ * Constructs `struct.set` writing a mutable field.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const structSet = (type: Type.Type, field: number): Instr =>
+  freeze({ _tag: 'StructSet', type, field })
+
+/**
+ * Constructs `array.new`, or `array.new_default` with `defaults: true`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayNew = (type: Type.Type, options: { readonly defaults?: boolean } = {}): Instr =>
+  freeze({ _tag: 'ArrayNew', type, defaults: options.defaults ?? false })
+
+/**
+ * Constructs `array.new_fixed`, popping `length` elements.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayNewFixed = (type: Type.Type, length: number): Instr =>
+  freeze({ _tag: 'ArrayNewFixed', type, length })
+
+/**
+ * Constructs `array.new_data`, filling a numeric array from a data segment.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayNewData = (type: Type.Type, data: Data.Data): Instr =>
+  freeze({ _tag: 'ArrayNewData', type, data })
+
+/**
+ * Constructs `array.new_elem`, filling a reference array from an element segment.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayNewElem = (type: Type.Type, elem: Elem.Elem): Instr =>
+  freeze({ _tag: 'ArrayNewElem', type, elem })
+
+/**
+ * Constructs `array.get` (or the packed `_s`/`_u` forms).
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayGet = (type: Type.Type, sign?: 's' | 'u'): Instr =>
+  freeze({ _tag: 'ArrayGet', type, sign })
+
+/**
+ * Constructs `array.set` writing a mutable element.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arraySet = (type: Type.Type): Instr => freeze({ _tag: 'ArraySet', type })
+
+/**
+ * Constructs `array.fill`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayFill = (type: Type.Type): Instr => freeze({ _tag: 'ArrayFill', type })
+
+/**
+ * Constructs `array.copy` between two array types.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayCopy = (destination: Type.Type, source: Type.Type): Instr =>
+  freeze({ _tag: 'ArrayCopy', destination, source })
+
+/**
+ * Constructs `array.init_data`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayInitData = (type: Type.Type, data: Data.Data): Instr =>
+  freeze({ _tag: 'ArrayInitData', type, data })
+
+/**
+ * Constructs `array.init_elem`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const arrayInitElem = (type: Type.Type, elem: Elem.Elem): Instr =>
+  freeze({ _tag: 'ArrayInitElem', type, elem })
+
+/**
+ * Constructs `ref.test` against a reference type in the operand's hierarchy.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const refTest = (refType: ValType.RefType): Instr => freeze({ _tag: 'RefTest', refType })
+
+/**
+ * Constructs `ref.cast` to a reference type in the operand's hierarchy.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const refCast = (refType: ValType.RefType): Instr => freeze({ _tag: 'RefCast', refType })
+
+/**
+ * Constructs `br_on_cast`, branching when the operand casts from `from` to `to`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const brOnCast = (depth: number, from: ValType.RefType, to: ValType.RefType): Instr =>
+  freeze({ _tag: 'BrOnCast', depth, from, to, fail: false })
+
+/**
+ * Constructs `br_on_cast_fail`, branching when the cast fails.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const brOnCastFail = (depth: number, from: ValType.RefType, to: ValType.RefType): Instr =>
+  freeze({ _tag: 'BrOnCast', depth, from, to, fail: true })
+
+/**
+ * Constructs `br_on_null`, branching when the reference is null and leaving it non-null
+ * otherwise.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const brOnNull = (depth: number): Instr => freeze({ _tag: 'BrOnNull', depth })
+
+/**
+ * Constructs `br_on_non_null`, branching with the non-null reference.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const brOnNonNull = (depth: number): Instr => freeze({ _tag: 'BrOnNonNull', depth })
+
+/**
+ * Constructs `call_ref`, calling through a typed function reference.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const callRef = (type: Type.Type): Instr => freeze({ _tag: 'CallRef', type })
+
+/**
+ * Constructs `return_call_ref`, the tail-calling form of `call_ref`.
+ *
+ * @category constructors
+ * @since 0.0.0
+ */
+export const returnCallRef = (type: Type.Type): Instr => freeze({ _tag: 'ReturnCallRef', type })

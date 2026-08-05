@@ -14,8 +14,9 @@ import * as ValType from '../ValType.js'
 import { validationFailed, type WasmError } from '../WasmError.js'
 import * as Handle from './Handle.js'
 import * as InstructionTable from './InstructionTable.js'
-import type * as ModuleState from './ModuleState.js'
+import * as ModuleState from './ModuleState.js'
 import type * as OwnedHandle from './OwnedHandle.js'
+import * as Subtype from './Subtype.js'
 
 /** The bottom type produced while a control frame is unreachable. */
 type StackType = ValType.ValType | 'unknown'
@@ -85,7 +86,11 @@ const popVal = (context: Context, expect?: ValType.ValType): StackType => {
   }
   const actual = context.valStack.pop()
   if (actual === undefined) return abort('The value stack is empty')
-  if (expect !== undefined && actual !== 'unknown' && !ValType.equals(actual, expect)) {
+  if (
+    expect !== undefined &&
+    actual !== 'unknown' &&
+    !Subtype.matches(context.state, actual, expect)
+  ) {
     return abort(`Expected ${ValType.text(expect)} on the stack but found ${typeText(actual)}`)
   }
   return actual
@@ -157,8 +162,8 @@ const blockTypes = (
       const index = orAbort(
         Handle.resolve(context.owner, blockType.type, 'Type', context.operation),
       )
-      const funcType = context.state.types[index]
-      if (funcType === undefined) return abort('Type table entry is missing')
+      const funcType = ModuleState.funcTypeAt(context.state.types, index)
+      if (funcType === undefined) return abort('The block type must be a function type')
       return { startTypes: funcType.params, endTypes: funcType.results }
     }
   }
@@ -166,7 +171,8 @@ const blockTypes = (
 
 const funcTypeOf = (context: Context, index: number): ModuleState.FuncType => {
   const entry = context.state.funcs[index]
-  const funcType = entry === undefined ? undefined : context.state.types[entry.typeIndex]
+  const funcType =
+    entry === undefined ? undefined : ModuleState.funcTypeAt(context.state.types, entry.typeIndex)
   return funcType ?? abort('Function table entry is missing')
 }
 
@@ -222,7 +228,7 @@ const tagParams = (
   context: Context,
   entry: ModuleState.TagEntry,
 ): ReadonlyArray<ValType.ValType> => {
-  const funcType = context.state.types[entry.typeIndex]
+  const funcType = ModuleState.funcTypeAt(context.state.types, entry.typeIndex)
   return funcType?.params ?? abort('Tag type entry is missing')
 }
 
@@ -237,6 +243,86 @@ const dataIndex = (context: Context, handle: Parameters<typeof Handle.resolve>[1
   if (context.state.datas[index] === undefined) return abort('Data segment entry is missing')
   return index
 }
+
+const typeIndexOf = (context: Context, handle: Parameters<typeof Handle.resolve>[1]): number =>
+  orAbort(Handle.resolve(context.owner, handle, 'Type', context.operation))
+
+const typeHandleAt = (context: Context, index: number) =>
+  context.state.typeHandles[index] ?? abort('Type table handle is missing')
+
+const structAt = (context: Context, index: number) => {
+  const composite = context.state.types[index]?.composite
+  return composite?._tag === 'Struct' ? composite : abort('The type must be a struct type')
+}
+
+const arrayAt = (context: Context, index: number) => {
+  const composite = context.state.types[index]?.composite
+  return composite?._tag === 'Array' ? composite : abort('The type must be an array type')
+}
+
+const isPacked = (
+  storage: ModuleState.StorageType,
+): storage is { _tag: 'Packed'; width: 'i8' | 'i16' } =>
+  '_tag' in storage && storage._tag === 'Packed'
+
+const unpacked = (storage: ModuleState.StorageType): ValType.ValType =>
+  isPacked(storage) ? ValType.i32 : (storage as ValType.ValType)
+
+const storageDefaultable = (storage: ModuleState.StorageType): boolean =>
+  isPacked(storage) || ValType.isDefaultable(storage as ValType.ValType)
+
+const checkAccessSign = (
+  storage: ModuleState.StorageType,
+  sign: 's' | 'u' | undefined,
+  mnemonic: string,
+): undefined => {
+  if (isPacked(storage) && sign === undefined) {
+    abort(`Packed fields require ${mnemonic}_s or ${mnemonic}_u`)
+  }
+  if (!isPacked(storage) && sign !== undefined) {
+    abort(`Only packed fields allow ${mnemonic}_s and ${mnemonic}_u`)
+  }
+}
+
+const concreteRef = (context: Context, index: number, nullable: boolean): ValType.RefType =>
+  nullable
+    ? ValType.refNull(typeHandleAt(context, index))
+    : ValType.ref(typeHandleAt(context, index))
+
+const hierarchyTop = (context: Context, refType: ValType.RefType): ValType.AbstractHeapKind => {
+  if (refType.heapType._tag === 'Abstract') {
+    const kind = refType.heapType.kind
+    if (kind === 'func' || kind === 'nofunc') return 'func'
+    if (kind === 'extern' || kind === 'noextern') return 'extern'
+    if (kind === 'exn' || kind === 'noexn') return 'exn'
+    return 'any'
+  }
+  const index = orAbort(
+    Handle.resolve(context.owner, refType.heapType.type, 'Type', context.operation),
+  )
+  const composite = context.state.types[index]?.composite
+  if (composite === undefined) return abort('Type table entry is missing')
+  return composite._tag === 'Func' ? 'func' : 'any'
+}
+
+/** Statically requires the popped operand (when known) to share the immediate's hierarchy. */
+const popCastOperandStaticCheck = (
+  context: Context,
+  immediate: ValType.RefType,
+  operand: StackType,
+): void => {
+  if (operand === 'unknown' || !ValType.isRefType(operand)) return
+  if (hierarchyTop(context, immediate) !== hierarchyTop(context, operand)) {
+    abort('The cast target must share the operand reference hierarchy')
+  }
+}
+
+/** The static difference rt1 \ rt2 used by br_on_cast typing. */
+const refDifference = (from: ValType.RefType, to: ValType.RefType): ValType.RefType => ({
+  _tag: 'Ref',
+  nullable: from.nullable && !to.nullable,
+  heapType: from.heapType,
+})
 
 const checkSequence = (context: Context, body: ReadonlyArray<Instr.Instr>): void => {
   for (const instr of body) checkInstr(context, instr)
@@ -304,6 +390,19 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
           popVal(context, ValType.exnref)
           markUnreachable(context)
           return
+        case 'ref.as_non_null': {
+          const operand = popVal(context)
+          if (operand !== 'unknown' && !ValType.isRefType(operand)) {
+            return abort('ref.as_non_null requires a reference operand')
+          }
+          pushVal(
+            context,
+            operand === 'unknown' || !ValType.isRefType(operand)
+              ? 'unknown'
+              : ValType.ref(operand.heapType),
+          )
+          return
+        }
         default:
           return abort(`The instruction ${instr.mnemonic} has no typing rule`)
       }
@@ -356,13 +455,15 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
     }
     case 'CallIndirect': {
       const table = tableEntry(context, instr.table)
-      if (table.refType._tag !== 'FuncRef') {
+      if (!Subtype.matches(context.state, table.refType, ValType.funcref)) {
         return abort('call_indirect requires a funcref table')
       }
       const typeIndex = orAbort(
         Handle.resolve(context.owner, instr.type, 'Type', context.operation),
       )
-      const funcType = context.state.types[typeIndex] ?? abort('Type table entry is missing')
+      const funcType =
+        ModuleState.funcTypeAt(context.state.types, typeIndex) ??
+        abort('call_indirect requires a function type')
       popVal(context, ValType.i32)
       popVals(context, funcType.params)
       pushVals(context, funcType.results)
@@ -378,13 +479,15 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
     }
     case 'ReturnCallIndirect': {
       const table = tableEntry(context, instr.table)
-      if (table.refType._tag !== 'FuncRef') {
+      if (!Subtype.matches(context.state, table.refType, ValType.funcref)) {
         return abort('return_call_indirect requires a funcref table')
       }
       const typeIndex = orAbort(
         Handle.resolve(context.owner, instr.type, 'Type', context.operation),
       )
-      const funcType = context.state.types[typeIndex] ?? abort('Type table entry is missing')
+      const funcType =
+        ModuleState.funcTypeAt(context.state.types, typeIndex) ??
+        abort('return_call_indirect requires a function type')
       checkTailResults(context, funcType.results)
       popVal(context, ValType.i32)
       popVals(context, funcType.params)
@@ -449,15 +552,13 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
       return
     }
     case 'RefNull':
-      pushVal(context, instr.refType)
+      pushVal(context, ValType.refNull(instr.heapType))
       return
     case 'RefFunc': {
       const index = orAbort(Handle.resolve(context.owner, instr.func, 'Func', context.operation))
-      if (context.state.funcs[index] === undefined) {
-        return abort('Function table entry is missing')
-      }
+      const entry = context.state.funcs[index] ?? abort('Function table entry is missing')
       context.refFuncs.add(index)
-      pushVal(context, ValType.funcref)
+      pushVal(context, ValType.ref(typeHandleAt(context, entry.typeIndex)))
       return
     }
     case 'MemoryAccess': {
@@ -609,6 +710,278 @@ const checkInstr = (context: Context, instr: Instr.Instr): undefined => {
       pushVals(context, endTypes)
       return
     }
+    case 'StructNew': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = structAt(context, index)
+      if (instr.defaults) {
+        for (const field of composite.fields) {
+          if (!storageDefaultable(field.storage)) {
+            return abort('struct.new_default requires all fields to be defaultable')
+          }
+        }
+      } else {
+        for (let position = composite.fields.length - 1; position >= 0; position -= 1) {
+          const field = composite.fields[position]
+          if (field !== undefined) popVal(context, unpacked(field.storage))
+        }
+      }
+      pushVal(context, concreteRef(context, index, false))
+      return
+    }
+    case 'StructGet': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = structAt(context, index)
+      const field = composite.fields[instr.field] ?? abort('Struct field index is out of range')
+      checkAccessSign(field.storage, instr.sign, 'struct.get')
+      popVal(context, concreteRef(context, index, true))
+      pushVal(context, unpacked(field.storage))
+      return
+    }
+    case 'StructSet': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = structAt(context, index)
+      const field = composite.fields[instr.field] ?? abort('Struct field index is out of range')
+      if (!field.mutable) return abort('struct.set requires a mutable field')
+      popVal(context, unpacked(field.storage))
+      popVal(context, concreteRef(context, index, true))
+      return
+    }
+    case 'ArrayNew': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      popVal(context, ValType.i32)
+      if (instr.defaults) {
+        if (!storageDefaultable(composite.field.storage)) {
+          return abort('array.new_default requires a defaultable element type')
+        }
+      } else {
+        popVal(context, unpacked(composite.field.storage))
+      }
+      pushVal(context, concreteRef(context, index, false))
+      return
+    }
+    case 'ArrayNewFixed': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      if (!Number.isInteger(instr.length) || instr.length < 0 || instr.length > 0xffffffff) {
+        return abort('array.new_fixed requires an unsigned 32-bit length')
+      }
+      for (let position = 0; position < instr.length; position += 1) {
+        popVal(context, unpacked(composite.field.storage))
+      }
+      pushVal(context, concreteRef(context, index, false))
+      return
+    }
+    case 'ArrayNewData': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      if (
+        !isPacked(composite.field.storage) &&
+        ValType.isRefType(composite.field.storage as ValType.ValType)
+      ) {
+        return abort('array.new_data requires a numeric element type')
+      }
+      dataIndex(context, instr.data)
+      context.usesDataCount = true
+      popVals(context, [ValType.i32, ValType.i32])
+      pushVal(context, concreteRef(context, index, false))
+      return
+    }
+    case 'ArrayNewElem': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      const element = elemEntry(context, instr.elem)
+      if (isPacked(composite.field.storage))
+        return abort('array.new_elem requires a reference element type')
+      if (
+        !Subtype.matches(context.state, element.refType, composite.field.storage as ValType.ValType)
+      ) {
+        return abort('array.new_elem requires the segment type to match the element type')
+      }
+      popVals(context, [ValType.i32, ValType.i32])
+      pushVal(context, concreteRef(context, index, false))
+      return
+    }
+    case 'ArrayGet': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      checkAccessSign(composite.field.storage, instr.sign, 'array.get')
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, index, true))
+      pushVal(context, unpacked(composite.field.storage))
+      return
+    }
+    case 'ArraySet': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      if (!composite.field.mutable) return abort('array.set requires a mutable element')
+      popVal(context, unpacked(composite.field.storage))
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, index, true))
+      return
+    }
+    case 'ArrayFill': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      if (!composite.field.mutable) return abort('array.fill requires a mutable element')
+      popVal(context, ValType.i32)
+      popVal(context, unpacked(composite.field.storage))
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, index, true))
+      return
+    }
+    case 'ArrayCopy': {
+      const destinationIndex = typeIndexOf(context, instr.destination)
+      const sourceIndex = typeIndexOf(context, instr.source)
+      const destination = arrayAt(context, destinationIndex)
+      const source = arrayAt(context, sourceIndex)
+      if (!destination.field.mutable) return abort('array.copy requires a mutable destination')
+      const storagesMatch = isPacked(source.field.storage)
+        ? isPacked(destination.field.storage) &&
+          source.field.storage.width === destination.field.storage.width
+        : !isPacked(destination.field.storage) &&
+          Subtype.matches(
+            context.state,
+            source.field.storage as ValType.ValType,
+            destination.field.storage as ValType.ValType,
+          )
+      if (!storagesMatch) return abort('array.copy requires compatible element types')
+      popVal(context, ValType.i32)
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, sourceIndex, true))
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, destinationIndex, true))
+      return
+    }
+    case 'ArrayInitData': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      if (!composite.field.mutable) return abort('array.init_data requires a mutable element')
+      if (
+        !isPacked(composite.field.storage) &&
+        ValType.isRefType(composite.field.storage as ValType.ValType)
+      ) {
+        return abort('array.init_data requires a numeric element type')
+      }
+      dataIndex(context, instr.data)
+      context.usesDataCount = true
+      popVals(context, [ValType.i32, ValType.i32])
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, index, true))
+      return
+    }
+    case 'ArrayInitElem': {
+      const index = typeIndexOf(context, instr.type)
+      const composite = arrayAt(context, index)
+      const element = elemEntry(context, instr.elem)
+      if (!composite.field.mutable) return abort('array.init_elem requires a mutable element')
+      if (isPacked(composite.field.storage))
+        return abort('array.init_elem requires a reference element type')
+      if (
+        !Subtype.matches(context.state, element.refType, composite.field.storage as ValType.ValType)
+      ) {
+        return abort('array.init_elem requires the segment type to match the element type')
+      }
+      popVals(context, [ValType.i32, ValType.i32])
+      popVal(context, ValType.i32)
+      popVal(context, concreteRef(context, index, true))
+      return
+    }
+    case 'RefTest': {
+      const operand = popVal(context)
+      if (operand !== 'unknown') {
+        if (!ValType.isRefType(operand)) return abort('ref.test requires a reference operand')
+        if (!Subtype.matches(context.state, instr.refType, operand)) {
+          return abort('ref.test requires a target type below the operand type')
+        }
+      }
+      popCastOperandStaticCheck(context, instr.refType, operand)
+      pushVal(context, ValType.i32)
+      return
+    }
+    case 'RefCast': {
+      const operand = popVal(context)
+      if (operand !== 'unknown') {
+        if (!ValType.isRefType(operand)) return abort('ref.cast requires a reference operand')
+        if (!Subtype.matches(context.state, instr.refType, operand)) {
+          return abort('ref.cast requires a target type below the operand type')
+        }
+      }
+      popCastOperandStaticCheck(context, instr.refType, operand)
+      pushVal(context, instr.refType)
+      return
+    }
+    case 'BrOnCast': {
+      if (!Subtype.matches(context.state, instr.to, instr.from)) {
+        return abort('br_on_cast requires the target type below the source type')
+      }
+      popVal(context, instr.from)
+      const label = labelTypes(frameAt(context, instr.depth))
+      const last = label.at(-1) ?? abort('The branch label must accept the cast reference')
+      const sent = instr.fail ? refDifference(instr.from, instr.to) : instr.to
+      if (!Subtype.matches(context.state, sent, last)) {
+        return abort('The branch label must accept the cast reference')
+      }
+      const rest = label.slice(0, -1)
+      popVals(context, rest)
+      pushVals(context, rest)
+      pushVal(context, instr.fail ? instr.to : refDifference(instr.from, instr.to))
+      return
+    }
+    case 'BrOnNull': {
+      const operand = popVal(context)
+      if (operand !== 'unknown' && !ValType.isRefType(operand)) {
+        return abort('br_on_null requires a reference operand')
+      }
+      const label = labelTypes(frameAt(context, instr.depth))
+      popVals(context, label)
+      pushVals(context, label)
+      pushVal(
+        context,
+        operand === 'unknown' || !ValType.isRefType(operand)
+          ? 'unknown'
+          : ValType.ref(operand.heapType),
+      )
+      return
+    }
+    case 'BrOnNonNull': {
+      const operand = popVal(context)
+      if (operand !== 'unknown' && !ValType.isRefType(operand)) {
+        return abort('br_on_non_null requires a reference operand')
+      }
+      const label = labelTypes(frameAt(context, instr.depth))
+      const last = label.at(-1) ?? abort('The branch label must accept the non-null reference')
+      if (operand !== 'unknown' && ValType.isRefType(operand)) {
+        if (!Subtype.matches(context.state, ValType.ref(operand.heapType), last)) {
+          return abort('The branch label must accept the non-null reference')
+        }
+      }
+      const rest = label.slice(0, -1)
+      popVals(context, rest)
+      pushVals(context, rest)
+      return
+    }
+    case 'CallRef': {
+      const index = typeIndexOf(context, instr.type)
+      const funcType =
+        ModuleState.funcTypeAt(context.state.types, index) ??
+        abort('call_ref requires a function type')
+      popVal(context, concreteRef(context, index, true))
+      popVals(context, funcType.params)
+      pushVals(context, funcType.results)
+      return
+    }
+    case 'ReturnCallRef': {
+      const index = typeIndexOf(context, instr.type)
+      const funcType =
+        ModuleState.funcTypeAt(context.state.types, index) ??
+        abort('return_call_ref requires a function type')
+      checkTailResults(context, funcType.results)
+      popVal(context, concreteRef(context, index, true))
+      popVals(context, funcType.params)
+      markUnreachable(context)
+      return
+    }
     case 'V128Const': {
       if (
         instr.bytes.length !== 16 ||
@@ -756,6 +1129,17 @@ export const checkBody = (
   body: ReadonlyArray<Instr.Instr>,
   operation: string,
 ): Result.Result<CheckedBody, WasmError> => {
+  for (const local of locals) {
+    if (!ValType.isDefaultable(local.type)) {
+      return Result.fail(
+        validationFailed({
+          operation,
+          message: 'Locals must be defaultable; non-nullable reference locals are not supported',
+          detail: local,
+        }),
+      )
+    }
+  }
   const context: Context = {
     state,
     owner,

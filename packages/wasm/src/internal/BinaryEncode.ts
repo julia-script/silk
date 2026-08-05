@@ -13,7 +13,7 @@ import { ByteWriter } from './ByteWriter.js'
 import * as Handle from './Handle.js'
 import type * as IndexSpace from './IndexSpace.js'
 import * as InstructionTable from './InstructionTable.js'
-import type * as ModuleState from './ModuleState.js'
+import * as ModuleState from './ModuleState.js'
 
 class Abort {
   constructor(readonly error: WasmError) {}
@@ -66,7 +66,47 @@ const spaceIndex = (
   }
 }
 
-const refTypeByte = (refType: ValType.RefType): number => ValType.binary(refType)
+const encodeHeapType = (context: Context, writer: ByteWriter, heapType: ValType.HeapType): void => {
+  if (heapType._tag === 'Abstract') {
+    writer.byte(ValType.abstractByte(heapType.kind))
+  } else {
+    writer.s33(spaceIndex(context, heapType.type, 'Type'))
+  }
+}
+
+const encodeValType = (context: Context, writer: ByteWriter, type: ValType.ValType): void => {
+  const shorthand = ValType.binary(type)
+  if (shorthand !== undefined) {
+    writer.byte(shorthand)
+    return
+  }
+  // Only non-shorthand references reach here.
+  if (type._tag === 'Ref') {
+    writer.byte(type.nullable ? 0x63 : 0x64)
+    encodeHeapType(context, writer, type.heapType)
+  }
+}
+
+const encodeStorageType = (
+  context: Context,
+  writer: ByteWriter,
+  storage: ModuleState.StorageType,
+): void => {
+  if ('_tag' in storage && storage._tag === 'Packed') {
+    writer.byte(storage.width === 'i8' ? 0x78 : 0x77)
+    return
+  }
+  encodeValType(context, writer, storage as ValType.ValType)
+}
+
+const encodeFieldType = (
+  context: Context,
+  writer: ByteWriter,
+  field: ModuleState.FieldType,
+): void => {
+  encodeStorageType(context, writer, field.storage)
+  writer.byte(field.mutable ? 0x01 : 0x00)
+}
 
 const encodeBlockType = (
   context: Context,
@@ -78,7 +118,7 @@ const encodeBlockType = (
       writer.byte(0x40)
       return
     case 'Value':
-      writer.byte(ValType.binary(blockType.type))
+      encodeValType(context, writer, blockType.type)
       return
     case 'Func':
       writer.s33(spaceIndex(context, blockType.type, 'Type'))
@@ -201,11 +241,12 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
     }
     case 'SelectTyped': {
       writer.byte(ops.selectTyped).u32(instr.types.length)
-      for (const type of instr.types) writer.byte(ValType.binary(type))
+      for (const type of instr.types) encodeValType(context, writer, type)
       return
     }
     case 'RefNull':
-      writer.byte(ops.refNull).byte(refTypeByte(instr.refType))
+      writer.byte(ops.refNull)
+      encodeHeapType(context, writer, instr.heapType)
       return
     case 'RefFunc':
       writer.byte(ops.refFunc).u32(spaceIndex(context, instr.func, 'Func'))
@@ -310,6 +351,145 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
       writer.byte(ops.end)
       return
     }
+    case 'StructNew': {
+      const gcOps = InstructionTable.gcOpcodes
+      writer
+        .byte(ops.prefixGc)
+        .u32(instr.defaults ? gcOps.structNewDefault : gcOps.structNew)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+      return
+    }
+    case 'StructGet': {
+      const gcOps = InstructionTable.gcOpcodes
+      const opcode =
+        instr.sign === undefined
+          ? gcOps.structGet
+          : instr.sign === 's'
+            ? gcOps.structGetS
+            : gcOps.structGetU
+      writer
+        .byte(ops.prefixGc)
+        .u32(opcode)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(instr.field)
+      return
+    }
+    case 'StructSet':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.structSet)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(instr.field)
+      return
+    case 'ArrayNew': {
+      const gcOps = InstructionTable.gcOpcodes
+      writer
+        .byte(ops.prefixGc)
+        .u32(instr.defaults ? gcOps.arrayNewDefault : gcOps.arrayNew)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+      return
+    }
+    case 'ArrayNewFixed':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayNewFixed)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(instr.length)
+      return
+    case 'ArrayNewData':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayNewData)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(spaceIndex(context, instr.data, 'Data'))
+      return
+    case 'ArrayNewElem':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayNewElem)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(spaceIndex(context, instr.elem, 'Elem'))
+      return
+    case 'ArrayGet': {
+      const gcOps = InstructionTable.gcOpcodes
+      const opcode =
+        instr.sign === undefined
+          ? gcOps.arrayGet
+          : instr.sign === 's'
+            ? gcOps.arrayGetS
+            : gcOps.arrayGetU
+      writer
+        .byte(ops.prefixGc)
+        .u32(opcode)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+      return
+    }
+    case 'ArraySet':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arraySet)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+      return
+    case 'ArrayFill':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayFill)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+      return
+    case 'ArrayCopy':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayCopy)
+        .u32(spaceIndex(context, instr.destination, 'Type'))
+        .u32(spaceIndex(context, instr.source, 'Type'))
+      return
+    case 'ArrayInitData':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayInitData)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(spaceIndex(context, instr.data, 'Data'))
+      return
+    case 'ArrayInitElem':
+      writer
+        .byte(ops.prefixGc)
+        .u32(InstructionTable.gcOpcodes.arrayInitElem)
+        .u32(spaceIndex(context, instr.type, 'Type'))
+        .u32(spaceIndex(context, instr.elem, 'Elem'))
+      return
+    case 'RefTest': {
+      const gcOps = InstructionTable.gcOpcodes
+      writer.byte(ops.prefixGc).u32(instr.refType.nullable ? gcOps.refTestNull : gcOps.refTest)
+      encodeHeapType(context, writer, instr.refType.heapType)
+      return
+    }
+    case 'RefCast': {
+      const gcOps = InstructionTable.gcOpcodes
+      writer.byte(ops.prefixGc).u32(instr.refType.nullable ? gcOps.refCastNull : gcOps.refCast)
+      encodeHeapType(context, writer, instr.refType.heapType)
+      return
+    }
+    case 'BrOnCast': {
+      const gcOps = InstructionTable.gcOpcodes
+      writer.byte(ops.prefixGc).u32(instr.fail ? gcOps.brOnCastFail : gcOps.brOnCast)
+      writer.byte((instr.from.nullable ? 0x01 : 0) | (instr.to.nullable ? 0x02 : 0))
+      writer.u32(instr.depth)
+      encodeHeapType(context, writer, instr.from.heapType)
+      encodeHeapType(context, writer, instr.to.heapType)
+      return
+    }
+    case 'BrOnNull':
+      writer.byte(ops.brOnNull).u32(instr.depth)
+      return
+    case 'BrOnNonNull':
+      writer.byte(ops.brOnNonNull).u32(instr.depth)
+      return
+    case 'CallRef':
+      writer.byte(ops.callRef).u32(spaceIndex(context, instr.type, 'Type'))
+      return
+    case 'ReturnCallRef':
+      writer.byte(ops.returnCallRef).u32(spaceIndex(context, instr.type, 'Type'))
+      return
     case 'V128Const': {
       writer.byte(ops.prefixSimd).u32(ops.v128Const)
       for (const byte of instr.bytes) writer.byte(byte)
@@ -387,6 +567,7 @@ const vectorSection = (
 }
 
 const encodeCompressedLocals = (
+  context: Context,
   writer: ByteWriter,
   locals: ReadonlyArray<ModuleState.LocalDeclaration>,
 ): void => {
@@ -401,7 +582,8 @@ const encodeCompressedLocals = (
   }
   writer.u32(runs.length)
   for (const run of runs) {
-    writer.u32(run.count).byte(ValType.binary(run.type))
+    writer.u32(run.count)
+    encodeValType(context, writer, run.type)
   }
 }
 
@@ -458,7 +640,7 @@ const encodeNameSection = (context: Context, module: ByteWriter): void => {
   }> = []
   for (const [entryIndex, entry] of snapshot.funcs.entries()) {
     const funcIndex = spaces.funcs[entryIndex]
-    const funcType = snapshot.types[entry.typeIndex]
+    const funcType = ModuleState.funcTypeAt(snapshot.types, entry.typeIndex)
     if (entry.definition === undefined || funcIndex === undefined || funcType === undefined) {
       continue
     }
@@ -483,6 +665,11 @@ const encodeNameSection = (context: Context, module: ByteWriter): void => {
   }
   const identity = (entries: ReadonlyArray<unknown>): ReadonlyArray<number> =>
     entries.map((_, index) => index)
+  namemap(
+    4,
+    snapshot.types,
+    snapshot.types.map((_, index) => index),
+  )
   namemap(5, snapshot.tables, spaces.tables)
   namemap(6, snapshot.memories, spaces.memories)
   namemap(7, snapshot.globals, spaces.globals)
@@ -507,12 +694,49 @@ export const encodeModule = (
     const module = new ByteWriter()
     module.raw([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])
 
-    vectorSection(module, 1, snapshot.types.length, (contents) => {
-      for (const funcType of snapshot.types) {
-        contents.byte(0x60).u32(funcType.params.length)
-        for (const param of funcType.params) contents.byte(ValType.binary(param))
-        contents.u32(funcType.results.length)
-        for (const result of funcType.results) contents.byte(ValType.binary(result))
+    const encodeComposite = (contents: ByteWriter, composite: ModuleState.CompositeType): void => {
+      switch (composite._tag) {
+        case 'Func': {
+          contents.byte(0x60).u32(composite.params.length)
+          for (const param of composite.params) encodeValType(context, contents, param)
+          contents.u32(composite.results.length)
+          for (const result of composite.results) encodeValType(context, contents, result)
+          return
+        }
+        case 'Struct': {
+          contents.byte(0x5f).u32(composite.fields.length)
+          for (const field of composite.fields) encodeFieldType(context, contents, field)
+          return
+        }
+        case 'Array': {
+          contents.byte(0x5e)
+          encodeFieldType(context, contents, composite.field)
+          return
+        }
+      }
+    }
+    const encodeSubType = (contents: ByteWriter, entry: ModuleState.SubType): void => {
+      if (entry.supertype === undefined && entry.final) {
+        encodeComposite(contents, entry.composite)
+        return
+      }
+      contents.byte(entry.final ? 0x4f : 0x50)
+      if (entry.supertype === undefined) {
+        contents.u32(0)
+      } else {
+        contents.u32(1).u32(entry.supertype)
+      }
+      encodeComposite(contents, entry.composite)
+    }
+    vectorSection(module, 1, snapshot.recGroups.length, (contents) => {
+      for (const group of snapshot.recGroups) {
+        if (group.length > 1) {
+          contents.byte(0x4e).u32(group.length)
+        }
+        for (let position = 0; position < group.length; position += 1) {
+          const entry = snapshot.types[group.start + position]
+          if (entry !== undefined) encodeSubType(contents, entry)
+        }
       }
     })
 
@@ -531,7 +755,7 @@ export const encodeModule = (
       if (entry === undefined || source === undefined) continue
       imports.push((contents) => {
         contents.name(source.module).name(source.field).byte(0x01)
-        contents.byte(refTypeByte(entry.refType))
+        encodeValType(context, contents, entry.refType)
         encodeLimits(contents, entry.limits, false, entry.addressType)
       })
     }
@@ -550,7 +774,8 @@ export const encodeModule = (
       if (entry === undefined || source === undefined) continue
       imports.push((contents) => {
         contents.name(source.module).name(source.field).byte(0x03)
-        contents.byte(ValType.binary(entry.valType)).byte(entry.mutable ? 0x01 : 0x00)
+        encodeValType(context, contents, entry.valType)
+        contents.byte(entry.mutable ? 0x01 : 0x00)
       })
     }
     for (const entryIndex of spaces.tagOrder) {
@@ -583,7 +808,7 @@ export const encodeModule = (
       for (const entryIndex of definedTables) {
         const entry = snapshot.tables[entryIndex]
         if (entry === undefined) continue
-        contents.byte(refTypeByte(entry.refType))
+        encodeValType(context, contents, entry.refType)
         encodeLimits(contents, entry.limits, false, entry.addressType)
       }
     })
@@ -616,7 +841,8 @@ export const encodeModule = (
       for (const entryIndex of definedGlobals) {
         const entry = snapshot.globals[entryIndex]
         if (entry?.init === undefined) continue
-        contents.byte(ValType.binary(entry.valType)).byte(entry.mutable ? 0x01 : 0x00)
+        encodeValType(context, contents, entry.valType)
+        contents.byte(entry.mutable ? 0x01 : 0x00)
         encodeExpr(context, contents, entry.init)
       }
     })
@@ -655,22 +881,25 @@ export const encodeModule = (
         switch (elem.mode._tag) {
           case 'Active': {
             const tableIndex = spaces.tables[elem.mode.table] ?? 0
-            const funcrefTableZero = tableIndex === 0 && elem.refType._tag === 'FuncRef'
+            const funcrefTableZero =
+              tableIndex === 0 && ValType.equals(elem.refType, ValType.funcref)
             if (funcrefTableZero) {
               contents.u32(4)
               encodeExpr(context, contents, elem.mode.offset)
             } else {
               contents.u32(6).u32(tableIndex)
               encodeExpr(context, contents, elem.mode.offset)
-              contents.byte(refTypeByte(elem.refType))
+              encodeValType(context, contents, elem.refType)
             }
             break
           }
           case 'Passive':
-            contents.u32(5).byte(refTypeByte(elem.refType))
+            contents.u32(5)
+            encodeValType(context, contents, elem.refType)
             break
           case 'Declarative':
-            contents.u32(7).byte(refTypeByte(elem.refType))
+            contents.u32(7)
+            encodeValType(context, contents, elem.refType)
             break
         }
         contents.u32(elem.items.length)
@@ -696,7 +925,7 @@ export const encodeModule = (
     for (const { entryIndex, definition } of definedFuncDefinitions) {
       const body = new ByteWriter()
       context.currentFuncIndex = spaces.funcs[entryIndex]
-      encodeCompressedLocals(body, definition.locals)
+      encodeCompressedLocals(context, body, definition.locals)
       encodeExpr(context, body, definition.body)
       context.currentFuncIndex = undefined
       codeContents.sized(body)

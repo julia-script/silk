@@ -35,6 +35,17 @@ export interface Options {
  * Declares a defined memory sized in 64 KiB pages. A module may declare several memories, and a
  * memory may be shared (for atomics) or 64-bit addressed.
  *
+ * **Details**
+ *
+ * `limits` are page counts, not bytes: `{ min: 1 }` reserves 64 KiB. A 32-bit memory is capped
+ * at 65536 pages (4 GiB); `addressType: 'i64'` raises that ceiling and changes the type of every
+ * address operand and active data-segment offset for this memory to `i64`.
+ *
+ * **Gotchas**
+ *
+ * A shared memory must declare a maximum — it cannot grow past a bound other threads have already
+ * observed — and is rejected here without one. Atomic instructions require a shared memory.
+ *
  * @category memories
  * @since 0.0.0
  */

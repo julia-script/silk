@@ -40,6 +40,22 @@ export interface Options {
 /**
  * Declares an active data segment copied into a memory at instantiation.
  *
+ * **When to use**
+ *
+ * Use for static initial memory contents — string literals, lookup tables, a preloaded heap.
+ *
+ * **Details**
+ *
+ * The offset is a constant expression producing an `i32`, or an `i64` when the memory is 64-bit
+ * addressed. Bytes are copied when the segment is declared, so mutating the caller's array
+ * afterwards does not affect the module.
+ *
+ * **Gotchas**
+ *
+ * The offset is not bounds-checked at declaration: a segment that overruns the memory's size
+ * fails at instantiation, in the host, not here.
+ *
+ * @see {@link passive} for bytes applied later by `memory.init`.
  * @category data segments
  * @since 0.0.0
  */
@@ -82,6 +98,18 @@ export const active = Effect.fn('Data.active')(function* (
 /**
  * Declares a passive data segment for later use with `memory.init`.
  *
+ * **When to use**
+ *
+ * Use when bytes are copied into memory at a moment the module chooses rather than at
+ * instantiation, or copied more than once, or to a computed destination.
+ *
+ * **Details**
+ *
+ * The segment names no memory and no offset; `memory.init` supplies both. It stays available
+ * until `memory.drop`, after which `memory.init` from it traps. Using either instruction makes
+ * the emitted module carry a data-count section, which the builder adds automatically.
+ *
+ * @see {@link active} for bytes copied automatically at instantiation.
  * @category data segments
  * @since 0.0.0
  */

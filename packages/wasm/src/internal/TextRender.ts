@@ -51,6 +51,7 @@ interface Context {
   readonly snapshot: ModuleState.Snapshot
   readonly spaces: IndexSpace.Spaces
   readonly operation: string
+  readonly types: Space
   readonly funcs: Space
   readonly tables: Space
   readonly memories: Space
@@ -115,7 +116,7 @@ const resolveRef = (
     case 'Data':
       return { text: ref(context, context.datas, entryIndex), entryIndex, emitted: entryIndex }
     case 'Type':
-      return { text: String(entryIndex), entryIndex, emitted: entryIndex }
+      return { text: ref(context, context.types, entryIndex), entryIndex, emitted: entryIndex }
   }
 }
 
@@ -151,16 +152,26 @@ const blockTypeText = (context: Context, blockType: Instr.BlockType): string => 
   }
 }
 
-const heapTypeText = (refType: ValType.RefType): string => {
-  switch (refType._tag) {
-    case 'FuncRef':
-      return 'func'
-    case 'ExternRef':
-      return 'extern'
-    case 'ExnRef':
-      return 'exn'
+const heapTypeText = (context: Context, heapType: ValType.HeapType): string =>
+  heapType._tag === 'Abstract' ? heapType.kind : resolveRef(context, heapType.type, 'Type').text
+
+const valTypeText = (context: Context, type: ValType.ValType): string => {
+  if (type._tag !== 'Ref' || (type.nullable && type.heapType._tag === 'Abstract')) {
+    return ValType.text(type)
   }
+  const nullText = type.nullable ? 'null ' : ''
+  return `(ref ${nullText}${heapTypeText(context, type.heapType)})`
 }
+
+const storageText = (context: Context, storage: ModuleState.StorageType): string =>
+  '_tag' in storage && storage._tag === 'Packed'
+    ? storage.width
+    : valTypeText(context, storage as ValType.ValType)
+
+const fieldText = (context: Context, field: ModuleState.FieldType): string =>
+  field.mutable
+    ? `(mut ${storageText(context, field.storage)})`
+    : storageText(context, field.storage)
 
 const memArgText = (
   context: Context,
@@ -221,11 +232,58 @@ const instrText = (context: Context, instr: Instr.Instr): string => {
     case 'BrTable':
       return `br_table ${[...instr.depths, instr.defaultDepth].join(' ')}`
     case 'SelectTyped':
-      return `select (result ${instr.types.map(ValType.text).join(' ')})`
+      return `select (result ${instr.types.map((type) => valTypeText(context, type)).join(' ')})`
     case 'RefNull':
-      return `ref.null ${heapTypeText(instr.refType)}`
+      return `ref.null ${heapTypeText(context, instr.heapType)}`
     case 'RefFunc':
       return `ref.func ${resolveRef(context, instr.func, 'Func').text}`
+    case 'StructNew':
+      return `struct.new${instr.defaults ? '_default' : ''} ${resolveRef(context, instr.type, 'Type').text}`
+    case 'StructGet': {
+      const suffix = instr.sign === undefined ? '' : `_${instr.sign}`
+      return `struct.get${suffix} ${resolveRef(context, instr.type, 'Type').text} ${instr.field}`
+    }
+    case 'StructSet':
+      return `struct.set ${resolveRef(context, instr.type, 'Type').text} ${instr.field}`
+    case 'ArrayNew':
+      return `array.new${instr.defaults ? '_default' : ''} ${resolveRef(context, instr.type, 'Type').text}`
+    case 'ArrayNewFixed':
+      return `array.new_fixed ${resolveRef(context, instr.type, 'Type').text} ${instr.length}`
+    case 'ArrayNewData':
+      return `array.new_data ${resolveRef(context, instr.type, 'Type').text} ${resolveRef(context, instr.data, 'Data').text}`
+    case 'ArrayNewElem':
+      return `array.new_elem ${resolveRef(context, instr.type, 'Type').text} ${resolveRef(context, instr.elem, 'Elem').text}`
+    case 'ArrayGet': {
+      const suffix = instr.sign === undefined ? '' : `_${instr.sign}`
+      return `array.get${suffix} ${resolveRef(context, instr.type, 'Type').text}`
+    }
+    case 'ArraySet':
+      return `array.set ${resolveRef(context, instr.type, 'Type').text}`
+    case 'ArrayFill':
+      return `array.fill ${resolveRef(context, instr.type, 'Type').text}`
+    case 'ArrayCopy':
+      return `array.copy ${resolveRef(context, instr.destination, 'Type').text} ${resolveRef(context, instr.source, 'Type').text}`
+    case 'ArrayInitData':
+      return `array.init_data ${resolveRef(context, instr.type, 'Type').text} ${resolveRef(context, instr.data, 'Data').text}`
+    case 'ArrayInitElem':
+      return `array.init_elem ${resolveRef(context, instr.type, 'Type').text} ${resolveRef(context, instr.elem, 'Elem').text}`
+    case 'RefTest':
+      return `ref.test ${valTypeText(context, instr.refType)}`
+    case 'RefCast':
+      return `ref.cast ${valTypeText(context, instr.refType)}`
+    case 'BrOnCast':
+      return `br_on_cast${instr.fail ? '_fail' : ''} ${instr.depth} ${valTypeText(
+        context,
+        instr.from,
+      )} ${valTypeText(context, instr.to)}`
+    case 'BrOnNull':
+      return `br_on_null ${instr.depth}`
+    case 'BrOnNonNull':
+      return `br_on_non_null ${instr.depth}`
+    case 'CallRef':
+      return `call_ref ${resolveRef(context, instr.type, 'Type').text}`
+    case 'ReturnCallRef':
+      return `return_call_ref ${resolveRef(context, instr.type, 'Type').text}`
     case 'Throw':
       return `throw ${resolveRef(context, instr.tag, 'Tag').text}`
     case 'MemoryAccess':
@@ -396,19 +454,28 @@ const memoryTypeText = (entry: {
   return `${address}${limitsText(entry.limits)}${shared}`
 }
 
-const tableTypeText = (entry: {
-  readonly limits: ModuleState.Limits
-  readonly addressType: ModuleState.AddressType
-  readonly refType: Parameters<typeof ValType.text>[0]
-}): string => {
+const tableTypeText = (
+  context: Context,
+  entry: {
+    readonly limits: ModuleState.Limits
+    readonly addressType: ModuleState.AddressType
+    readonly refType: ValType.RefType
+  },
+): string => {
   const address = entry.addressType === 'i64' ? 'i64 ' : ''
-  return `${address}${limitsText(entry.limits)} ${ValType.text(entry.refType)}`
+  return `${address}${limitsText(entry.limits)} ${valTypeText(context, entry.refType)}`
 }
 
-const globalTypeText = (entry: {
-  readonly valType: ValType.ValType
-  readonly mutable: boolean
-}): string => (entry.mutable ? `(mut ${ValType.text(entry.valType)})` : ValType.text(entry.valType))
+const globalTypeText = (
+  context: Context,
+  entry: {
+    readonly valType: ValType.ValType
+    readonly mutable: boolean
+  },
+): string =>
+  entry.mutable
+    ? `(mut ${valTypeText(context, entry.valType)})`
+    : valTypeText(context, entry.valType)
 
 /**
  * Renders validated module state as WebAssembly text.
@@ -424,6 +491,10 @@ export const renderModule = (
     snapshot,
     spaces,
     operation,
+    types: assignIds(
+      snapshot.types.map((entry) => entry.name),
+      snapshot.types.map((_, index) => index),
+    ),
     funcs: assignIds(
       snapshot.funcs.map((entry) => entry.name),
       spaces.funcs,
@@ -459,16 +530,52 @@ export const renderModule = (
     const moduleId = snapshot.moduleName === undefined ? '' : ` ${identifier(snapshot.moduleName)}`
     lines.push(`(module${moduleId}`)
 
-    for (const funcType of snapshot.types) {
-      const params =
-        funcType.params.length === 0
-          ? ''
-          : ` (param ${funcType.params.map(ValType.text).join(' ')})`
-      const results =
-        funcType.results.length === 0
-          ? ''
-          : ` (result ${funcType.results.map(ValType.text).join(' ')})`
-      lines.push(`  (type (func${params}${results}))`)
+    const compositeText = (entry: ModuleState.SubType): string => {
+      const composite = entry.composite
+      switch (composite._tag) {
+        case 'Func': {
+          const params =
+            composite.params.length === 0
+              ? ''
+              : ` (param ${composite.params.map((type) => valTypeText(context, type)).join(' ')})`
+          const results =
+            composite.results.length === 0
+              ? ''
+              : ` (result ${composite.results.map((type) => valTypeText(context, type)).join(' ')})`
+          return `(func${params}${results})`
+        }
+        case 'Struct': {
+          const fields = composite.fields
+            .map((field) => ` (field ${fieldText(context, field)})`)
+            .join('')
+          return `(struct${fields})`
+        }
+        case 'Array':
+          return `(array ${fieldText(context, composite.field)})`
+      }
+    }
+    const typeEntryText = (index: number, entry: ModuleState.SubType): string => {
+      const id = context.types.refs[index]?.startsWith('$') ? ` ${context.types.refs[index]}` : ''
+      let body = compositeText(entry)
+      if (entry.supertype !== undefined || !entry.final) {
+        const supertype =
+          entry.supertype === undefined ? '' : ` ${ref(context, context.types, entry.supertype)}`
+        body = `(sub${entry.final ? ' final' : ''}${supertype} ${body})`
+      }
+      return `(type${id} ${body})`
+    }
+    for (const group of snapshot.recGroups) {
+      if (group.length === 1) {
+        const entry = snapshot.types[group.start]
+        if (entry !== undefined) lines.push(`  ${typeEntryText(group.start, entry)}`)
+        continue
+      }
+      lines.push('  (rec')
+      for (let position = 0; position < group.length; position += 1) {
+        const entry = snapshot.types[group.start + position]
+        if (entry !== undefined) lines.push(`    ${typeEntryText(group.start + position, entry)}`)
+      }
+      lines.push('  )')
     }
 
     const importable = (id: string): string => (id.startsWith('$') ? ` ${id}` : '')
@@ -479,7 +586,7 @@ export const renderModule = (
       const id = importable(ref(context, context.funcs, entryIndex))
       lines.push(
         `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
-          `(func${id} (type ${entry.typeIndex})))`,
+          `(func${id} (type ${ref(context, context.types, entry.typeIndex)})))`,
       )
     }
     for (const entryIndex of spaces.tableOrder) {
@@ -489,7 +596,7 @@ export const renderModule = (
       const id = importable(ref(context, context.tables, entryIndex))
       lines.push(
         `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
-          `(table${id} ${tableTypeText(entry)}))`,
+          `(table${id} ${tableTypeText(context, entry)}))`,
       )
     }
     for (const entryIndex of spaces.memoryOrder) {
@@ -509,7 +616,7 @@ export const renderModule = (
       const id = importable(ref(context, context.globals, entryIndex))
       lines.push(
         `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
-          `(global${id} ${globalTypeText(entry)}))`,
+          `(global${id} ${globalTypeText(context, entry)}))`,
       )
     }
     for (const entryIndex of spaces.tagOrder) {
@@ -519,7 +626,7 @@ export const renderModule = (
       const id = importable(ref(context, context.tags, entryIndex))
       lines.push(
         `  (import ${escapeName(source.module)} ${escapeName(source.field)} ` +
-          `(tag${id} (type ${entry.typeIndex})))`,
+          `(tag${id} (type ${ref(context, context.types, entry.typeIndex)})))`,
       )
     }
 
@@ -529,10 +636,10 @@ export const renderModule = (
       const definition = entry.definition
       if (definition === undefined) continue
       const id = importable(ref(context, context.funcs, entryIndex))
-      lines.push(`  (func${id} (type ${entry.typeIndex})`)
+      lines.push(`  (func${id} (type ${ref(context, context.types, entry.typeIndex)})`)
       for (const local of definition.locals) {
         const localId = local.name === undefined ? '' : ` ${identifier(local.name)}`
-        lines.push(`    (local${localId} ${ValType.text(local.type)})`)
+        lines.push(`    (local${localId} ${valTypeText(context, local.type)})`)
       }
       renderBody(context, definition.body, '    ')
       lines.push('  )')
@@ -542,7 +649,7 @@ export const renderModule = (
       const entry = snapshot.tables[entryIndex]
       if (entry === undefined || entry.importSource !== undefined) continue
       const id = importable(ref(context, context.tables, entryIndex))
-      lines.push(`  (table${id} ${tableTypeText(entry)})`)
+      lines.push(`  (table${id} ${tableTypeText(context, entry)})`)
     }
     for (const entryIndex of spaces.memoryOrder) {
       const entry = snapshot.memories[entryIndex]
@@ -555,14 +662,16 @@ export const renderModule = (
       if (entry === undefined || entry.importSource !== undefined) continue
       if (entry.init === undefined) continue
       const id = importable(ref(context, context.globals, entryIndex))
-      lines.push(`  (global${id} ${globalTypeText(entry)} ${constExprText(context, entry.init)})`)
+      lines.push(
+        `  (global${id} ${globalTypeText(context, entry)} ${constExprText(context, entry.init)})`,
+      )
     }
 
     for (const entryIndex of spaces.tagOrder) {
       const entry = snapshot.tags[entryIndex]
       if (entry === undefined || entry.importSource !== undefined) continue
       const id = importable(ref(context, context.tags, entryIndex))
-      lines.push(`  (tag${id} (type ${entry.typeIndex}))`)
+      lines.push(`  (tag${id} (type ${ref(context, context.types, entry.typeIndex)}))`)
     }
 
     for (const moduleExport of snapshot.exports) {
@@ -591,7 +700,7 @@ export const renderModule = (
       const id = importable(ref(context, context.elems, entryIndex))
       const items = elem.items.map((item) => `(${constExprText(context, item)})`).join(' ')
       const itemsText = items.length === 0 ? '' : ` ${items}`
-      const refTypeText = ValType.text(elem.refType)
+      const refTypeText = valTypeText(context, elem.refType)
       switch (elem.mode._tag) {
         case 'Active': {
           const tableIndex = spaces.tables[elem.mode.table] ?? 0

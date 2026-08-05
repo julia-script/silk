@@ -71,12 +71,24 @@ interface TaggedFields extends Options {
 /**
  * The typed failure channel shared by every effectful WebAssembly operation.
  *
+ * **When to use**
+ *
+ * Catch this to distinguish a caller mistake from a malformed module. Because every operation
+ * in the package fails with this one type, `Effect.catchTag('WasmError', …)` covers the whole
+ * surface, and `reason._tag` is the branch to switch on.
+ *
  * **Details**
  *
  * `operation` identifies the actor function that rejected the request and `message` provides
  * stable human context. `reason` distinguishes invalid input, invalid state or ownership, a
  * specification validation failure, and a wrapped implementation failure. Only a wrapped failure
  * populates JavaScript's `cause` property.
+ *
+ * **Gotchas**
+ *
+ * A failure never leaves partial state behind: the operation that failed committed nothing, so
+ * the builder stays usable and the corrected call can simply be retried. `message` is intended
+ * for humans and is not a stable identifier — branch on `reason._tag` and `operation` instead.
  *
  * **Example** (Recovering from a rejected declaration)
  *

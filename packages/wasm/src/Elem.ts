@@ -90,11 +90,23 @@ const push = (
 /**
  * Declares an active element segment copied into a table at instantiation.
  *
+ * **When to use**
+ *
+ * Use to populate a table before any code runs — the usual way to fill a `call_indirect`
+ * dispatch table.
+ *
  * **Details**
  *
- * The offset is a constant expression producing an `i32`. The segment's reference type is the
- * table's reference type, and every item must be a constant expression of that type.
+ * The offset is a constant expression producing an `i32`, or an `i64` when the table is
+ * 64-bit addressed. The segment's reference type is the table's reference type, and every item
+ * must be a constant expression of that type.
  *
+ * **Gotchas**
+ *
+ * The offset is not bounds-checked at declaration: a segment that overruns the table's size
+ * fails at instantiation, in the host, not here.
+ *
+ * @see {@link passive} for a segment applied later by `table.init`.
  * @category element segments
  * @since 0.0.0
  */
@@ -136,6 +148,17 @@ export const active = Effect.fn('Elem.active')(function* (
 /**
  * Declares a passive element segment for later use with `table.init`.
  *
+ * **When to use**
+ *
+ * Use when a table region is filled at a moment the module chooses rather than at instantiation,
+ * or filled more than once. Unlike an active segment it names no table, so the same segment can
+ * initialize different tables at different offsets.
+ *
+ * **Details**
+ *
+ * The segment stays available until `elem.drop`, after which `table.init` from it traps.
+ *
+ * @see {@link active} for a segment applied automatically at instantiation.
  * @category element segments
  * @since 0.0.0
  */
@@ -162,6 +185,23 @@ export const passive = Effect.fn('Elem.passive')(function* (
 
 /**
  * Declares a declarative element segment that makes functions referenceable by `ref.func`.
+ *
+ * **When to use**
+ *
+ * Use to satisfy the specification's rule that `ref.func` may only name a function the module
+ * has already declared referenceable. When a function is reached only through `ref.func` inside
+ * a body — never exported, never in a table — this is what makes that legal.
+ *
+ * **Details**
+ *
+ * A declarative segment carries no runtime data: it initializes nothing and exists only to
+ * declare references. Exporting a function or listing it in another segment declares it too, so
+ * this is needed only when neither applies.
+ *
+ * **Gotchas**
+ *
+ * The omission is reported at emission, not by `Func.define`, and reads as a whole-module
+ * failure about an undeclared `ref.func` target.
  *
  * @category element segments
  * @since 0.0.0

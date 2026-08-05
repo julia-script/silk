@@ -63,6 +63,17 @@ export interface MemoryOptions extends Options {
 /**
  * Imports a function with an interned function type.
  *
+ * **When to use**
+ *
+ * Use for any function the host supplies. The returned handle is the same kind `Func.declare`
+ * returns, so an imported function is callable, exportable, and table-storable exactly like a
+ * defined one — the only difference is that it has no body and `Func.define` rejects it.
+ *
+ * **Gotchas**
+ *
+ * `module` and `field` are the host's lookup path, not the local name: pass `options.name`
+ * separately for the identifier that appears in text output and the `name` section.
+ *
  * **Example** (Importing a logging function)
  *
  * ```ts
@@ -186,6 +197,12 @@ export const memory = Effect.fn('Import.memory')(function* (
 
 /**
  * Imports a global with a value type and mutability.
+ *
+ * **Details**
+ *
+ * An imported global needs no initializer — the host supplies its value. An imported immutable
+ * global is the only global a constant expression may read, which makes this the way to
+ * parameterize segment offsets and other initializers at instantiation time.
  *
  * @category imports
  * @since 0.0.0

@@ -33,6 +33,18 @@ export interface Options {
 /**
  * Declares a defined table holding one reference type.
  *
+ * **Details**
+ *
+ * `limits` count elements. Every slot holds the same reference type, and a table declared with a
+ * nullable type starts filled with null.
+ *
+ * **Gotchas**
+ *
+ * A non-nullable element type has no default value, so the table needs an initial value the
+ * builder cannot supply. Such a module encodes successfully and is rejected by the host at
+ * instantiation ("needs initial value"), not by the emitters — prefer a nullable element type
+ * unless an active element segment covers the whole table.
+ *
  * **Example** (A one-element function table)
  *
  * ```ts

@@ -5,6 +5,7 @@ import { validationFailed, type WasmError } from '../WasmError.js'
 import * as Handle from './Handle.js'
 import type * as ModuleState from './ModuleState.js'
 import type * as OwnedHandle from './OwnedHandle.js'
+import * as Subtype from './Subtype.js'
 
 const extendedConstMnemonics = new Set([
   'i32.add',
@@ -47,11 +48,12 @@ export const check = (
           stack.push(ValType.f64)
           break
         case 'RefNull':
-          stack.push(instr.refType)
+          stack.push(ValType.refNull(instr.heapType))
           break
         case 'RefFunc': {
-          yield* Handle.resolve(owner, instr.func, 'Func', operation)
-          stack.push(ValType.funcref)
+          const index = yield* Handle.resolve(owner, instr.func, 'Func', operation)
+          const typeHandle = state.typeHandles[state.funcs[index]?.typeIndex ?? -1]
+          stack.push(typeHandle === undefined ? ValType.funcref : ValType.ref(typeHandle))
           break
         }
         case 'GlobalGet': {
@@ -95,7 +97,7 @@ export const check = (
       }
     }
     const produced = stack.length === 1 ? stack[0] : undefined
-    if (produced === undefined || !ValType.equals(produced, expected)) {
+    if (produced === undefined || !Subtype.matches(state, produced, expected)) {
       return yield* invalid(
         `A constant expression here must produce exactly one ${ValType.text(expected)}`,
         { expected: ValType.text(expected), produced: stack.map(ValType.text) },

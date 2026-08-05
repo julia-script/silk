@@ -350,10 +350,8 @@ const constFor = (type) => {
       return Instr.f64Const(1.5)
     case 'V128':
       return Instr.v128Const(Array.from({ length: 16 }, (_, i) => i))
-    case 'FuncRef':
-      return Instr.refNull(ValType.funcref)
-    case 'ExternRef':
-      return Instr.refNull(ValType.externref)
+    case 'Ref':
+      return Instr.refNull(type.heapType)
     default:
       throw new Error(`No constant for ${type._tag}`)
   }
@@ -612,6 +610,106 @@ fixtures.push(
       })
       yield* Export.func(builder, 'fast', fast)
       yield* Export.func(builder, 'slow', slow)
+      return builder
+    }),
+  ),
+)
+
+fixtures.push(
+  build(
+    'gc',
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ moduleName: 'gc' })
+      // A recursive node type, an open base with a subtype, and a packed byte array.
+      const [node] = yield* Type.rec(builder, 1, ([self]) => [
+        {
+          kind: 'struct',
+          name: 'node',
+          fields: [{ storage: ValType.i32 }, { storage: ValType.refNull(self), mutable: true }],
+        },
+      ])
+      const base = yield* Type.struct(builder, [{ storage: ValType.i32 }], {
+        name: 'base',
+        final: false,
+      })
+      const extended = yield* Type.struct(
+        builder,
+        [{ storage: ValType.i32 }, { storage: ValType.f64, mutable: true }],
+        { name: 'extended', supertype: base },
+      )
+      const bytesType = yield* Type.array(
+        builder,
+        { storage: 'i8', mutable: true },
+        {
+          name: 'bytes',
+        },
+      )
+      const greeting = yield* Data.passive(builder, new Uint8Array([104, 105, 33]), {
+        name: 'greeting',
+      })
+      const sumType = yield* Type.func(builder, [ValType.i32], [ValType.i32])
+      const twice = yield* Func.declare(builder, sumType, { name: 'twice' })
+      yield* Func.define(builder, twice, {
+        body: [Instr.localGet(0), Instr.localGet(0), Instr.op('i32.add')],
+      })
+      const run = yield* Func.declare(builder, sumType, { name: 'run' })
+      yield* Func.define(builder, run, {
+        locals: [
+          { type: ValType.refNull(node), name: 'list' },
+          { type: ValType.refNull(bytesType), name: 'buffer' },
+        ],
+        body: [
+          // Build a two-node list and sum it via casts and null branches.
+          Instr.localGet(0),
+          Instr.refNull(node),
+          Instr.structNew(node),
+          Instr.localSet(1),
+          Instr.i32Const(1),
+          Instr.localGet(1),
+          Instr.structNew(node),
+          Instr.localSet(1),
+          // Bytes from a data segment, filled and measured.
+          Instr.i32Const(0),
+          Instr.i32Const(3),
+          Instr.arrayNewData(bytesType, greeting),
+          Instr.localTee(2),
+          Instr.op('array.len'),
+          // Sub/supertype traffic and casts.
+          Instr.i32Const(2),
+          Instr.structNew(base, { defaults: true }),
+          Instr.refCast(ValType.ref(base)),
+          Instr.structGet(base, 0),
+          Instr.op('i32.add'),
+          Instr.i32Const(5),
+          Instr.op('ref.i31'),
+          Instr.refTest(ValType.ref('i31')),
+          Instr.op('i32.add'),
+          Instr.op('i32.add'),
+          // Typed call through a precise reference.
+          Instr.refFunc(twice),
+          Instr.callRef(sumType),
+          Instr.block(Instr.valueBlockType(ValType.i32), [
+            Instr.block(Instr.emptyBlockType, [
+              Instr.localGet(1),
+              Instr.brOnNull(0),
+              Instr.structGet(node, 0),
+              Instr.br(1),
+            ]),
+            Instr.i32Const(-1),
+          ]),
+          Instr.op('i32.add'),
+          // Keep the extended subtype and default array observable.
+          Instr.structNew(extended, { defaults: true }),
+          Instr.op('ref.is_null'),
+          Instr.op('i32.add'),
+          Instr.i32Const(4),
+          Instr.arrayNew(bytesType, { defaults: true }),
+          Instr.op('array.len'),
+          Instr.op('i32.add'),
+        ],
+      })
+      yield* Export.func(builder, 'run', run)
+      yield* Export.func(builder, 'twice', twice)
       return builder
     }),
   ),

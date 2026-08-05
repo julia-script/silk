@@ -50,6 +50,37 @@ const declare = (
 /**
  * Exports a function under a unique name.
  *
+ * **Details**
+ *
+ * The export name is what the host looks up; it is independent of the function's own
+ * `options.name`, and either may be omitted or differ. Exporting also declares the function
+ * referenceable, which satisfies `ref.func`'s requirement without a declarative element segment.
+ *
+ * **Gotchas**
+ *
+ * Export names must be unique across every kind: a function and a memory cannot share one name.
+ * A duplicate is rejected here, at declaration.
+ *
+ * **Example** (Exporting under a different name)
+ *
+ * ```ts
+ * import * as Effect from 'effect/Effect'
+ * import * as Builder from '@silk-effect/wasm/Builder'
+ * import * as Export from '@silk-effect/wasm/Export'
+ * import * as Func from '@silk-effect/wasm/Func'
+ * import * as Instr from '@silk-effect/wasm/Instr'
+ * import * as Type from '@silk-effect/wasm/Type'
+ * import * as ValType from '@silk-effect/wasm/ValType'
+ *
+ * const program = Effect.gen(function* () {
+ *   const builder = yield* Builder.make()
+ *   const signature = yield* Type.func(builder, [], [ValType.i32])
+ *   const answer = yield* Func.declare(builder, signature, { name: 'answer' })
+ *   yield* Func.define(builder, answer, { body: [Instr.i32Const(42)] })
+ *   yield* Export.func(builder, 'getAnswer', answer)
+ * })
+ * ```
+ *
  * @category exports
  * @since 0.0.0
  */
@@ -62,6 +93,7 @@ export const func: (
 /**
  * Exports a table under a unique name.
  *
+ * @see {@link func} for how export names relate to entity names and uniqueness.
  * @category exports
  * @since 0.0.0
  */
@@ -74,6 +106,7 @@ export const table: (
 /**
  * Exports a memory under a unique name.
  *
+ * @see {@link func} for how export names relate to entity names and uniqueness.
  * @category exports
  * @since 0.0.0
  */
@@ -86,6 +119,11 @@ export const memory: (
 /**
  * Exports a global under a unique name.
  *
+ * **Details**
+ *
+ * A mutable global may be exported; the host sees it as a writable `WebAssembly.Global`.
+ *
+ * @see {@link func} for how export names relate to entity names and uniqueness.
  * @category exports
  * @since 0.0.0
  */
@@ -98,6 +136,12 @@ export const global: (
 /**
  * Exports an exception tag under a unique name.
  *
+ * **Details**
+ *
+ * Exporting a tag lets another module import the same tag identity, which is what makes an
+ * exception thrown in one module catchable by name in another.
+ *
+ * @see {@link func} for how export names relate to entity names and uniqueness.
  * @category exports
  * @since 0.0.0
  */

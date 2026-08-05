@@ -32,7 +32,7 @@ export const checkTagType = (
   typeIndex: number,
   operation: string,
 ): Result.Result<void, WasmError> => {
-  const funcType = state.types[typeIndex]
+  const funcType = ModuleState.funcTypeAt(state.types, typeIndex)
   if (funcType === undefined || funcType.results.length > 0) {
     return Result.fail(
       invalidInput({
@@ -52,6 +52,12 @@ export const checkTagType = (
  *
  * The tag's type describes the exception payload: its parameters are the values carried by a
  * `throw` and delivered to catching labels. The type's result sequence must be empty.
+ *
+ * **Gotchas**
+ *
+ * Tags are identities, not structures: two tags declared with the same payload type are
+ * different exceptions, and a `catch` matches only the exact tag it names. To catch an exception
+ * across a module boundary, import and export the one tag rather than redeclaring it.
  *
  * **Example** (A tag carrying one error code)
  *

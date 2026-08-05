@@ -2,6 +2,28 @@
   (type (func))
   (func $everything (type 0)
     nop
+    ref.null eq
+    ref.null eq
+    ref.eq
+    drop
+    ref.null extern
+    any.convert_extern
+    drop
+    ref.null any
+    extern.convert_any
+    drop
+    i32.const 1
+    ref.i31
+    drop
+    ref.null i31
+    i31.get_s
+    drop
+    ref.null i31
+    i31.get_u
+    drop
+    ref.null array
+    array.len
+    drop
     i32.const 1
     i32.eqz
     drop

@@ -37,6 +37,12 @@ export interface Options {
  * global is declared: constants, `ref.null`, `ref.func`, reads of imported immutable globals,
  * and extended integer arithmetic, producing exactly one value of the global's type.
  *
+ * **Gotchas**
+ *
+ * The initializer cannot call a function or read a defined global, so a value that depends on
+ * computation must be assigned by the start function instead. A `ref.func` here also declares
+ * that function referenceable, the same as an export or a declarative element segment.
+ *
  * **Example** (A mutable counter starting at zero)
  *
  * ```ts

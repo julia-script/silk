@@ -79,16 +79,17 @@ emission, so an emitted module is guaranteed valid.
 
 ## Feature baseline
 
-WebAssembly core 2.0 (multi-value, bulk memory, reference types, sign extension, saturating
-float-to-int, mutable globals) plus tail calls, extended constant expressions, multiple
-memories, fixed-width SIMD, relaxed SIMD, threads (shared memories and atomics), memory64
-(64-bit addressed memories and tables), exception handling with `exnref` (tags, `throw`,
-`throw_ref`, `try_table`), and branch hinting.
+The complete Chrome-unflagged surface: WebAssembly core 2.0 (multi-value, bulk memory,
+reference types, sign extension, saturating float-to-int, mutable globals) plus tail calls,
+extended constant expressions, multiple memories, fixed-width SIMD, relaxed SIMD, threads
+(shared memories and atomics), memory64 (64-bit addressed memories and tables), exception
+handling with `exnref` (tags, `throw`, `throw_ref`, `try_table`), branch hinting, and GC with
+typed function references (parameterized reference types, struct/array types in recursive
+groups, subtyping, casts, and `call_ref`).
 
-The package's destination surface is everything Chrome ships unflagged (Wasm 3.0 plus threads,
-relaxed SIMD, and branch hinting). GC with typed function references arrives in the last
-planned follow-up change. Legacy exception handling and JS-API-only features are permanently
-out of scope, as are proposals below phase 4.
+Legacy exception handling and JS-API-only features are permanently out of scope, as are
+proposals below phase 4. One documented restriction: locals must be defaultable — non-nullable
+reference locals (which the specification permits with initialization tracking) are rejected.
 
 ## Scope and compatibility
 

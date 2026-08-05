@@ -164,4 +164,40 @@ export const negativeCorpus = [
     name: 'throw-missing-payload',
     wat: '(module (tag $e (param i32)) (func throw $e))',
   },
+  {
+    name: 'struct-get-packed-unsigned-missing',
+    wat: '(module (type $p (struct (field i8))) (func (result i32) struct.new_default $p struct.get $p 0))',
+  },
+  {
+    name: 'struct-set-immutable',
+    wat: '(module (type $p (struct (field i32))) (func struct.new_default $p i32.const 1 struct.set $p 0))',
+  },
+  {
+    name: 'cast-cross-hierarchy',
+    wat: '(module (type $p (struct (field i32))) (func ref.null extern ref.cast (ref $p) drop))',
+  },
+  {
+    name: 'supertype-structural-mismatch',
+    wat: '(module (type $a (sub (struct (field i32)))) (type $b (sub $a (struct (field f32)))))',
+  },
+  {
+    name: 'supertype-final',
+    wat: '(module (type $a (struct (field i32))) (type $b (sub $a (struct (field i32)))))',
+  },
+  {
+    name: 'call-ref-wrong-type',
+    wat: `(module (type $f (func (result i32))) (type $g (func (result i64)))
+      (func $target (type $f) i32.const 1)
+      (elem declare func $target)
+      (func (result i64) ref.func $target call_ref $g))`,
+  },
+  {
+    name: 'br-on-cast-label-mismatch',
+    wat: `(module (type $p (struct (field i32))) (func
+      block
+        ref.null any
+        br_on_cast 0 anyref (ref null $p)
+        drop
+      end))`,
+  },
 ]

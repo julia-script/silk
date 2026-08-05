@@ -9,6 +9,12 @@ import type { WasmError } from './WasmError.js'
 /**
  * Encodes the builder's committed module state as a binary `.wasm` module.
  *
+ * **When to use**
+ *
+ * Use when you need bytes to instantiate, write to a `.wasm` file, or hash. Emission does not
+ * consume the builder, so you can encode the same module more than once, and encode and render
+ * the same builder to compare the two projections.
+ *
  * **Details**
  *
  * Emission first validates module-level constraints that are only decidable over the whole
@@ -17,6 +23,13 @@ import type { WasmError } from './WasmError.js'
  * spaces — imported entities first, definitions after, both in declaration order — and encodes
  * the canonical section sequence. Declared names are carried in the binary `name` custom
  * section. Output is deterministic: the same committed operation order produces identical bytes.
+ *
+ * **Gotchas**
+ *
+ * Whole-module rules are only checked here, so a builder that accepted every individual
+ * declaration can still fail at this point — most often because a function was declared and
+ * never defined. Function bodies themselves were already validated by `Func.define`, so this
+ * step never re-reports a body-level error.
  *
  * **Example** (Encoding a module)
  *

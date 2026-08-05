@@ -30,6 +30,11 @@ export const make = <Tag extends string>(
 }
 
 /** @internal */
+export const invalidate = (handle: object): void => {
+  entries.delete(handle)
+}
+
+/** @internal */
 export const resolve = <Tag extends string>(
   owner: OwnedHandle.Owner,
   handle: Handle<Tag>,

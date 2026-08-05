@@ -8,3 +8,4 @@ atomics
 memory64
 exceptions
 branch-hints
+gc

@@ -9,6 +9,12 @@ import type { WasmError } from './WasmError.js'
 /**
  * Renders the builder's committed module state as WebAssembly text format.
  *
+ * **When to use**
+ *
+ * Use when a human or a text-consuming tool needs to read the module — debugging a body the
+ * validator accepted but you did not expect, diffing two builds, or producing `.wat` fixtures.
+ * For anything that runs the module, encode it instead.
+ *
  * **Details**
  *
  * The same module-level validation and index resolution as `Binary.encode` run first, so the
@@ -17,6 +23,12 @@ import type { WasmError } from './WasmError.js'
  * appear as `$`-identifiers when they fit the text format's identifier character set; entities
  * whose names do not fit are referenced by index while their exact names remain in the binary
  * `name` custom section.
+ *
+ * **Gotchas**
+ *
+ * Rendering is a projection of committed state, not a record of how it was built: interned types
+ * appear once no matter how many times they were requested, and imports are numbered ahead of
+ * definitions regardless of declaration order.
  *
  * **Example** (Rendering a module)
  *

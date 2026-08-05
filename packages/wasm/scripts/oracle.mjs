@@ -39,6 +39,8 @@ const FEATURES = [
   'threads',
   'memory64',
   'exceptions',
+  'gc',
+  'function-references',
 ]
 
 const run = (args, options = {}) => execFileSync(wasmTools, args, { stdio: 'pipe', ...options })

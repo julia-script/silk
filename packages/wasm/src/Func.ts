@@ -32,12 +32,25 @@ export interface DeclareOptions {
 /**
  * Declares a defined function with an interned function type.
  *
+ * **When to use**
+ *
+ * Use to reserve a function's identity before its body exists. Because the handle is valid
+ * immediately, mutually recursive functions need no special ordering: declare both, then define
+ * both.
+ *
  * **Details**
  *
  * Declaration returns a handle immediately usable in calls, exports, and element segments; the
  * body is supplied later with `Func.define`. Emission fails if a declared function was never
  * defined.
  *
+ * **Gotchas**
+ *
+ * A declared function is not yet a complete function. Nothing rejects the omission until
+ * `Binary.encode` or `WatText.render` runs, so an undefined declaration surfaces as a
+ * whole-module failure at emission rather than at the point of the mistake.
+ *
+ * @see {@link define} for supplying the body.
  * @category functions
  * @since 0.0.0
  */
@@ -49,6 +62,15 @@ export const declare = Effect.fn('Func.declare')(function* (
   return yield* ModuleState.mutate(builder, 'Func.declare', (state, owner) =>
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(owner, type, 'Type', 'Func.declare')
+      if (ModuleState.funcTypeAt(state.types, typeIndex) === undefined) {
+        return yield* Result.fail(
+          invalidState({
+            operation: 'Func.declare',
+            message: 'A function must be declared with a function type',
+            state: typeIndex,
+          }),
+        )
+      }
       yield* NameCheck.ensureFresh(state.funcs, options.name, 'Func.declare')
       const index = state.funcs.length
       state.funcs.push({
@@ -91,12 +113,24 @@ export interface Definition {
  * Supplies the locals and body of a declared function, validating the body against the
  * WebAssembly specification before anything is committed.
  *
+ * **When to use**
+ *
+ * Use once per declared function. This is where body errors are reported, so it is the point at
+ * which a malformed instruction sequence is worth debugging — the emitters assume bodies already
+ * passed here and never re-check them.
+ *
  * **Details**
  *
  * Validation runs the specification's algorithm — value-stack typing, control-frame tracking,
  * branch arities, entity reference checks, and polymorphic typing after unreachable code. A
  * rejected body fails with `WasmError` and leaves the function undefined, so a corrected
  * definition can be retried without any artifact of the failed attempt.
+ *
+ * **Gotchas**
+ *
+ * Defining the same function twice fails rather than replacing the first body, and an imported
+ * function cannot be defined at all. Locals must be defaultable, so a non-nullable reference
+ * local is rejected; declare it nullable, or keep the value on the stack.
  *
  * **Example** (Defining `add`)
  *
@@ -130,7 +164,8 @@ export const define = Effect.fn('Func.define')(function* (
     Result.gen(function* () {
       const index = yield* Handle.resolve(owner, func, 'Func', 'Func.define')
       const entry = state.funcs[index]
-      const funcType = entry === undefined ? undefined : state.types[entry.typeIndex]
+      const funcType =
+        entry === undefined ? undefined : ModuleState.funcTypeAt(state.types, entry.typeIndex)
       if (entry === undefined || funcType === undefined) {
         return yield* Result.fail(
           invalidState({
@@ -244,6 +279,16 @@ export const name = Effect.fn('Func.name')(function* (
 /**
  * Designates the module's start function, which must have the type `[] -> []`.
  *
+ * **Details**
+ *
+ * The start function runs during instantiation, after the module's globals and segments are
+ * initialized and before any export is callable.
+ *
+ * **Gotchas**
+ *
+ * A module has at most one start function: a second call fails rather than replacing the first.
+ * Both the arity requirement and the single-designation rule are enforced here, not at emission.
+ *
  * @category functions
  * @since 0.0.0
  */
@@ -255,7 +300,8 @@ export const start = Effect.fn('Func.start')(function* (
     Result.gen(function* () {
       const index = yield* Handle.resolve(owner, func, 'Func', 'Func.start')
       const entry = state.funcs[index]
-      const funcType = entry === undefined ? undefined : state.types[entry.typeIndex]
+      const funcType =
+        entry === undefined ? undefined : ModuleState.funcTypeAt(state.types, entry.typeIndex)
       if (funcType === undefined) {
         return yield* Result.fail(
           invalidState({
