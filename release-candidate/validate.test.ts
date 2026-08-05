@@ -212,6 +212,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(Object.keys(manifest.dependencies ?? {})).toEqual(['effect'])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
+      './Analysis',
       './BootstrapEvaluation',
       './DeclarationIndex',
       './Diagnostic',
@@ -462,6 +463,7 @@ console.log(
     )
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
+      'Analysis',
       'BootstrapEvaluation',
       'DeclarationIndex',
       'Diagnostic',

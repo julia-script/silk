@@ -1,6 +1,7 @@
 'use client'
 
-import { DeclarationIndex, ModuleClosure } from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
+import type { DeclarationIndex } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -121,8 +122,8 @@ export function DeclarationIndexLab() {
 
   const index = useMemo(
     () =>
-      DeclarationIndex.collect(
-        ModuleClosure.load({
+      Analysis.declarationIndex(
+        Analysis.make({
           rootModule: preset.root,
           sources: new Map(
             Object.entries(sources).map(([name, text]) => [name, encoder.encode(text)]),

@@ -1,14 +1,7 @@
 'use client'
 
-import {
-  BootstrapEvaluation,
-  Diagnostic,
-  Lexer,
-  Parser,
-  Elaboration,
-  SourceFile,
-  SyntaxTree,
-} from '@silk-effect/compiler'
+import { Analysis, Diagnostic, SyntaxTree } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Elaboration, SourceFile } from '@silk-effect/compiler'
 import type { Hir, SourceSpan, SyntaxFile } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import {
@@ -604,7 +597,7 @@ function ParameterFacts({ declaration }: { readonly declaration: Elaboration.Dec
           const type = parameter.declaredType
           const lookup =
             name._tag === 'Present'
-              ? Elaboration.parameterByName(declaration, name.spelling)
+              ? Analysis.parameterLookup(declaration, name.spelling)
               : undefined
           return (
             <article
@@ -1232,7 +1225,7 @@ function SemanticFacts({
     ),
   )
   const lookups = presentNames.map((spelling) =>
-    Elaboration.declarationByName(analysis, spelling),
+    Analysis.declarationLookup(analysis, spelling),
   )
 
   return (
@@ -1438,10 +1431,8 @@ export function SyntaxInspector() {
   const [selectedFlowId, setSelectedFlowId] = useState<string>()
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
   const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
-  const analysis = useMemo(() => {
-    const source = SourceFile.make(sourceId, encoder.encode(text))
-    return Elaboration.elaborateModule(Parser.parse(Lexer.lex(source)))
-  }, [text])
+  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
+  const analysis = Analysis.rootAnalysis(snapshot)
   const result = analysis.syntax
 
   return (
@@ -1518,7 +1509,7 @@ export function SyntaxInspector() {
           selectedFlowId={selectedFlowId}
           onSelectFlow={setSelectedFlowId}
           evaluation={evaluation}
-          onEvaluate={() => setEvaluation(BootstrapEvaluation.evaluate(analysis))}
+          onEvaluate={() => setEvaluation(Analysis.evaluate(snapshot))}
         />
 
         <div className={styles.diagnostics}>

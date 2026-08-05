@@ -1,48 +1,41 @@
 # `@silk-effect/compiler`
 
-`@silk-effect/compiler` contains the first bootstrap layer of the Silk Effect compiler: immutable
-source bytes, source-owned spans, tokens, lexical diagnostics, a deterministic lexer, and a
-lossless concrete parser and ordered semantic facts for one or more public functions.
+`@silk-effect/compiler` contains the bootstrap layer of the Silk Effect compiler: immutable
+source bytes and source-owned spans, the lossless per-module `SyntaxFile` artifact, module
+closure loading, the canonical declaration index, HIR elaboration with unified diagnostics, and
+the closed bootstrap evaluator — all reachable through one supported analysis facade.
 
 ```ts
-import {
-  BootstrapEvaluation,
-  Lexer,
-  Parser,
-  SemanticAnalysis,
-  SourceFile,
-  SyntaxTree,
-} from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
 
-const source = SourceFile.make(
+const snapshot = Analysis.ofSource(
   'memory://example.silk',
   new TextEncoder().encode(`pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`),
 )
-const lexical = Lexer.lex(source)
-const parse = Parser.parse(lexical)
-const result = SemanticAnalysis.analyze(parse)
-const evaluation = BootstrapEvaluation.evaluate(result)
-const identity = result.functions[0]
+const result = Analysis.rootAnalysis(snapshot)
 
-console.log(parse.root.kind) // SourceFile
-console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // true
+console.log(result.syntax.root.kind) // SourceFile
 console.log(result.functions.length) // 2
-console.log(identity?.declaration.parameters[0]?.id) // { _tag: 'ParameterId', function: { ... }, ordinal: 0 }
-console.log(identity?.returnedExpression) // { _tag: 'Identifier', reference: { _tag: 'Resolved', ... }, type: { _tag: 'Available', type: 'I32' }, ... }
-console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', arguments: [{ id: { ordinal: 0 }, ... }], mappings: [...], contract: { _tag: 'Compatible', ... }, ... }
-console.log(SemanticAnalysis.declarationByName(result, 'main')) // { _tag: 'Resolved', ... }
-if (identity !== undefined) {
-  console.log(SemanticAnalysis.parameterByName(identity.declaration, 'value')) // { _tag: 'Resolved', ... }
-}
-console.log(evaluation._tag) // Completed
+console.log(result.hir.functions[1]?.body) // { _tag: 'Call', target: { _tag: 'CanonicalDeclarationId', ... }, ... }
+console.log(Analysis.declarationByName(snapshot, 'memory://example.silk', 'main')) // { _tag: 'Resolved', ... }
+console.log(Analysis.diagnostics(snapshot)) // []
+console.log(Analysis.evaluate(snapshot)._tag) // Completed
 ```
 
-The same actors are available through explicit deep imports such as
-`@silk-effect/compiler/SourceFile`, `@silk-effect/compiler/Lexer`, and
-`@silk-effect/compiler/Parser`. Semantic facts and diagnostics are available through
-`@silk-effect/compiler/SemanticAnalysis` and `@silk-effect/compiler/SemanticDiagnostic`.
-The closed direct evaluator is available through `@silk-effect/compiler/BootstrapEvaluation`.
+## The facade is the supported consumer surface
+
+Tooling consumes compiler phases exclusively through `Analysis`: build a snapshot from a
+compilation request (or one source), then query immutable facts — sources, syntax, imports and
+cycles, declarations, references, types, contracts, HIR, evaluation, and the compilation's
+diagnostics merged in deterministic driver order. The immutable data-model vocabularies
+(`SyntaxTree`, `SourceFile`, `SourceSpan`, `Token`, `Diagnostic`, `Hir`, and the fact type
+namespaces) are part of the facade's answers and remain importable, including as type-only
+imports. Running phase modules directly (`Lexer`, `Parser`, `ModuleClosure`,
+`DeclarationIndex`, `Elaboration`, `BootstrapEvaluation`) is not a supported consumer surface.
+Bootstrap does not implement every future editor query, but its identities, recovery states,
+provenance, and phase boundaries let the facade grow without reimplementing Silk semantics in a
+separate tool.
 
 ## Byte and span conventions
 

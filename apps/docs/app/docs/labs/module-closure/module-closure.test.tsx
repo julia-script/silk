@@ -1,4 +1,5 @@
-import { ModuleClosure } from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
+import type { ModuleClosure } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ClosureView, ModuleClosureLab } from './module-closure'
@@ -10,10 +11,10 @@ const load = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
 ): ModuleClosure.Closure =>
-  ModuleClosure.load({
+  Analysis.make({
     rootModule,
     sources: new Map(entries.map(([name, text]) => [name, encoder.encode(text)])),
-  })
+  }).closure
 
 describe('ClosureView', () => {
   it('lists a diamond closure in canonical order without cycles', () => {

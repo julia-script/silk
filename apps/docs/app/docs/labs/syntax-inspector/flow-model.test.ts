@@ -1,11 +1,15 @@
-import { BootstrapEvaluation, Lexer, Parser, Elaboration, SourceFile } from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
+import type { Elaboration } from '@silk-effect/compiler'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from './flow-model'
 
 const encoder = new TextEncoder()
 
+const snap = (id: string, text: string): Analysis.Snapshot =>
+  Analysis.ofSource(id, encoder.encode(text))
+
 const analyze = (id: string, text: string): Elaboration.Result =>
-  Elaboration.elaborateModule(Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(text)))))
+  Analysis.rootAnalysis(snap(id, text))
 
 const identitySource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
@@ -54,8 +58,9 @@ describe('projectDataFlow', () => {
   })
 
   it('keeps repeated sibling call sites distinct and source ordered', () => {
-    const analysis = analyze('memory://flow-siblings.silk', siblingSource)
-    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const snapshot = snap('memory://flow-siblings.silk', siblingSource)
+    const analysis = Analysis.rootAnalysis(snapshot)
+    const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
     const children = flow.groups.filter((group) => group.depth === 1)
 
@@ -102,13 +107,11 @@ pub fn main() -> I32 { return identity(identity()) }`,
   })
 
   it('overlays only the completed prefix when a later sibling blocks', () => {
-    const analysis = analyze(
-      'memory://flow-blocked.silk',
-      `pub fn identity(value: I32) -> I32 { return value }
+    const snapshot = snap('memory://flow-blocked.silk', `pub fn identity(value: I32) -> I32 { return value }
 pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
-    )
-    const outcome = BootstrapEvaluation.evaluate(analysis)
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
+    const analysis = Analysis.rootAnalysis(snapshot)
+    const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
     const outer = flow.groups.find((group) => group.depth === 0)
 
@@ -124,12 +127,10 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
   })
 
   it('renders a recursive cycle as one finite trace-backed terminal', () => {
-    const analysis = analyze(
-      'memory://flow-cycle.silk',
-      `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(main()) }`,
-    )
-    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const snapshot = snap('memory://flow-cycle.silk', `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(main()) }`)
+    const analysis = Analysis.rootAnalysis(snapshot)
+    const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
     const terminals = flow.nodes.filter(
       (item) => item.layer === 'Evaluated' && item.kind === 'Terminal',

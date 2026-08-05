@@ -1,4 +1,5 @@
-import { DeclarationIndex, ModuleClosure } from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
+import type { DeclarationIndex } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { DeclarationIndexLab, IndexView } from './declaration-index'
@@ -9,8 +10,8 @@ const collect = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
 ): DeclarationIndex.Index =>
-  DeclarationIndex.collect(
-    ModuleClosure.load({
+  Analysis.declarationIndex(
+    Analysis.make({
       rootModule,
       sources: new Map(entries.map(([name, text]) => [name, encoder.encode(text)])),
     }),

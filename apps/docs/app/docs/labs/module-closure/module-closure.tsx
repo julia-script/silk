@@ -1,6 +1,7 @@
 'use client'
 
-import { ModuleClosure } from '@silk-effect/compiler'
+import { Analysis } from '@silk-effect/compiler'
+import type { ModuleClosure } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -142,10 +143,10 @@ export function ModuleClosureLab() {
 
   const closure = useMemo(
     () =>
-      ModuleClosure.load({
+      Analysis.make({
         rootModule: preset.root,
         sources: new Map(Object.entries(sources).map(([name, text]) => [name, encoder.encode(text)])),
-      }),
+      }).closure,
     [preset, sources],
   )
 

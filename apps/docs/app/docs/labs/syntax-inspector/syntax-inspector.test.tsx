@@ -1,11 +1,5 @@
-import {
-  BootstrapEvaluation,
-  Diagnostic,
-  Lexer,
-  Parser,
-  Elaboration,
-  SourceFile,
-} from '@silk-effect/compiler'
+import { Analysis, Diagnostic } from '@silk-effect/compiler'
+import type { Elaboration } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from './flow-model'
@@ -21,10 +15,10 @@ import {
 
 const encoder = new TextEncoder()
 
-const analyze = (text: string): Elaboration.Result =>
-  Elaboration.elaborateModule(
-    Parser.parse(Lexer.lex(SourceFile.make('memory://component-flow.silk', encoder.encode(text)))),
-  )
+const snap = (text: string): Analysis.Snapshot =>
+  Analysis.ofSource('memory://component-flow.silk', encoder.encode(text))
+
+const analyze = (text: string): Elaboration.Result => Analysis.rootAnalysis(snap(text))
 
 const completeSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
@@ -34,11 +28,12 @@ const renderFlow = (
   selectedId?: string,
   evaluate = false,
 ): string => {
-  const analysis = analyze(source)
+  const snapshot = snap(source)
+  const analysis = Analysis.rootAnalysis(snapshot)
   return renderToStaticMarkup(
     <DataFlow
       analysis={analysis}
-      outcome={evaluate ? BootstrapEvaluation.evaluate(analysis) : undefined}
+      outcome={evaluate ? Analysis.evaluate(snapshot) : undefined}
       selectedId={selectedId}
       onSelect={() => undefined}
     />,
@@ -85,8 +80,9 @@ pub fn main() -> I32 { return identity(identity(42)) }`,
   })
 
   it('makes call groups, edges, and evaluated terminals source-selectable', () => {
-    const analysis = analyze('pub fn main() -> I32 { return missing(42) }')
-    const outcome = BootstrapEvaluation.evaluate(analysis)
+    const snapshot = snap('pub fn main() -> I32 { return missing(42) }')
+    const analysis = Analysis.rootAnalysis(snapshot)
+    const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
     const selectableIds = [flow.groups.at(0)?.id, flow.edges.at(0)?.id, flow.nodes.at(-1)?.id]
 
@@ -117,7 +113,7 @@ pub fn main() -> I32 { return identity(identity(42)) }`,
 
 describe('EvaluationPanel', () => {
   it('renders an exact completed result and ordered accessible trace', () => {
-    const outcome = BootstrapEvaluation.evaluate(analyze(completeSource))
+    const outcome = Analysis.evaluate(snap(completeSource))
     const markup = renderToStaticMarkup(
       <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
     )
@@ -130,8 +126,7 @@ describe('EvaluationPanel', () => {
   })
 
   it('renders a bounded recursive cycle with its partial trace', () => {
-    const outcome = BootstrapEvaluation.evaluate(
-      analyze('pub fn main() -> I32 { return main() }'),
+    const outcome = Analysis.evaluate(snap('pub fn main() -> I32 { return main() }'),
     )
     const markup = renderToStaticMarkup(
       <EvaluationPanel outcome={outcome} onEvaluate={() => undefined} />,
@@ -144,8 +139,7 @@ describe('EvaluationPanel', () => {
   })
 
   it('renders completed nested evaluation with call depth and result binding', () => {
-    const outcome = BootstrapEvaluation.evaluate(
-      analyze(`pub fn identity(value: I32) -> I32 { return value }
+    const outcome = Analysis.evaluate(snap(`pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`),
     )
     const markup = renderToStaticMarkup(
@@ -159,8 +153,7 @@ pub fn main() -> I32 { return identity(identity(42)) }`),
   })
 
   it('renders an inner blocked endpoint without an enclosing nested-result binding', () => {
-    const outcome = BootstrapEvaluation.evaluate(
-      analyze(`pub fn identity(value: I32) -> I32 { return value }
+    const outcome = Analysis.evaluate(snap(`pub fn identity(value: I32) -> I32 { return value }
 pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(identity(1), missing(2)) }`),
     )
