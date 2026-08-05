@@ -3,6 +3,7 @@ import * as Option from 'effect/Option'
 import type * as Parser from './Parser.js'
 import * as SemanticDiagnostic from './SemanticDiagnostic.js'
 import * as SourceFile from './SourceFile.js'
+import type * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
@@ -166,7 +167,7 @@ export interface IdentifierExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** One concrete call argument expression before positional call binding exists. */
+/** One concrete call argument expression. */
 export type ArgumentExpressionFact =
   | {
       readonly _tag: 'Integer'
@@ -175,6 +176,53 @@ export type ArgumentExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | IdentifierExpressionFact
+
+/** A deterministic argument identity within one caller and concrete call site. */
+export interface ArgumentId {
+  readonly _tag: 'ArgumentId'
+  readonly function: DeclarationId
+  readonly callSpan: SourceSpan.SourceSpan
+  readonly ordinal: number
+}
+
+/** One ordered, syntax-owned call argument. */
+export interface ArgumentFact {
+  readonly _tag: 'Argument'
+  readonly id: ArgumentId
+  readonly expression: ArgumentExpressionFact
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One positional argument-to-parameter relationship. */
+export interface ArgumentMappingFact {
+  readonly _tag: 'ArgumentMapping'
+  readonly argument: ArgumentFact
+  readonly parameter: ParameterFact
+}
+
+/** Why a call contract cannot be established. */
+export type UnavailableCallContractReason =
+  | { readonly _tag: 'UnavailableCallSyntax'; readonly syntax: SyntaxTree.Node }
+  | { readonly _tag: 'UnavailableCallTarget'; readonly reference: CallReferenceFact }
+  | { readonly _tag: 'UnavailableMappedType'; readonly mapping: ArgumentMappingFact }
+
+/** The complete positional contract outcome for one call. */
+export type CallContractFact =
+  | {
+      readonly _tag: 'Compatible'
+      readonly expectedCount: number
+      readonly actualCount: number
+    }
+  | {
+      readonly _tag: 'ArityMismatch'
+      readonly expectedCount: number
+      readonly actualCount: number
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly reason: UnavailableCallContractReason
+    }
 
 /** One returned expression with exact concrete provenance. */
 export type ReturnedExpressionFact =
@@ -187,7 +235,9 @@ export type ReturnedExpressionFact =
   | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
-      readonly argumentExpressions: ReadonlyArray<ArgumentExpressionFact>
+      readonly arguments: ReadonlyArray<ArgumentFact>
+      readonly mappings: ReadonlyArray<ArgumentMappingFact>
+      readonly contract: CallContractFact
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
@@ -386,8 +436,8 @@ interface IdentifierResult {
   readonly syntax: SyntaxTree.Node
 }
 
-interface ArgumentExpressionsResult {
-  readonly facts: ReadonlyArray<ArgumentExpressionFact>
+interface ArgumentsResult {
+  readonly facts: ReadonlyArray<ArgumentFact>
   readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
 }
 
@@ -504,13 +554,14 @@ const analyzeIdentifier = (
   })
 }
 
-const analyzeArgumentExpressions = (
+const analyzeArguments = (
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
+  functionId: DeclarationId,
   parameters: ReadonlyArray<ParameterFact>,
-): ArgumentExpressionsResult => {
+): ArgumentsResult => {
   const argumentList = childNode(call, 'ArgumentList')
-  const analyzed = argumentList.children.flatMap(
+  const analyzed = argumentList.children.filter(isAvailableSyntax).flatMap(
     (
       element,
     ): ReadonlyArray<
@@ -534,13 +585,28 @@ const analyzeArgumentExpressions = (
       ]
     },
   )
-  const facts = analyzed.map((result): ArgumentExpressionFact => {
-    if ('reference' in result.fact) return result.fact
+  const facts = analyzed.map((result, ordinal): ArgumentFact => {
+    const expression: ArgumentExpressionFact =
+      'reference' in result.fact
+        ? result.fact
+        : Object.freeze({
+            _tag: 'Integer',
+            integer: result.fact,
+            type:
+              result.type === undefined ? unavailableExpressionType : availableI32ExpressionType,
+            syntax: result.syntax,
+          })
     return Object.freeze({
-      _tag: 'Integer',
-      integer: result.fact,
-      type: result.type === undefined ? unavailableExpressionType : availableI32ExpressionType,
-      syntax: result.syntax,
+      _tag: 'Argument',
+      id: Object.freeze({
+        _tag: 'ArgumentId',
+        function: functionId,
+        callSpan: call.span,
+        ordinal,
+      }),
+      expression,
+      type: expression.type,
+      syntax: expression.syntax,
     })
   })
 
@@ -550,11 +616,95 @@ const analyzeArgumentExpressions = (
   })
 }
 
+interface CallContractResult {
+  readonly mappings: ReadonlyArray<ArgumentMappingFact>
+  readonly fact: CallContractFact
+  readonly diagnostics: ReadonlyArray<SemanticDiagnostic.SemanticDiagnostic>
+}
+
+const analyzeCallContract = (
+  call: SyntaxTree.Node,
+  reference: CallReferenceFact,
+  argumentsList: ReadonlyArray<ArgumentFact>,
+): CallContractResult => {
+  if (!call.children.every(isAvailableSyntax)) {
+    return Object.freeze({
+      mappings: Object.freeze([]),
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  if (reference._tag !== 'Resolved') {
+    return Object.freeze({
+      mappings: Object.freeze([]),
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({ _tag: 'UnavailableCallTarget', reference }),
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+
+  const parameters = reference.declaration.parameters
+  const mappings = Object.freeze(
+    argumentsList.flatMap((argument, ordinal): ReadonlyArray<ArgumentMappingFact> => {
+      const parameter = parameters.at(ordinal)
+      return parameter === undefined
+        ? []
+        : [Object.freeze({ _tag: 'ArgumentMapping', argument, parameter })]
+    }),
+  )
+  const unavailableMapping = mappings.find(
+    (mapping) =>
+      mapping.argument.type._tag !== 'Available' ||
+      mapping.parameter.declaredType._tag !== 'Resolved',
+  )
+  if (unavailableMapping !== undefined) {
+    return Object.freeze({
+      mappings,
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({
+          _tag: 'UnavailableMappedType',
+          mapping: unavailableMapping,
+        }),
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+
+  const expectedCount = parameters.length
+  const actualCount = argumentsList.length
+  if (expectedCount !== actualCount) {
+    return Object.freeze({
+      mappings,
+      fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
+      diagnostics: Object.freeze([
+        SemanticDiagnostic.wrongCallArity(
+          reference.declaration.id,
+          expectedCount,
+          actualCount,
+          call.span,
+        ),
+      ]),
+    })
+  }
+
+  return Object.freeze({
+    mappings,
+    fact: Object.freeze({ _tag: 'Compatible', expectedCount, actualCount }),
+    diagnostics: Object.freeze([]),
+  })
+}
+
 const analyzeReturnedExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
-  parameters: ReadonlyArray<ParameterFact>,
+  declaration: DeclarationFact,
 ): ReturnedExpressionResult => {
   if (node.kind === 'IntegerLiteralExpression') {
     const integer = analyzeInteger(source, node)
@@ -570,10 +720,10 @@ const analyzeReturnedExpression = (
   }
 
   if (node.kind === 'IdentifierExpression') {
-    return analyzeIdentifier(source, node, parameters)
+    return analyzeIdentifier(source, node, declaration.parameters)
   }
 
-  const argumentExpressions = analyzeArgumentExpressions(source, node, parameters)
+  const argumentsResult = analyzeArguments(source, node, declaration.id, declaration.parameters)
 
   const token = directToken(node, 'Identifier')
   if (token === undefined) {
@@ -584,11 +734,19 @@ const analyzeReturnedExpression = (
           _tag: 'Unavailable',
           syntax: unavailableSyntax(node, 'Identifier'),
         }),
-        argumentExpressions: argumentExpressions.facts,
+        arguments: argumentsResult.facts,
+        mappings: Object.freeze([]),
+        contract: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({
+            _tag: 'UnavailableCallSyntax',
+            syntax: node,
+          }),
+        }),
         type: unavailableExpressionType,
         syntax: node,
       }),
-      diagnostics: argumentExpressions.diagnostics,
+      diagnostics: argumentsResult.diagnostics,
       type: undefined,
     })
   }
@@ -615,6 +773,7 @@ const analyzeReturnedExpression = (
             spelling: tokenSpelling,
             token,
           })
+  const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
   const syntaxAvailable = node.children.every(isAvailableSyntax)
   const expressionType =
     syntaxAvailable &&
@@ -626,7 +785,9 @@ const analyzeReturnedExpression = (
     fact: Object.freeze({
       _tag: 'Call',
       reference,
-      argumentExpressions: argumentExpressions.facts,
+      arguments: argumentsResult.facts,
+      mappings: callContract.mappings,
+      contract: callContract.fact,
       type: expressionType,
       syntax: node,
     }),
@@ -634,7 +795,8 @@ const analyzeReturnedExpression = (
       ...(reference._tag === 'Missing'
         ? [SemanticDiagnostic.unknownFunction(reference.spelling, reference.token.span)]
         : []),
-      ...argumentExpressions.diagnostics,
+      ...argumentsResult.diagnostics,
+      ...callContract.diagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
   })
@@ -802,7 +964,7 @@ const analyzeFunctionBody = (
     source,
     expressionNode,
     declarations,
-    header.declaration.parameters,
+    header.declaration,
   )
   const returnCompatibility =
     header.declaration.returnType._tag === 'Resolved' &&

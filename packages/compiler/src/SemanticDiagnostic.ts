@@ -18,6 +18,9 @@ export const duplicateParameterNameCode = 'SEM0005' as const
 /** Stable code for a present value name with no matching local parameter. */
 export const unknownParameterReferenceCode = 'SEM0006' as const
 
+/** Stable code for a uniquely resolved call with the wrong number of arguments. */
+export const wrongCallArityCode = 'SEM0007' as const
+
 /** Why semantic analysis produced a diagnostic. */
 export type Reason =
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
@@ -38,6 +41,16 @@ export type Reason =
       readonly originalSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'UnknownParameterReference'; readonly spelling: string }
+  | {
+      readonly _tag: 'WrongCallArity'
+      readonly target: {
+        readonly _tag: 'DeclarationId'
+        readonly sourceId: string
+        readonly ordinal: number
+      }
+      readonly expectedCount: number
+      readonly actualCount: number
+    }
 
 /** A recoverable semantic problem attached to one exact source span. */
 export interface SemanticDiagnostic {
@@ -49,6 +62,7 @@ export interface SemanticDiagnostic {
     | typeof unknownFunctionCode
     | typeof duplicateParameterNameCode
     | typeof unknownParameterReferenceCode
+    | typeof wrongCallArityCode
   readonly severity: 'error'
   readonly message: string
   readonly reason: Reason
@@ -147,5 +161,30 @@ export const unknownParameterReference = (
     severity: 'error',
     message: `Unknown parameter ${spelling}`,
     reason: Object.freeze({ _tag: 'UnknownParameterReference', spelling }),
+    span,
+  })
+
+/** Creates the diagnostic for a uniquely resolved call with the wrong arity. */
+export const wrongCallArity = (
+  target: {
+    readonly _tag: 'DeclarationId'
+    readonly sourceId: string
+    readonly ordinal: number
+  },
+  expectedCount: number,
+  actualCount: number,
+  span: SourceSpan.SourceSpan,
+): SemanticDiagnostic =>
+  Object.freeze({
+    _tag: 'SemanticDiagnostic',
+    code: wrongCallArityCode,
+    severity: 'error',
+    message: `Expected ${expectedCount} ${expectedCount === 1 ? 'argument' : 'arguments'} but received ${actualCount}`,
+    reason: Object.freeze({
+      _tag: 'WrongCallArity',
+      target,
+      expectedCount,
+      actualCount,
+    }),
     span,
   })

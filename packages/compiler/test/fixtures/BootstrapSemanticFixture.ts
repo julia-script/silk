@@ -34,6 +34,18 @@ export const missingCallRightParenthesisSource = `pub fn answer() -> I32 { retur
 pub fn main() -> I32 { return answer( }`
 export const identityCallSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
+export const twoArgumentCallSource = `pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(1, 2) }`
+export const tooFewArgumentsSource = `pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(1) }`
+export const tooManyArgumentsSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(1, 2) }`
+export const unavailableParameterContractSource = `pub fn identity(value: Mystery) -> I32 { return 0 }
+pub fn main() -> I32 { return identity(42) }`
+export const unavailableArgumentContractSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(missing) }`
+export const recoveredArgumentSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(@) }`
 export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
 export const duplicateParameterSource =
   'pub fn choose(value: I32, value: I32) -> I32 { return value }'

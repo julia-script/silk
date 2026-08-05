@@ -36,19 +36,19 @@ discarding any collected declaration.
 - **WHEN** two declarations have the same present name
 - **THEN** both function facts remain in source order, lookup reports multiple matches, and one `SEM0003` diagnostic identifies the later duplicate name
 
-### Requirement: Call argument binding remains explicitly deferred
-Semantic analysis SHALL retain local expression facts for concrete integer and identifier call
-arguments without mapping them to target parameters or claiming argument compatibility. Existing
-top-level call-name resolution and target-return-type facts SHALL remain available independently of
-the unchecked argument list.
+### Requirement: Call result typing remains independent of its argument contract
+Top-level call-name resolution and target-return-type facts SHALL remain independent of the
+positional argument contract. A uniquely resolved call SHALL retain its target result type even when
+its argument contract has the wrong arity, while the caller's return compatibility SHALL continue
+to compare only the returned expression type with the caller's declared return type.
 
-#### Scenario: Retain an unbound literal argument
-- **WHEN** `main` returns a uniquely resolved call `identity(42)`
-- **THEN** the call relationship resolves to `identity` and the literal has its existing `I32` expression fact while no target-parameter binding or argument compatibility is claimed
+#### Scenario: Retain a result type across wrong arity
+- **WHEN** an `I32` function is called with the wrong number of otherwise available arguments
+- **THEN** the call expression type and caller return compatibility remain available while the separate call contract is an arity mismatch
 
-#### Scenario: Resolve a local argument independently
-- **WHEN** a function passes its own parameter `value` as a call argument
-- **THEN** the argument resolves locally to `value` without being mapped to a parameter of the call target
+#### Scenario: Withhold a contract without changing name resolution
+- **WHEN** a mapped argument type is unavailable
+- **THEN** the call target and result type remain independently resolved while the call contract is unavailable
 
 ### Requirement: Function-local parameter declaration facts
 Every function fact SHALL publish one ordered parameter declaration fact for every concrete
@@ -135,6 +135,84 @@ parser, and semantic diagnostics.
 #### Scenario: Repeat parameter analysis
 - **WHEN** equivalent parameter declarations and references are analyzed repeatedly in fresh processes
 - **THEN** parameter identities, lookup outcomes, reference facts, types, compatibility, and diagnostic ordering are identical
+
+### Requirement: Ordered call argument facts
+Every call expression SHALL publish one ordered argument fact for every concrete argument. Each
+argument fact SHALL have a zero-based ordinal, retain exact argument syntax provenance, and expose
+the existing integer or local-parameter-reference expression fact and type state. Missing or damaged
+argument syntax SHALL remain unavailable without creating a semantic argument or duplicating parser
+diagnostics.
+
+#### Scenario: Collect a literal argument
+- **WHEN** `main` returns `identity(42)`
+- **THEN** the call has one argument fact at ordinal zero with exact value `42`, type `I32`, and provenance to the literal syntax
+
+#### Scenario: Collect a parameter-reference argument
+- **WHEN** a function calls `identity(value)` using its resolved local parameter
+- **THEN** the call's first argument retains that parameter reference and its available `I32` type
+
+#### Scenario: Preserve argument source order
+- **WHEN** a call contains two concrete arguments
+- **THEN** its two argument facts have ordinals zero and one matching concrete list order
+
+#### Scenario: Preserve parser ownership for a damaged argument
+- **WHEN** argument syntax is missing or retained in an error region
+- **THEN** no semantic argument is invented and the parser diagnostic remains the owning error
+
+### Requirement: First positional call contract
+A call whose function reference resolves uniquely SHALL map argument ordinal `n` to target parameter
+ordinal `n`. Its call-contract fact SHALL be `Compatible` only when argument count equals parameter
+count and every mapped argument and parameter type is available and equal. It SHALL be
+`ArityMismatch` when the counts differ and `Unavailable` when the target is missing, ambiguous, or
+syntax-unavailable or when any mapped type is unresolved or unavailable. Every mapped pair SHALL
+retain the exact argument and target-parameter identities and syntax provenance.
+
+#### Scenario: Bind one compatible argument
+- **WHEN** `identity(value: I32)` is called as `identity(42)`
+- **THEN** argument zero maps to parameter zero and the call contract is compatible
+
+#### Scenario: Bind two arguments positionally
+- **WHEN** a uniquely resolved two-parameter function is called with two available `I32` arguments
+- **THEN** each argument maps to the parameter with the same ordinal and the call contract is compatible
+
+#### Scenario: Preserve too few arguments
+- **WHEN** a two-parameter target is called with one argument
+- **THEN** the call contract is an arity mismatch with expected count two and actual count one
+
+#### Scenario: Preserve too many arguments
+- **WHEN** a one-parameter target is called with two arguments
+- **THEN** the call contract is an arity mismatch with expected count one and actual count two
+
+#### Scenario: Withhold a contract for an unavailable type
+- **WHEN** a mapped parameter or argument type is unresolved or unavailable
+- **THEN** the mapping remains visible but the call contract is unavailable
+
+#### Scenario: Withhold a contract for an unresolved call
+- **WHEN** top-level call resolution is missing, ambiguous, or syntax-unavailable
+- **THEN** no target parameters are selected and the call contract is unavailable
+
+### Requirement: Wrong call arity diagnostic
+Every uniquely resolved call with a different argument and parameter count SHALL produce one
+`SEM0007` diagnostic at the complete call span. Its reason data SHALL retain the target declaration
+identity and expected and actual counts. Type-unavailable and unresolved calls SHALL not add an
+arity or type diagnostic, and the existing return-type compatibility fact SHALL remain independent
+from this call-contract fact.
+
+#### Scenario: Diagnose too few arguments
+- **WHEN** a one-parameter function is called with zero arguments
+- **THEN** `SEM0007` covers the call and reports expected one and actual zero
+
+#### Scenario: Diagnose too many arguments
+- **WHEN** a zero-parameter function is called with one argument
+- **THEN** `SEM0007` covers the call and reports expected zero and actual one
+
+#### Scenario: Avoid cascading diagnostics
+- **WHEN** a call target or mapped type is unavailable
+- **THEN** the call contract is unavailable without adding `SEM0007` or a speculative type-mismatch diagnostic
+
+#### Scenario: Repeat call-contract analysis
+- **WHEN** equivalent calls and declarations are analyzed repeatedly in fresh processes
+- **THEN** argument ordinals, mappings, compatibility states, reason data, and diagnostics are identical
 
 ### Requirement: Built-in I32 type fact
 Semantic analysis SHALL resolve the exact return-type spelling `I32` for every function to the

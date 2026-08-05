@@ -62,11 +62,11 @@ playground.
 The Syntax Inspector SHALL provide valid and malformed presets for typed parameter declarations,
 bare-identifier expressions, and value-carrying calls. It SHALL show the concrete parameter and
 argument branches, every separator and token span, local recovery nodes, exact declaration parameter
-counts, local parameter-resolution states, and the explicitly deferred positional-checking boundary.
+counts, local parameter-resolution states, and positional call-contract facts.
 
 #### Scenario: Inspect the identity syntax slice
 - **WHEN** a developer selects the parameter-and-argument preset
-- **THEN** the concrete view shows `value: I32`, the returned `value`, and the `42` in `identity(42)` while semantic panels show the local parameter relationship and clearly mark positional argument checking as deferred
+- **THEN** the concrete view shows `value: I32`, the returned `value`, and the `42` in `identity(42)` while semantic panels show both the local parameter relationship and positional call contract
 
 #### Scenario: Inspect malformed list recovery
 - **WHEN** a developer selects a preset with a missing parameter type, comma, or call parenthesis
@@ -130,6 +130,25 @@ return compatibility, and separate parser and semantic diagnostic collections.
 #### Scenario: Inspect damaged call syntax
 - **WHEN** a developer selects a missing-parenthesis or unsupported-argument preset
 - **THEN** explicit missing or error syntax stays visible beside the unavailable call facts and parser-owned diagnostics
+
+### Requirement: Inspect call argument contracts
+The Syntax Inspector SHALL show every ordered argument fact, its expression and type, its positional
+target parameter when available, and the complete call-contract state. Presets SHALL cover a
+compatible call, too few arguments, too many arguments, an unavailable mapped type, and an
+unresolved call while retaining the existing syntax, relationship, return compatibility, and
+phase-separated diagnostic views.
+
+#### Scenario: Inspect a compatible call contract
+- **WHEN** a developer selects the `identity(42)` preset
+- **THEN** the inspector shows argument zero mapped to `identity` parameter zero with available `I32` types and a compatible contract
+
+#### Scenario: Inspect wrong arity
+- **WHEN** a developer selects a too-few or too-many preset
+- **THEN** expected and actual counts, any positionally available mappings, and `SEM0007` are visible without hiding the resolved call target
+
+#### Scenario: Inspect an unavailable contract
+- **WHEN** a developer selects a preset with an unresolved argument type or call target
+- **THEN** the inspector explains which prerequisite is unavailable and does not display an invented binding or mismatch
 
 ### Requirement: Inspect the first resolved call relationship
 The Syntax Inspector SHALL visualize each present call as a directed caller-to-target relationship

@@ -34,8 +34,9 @@ export default function SyntaxInspectorPage() {
           alongside ordered semantic facts, function-local parameter lookup, and resolved reference
           relationships. Every declaration, reference, argument, separator, and token stays attached
           to its original UTF-8 byte span; recovery appears as explicit error nodes and missing
-          leaves. Positional argument binding and checking are still deferred. These relationships
-          are not execution, a general scope graph, semantic AST, HIR, or a code-generation pipeline.
+          leaves. Calls show ordered arguments, positional parameter mappings, and a contract state
+          separately from their return compatibility. These relationships are not execution,
+          conversions, a general scope graph, semantic AST, HIR, or a code-generation pipeline.
         </p>
       </header>
       <SyntaxInspector />

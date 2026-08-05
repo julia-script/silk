@@ -30,13 +30,19 @@ import {
   mixedResolutionDamageSource,
   overflowSource,
   parserAndSemanticDamageSource,
+  recoveredArgumentSource,
   sameParameterNamesSource,
   selfCallSource,
   threeFunctionSource,
+  tooFewArgumentsSource,
+  tooManyArgumentsSource,
   tripleDuplicateNameSource,
   tripleDuplicateParameterSource,
+  twoArgumentCallSource,
   twoFunctionSource,
   twoParameterSource,
+  unavailableArgumentContractSource,
+  unavailableParameterContractSource,
   unknownCallSource,
   unknownParameterReferenceSource,
   unknownParameterTypeSource,
@@ -245,15 +251,186 @@ pub fn forward(value: I32) -> I32 { return identity(value) }`,
   )
   const forward = functionAt(result, 1)
   const call = callFact(forward)
-  const argument = call.argumentExpressions.at(0) ?? raise('expected argument expression')
+  const argument = call.arguments.at(0) ?? raise('expected argument')
+  const expression = argument.expression
 
-  assert.strictEqual(argument._tag, 'Identifier')
-  if (argument._tag !== 'Identifier') return
-  assert.strictEqual(argument.reference._tag, 'Resolved')
-  if (argument.reference._tag !== 'Resolved') return
-  assert.strictEqual(argument.reference.parameter, forward.declaration.parameters.at(0))
-  assert.deepEqual(argument.type, { _tag: 'Available', type: 'I32' })
+  assert.strictEqual(expression._tag, 'Identifier')
+  if (expression._tag !== 'Identifier') return
+  assert.strictEqual(expression.reference._tag, 'Resolved')
+  if (expression.reference._tag !== 'Resolved') return
+  assert.strictEqual(expression.reference.parameter, forward.declaration.parameters.at(0))
+  assert.deepEqual(expression.type, { _tag: 'Available', type: 'I32' })
   assert.deepEqual(result.diagnostics, [])
+})
+
+it('publishes ordered argument identities, expressions, mappings, and compatible contracts', () => {
+  const one = analyzeText('fixture://one-argument-contract.silk', identityCallSource)
+  const two = analyzeText('fixture://two-argument-contract.silk', twoArgumentCallSource)
+  const oneCall = callFact(functionAt(one, 1))
+  const twoCall = callFact(functionAt(two, 1))
+  const firstArgument = oneCall.arguments.at(0) ?? raise('expected first argument')
+
+  assert.deepEqual(firstArgument.id, {
+    _tag: 'ArgumentId',
+    function: functionAt(one, 1).declaration.id,
+    callSpan: oneCall.syntax.span,
+    ordinal: 0,
+  })
+  assert.strictEqual(firstArgument.expression._tag, 'Integer')
+  if (firstArgument.expression._tag !== 'Integer') return
+  assert.strictEqual(firstArgument.expression.integer._tag, 'Available')
+  if (firstArgument.expression.integer._tag !== 'Available') return
+  assert.strictEqual(firstArgument.expression.integer.value, 42)
+  assert.deepEqual(firstArgument.type, { _tag: 'Available', type: 'I32' })
+  assert.strictEqual(firstArgument.syntax, firstArgument.expression.syntax)
+  assert.strictEqual(oneCall.mappings.at(0)?.argument, firstArgument)
+  assert.strictEqual(
+    oneCall.mappings.at(0)?.parameter,
+    functionAt(one, 0).declaration.parameters.at(0),
+  )
+  assert.deepEqual(oneCall.contract, {
+    _tag: 'Compatible',
+    expectedCount: 1,
+    actualCount: 1,
+  })
+  assert.deepEqual(
+    twoCall.arguments.map((argument) => argument.id.ordinal),
+    [0, 1],
+  )
+  assert.deepEqual(
+    twoCall.mappings.map((mapping) => [mapping.argument.id.ordinal, mapping.parameter.id.ordinal]),
+    [
+      [0, 0],
+      [1, 1],
+    ],
+  )
+  assert.deepEqual(twoCall.contract, {
+    _tag: 'Compatible',
+    expectedCount: 2,
+    actualCount: 2,
+  })
+  assert.strictEqual(Object.isFrozen(oneCall.arguments), true)
+  assert.strictEqual(Object.isFrozen(firstArgument), true)
+  assert.strictEqual(Object.isFrozen(oneCall.mappings), true)
+  assert.strictEqual(Object.isFrozen(oneCall.contract), true)
+})
+
+it('checks zero-, one-, and two-argument compatible calls', () => {
+  const zero = callFact(functionAt(analyzeText('fixture://zero-contract.silk', validCallSource), 1))
+  const one = callFact(
+    functionAt(analyzeText('fixture://one-contract.silk', identityCallSource), 1),
+  )
+  const two = callFact(
+    functionAt(analyzeText('fixture://two-contract.silk', twoArgumentCallSource), 1),
+  )
+
+  assert.strictEqual(zero.contract._tag, 'Compatible')
+  assert.strictEqual(one.contract._tag, 'Compatible')
+  assert.strictEqual(two.contract._tag, 'Compatible')
+})
+
+it('retains partial mappings and diagnoses too few and too many arguments', () => {
+  const tooFew = analyzeText('fixture://too-few.silk', tooFewArgumentsSource)
+  const tooMany = analyzeText('fixture://too-many.silk', tooManyArgumentsSource)
+  const fewCall = callFact(functionAt(tooFew, 1))
+  const manyFunction = functionAt(tooMany, 1)
+  const manyCall = callFact(manyFunction)
+
+  assert.deepEqual(fewCall.contract, {
+    _tag: 'ArityMismatch',
+    expectedCount: 2,
+    actualCount: 1,
+  })
+  assert.strictEqual(fewCall.mappings.length, 1)
+  assert.deepEqual(manyCall.contract, {
+    _tag: 'ArityMismatch',
+    expectedCount: 1,
+    actualCount: 2,
+  })
+  assert.strictEqual(manyCall.mappings.length, 1)
+  assert.deepEqual(manyFunction.returnCompatibility, { _tag: 'Compatible' })
+  assert.deepEqual(manyCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(
+    diagnosticView(tooFew).map((diagnostic) => ({
+      code: diagnostic.code,
+      reason: diagnostic.reason,
+    })),
+    [
+      {
+        code: 'SEM0007',
+        reason: {
+          _tag: 'WrongCallArity',
+          target: functionAt(tooFew, 0).declaration.id,
+          expectedCount: 2,
+          actualCount: 1,
+        },
+      },
+    ],
+  )
+  assert.deepEqual(
+    tooMany.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0007'],
+  )
+  assert.strictEqual(tooMany.diagnostics.at(0)?.span, manyCall.syntax.span)
+})
+
+it('withholds contracts without cascading when a prerequisite is unavailable', () => {
+  const parameterType = analyzeText(
+    'fixture://unavailable-parameter-contract.silk',
+    unavailableParameterContractSource,
+  )
+  const argumentType = analyzeText(
+    'fixture://unavailable-argument-contract.silk',
+    unavailableArgumentContractSource,
+  )
+  const missingTarget = analyzeText('fixture://missing-contract-target.silk', unknownCallSource)
+  const ambiguousTarget = analyzeText(
+    'fixture://ambiguous-contract-target.silk',
+    ambiguousCallSource,
+  )
+  const recovered = analyzeText('fixture://recovered-argument.silk', recoveredArgumentSource)
+  const parameterCall = callFact(functionAt(parameterType, 1))
+  const argumentCall = callFact(functionAt(argumentType, 1))
+  const missingCall = callFact(functionAt(missingTarget, 0))
+  const ambiguousCall = callFact(functionAt(ambiguousTarget, 2))
+  const recoveredCall = callFact(functionAt(recovered, 1))
+
+  assert.strictEqual(parameterCall.contract._tag, 'Unavailable')
+  assert.strictEqual(parameterCall.mappings.length, 1)
+  assert.strictEqual(argumentCall.contract._tag, 'Unavailable')
+  assert.strictEqual(argumentCall.mappings.length, 1)
+  assert.strictEqual(missingCall.contract._tag, 'Unavailable')
+  assert.strictEqual(missingCall.mappings.length, 0)
+  assert.strictEqual(ambiguousCall.contract._tag, 'Unavailable')
+  assert.strictEqual(ambiguousCall.mappings.length, 0)
+  assert.strictEqual(recoveredCall.contract._tag, 'Unavailable')
+  assert.strictEqual(recoveredCall.arguments.length, 0)
+  assert.strictEqual(recoveredCall.mappings.length, 0)
+  assert.deepEqual(
+    parameterType.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0001'],
+  )
+  assert.deepEqual(
+    argumentType.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0006'],
+  )
+  assert.deepEqual(
+    missingTarget.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0004'],
+  )
+  assert.deepEqual(
+    recovered.parse.diagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002', 'PAR0001'],
+  )
+  assert.deepEqual(recovered.diagnostics, [])
+})
+
+it('keeps call contracts deterministic across fresh analyses', () => {
+  const first = analyzeText('fixture://contract-determinism.silk', tooManyArgumentsSource)
+  const second = analyzeText('fixture://contract-determinism.silk', tooManyArgumentsSource)
+
+  assert.deepEqual(first.functions, second.functions)
+  assert.deepEqual(diagnosticView(first), diagnosticView(second))
 })
 
 it('keeps parameter lookup isolated to its owning function', () => {

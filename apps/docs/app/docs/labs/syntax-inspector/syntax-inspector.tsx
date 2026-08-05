@@ -50,6 +50,30 @@ pub fn main() -> I32 { return answer( }`,
 pub fn main() -> I32 { return identity(42) }`,
   },
   {
+    label: 'Compatible contract',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Too few arguments',
+    source: `pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(1) }`,
+  },
+  {
+    label: 'Too many arguments',
+    source: `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(1, 2) }`,
+  },
+  {
+    label: 'Unavailable contract type',
+    source: `pub fn identity(value: Mystery) -> I32 { return 0 }
+pub fn main() -> I32 { return identity(42) }`,
+  },
+  {
+    label: 'Unresolved contract call',
+    source: 'pub fn main() -> I32 { return missing(42) }',
+  },
+  {
     label: 'Unknown parameter',
     source: 'pub fn main() -> I32 { return missing }',
   },
@@ -411,16 +435,15 @@ function CallRelationship({
   const calleeName = reference._tag === 'Unavailable' ? 'Unavailable callee' : reference.spelling
   const targetName =
     reference._tag === 'Resolved' ? declarationLabel(reference.declaration) : calleeName
-  const argumentsList = returned.syntax.children.find(
-    (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) && element.kind === 'ArgumentList',
-  )
-  const argumentCount =
-    argumentsList?.children.filter(
-      (element) =>
-        SyntaxTree.isNode(element) &&
-        (element.kind === 'IntegerLiteralExpression' || element.kind === 'IdentifierExpression'),
-    ).length ?? 0
+  const expectedCount = reference._tag === 'Resolved' ? reference.declaration.parameters.length : undefined
+  const contractReason =
+    returned.contract._tag !== 'Unavailable'
+      ? undefined
+      : returned.contract.reason._tag === 'UnavailableCallSyntax'
+        ? 'Call syntax is incomplete.'
+        : returned.contract.reason._tag === 'UnavailableCallTarget'
+          ? 'A unique call target is unavailable.'
+          : 'A mapped argument or parameter type is unavailable.'
 
   return (
     <section
@@ -463,11 +486,79 @@ function CallRelationship({
         <div>
           <dt>Arguments</dt>
           <dd>
-            <code>{argumentCount}</code>
-            <span>Expressions resolved · binding unchecked</span>
+            <code>
+              {returned.arguments.length} actual · {expectedCount ?? '—'} expected
+            </code>
+            <span>{returned.mappings.length} positional mappings</span>
           </dd>
         </div>
       </dl>
+      <section
+        className={styles.callContract}
+        aria-label={`Call contract ${returned.contract._tag} for ${callerName} to ${targetName}`}
+      >
+        <div className={styles.callContractHeading}>
+          <span>Positional call contract</span>
+          <strong>{returned.contract._tag}</strong>
+          <code>
+            {returned.arguments.length} / {expectedCount ?? '—'}
+          </code>
+        </div>
+        {returned.arguments.length === 0 ? (
+          <p className={styles.relationshipNotice}>No semantic arguments were collected.</p>
+        ) : (
+          <ol className={styles.argumentList} aria-label="Ordered call arguments">
+            {returned.arguments.map((argument) => {
+              const mapping = returned.mappings.find((candidate) => candidate.argument === argument)
+              const expression = argument.expression
+              const expressionLabel =
+                expression._tag === 'Integer'
+                  ? expression.integer._tag === 'Available'
+                    ? String(expression.integer.value)
+                    : expression.integer._tag
+                  : expression.reference._tag === 'Unavailable'
+                    ? 'Unavailable reference'
+                    : expression.reference.spelling
+              return (
+                <li key={`${argument.id.callSpan.start}-${argument.id.ordinal}`}>
+                  <div>
+                    <span>Argument #{argument.id.ordinal}</span>
+                    <strong>{expressionLabel}</strong>
+                    <code>{argument.type._tag === 'Available' ? argument.type.type : 'Unavailable'}</code>
+                  </div>
+                  <div>
+                    <span>{spanLabel(argument.syntax)}</span>
+                    {mapping === undefined ? (
+                      <code>Unmatched</code>
+                    ) : (
+                      <code>
+                        → parameter #{mapping.parameter.id.ordinal} ·{' '}
+                        {parameterLabel(mapping.parameter)} ·{' '}
+                        {mapping.parameter.declaredType._tag === 'Resolved'
+                          ? mapping.parameter.declaredType.type
+                          : 'Unavailable'}
+                      </code>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+        {reference._tag === 'Resolved' &&
+        returned.mappings.length < reference.declaration.parameters.length ? (
+          <p className={styles.unmatchedParameters}>
+            Unmatched target parameters:{' '}
+            {reference.declaration.parameters
+              .slice(returned.mappings.length)
+              .map((parameter) => `#${parameter.id.ordinal} ${parameterLabel(parameter)}`)
+              .join(', ')}
+          </p>
+        ) : null}
+        {contractReason === undefined ? null : (
+          <p className={styles.relationshipNotice}>{contractReason}</p>
+        )}
+      </section>
       {reference._tag === 'Resolved' ? (
         <div className={styles.relationshipTargets}>
           <span>Target declaration</span>
@@ -553,7 +644,9 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
             returned._tag === 'Identifier'
               ? [returned]
               : returned._tag === 'Call'
-                ? returned.argumentExpressions.filter(
+                ? returned.arguments
+                    .map((argument) => argument.expression)
+                    .filter(
                     (argument): argument is IdentifierExpression => argument._tag === 'Identifier',
                   )
                 : []
@@ -683,10 +776,10 @@ function SemanticFacts({ analysis }: { readonly analysis: SemanticAnalysis.Resul
 
       <p className={styles.boundaryNote}>
         Parameters now have function-local identities, declared types, closed lookup, and exact
-        reference links. Call arguments expose their local expression facts, while positional
-        argument binding and checking remain deliberately deferred. These arrows record name
-        resolution, not execution order. General scope graphs, semantic AST, HIR, and code
-        generation do not exist yet.
+        reference links. Calls now expose ordered argument identities, positional mappings, and a
+        contract outcome independently of their return compatibility. These arrows record semantic
+        relationships, not execution order. Conversions, general scope graphs, semantic AST, HIR,
+        and code generation do not exist yet.
       </p>
     </section>
   )

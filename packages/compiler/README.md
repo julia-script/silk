@@ -22,7 +22,7 @@ console.log(SyntaxTree.tokens(parse.root).length === lexical.tokens.length) // t
 console.log(result.functions.length) // 2
 console.log(identity?.declaration.parameters[0]?.id) // { _tag: 'ParameterId', function: { ... }, ordinal: 0 }
 console.log(identity?.returnedExpression) // { _tag: 'Identifier', reference: { _tag: 'Resolved', ... }, type: { _tag: 'Available', type: 'I32' }, ... }
-console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', argumentExpressions: [{ _tag: 'Integer', ... }], ... }
+console.log(result.functions[1]?.returnedExpression) // { _tag: 'Call', arguments: [{ id: { ordinal: 0 }, ... }], mappings: [...], contract: { _tag: 'Compatible', ... }, ... }
 console.log(SemanticAnalysis.declarationByName(result, 'main')) // { _tag: 'Resolved', ... }
 if (identity !== undefined) {
   console.log(SemanticAnalysis.parameterByName(identity.declaration, 'value')) // { _tag: 'Resolved', ... }
@@ -128,14 +128,21 @@ its enclosing function. A unique match retains the exact parameter identity and 
 declared type to the expression; a missing match produces `SEM0006`; duplicate matches stay
 ambiguous and rely on the declaration-owned `SEM0005`. Missing or damaged reference syntax remains
 parser-owned and unavailable. The same rule applies to returned identifiers and identifier call
-arguments. Calls expose their ordered integer or identifier argument expression facts, but
-positional argument-to-parameter binding, arity checking, and execution remain deferred.
+arguments.
+
+Each usable call argument has a source-local identity, zero-based concrete ordinal, expression,
+type, and exact syntax provenance. A uniquely resolved call maps argument ordinal `n` to target
+parameter ordinal `n`. Its separate call contract is `Compatible` when counts match and every mapped
+type is available, `ArityMismatch` when available counts differ, or `Unavailable` when syntax,
+target resolution, or a mapped type is unavailable. Partial mappings remain visible across arity
+mismatches. `SEM0007` reports the expected and actual counts at the complete call span without
+changing the call's expression type or the caller's return compatibility.
 
 These are direct semantic facts over the concrete tree—not a semantic AST or a general type
 checker. The package intentionally does not yet contain an AST, HIR, MIR, LLVM lowering, or native
-compilation. Top-level call resolution exists, but execution, recursion policy, a general scope graph, and
-dependency scheduling remain deferred. Those layers follow only after this narrow source-to-fact
-contract proves useful.
+compilation. Top-level call resolution and positional contract checking exist, but execution,
+recursion policy, conversions, a general scope graph, and dependency scheduling remain deferred.
+Those layers follow only after this narrow source-to-fact contract proves useful.
 
 Token families deliberately deferred with those later grammar decisions include string and
 character literals, floating-point numbers, general operators, separators, attributes, and any

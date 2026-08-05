@@ -301,6 +301,15 @@ const unknownLocalSource = api.SourceFile.make(
 const unknownLocalAnalysis = semanticModule.analyze(
   api.Parser.parse(api.Lexer.lex(unknownLocalSource)),
 );
+const wrongAritySource = api.SourceFile.make(
+  'memory://packed-wrong-arity.silk',
+  new TextEncoder().encode(
+    'pub fn identity(value: I32) -> I32 { return value }\npub fn main() -> I32 { return identity() }',
+  ),
+);
+const wrongArityAnalysis = semanticModule.analyze(
+  api.Parser.parse(api.Lexer.lex(wrongAritySource)),
+);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -341,14 +350,27 @@ console.log(
       callReference: call?.reference._tag,
       argumentExpressionTags:
         call?._tag === 'Call'
-          ? call.argumentExpressions.map((argument) => argument._tag)
+          ? call.arguments.map((argument) => argument.expression._tag)
           : [],
+      argumentOrdinals:
+        call?._tag === 'Call' ? call.arguments.map((argument) => argument.id.ordinal) : [],
+      mappingOrdinals:
+        call?._tag === 'Call'
+          ? call.mappings.map((mapping) => [
+              mapping.argument.id.ordinal,
+              mapping.parameter.id.ordinal,
+            ])
+          : [],
+      callContract: call?._tag === 'Call' ? call.contract : null,
       callType: call?.type,
       callTargetOrdinal:
         call?.reference._tag === 'Resolved' ? call.reference.declaration.id.ordinal : null,
       callCompatibility: analysis.functions[1]?.returnCompatibility._tag,
       unknownDiagnosticCodes: unknownAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
       unknownLocalDiagnosticCodes: unknownLocalAnalysis.diagnostics.map(
+        (diagnostic) => diagnostic.code,
+      ),
+      wrongArityDiagnosticCodes: wrongArityAnalysis.diagnostics.map(
         (diagnostic) => diagnostic.code,
       ),
       rootLookup: api.SemanticAnalysis.declarationByName(analysis, 'identity')._tag,
@@ -397,6 +419,7 @@ console.log(
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownFunction')
     expect(api.deep['./SemanticDiagnostic']).toContain('duplicateParameterName')
     expect(api.deep['./SemanticDiagnostic']).toContain('unknownParameterReference')
+    expect(api.deep['./SemanticDiagnostic']).toContain('wrongCallArity')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.functionCount).toBe(2)
@@ -412,11 +435,15 @@ console.log(
       identifierType: { _tag: 'Available', type: 'I32' },
       callReference: 'Resolved',
       argumentExpressionTags: ['Integer'],
+      argumentOrdinals: [0],
+      mappingOrdinals: [[0, 0]],
+      callContract: { _tag: 'Compatible', expectedCount: 1, actualCount: 1 },
       callType: { _tag: 'Available', type: 'I32' },
       callTargetOrdinal: 0,
       callCompatibility: 'Compatible',
       unknownDiagnosticCodes: ['SEM0004'],
       unknownLocalDiagnosticCodes: ['SEM0006'],
+      wrongArityDiagnosticCodes: ['SEM0007'],
       rootLookup: 'Resolved',
       deepLookup: 'Missing',
       legacyResultFields: [],
