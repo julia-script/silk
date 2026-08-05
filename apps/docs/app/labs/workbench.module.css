@@ -1,0 +1,221 @@
+/*
+ * Layout shell for the consolidated compiler workbench. Panel *contents* keep using
+ * syntax-inspector.module.css — this file only owns the frame: the split, the rail, and
+ * the collapsible panel chrome.
+ */
+
+.workbench {
+  display: flex;
+  flex-direction: column;
+  /* Fills the viewport minus the fumadocs navbar, so the two columns scroll independently
+     instead of the whole page scrolling as one. */
+  height: calc(100vh - var(--fd-nav-height, 3.5rem));
+  gap: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--color-fd-border);
+  padding: 0.6rem 0.9rem;
+}
+
+.toolbarTitle {
+  margin: 0 0.5rem 0 0;
+  color: var(--color-fd-foreground);
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.toolbarSpacer {
+  flex: 1;
+}
+
+.toggle {
+  border: 1px solid var(--color-fd-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-fd-card) 92%, transparent);
+  padding: 0.24rem 0.68rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.toggle:hover,
+.toggle:focus-visible {
+  border-color: color-mix(in srgb, var(--color-fd-primary) 45%, var(--color-fd-border));
+  color: var(--color-fd-foreground);
+}
+
+.toggle[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--color-fd-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--color-fd-primary) 14%, transparent);
+  color: var(--color-fd-foreground);
+}
+
+/* Diagnostic count badge on a phase toggle. */
+.toggleCount {
+  margin-left: 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-fd-primary) 22%, transparent);
+  padding: 0 0.32rem;
+  font-size: 0.64rem;
+}
+
+.toggleCount[data-tone='error'] {
+  background: color-mix(in srgb, #f87171 30%, transparent);
+  color: #fecaca;
+}
+
+.split {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.sourceColumn {
+  display: flex;
+  min-width: 16rem;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--color-fd-border);
+}
+
+.sourceScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* The shared editor stretches to its column instead of the fixed 15rem the labs used. */
+.sourceColumn .editorFill {
+  min-height: 11rem;
+  height: 40%;
+  resize: none;
+}
+
+.panelColumn {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0.9rem 1rem 4rem;
+  gap: 0.75rem;
+}
+
+.handle {
+  width: 7px;
+  flex: none;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  padding: 0;
+  touch-action: none;
+}
+
+.handle:hover,
+.handle:focus-visible,
+.handle[data-dragging='true'] {
+  background: color-mix(in srgb, var(--color-fd-primary) 35%, transparent);
+  outline: none;
+}
+
+.panel {
+  /* `flex: none` matters: the column is a flex container, and without it every open panel
+     shrinks toward its header and the bodies collapse to a sliver. */
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--color-fd-border);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--color-fd-card) 94%, transparent);
+}
+
+.panelBar {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  border: 0;
+  background: transparent;
+  padding: 0.6rem 0.85rem;
+  color: var(--color-fd-foreground);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 620;
+  text-align: left;
+  cursor: pointer;
+}
+
+.panelBar:hover,
+.panelBar:focus-visible {
+  background: color-mix(in srgb, var(--color-fd-primary) 7%, transparent);
+  outline: none;
+}
+
+.panelBar > .chevron {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.65rem;
+  transition: transform 0.14s;
+}
+
+.panelBar[aria-expanded='true'] > .chevron {
+  transform: rotate(90deg);
+}
+
+.panelPhase {
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.panelBody {
+  /* Tall panels (the tree, WAT text) scroll inside the panel rather than pushing the
+     rest of the column down the page. */
+  max-height: var(--panel-max, 34rem);
+  overflow: auto;
+  border-top: 1px solid var(--color-fd-border);
+  padding: 0.85rem;
+  resize: vertical;
+}
+
+.panelBody > :global(.fd-first) {
+  margin-top: 0;
+}
+
+.empty {
+  margin: 2rem auto;
+  max-width: 24rem;
+  color: var(--color-fd-muted-foreground);
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 860px) {
+  .workbench {
+    height: auto;
+  }
+
+  .split {
+    flex-direction: column;
+  }
+
+  .sourceColumn {
+    width: auto !important;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-fd-border);
+  }
+
+  .handle {
+    display: none;
+  }
+}
