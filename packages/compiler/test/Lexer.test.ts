@@ -67,6 +67,64 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('lexes binding statements with let, move, and equals tokens', () => {
+  const source = SourceFile.make('memory://bindings.silk', ascii('let answer = move value'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['LetKeyword', 'Identifier', 'Equals', 'MoveKeyword', 'Identifier', 'EndOfFile'],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps let and move keyword prefixes as identifiers', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://prefixes.silk', ascii('letter movement lets moved')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Identifier', 'Identifier', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
+it('distinguishes the equals token from the arrow', () => {
+  const source = SourceFile.make('memory://equals.silk', ascii('= ->'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => ({ kind: token.kind, start: token.span.start, end: token.span.end })),
+    [
+      { kind: 'Equals', start: 0, end: 1 },
+      { kind: 'Arrow', start: 2, end: 4 },
+      { kind: 'EndOfFile', start: 4, end: 4 },
+    ],
+  )
+})
+
+it('recognizes typed parameter and argument punctuation with exact spans', () => {
+  const source = SourceFile.make(
+    'memory://parameter-punctuation.silk',
+    ascii('identity(value: I32, other: I32)'),
+  )
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind === 'Colon' || token.kind === 'Comma')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'Colon', start: 14, end: 15, slice: ':' },
+      { kind: 'Comma', start: 19, end: 20, slice: ',' },
+      { kind: 'Colon', start: 26, end: 27, slice: ':' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
 it('keeps comments as trivia and leaves line endings for whitespace tokens', () => {
   const withNewline = Lexer.lex(
     SourceFile.make('memory://comment-newline.silk', ascii('// note\r\nfn')),
@@ -150,4 +208,24 @@ it('terminates on empty and wholly invalid input', () => {
     ['Invalid', 'EndOfFile'],
   )
   assert.strictEqual(invalid.diagnostics.length, 1)
+})
+
+it('distinguishes documentation comments from plain line comments', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://doc-comments.silk', ascii('/// doc\n// note\nfn')),
+  )
+  const final = Lexer.lex(SourceFile.make('memory://final-doc.silk', ascii('/// tail')))
+
+  assert.deepEqual(
+    result.tokens.map((token) => token.kind),
+    ['DocComment', 'Whitespace', 'LineComment', 'Whitespace', 'FnKeyword', 'EndOfFile'],
+  )
+  assert.deepEqual(
+    result.tokens.slice(0, 1).map((token) => tokenView(result.source, token)),
+    [{ kind: 'DocComment', start: 0, end: 7, slice: '/// doc' }],
+  )
+  assert.deepEqual(
+    final.tokens.map((token) => token.kind),
+    ['DocComment', 'EndOfFile'],
+  )
 })

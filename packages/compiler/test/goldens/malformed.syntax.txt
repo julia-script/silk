@@ -1,0 +1,58 @@
+syntax-file golden://malformed.silk bytes=40
+tokens:
+  0 Invalid [0, 2) "@\xFF"
+  1 Whitespace [2, 3) " "
+  2 PubKeyword [3, 6) "pub"
+  3 Whitespace [6, 7) " "
+  4 FnKeyword [7, 9) "fn"
+  5 Whitespace [9, 10) " "
+  6 Identifier [10, 14) "main"
+  7 LeftParenthesis [14, 15) "("
+  8 Whitespace [15, 16) " "
+  9 Arrow [16, 18) "->"
+  10 Whitespace [18, 19) " "
+  11 Identifier [19, 26) "Mystery"
+  12 Whitespace [26, 27) " "
+  13 LeftBrace [27, 28) "{"
+  14 Whitespace [28, 29) " "
+  15 ReturnKeyword [29, 35) "return"
+  16 Whitespace [35, 36) " "
+  17 DecimalInteger [36, 38) "42"
+  18 Whitespace [38, 39) " "
+  19 RightBrace [39, 40) "}"
+  20 EndOfFile [40, 40) ""
+tree:
+  SourceFile [0, 40)
+    FunctionDeclaration [0, 40)
+      Error [0, 3)
+        token Invalid [0, 2) "@\xFF"
+        token Whitespace [2, 3) " "
+      token PubKeyword [3, 6) "pub"
+      token Whitespace [6, 7) " "
+      token FnKeyword [7, 9) "fn"
+      token Whitespace [9, 10) " "
+      token Identifier [10, 14) "main"
+      ParameterList [14, 16)
+        token LeftParenthesis [14, 15) "("
+        token Whitespace [15, 16) " "
+        missing RightParenthesis [16, 16)
+      ReturnType [16, 26)
+        token Arrow [16, 18) "->"
+        token Whitespace [18, 19) " "
+        token Identifier [19, 26) "Mystery"
+      Block [26, 40)
+        token Whitespace [26, 27) " "
+        token LeftBrace [27, 28) "{"
+        ReturnStatement [28, 38)
+          token Whitespace [28, 29) " "
+          token ReturnKeyword [29, 35) "return"
+          IntegerLiteralExpression [35, 38)
+            token Whitespace [35, 36) " "
+            token DecimalInteger [36, 38) "42"
+        token Whitespace [38, 39) " "
+        token RightBrace [39, 40) "}"
+    token EndOfFile [40, 40) ""
+diagnostics:
+  lexical LEX0001 [0, 2)
+  parser PAR0002 [0, 3)
+  parser PAR0001 [16, 16)

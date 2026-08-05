@@ -1,4 +1,5 @@
 export const acceptedSource = 'pub fn main() -> I32 { return 42 }'
+export const emptySource = new Uint8Array()
 
 export const denseTriviaSource = `pub // visibility
 fn // declaration
@@ -66,6 +67,52 @@ export const missingNameSource = 'pub fn () -> I32 { return 42 }'
 export const missingRightBraceSource = 'pub fn main() -> I32 { return 42'
 export const unexpectedPunctuationSource = 'pub fn @ main() -> I32 { return 42 }'
 export const whollyUnrelatedSource = '@@@'
+export const twoFunctionSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return 0 }`
+export const threeFunctionSource = `pub fn one() -> I32 { return 1 }
+pub fn two() -> I32 { return 2 }
+pub fn three() -> I32 { return 3 }`
+export const missingFirstRightBraceSource = `pub fn answer() -> I32 { return 42
+pub fn main() -> I32 { return 0 }`
+export const interFunctionPunctuationSource = `pub fn answer() -> I32 { return 42 }
+@@
+pub fn main() -> I32 { return 0 }`
+export const trailingTriviaSource = `pub fn main() -> I32 { return 42 }
+// trailing source trivia
+`
+export const validCallSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer() }`
+export const triviaCallSource = `pub fn answer() -> I32 { return 42 }
+pub fn main() -> I32 { return answer // callee
+  ( // open call
+  // empty call
+  ) }`
+export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
+export const missingCallRightParenthesisSource = 'pub fn main() -> I32 { return answer( }'
+export const valueCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
+export const identifierCallArgumentSource =
+  'pub fn main(value: I32) -> I32 { return answer(value) }'
+export const identitySource = 'pub fn identity(value: I32) -> I32 { return value }'
+export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
+export const missingParameterTypeSource = 'pub fn identity(value:) -> I32 { return value }'
+export const missingParameterCommaSource =
+  'pub fn choose(left: I32 right: I32) -> I32 { return left }'
+export const malformedArgumentSource = 'pub fn main(value: I32) -> I32 { return answer(@, value) }'
+export const damagedCallBeforeNextFunctionSource = `pub fn main() -> I32 { return answer(
+pub fn after() -> I32 { return 0 }`
+export const nestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
+export const nestedSiblingCallSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
+export const damagedNestedSiblingSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return left }
+pub fn main() -> I32 { return choose(identity(@), identity(2)) }`
+export const missingNestedRightParenthesisSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42) }`
+export const damagedNestedBeforeNextFunctionSource = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)
+pub fn after() -> I32 { return 0 }`
 
 export const invalidUtf8Source = Uint8Array.of(
   ...Array.from('pub fn ', (character) => character.charCodeAt(0)),

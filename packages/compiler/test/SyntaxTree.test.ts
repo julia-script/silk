@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
+import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
-import * as ParseDiagnostic from '../src/ParseDiagnostic.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 
@@ -70,8 +70,8 @@ it('models missing and unexpected parser diagnostics as ordered source data', ()
   const error = Option.getOrThrow(SyntaxTree.make(source, 'Error', [invalid], 0))
 
   const diagnostics = [
-    ParseDiagnostic.missingToken(missing.expected, missing.span),
-    ParseDiagnostic.unexpectedTokens(error.span),
+    Diagnostic.missingToken(missing.expected, missing.span),
+    Diagnostic.unexpectedTokens(error.span),
   ]
   assert.deepEqual(
     diagnostics.map((diagnostic) => ({

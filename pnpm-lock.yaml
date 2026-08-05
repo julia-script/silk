@@ -93,6 +93,9 @@ importers:
 
   packages/compiler:
     dependencies:
+      '@silk-effect/llvm':
+        specifier: workspace:*
+        version: link:../llvm
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
@@ -100,6 +103,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
 
   packages/llvm:
     dependencies:

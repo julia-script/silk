@@ -1,5 +1,5 @@
 import * as Option from 'effect/Option'
-import * as LexicalDiagnostic from './LexicalDiagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
 import type * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Token from './Token.js'
@@ -8,7 +8,7 @@ import * as Token from './Token.js'
 export interface LexicalResult {
   readonly source: SourceFile.SourceFile
   readonly tokens: ReadonlyArray<Token.Token>
-  readonly diagnostics: ReadonlyArray<LexicalDiagnostic.LexicalDiagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const isWhitespace = (byte: number | undefined): boolean =>
@@ -33,7 +33,13 @@ const isArrowStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2d && bytes[index + 1] === 0x3e
 
 const isPunctuation = (byte: number | undefined): boolean =>
-  byte === 0x28 || byte === 0x29 || byte === 0x7b || byte === 0x7d
+  byte === 0x28 ||
+  byte === 0x29 ||
+  byte === 0x7b ||
+  byte === 0x7d ||
+  byte === 0x3a ||
+  byte === 0x2c ||
+  byte === 0x3d
 
 const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boolean => {
   const byte = bytes[index]
@@ -50,6 +56,23 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
 const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind => {
   if (end - start === 2 && bytes[start] === 0x66 && bytes[start + 1] === 0x6e) {
     return 'FnKeyword'
+  }
+  if (
+    end - start === 3 &&
+    bytes[start] === 0x6c &&
+    bytes[start + 1] === 0x65 &&
+    bytes[start + 2] === 0x74
+  ) {
+    return 'LetKeyword'
+  }
+  if (
+    end - start === 4 &&
+    bytes[start] === 0x6d &&
+    bytes[start + 1] === 0x6f &&
+    bytes[start + 2] === 0x76 &&
+    bytes[start + 3] === 0x65
+  ) {
+    return 'MoveKeyword'
   }
   if (
     end - start === 3 &&
@@ -70,6 +93,17 @@ const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): 
   ) {
     return 'ReturnKeyword'
   }
+  if (
+    end - start === 6 &&
+    bytes[start] === 0x69 &&
+    bytes[start + 1] === 0x6d &&
+    bytes[start + 2] === 0x70 &&
+    bytes[start + 3] === 0x6f &&
+    bytes[start + 4] === 0x72 &&
+    bytes[start + 5] === 0x74
+  ) {
+    return 'ImportKeyword'
+  }
   return 'Identifier'
 }
 
@@ -83,6 +117,12 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'LeftBrace'
     case 0x7d:
       return 'RightBrace'
+    case 0x3a:
+      return 'Colon'
+    case 0x2c:
+      return 'Comma'
+    case 0x3d:
+      return 'Equals'
     default:
       return 'Invalid'
   }
@@ -103,7 +143,7 @@ const spanAt = (source: SourceFile.SourceFile, start: number, end: number): Sour
 export const lex = (source: SourceFile.SourceFile): LexicalResult => {
   const bytes = source.bytes
   const tokens: Array<Token.Token> = []
-  const diagnostics: Array<LexicalDiagnostic.LexicalDiagnostic> = []
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
   let index = 0
 
   const pushToken = (kind: Token.TokenKind, start: number, end: number): SourceSpan.SourceSpan => {
@@ -124,9 +164,10 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     }
 
     if (isLineCommentStart(bytes, index)) {
+      const kind = bytes[index + 2] === 0x2f ? 'DocComment' : 'LineComment'
       index += 2
       while (index < bytes.length && bytes[index] !== 0x0a && bytes[index] !== 0x0d) index += 1
-      pushToken('LineComment', start, index)
+      pushToken(kind, start, index)
       continue
     }
 
@@ -159,7 +200,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     index += 1
     while (index < bytes.length && !isSupportedTokenStart(bytes, index)) index += 1
     const span = pushToken('Invalid', start, index)
-    diagnostics.push(LexicalDiagnostic.unsupportedBytes(span))
+    diagnostics.push(Diagnostic.unsupportedBytes(span))
   }
 
   pushToken('EndOfFile', bytes.length, bytes.length)

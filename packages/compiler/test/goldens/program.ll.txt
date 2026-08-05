@@ -1,0 +1,13 @@
+source_filename = "golden://program.silk"
+target triple = "arm64-apple-darwin"
+
+define i32 @silk_main() {
+bb0:
+  %t1 = call i32 @silk_1_identity(i32 42)
+  %t2 = call i32 @silk_1_identity(i32 %t1)
+  ret i32 %t2
+}
+define i32 @silk_1_identity(i32 %v0) {
+bb0:
+  ret i32 %v0
+}

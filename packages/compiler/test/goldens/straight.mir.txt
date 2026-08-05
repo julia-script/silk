@@ -1,0 +1,9 @@
+mir-module sample://straight.silk
+fn sample://straight.silk.answer params=0 locals=1 -> I32
+  bb0:
+    %0 = literal 42 : I32 [32, 34)
+    return %0 [25, 34)
+fn sample://straight.silk.main params=0 locals=1 -> I32
+  bb0:
+    %0 = call sample://straight.silk.answer() : I32 [67, 75)
+    return %0 [60, 75)

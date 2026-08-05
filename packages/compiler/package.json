@@ -33,6 +33,22 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./Analysis": {
+      "types": "./dist/Analysis.d.ts",
+      "import": "./dist/Analysis.js"
+    },
+    "./Backend": {
+      "types": "./dist/Backend.d.ts",
+      "import": "./dist/Backend.js"
+    },
+    "./BootstrapEvaluation": {
+      "types": "./dist/BootstrapEvaluation.d.ts",
+      "import": "./dist/BootstrapEvaluation.js"
+    },
+    "./NativeToolchain": {
+      "types": "./dist/NativeToolchain.d.ts",
+      "import": "./dist/NativeToolchain.js"
+    },
     "./SourceFile": {
       "types": "./dist/SourceFile.d.ts",
       "import": "./dist/SourceFile.js"
@@ -45,33 +61,65 @@
       "types": "./dist/Token.d.ts",
       "import": "./dist/Token.js"
     },
-    "./LexicalDiagnostic": {
-      "types": "./dist/LexicalDiagnostic.d.ts",
-      "import": "./dist/LexicalDiagnostic.js"
+    "./DeclarationIndex": {
+      "types": "./dist/DeclarationIndex.d.ts",
+      "import": "./dist/DeclarationIndex.js"
+    },
+    "./Driver": {
+      "types": "./dist/Driver.d.ts",
+      "import": "./dist/Driver.js"
+    },
+    "./Diagnostic": {
+      "types": "./dist/Diagnostic.d.ts",
+      "import": "./dist/Diagnostic.js"
+    },
+    "./Instances": {
+      "types": "./dist/Instances.d.ts",
+      "import": "./dist/Instances.js"
     },
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
     },
+    "./Lower": {
+      "types": "./dist/Lower.d.ts",
+      "import": "./dist/Lower.js"
+    },
+    "./Mir": {
+      "types": "./dist/Mir.d.ts",
+      "import": "./dist/Mir.js"
+    },
+    "./ModuleClosure": {
+      "types": "./dist/ModuleClosure.d.ts",
+      "import": "./dist/ModuleClosure.js"
+    },
+    "./SyntaxFile": {
+      "types": "./dist/SyntaxFile.d.ts",
+      "import": "./dist/SyntaxFile.js"
+    },
     "./SyntaxTree": {
       "types": "./dist/SyntaxTree.d.ts",
       "import": "./dist/SyntaxTree.js"
     },
-    "./ParseDiagnostic": {
-      "types": "./dist/ParseDiagnostic.d.ts",
-      "import": "./dist/ParseDiagnostic.js"
+    "./Ownership": {
+      "types": "./dist/Ownership.d.ts",
+      "import": "./dist/Ownership.js"
     },
     "./Parser": {
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
     },
-    "./SemanticAnalysis": {
-      "types": "./dist/SemanticAnalysis.d.ts",
-      "import": "./dist/SemanticAnalysis.js"
+    "./Elaboration": {
+      "types": "./dist/Elaboration.d.ts",
+      "import": "./dist/Elaboration.js"
     },
-    "./SemanticDiagnostic": {
-      "types": "./dist/SemanticDiagnostic.d.ts",
-      "import": "./dist/SemanticDiagnostic.js"
+    "./Hir": {
+      "types": "./dist/Hir.d.ts",
+      "import": "./dist/Hir.js"
+    },
+    "./ToolchainPlan": {
+      "types": "./dist/ToolchainPlan.d.ts",
+      "import": "./dist/ToolchainPlan.js"
     }
   },
   "scripts": {
@@ -83,9 +131,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@silk-effect/llvm": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:"
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1"
   }
 }

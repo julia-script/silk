@@ -1,0 +1,128 @@
+import { assert, it } from '@effect/vitest'
+import * as Analysis from '../src/Analysis.js'
+import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import { corpus } from './support/corpus.js'
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const evaluateSource = (text: string): BootstrapEvaluation.Outcome =>
+  Analysis.evaluate(Analysis.ofSource('memory://evaluation.silk', ascii(text)))
+
+it('reproduces every pinned corpus outcome', () => {
+  for (const program of corpus) {
+    const outcome = evaluateSource(program.source)
+    switch (program.expected._tag) {
+      case 'Completes':
+        assert.strictEqual(outcome._tag, 'Completed', program.name)
+        if (outcome._tag === 'Completed') {
+          assert.strictEqual(outcome.result.value, program.expected.result, program.name)
+        }
+        break
+      case 'Trap':
+        assert.strictEqual(outcome._tag, 'Blocked', program.name)
+        if (outcome._tag === 'Blocked') {
+          assert.strictEqual(outcome.reason._tag, 'Trap', program.name)
+        }
+        break
+      case 'RecursiveCycle':
+        assert.strictEqual(outcome._tag, 'Blocked', program.name)
+        if (outcome._tag === 'Blocked' && outcome.reason._tag === 'RecursiveCycle') {
+          assert.deepEqual(
+            outcome.reason.cycle.map((id) => id.name),
+            program.expected.cycle,
+            program.name,
+          )
+        } else {
+          assert.fail(`${program.name} expected a recursive cycle`)
+        }
+        break
+      case 'UnavailableEntry':
+        assert.strictEqual(outcome._tag, 'Blocked', program.name)
+        if (outcome._tag === 'Blocked' && outcome.reason._tag === 'UnavailableEntry') {
+          assert.strictEqual(outcome.reason.reason, program.expected.reason, program.name)
+        } else {
+          assert.fail(`${program.name} expected an unavailable entry`)
+        }
+        break
+    }
+  }
+})
+
+it('traces the identity program in order with bound and returned values', () => {
+  const outcome = evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`)
+
+  assert.strictEqual(outcome._tag, 'Completed')
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    ['Entry', 'Call', 'Binding', 'Return', 'Return'],
+  )
+  const binding = outcome.trace.at(2)
+  assert.strictEqual(binding?._tag, 'Binding')
+  if (binding?._tag !== 'Binding') return
+  assert.strictEqual(binding.value.value, 42)
+  assert.strictEqual(binding.parameterOrdinal, 0)
+  assert.strictEqual(binding.fromCall, false)
+})
+
+it('marks nested-call bindings and orders inner events before outer bindings', () => {
+  const outcome = evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`)
+
+  assert.strictEqual(outcome._tag, 'Completed')
+  const tags = outcome.trace.map((event) => event._tag)
+  assert.deepEqual(tags, [
+    'Entry',
+    'Call',
+    'Binding',
+    'Return',
+    'Call',
+    'Binding',
+    'Return',
+    'Return',
+  ])
+  const outerBinding = outcome.trace.at(5)
+  assert.strictEqual(outerBinding?._tag, 'Binding')
+  if (outerBinding?._tag !== 'Binding') return
+  assert.strictEqual(outerBinding.fromCall, true)
+  const innerCall = outcome.trace.at(1)
+  const outerCall = outcome.trace.at(4)
+  assert.strictEqual(innerCall?._tag, 'Call')
+  assert.strictEqual(outerCall?._tag, 'Call')
+  if (innerCall?._tag !== 'Call' || outerCall?._tag !== 'Call') return
+  assert.notDeepEqual(innerCall.span, outerCall.span)
+})
+
+it('retains the completed prefix before a trap without fabricated events', () => {
+  const outcome = evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
+pub fn choose(left: I32, right: I32) -> I32 { return right }
+pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
+
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'Trap')
+  assert.deepEqual(
+    outcome.trace.map((event) => event._tag),
+    ['Entry'],
+  )
+})
+
+it('blocks recursive cycles with the closing call span', () => {
+  const outcome = evaluateSource('pub fn main() -> I32 { return main() }')
+
+  assert.strictEqual(outcome._tag, 'Blocked')
+  if (outcome._tag !== 'Blocked') return
+  assert.strictEqual(outcome.reason._tag, 'RecursiveCycle')
+  if (outcome.reason._tag !== 'RecursiveCycle') return
+  assert.isAbove(outcome.reason.closingCallSpan.end, outcome.reason.closingCallSpan.start)
+})
+
+it('evaluates identically across repeated fresh runs', () => {
+  const source = `pub fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(identity(42)) }`
+  const first = evaluateSource(source)
+  const second = evaluateSource(source)
+
+  assert.deepEqual(first, second)
+})

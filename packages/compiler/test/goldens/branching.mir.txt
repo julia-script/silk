@@ -1,0 +1,12 @@
+mir-module sample://branching.silk
+fn sample://branching.silk.choose params=1 locals=2 -> I32
+  bb0:
+    branch %0 ? bb1 : bb2 [34, 45)
+  bb1:
+    %1 = move %0 [41, 45)
+    jump bb3 [34, 45) generated
+  bb2:
+    trap "unreachable flag state" [34, 45) generated
+  bb3 cleanup:
+    drop %0 [34, 45) generated
+    return %1 [34, 45)

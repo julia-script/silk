@@ -2,7 +2,7 @@
 
 > Direction, not commitment — Now is committed; Next is planned; Later is exploration.
 > Only Now items may be promised to anyone. This document changes as we learn.
-> Last reviewed: 2026-08-04 · Review cadence: after each OpenSpec archive, or monthly when no
+> Last reviewed: 2026-08-05 · Review cadence: after each OpenSpec archive, or monthly when no
 > change ships · Scope: whole project
 
 ## Vision
@@ -13,9 +13,10 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** give the first bootstrap function semantic facts — measured by its
-declaration, `I32` return type, integer value, and return compatibility remaining deterministic and
-inspectable across the accepted fixture and a tiny malformed-input corpus.
+**Current objective:** widen the bootstrap language over the accepted compiler spine — the full
+source-to-native pipeline shipped 2026-08-05 with every phase inspectable, so growth now means
+grammar and semantics (bindings, arithmetic, control flow, and onward toward issues 01–04 and 08)
+riding an unchanged, determinism-gated architecture.
 
 ## Column rules
 
@@ -25,44 +26,46 @@ inspectable across the accepted fixture and a tiny malformed-input corpus.
 
 ## Now
 
-### Analyze the first bootstrap function without introducing HIR
+### Widen the language, slice 1: bindings, arithmetic, branching
 
-- **Problem:** The concrete tree identifies grammatical regions, but `main`, `I32`, and `42` still
-  have no declaration, type, or checked-value meaning.
-- **Outcome & done-when:** The accepted fixture publishes immutable declaration, type, value, and
-  return-compatibility facts; unknown types, out-of-range integers, and syntax-damaged declarations
-  remain explicit and deterministic; and the hidden inspector can show the facts without implying
-  HIR or code generation exists.
-- **Status:** shaped — one function, one built-in type, and one integer expression are enough to
-  discover the first semantic fact boundary before any semantic IR is justified.
-- **Appetite:** one focused OpenSpec change; multiple declarations, references, general expressions,
-  modules, AST lowering, HIR, MIR, ownership, contracts, and code generation remain outside scope.
-- **Links:** change: `analyze-first-bootstrap-function` ·
-  [bootstrap syntax spec](../openspec/specs/bootstrap-syntax/spec.md) ·
-  [bootstrap-language map](../wayfinder/bootstrap-language/map.md) ·
-  [compiler pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md)
+- **Problem:** The realigned spine (diagnostics through native link, all 13 changes archived
+  2026-08-05) runs end to end over a grammar too small to exercise it: ownership is trivially
+  satisfiable, lowering never emits `Branch` or `Drop`, and the differential harness compares only
+  straight-line integer programs.
+- **Outcome & done-when:** Silk programs with `let` bindings and `move`, signed literals with
+  arithmetic, and `Bool`/comparison/`if` compile through every phase — real liveness ranges and
+  cleanup drops in the ownership and MIR labs, real CFG diamonds, interpreter and native agreeing
+  across both branch arms — with every artifact encoder and golden extended, not replaced.
+- **Status:** shaped — dependency order pinned by the map: bindings first (the pressure issue 01
+  deferred to issue 08's syntax), then arithmetic, then branching. Includes threading the `Backend`
+  service through `Driver.CompileRequest` and `Analysis.codegen` instead of the current hardwired
+  `LlvmBackend` call, so the declared seam is actually exercised.
+- **Appetite:** three or four focused changes, one per feature, same
+  propose → implement → inspect → archive loop as the realignment; structs, unions, match,
+  failures, generics, and cross-module calls stay outside this slice.
+- **Links:** [bootstrap-language map](../wayfinder/bootstrap-language/map.md) ·
+  [ownership decision](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
+  [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md) ·
+  [realignment record](compiler-realignment.md)
 
 ## Next
 
-### Add the first resolved reference
+### Give the language its data: structs, unions, and matching
 
-- **Problem:** One declaration can validate fact shape and local typing, but it cannot test header
-  collection, name lookup, references, or dependency ordering.
-- **Hypothesis:** A second parameterless function plus one direct call is the smallest grammar and
-  semantic extension that can validate declaration identity and name-resolution facts without HIR.
-- **Confidence:** low until the first semantic fact model exists.
-- **Assumes:** Multiple declarations and direct calls are the next pressure needed by the bootstrap
-  compiler rather than local bindings or richer integer expressions.
-- **Open questions:** Should multiple declarations and the first call land together as one vertical
-  slice, or should syntax repetition be proven before reference resolution?
+- **Problem:** A compiler-shaped program is mostly data manipulation; expressions and branches
+  alone cannot express tokens, trees, or facts.
+- **Hypothesis:** Nominal structs first, then normalized structural unions with mode-aware
+  exhaustive matching (issue 02), will force the first real type-layout decisions in MIR and the
+  backend and make instance discovery meaningful.
+- **Confidence:** medium — the semantic decisions are pinned; the MIR/layout consequences are not
+  yet designed.
+- **Assumes:** The slice-1 widening loop proves the extend-don't-replace economics of growing
+  grammar, HIR, MIR, interpreter, backend, and labs together.
+- **Open questions:** Where aggregate layout lives (MIR `TargetLayout` vs backend), and when typed
+  failure rows (issue 03) and cross-module resolution (issue 04) interleave with the data work.
 
 ## Later
 
-- **Lower checked programs into backend-neutral execution** — introduce HIR and MIR only when
-  concrete declarations, types, control flow, ownership, failures, and services require those
-  representations.
-- **Produce the first native Silk program** — connect proven MIR to `@silk-effect/llvm`, scoped
-  artifacts, Clang, native linking, and transactional output.
 - **Supply the compiler's native platform** — add the minimum runtime, standard library, host
   services, and private C shim in response to real self-hosting compiler needs.
 - **Make Silk capable of expressing its own compiler** — progressively replace the TypeScript seed
@@ -105,11 +108,30 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
-- What appetite should normally bound one bootstrap OpenSpec change when a semantic slice touches
-  syntax, HIR, MIR, runtime, and fixtures together?
+- How far should backend agnosticism go before a second backend exists? The `Backend` service and
+  neutral MIR are pinned; the artifact hand-off (`bitcode` + Clang object step) deliberately stays
+  LLVM-shaped per issue 06 until a real second backend pairs it with its own toolchain plan.
 
 ## Changelog
 
+- 2026-08-05: Shipped and archived `bind-local-values` — slice 1's first change. `let` bindings
+  and `move` now run through the whole spine: statement sequences in grammar and HIR, initializer
+  inference, non-shadowing (`SEM0008`), the first real ownership analysis (liveness ranges, moves,
+  `OWN0001` use-after-move with a new ownership diagnostic phase and `Violation` verdict),
+  populated cleanup plans, lowered `Drop` operations, and interpreter/native trap parity across
+  four new corpus programs. Backend injection landed alongside in `fa83a5f`. Next: arithmetic.
+- 2026-08-05: Completed the compiler realignment — all 13 changes from
+  [compiler-realignment](compiler-realignment.md) implemented and archived in one loop. The spine
+  now runs source → module closure → declaration index → HIR → ownership → instances → MIR →
+  LLVM bitcode → pinned Clang object → linked native executable, with a MIR interpreter as the
+  differential oracle, deterministic encoders and goldens at every artifact, and nine facade-only
+  inspector labs. The two-function "Now" milestone and the former "Later" items for MIR lowering
+  and the first native program shipped inside it. Grammar freeze lifted; promoted language
+  widening slice 1 (bindings, arithmetic, branching) to Now and data types (issue 02) to Next.
+- 2026-08-04: Shipped and archived `analyze-first-bootstrap-function` in commit `373c4d8`; direct
+  declaration, `I32`, integer, compatibility, and semantic diagnostic facts held without AST/HIR.
+  Recast Now as a checkable two-function milestone split into four dependency-ordered changes, each
+  with a required inspector checkpoint and a sync/reassessment boundary.
 - 2026-08-04: Shipped and archived `parse-first-bootstrap-function` in commit `ba6feaf`; its
   lossless tree, bounded recovery, deterministic diagnostics, and hidden inspector met the recorded
   outcome. Promoted one-function declaration and `I32` fact analysis to Now, explicitly keeping HIR

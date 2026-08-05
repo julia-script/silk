@@ -1,0 +1,7 @@
+hir-module golden://damaged.silk
+fn golden://damaged.silk.puzzle contract-unavailable
+  return [45, 51)
+    unavailable [45, 51)
+fn golden://damaged.silk.main () -> I32
+  return [83, 103)
+    unavailable [83, 103)

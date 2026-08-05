@@ -38,6 +38,12 @@ export const slice = (self: SourceFile, span: SourceSpan.SourceSpan): Option.Opt
     ? Option.some(Uint8Array.from(self.bytes.slice(span.start, span.end)))
     : Option.none()
 
+/** Decodes a valid span's bytes as one-byte characters for identifier and keyword spellings. */
+export const spelling = (self: SourceFile, span: SourceSpan.SourceSpan): Option.Option<string> =>
+  Option.map(slice(self, span), (bytes) =>
+    Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''),
+  )
+
 /** Tests identity and byte-for-byte equality between two immutable source snapshots. */
 export const equals = (self: SourceFile, other: SourceFile): boolean =>
   self.id === other.id &&
