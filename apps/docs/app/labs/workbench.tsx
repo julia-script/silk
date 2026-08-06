@@ -56,7 +56,6 @@ const initialPreset = presets.find((preset) => preset.label === 'Nested calls') 
  */
 interface WorkbenchState extends Omit<ViewContext, 'filter' | 'showTrivia'> {
   readonly setModuleSource: (name: string, value: string) => void
-  readonly openPalette: () => void
   readonly addModule: () => void
   readonly setRoot: (name: string) => void
   readonly activeModule: string
@@ -500,7 +499,6 @@ export function Workbench() {
         Analysis.mirOf(snapshot)._tag === 'Available' ? Analysis.evaluate(snapshot) : undefined,
       ),
     setModuleSource: (name, value) => setModules((current) => ({ ...current, [name]: value })),
-    openPalette: () => setPaletteOpen(true),
     addModule,
     setRoot,
     activeModule,
@@ -755,12 +753,6 @@ export function Workbench() {
             </button>
           )}
         </div>
-
-        <button type="button" className={shell.barButton} onClick={() => setPaletteOpen(true)}>
-          <span className={shell.eyebrow}>prog</span>
-          <span className={shell.barValue}>{programName}</span>
-          <span className={shell.kbd}>⌘P</span>
-        </button>
 
         <label className="sr-only" htmlFor="add-pane">
           Add a pane
