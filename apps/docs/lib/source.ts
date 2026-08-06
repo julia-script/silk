@@ -1,6 +1,7 @@
 import { getSlugs, loader } from 'fumadocs-core/source';
 import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config';
 import { defineDocs } from 'fumadocs-mdx/macro';
+import { TextMate } from '@silk-effect/language';
 import { remarkH1Title } from './remark-h1-title.mjs';
 
 /**
@@ -40,6 +41,9 @@ const docs = defineDocs({
     mdxOptions: applyMdxPreset({
       remarkPlugins: (v) => [remarkH1Title, ...v],
       rehypeCodeOptions: {
+        // Bundled languages lazy-load regardless of `langs`, so this only adds Silk on top.
+        // The grammar's own types are readonly; Shiki's registration type is not.
+        langs: [TextMate.grammar as never],
         // Shiki has no grammar for some fences the docs use (e.g. `ebnf`). Render those as
         // plain text instead of failing the build — and without editing the published Markdown.
         fallbackLanguage: 'text',
@@ -52,6 +56,7 @@ const docs = defineDocs({
 
 /** Sidebar label for each top-level content folder, keyed by directory name. */
 const folderTitles: Record<string, string> = {
+  language: '@silk-effect/language',
   llvm: '@silk-effect/llvm',
 };
 

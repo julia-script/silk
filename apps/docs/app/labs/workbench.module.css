@@ -659,16 +659,52 @@
 .editor {
   min-height: 0;
   flex: 1;
-  padding: 5px 8px;
-  border: 0;
-  background: transparent;
+  overflow: hidden;
   color: var(--wb-ink);
-  font-family: var(--wb-font);
-  font-size: 11.5px;
-  line-height: 19px;
-  resize: none;
-  outline: none;
   tab-size: 2;
+}
+
+.editor :global(.cm-editor) {
+  height: 100%;
+}
+
+/*
+ * Token colors for the lexer-driven highlighter, on its stable `cm-silk-*` classes. The workbench
+ * is always dark, so these override the extension's light default highlight style outright.
+ */
+.editor :global(.cm-silk-keyword) {
+  color: var(--wb-amber);
+}
+
+.editor :global(.cm-silk-boolean),
+.editor :global(.cm-silk-number) {
+  color: var(--wb-violet);
+}
+
+.editor :global(.cm-silk-identifier) {
+  color: var(--wb-ink);
+}
+
+.editor :global(.cm-silk-line-comment),
+.editor :global(.cm-silk-doc-comment) {
+  color: var(--wb-ink-4);
+}
+
+.editor :global(.cm-silk-doc-comment) {
+  font-style: italic;
+}
+
+.editor :global(.cm-silk-operator) {
+  color: var(--wb-ink-2);
+}
+
+.editor :global(.cm-silk-punctuation) {
+  color: var(--wb-ink-3);
+}
+
+.editor :global(.cm-silk-invalid) {
+  color: var(--wb-error-ink);
+  text-decoration: underline wavy var(--wb-error);
 }
 
 .sourceFooter {

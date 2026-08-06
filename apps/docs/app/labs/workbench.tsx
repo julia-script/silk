@@ -26,6 +26,7 @@ import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockv
 import { DockviewReact } from 'dockview-react'
 import { Atom } from 'effect/unstable/reactivity'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { SilkEditor } from './editor'
 import { PresetPalette } from './preset-palette'
 import { type Preset, presetGroups, presets } from './presets'
 import { type ViewContext, siblingsOf, viewById, views } from './registry'
@@ -107,30 +108,18 @@ function SourceBody() {
   const active = names.includes(activeModule) ? activeModule : (names[0] ?? '')
   const text = modules[active] ?? ''
 
+  const activeRef = useRef(active)
+  activeRef.current = active
+  const onChange = useCallback(
+    (value: string) => {
+      setModules((current) => ({ ...current, [activeRef.current]: value }))
+    },
+    [setModules],
+  )
+
   return (
     <>
-      <label className="sr-only" htmlFor="workbench-source">
-        Silk source code
-      </label>
-      <textarea
-        id="workbench-source"
-        className={shell.editor}
-        value={text}
-        onChange={(event) => {
-          const value = event.target.value
-          setModules((current) => ({ ...current, [active]: value }))
-        }}
-        onSelect={(event) => {
-          // The editor is a phase like any other: selecting text moves the same span cursor a
-          // row click moves, so a selection lights up every downstream pane.
-          const target = event.currentTarget
-          if (target.selectionStart === target.selectionEnd) return
-          setCursor({ start: target.selectionStart, end: target.selectionEnd })
-        }}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-      />
+      <SilkEditor value={text} onChange={onChange} onSelect={setCursor} className={shell.editor} />
       <div className={shell.sourceFooter}>
         <span>{active}</span>
         <span>{text.length} B</span>

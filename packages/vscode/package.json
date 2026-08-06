@@ -1,0 +1,36 @@
+{
+  "name": "silk-language",
+  "displayName": "Silk Language",
+  "description": "Syntax highlighting for Silk Effect source files.",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "silk-effect",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "silk",
+        "aliases": [
+          "Silk"
+        ],
+        "extensions": [
+          ".silk"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "silk",
+        "scopeName": "source.silk",
+        "path": "./syntaxes/silk.tmLanguage.json"
+      }
+    ]
+  }
+}
