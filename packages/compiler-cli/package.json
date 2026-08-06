@@ -1,0 +1,109 @@
+{
+  "name": "@silk-effect/compiler-cli",
+  "version": "0.0.0",
+  "description": "Command line interface for the Silk Effect bootstrap compiler.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "directory": "packages/compiler-cli"
+  },
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
+  "keywords": [
+    "compiler",
+    "cli",
+    "effect",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "silk": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./Cli": {
+      "types": "./dist/Cli.d.ts",
+      "import": "./dist/Cli.js"
+    },
+    "./BuildCommand": {
+      "types": "./dist/BuildCommand.d.ts",
+      "import": "./dist/BuildCommand.js"
+    },
+    "./BuildExeCommand": {
+      "types": "./dist/BuildExeCommand.d.ts",
+      "import": "./dist/BuildExeCommand.js"
+    },
+    "./BuildPlan": {
+      "types": "./dist/BuildPlan.d.ts",
+      "import": "./dist/BuildPlan.js"
+    },
+    "./CheckCommand": {
+      "types": "./dist/CheckCommand.d.ts",
+      "import": "./dist/CheckCommand.js"
+    },
+    "./FileSourceResolver": {
+      "types": "./dist/FileSourceResolver.d.ts",
+      "import": "./dist/FileSourceResolver.js"
+    },
+    "./Program": {
+      "types": "./dist/Program.d.ts",
+      "import": "./dist/Program.js"
+    },
+    "./Project": {
+      "types": "./dist/Project.d.ts",
+      "import": "./dist/Project.js"
+    },
+    "./ProjectOptions": {
+      "types": "./dist/ProjectOptions.d.ts",
+      "import": "./dist/ProjectOptions.js"
+    },
+    "./Report": {
+      "types": "./dist/Report.d.ts",
+      "import": "./dist/Report.js"
+    },
+    "./RunCommand": {
+      "types": "./dist/RunCommand.d.ts",
+      "import": "./dist/RunCommand.js"
+    },
+    "./SourceEntry": {
+      "types": "./dist/SourceEntry.d.ts",
+      "import": "./dist/SourceEntry.js"
+    },
+    "./Workflow": {
+      "types": "./dist/Workflow.d.ts",
+      "import": "./dist/Workflow.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.103",
+    "@silk-effect/compiler": "workspace:*",
+    "effect": "catalog:",
+    "smol-toml": "^1.7.1"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1"
+  }
+}

@@ -16,6 +16,8 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     modules: Object.freeze([module]),
     cycles: Object.freeze([]),
     diagnostics: Object.freeze([]),
+    sources: new Map([[syntax.source.id, syntax.source]]),
+    resolutionFailures: Object.freeze([]),
   })
   const analyzed = NameResolution.analyze(closure)
   const index = analyzed.index

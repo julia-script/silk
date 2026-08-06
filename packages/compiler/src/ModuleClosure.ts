@@ -1,16 +1,18 @@
+import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
+import * as Result from 'effect/Result'
 import * as Diagnostic from './Diagnostic.js'
 import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
 import * as SourceFile from './SourceFile.js'
+import * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
-/** One compilation request: a root module and the available sources by logical identity. */
+/** One compilation request: an explicit root source plus optional target selection. */
 export interface CompilationRequest {
-  readonly rootModule: string
-  readonly sources: ReadonlyMap<string, Uint8Array>
+  readonly root: SourceFile.SourceFile
   readonly target?: string
 }
 
@@ -32,6 +34,12 @@ export type ImportTarget =
       readonly module: string
       readonly token: Token.Token
       readonly cause: Diagnostic.Identity
+    }
+  | {
+      readonly _tag: 'Failed'
+      readonly module: string
+      readonly token: Token.Token
+      readonly error: SourceResolver.SourceResolverError
     }
   | {
       readonly _tag: 'Unavailable'
@@ -63,29 +71,13 @@ export interface Closure {
   readonly modules: ReadonlyArray<Module>
   readonly cycles: ReadonlyArray<ReadonlyArray<string>>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly sources: ReadonlyMap<string, SourceFile.SourceFile>
+  readonly resolutionFailures: ReadonlyArray<SourceResolver.SourceResolverError>
 }
 
-const isCanonicalIdentity = (identity: string): boolean =>
-  identity.length > 0 &&
-  !identity.startsWith('/') &&
-  !identity.endsWith('/') &&
-  !identity.includes('\\') &&
-  !identity.includes('.') &&
-  identity
-    .split('/')
-    .every(
-      (segment) =>
-        segment.length > 0 &&
-        segment !== '.' &&
-        segment !== '..' &&
-        /^[A-Za-z0-9_-]+$/.test(segment),
-    )
-
 const validateRequest = (request: CompilationRequest): void => {
-  const identities = [request.rootModule, ...request.sources.keys()]
-  const invalid = identities.find((identity) => !isCanonicalIdentity(identity))
-  if (invalid !== undefined)
-    throw new RangeError(`Compilation request module identity ${invalid} is not canonical`)
+  if (!SourceResolver.isCanonicalModule(request.root.id))
+    throw new RangeError(`Compilation request module identity ${request.root.id} is not canonical`)
 }
 
 const spelling = (source: SourceFile.SourceFile, token: Token.Token): string => {
@@ -99,19 +91,26 @@ const spelling = (source: SourceFile.SourceFile, token: Token.Token): string => 
 const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
   SyntaxTree.unavailableElement(parent.children, parent)
 
+interface ParsedModule {
+  readonly name: string
+  readonly syntax: SyntaxFile.SyntaxFile
+  readonly imports: ReadonlyArray<{
+    readonly syntax: SyntaxTree.Node
+    readonly path: SyntaxTree.Node
+    readonly sourceSpelling?: string
+    readonly canonicalTarget?: string
+    readonly token?: Token.Token
+  }>
+}
+
 interface ModuleAnalysis {
   readonly module: Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const analyzeModule = (
-  name: string,
-  bytes: Uint8Array,
-  sources: ReadonlyMap<string, Uint8Array>,
-): ModuleAnalysis => {
+const parseModule = (name: string, bytes: Uint8Array): ParsedModule => {
   const syntax = Parser.parse(Lexer.lex(SourceFile.make(name, bytes)))
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const imports = syntax.root.children.flatMap((element): ReadonlyArray<ImportFact> => {
+  const imports = syntax.root.children.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
     const path = SyntaxTree.directNode(element, 'ImportPath')
     const tokens =
@@ -119,82 +118,118 @@ const analyzeModule = (
         (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'Identifier',
       ) ?? []
     if (path === undefined || tokens.length === 0 || !SyntaxTree.isAvailableSyntax(path)) {
-      return [
-        Object.freeze({
-          _tag: 'Import' as const,
-          syntax: element,
-          path: path ?? element,
-          target: Object.freeze({
-            _tag: 'Unavailable' as const,
-            syntax: unavailableSyntax(path ?? element),
-          }),
-        }),
-      ]
+      return [Object.freeze({ syntax: element, path: path ?? element })]
     }
     const sourceSpelling = tokens.map((token) => spelling(syntax.source, token)).join('.')
-    const module = tokens.map((token) => spelling(syntax.source, token)).join('/')
+    const canonicalTarget = tokens.map((token) => spelling(syntax.source, token)).join('/')
     const token = tokens.at(0)
     if (token === undefined) throw new RangeError('Available import path lost its first segment')
-    if (module === name) {
-      const diagnostic = Diagnostic.selfImport(module, path.span)
-      diagnostics.push(diagnostic)
-      return [
+    return [Object.freeze({ syntax: element, path, sourceSpelling, canonicalTarget, token })]
+  })
+  return Object.freeze({ name, syntax, imports: Object.freeze(imports) })
+}
+
+type Resolution =
+  | { readonly _tag: 'Found'; readonly bytes: Uint8Array }
+  | { readonly _tag: 'Absent' }
+  | { readonly _tag: 'Failed'; readonly error: SourceResolver.SourceResolverError }
+
+const analyzeModule = Effect.fnUntraced(function* (
+  parsed: ParsedModule,
+  resolve: (module: string) => Effect.Effect<Resolution, never, SourceResolver.SourceResolver>,
+): Effect.fn.Return<ModuleAnalysis, never, SourceResolver.SourceResolver> {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const imports: Array<ImportFact> = []
+  for (const imported of parsed.imports) {
+    if (imported.canonicalTarget === undefined || imported.token === undefined) {
+      imports.push(
         Object.freeze({
-          _tag: 'Import' as const,
-          syntax: element,
-          path,
+          _tag: 'Import',
+          syntax: imported.syntax,
+          path: imported.path,
+          target: Object.freeze({
+            _tag: 'Unavailable',
+            syntax: unavailableSyntax(imported.path),
+          }),
+        }),
+      )
+      continue
+    }
+    const module = imported.canonicalTarget
+    const sourceSpelling = imported.sourceSpelling
+    if (sourceSpelling === undefined)
+      throw new RangeError('Available import path lost its source spelling')
+    if (module === parsed.name) {
+      const diagnostic = Diagnostic.selfImport(module, imported.path.span)
+      diagnostics.push(diagnostic)
+      imports.push(
+        Object.freeze({
+          _tag: 'Import',
+          syntax: imported.syntax,
+          path: imported.path,
           sourceSpelling,
           canonicalTarget: module,
           target: Object.freeze({
-            _tag: 'Self' as const,
+            _tag: 'Self',
             module,
-            token,
+            token: imported.token,
             cause: Diagnostic.identity(diagnostic),
           }),
         }),
-      ]
+      )
+      continue
     }
-    if (!sources.has(module)) {
-      const diagnostic = Diagnostic.unknownModule(module, path.span)
+    const resolution = yield* resolve(module)
+    if (resolution._tag === 'Absent') {
+      const diagnostic = Diagnostic.unknownModule(module, imported.path.span)
       diagnostics.push(diagnostic)
-      return [
+      imports.push(
         Object.freeze({
-          _tag: 'Import' as const,
-          syntax: element,
-          path,
+          _tag: 'Import',
+          syntax: imported.syntax,
+          path: imported.path,
           sourceSpelling,
           canonicalTarget: module,
           target: Object.freeze({
-            _tag: 'Unknown' as const,
+            _tag: 'Unknown',
             module,
-            token,
+            token: imported.token,
             cause: Diagnostic.identity(diagnostic),
           }),
         }),
-      ]
+      )
+      continue
     }
-    return [
+    imports.push(
       Object.freeze({
-        _tag: 'Import' as const,
-        syntax: element,
-        path,
+        _tag: 'Import',
+        syntax: imported.syntax,
+        path: imported.path,
         sourceSpelling,
         canonicalTarget: module,
-        target: Object.freeze({ _tag: 'Resolved' as const, module, token }),
+        target:
+          resolution._tag === 'Found'
+            ? Object.freeze({ _tag: 'Resolved' as const, module, token: imported.token })
+            : Object.freeze({
+                _tag: 'Failed' as const,
+                module,
+                token: imported.token,
+                error: resolution.error,
+              }),
       }),
-    ]
-  })
+    )
+  }
 
   return Object.freeze({
     module: Object.freeze({
-      _tag: 'Module' as const,
-      name,
-      syntax,
+      _tag: 'Module',
+      name: parsed.name,
+      syntax: parsed.syntax,
       imports: Object.freeze(imports),
     }),
     diagnostics: Object.freeze(diagnostics),
   })
-}
+})
 
 const resolvedTargets = (module: Module): ReadonlyArray<string> =>
   Object.freeze(
@@ -268,26 +303,42 @@ const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray
  * module order are both canonically sorted, so neither supply order nor traversal order affects
  * the result. A missing root module violates the caller contract and is rejected.
  */
-export const load = (request: CompilationRequest): Closure => {
+export const load = Effect.fn('ModuleClosure.load')(function* (
+  request: CompilationRequest,
+): Effect.fn.Return<Closure, never, SourceResolver.SourceResolver> {
   validateRequest(request)
-  const rootBytes = request.sources.get(request.rootModule)
-  if (rootBytes === undefined) {
-    throw new RangeError(
-      `Compilation request root module ${request.rootModule} is not among the supplied sources`,
-    )
-  }
-
+  const rootModule = request.root.id
   const loaded = new Map<string, Module>()
   const diagnostics: Array<ReadonlyArray<Diagnostic.Diagnostic>> = []
-  const pending: Array<string> = [request.rootModule]
+  const resolutions = new Map<string, Resolution>([
+    [rootModule, Object.freeze({ _tag: 'Found', bytes: SourceFile.toUint8Array(request.root) })],
+  ])
+  const pending: Array<string> = [rootModule]
+
+  const resolve = Effect.fnUntraced(function* (
+    module: string,
+  ): Effect.fn.Return<Resolution, never, SourceResolver.SourceResolver> {
+    const cached = resolutions.get(module)
+    if (cached !== undefined) return cached
+    const attempted = yield* Effect.result(SourceResolver.resolve(module))
+    const resolution: Resolution = Result.isFailure(attempted)
+      ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
+      : Option.match(attempted.success, {
+          onNone: () => Object.freeze({ _tag: 'Absent' as const }),
+          onSome: (bytes) =>
+            Object.freeze({ _tag: 'Found' as const, bytes: Uint8Array.from(bytes) }),
+        })
+    resolutions.set(module, resolution)
+    return resolution
+  })
 
   while (pending.length > 0) {
     pending.sort()
     const name = pending.shift()
     if (name === undefined || loaded.has(name)) continue
-    const bytes = request.sources.get(name)
-    if (bytes === undefined) continue
-    const analysis = analyzeModule(name, bytes, request.sources)
+    const resolution = resolutions.get(name)
+    if (resolution?._tag !== 'Found') continue
+    const analysis = yield* analyzeModule(parseModule(name, resolution.bytes), resolve)
     loaded.set(name, analysis.module)
     diagnostics.push(analysis.diagnostics)
     for (const target of resolvedTargets(analysis.module)) {
@@ -303,9 +354,15 @@ export const load = (request: CompilationRequest): Closure => {
 
   return Object.freeze({
     _tag: 'ModuleClosure',
-    rootModule: request.rootModule,
+    rootModule,
     modules,
     cycles: cycleFacts(modules),
     diagnostics: Diagnostic.merge(...diagnostics),
+    sources: new Map(modules.map((module) => [module.name, module.syntax.source])),
+    resolutionFailures: Object.freeze(
+      [...resolutions.entries()]
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .flatMap(([, resolution]) => (resolution._tag === 'Failed' ? [resolution.error] : [])),
+    ),
   })
-}
+})

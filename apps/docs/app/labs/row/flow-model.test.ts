@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { Elaboration } from '@silk-effect/compiler'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from './flow-model'
@@ -6,7 +7,7 @@ import { projectDataFlow } from './flow-model'
 const encoder = new TextEncoder()
 
 const snap = (id: string, text: string): Analysis.Snapshot =>
-  Analysis.ofSource(id, encoder.encode(text))
+  Snapshot.ofSource(id, encoder.encode(text))
 
 const analyze = (id: string, text: string): Elaboration.Result =>
   Analysis.rootAnalysis(snap(id, text))

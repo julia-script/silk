@@ -1,4 +1,5 @@
 import { memoryUsage } from 'node:process'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
@@ -12,6 +13,8 @@ import * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import * as NativeToolchain from './NativeToolchain.js'
 import * as Ownership from './Ownership.js'
+import * as SourceFile from './SourceFile.js'
+import type * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
 import type * as ToolchainPlan from './ToolchainPlan.js'
 
@@ -86,13 +89,31 @@ export interface BackendFailed {
   readonly report: ReadonlyArray<PhaseReport>
 }
 
+/** Source diagnostics rejected artifact production after the recoverable frontend completed. */
+export interface Rejected {
+  readonly _tag: 'Rejected'
+  readonly sources: ReadonlyMap<string, SourceFile.SourceFile>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly report: ReadonlyArray<PhaseReport>
+}
+
+/** Imported source storage failed operationally after retaining the available frontend facts. */
+export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFailed')<{
+  readonly operation: 'Driver.compile'
+  readonly message: string
+  readonly failures: ReadonlyArray<SourceResolver.SourceResolverError>
+  readonly sources: ReadonlyMap<string, SourceFile.SourceFile>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly report: ReadonlyArray<PhaseReport>
+}> {}
+
 /** The closed outcome of one driver run. */
-export type Outcome = Compiled | NoEntry | TargetFailed | BackendFailed | Failed
+export type Outcome = Compiled | Rejected | NoEntry | TargetFailed | BackendFailed | Failed
 
 /** Compiles one request end to end, writing the executable to the durable destination. */
 export const compile = Effect.fn('Driver.compile')(function* (
   request: CompileRequest,
-): Effect.fn.Return<Outcome> {
+): Effect.fn.Return<Outcome, SourceResolutionFailed, SourceResolver.SourceResolver> {
   const report: Array<PhaseReport> = []
   const phase = <A>(
     name: string,
@@ -116,12 +137,17 @@ export const compile = Effect.fn('Driver.compile')(function* (
     return result
   }
 
-  const closure = phase(
-    'closure',
-    request.compilation.sources.size,
-    () => ModuleClosure.load(request.compilation),
-    (result) => result.modules.length,
-    (result) => result.diagnostics.length,
+  const closureStartedAt = performance.now()
+  const closure = yield* ModuleClosure.load(request.compilation)
+  report.push(
+    Object.freeze({
+      phase: 'closure',
+      elapsedMs: performance.now() - closureStartedAt,
+      inputs: 1,
+      outputs: closure.modules.length,
+      diagnostics: closure.diagnostics.length,
+      heapBytes: memoryUsage().heapUsed,
+    }),
   )
   const collected = phase(
     'declaration-collection',
@@ -180,7 +206,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const discovery = phase(
     'instance-discovery',
     results.size,
-    () => Instances.discover(request.compilation.rootModule, results),
+    () => Instances.discover(request.compilation.root.id, results),
     (result) => result.instances.length,
   )
   const diagnostics = Diagnostic.merge(
@@ -191,6 +217,26 @@ export const compile = Effect.fn('Driver.compile')(function* (
     ...[...results.values()].map((result) => result.diagnostics),
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
+
+  if (closure.resolutionFailures.length > 0) {
+    return yield* new SourceResolutionFailed({
+      operation: 'Driver.compile',
+      message: `Source resolution failed for ${closure.resolutionFailures.length} imported module${closure.resolutionFailures.length === 1 ? '' : 's'}`,
+      failures: closure.resolutionFailures,
+      sources: closure.sources,
+      diagnostics,
+      report: Object.freeze([...report]),
+    })
+  }
+
+  if (Diagnostic.hasErrors(diagnostics)) {
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: closure.sources,
+      diagnostics,
+      report: Object.freeze([...report]),
+    })
+  }
 
   if (discovery.entry._tag !== 'Resolved') {
     return Object.freeze({
@@ -250,7 +296,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const emitted = yield* Backend.emit(backend, program, {
     mode: request.profile === 'release' ? 'release' : 'debug',
     sources: new Map(
-      closure.modules.map((module) => [module.name, Uint8Array.from(module.syntax.source.bytes)]),
+      [...closure.sources].map(([module, source]) => [module, SourceFile.toUint8Array(source)]),
     ),
   }).pipe(
     Effect.map((artifact) => Object.freeze({ _tag: 'Emitted' as const, artifact })),

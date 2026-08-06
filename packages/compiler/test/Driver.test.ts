@@ -4,10 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Driver from '../src/Driver.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import { corpus } from './support/corpus.js'
 
 const clang = '/usr/bin/clang'
@@ -25,17 +28,16 @@ const compileSource = (
   name: string,
   text: string,
   overrides: Partial<Driver.CompileRequest> = {},
-): Effect.Effect<Driver.Outcome> =>
+): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed> =>
   Driver.compile({
     compilation: {
-      rootModule: 'memory/driver',
-      sources: new Map([['memory/driver', ascii(text)]]),
+      root: SourceFile.make('memory/driver', ascii(text)),
     },
     toolchain,
     profile: 'release',
     destination: join(destinationRoot, name),
     ...overrides,
-  })
+  }).pipe(Effect.provide(SourceResolver.empty))
 
 const expectedPhases = [
   'closure',
@@ -65,7 +67,9 @@ it.effect('compiles the nested program to a running executable matching the inte
     assert.strictEqual(outcome.target.kind, 'Native')
     assert.strictEqual(existsSync(outcome.executable), true)
     const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
-    const interpreted = Analysis.evaluate(Analysis.ofSource('memory/driver', ascii(nested.source)))
+    const interpreted = Analysis.evaluate(
+      yield* Analysis.ofSource('memory/driver', ascii(nested.source)),
+    )
     assert.strictEqual(interpreted._tag, 'Completed')
     if (interpreted._tag !== 'Completed') return
     assert.strictEqual(run.status, interpreted.result.value)
@@ -85,10 +89,19 @@ it.effect('compiles a three-module call chain to native execution matching the i
       ],
       ['values/Number', ascii('pub fn two() -> I32 { return 2 }')],
     ])
-    const outcome = yield* compileSource('cross-module', '', {
-      compilation: { rootModule: 'app/Main', sources },
-    })
-    const interpreted = Analysis.evaluate(Analysis.make({ rootModule: 'app/Main', sources }))
+    const root = sources.get('app/Main')
+    if (root === undefined) return assert.fail('expected app/Main fixture')
+    const imports = new Map([...sources].filter(([name]) => name !== 'app/Main'))
+    const layer = SourceResolver.memory(imports)
+    const outcome = yield* Driver.compile({
+      compilation: { root: SourceFile.make('app/Main', root) },
+      toolchain,
+      profile: 'release',
+      destination: join(destinationRoot, 'cross-module'),
+    }).pipe(Effect.provide(layer))
+    const interpreted = Analysis.evaluate(
+      yield* Analysis.make({ root: SourceFile.make('app/Main', root) }).pipe(Effect.provide(layer)),
+    )
     assert.strictEqual(outcome._tag, 'Compiled')
     assert.strictEqual(interpreted._tag, 'Completed')
     if (outcome._tag !== 'Compiled' || interpreted._tag !== 'Completed') return
@@ -139,6 +152,69 @@ it.effect('routes emission through an injected backend service', () =>
   }),
 )
 
+it.effect('gates source rejection and operational resolution failure before backend work', () =>
+  Effect.gen(function* () {
+    let emissions = 0
+    const spy: Backend.Backend = {
+      _tag: 'Backend',
+      name: 'Gate Spy',
+      targets: Backend.LlvmBackend.targets,
+      emit: (program, request) => {
+        emissions += 1
+        return Backend.LlvmBackend.emit(program, request)
+      },
+    }
+    const rejected = yield* compileSource('rejected', 'pub fn main() -> Mystery { return 42 }', {
+      backend: spy,
+    })
+    assert.strictEqual(rejected._tag, 'Rejected')
+    assert.strictEqual(emissions, 0)
+    assert.strictEqual(
+      rejected.report.some((entry) => entry.phase === 'target-layout'),
+      false,
+    )
+
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolve: (module: string) =>
+        Effect.fail(
+          new SourceResolver.SourceResolverError({
+            operation: 'test.resolve',
+            module,
+            message: `cannot read ${module}`,
+            reason: { _tag: 'WrappedFailure', cause: new Error(module) },
+          }),
+        ),
+    })
+    const failed = yield* Effect.result(
+      Driver.compile({
+        compilation: {
+          root: SourceFile.make(
+            'memory/driver',
+            ascii('import unreadable\npub fn main() -> I32 { return 42 }'),
+          ),
+        },
+        toolchain,
+        profile: 'release',
+        destination: join(destinationRoot, 'resolution-failed'),
+        backend: spy,
+      }).pipe(Effect.provide(resolver)),
+    )
+    assert.strictEqual(failed._tag, 'Failure')
+    if (failed._tag === 'Failure') {
+      assert.strictEqual(failed.failure._tag, 'SourceResolutionFailed')
+      assert.deepEqual(
+        failed.failure.failures.map((failure) => failure.module),
+        ['unreadable'],
+      )
+      assert.strictEqual(
+        failed.failure.report.some((entry) => entry.phase === 'target-layout'),
+        false,
+      )
+    }
+    assert.strictEqual(emissions, 0)
+  }),
+)
+
 it.effect('surfaces a missing entry as a closed outcome without invoking the toolchain', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('no-entry', 'pub fn answer() -> I32 { return 42 }')
@@ -172,12 +248,18 @@ it.effect(
     Effect.gen(function* () {
       for (const program of corpus) {
         const interpreted = Analysis.evaluate(
-          Analysis.ofSource('memory/driver', ascii(program.source)),
+          yield* Analysis.ofSource('memory/driver', ascii(program.source)),
         )
         const outcome = yield* compileSource(`corpus-${program.name}`, program.source)
 
         if (program.expected._tag === 'UnavailableEntry') {
           assert.strictEqual(outcome._tag, 'NoEntry', program.name)
+          continue
+        }
+
+        if (outcome._tag === 'Rejected') {
+          assert.strictEqual(program.expected._tag, 'Trap', program.name)
+          assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
           continue
         }
 
@@ -220,8 +302,7 @@ it.effect('stops unsupported and WebAssembly targets before MIR or native tools'
         'pub fn main() -> I32 { return 42 }',
         {
           compilation: {
-            rootModule: 'memory/driver',
-            sources: new Map([['memory/driver', ascii('pub fn main() -> I32 { return 42 }')]]),
+            root: SourceFile.make('memory/driver', ascii('pub fn main() -> I32 { return 42 }')),
             target,
           },
         },

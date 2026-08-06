@@ -1,0 +1,67 @@
+import * as Target from '@silk-effect/compiler/Target'
+import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
+import * as Data from 'effect/Data'
+import * as Result from 'effect/Result'
+import { Flag } from 'effect/unstable/cli'
+
+export const profiles = ['debug', 'release', 'release-with-debug'] as const
+const targetIds = Target.all.map((candidate) => candidate.id)
+
+export const manifestPath = Flag.string('manifest-path').pipe(
+  Flag.withDescription('Path to a Silk project manifest. Disables upward discovery.'),
+  Flag.optional,
+)
+
+export const target = Flag.choice('target', targetIds).pipe(
+  Flag.withDescription('Native compilation target. Defaults to the host target.'),
+  Flag.optional,
+)
+
+export const profile = Flag.choice('profile', profiles).pipe(
+  Flag.withDescription('Compilation profile.'),
+  Flag.optional,
+)
+
+export const release = Flag.boolean('release').pipe(
+  Flag.withDescription('Build with the release profile.'),
+)
+
+export interface Input {
+  readonly manifestPath?: string
+  readonly target?: string
+  readonly profile?: ToolchainPlan.OptimizationProfile
+  readonly release: boolean
+}
+
+export interface ProjectOptions {
+  readonly manifestPath?: string
+  readonly target?: string
+  readonly profile: ToolchainPlan.OptimizationProfile
+}
+
+/** Project command flags contradict one another. */
+export class ProjectOptionsError extends Data.TaggedError('ProjectOptionsError')<{
+  readonly operation: 'ProjectOptions.resolve'
+  readonly message: string
+  readonly reason: { readonly _tag: 'ConflictingProfile'; readonly profile: string }
+}> {}
+
+/** Resolves shared project flags before project discovery or compilation begins. */
+export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOptionsError> => {
+  if (input.release && input.profile !== undefined && input.profile !== 'release') {
+    return Result.fail(
+      new ProjectOptionsError({
+        operation: 'ProjectOptions.resolve',
+        message: `--release conflicts with --profile ${input.profile}`,
+        reason: { _tag: 'ConflictingProfile', profile: input.profile },
+      }),
+    )
+  }
+  return Result.succeed(
+    Object.freeze({
+      ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
+      ...(input.target === undefined ? {} : { target: input.target }),
+      profile: input.release ? ('release' as const) : (input.profile ?? 'debug'),
+    }),
+  )
+}

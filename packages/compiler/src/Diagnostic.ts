@@ -271,6 +271,10 @@ export interface Diagnostic {
   readonly cause?: Identity
 }
 
+/** Tests whether a diagnostic collection contains an emission-blocking error. */
+export const hasErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+
 /** Derives the identity of one diagnostic given its ordinal among equals. */
 export const identity = (self: Diagnostic, ordinal = 0): Identity =>
   Object.freeze({

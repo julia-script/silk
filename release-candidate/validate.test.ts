@@ -15,6 +15,7 @@ import { expect, test } from 'vitest'
 const workspaceRoot = resolve(dirname(new URL(import.meta.url).pathname), '..')
 const packageRoot = resolve(workspaceRoot, 'packages/llvm')
 const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
+const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 
 test('the llvm release candidate is a self-contained ESM package', () => {
@@ -254,6 +255,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Ownership',
       './Parser',
       './SourceFile',
+      './SourceResolver',
       './SourceSpan',
       './SyntaxFile',
       './SyntaxTree',
@@ -287,7 +289,10 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       JSON.stringify({
         private: true,
         type: 'module',
-        dependencies: { '@silk-effect/compiler': `file:${resolve(archiveRoot, archive ?? '')}` },
+        dependencies: {
+          '@silk-effect/compiler': `file:${resolve(archiveRoot, archive ?? '')}`,
+          effect: manifest.dependencies.effect,
+        },
       }),
     )
     writeFileSync(
@@ -308,6 +313,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         '--input-type=module',
         '--eval',
         `import * as api from '@silk-effect/compiler';
+import * as Effect from 'effect/Effect';
 import * as evaluationModule from '@silk-effect/compiler/BootstrapEvaluation';
 import * as parserModule from '@silk-effect/compiler/Parser';
 import * as semanticModule from '@silk-effect/compiler/Elaboration';
@@ -322,6 +328,7 @@ const source = api.SourceFile.make(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
   ),
 );
+const snapshotOfSource = (id, bytes) => Effect.runSync(api.Analysis.ofSource(id, bytes));
 const parse = api.Parser.parse(api.Lexer.lex(source));
 const concreteFunctions = parse.root.children.filter(
   (element) => api.SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
@@ -333,7 +340,7 @@ const visit = (element) => {
   for (const child of element.children) visit(child);
 };
 visit(parse.root);
-const rootSnapshot = api.Analysis.ofSource(
+const rootSnapshot = snapshotOfSource(
   'memory/packed',
   new TextEncoder().encode(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
@@ -353,22 +360,22 @@ const deepEvaluation = evaluationModule.evaluate(
   api.Analysis.loweredMir(rootSnapshot),
 );
 const call = analysis.functions[1]?.returnedExpression;
-const unknownAnalysis = api.Analysis.rootAnalysis(api.Analysis.ofSource(
+const unknownAnalysis = api.Analysis.rootAnalysis(snapshotOfSource(
   'memory/packed-unknown',
   new TextEncoder().encode('pub fn main() -> I32 { return missing() }'),
 ));
-const unknownLocalAnalysis = api.Analysis.rootAnalysis(api.Analysis.ofSource(
+const unknownLocalAnalysis = api.Analysis.rootAnalysis(snapshotOfSource(
   'memory/packed-unknown-local',
   new TextEncoder().encode('pub fn main() -> I32 { return missing }'),
 ));
-const wrongArityAnalysis = api.Analysis.rootAnalysis(api.Analysis.ofSource(
+const wrongArityAnalysis = api.Analysis.rootAnalysis(snapshotOfSource(
   'memory/packed-wrong-arity',
   new TextEncoder().encode(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity() }',
   ),
 ));
 const cycleEvaluation = api.Analysis.evaluate(
-  api.Analysis.ofSource(
+  snapshotOfSource(
     'memory/packed-cycle',
     new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
   ),
@@ -387,7 +394,7 @@ const visitNested = (element) => {
   for (const child of element.children) visitNested(child);
 };
 visitNested(nestedParse.root);
-const nestedSnapshot = api.Analysis.ofSource(
+const nestedSnapshot = snapshotOfSource(
   'memory/packed-nested',
   Uint8Array.from(nestedParse.source.bytes),
 );
@@ -535,6 +542,7 @@ console.log(
       'Ownership',
       'Parser',
       'SourceFile',
+      'SourceResolver',
       'SourceSpan',
       'SyntaxFile',
       'SyntaxTree',
@@ -634,6 +642,142 @@ console.log(
     rmSync(temporary, { recursive: true, force: true })
   }
 })
+
+test('the compiler CLI release candidate installs with its project-first command surface', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-compiler-cli-release-candidate-'))
+
+  try {
+    const archiveRoot = resolve(temporary, 'archives')
+    const unpackRoot = resolve(temporary, 'unpacked')
+    mkdirSync(archiveRoot)
+    mkdirSync(unpackRoot)
+
+    for (const root of [
+      compilerCliPackageRoot,
+      compilerPackageRoot,
+      packageRoot,
+      wasmPackageRoot,
+    ]) {
+      execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+        cwd: root,
+        stdio: 'pipe',
+      })
+    }
+
+    const archives = readdirSync(archiveRoot)
+    const archive = archives.find(
+      (file) => file.startsWith('silk-effect-compiler-cli-') && file.endsWith('.tgz'),
+    )
+    const compilerArchive = archives.find(
+      (file) => file.startsWith('silk-effect-compiler-') && !file.includes('-cli-'),
+    )
+    const llvmArchive = archives.find((file) => file.startsWith('silk-effect-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silk-effect-wasm-'))
+    expect(archive).toBeDefined()
+    expect(compilerArchive).toBeDefined()
+    expect(llvmArchive).toBeDefined()
+    expect(wasmArchive).toBeDefined()
+    execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
+
+    const packedRoot = resolve(unpackRoot, 'package')
+    const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
+    expect(manifest.name).toBe('@silk-effect/compiler-cli')
+    expect(manifest.private).not.toBe(true)
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
+      '@effect/platform-node',
+      '@silk-effect/compiler',
+      'effect',
+      'smol-toml',
+    ])
+    expect(Object.keys(manifest.exports).sort()).toEqual([
+      '.',
+      './BuildCommand',
+      './BuildExeCommand',
+      './BuildPlan',
+      './CheckCommand',
+      './Cli',
+      './FileSourceResolver',
+      './Program',
+      './Project',
+      './ProjectOptions',
+      './Report',
+      './RunCommand',
+      './SourceEntry',
+      './Workflow',
+    ])
+    expect(manifest.exports).not.toHaveProperty('./CompileCommand')
+    expect(manifest.bin).toEqual({ silk: './dist/bin.js' })
+    expect(existsSync(resolve(packedRoot, 'dist/bin.js'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'test'))).toBe(false)
+
+    const consumerRoot = resolve(temporary, 'consumer')
+    mkdirSync(consumerRoot)
+    writeFileSync(
+      resolve(consumerRoot, 'package.json'),
+      JSON.stringify({
+        private: true,
+        type: 'module',
+        dependencies: {
+          '@silk-effect/compiler-cli': `file:${resolve(archiveRoot, archive ?? '')}`,
+        },
+      }),
+    )
+    writeFileSync(
+      resolve(consumerRoot, 'pnpm-workspace.yaml'),
+      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+    )
+    execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
+
+    const executable = resolve(consumerRoot, 'node_modules/.bin/silk')
+    const help = execFileSync(executable, ['--help'], { cwd: consumerRoot, encoding: 'utf8' })
+    expect(help).toContain('build        Build the nearest Silk project.')
+    expect(help).toContain('check        Analyze the nearest Silk project')
+    expect(help).toContain('run          Build and run the nearest Silk project.')
+    expect(help).toContain('build-exe    Build one rooted Silk source graph')
+    expect(help).not.toContain('\n  compile ')
+
+    writeFileSync(
+      resolve(consumerRoot, 'silk.toml'),
+      '[package]\nname = "packed-cli"\nroot = "Main.silk"\n',
+    )
+    writeFileSync(resolve(consumerRoot, 'Main.silk'), 'pub fn main() -> I32 { return 42 }')
+    execFileSync(executable, ['check'], { cwd: consumerRoot, stdio: 'pipe' })
+    expect(existsSync(resolve(consumerRoot, '.silk'))).toBe(false)
+
+    const api = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import * as api from '@silk-effect/compiler-cli'; console.log(JSON.stringify(Object.keys(api).sort()))`,
+        ],
+        { cwd: consumerRoot, encoding: 'utf8' },
+      ),
+    )
+    expect(api).toEqual([
+      'BuildCommand',
+      'BuildExeCommand',
+      'BuildPlan',
+      'CheckCommand',
+      'Cli',
+      'FileSourceResolver',
+      'Program',
+      'Project',
+      'ProjectOptions',
+      'Report',
+      'RunCommand',
+      'SourceEntry',
+      'Workflow',
+    ])
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+}, 30_000)
 
 test('the wasm release candidate is a self-contained ESM package', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-wasm-release-candidate-'))

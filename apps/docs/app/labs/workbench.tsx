@@ -25,6 +25,7 @@ import { type Preset, presetGroups, presets } from './presets'
 import { type ViewContext, siblingsOf, viewById, views } from './registry'
 import { EmptyState, RowList, type Span } from './row/row'
 import { diagnosticCounts, diagnosticEntries, hirContract } from './row/project-syntax'
+import * as Snapshot from './snapshot'
 import {
   decodeLayout,
   decodeSource,
@@ -413,7 +414,7 @@ export function Workbench() {
 
   const snapshot = useMemo(
     () =>
-      Analysis.make({
+      Snapshot.make({
         rootModule: root,
         sources: new Map(
           Object.entries(modules).map(([name, text]) => [name, encoder.encode(text)]),

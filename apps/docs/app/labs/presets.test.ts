@@ -1,11 +1,12 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from './snapshot'
 import { describe, expect, it } from 'vitest'
 import { presets } from './presets'
 
 const encoder = new TextEncoder()
 
 const snapshotOf = (preset: (typeof presets)[number], target?: string): Analysis.Snapshot =>
-  Analysis.make({
+  Snapshot.make({
     rootModule: preset.root,
     sources: new Map(
       Object.entries(preset.modules).map(([name, text]) => [name, encoder.encode(text)]),

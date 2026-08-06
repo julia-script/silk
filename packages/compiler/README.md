@@ -7,21 +7,36 @@ the closed bootstrap evaluator — all reachable through one supported analysis 
 
 ```ts
 import { Analysis } from '@silk-effect/compiler'
+import * as Effect from 'effect/Effect'
 
-const snapshot = Analysis.ofSource(
-  'memory://example.silk',
-  new TextEncoder().encode(`pub fn identity(value: I32) -> I32 { return value }
+const program = Effect.gen(function* () {
+  const snapshot = yield* Analysis.ofSource(
+    'memory/example',
+    new TextEncoder().encode(`pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`),
-)
-const result = Analysis.rootAnalysis(snapshot)
+  )
+  const result = Analysis.rootAnalysis(snapshot)
 
-console.log(result.syntax.root.kind) // SourceFile
-console.log(result.functions.length) // 2
-console.log(result.hir.functions[1]?.body) // { _tag: 'Call', target: { _tag: 'CanonicalDeclarationId', ... }, ... }
-console.log(Analysis.declarationByName(snapshot, 'memory://example.silk', 'main')) // { _tag: 'Resolved', ... }
-console.log(Analysis.diagnostics(snapshot)) // []
-console.log(Analysis.evaluate(snapshot)._tag) // Completed
+  console.log(result.syntax.root.kind) // SourceFile
+  console.log(result.functions.length) // 2
+  console.log(Analysis.declarationByName(snapshot, 'memory/example', 'main')) // Resolved
+  console.log(Analysis.diagnostics(snapshot)) // []
+  console.log(Analysis.evaluate(snapshot)._tag) // Completed
+})
 ```
+
+## Source resolution and recovery
+
+Compilation requests carry one explicit root `SourceFile`. Reachable imports are loaded through
+the `SourceResolver` Effect service by canonical, extensionless identity. `compiler/Syntax` is a
+logical identity—not an operating-system path. Browser and editor tooling can provide
+`SourceResolver.memory(sources)`; the compiler package never depends on a host filesystem.
+
+`Analysis.make` is Effectful and resilient. An absent source becomes an ordinary missing-module
+diagnostic, while an operational resolver failure remains typed data available through
+`Analysis.resolutionFailures`. Successfully loaded modules and unrelated facts remain queryable.
+`Analysis.codegen` and `Driver.compile` are strict boundaries: they refuse any snapshot containing
+an error diagnostic or resolver failure before invoking a backend or toolchain.
 
 ## The facade is the supported consumer surface
 

@@ -2,10 +2,11 @@ import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import { describe, expect, it } from 'vitest'
 import type { ViewContext, ViewResult } from './registry'
 import { siblingsOf, viewById, views } from './registry'
+import * as Snapshot from './snapshot'
 
 const project = (viewId: string, source: string): ViewResult => {
   const sourceId = 'memory/docs/unified-layout'
-  const snapshot = Analysis.ofSource(
+  const snapshot = Snapshot.ofSource(
     sourceId,
     new TextEncoder().encode(source),
     'aarch64-apple-darwin',
@@ -40,7 +41,7 @@ const text = (result: ViewResult): string =>
  */
 const projectStructValues = (source: string): ViewResult => {
   const sourceId = 'memory/docs/unified-struct-values'
-  const snapshot = Analysis.ofSource(
+  const snapshot = Snapshot.ofSource(
     sourceId,
     new TextEncoder().encode(source),
     'wasm32-unknown-unknown',
@@ -167,7 +168,7 @@ describe('downstream panes state why they are empty', () => {
   // A blank pane and a pane for a program that never got that far look identical, which hides
   // the phase that actually broke. Every absent phase has to name its reason.
   it('says why MIR is unavailable for an unresolved target', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/docs/unavailable',
       new TextEncoder().encode('pub fn main() -> I32 { return 42 }'),
       'not-a-real-target',
@@ -232,7 +233,7 @@ pub fn main() -> I32 { return answer( }`,
     const source = 'pub fn main() -> I32 { return 42 }'
     const view = viewById('tree')
     if (view === undefined) throw new Error('missing tree view')
-    const snapshot = Analysis.ofSource('memory/docs/trivia', new TextEncoder().encode(source))
+    const snapshot = Snapshot.ofSource('memory/docs/trivia', new TextEncoder().encode(source))
     const base = {
       snapshot,
       modules: { [snapshot.closure.rootModule]: source },
