@@ -700,7 +700,15 @@ export function Workbench() {
   return (
     <div className={`${shell.workbench} workbenchRoot`}>
       <div className={shell.appBar}>
-        {/* A mark, not a control: the sidebar's own header and the peek tab do the toggling. */}
+        <button
+          type="button"
+          className={shell.sidebarToggle}
+          onClick={() => setSidebarOpen((open) => !open)}
+          title={sidebarOpen ? 'Hide the program sidebar' : 'Show the program sidebar'}
+          aria-expanded={sidebarOpen}
+        >
+          {sidebarOpen ? '‹' : '›'}
+        </button>
         <span className={shell.wordmark}>silk</span>
 
         <div className={shell.workspaces}>
@@ -929,16 +937,7 @@ export function Workbench() {
               })}
             </div>
           </div>
-        ) : (
-          <button
-            type="button"
-            className={shell.sidebarPeek}
-            onClick={() => setSidebarOpen(true)}
-            title="Show the program sidebar"
-          >
-            ›
-          </button>
-        )}
+        ) : null}
 
         <div className={shell.dockFrame}>
           <div className={shell.dock} ref={dockRef}>

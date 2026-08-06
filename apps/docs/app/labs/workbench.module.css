@@ -213,8 +213,6 @@
 /* ── body ─────────────────────────────────────────────────────────────────── */
 
 .body {
-  /* Anchors the collapsed-sidebar peek tab. */
-  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
@@ -354,23 +352,14 @@
   width: 18px;
 }
 
-/*
- * The collapsed sidebar's way back: a small tab hanging off the left edge, where the sidebar
- * was. It sits where the eye already goes to look for the missing panel, which is what the
- * wordmark-as-toggle got wrong.
- */
-.sidebarPeek {
-  position: absolute;
-  z-index: 10;
-  top: 0;
-  left: 0;
+/* The sidebar toggle: first cell of the app bar, left of the wordmark. `‹` open, `›` closed. */
+.sidebarToggle {
   display: grid;
-  width: 15px;
-  height: var(--wb-bar-h);
+  flex: none;
+  width: 26px;
   border: 0;
   border-right: 1px solid var(--wb-hairline-strong);
-  border-bottom: 1px solid var(--wb-hairline-strong);
-  background: var(--wb-bg-bar);
+  background: transparent;
   color: var(--wb-ink-4);
   font: inherit;
   font-size: 11px;
@@ -378,7 +367,7 @@
   place-items: center;
 }
 
-.sidebarPeek:hover {
+.sidebarToggle:hover {
   background: var(--wb-active);
   color: var(--wb-ink);
 }
