@@ -13,11 +13,11 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** make the bootstrap language capable of expressing small real algorithms over
-compiler-shaped data. With target-aware layout, cross-module declarations, operators, nominal
-structs, struct values, fixed-size arrays, mutation, and structured loops complete, the current work
-normalizes structural unions before exhaustive matching grows through the same inspectable,
-determinism-gated architecture.
+**Current objective:** choose the smallest next slice required to express a real compiler pass in
+Silk. The first algorithmic-language slice is now the baseline: target-aware layouts, cross-module
+declarations, operators, nominal structs and values, fixed-size arrays, mutation, structured loops,
+normalized structural unions, and exhaustive matching all run through the inspectable,
+determinism-gated compiler architecture.
 
 ## Column rules
 
@@ -53,10 +53,8 @@ determinism-gated architecture.
 
 ### Make the language algorithmic: modules, operators, data, and loops
 
-**Status: in progress; structural unions current.** Target-aware layout, cross-module declarations,
-operators, nominal structs, struct values, fixed-size arrays, mutation, and structured loops are
-complete. Compiler-published control remains a DAG until each backend converts it to its required
-target form.
+**Status: complete (2026-08-06).** All nine changes shipped and archived. Compiler-published
+control remains a DAG until each backend converts it to its required target form.
 
 - **Problem:** The compiler spine is complete, but the language can only express small scalar,
   call, binding, and branching examples. It lacks a settled operator surface, aggregate data,
@@ -75,8 +73,8 @@ target form.
   5. `construct-and-project-struct-values` — complete and archived
   6. `add-fixed-size-arrays-and-indexing` — complete and archived
   7. `add-mutable-bindings-and-structured-loops` — complete and archived
-  8. `normalize-structural-unions`
-  9. `match-exhaustively`
+  8. `normalize-structural-unions` — complete and archived
+  9. `match-exhaustively` — complete and archived
 - **Dependencies:** cross-module resolution precedes operator desugaring into canonical actor
   operations and all cross-module data use. Struct declarations precede construction. Arrays build
   on aggregate layout and the expression/operator foundation; the first useful loop slice adds
@@ -91,8 +89,9 @@ target form.
 
 ## Next
 
-No item is promoted yet. Reassess after each data-slice change is implemented and archived; the
-remaining Now sequence is intentionally allowed to change when implementation evidence demands it.
+No item is promoted yet. The first algorithmic-language slice is complete; the next planning pass
+should start from a real compiler-shaped program and promote only the smallest capability gap it
+exposes.
 
 ## Later
 
@@ -107,8 +106,8 @@ remaining Now sequence is intentionally allowed to change when implementation ev
 - **Grow beyond the bootstrap subset** — concurrency, networking, schemas, observability, richer
   tooling, and broader standard-library families become candidates only after the self-hosting core
   exposes their real constraints.
-- **Deepen WebAssembly integration** — preserve backend-neutral boundaries now; consider a direct
-  WebAssembly backend and generated Effect interop after the native bootstrap path is accepted.
+- **Deepen WebAssembly integration** — extend the direct backend toward host integration and
+  generated Effect interop after the native bootstrap path is accepted.
 
 ## Maintenance budget
 
@@ -123,8 +122,8 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 - General concurrency, atomics, async scheduling, networking, or a broad user-facing FFI during
   bootstrap — the compiler workload does not require them.
-- A direct WebAssembly backend as a self-hosting prerequisite — backend-neutral MIR is sufficient
-  protection until native self-hosting succeeds.
+- WebAssembly-hosted self-hosting as a prerequisite — native fixed-point acceptance remains the
+  bootstrap gate even though direct WebAssembly emission is maintained in differential parity.
 - A package registry, dependency solver, production build system, or full language server — none is
   required to prove the bootstrap language.
 - A general incremental query engine — immutable analysis snapshots and localized deterministic
@@ -138,12 +137,21 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
-- Which additional control regions will structural unions and matching require? The invariant is
-  pinned: compiler-published relationships stay acyclic and target-aware, while each backend owns
-  flattening or nesting them into its private control representation.
+- Which real compiler algorithm should become the first post-slice acceptance program, and which
+  remaining language, runtime, or library gap does it expose?
 
 ## Changelog
 
+- 2026-08-06: Shipped and archived `match-exhaustively`, completing the nine-change algorithmic
+  language slice. Precise and structural-union values now support bare, move, shared, and exclusive
+  exhaustive matching with guarded and nested destructuring, canonical result joins, selected-path
+  ownership and cleanup, structured DAG HIR/MIR, logical evaluation, native and direct WebAssembly
+  parity, and coordinated inspection in `/labs`. No successor is promoted until a real
+  compiler-shaped program exposes the next smallest gap.
+- 2026-08-06: Shipped and archived `normalize-structural-unions`. Structural unions now have
+  canonical normalized identities, compiler-owned target-aware sum layouts and calling shapes,
+  explicit widening, ownership and cleanup semantics, evaluator/native/WebAssembly parity, and
+  unified inspector coverage. Next: `match-exhaustively`.
 - 2026-08-06: Shipped and archived `add-mutable-bindings-and-structured-loops`. Silk now has explicit
   `let mut`, transactional whole-value assignment through binding/field/index places, structured
   `while` with lexical `break` and `continue`, deterministic loop-header ownership fixed points,
