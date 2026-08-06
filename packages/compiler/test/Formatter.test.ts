@@ -82,15 +82,21 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IndexProjectionExpression',
   'InfixExpression',
   'IntegerLiteralExpression',
+  'MatchAccess',
+  'MatchArm',
+  'MatchExpression',
   'MoveExpression',
+  'NominalPattern',
   'ParameterDeclaration',
   'ParameterList',
   'ParenthesizedType',
   'PipelineExpression',
   'PipelineTarget',
   'PrefixExpression',
+  'PatternField',
   'ReturnStatement',
   'ReturnType',
+  'RestPattern',
   'SourceFile',
   'StructDeclaration',
   'StructField',
@@ -98,6 +104,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'StructLiteralExpression',
   'TypePath',
   'UnionType',
+  'UniversalPattern',
   'WhileStatement',
 ])
 
@@ -273,6 +280,36 @@ it.effect('removes only terminal horizontal whitespace from comment spellings', 
   }),
 )
 
+it.effect('formats match arms, guards, access modes, and nested patterns idempotently', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Span { start: I32 end: I32 }
+pub struct Token { span: Span }
+pub fn inspect(event: Token) -> I32 { return match   & mut event { Token { span: Span { start: offset , .. }, .. } if true=>offset _=>0 } }`
+    const first = yield* Formatter.format(parse('memory://match-format.silk', source))
+    const expected = `pub struct Span {
+  start: I32
+  end: I32
+}
+
+pub struct Token {
+  span: Span
+}
+
+pub fn inspect(event: Token) -> I32 {
+  return match &mut event {
+    Token {span: Span {start: offset, ..}, ..} if true => offset
+    _ => 0
+  }
+}
+`
+
+    assert.strictEqual(formattedText(first), expected)
+    const second = yield* Formatter.format(parse('memory://match-format.silk', expected))
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
     const source = `import Core.Math as Math { add as plus, subtract }
@@ -281,6 +318,9 @@ pub struct Pair {
   right: Bool
   choice: Alpha | (Beta | Alpha)
 }
+pub struct Span { start: I32 end: I32 }
+pub struct Token { span: Span }
+pub struct End {}
 fn helper(value: I32, other: I32) -> I32 {
   let mut moved = move value
   while moved < other {
@@ -289,6 +329,9 @@ fn helper(value: I32, other: I32) -> I32 {
   moved = moved + 1
   if !false { return (moved + other) } else { return Pair { left: [1, 2], right: true }.left[0] }
   return moved
+}
+fn inspect(event: Token | End) -> I32 {
+  return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }
 pub fn main() -> I32 { return helper(-1, 2) |> Core.finish() }
 `

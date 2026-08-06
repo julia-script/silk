@@ -6,6 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import type * as Mir from '../src/Mir.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import { corpus } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -63,6 +64,17 @@ const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 
 const branchSource = 'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'
+
+const matchSource = `pub struct Left { value: I32 }
+pub struct Right { value: I32 }
+pub fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => I32.add(answer, 1)
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 41 }) }`
 
 it.effect('matches the WAT golden and the binary digest golden', () =>
   Effect.gen(function* () {
@@ -130,6 +142,28 @@ it.effect('nests an if inside an arm for nested source conditionals', () =>
 
     // Two conditionals in the source produce two `if` constructs, one inside the other.
     assert.strictEqual(artifact.ir.match(/^\s*if$/gm)?.length, 2)
+  }),
+)
+
+it.effect('emits structured match dispatch and agrees with logical evaluation', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(matchSource)
+    const interpreted = yield* interpret(matchSource)
+    const executed = yield* run(matchSource)
+
+    assert.strictEqual(interpreted, 42)
+    assert.strictEqual(executed, interpreted)
+    assert.match(artifact.ir, /i32\.eq/)
+    assert.match(artifact.ir, /\bif\b/)
+    assert.notMatch(artifact.ir, /br_table/)
+  }),
+)
+
+it.effect('keeps every valid match corpus case in three-engine agreement', () =>
+  Effect.gen(function* () {
+    for (const program of corpus.filter((candidate) => candidate.name.startsWith('match-'))) {
+      assert.strictEqual(yield* run(program.source), yield* interpret(program.source), program.name)
+    }
   }),
 )
 

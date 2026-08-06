@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
+import type * as Mir from '../src/Mir.js'
 import { corpus } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -199,5 +200,111 @@ it.effect('preserves trapping arithmetic through operator sugar', () =>
     assert.strictEqual(division._tag === 'Blocked' ? division.reason._tag : undefined, 'Trap')
     assert.strictEqual(negation._tag, 'Blocked')
     assert.strictEqual(negation._tag === 'Blocked' ? negation.reason._tag : undefined, 'Trap')
+  }),
+)
+
+it.effect('evaluates logical union matches with source-ordered guarded fallthrough', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`pub struct Left { value: I32 }
+pub struct Right { value: I32 }
+pub fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => I32.add(answer, 1)
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 41 }) }`)
+
+    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.deepEqual(
+      outcome.trace.filter((event) => event._tag.startsWith('Match')).map((event) => event._tag),
+      [
+        'MatchDispatch',
+        'MatchCandidate',
+        'MatchCandidate',
+        'MatchCandidate',
+        'MatchCandidate',
+        'MatchSelected',
+        'MatchBorrowEnd',
+      ],
+    )
+  }),
+)
+
+it.effect('evaluates nested move matches and traces selected-path cleanup exactly once', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`pub struct Leaf { value: I32 }
+pub struct Box { answer: I32 leaf: Leaf }
+pub fn main() -> I32 {
+  let box = Box { answer: 42, leaf: Leaf { value: 0 } }
+  return match move box { Box { answer, .. } => answer }
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    const cleanup = outcome.trace.filter((event) => event._tag === 'MatchCleanup')
+    assert.strictEqual(cleanup.length, 1)
+    const first = cleanup.at(0)
+    if (first?._tag !== 'MatchCleanup') return assert.fail('expected match cleanup')
+    assert.deepEqual(
+      first.path?.map((field) => field.ordinal),
+      [1],
+    )
+  }),
+)
+
+it.effect('evaluates verified Copy match access without consuming the logical payload', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'memory/copy-match',
+      ascii(`struct Token { value: I32 }
+fn inspect(input: Token) -> I32 { return match &input { Token { value } => value } }
+pub fn main() -> I32 { return inspect(Token { value: 42 }) }`),
+    )
+    const original = Analysis.loweredMir(self)
+    const copied: Mir.Module = {
+      ...original,
+      functions: original.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag !== 'OperationRegion'
+            ? region
+            : {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation._tag !== 'Match'
+                    ? operation
+                    : {
+                        ...operation,
+                        access: 'Copy',
+                        arms: operation.arms.map((arm) => ({
+                          ...arm,
+                          bindings: arm.bindings.map((binding) => ({
+                            ...binding,
+                            access: 'Copy',
+                          })),
+                          selected: {
+                            ...arm.selected,
+                            access: 'Copy',
+                            cleanup: [],
+                            endBorrow: false,
+                          },
+                        })),
+                      },
+                ),
+              },
+        ),
+      })),
+    }
+
+    const outcome = BootstrapEvaluation.evaluate(self.instances, copied)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.deepEqual(outcome.result, {
+      _tag: 'I32Value',
+      value: 42,
+    })
   }),
 )

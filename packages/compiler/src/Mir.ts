@@ -1,6 +1,7 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Layout from './Layout.js'
+import * as Match from './Match.js'
 import type * as Ownership from './Ownership.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -182,6 +183,62 @@ export type Operation =
       readonly cleanup: Ownership.CleanupPlan
       readonly provenance: Provenance
     }
+  | MatchOperation
+
+export interface MatchBinding {
+  readonly id: Match.BindingId
+  readonly destination: LocalId
+  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly type: Type
+  readonly access: Match.Access
+  readonly provenance: Provenance
+}
+
+export interface MatchArm {
+  readonly id: Match.ArmId
+  readonly member?: SilkType.Nominal
+  readonly universal: boolean
+  readonly before: ReadonlyArray<SilkType.Nominal>
+  readonly after: ReadonlyArray<SilkType.Nominal>
+  readonly bindings: ReadonlyArray<MatchBinding>
+  readonly guard?: {
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+  }
+  readonly selected: {
+    readonly access: Match.Access
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+    readonly cleanup: ReadonlyArray<{
+      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly cleanup: Ownership.CleanupPlan
+    }>
+    readonly endBorrow: boolean
+  }
+  readonly provenance: Provenance
+}
+
+/** One compiler-owned structured selection. Child operations form an acyclic expression DAG. */
+export interface MatchOperation {
+  readonly _tag: 'Match'
+  readonly id: Match.MatchId
+  readonly destination: LocalId
+  readonly scrutinee: LocalId
+  readonly scrutineeType:
+    | Extract<Type, { readonly _tag: 'Nominal' }>
+    | Extract<Type, { readonly _tag: 'Union' }>
+  readonly scrutineeShape: Layout.CallingShape
+  readonly access: Match.Access
+  readonly members: ReadonlyArray<SilkType.Nominal>
+  readonly decisions: ReadonlyArray<{
+    readonly member: SilkType.Nominal
+    readonly candidates: ReadonlyArray<Match.ArmId>
+  }>
+  readonly arms: ReadonlyArray<MatchArm>
+  readonly type: Type
+  readonly resultShape: Layout.CallingShape
+  readonly provenance: Provenance
+}
 
 export type Outcome =
   | { readonly _tag: 'Forward'; readonly target: RegionId; readonly provenance: Provenance }
@@ -325,6 +382,13 @@ export interface Violation {
     | 'InvalidAggregateOperation'
     | 'InvalidCallShape'
     | 'InvalidWrite'
+    | 'InvalidMatchLayout'
+    | 'InvalidMatchDecision'
+    | 'InvalidMatchBinding'
+    | 'InvalidMatchGuard'
+    | 'InvalidMatchOwnership'
+    | 'InvalidMatchJoin'
+    | 'CyclicMatchOperation'
   readonly function?: DeclarationIndex.CanonicalId
   readonly region?: RegionId
   readonly detail: string
@@ -337,9 +401,45 @@ const operationsOf = (region: Region): ReadonlyArray<Operation> =>
       ? region.releases
       : []
 
+const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
+  operation._tag === 'Match'
+    ? operation.arms.flatMap((arm) => [
+        ...(arm.guard?.operations ?? []),
+        ...arm.selected.operations,
+      ])
+    : []
+
+/** One operation and all structurally nested operations in deterministic source order. */
+export const operationTree = (operation: Operation): ReadonlyArray<Operation> => {
+  const seen = new Set<Operation>()
+  const walk = (current: Operation): ReadonlyArray<Operation> => {
+    if (seen.has(current)) return []
+    seen.add(current)
+    return [current, ...operationChildren(current).flatMap(walk)]
+  }
+  return Object.freeze(walk(operation))
+}
+
+const cyclicOperation = (operation: Operation): boolean => {
+  const active = new Set<Operation>()
+  const completed = new Set<Operation>()
+  const walk = (current: Operation): boolean => {
+    if (active.has(current)) return true
+    if (completed.has(current)) return false
+    active.add(current)
+    const cyclic = operationChildren(current).some(walk)
+    active.delete(current)
+    completed.add(current)
+    return cyclic
+  }
+  return walk(operation)
+}
+
 /** Source-stable operations across canonical topological region order. */
 export const operations = (self: MirFunction): ReadonlyArray<Operation> =>
-  Object.freeze(topologicalRegions(self).flatMap(operationsOf))
+  Object.freeze(
+    topologicalRegions(self).flatMap((region) => operationsOf(region).flatMap(operationTree)),
+  )
 
 export const outcomes = (self: MirFunction): ReadonlyArray<Outcome> =>
   Object.freeze(topologicalRegions(self).flatMap((region) => outcomeOf(region) ?? []))
@@ -373,6 +473,16 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.root, operation.source, ...selectorLocals(operation.selectors)]
     case 'Drop':
       return [operation.local]
+    case 'Match':
+      return [
+        operation.destination,
+        operation.scrutinee,
+        ...operation.arms.flatMap((arm) => [
+          ...arm.bindings.map((binding) => binding.destination),
+          ...(arm.guard === undefined ? [] : [arm.guard.result]),
+          arm.selected.result,
+        ]),
+      ]
   }
 }
 
@@ -432,6 +542,41 @@ const placeType = (
   }
   return current
 }
+
+const fieldPathType = (
+  layout: Layout.Plan,
+  root: DeclarationIndex.SemanticType,
+  path: ReadonlyArray<DeclarationIndex.FieldId>,
+): DeclarationIndex.SemanticType | undefined => {
+  let current: DeclarationIndex.SemanticType | undefined = root
+  for (const selector of path) {
+    const entry: Layout.Entry | undefined = SilkType.isNominal(current)
+      ? Layout.entry(layout, current)
+      : undefined
+    const field: Layout.Field | undefined =
+      entry?.representation._tag === 'Aggregate'
+        ? entry.representation.fields.find(
+            (candidate) =>
+              candidate.id.ordinal === selector.ordinal &&
+              candidate.id.struct.sourceId === selector.struct.sourceId &&
+              candidate.id.struct.ordinal === selector.struct.ordinal,
+          )
+        : undefined
+    current = field?.type
+    if (current === undefined) return undefined
+  }
+  return current
+}
+
+const sameMembers = (
+  left: ReadonlyArray<SilkType.Nominal>,
+  right: ReadonlyArray<SilkType.Nominal>,
+): boolean =>
+  left.length === right.length &&
+  left.every((member, ordinal) => {
+    const candidate = right.at(ordinal)
+    return candidate !== undefined && SilkType.equals(member, candidate)
+  })
 
 const targetText = (target: DeclarationIndex.CanonicalId): string =>
   `${target.module}.${target.name}`
@@ -580,8 +725,185 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           )
         }
       }
-      const operations = operationsOf(region)
+      for (const rootOperation of operationsOf(region)) {
+        if (cyclicOperation(rootOperation)) {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'CyclicMatchOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'nested match operations contain a structural cycle',
+            }),
+          )
+        }
+      }
+      const operations = operationsOf(region).flatMap(operationTree)
       for (const [index, operation] of operations.entries()) {
+        if (operation._tag === 'Match') {
+          const source = fn.localTypes.at(operation.scrutinee.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const plannedScrutinee = Layout.callingShape(
+            self.layout,
+            semanticType(operation.scrutineeType),
+          )
+          const plannedResult = Layout.callingShape(self.layout, semanticType(operation.type))
+          if (
+            source === undefined ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(source), semanticType(operation.scrutineeType)) ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            !SilkType.equals(
+              operation.scrutineeShape.type,
+              semanticType(operation.scrutineeType),
+            ) ||
+            !SilkType.equals(operation.resultShape.type, semanticType(operation.type)) ||
+            plannedScrutinee === undefined ||
+            plannedResult === undefined ||
+            plannedScrutinee.laneCount !== operation.scrutineeShape.laneCount ||
+            plannedResult.laneCount !== operation.resultShape.laneCount
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidMatchLayout',
+                function: fn.id,
+                region: region.id,
+                detail: 'match scrutinee or join disagrees with its locals or compiler layout',
+              }),
+            )
+          }
+
+          const coverage = Match.cover(
+            operation.members,
+            operation.arms.map((arm) => ({
+              ...(arm.member === undefined ? {} : { member: arm.member }),
+              universal: arm.universal,
+              guarded: arm.guard !== undefined,
+            })),
+          )
+          const decisionsValid =
+            coverage.exhaustive &&
+            operation.decisions.length === operation.members.length &&
+            operation.decisions.every((decision, ordinal) => {
+              const member = operation.members.at(ordinal)
+              const expected = operation.arms.filter(
+                (arm) =>
+                  arm.universal ||
+                  (arm.member !== undefined &&
+                    member !== undefined &&
+                    SilkType.equals(arm.member, member)),
+              )
+              return (
+                member !== undefined &&
+                SilkType.equals(decision.member, member) &&
+                decision.candidates.length === expected.length &&
+                decision.candidates.every(
+                  (candidate, candidateOrdinal) =>
+                    candidate.ordinal === expected.at(candidateOrdinal)?.id.ordinal,
+                )
+              )
+            }) &&
+            operation.arms.every((arm, ordinal) => {
+              const transition = coverage.transitions.at(ordinal)
+              return (
+                transition?.reachable === true &&
+                sameMembers(arm.before, transition.before) &&
+                sameMembers(arm.after, transition.after)
+              )
+            })
+          if (!decisionsValid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidMatchDecision',
+                function: fn.id,
+                region: region.id,
+                detail: 'match decisions disagree with canonical members or source coverage order',
+              }),
+            )
+          }
+
+          for (const arm of operation.arms) {
+            for (const binding of arm.bindings) {
+              const localType = fn.localTypes.at(binding.destination.ordinal)
+              const selected =
+                arm.member === undefined
+                  ? undefined
+                  : fieldPathType(self.layout, arm.member, binding.path)
+              if (
+                localType === undefined ||
+                selected === undefined ||
+                !SilkType.equals(semanticType(localType), semanticType(binding.type)) ||
+                !SilkType.equals(selected, semanticType(binding.type)) ||
+                binding.access !== operation.access
+              ) {
+                violations.push(
+                  Object.freeze({
+                    _tag: 'Violation',
+                    rule: 'InvalidMatchBinding',
+                    function: fn.id,
+                    region: region.id,
+                    detail: `arm #${arm.id.ordinal} has an invalid pattern path, type, or access`,
+                  }),
+                )
+              }
+            }
+            if (
+              arm.guard !== undefined &&
+              fn.localTypes.at(arm.guard.result.ordinal)?._tag !== 'Bool'
+            ) {
+              violations.push(
+                Object.freeze({
+                  _tag: 'Violation',
+                  rule: 'InvalidMatchGuard',
+                  function: fn.id,
+                  region: region.id,
+                  detail: `arm #${arm.id.ordinal} guard does not produce Bool`,
+                }),
+              )
+            }
+            const resultType = fn.localTypes.at(arm.selected.result.ordinal)
+            if (
+              resultType === undefined ||
+              !SilkType.equals(semanticType(resultType), semanticType(operation.type))
+            ) {
+              violations.push(
+                Object.freeze({
+                  _tag: 'Violation',
+                  rule: 'InvalidMatchJoin',
+                  function: fn.id,
+                  region: region.id,
+                  detail: `arm #${arm.id.ordinal} result does not match the join destination`,
+                }),
+              )
+            }
+            const cleanupValid =
+              arm.selected.access === operation.access &&
+              arm.selected.endBorrow ===
+                (operation.access === 'Shared' || operation.access === 'Exclusive') &&
+              (operation.access === 'Move'
+                ? arm.selected.cleanup.every((entry) => {
+                    const selected =
+                      arm.member === undefined
+                        ? undefined
+                        : fieldPathType(self.layout, arm.member, entry.path)
+                    return selected !== undefined && SilkType.equals(selected, entry.cleanup.type)
+                  })
+                : arm.selected.cleanup.length === 0)
+            if (!cleanupValid) {
+              violations.push(
+                Object.freeze({
+                  _tag: 'Violation',
+                  rule: 'InvalidMatchOwnership',
+                  function: fn.id,
+                  region: region.id,
+                  detail: `arm #${arm.id.ordinal} has invalid selection ownership or cleanup`,
+                }),
+              )
+            }
+          }
+        }
         if (operation._tag === 'ConvertUnion') {
           const source = fn.localTypes.at(operation.source.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -859,7 +1181,42 @@ const operationText = (operation: Operation): string => {
       return `write-place ${localText(operation.root)}${selectorText(operation.selectors)} <- ${localText(operation.source)} : ${typeText(operation.type)} replacement=${operation.replacement} commit=${operation.commit} ${provenanceText(operation.provenance)}`
     case 'Drop':
       return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`} ${provenanceText(operation.provenance)}`
+    case 'Match':
+      return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
   }
+}
+
+const fieldPathText = (path: ReadonlyArray<DeclarationIndex.FieldId>): string =>
+  path.length === 0 ? 'payload' : path.map((field) => `#${field.ordinal}`).join('.')
+
+const operationLines = (operation: Operation, indent: string): ReadonlyArray<string> => {
+  if (operation._tag !== 'Match') return [`${indent}${operationText(operation)}`]
+  return [
+    `${indent}${operationText(operation)}`,
+    `${indent}  members ${operation.members.map(SilkType.encode).join(', ')}`,
+    ...operation.decisions.map(
+      (decision) =>
+        `${indent}  decision ${SilkType.encode(decision.member)} candidates=${decision.candidates.map((candidate) => `#${candidate.ordinal}`).join(',')}`,
+    ),
+    ...operation.arms.flatMap((arm) => [
+      `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : SilkType.encode(arm.member)} before=${arm.before.map(SilkType.encode).join(',') || 'empty'} after=${arm.after.map(SilkType.encode).join(',') || 'empty'} ${provenanceText(arm.provenance)}`,
+      ...arm.bindings.map(
+        (binding) =>
+          `${indent}    bind #${binding.id.ordinal} ${localText(binding.destination)} <- ${fieldPathText(binding.path)} : ${typeText(binding.type)} access=${binding.access} ${provenanceText(binding.provenance)}`,
+      ),
+      ...(arm.guard === undefined
+        ? []
+        : [
+            `${indent}    guard -> ${localText(arm.guard.result)}`,
+            ...arm.guard.operations.flatMap((child) => operationLines(child, `${indent}      `)),
+          ]),
+      `${indent}    selected access=${arm.selected.access} result=${localText(arm.selected.result)} end-borrow=${arm.selected.endBorrow}`,
+      ...arm.selected.operations.flatMap((child) => operationLines(child, `${indent}      `)),
+      ...arm.selected.cleanup.map(
+        (entry) => `${indent}      cleanup ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
+      ),
+    ]),
+  ]
 }
 
 const outcomeText = (outcome: Outcome): string => {
@@ -885,13 +1242,13 @@ const regionLines = (region: Region): ReadonlyArray<string> => {
     case 'OperationRegion':
       return [
         `  ${regionText(region.id)} operation${owner}:`,
-        ...region.operations.map((operation) => `    ${operationText(operation)}`),
+        ...region.operations.flatMap((operation) => operationLines(operation, '    ')),
         `    ${outcomeText(region.outcome)}`,
       ]
     case 'CleanupRegion':
       return [
         `  ${regionText(region.id)} cleanup${owner}:`,
-        ...region.releases.map((release) => `    ${operationText(release)}`),
+        ...region.releases.flatMap((release) => operationLines(release, '    ')),
         `    ${outcomeText(region.outcome)}`,
       ]
     case 'ConditionalRegion':

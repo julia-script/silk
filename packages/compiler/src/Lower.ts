@@ -1,6 +1,7 @@
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
+import type * as Match from './Match.js'
 import type * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -30,16 +31,20 @@ const mirType = (type: Type.Type): Mir.Type | undefined =>
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
 const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
+const patternKey = (binding: Match.BindingId): string =>
+  `${spanKey(binding.arm.match.span)}:${binding.arm.ordinal}:${binding.ordinal}`
 
 class FunctionLowering {
   readonly regions: Array<Mir.Region | undefined> = []
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()
+  readonly patternLocals = new Map<string, Mir.LocalId>()
   private operations: Array<Mir.Operation> = []
 
   constructor(
     readonly layout: Layout.Plan,
     parameterTypes: ReadonlyArray<Mir.Type>,
+    readonly ownership: Ownership.FunctionOwnership | undefined,
   ) {
     this.localTypes.push(...parameterTypes)
   }
@@ -195,6 +200,11 @@ function lowerExpression(
       if (bound === undefined) return undefined
       return { result: bound }
     }
+    case 'PatternBindingReference': {
+      const bound = fn.patternLocals.get(patternKey(expression.binding))
+      if (bound === undefined) return undefined
+      return { result: bound }
+    }
     case 'Move':
       return lowerExpression(fn, expression.subject)
     case 'UnionConvert': {
@@ -225,6 +235,119 @@ function lowerExpression(
           sourceShape,
           targetShape,
           access: expression.access,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'Match': {
+      if (expression.scrutinee._tag === 'Unavailable') return undefined
+      const scrutinee = lowerExpression(fn, expression.scrutinee)
+      const scrutineeType = mirType(expression.scrutinee.type)
+      const resultType = mirType(expression.type)
+      const scrutineeShape = Layout.callingShape(fn.layout, expression.scrutinee.type)
+      const resultShape = Layout.callingShape(fn.layout, expression.type)
+      if (
+        scrutinee === undefined ||
+        (scrutineeType?._tag !== 'Nominal' && scrutineeType?._tag !== 'Union') ||
+        resultType === undefined ||
+        scrutineeShape === undefined ||
+        resultShape === undefined
+      ) {
+        return undefined
+      }
+      const ownership = fn.ownership?.matches.find(
+        (candidate) =>
+          candidate.id.span.start === expression.id.span.start &&
+          candidate.id.span.end === expression.id.span.end,
+      )
+      const arms: Array<Mir.MatchArm> = []
+      for (const arm of expression.arms) {
+        if (!arm.reachable) continue
+        const bindings: Array<Mir.MatchBinding> = []
+        for (const binding of arm.bindings) {
+          const type = mirType(binding.type)
+          if (type === undefined) return undefined
+          const destination = fn.alloc(type)
+          fn.patternLocals.set(patternKey(binding.id), destination)
+          bindings.push(
+            Object.freeze({
+              id: binding.id,
+              destination,
+              path: binding.path,
+              type,
+              access: binding.access,
+              provenance: authored(binding.span),
+            }),
+          )
+        }
+        const guardExpression = arm.guard
+        const guard =
+          guardExpression === undefined
+            ? undefined
+            : (() => {
+                const [lowered, operations] = fn.capture(() => lowerExpression(fn, guardExpression))
+                return lowered === undefined
+                  ? undefined
+                  : Object.freeze({ operations, result: lowered.result })
+              })()
+        if (guardExpression !== undefined && guard === undefined) return undefined
+        const [selectedResult, selectedOperations] = fn.capture(() =>
+          lowerExpression(fn, arm.result),
+        )
+        if (selectedResult === undefined) return undefined
+        const ownedArm = ownership?.arms.find(
+          (candidate) => candidate.id.ordinal === arm.id.ordinal,
+        )
+        arms.push(
+          Object.freeze({
+            id: arm.id,
+            ...(arm.member === undefined ? {} : { member: arm.member }),
+            universal: arm.universal,
+            before: arm.before,
+            after: arm.after,
+            bindings: Object.freeze(bindings),
+            ...(guard === undefined ? {} : { guard }),
+            selected: Object.freeze({
+              access: expression.access,
+              operations: selectedOperations,
+              result: selectedResult.result,
+              cleanup: Object.freeze([...(ownedArm?.cleanup ?? [])]),
+              endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
+            }),
+            provenance: authored(arm.span),
+          }),
+        )
+        for (const binding of arm.bindings) fn.patternLocals.delete(patternKey(binding.id))
+      }
+      const destination = fn.alloc(resultType)
+      const decisions = expression.members.map((member) =>
+        Object.freeze({
+          member,
+          candidates: Object.freeze(
+            arms
+              .filter(
+                (arm) =>
+                  arm.universal || (arm.member !== undefined && Type.equals(arm.member, member)),
+              )
+              .map((arm) => arm.id),
+          ),
+        }),
+      )
+      fn.emit(
+        Object.freeze({
+          _tag: 'Match',
+          id: expression.id,
+          destination,
+          scrutinee: scrutinee.result,
+          scrutineeType,
+          scrutineeShape,
+          access: expression.access,
+          members: expression.members,
+          decisions: Object.freeze(decisions),
+          arms: Object.freeze(arms),
+          type: resultType,
+          resultShape,
           provenance: authored(expression.span),
         }),
       )
@@ -897,7 +1020,7 @@ const lowerInstance = (
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
   }
 
-  const lowering = new FunctionLowering(layout, parameterTypes)
+  const lowering = new FunctionLowering(layout, parameterTypes, plan)
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
     reason: 'body fell through without return',

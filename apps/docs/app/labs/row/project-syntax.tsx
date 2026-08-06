@@ -203,10 +203,14 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal}`
     case 'BindingReference':
       return `binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal}`
+    case 'PatternBindingReference':
+      return `pattern b${expression.binding.ordinal}`
     case 'Move':
       return 'move'
     case 'UnionConvert':
       return `${expression.conversion.toLowerCase()} → ${hirTypeText(expression.target)}`
+    case 'Match':
+      return `match ${expression.access.toLowerCase()} · ${expression.members.map(hirTypeText).join(' | ')}`
     case 'Construct':
       return `construct ${hirTypeText(expression.nominal)}`
     case 'ArrayConstruct':
@@ -268,6 +272,24 @@ export const hirRows = (
       node.elements.forEach((element, index) =>
         expression(element, depth + 1, `${path}.e${index}`),
       )
+    }
+    if (node._tag === 'Match') {
+      expression(node.scrutinee, depth + 1, `${path}.scrutinee`)
+      node.arms.forEach((arm) => {
+        const armSpan = hirSpan(arm.span)
+        rows.push({
+          key: `${path}.arm${arm.id.ordinal}`,
+          depth: depth + 1,
+          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : hirTypeText(arm.member)}`,
+          detail: `${arm.guard === undefined ? 'selected directly' : 'guarded'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · ${arm.before.map(hirTypeText).join(' | ') || 'empty'} → ${arm.after.map(hirTypeText).join(' | ') || 'empty'}`,
+          span: armSpan,
+          onActivate: () => onPick(armSpan),
+        })
+        if (arm.guard !== undefined) {
+          expression(arm.guard, depth + 2, `${path}.arm${arm.id.ordinal}.guard`)
+        }
+        expression(arm.result, depth + 2, `${path}.arm${arm.id.ordinal}.result`)
+      })
     }
   }
 

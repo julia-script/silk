@@ -2,6 +2,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
+import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -21,6 +22,7 @@ export type OwnershipCategory =
 export type BindingSite =
   | { readonly _tag: 'Parameter'; readonly parameter: DeclarationIndex.ParameterId }
   | { readonly _tag: 'Let'; readonly binding: Hir.BindingId }
+  | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
 
 /** One binding's ownership fact: site, category, live range, and consuming move if any. */
 export interface BindingFact {
@@ -106,7 +108,26 @@ export interface FunctionOwnership {
   readonly bindings: ReadonlyArray<BindingFact>
   readonly exits: ReadonlyArray<ExitPlan>
   readonly fixedPoints: ReadonlyArray<LoopFixedPoint>
+  readonly matches: ReadonlyArray<MatchOwnership>
   readonly verdict: Verdict
+}
+
+export interface MatchOwnership {
+  readonly _tag: 'MatchOwnership'
+  readonly id: Match.MatchId
+  readonly access: Match.Access
+  readonly span: SourceSpan.SourceSpan
+  readonly arms: ReadonlyArray<{
+    readonly id: Match.ArmId
+    readonly member?: Type.Nominal
+    readonly universal: boolean
+    readonly provisionalGuard: boolean
+    readonly bindings: ReadonlyArray<BindingSite>
+    readonly cleanup: ReadonlyArray<{
+      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly cleanup: CleanupPlan
+    }>
+  }>
 }
 
 /** One module's ownership fact table and its phase diagnostics. */
@@ -131,7 +152,11 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
       : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
-  site._tag === 'Parameter' ? `p${site.parameter.ordinal}` : `b${site.binding.ordinal}`
+  site._tag === 'Parameter'
+    ? `p${site.parameter.ordinal}`
+    : site._tag === 'Let'
+      ? `b${site.binding.ordinal}`
+      : `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
 
 interface MutableBinding {
   readonly site: BindingSite
@@ -142,12 +167,15 @@ interface MutableBinding {
   readonly type?: DeclarationIndex.SemanticType
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
+  readonly matchAccess?: Match.Access
 }
 
 interface CheckState {
+  readonly index: DeclarationIndex.Index
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
   readonly diagnostics: Array<Diagnostic.Diagnostic>
+  readonly matches: Array<MatchOwnership>
 }
 
 const useSite = (expression: Hir.Expression): BindingSite | undefined => {
@@ -156,6 +184,8 @@ const useSite = (expression: Hir.Expression): BindingSite | undefined => {
       return Object.freeze({ _tag: 'Parameter', parameter: expression.parameter })
     case 'BindingReference':
       return Object.freeze({ _tag: 'Let', binding: expression.binding })
+    case 'PatternBindingReference':
+      return Object.freeze({ _tag: 'Pattern', binding: expression.binding })
     default:
       return undefined
   }
@@ -189,6 +219,8 @@ const checkExpression = (
   live: Set<string>,
   expression: Hir.Expression,
   consuming: boolean,
+  guard = false,
+  escaping = false,
 ): void => {
   switch (expression._tag) {
     case 'ParameterReference':
@@ -204,19 +236,58 @@ const checkExpression = (
       checkUse(state, live, site, expression.span, false)
       return
     }
+    case 'PatternBindingReference': {
+      const site = useSite(expression)
+      if (site === undefined) return
+      const binding = state.bindings.get(siteKey(site))
+      const moveOnly = binding?.category._tag === 'MoveOnly'
+      if (guard && consuming && moveOnly) {
+        state.diagnostics.push(
+          Diagnostic.guardConsumesPattern(binding?.name ?? '?', expression.span),
+        )
+        checkUse(state, live, site, expression.span, false)
+        return
+      }
+      if (
+        (binding?.matchAccess === 'Shared' || binding?.matchAccess === 'Exclusive') &&
+        moveOnly &&
+        (consuming || escaping)
+      ) {
+        state.diagnostics.push(Diagnostic.matchBorrowEscape(binding.name ?? '?', expression.span))
+        checkUse(state, live, site, expression.span, false)
+        return
+      }
+      checkUse(
+        state,
+        live,
+        site,
+        expression.span,
+        binding?.matchAccess === 'Move' && consuming && moveOnly,
+      )
+      return
+    }
     case 'Move': {
       if (expression.subject._tag === 'Project' || expression.subject._tag === 'IndexPlace') {
-        checkExpression(state, live, expression.subject, false)
+        checkExpression(state, live, expression.subject, false, guard, escaping)
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
         return
       }
       const site = useSite(expression.subject)
-      if (site !== undefined) checkUse(state, live, site, expression.span, true)
-      else checkExpression(state, live, expression.subject, true)
+      if (site?._tag === 'Pattern') {
+        checkExpression(state, live, expression.subject, true, guard, escaping)
+      } else if (site !== undefined) checkUse(state, live, site, expression.span, true)
+      else checkExpression(state, live, expression.subject, true, guard, escaping)
       return
     }
     case 'UnionConvert':
-      checkExpression(state, live, expression.source, expression.access === 'Owned')
+      checkExpression(
+        state,
+        live,
+        expression.source,
+        expression.access === 'Owned',
+        guard,
+        escaping,
+      )
       return
     case 'Construct': {
       const fields = new Map(
@@ -224,35 +295,156 @@ const checkExpression = (
       )
       for (const field of expression.evaluationOrder) {
         const value = fields.get(field.ordinal)
-        if (value !== undefined) checkExpression(state, live, value, true)
+        if (value !== undefined) checkExpression(state, live, value, true, guard, escaping)
       }
       return
     }
     case 'ArrayConstruct': {
-      for (const element of expression.elements) checkExpression(state, live, element, true)
+      for (const element of expression.elements)
+        checkExpression(state, live, element, true, guard, escaping)
       return
     }
     case 'Project': {
-      checkExpression(state, live, expression.subject, false)
+      checkExpression(state, live, expression.subject, false, guard, escaping)
       if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
       }
       return
     }
     case 'IndexPlace': {
-      checkExpression(state, live, expression.subject, false)
-      checkExpression(state, live, expression.index, false)
+      checkExpression(state, live, expression.subject, false, guard, escaping)
+      checkExpression(state, live, expression.index, false, guard, escaping)
       if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
       }
       return
     }
     case 'BuiltinCall': {
-      for (const argument of expression.arguments) checkExpression(state, live, argument, false)
+      for (const argument of expression.arguments)
+        checkExpression(state, live, argument, false, guard, escaping)
       return
     }
     case 'Call': {
-      for (const argument of expression.arguments) checkExpression(state, live, argument, true)
+      for (const argument of expression.arguments)
+        checkExpression(state, live, argument, true, guard, escaping)
+      return
+    }
+    case 'Match': {
+      const scrutineeSite = useSite(expression.scrutinee)
+      const scrutineeType =
+        expression.scrutinee._tag === 'Unavailable' ? undefined : expression.scrutinee.type
+      const scrutineeBinding =
+        scrutineeSite === undefined ? undefined : state.bindings.get(siteKey(scrutineeSite))
+      if (expression.access === 'Copy') {
+        checkExpression(state, live, expression.scrutinee, false, guard, false)
+        if (categoryOf(scrutineeType)._tag === 'MoveOnly') {
+          state.diagnostics.push(
+            Diagnostic.explicitMoveRequired(scrutineeBinding?.name ?? '?', expression.span),
+          )
+        }
+      } else if (expression.access === 'Move') {
+        if (scrutineeSite === undefined) {
+          checkExpression(state, live, expression.scrutinee, true, guard, false)
+        } else {
+          checkUse(state, live, scrutineeSite, expression.span, true)
+        }
+      } else {
+        checkExpression(state, live, expression.scrutinee, false, guard, false)
+        if (expression.access === 'Exclusive') {
+          if (scrutineeSite === undefined) {
+            state.diagnostics.push(
+              Diagnostic.invalidMatchScrutineePlace('Exclusive', expression.span),
+            )
+          } else if (scrutineeBinding?.mutability !== 'Mutable') {
+            state.diagnostics.push(
+              Diagnostic.exclusiveMatchRequiresMutable(
+                scrutineeBinding?.name ?? '?',
+                expression.span,
+              ),
+            )
+          }
+        }
+      }
+
+      const afterScrutinee = new Set(live)
+      const continuing: Array<Set<string>> = []
+      const armFacts: Array<MatchOwnership['arms'][number]> = []
+      for (const arm of expression.arms) {
+        const armLive = new Set(afterScrutinee)
+        const sites: Array<BindingSite> = []
+        for (const pattern of arm.bindings) {
+          const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: pattern.id })
+          const mutable: MutableBinding = {
+            site,
+            name: pattern.name,
+            mutability: pattern.access === 'Exclusive' ? 'Mutable' : 'Immutable',
+            liveFrom: pattern.span,
+            liveTo: arm.span,
+            category: categoryOf(pattern.type),
+            type: pattern.type,
+            matchAccess: pattern.access,
+          }
+          const key = siteKey(site)
+          state.bindings.set(key, mutable)
+          state.order.push(mutable)
+          armLive.add(key)
+          sites.push(site)
+        }
+        if (arm.guard !== undefined) checkExpression(state, armLive, arm.guard, false, true, false)
+        checkExpression(state, armLive, arm.result, consuming, guard, true)
+        const cleanup =
+          expression.access === 'Move'
+            ? [
+                ...arm.cleanup.flatMap((path) => {
+                  const type = cleanupTypeAtPath(state.index, arm.member ?? scrutineeType, path)
+                  return type === undefined
+                    ? []
+                    : [Object.freeze({ path, cleanup: cleanupPlan(state.index, type) })]
+                }),
+                ...arm.bindings.flatMap((binding) => {
+                  const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
+                  return armLive.has(siteKey(site)) && categoryOf(binding.type)._tag === 'MoveOnly'
+                    ? [
+                        Object.freeze({
+                          path: binding.path,
+                          cleanup: cleanupPlan(state.index, binding.type),
+                        }),
+                      ]
+                    : []
+                }),
+              ]
+            : []
+        armFacts.push(
+          Object.freeze({
+            id: arm.id,
+            ...(arm.member === undefined ? {} : { member: arm.member }),
+            universal: arm.universal,
+            provisionalGuard: arm.guard !== undefined,
+            bindings: Object.freeze(sites),
+            cleanup: Object.freeze(cleanup),
+          }),
+        )
+        for (const site of sites) armLive.delete(siteKey(site))
+        continuing.push(armLive)
+      }
+      if (continuing.length > 0) {
+        const intersection = new Set(
+          [...(continuing.at(0) ?? [])].filter((site) =>
+            continuing.every((candidate) => candidate.has(site)),
+          ),
+        )
+        live.clear()
+        for (const site of intersection) live.add(site)
+      }
+      state.matches.push(
+        Object.freeze({
+          _tag: 'MatchOwnership',
+          id: expression.id,
+          access: expression.access,
+          span: expression.span,
+          arms: Object.freeze(armFacts),
+        }),
+      )
       return
     }
     default:
@@ -356,12 +548,38 @@ const cleanupPlan = (
   })
 }
 
+const cleanupTypeAtPath = (
+  index: DeclarationIndex.Index,
+  root: DeclarationIndex.SemanticType | undefined,
+  path: ReadonlyArray<DeclarationIndex.FieldId>,
+): DeclarationIndex.SemanticType | undefined => {
+  let current = root
+  for (const fieldId of path) {
+    if (current === undefined || !Type.isNominal(current)) return undefined
+    const declaration = DeclarationIndex.byCanonical(index, {
+      _tag: 'CanonicalDeclarationId',
+      module: current.module,
+      name: current.name,
+    })
+    if (declaration?._tag !== 'StructDeclaration') return undefined
+    const field = declaration.fields.find(
+      (candidate) =>
+        candidate.id.struct.ordinal === fieldId.struct.ordinal &&
+        candidate.id.ordinal === fieldId.ordinal,
+    )
+    current = field?.declaredType._tag === 'Resolved' ? field.declaredType.type : undefined
+  }
+  return current
+}
+
 const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): CheckedFunction => {
   const declaration = fn.declaration
   const state: CheckState = {
+    index,
     bindings: new Map(),
     order: [],
     diagnostics: [],
+    matches: [],
   }
 
   const initialLive = new Set<string>()
@@ -708,6 +926,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           })
         }),
       ),
+      matches: Object.freeze(state.matches),
       verdict,
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
@@ -752,7 +971,11 @@ const verdictText = (verdict: Verdict): string => {
 }
 
 const siteText = (site: BindingSite): string =>
-  site._tag === 'Parameter' ? `p${site.parameter.ordinal}` : `b${site.binding.ordinal}`
+  site._tag === 'Parameter'
+    ? `p${site.parameter.ordinal}`
+    : site._tag === 'Let'
+      ? `b${site.binding.ordinal}`
+      : `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
 
 const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
@@ -816,6 +1039,15 @@ export const encode = (self: ModuleOwnership): string =>
       ...fn.fixedPoints.map(
         (point) =>
           `  loop${point.loop.ordinal} fixed-point ${point.compatible ? 'compatible' : 'incompatible'} iterations=${point.iterations} incoming=${point.incoming.map(siteText).join(',') || 'none'} repeating=${point.repeating.map((state) => `[${state.map(siteText).join(',')}]`).join(',') || 'none'} following=${point.following.map(siteText).join(',') || 'none'}`,
+      ),
+      ...fn.matches.map((match) =>
+        [
+          `  match ${match.access.toLowerCase()} ${spanText(match.span)}`,
+          ...match.arms.map(
+            (arm) =>
+              `    arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Type.encode(arm.member)} guard=${arm.provisionalGuard} bindings=${arm.bindings.map(siteText).join(',') || 'none'} cleanup=${arm.cleanup.map((entry) => `${entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload'}(${cleanupText(entry.cleanup)})`).join(',') || 'none'}`,
+          ),
+        ].join('\n'),
       ),
     ]),
     '',

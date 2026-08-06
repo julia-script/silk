@@ -614,6 +614,77 @@ pub fn main() -> I32 { return choose(1, 2) }`,
   one('ownership', 'Damaged body', 'pub fn main() -> I32 { return missing() }'),
   one('ownership', 'Unknown parameter type', 'pub fn puzzle(value: Mystery) -> I32 { return value }'),
 
+  // ---- exhaustive matching --------------------------------------------------------------
+  one(
+    'matching',
+    'Guarded union match',
+    `struct Left { value: I32 }
+struct Right { value: I32 }
+fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => answer + 1
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 41 }) }`,
+  ),
+  one(
+    'matching',
+    'Nested renamed patterns',
+    `struct Token { kind: I32 }
+struct Box { token: Token extra: I32 }
+pub fn main() -> I32 {
+  let box = Box { token: Token { kind: 42 }, extra: 0 }
+  return match move box { Box { token: Token { kind: answer }, .. } => answer }
+}`,
+  ),
+  one(
+    'matching',
+    'Universal fallback',
+    `struct Left { value: I32 }
+struct Right { value: I32 }
+fn inspect(input: Left | Right) -> I32 { return match &input { Left { value } => value _ => 0 } }
+pub fn main() -> I32 { return inspect(Right { value: 42 }) }`,
+  ),
+  one(
+    'matching',
+    'Exclusive mutable match',
+    `struct Token { kind: I32 }
+pub fn main() -> I32 { let mut token = Token { kind: 42 } return match &mut token { Token { kind } => kind } }`,
+  ),
+  one(
+    'matching',
+    'Incomplete match',
+    `struct Left {}
+struct Right {}
+fn inspect(input: Left | Right) -> I32 { return match &input { Left {} => 1 } }
+pub fn main() -> I32 { return 0 }`,
+  ),
+  one(
+    'matching',
+    'Unreachable match arm',
+    `struct Token { value: I32 }
+fn inspect(input: Token) -> I32 { return match &input { Token { value } => value Token { value: other } => other } }
+pub fn main() -> I32 { return 0 }`,
+  ),
+  one(
+    'matching',
+    'Invalid guard and join',
+    `struct Left {}
+struct Right {}
+fn inspect(input: Left | Right) -> I32 { return match &input { Left {} if 1 => 1 Left {} => 1 Right {} => true } }
+pub fn main() -> I32 { return 0 }`,
+  ),
+  one(
+    'matching',
+    'Borrow escape and immutable exclusive',
+    `struct Token { value: Token }
+fn escape(input: Token) -> Token { return match &input { Token { value } => value } }
+fn exclusive(input: Token) -> I32 { return match &mut input { Token { .. } => 0 } }
+pub fn main() -> I32 { return 0 }`,
+  ),
+
   // ---- mutation and structured loops ----------------------------------------------------
   one(
     'control',

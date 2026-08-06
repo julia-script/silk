@@ -219,6 +219,14 @@ const nestedExpressionFacts = (
         return expression.arguments.map((argument) => argument.expression)
       case 'Pipeline':
         return [expression.input, ...expression.arguments.map((argument) => argument.expression)]
+      case 'Match':
+        return [
+          expression.scrutinee,
+          ...expression.arms.flatMap((arm) => [
+            ...(arm.guard === undefined ? [] : [arm.guard]),
+            arm.result,
+          ]),
+        ]
       default:
         return []
     }
@@ -349,6 +357,18 @@ export const expressionsOf = (
     self.results
       .get(module)
       ?.functions.flatMap((fn) => fn.statements.flatMap(statementExpressionFacts)) ?? [],
+  )
+
+/** Returns every retained semantic match with source patterns and canonical coverage facts. */
+export const matchesOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }>> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }> =>
+        expression._tag === 'Match',
+    ),
   )
 
 /** Returns every retained struct literal fact without reconstructing field mappings. */
@@ -515,6 +535,27 @@ export const hirUnionConversionsOf = (
     ),
   )
 
+/** Returns every typed structured HIR match in deterministic expression preorder. */
+export const hirMatchesOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Match' }>> =>
+  Object.freeze(
+    (self.results.get(module)?.hir.functions ?? []).flatMap((fn) =>
+      fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => (expression._tag === 'Match' ? [expression] : [])),
+    ),
+  )
+
+/** Returns every match-local ownership and cleanup plan in function/source order. */
+export const ownershipMatchesOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Ownership.MatchOwnership> =>
+  Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.matches) ?? [])
+
 /** Returns every verified MIR union conversion in canonical topological order. */
 export const mirUnionConversionsOf = (
   self: Snapshot,
@@ -525,6 +566,20 @@ export const mirUnionConversionsOf = (
         self.mir.value.functions.flatMap((fn) =>
           Mir.operations(fn).flatMap((operation) =>
             operation._tag === 'ConvertUnion' ? [operation] : [],
+          ),
+        ),
+      )
+
+/** Returns every structured MIR match, including nested expression matches, in DAG preorder. */
+export const mirMatchesOf = (
+  self: Snapshot,
+): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'Match' }>> =>
+  self.mir._tag === 'Unavailable'
+    ? Object.freeze([])
+    : Object.freeze(
+        self.mir.value.functions.flatMap((fn) =>
+          Mir.operations(fn).flatMap((operation) =>
+            operation._tag === 'Match' ? [operation] : [],
           ),
         ),
       )

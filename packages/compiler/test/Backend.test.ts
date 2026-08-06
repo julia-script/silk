@@ -82,6 +82,17 @@ it.effect('emits native debug metadata only for debug requests', () =>
 
 const arithmeticSource = 'pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }'
 
+const matchSource = `pub struct Left { value: I32 }
+pub struct Right { value: I32 }
+pub fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => I32.add(answer, 1)
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 41 }) }`
+
 it.effect('emits checked arithmetic through overflow intrinsics and guarded division', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(arithmeticSource, { mode: 'release' })
@@ -120,6 +131,19 @@ it.effect('emits comparisons as icmp with zero-extension and branches natively',
     assert.include(artifact.ir, 'icmp slt')
     assert.include(artifact.ir, 'zext')
     assert.include(artifact.ir, 'br i1')
+  }),
+)
+
+it.effect('privately flattens structured match regions with deterministic member branches', () =>
+  Effect.gen(function* () {
+    const first = yield* emit(matchSource, { mode: 'release' })
+    const second = yield* emit(matchSource, { mode: 'release' })
+
+    assert.include(first.ir, 'match')
+    assert.include(first.ir, 'icmp eq')
+    assert.include(first.ir, 'br i1')
+    assert.strictEqual(first.ir, second.ir)
+    assert.deepEqual(first.bitcode, second.bitcode)
   }),
 )
 

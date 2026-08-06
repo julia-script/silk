@@ -580,6 +580,88 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    case 'MatchExpression': {
+      const nodes = directNodes(node)
+      const access = nodes[0] ?? nodeOf(node, 'MatchAccess')
+      const scrutinee = nodes[1] ?? nodeOf(node, 'IdentifierExpression')
+      const arms = nodes.slice(2)
+      const accessTokens = directTokens(access)
+      const head = FormatDocument.concat(
+        printToken(context, tokenOf(node, 'MatchKeyword'), prefix, preserveBlank),
+        ...(accessTokens.length === 0
+          ? []
+          : [printNode(context, access, FormatDocument.text(' '))]),
+        printNode(context, scrutinee, FormatDocument.text(' ')),
+        printToken(context, tokenOf(node, 'LeftBrace'), FormatDocument.text(' ')),
+      )
+      if (arms.length === 0) {
+        return FormatDocument.concat(head, printToken(context, tokenOf(node, 'RightBrace')))
+      }
+      return FormatDocument.concat(
+        head,
+        FormatDocument.indent(
+          FormatDocument.concat(
+            ...arms.map((arm) => printNode(context, arm, FormatDocument.hardLine, true)),
+          ),
+        ),
+        printToken(context, tokenOf(node, 'RightBrace'), FormatDocument.hardLine),
+      )
+    }
+    case 'MatchAccess':
+      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'MatchArm': {
+      const nodes = directNodes(node)
+      const pattern = nodes[0] ?? nodeOf(node, 'UniversalPattern')
+      const guardKeyword = directTokens(node).find((token) => token.kind === 'IfKeyword')
+      const result = nodes.at(-1) ?? nodeOf(node, 'IdentifierExpression')
+      const guard = guardKeyword === undefined ? undefined : nodes[1]
+      return FormatDocument.concat(
+        printNode(context, pattern, prefix, preserveBlank),
+        ...(guardKeyword === undefined || guard === undefined
+          ? []
+          : [
+              printToken(context, guardKeyword, FormatDocument.text(' ')),
+              printNode(context, guard, FormatDocument.text(' ')),
+            ]),
+        printToken(context, tokenOf(node, 'FatArrow'), FormatDocument.text(' ')),
+        printNode(context, result, FormatDocument.text(' ')),
+      )
+    }
+    case 'NominalPattern': {
+      const nodes = directNodes(node)
+      return FormatDocument.concat(
+        printNode(context, nodes[0] ?? nodeOf(node, 'TypePath'), prefix, preserveBlank),
+        printDelimited(
+          context,
+          tokenOf(node, 'LeftBrace'),
+          nodes.slice(1),
+          commaTokens(node),
+          tokenOf(node, 'RightBrace'),
+          FormatDocument.text(' '),
+        ),
+      )
+    }
+    case 'UniversalPattern':
+    case 'RestPattern':
+      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'PatternField': {
+      const identifiers = directTokens(node).filter((token) => token.kind === 'Identifier')
+      const nested = directNodes(node).find((child) => child.kind === 'NominalPattern')
+      const colon = directTokens(node).find((token) => token.kind === 'Colon')
+      const name = identifiers[0] ?? tokenOf(node, 'Identifier')
+      if (colon === undefined) return printToken(context, name, prefix, preserveBlank)
+      return FormatDocument.concat(
+        printToken(context, name, prefix, preserveBlank),
+        printToken(context, colon),
+        nested === undefined
+          ? printToken(
+              context,
+              identifiers[1] ?? tokenOf(node, 'Identifier', 1),
+              FormatDocument.text(' '),
+            )
+          : printNode(context, nested, FormatDocument.text(' ')),
+      )
+    }
     case 'StructLiteralExpression': {
       const nodes = directNodes(node)
       const target = nodes[0] ?? nodeOf(node, 'TypePath')

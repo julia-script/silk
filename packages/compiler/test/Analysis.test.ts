@@ -5,6 +5,7 @@ import * as Hir from '../src/Hir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
+import { invalidMatchCorpus } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -94,6 +95,47 @@ it.effect('evaluates and answers ownership through the single-source convenience
     const facts = Analysis.ownershipOf(owned, 'memory/ownership')
     assert.strictEqual(facts?.functions.at(0)?.verdict._tag, 'Satisfied')
     assert.strictEqual(facts?.functions.at(0)?.bindings.at(0)?.category._tag, 'Copyable')
+  }),
+)
+
+it.effect('answers stable match facts across semantic, HIR, ownership, MIR, and trace phases', () =>
+  Effect.gen(function* () {
+    const source = `struct Left { value: I32 }
+struct Right { value: I32 }
+fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => answer
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 42 }) }`
+    const first = yield* Analysis.ofSource(
+      'memory/match-facade',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    const second = yield* Analysis.ofSource(
+      'memory/match-facade',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    const answer = (self: Analysis.Snapshot) => ({
+      semantic: Analysis.matchesOf(self, 'memory/match-facade'),
+      hir: Analysis.hirMatchesOf(self, 'memory/match-facade'),
+      ownership: Analysis.ownershipMatchesOf(self, 'memory/match-facade'),
+      mir: Analysis.mirMatchesOf(self),
+      trace: Analysis.traceOf(Analysis.evaluate(self)).filter((event) =>
+        event._tag.startsWith('Match'),
+      ),
+    })
+
+    assert.deepEqual(answer(first), answer(second))
+    assert.strictEqual(answer(first).semantic.at(0)?.arms.length, 3)
+    assert.strictEqual(answer(first).hir.at(0)?.arms.at(0)?.guard?._tag, 'BooleanLiteral')
+    assert.strictEqual(answer(first).ownership.at(0)?.arms.at(0)?.provisionalGuard, true)
+    assert.strictEqual(answer(first).mir.at(0)?.decisions.length, 2)
+    assert.strictEqual(answer(first).trace.at(-1)?._tag, 'MatchBorrowEnd')
   }),
 )
 
@@ -263,5 +305,20 @@ it.effect('keeps unsupported targets explicit and queryable without manufacturin
     assert.strictEqual(Analysis.layoutCatalogOf(unsupported)._tag, 'Unavailable')
     assert.strictEqual(Analysis.layoutOf(unsupported)._tag, 'Unavailable')
     assert.strictEqual(Analysis.mirOf(unsupported)._tag, 'Unavailable')
+  }),
+)
+
+it.effect('keeps invalid match corpus failures phase-owned and downstream facts queryable', () =>
+  Effect.gen(function* () {
+    for (const program of invalidMatchCorpus) {
+      const self = yield* Analysis.ofSource(
+        `memory/${program.name}`,
+        ascii(program.source),
+        'wasm32-unknown-unknown',
+      )
+      const codes = Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
+      for (const code of program.codes) assert.include(codes, code, program.name)
+      assert.isAtLeast(Analysis.matchesOf(self, `memory/${program.name}`).length, 1, program.name)
+    }
   }),
 )

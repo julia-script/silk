@@ -1,5 +1,6 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Instances from './Instances.js'
+import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -137,6 +138,25 @@ export interface CleanupTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface MatchTraceEvent {
+  readonly _tag:
+    | 'MatchDispatch'
+    | 'MatchCandidate'
+    | 'MatchSelected'
+    | 'MatchCleanup'
+    | 'MatchBorrowEnd'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly match: number
+  readonly arm?: number
+  readonly member: Type.Nominal
+  readonly access: Match.Access
+  readonly binding?: number
+  readonly path?: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly value?: Value
+  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly span: SourceSpan.SourceSpan
+}
+
 export interface ControlTraceEvent {
   readonly _tag:
     | 'RegionEntry'
@@ -166,6 +186,7 @@ export type TraceEvent =
   | UnionConversionTraceEvent
   | PlaceReadTraceEvent
   | CleanupTraceEvent
+  | MatchTraceEvent
   | ControlTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
@@ -301,6 +322,29 @@ function executeFunction(
         return value === undefined ? [] : cleanupMembers(field.cleanup, value.value)
       }),
     )
+  }
+
+  const selectFieldPath = (
+    root: AggregateValue,
+    path: ReadonlyArray<DeclarationIndex.FieldId>,
+  ): Value => {
+    let selected: Value = root
+    for (const selector of path) {
+      if (selected._tag !== 'AggregateValue') {
+        throw new RangeError('MIR verifier allowed a match field below a non-struct value')
+      }
+      const field: AggregateValue['fields'][number] | undefined = selected.fields.find(
+        (candidate) =>
+          candidate.field.ordinal === selector.ordinal &&
+          candidate.field.struct.sourceId === selector.struct.sourceId &&
+          candidate.field.struct.ordinal === selector.struct.ordinal,
+      )
+      if (field === undefined) {
+        throw new RangeError('MIR verifier allowed a missing match field')
+      }
+      selected = field.value
+    }
+    return selected
   }
 
   const resolvePlace = (
@@ -448,372 +492,514 @@ function executeFunction(
       continue
     }
 
-    const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
-    for (const operation of operations) {
-      switch (operation._tag) {
-        case 'Literal':
-          locals.set(operation.destination.ordinal, {
-            value: value(operation.value),
-            fromCall: false,
-          })
-          break
-        case 'Move':
-          locals.set(operation.destination.ordinal, read(operation.source))
-          break
-        case 'ConvertUnion': {
-          const source = read(operation.source).value
-          const mapping =
-            operation.conversion === 'Inject'
-              ? operation.mappings.at(0)
-              : source._tag === 'UnionValue'
-                ? operation.mappings.find((candidate) =>
-                    Type.equals(candidate.source, source.member),
-                  )
-                : undefined
-          const payload =
-            operation.conversion === 'Inject' && source._tag === 'AggregateValue'
-              ? source
-              : operation.conversion === 'Widen' && source._tag === 'UnionValue'
-                ? source.payload
-                : undefined
-          if (mapping === undefined || payload === undefined) {
-            throw new RangeError('MIR verifier allowed an invalid logical union conversion')
+    const executeOperations = (operations: ReadonlyArray<Mir.Operation>): Step | undefined => {
+      for (const operation of operations) {
+        switch (operation._tag) {
+          case 'Match': {
+            const scrutinee = read(operation.scrutinee).value
+            const activeMember =
+              scrutinee._tag === 'UnionValue'
+                ? scrutinee.member
+                : scrutinee._tag === 'AggregateValue'
+                  ? scrutinee.type
+                  : undefined
+            const payload =
+              scrutinee._tag === 'UnionValue'
+                ? scrutinee.payload
+                : scrutinee._tag === 'AggregateValue'
+                  ? scrutinee
+                  : undefined
+            if (activeMember === undefined || payload === undefined) {
+              throw new RangeError('MIR verifier allowed matching a scalar value')
+            }
+            trace.push(
+              Object.freeze({
+                _tag: 'MatchDispatch',
+                function: fn.id,
+                match: operation.provenance.span.start,
+                member: activeMember,
+                access: operation.access,
+                span: operation.provenance.span,
+              }),
+            )
+            const decision = operation.decisions.find((candidate) =>
+              Type.equals(candidate.member, activeMember),
+            )
+            if (decision === undefined) {
+              throw new RangeError('MIR verifier allowed a match without its active member')
+            }
+            let selected = false
+            for (const candidateId of decision.candidates) {
+              const arm = operation.arms.find(
+                (candidate) => candidate.id.ordinal === candidateId.ordinal,
+              )
+              if (arm === undefined) {
+                throw new RangeError('MIR verifier allowed a missing match candidate')
+              }
+              trace.push(
+                Object.freeze({
+                  _tag: 'MatchCandidate',
+                  function: fn.id,
+                  match: operation.provenance.span.start,
+                  arm: arm.id.ordinal,
+                  member: activeMember,
+                  access: operation.access,
+                  span: arm.provenance.span,
+                }),
+              )
+              for (const binding of arm.bindings) {
+                const bound = selectFieldPath(payload, binding.path)
+                locals.set(binding.destination.ordinal, { value: bound, fromCall: false })
+                trace.push(
+                  Object.freeze({
+                    _tag: 'MatchCandidate',
+                    function: fn.id,
+                    match: operation.provenance.span.start,
+                    arm: arm.id.ordinal,
+                    member: activeMember,
+                    access: operation.access,
+                    binding: binding.id.ordinal,
+                    path: binding.path,
+                    value: bound,
+                    span: binding.provenance.span,
+                  }),
+                )
+              }
+              if (arm.guard !== undefined) {
+                const guardStep = executeOperations(arm.guard.operations)
+                if (guardStep !== undefined) return guardStep
+                if (readI32(arm.guard.result).value === 0) continue
+              }
+              trace.push(
+                Object.freeze({
+                  _tag: 'MatchSelected',
+                  function: fn.id,
+                  match: operation.provenance.span.start,
+                  arm: arm.id.ordinal,
+                  member: activeMember,
+                  access: operation.access,
+                  span: arm.provenance.span,
+                }),
+              )
+              const selectedStep = executeOperations(arm.selected.operations)
+              if (selectedStep !== undefined) return selectedStep
+              for (const cleanup of arm.selected.cleanup) {
+                const owner = selectFieldPath(payload, cleanup.path)
+                const members = cleanupMembers(cleanup.cleanup, owner)
+                trace.push(
+                  Object.freeze({
+                    _tag: 'MatchCleanup',
+                    function: fn.id,
+                    match: operation.provenance.span.start,
+                    arm: arm.id.ordinal,
+                    member: activeMember,
+                    access: operation.access,
+                    path: cleanup.path,
+                    ...(members.length === 0 ? {} : { members }),
+                    span: arm.provenance.span,
+                  }),
+                )
+              }
+              const result = read(arm.selected.result)
+              locals.set(operation.destination.ordinal, result)
+              if (arm.selected.endBorrow) {
+                trace.push(
+                  Object.freeze({
+                    _tag: 'MatchBorrowEnd',
+                    function: fn.id,
+                    match: operation.provenance.span.start,
+                    arm: arm.id.ordinal,
+                    member: activeMember,
+                    access: operation.access,
+                    span: arm.provenance.span,
+                  }),
+                )
+              }
+              selected = true
+              break
+            }
+            if (!selected) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: `exhaustive match rejected every guard in ${fn.id.module}.${fn.id.name}`,
+                span: operation.provenance.span,
+              })
+            }
+            break
           }
-          const converted: UnionValue = Object.freeze({
-            _tag: 'UnionValue',
-            type: operation.targetType.type,
-            member: mapping.target,
-            payload,
-          })
-          locals.set(operation.destination.ordinal, { value: converted, fromCall: false })
-          trace.push(
-            Object.freeze({
-              _tag: 'UnionConversion',
-              function: fn.id,
-              conversion: operation.conversion,
-              source: operation.sourceType.type,
-              target: operation.targetType.type,
-              member: converted.member,
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'Binary': {
-          const left = BigInt(readI32(operation.left).value)
-          const right = BigInt(readI32(operation.right).value)
-          if (
-            operation.operator === 'Equals' ||
-            operation.operator === 'NotEquals' ||
-            operation.operator === 'LessThan' ||
-            operation.operator === 'LessOrEqual' ||
-            operation.operator === 'GreaterThan' ||
-            operation.operator === 'GreaterOrEqual'
-          ) {
-            const holds =
-              operation.operator === 'Equals'
-                ? left === right
-                : operation.operator === 'NotEquals'
-                  ? left !== right
-                  : operation.operator === 'LessThan'
-                    ? left < right
-                    : operation.operator === 'LessOrEqual'
-                      ? left <= right
-                      : operation.operator === 'GreaterThan'
-                        ? left > right
-                        : left >= right
+          case 'Literal':
             locals.set(operation.destination.ordinal, {
-              value: value(holds ? 1 : 0),
+              value: value(operation.value),
+              fromCall: false,
+            })
+            break
+          case 'Move':
+            locals.set(operation.destination.ordinal, read(operation.source))
+            break
+          case 'ConvertUnion': {
+            const source = read(operation.source).value
+            const mapping =
+              operation.conversion === 'Inject'
+                ? operation.mappings.at(0)
+                : source._tag === 'UnionValue'
+                  ? operation.mappings.find((candidate) =>
+                      Type.equals(candidate.source, source.member),
+                    )
+                  : undefined
+            const payload =
+              operation.conversion === 'Inject' && source._tag === 'AggregateValue'
+                ? source
+                : operation.conversion === 'Widen' && source._tag === 'UnionValue'
+                  ? source.payload
+                  : undefined
+            if (mapping === undefined || payload === undefined) {
+              throw new RangeError('MIR verifier allowed an invalid logical union conversion')
+            }
+            const converted: UnionValue = Object.freeze({
+              _tag: 'UnionValue',
+              type: operation.targetType.type,
+              member: mapping.target,
+              payload,
+            })
+            locals.set(operation.destination.ordinal, { value: converted, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'UnionConversion',
+                function: fn.id,
+                conversion: operation.conversion,
+                source: operation.sourceType.type,
+                target: operation.targetType.type,
+                member: converted.member,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'Binary': {
+            const left = BigInt(readI32(operation.left).value)
+            const right = BigInt(readI32(operation.right).value)
+            if (
+              operation.operator === 'Equals' ||
+              operation.operator === 'NotEquals' ||
+              operation.operator === 'LessThan' ||
+              operation.operator === 'LessOrEqual' ||
+              operation.operator === 'GreaterThan' ||
+              operation.operator === 'GreaterOrEqual'
+            ) {
+              const holds =
+                operation.operator === 'Equals'
+                  ? left === right
+                  : operation.operator === 'NotEquals'
+                    ? left !== right
+                    : operation.operator === 'LessThan'
+                      ? left < right
+                      : operation.operator === 'LessOrEqual'
+                        ? left <= right
+                        : operation.operator === 'GreaterThan'
+                          ? left > right
+                          : left >= right
+              locals.set(operation.destination.ordinal, {
+                value: value(holds ? 1 : 0),
+                fromCall: false,
+              })
+              break
+            }
+            if (
+              (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
+              right === 0n
+            ) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'division by zero',
+                span: operation.provenance.span,
+              })
+            }
+            const exact =
+              operation.operator === 'Add'
+                ? left + right
+                : operation.operator === 'Subtract'
+                  ? left - right
+                  : operation.operator === 'Multiply'
+                    ? left * right
+                    : operation.operator === 'Divide'
+                      ? left / right
+                      : left % right
+            if (exact < -2147483648n || exact > 2147483647n) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'arithmetic overflow',
+                span: operation.provenance.span,
+              })
+            }
+            locals.set(operation.destination.ordinal, {
+              value: value(Number(exact)),
               fromCall: false,
             })
             break
           }
-          if (
-            (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
-            right === 0n
-          ) {
-            return blockedStep({
-              _tag: 'Trap',
-              function: fn.id,
-              reason: 'division by zero',
-              span: operation.provenance.span,
-            })
-          }
-          const exact =
-            operation.operator === 'Add'
-              ? left + right
-              : operation.operator === 'Subtract'
-                ? left - right
-                : operation.operator === 'Multiply'
-                  ? left * right
-                  : operation.operator === 'Divide'
-                    ? left / right
-                    : left % right
-          if (exact < -2147483648n || exact > 2147483647n) {
-            return blockedStep({
-              _tag: 'Trap',
-              function: fn.id,
-              reason: 'arithmetic overflow',
-              span: operation.provenance.span,
-            })
-          }
-          locals.set(operation.destination.ordinal, {
-            value: value(Number(exact)),
-            fromCall: false,
-          })
-          break
-        }
-        case 'Construct': {
-          const aggregate: AggregateValue = Object.freeze({
-            _tag: 'AggregateValue',
-            type: operation.type.type,
-            fields: Object.freeze(
-              operation.fields.map((field) =>
-                Object.freeze({ field: field.field, value: read(field.value).value }),
+          case 'Construct': {
+            const aggregate: AggregateValue = Object.freeze({
+              _tag: 'AggregateValue',
+              type: operation.type.type,
+              fields: Object.freeze(
+                operation.fields.map((field) =>
+                  Object.freeze({ field: field.field, value: read(field.value).value }),
+                ),
               ),
-            ),
-          })
-          locals.set(operation.destination.ordinal, { value: aggregate, fromCall: false })
-          trace.push(
-            Object.freeze({
-              _tag: 'Construct',
-              function: fn.id,
-              type: aggregate.type,
-              fieldCount: aggregate.fields.length,
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'ConstructArray': {
-          const array: ArrayValue = Object.freeze({
-            _tag: 'ArrayValue',
-            type: operation.type.type,
-            elements: Object.freeze(operation.elements.map((element) => read(element).value)),
-          })
-          locals.set(operation.destination.ordinal, { value: array, fromCall: false })
-          trace.push(
-            Object.freeze({
-              _tag: 'ArrayConstruct',
-              function: fn.id,
-              type: array.type,
-              elementCount: array.elements.length,
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'Project': {
-          const aggregate = read(operation.source).value
-          if (aggregate._tag !== 'AggregateValue') {
-            throw new RangeError('MIR verifier allowed projection from a scalar value')
-          }
-          const selected = aggregate.fields.find(
-            (candidate) =>
-              candidate.field.ordinal === operation.field.ordinal &&
-              candidate.field.struct.sourceId === operation.field.struct.sourceId &&
-              candidate.field.struct.ordinal === operation.field.struct.ordinal,
-          )
-          if (selected === undefined) {
-            throw new RangeError('MIR verifier allowed projection of a missing aggregate field')
-          }
-          locals.set(operation.destination.ordinal, { value: selected.value, fromCall: false })
-          trace.push(
-            Object.freeze({
-              _tag: 'Project',
-              function: fn.id,
-              type: aggregate.type,
-              field: operation.field,
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'ReadPlace': {
-          let selected = read(operation.root).value
-          const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
-          for (const selector of operation.selectors) {
-            if (selector._tag === 'FieldSelector') {
-              if (selected._tag !== 'AggregateValue') {
-                throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
-              }
-              const field = selected.fields.find(
-                (candidate) =>
-                  candidate.field.ordinal === selector.field.ordinal &&
-                  candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-                  candidate.field.struct.ordinal === selector.field.struct.ordinal,
-              )
-              if (field === undefined) {
-                throw new RangeError('MIR verifier allowed a missing field selector')
-              }
-              selected = field.value
-              selectors.push(Object.freeze({ _tag: 'Field', field: selector.field }))
-              continue
-            }
-            if (selected._tag !== 'ArrayValue') {
-              throw new RangeError('MIR verifier allowed an element selector on a non-array value')
-            }
-            const index =
-              selector.index._tag === 'Proven'
-                ? selector.index.value
-                : readI32(selector.index.local).value
-            if (index < 0 || index >= selector.length) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: `array index ${index} is outside length ${selector.length} in ${fn.id.module}.${fn.id.name}`,
-                span: selector.provenance.span,
-              })
-            }
-            const element = selected.elements.at(index)
-            if (element === undefined) {
-              throw new RangeError('MIR verifier allowed an incomplete array value')
-            }
-            selectors.push(
-              Object.freeze({
-                _tag: 'Element',
-                array: selected.type,
-                index,
-                bounds: selector.index._tag === 'Proven' ? 'Proven' : 'Checked',
-                span: selector.provenance.span,
-              }),
-            )
-            selected = element
-          }
-          locals.set(operation.destination.ordinal, { value: selected, fromCall: false })
-          trace.push(
-            Object.freeze({
-              _tag: 'PlaceRead',
-              function: fn.id,
-              selectors: Object.freeze(selectors),
-              value: selected,
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'CheckPlace': {
-          const resolved = resolvePlace(operation.root, operation.selectors)
-          if (resolved._tag === 'Blocked') return resolved.step
-          checkedPlaces.set(operation.selectors, resolved.indexes)
-          trace.push(
-            Object.freeze({
-              _tag: 'WriteCheck',
-              function: fn.id,
-              region: region.id.ordinal,
-              ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'WritePlace': {
-          const indexes = checkedPlaces.get(operation.selectors)
-          if (indexes === undefined) throw new RangeError('MIR write executed without its precheck')
-          const root = read(operation.root)
-          const replacement = read(operation.source)
-          if (operation.replacement === 'Owned') {
-            const previous = resolvePlace(operation.root, operation.selectors)
-            if (previous._tag === 'Blocked') return previous.step
-            const members =
-              previous.selected._tag === 'UnionValue'
-                ? Object.freeze([previous.selected.member])
-                : Object.freeze([])
+            })
+            locals.set(operation.destination.ordinal, { value: aggregate, fromCall: false })
             trace.push(
               Object.freeze({
-                _tag: 'ReplacementCleanup',
+                _tag: 'Construct',
+                function: fn.id,
+                type: aggregate.type,
+                fieldCount: aggregate.fields.length,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'ConstructArray': {
+            const array: ArrayValue = Object.freeze({
+              _tag: 'ArrayValue',
+              type: operation.type.type,
+              elements: Object.freeze(operation.elements.map((element) => read(element).value)),
+            })
+            locals.set(operation.destination.ordinal, { value: array, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'ArrayConstruct',
+                function: fn.id,
+                type: array.type,
+                elementCount: array.elements.length,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'Project': {
+            const aggregate = read(operation.source).value
+            if (aggregate._tag !== 'AggregateValue') {
+              throw new RangeError('MIR verifier allowed projection from a scalar value')
+            }
+            const selected = aggregate.fields.find(
+              (candidate) =>
+                candidate.field.ordinal === operation.field.ordinal &&
+                candidate.field.struct.sourceId === operation.field.struct.sourceId &&
+                candidate.field.struct.ordinal === operation.field.struct.ordinal,
+            )
+            if (selected === undefined) {
+              throw new RangeError('MIR verifier allowed projection of a missing aggregate field')
+            }
+            locals.set(operation.destination.ordinal, { value: selected.value, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'Project',
+                function: fn.id,
+                type: aggregate.type,
+                field: operation.field,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'ReadPlace': {
+            let selected = read(operation.root).value
+            const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
+            for (const selector of operation.selectors) {
+              if (selector._tag === 'FieldSelector') {
+                if (selected._tag !== 'AggregateValue') {
+                  throw new RangeError(
+                    'MIR verifier allowed a field selector on a non-struct value',
+                  )
+                }
+                const field = selected.fields.find(
+                  (candidate) =>
+                    candidate.field.ordinal === selector.field.ordinal &&
+                    candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+                    candidate.field.struct.ordinal === selector.field.struct.ordinal,
+                )
+                if (field === undefined) {
+                  throw new RangeError('MIR verifier allowed a missing field selector')
+                }
+                selected = field.value
+                selectors.push(Object.freeze({ _tag: 'Field', field: selector.field }))
+                continue
+              }
+              if (selected._tag !== 'ArrayValue') {
+                throw new RangeError(
+                  'MIR verifier allowed an element selector on a non-array value',
+                )
+              }
+              const index =
+                selector.index._tag === 'Proven'
+                  ? selector.index.value
+                  : readI32(selector.index.local).value
+              if (index < 0 || index >= selector.length) {
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: `array index ${index} is outside length ${selector.length} in ${fn.id.module}.${fn.id.name}`,
+                  span: selector.provenance.span,
+                })
+              }
+              const element = selected.elements.at(index)
+              if (element === undefined) {
+                throw new RangeError('MIR verifier allowed an incomplete array value')
+              }
+              selectors.push(
+                Object.freeze({
+                  _tag: 'Element',
+                  array: selected.type,
+                  index,
+                  bounds: selector.index._tag === 'Proven' ? 'Proven' : 'Checked',
+                  span: selector.provenance.span,
+                }),
+              )
+              selected = element
+            }
+            locals.set(operation.destination.ordinal, { value: selected, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'PlaceRead',
+                function: fn.id,
+                selectors: Object.freeze(selectors),
+                value: selected,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'CheckPlace': {
+            const resolved = resolvePlace(operation.root, operation.selectors)
+            if (resolved._tag === 'Blocked') return resolved.step
+            checkedPlaces.set(operation.selectors, resolved.indexes)
+            trace.push(
+              Object.freeze({
+                _tag: 'WriteCheck',
                 function: fn.id,
                 region: region.id.ordinal,
                 ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'WritePlace': {
+            const indexes = checkedPlaces.get(operation.selectors)
+            if (indexes === undefined)
+              throw new RangeError('MIR write executed without its precheck')
+            const root = read(operation.root)
+            const replacement = read(operation.source)
+            if (operation.replacement === 'Owned') {
+              const previous = resolvePlace(operation.root, operation.selectors)
+              if (previous._tag === 'Blocked') return previous.step
+              const members =
+                previous.selected._tag === 'UnionValue'
+                  ? Object.freeze([previous.selected.member])
+                  : Object.freeze([])
+              trace.push(
+                Object.freeze({
+                  _tag: 'ReplacementCleanup',
+                  function: fn.id,
+                  region: region.id.ordinal,
+                  ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+                  ...(members.length === 0 ? {} : { members }),
+                  span: operation.provenance.span,
+                }),
+              )
+            }
+            locals.set(operation.root.ordinal, {
+              value: replacePlace(root.value, operation.selectors, indexes, replacement.value),
+              fromCall: replacement.fromCall,
+            })
+            checkedPlaces.delete(operation.selectors)
+            trace.push(
+              Object.freeze({
+                _tag: 'Replacement',
+                function: fn.id,
+                region: region.id.ordinal,
+                ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'Drop': {
+            const dropped = read(operation.local).value
+            const members = cleanupMembers(operation.cleanup, dropped)
+            trace.push(
+              Object.freeze({
+                _tag: 'Cleanup',
+                function: fn.id,
+                local: operation.local.ordinal,
                 ...(members.length === 0 ? {} : { members }),
                 span: operation.provenance.span,
               }),
             )
+            break
           }
-          locals.set(operation.root.ordinal, {
-            value: replacePlace(root.value, operation.selectors, indexes, replacement.value),
-            fromCall: replacement.fromCall,
-          })
-          checkedPlaces.delete(operation.selectors)
-          trace.push(
-            Object.freeze({
-              _tag: 'Replacement',
-              function: fn.id,
-              region: region.id.ordinal,
-              ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'Drop': {
-          const dropped = read(operation.local).value
-          const members = cleanupMembers(operation.cleanup, dropped)
-          trace.push(
-            Object.freeze({
-              _tag: 'Cleanup',
-              function: fn.id,
-              local: operation.local.ordinal,
-              ...(members.length === 0 ? {} : { members }),
-              span: operation.provenance.span,
-            }),
-          )
-          break
-        }
-        case 'Call': {
-          const target = functionFor(program, operation.target)
-          if (target === undefined) {
-            return blockedStep({
-              _tag: 'MissingFunction',
-              target: operation.target,
-              span: operation.provenance.span,
-            })
-          }
-          trace.push(
-            Object.freeze({
-              _tag: 'Call',
-              caller: fn.id,
-              target: operation.target,
-              span: operation.provenance.span,
-            }),
-          )
-          const cycleStart = active.findIndex((candidate) => sameId(candidate, operation.target))
-          if (cycleStart >= 0) {
-            return blockedStep({
-              _tag: 'RecursiveCycle',
-              cycle: Object.freeze([...active.slice(cycleStart), operation.target]),
-              closingCallSpan: operation.provenance.span,
-            })
-          }
-          const argumentStates = operation.arguments.map((argument) => read(argument))
-          argumentStates.forEach((state, ordinal) => {
+          case 'Call': {
+            const target = functionFor(program, operation.target)
+            if (target === undefined) {
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.target,
+                span: operation.provenance.span,
+              })
+            }
             trace.push(
               Object.freeze({
-                _tag: 'Binding',
+                _tag: 'Call',
+                caller: fn.id,
                 target: operation.target,
-                callSpan: operation.provenance.span,
-                argumentOrdinal: ordinal,
-                parameterOrdinal: ordinal,
-                value: state.value,
-                fromCall: state.fromCall,
                 span: operation.provenance.span,
               }),
             )
-          })
-          const result = executeFunction(
-            program,
-            target,
-            argumentStates.map((state) => state.value),
-            Object.freeze([...active, operation.target]),
-            trace,
-          )
-          if (result._tag === 'Blocked') return result
-          locals.set(operation.destination.ordinal, { value: result.value, fromCall: true })
-          break
+            const cycleStart = active.findIndex((candidate) => sameId(candidate, operation.target))
+            if (cycleStart >= 0) {
+              return blockedStep({
+                _tag: 'RecursiveCycle',
+                cycle: Object.freeze([...active.slice(cycleStart), operation.target]),
+                closingCallSpan: operation.provenance.span,
+              })
+            }
+            const argumentStates = operation.arguments.map((argument) => read(argument))
+            argumentStates.forEach((state, ordinal) => {
+              trace.push(
+                Object.freeze({
+                  _tag: 'Binding',
+                  target: operation.target,
+                  callSpan: operation.provenance.span,
+                  argumentOrdinal: ordinal,
+                  parameterOrdinal: ordinal,
+                  value: state.value,
+                  fromCall: state.fromCall,
+                  span: operation.provenance.span,
+                }),
+              )
+            })
+            const result = executeFunction(
+              program,
+              target,
+              argumentStates.map((state) => state.value),
+              Object.freeze([...active, operation.target]),
+              trace,
+            )
+            if (result._tag === 'Blocked') return result
+            locals.set(operation.destination.ordinal, { value: result.value, fromCall: true })
+            break
+          }
         }
       }
+      return undefined
     }
-
+    const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
+    const operationStep = executeOperations(operations)
+    if (operationStep !== undefined) return operationStep
     const outcome = region.outcome
     switch (outcome._tag) {
       case 'Return': {

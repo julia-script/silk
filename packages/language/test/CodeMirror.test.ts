@@ -46,6 +46,16 @@ it('highlights type unions separately from pipelines', () => {
   assert.deepStrictEqual(spellings('Token | End |> inspect', 'operator'), ['|', '|>'])
 })
 
+it('highlights the complete match surface through compiler tokens', () => {
+  const doc = 'match &mut event { Token { kind, .. } if true => kind _ => 0 }'
+  assert.deepStrictEqual(spellings(doc, 'keyword'), ['match', 'mut', 'if'])
+  assert.deepStrictEqual(spellings(doc, 'operator'), ['&', '=>', '=>'])
+  assert.include(spellings(doc, 'punctuation'), '..')
+  assert.deepStrictEqual(spellings(doc, 'boolean'), ['true'])
+  assert.include(spellings(doc, 'identifier'), 'Token')
+  assert.include(spellings(doc, 'identifier'), '_')
+})
+
 it('classifies Never and executable scalar names as builtin types', () => {
   assert.deepStrictEqual(spellings('Never | I32 | Bool', 'type'), ['Never', 'I32', 'Bool'])
 })

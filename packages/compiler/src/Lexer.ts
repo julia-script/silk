@@ -48,6 +48,7 @@ const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x3c ||
   byte === 0x3e ||
   byte === 0x7c ||
+  byte === 0x26 ||
   byte === 0x2e
 
 const compoundPunctuationKind = (
@@ -58,10 +59,12 @@ const compoundPunctuationKind = (
   const second = bytes[index + 1]
   if (first === 0x2d && second === 0x3e) return 'Arrow'
   if (first === 0x3d && second === 0x3d) return 'EqualEqual'
+  if (first === 0x3d && second === 0x3e) return 'FatArrow'
   if (first === 0x21 && second === 0x3d) return 'BangEqual'
   if (first === 0x3c && second === 0x3d) return 'LessEqual'
   if (first === 0x3e && second === 0x3d) return 'GreaterEqual'
   if (first === 0x7c && second === 0x3e) return 'PipeGreater'
+  if (first === 0x2e && second === 0x2e) return 'DotDot'
   return undefined
 }
 
@@ -82,6 +85,7 @@ const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['if', 'IfKeyword'],
   ['else', 'ElseKeyword'],
   ['mut', 'MutKeyword'],
+  ['match', 'MatchKeyword'],
   ['while', 'WhileKeyword'],
   ['break', 'BreakKeyword'],
   ['continue', 'ContinueKeyword'],
@@ -198,6 +202,8 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'Greater'
     case 0x7c:
       return 'Pipe'
+    case 0x26:
+      return 'Ampersand'
     case 0x2e:
       return 'Dot'
     default:

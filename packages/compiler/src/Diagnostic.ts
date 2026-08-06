@@ -91,6 +91,15 @@ export const assignmentTypeMismatchCode = 'SEM0037' as const
 export const transferOutsideLoopCode = 'SEM0038' as const
 export const invalidUnionMemberCode = 'SEM0039' as const
 export const incompatibleUnionConversionCode = 'SEM0040' as const
+export const matchScrutineeNotNominalCode = 'SEM0041' as const
+export const matchMemberNotInScrutineeCode = 'SEM0042' as const
+export const unreachableMatchArmCode = 'SEM0043' as const
+export const incompleteMatchCode = 'SEM0044' as const
+export const matchGuardNotBoolCode = 'SEM0045' as const
+export const missingPatternFieldCode = 'SEM0046' as const
+export const duplicatePatternFieldCode = 'SEM0047' as const
+export const patternBindingConflictCode = 'SEM0048' as const
+export const incompatibleMatchResultsCode = 'SEM0049' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -98,6 +107,10 @@ export const partialMoveCode = 'OWN0002' as const
 export const explicitMoveRequiredCode = 'OWN0003' as const
 export const overlappingAssignmentCode = 'OWN0004' as const
 export const incompatibleLoopHeaderCode = 'OWN0005' as const
+export const matchBorrowEscapeCode = 'OWN0006' as const
+export const exclusiveMatchRequiresMutableCode = 'OWN0007' as const
+export const guardConsumesPatternCode = 'OWN0008' as const
+export const invalidMatchScrutineePlaceCode = 'OWN0009' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
@@ -147,11 +160,24 @@ export type Code =
   | typeof transferOutsideLoopCode
   | typeof invalidUnionMemberCode
   | typeof incompatibleUnionConversionCode
+  | typeof matchScrutineeNotNominalCode
+  | typeof matchMemberNotInScrutineeCode
+  | typeof unreachableMatchArmCode
+  | typeof incompleteMatchCode
+  | typeof matchGuardNotBoolCode
+  | typeof missingPatternFieldCode
+  | typeof duplicatePatternFieldCode
+  | typeof patternBindingConflictCode
+  | typeof incompatibleMatchResultsCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
   | typeof overlappingAssignmentCode
   | typeof incompatibleLoopHeaderCode
+  | typeof matchBorrowEscapeCode
+  | typeof exclusiveMatchRequiresMutableCode
+  | typeof guardConsumesPatternCode
+  | typeof invalidMatchScrutineePlaceCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
 export interface DeclarationEntity {
@@ -280,6 +306,27 @@ export type Reason =
       readonly target: string
       readonly missing: ReadonlyArray<string>
     }
+  | { readonly _tag: 'MatchScrutineeNotNominal'; readonly actual: string }
+  | {
+      readonly _tag: 'MatchMemberNotInScrutinee'
+      readonly member: string
+      readonly scrutinee: string
+    }
+  | { readonly _tag: 'UnreachableMatchArm'; readonly member: string }
+  | { readonly _tag: 'IncompleteMatch'; readonly missing: ReadonlyArray<string> }
+  | { readonly _tag: 'MatchGuardNotBool'; readonly actual: string }
+  | { readonly _tag: 'MissingPatternField'; readonly type: string; readonly field: string }
+  | {
+      readonly _tag: 'DuplicatePatternField'
+      readonly field: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'PatternBindingConflict'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'IncompatibleMatchResults'; readonly types: ReadonlyArray<string> }
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
@@ -289,6 +336,10 @@ export type Reason =
   | { readonly _tag: 'ExplicitMoveRequired'; readonly spelling: string }
   | { readonly _tag: 'OverlappingAssignment'; readonly spelling: string }
   | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
+  | { readonly _tag: 'MatchBorrowEscape'; readonly spelling: string }
+  | { readonly _tag: 'ExclusiveMatchRequiresMutable'; readonly spelling: string }
+  | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
+  | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
@@ -1020,6 +1071,136 @@ export const incompatibleUnionConversion = (
     span,
   })
 
+export const matchScrutineeNotNominal = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: matchScrutineeNotNominalCode,
+    severity: 'error',
+    message: `Cannot match non-nominal type ${actual}`,
+    reason: Object.freeze({ _tag: 'MatchScrutineeNotNominal', actual }),
+    span,
+  })
+
+export const matchMemberNotInScrutinee = (
+  member: string,
+  scrutinee: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: matchMemberNotInScrutineeCode,
+    severity: 'error',
+    message: `${member} is not a member of ${scrutinee}`,
+    reason: Object.freeze({ _tag: 'MatchMemberNotInScrutinee', member, scrutinee }),
+    span,
+  })
+
+export const unreachableMatchArm = (member: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unreachableMatchArmCode,
+    severity: 'error',
+    message: `Unreachable match arm ${member}`,
+    reason: Object.freeze({ _tag: 'UnreachableMatchArm', member }),
+    span,
+  })
+
+export const incompleteMatch = (
+  missing: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: incompleteMatchCode,
+    severity: 'error',
+    message: `Match does not cover ${missing.join(', ')}`,
+    reason: Object.freeze({ _tag: 'IncompleteMatch', missing: Object.freeze([...missing]) }),
+    span,
+  })
+
+export const matchGuardNotBool = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: matchGuardNotBoolCode,
+    severity: 'error',
+    message: `Match guard must be Bool, found ${actual}`,
+    reason: Object.freeze({ _tag: 'MatchGuardNotBool', actual }),
+    span,
+  })
+
+export const missingPatternField = (
+  type: string,
+  field: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingPatternFieldCode,
+    severity: 'error',
+    message: `Pattern for ${type} is missing field ${field}; add it or use ..`,
+    reason: Object.freeze({ _tag: 'MissingPatternField', type, field }),
+    span,
+  })
+
+export const duplicatePatternField = (
+  field: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicatePatternFieldCode,
+    severity: 'error',
+    message: `Pattern field ${field} appears more than once`,
+    reason: Object.freeze({ _tag: 'DuplicatePatternField', field, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first matched here', span: originalSpan }),
+    ]),
+  })
+
+export const patternBindingConflict = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: patternBindingConflictCode,
+    severity: 'error',
+    message: `Pattern binding ${spelling} conflicts with an existing declaration`,
+    reason: Object.freeze({ _tag: 'PatternBindingConflict', spelling, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+export const incompatibleMatchResults = (
+  types: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: incompatibleMatchResultsCode,
+    severity: 'error',
+    message: `Match arms have incompatible result types: ${types.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'IncompatibleMatchResults',
+      types: Object.freeze([...types]),
+    }),
+    span,
+  })
+
 /** Creates the diagnostic for a call argument whose type mismatches its parameter. */
 export const argumentTypeMismatch = (
   expected: string,
@@ -1094,6 +1275,56 @@ export const incompatibleLoopHeader = (loop: number, span: SourceSpan.SourceSpan
     severity: 'error',
     message: `Loop ${loop} repeats with incompatible owner liveness`,
     reason: Object.freeze({ _tag: 'IncompatibleLoopHeader', loop }),
+    span,
+  })
+
+export const matchBorrowEscape = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: matchBorrowEscapeCode,
+    severity: 'error',
+    message: `Borrowed pattern binding ${spelling} cannot escape its match arm`,
+    reason: Object.freeze({ _tag: 'MatchBorrowEscape', spelling }),
+    span,
+  })
+
+export const exclusiveMatchRequiresMutable = (
+  spelling: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: exclusiveMatchRequiresMutableCode,
+    severity: 'error',
+    message: `Exclusive match requires mutable binding ${spelling}`,
+    reason: Object.freeze({ _tag: 'ExclusiveMatchRequiresMutable', spelling }),
+    span,
+  })
+
+export const guardConsumesPattern = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: guardConsumesPatternCode,
+    severity: 'error',
+    message: `Match guard cannot consume pattern binding ${spelling}`,
+    reason: Object.freeze({ _tag: 'GuardConsumesPattern', spelling }),
+    span,
+  })
+
+export const invalidMatchScrutineePlace = (
+  access: 'Move' | 'Exclusive',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: invalidMatchScrutineePlaceCode,
+    severity: 'error',
+    message: `${access} match requires a complete binding place`,
+    reason: Object.freeze({ _tag: 'InvalidMatchScrutineePlace', access }),
     span,
   })
 

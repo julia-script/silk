@@ -251,6 +251,31 @@ describe('control DAG view', () => {
       ),
     ).toBe(true)
   })
+
+  it('coordinates match facts through the existing HIR, ownership, and MIR panes', () => {
+    const source = `struct Left { value: I32 }
+struct Right { value: I32 }
+fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => answer
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 42 }) }`
+    const hir = project('hir', source)
+    const ownership = project('ownership', source)
+    const mir = project('mir', source)
+
+    expect(text(hir)).toContain('match shared')
+    expect(text(hir)).toContain('guarded')
+    expect(text(ownership)).toContain('match shared')
+    expect(text(ownership)).toContain('provisional guard')
+    expect(text(mir)).toContain('decision memory/docs/unified-layout.Left')
+    expect(text(mir)).toContain('guard _')
+    expect(mir.facts?.map((fact) => fact.text)).toContain('1 structured match')
+    expect(mir.rows.some((row) => row.onActivate !== undefined)).toBe(true)
+  })
 })
 
 describe('downstream panes state why they are empty', () => {

@@ -14,9 +14,11 @@ import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Layout from './Layout.js'
+import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
+import type * as SilkType from './Type.js'
 
 /**
  * Code generation as a nominal `Backend` service: one operation consuming the whole
@@ -157,16 +159,44 @@ type LinearTerminator =
       readonly otherwise: Mir.RegionId
       readonly provenance: Mir.Provenance
     }
+  | {
+      readonly _tag: 'MatchBranch'
+      readonly scrutinee: Mir.LocalId
+      readonly memberOrdinal: number
+      readonly taken: Mir.RegionId
+      readonly otherwise: Mir.RegionId
+      readonly provenance: Mir.Provenance
+    }
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Mir.Provenance }
+
+type LinearOperation =
+  | Exclude<Mir.Operation, { readonly _tag: 'Match' }>
+  | {
+      readonly _tag: 'BindMatch'
+      readonly scrutinee: Mir.LocalId
+      readonly shape: Layout.CallingShape
+      readonly member: SilkType.Nominal
+      readonly binding: Mir.MatchBinding
+      readonly provenance: Mir.Provenance
+    }
 
 interface LinearBlock {
   readonly id: Mir.RegionId
+  readonly origin: Mir.RegionId
+  readonly kind: 'Normal' | 'Cleanup'
+  readonly operations: ReadonlyArray<LinearOperation>
+  readonly terminator: LinearTerminator
+}
+
+interface StructuredBlock {
+  readonly id: Mir.RegionId
+  readonly origin: Mir.RegionId
   readonly kind: 'Normal' | 'Cleanup'
   readonly operations: ReadonlyArray<Mir.Operation>
   readonly terminator: LinearTerminator
 }
 
-const destinationOf = (operation: Mir.Operation): Mir.LocalId | undefined => {
+const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
   switch (operation._tag) {
     case 'Literal':
     case 'Binary':
@@ -178,11 +208,208 @@ const destinationOf = (operation: Mir.Operation): Mir.LocalId | undefined => {
     case 'Project':
     case 'ReadPlace':
       return operation.destination
+    case 'BindMatch':
+      return operation.binding.destination
     case 'CheckPlace':
     case 'WritePlace':
     case 'Drop':
       return undefined
   }
+}
+
+const expandMatches = (
+  fn: Mir.MirFunction,
+  input: ReadonlyArray<StructuredBlock>,
+): ReadonlyArray<LinearBlock> => {
+  let nextRegion = Math.max(-1, ...fn.regions.map((region) => region.id.ordinal)) + 1
+  const reserve = (): Mir.RegionId => Object.freeze({ _tag: 'Region', ordinal: nextRegion++ })
+  const blocks: Array<LinearBlock> = []
+  const jump = (target: Mir.RegionId, provenance: Mir.Provenance): LinearTerminator =>
+    Object.freeze({ _tag: 'Jump', target, provenance })
+
+  const lowerSequence = (
+    id: Mir.RegionId,
+    origin: Mir.RegionId,
+    kind: LinearBlock['kind'],
+    operations: ReadonlyArray<Mir.Operation | LinearOperation>,
+    terminator: LinearTerminator,
+  ): void => {
+    const matchIndex = operations.findIndex((operation) => operation._tag === 'Match')
+    if (matchIndex < 0) {
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: Object.freeze(operations as ReadonlyArray<LinearOperation>),
+          terminator,
+        }),
+      )
+      return
+    }
+    const match = operations.at(matchIndex)
+    if (match?._tag !== 'Match') throw new RangeError('LLVM match expansion lost its operation')
+    const dispatch = reserve()
+    const following = reserve()
+    blocks.push(
+      Object.freeze({
+        id,
+        origin,
+        kind,
+        operations: Object.freeze(
+          operations.slice(0, matchIndex) as ReadonlyArray<LinearOperation>,
+        ),
+        terminator: jump(dispatch, match.provenance),
+      }),
+    )
+    lowerSequence(following, origin, kind, operations.slice(matchIndex + 1), terminator)
+
+    const trap = reserve()
+    blocks.push(
+      Object.freeze({
+        id: trap,
+        origin,
+        kind: 'Normal',
+        operations: Object.freeze([]),
+        terminator: Object.freeze({
+          _tag: 'Trap',
+          reason: 'exhaustive match rejected every candidate',
+          provenance: match.provenance,
+        }),
+      }),
+    )
+
+    const candidateEntry = (
+      member: SilkType.Nominal,
+      candidates: ReadonlyArray<Match.ArmId>,
+      ordinal: number,
+    ): Mir.RegionId => {
+      const entry = reserve()
+      const candidate = candidates.at(ordinal)
+      if (candidate === undefined) {
+        blocks.push(
+          Object.freeze({
+            id: entry,
+            origin,
+            kind: 'Normal',
+            operations: Object.freeze([]),
+            terminator: jump(trap, match.provenance),
+          }),
+        )
+        return entry
+      }
+      const arm = match.arms.find((item) => item.id.ordinal === candidate.ordinal)
+      if (arm === undefined) throw new RangeError('LLVM match expansion lost a candidate arm')
+      const bindings: ReadonlyArray<LinearOperation> = Object.freeze(
+        arm.bindings.map((binding) =>
+          Object.freeze({
+            _tag: 'BindMatch' as const,
+            scrutinee: match.scrutinee,
+            shape: match.scrutineeShape,
+            member,
+            binding,
+            provenance: binding.provenance,
+          }),
+        ),
+      )
+      const selected = reserve()
+      lowerSequence(
+        selected,
+        origin,
+        'Normal',
+        [
+          ...arm.selected.operations,
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination: match.destination,
+            source: arm.selected.result,
+            provenance: arm.provenance,
+          }),
+        ],
+        jump(following, arm.provenance),
+      )
+      if (arm.guard === undefined) {
+        lowerSequence(entry, origin, 'Normal', bindings, jump(selected, arm.provenance))
+      } else {
+        const fallback = candidateEntry(member, candidates, ordinal + 1)
+        lowerSequence(
+          entry,
+          origin,
+          'Normal',
+          [...bindings, ...arm.guard.operations],
+          Object.freeze({
+            _tag: 'Branch',
+            condition: arm.guard.result,
+            taken: selected,
+            otherwise: fallback,
+            provenance: arm.provenance,
+          }),
+        )
+      }
+      return entry
+    }
+
+    const decisionEntries = match.decisions.map((decision) =>
+      candidateEntry(decision.member, decision.candidates, 0),
+    )
+    if (match.scrutineeType._tag === 'Nominal') {
+      const selected = decisionEntries.at(0) ?? trap
+      blocks.push(
+        Object.freeze({
+          id: dispatch,
+          origin,
+          kind: 'Normal',
+          operations: Object.freeze([]),
+          terminator: jump(selected, match.provenance),
+        }),
+      )
+      return
+    }
+    const dispatchIds = match.decisions.map((_, ordinal) => (ordinal === 0 ? dispatch : reserve()))
+    match.decisions.forEach((_, ordinal) => {
+      blocks.push(
+        Object.freeze({
+          id: dispatchIds.at(ordinal) ?? dispatch,
+          origin,
+          kind: 'Normal',
+          operations: Object.freeze([]),
+          terminator: Object.freeze({
+            _tag: 'MatchBranch',
+            scrutinee: match.scrutinee,
+            memberOrdinal: ordinal,
+            taken: decisionEntries.at(ordinal) ?? trap,
+            otherwise: dispatchIds.at(ordinal + 1) ?? trap,
+            provenance: match.provenance,
+          }),
+        }),
+      )
+    })
+  }
+
+  for (const block of input) {
+    lowerSequence(block.id, block.origin, block.kind, block.operations, block.terminator)
+  }
+  const byId = new Map(blocks.map((block) => [block.id.ordinal, block] as const))
+  const visited = new Set<number>()
+  const ordered: Array<LinearBlock> = []
+  const visit = (id: Mir.RegionId): void => {
+    if (visited.has(id.ordinal)) return
+    visited.add(id.ordinal)
+    const block = byId.get(id.ordinal)
+    if (block === undefined) return
+    ordered.push(block)
+    const terminator = block.terminator
+    if (terminator._tag === 'Jump') visit(terminator.target)
+    if (terminator._tag === 'Branch' || terminator._tag === 'MatchBranch') {
+      visit(terminator.taken)
+      visit(terminator.otherwise)
+    }
+  }
+  visit(fn.entry)
+  for (const block of [...blocks].sort((left, right) => left.id.ordinal - right.id.ordinal)) {
+    visit(block.id)
+  }
+  return Object.freeze(ordered)
 }
 
 /** LLVM-private flattening of the compiler-owned DAG. Repeat is the only source of a back-edge. */
@@ -229,10 +456,11 @@ const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
       }
     }
   }
-  const raw = Mir.topologicalRegions(fn).map((region): LinearBlock => {
+  const raw = Mir.topologicalRegions(fn).map((region): StructuredBlock => {
     if (region._tag === 'ConditionalRegion') {
       return Object.freeze({
         id: region.id,
+        origin: region.id,
         kind: 'Normal',
         operations: Object.freeze([]),
         terminator: Object.freeze({
@@ -247,6 +475,7 @@ const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
     if (region._tag === 'LoopRegion') {
       return Object.freeze({
         id: region.id,
+        origin: region.id,
         kind: 'Normal',
         operations: Object.freeze([]),
         terminator: Object.freeze({
@@ -258,6 +487,7 @@ const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
     }
     return Object.freeze({
       id: region.id,
+      origin: region.id,
       kind: region._tag === 'CleanupRegion' ? 'Cleanup' : 'Normal',
       operations: region._tag === 'CleanupRegion' ? region.releases : region.operations,
       terminator: outcome(region),
@@ -270,7 +500,7 @@ const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
   const byId = new Map(raw.map((block) => [block.id.ordinal, block] as const))
   const regionsById = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
   const inlined = new Set<number>()
-  const blocks = raw.map((block): LinearBlock => {
+  const blocks = raw.map((block): StructuredBlock => {
     let operations = [...block.operations]
     let terminator = block.terminator
     const seen = new Set<number>()
@@ -289,36 +519,47 @@ const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
     }
     return Object.freeze({ ...block, operations: Object.freeze(operations), terminator })
   })
-  return Object.freeze(blocks.filter((block) => !inlined.has(block.id.ordinal)))
+  return expandMatches(fn, Object.freeze(blocks.filter((block) => !inlined.has(block.id.ordinal))))
 }
 
 const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenance> =>
   Object.freeze(
     program.functions.flatMap((fn) =>
-      linearize(fn).map((block): ControlProvenance => {
-        const terminator = block.terminator
-        return Object.freeze({
-          _tag: 'BackendControlProvenance',
-          backend: 'LLVM',
-          function: fn.id,
-          region: block.id,
-          construct:
+      (() => {
+        const linear = linearize(fn)
+        const originOf = (target: Mir.RegionId): Mir.RegionId | undefined =>
+          linear.find((candidate) => candidate.id.ordinal === target.ordinal)?.origin
+        return linear.map((block): ControlProvenance => {
+          const terminator = block.terminator
+          const targets =
             terminator._tag === 'Jump'
-              ? 'LlvmJump'
-              : terminator._tag === 'Branch'
-                ? 'LlvmBranch'
-                : terminator._tag === 'Return'
-                  ? 'LlvmReturn'
-                  : 'LlvmTrap',
-          targets:
-            terminator._tag === 'Jump'
-              ? Object.freeze([terminator.target])
-              : terminator._tag === 'Branch'
-                ? Object.freeze([terminator.taken, terminator.otherwise])
-                : Object.freeze([]),
-          span: terminator.provenance.span,
+              ? [originOf(terminator.target)]
+              : terminator._tag === 'Branch' || terminator._tag === 'MatchBranch'
+                ? [originOf(terminator.taken), originOf(terminator.otherwise)]
+                : []
+          const canonicalTargets = Object.freeze(
+            targets.flatMap((target) =>
+              target === undefined || target.ordinal === block.origin.ordinal ? [] : [target],
+            ),
+          )
+          return Object.freeze({
+            _tag: 'BackendControlProvenance',
+            backend: 'LLVM',
+            function: fn.id,
+            region: block.origin,
+            construct:
+              terminator._tag === 'Jump'
+                ? 'LlvmJump'
+                : terminator._tag === 'Branch' || terminator._tag === 'MatchBranch'
+                  ? 'LlvmBranch'
+                  : terminator._tag === 'Return'
+                    ? 'LlvmReturn'
+                    : 'LlvmTrap',
+            targets: canonicalTargets,
+            span: terminator.provenance.span,
+          })
         })
-      }),
+      })(),
     ),
   )
 
@@ -467,13 +708,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           let trapBlock: LlvmBlock.Block | undefined
           let checkOrdinal = 0
           const locals = new Map<number, ReadonlyArray<Value.Input>>()
-          const mutableRoots = new Set(
-            entry.linear.flatMap((block) =>
+          const assignments = new Map<number, number>()
+          for (const operation of entry.linear.flatMap((block) => block.operations)) {
+            const destination = destinationOf(operation)
+            if (destination !== undefined) {
+              assignments.set(destination.ordinal, (assignments.get(destination.ordinal) ?? 0) + 1)
+            }
+          }
+          const mutableRoots = new Set([
+            ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
                 operation._tag === 'WritePlace' ? [operation.root.ordinal] : [],
               ),
             ),
-          )
+            ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
+          ])
           const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
           for (const root of [...mutableRoots].sort((left, right) => left - right)) {
             const logicalType = entry.fn.localTypes.at(root)
@@ -569,6 +818,26 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
             for (const operation of block.operations) {
               switch (operation._tag) {
+                case 'BindMatch': {
+                  const physical = Layout.memberFieldSlots(
+                    operation.shape,
+                    operation.member,
+                    operation.binding.path,
+                  )
+                  if (physical === undefined) {
+                    throw new RangeError('LLVM match lost a pattern payload path')
+                  }
+                  const source = readLocal(operation.scrutinee)
+                  const selected = physical.flatMap((ordinal) => {
+                    const value = source.at(ordinal)
+                    return value === undefined ? [] : [value]
+                  })
+                  if (selected.length !== lanesFor(operation.binding.type).length) {
+                    throw new RangeError('LLVM match binding disagrees with its payload lanes')
+                  }
+                  locals.set(operation.binding.destination.ordinal, Object.freeze(selected))
+                  break
+                }
                 case 'Literal':
                   locals.set(
                     operation.destination.ordinal,
@@ -1228,6 +1497,29 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 const otherwise = blocks.get(terminator.otherwise.ordinal)
                 if (taken === undefined || otherwise === undefined) {
                   throw new RangeError('Backend branch to missing block')
+                }
+                yield* FunctionBody.conditionalBranch(body, condition, taken, otherwise)
+                break
+              }
+              case 'MatchBranch': {
+                const tag = readLocal(terminator.scrutinee).at(0)
+                if (tag === undefined) throw new RangeError('LLVM union match has no tag lane')
+                const expected = yield* Constant.integerSigned(
+                  builder,
+                  i32,
+                  BigInt(terminator.memberOrdinal),
+                )
+                const condition = yield* FunctionBody.integerCompare(
+                  body,
+                  'eq',
+                  tag,
+                  expected,
+                  `match${block.id.ordinal}_member`,
+                )
+                const taken = blocks.get(terminator.taken.ordinal)
+                const otherwise = blocks.get(terminator.otherwise.ordinal)
+                if (taken === undefined || otherwise === undefined) {
+                  throw new RangeError('LLVM match branch targets a missing block')
                 }
                 yield* FunctionBody.conditionalBranch(body, condition, taken, otherwise)
                 break

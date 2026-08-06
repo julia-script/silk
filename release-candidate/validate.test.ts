@@ -612,6 +612,7 @@ console.log(
       'Layout',
       'Lexer',
       'Lower',
+      'Match',
       'Mir',
       'ModuleClosure',
       'NameResolution',

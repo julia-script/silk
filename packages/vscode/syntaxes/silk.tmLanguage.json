@@ -13,7 +13,7 @@
     },
     {
       "name": "keyword.other.silk",
-      "match": "\\b(?:pub|struct|fn|return|import|as|let|mut|move|if|else|while|break|continue)\\b"
+      "match": "\\b(?:pub|struct|fn|return|import|as|let|mut|move|match|if|else|while|break|continue)\\b"
     },
     {
       "name": "constant.language.boolean.silk",
@@ -24,12 +24,24 @@
       "match": "\\b(?:I32|Bool|Never)\\b"
     },
     {
+      "name": "entity.name.type.pattern.silk",
+      "match": "\\b[A-Z][A-Za-z0-9_]*(?=\\s*\\{)"
+    },
+    {
+      "name": "variable.language.wildcard.silk",
+      "match": "\\b_\\b"
+    },
+    {
       "name": "constant.numeric.integer.silk",
       "match": "\\b[0-9]+\\b"
     },
     {
       "name": "keyword.operator.silk",
-      "match": "->|\\|>|\\||[=!<>]=|[-+*/%!<>=]"
+      "match": "=>|->|\\|>|\\||[=!<>]=|[-+*/%!<>=&]"
+    },
+    {
+      "name": "punctuation.definition.pattern.rest.silk",
+      "match": "\\.\\."
     },
     {
       "name": "punctuation.silk",

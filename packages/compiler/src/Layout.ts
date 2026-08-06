@@ -528,6 +528,17 @@ const addExpressionTypes = (
   if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
     for (const argument of expression.arguments) addExpressionTypes(types, argument)
   }
+  if (expression._tag === 'Match') {
+    addExpressionTypes(types, expression.scrutinee)
+    for (const member of expression.members) types.set(Type.key(member), member)
+    for (const arm of expression.arms) {
+      if (!arm.reachable) continue
+      if (arm.member !== undefined) types.set(Type.key(arm.member), arm.member)
+      for (const binding of arm.bindings) types.set(Type.key(binding.type), binding.type)
+      if (arm.guard !== undefined) addExpressionTypes(types, arm.guard)
+      addExpressionTypes(types, arm.result)
+    }
+  }
 }
 
 const addStatementTypes = (
@@ -764,6 +775,57 @@ export const callingShape = (
   type: DeclarationIndex.SemanticType,
 ): CallingShape | undefined =>
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
+
+const fieldSlice = (
+  node: CallingShapeNode,
+  path: ReadonlyArray<DeclarationIndex.FieldId>,
+  offset = 0,
+): { readonly offset: number; readonly length: number } | undefined => {
+  const [field, ...rest] = path
+  if (field === undefined) return Object.freeze({ offset, length: node.laneCount })
+  if (node._tag !== 'ProductShape') return undefined
+  let fieldOffset = offset
+  for (const candidate of node.fields) {
+    if (
+      candidate.field.ordinal === field.ordinal &&
+      candidate.field.struct.sourceId === field.struct.sourceId &&
+      candidate.field.struct.ordinal === field.struct.ordinal
+    ) {
+      return fieldSlice(candidate.shape, rest, fieldOffset)
+    }
+    fieldOffset += candidate.shape.laneCount
+  }
+  return undefined
+}
+
+/** Physical calling-lane slots for one logical member payload field path. */
+export const memberFieldSlots = (
+  shape: CallingShape,
+  member: Type.Nominal,
+  path: ReadonlyArray<DeclarationIndex.FieldId>,
+): ReadonlyArray<number> | undefined => {
+  const selected =
+    shape.tree._tag === 'ProductShape' && Type.equals(shape.tree.type, member)
+      ? Object.freeze({ shape: shape.tree, physicalOffset: 0 })
+      : shape.tree._tag === 'SumShape'
+        ? (() => {
+            const candidate = shape.tree.members.find((entry) => Type.equals(entry.member, member))
+            return candidate === undefined
+              ? undefined
+              : Object.freeze({ shape: candidate.shape, physicalOffset: 1 })
+          })()
+        : undefined
+  if (selected === undefined) return undefined
+  const slice = fieldSlice(selected.shape, path)
+  return slice === undefined
+    ? undefined
+    : Object.freeze(
+        Array.from(
+          { length: slice.length },
+          (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
+        ),
+      )
+}
 
 /** Looks up one available or unavailable nominal catalog entry. */
 export const catalogEntry = (

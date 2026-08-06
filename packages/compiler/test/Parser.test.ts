@@ -1377,3 +1377,135 @@ it('keeps damaged struct fields and following declarations separate', () => {
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
+
+it('parses mode-aware match expressions and nested patterns losslessly', () => {
+  const source = `pub struct Span { start: I32 end: I32 }
+pub struct Token { kind: I32 span: Span }
+pub struct End {}
+pub fn inspect(event: Token | End) -> I32 {
+  let code = match move event {
+    Token { kind, span: Span { start: offset, .. } } if true => offset
+    End {} => 0
+  }
+  return code
+}`
+  const result = parseText('memory/match-expression', source)
+  const match = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'MatchExpression',
+  )
+
+  assert.notStrictEqual(match, undefined)
+  if (match === undefined) return
+  assert.strictEqual(SyntaxTree.directNodes(match, 'MatchAccess').length, 1)
+  assert.strictEqual(SyntaxTree.directNodes(match, 'MatchArm').length, 2)
+  assert.strictEqual(
+    descendants(match).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'NominalPattern',
+    ).length,
+    3,
+  )
+  assert.strictEqual(
+    descendants(match).some(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'RestPattern',
+    ),
+    true,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses bare, shared, and exclusive matches in expression positions', () => {
+  const source = `pub struct Token { kind: I32 }
+pub fn bare(event: Token) -> I32 { return match event { Token { kind } => kind } }
+pub fn shared(event: Token) -> I32 { return I32.add(match &event { Token { kind } => kind }, 1) }
+pub fn exclusive(event: Token) -> I32 { let value = match &mut event { _ => 0 } return value }`
+  const result = parseText('memory/match-modes', source)
+  const matches = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'MatchExpression',
+  )
+
+  assert.strictEqual(matches.length, 3)
+  assert.deepEqual(
+    matches.map((match) =>
+      SyntaxTree.directNode(match, 'MatchAccess')
+        ?.children.filter(SyntaxTree.isToken)
+        .map((token) => token.kind),
+    ),
+    [[], ['Whitespace', 'Ampersand'], ['Whitespace', 'Ampersand', 'MutKeyword']],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps a missing match arm arrow local to its arm', () => {
+  const source = `pub struct Token { kind: I32 }
+pub struct End {}
+pub fn inspect(event: Token | End) -> I32 {
+  return match event {
+    Token { kind } kind
+    End {} => 0
+  }
+}`
+  const result = parseText('memory/damaged-match-arm', source)
+  const match = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'MatchExpression',
+  )
+
+  assert.notStrictEqual(match, undefined)
+  if (match === undefined) return
+  assert.strictEqual(SyntaxTree.directNodes(match, 'MatchArm').length, 2)
+  assert.deepEqual(
+    missingLeaves(match).map((leaf) => leaf.expected),
+    ['FatArrow'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('bounds damaged pattern fields, nesting, braces, and guards at their arm', () => {
+  const cases: ReadonlyArray<readonly [string, string, Token.TokenKind]> = [
+    ['missing-pattern-name', '{ kind } => 1', 'Identifier'],
+    ['missing-binding-name', 'Token { kind: , .. } => 1', 'Identifier'],
+    ['missing-field-comma', 'Token { kind other } => 1', 'Comma'],
+    ['missing-nested-colon', 'Token { child Inner {}, .. } => 1', 'Colon'],
+    ['missing-pattern-brace', 'Token { kind, .. if true => 1', 'RightBrace'],
+    ['missing-guard-expression', 'Token { kind, .. } if => 1', 'Identifier'],
+  ]
+
+  for (const [name, damagedArm, expected] of cases) {
+    const source = `pub struct Inner {}
+pub struct Token { kind: I32 other: I32 child: Inner }
+pub struct End {}
+pub fn inspect(event: Token | End) -> I32 {
+  return match event {
+    ${damagedArm}
+    End {} => 0
+  }
+}
+pub fn after() -> I32 { return 2 }`
+    const result = parseText(`memory/${name}`, source)
+    const match = descendants(result.root).find(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'MatchExpression',
+    )
+    const after = directFunctionDeclarations(result.root).at(-1)
+
+    assert.notStrictEqual(match, undefined, name)
+    assert.notStrictEqual(after, undefined, name)
+    if (match === undefined || after === undefined) continue
+    assert.strictEqual(
+      missingLeaves(match).some((leaf) => leaf.expected === expected),
+      true,
+      name,
+    )
+    assert.strictEqual(SyntaxTree.directNodes(match, 'MatchArm').length, 2, name)
+    assert.deepEqual(missingLeaves(after), [], name)
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source), name)
+  }
+})

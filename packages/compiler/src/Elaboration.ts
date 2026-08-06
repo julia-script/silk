@@ -3,6 +3,7 @@ import * as Option from 'effect/Option'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
+import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Operator from './Operator.js'
 import * as SourceFile from './SourceFile.js'
@@ -61,6 +62,12 @@ export type ParameterReferenceFact =
       readonly spelling: string
       readonly token: Token.Token
       readonly binding: BindingDeclarationFact
+    }
+  | {
+      readonly _tag: 'ResolvedPattern'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly binding: PatternBindingFact
     }
   | {
       readonly _tag: 'Missing'
@@ -152,6 +159,83 @@ export interface IdentifierExpressionFact {
 export interface MoveExpressionFact {
   readonly _tag: 'Move'
   readonly subject: ExpressionFact
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One flattened leaf binding introduced by a nominal pattern. */
+export interface PatternBindingFact {
+  readonly _tag: 'PatternBinding'
+  readonly id: Match.BindingId
+  readonly name: DeclaredName
+  readonly field: DeclarationIndex.FieldFact
+  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly type: ExpressionTypeFact
+  readonly access: Match.Access
+  readonly syntax: SyntaxTree.Node
+}
+
+export type PatternFieldState =
+  | { readonly _tag: 'Resolved'; readonly field: DeclarationIndex.FieldFact }
+  | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
+  | {
+      readonly _tag: 'Duplicate'
+      readonly field: DeclarationIndex.FieldFact
+      readonly cause: Diagnostic.Identity
+    }
+  | { readonly _tag: 'Unavailable' }
+
+export interface PatternFieldFact {
+  readonly _tag: 'PatternField'
+  readonly name: string | undefined
+  readonly state: PatternFieldState
+  readonly binding?: PatternBindingFact
+  readonly nested?: PatternFact
+  readonly syntax: SyntaxTree.Node
+}
+
+export type PatternFact =
+  | {
+      readonly _tag: 'NominalPattern'
+      readonly id: Match.PatternId
+      readonly target: StructTargetFact
+      readonly member?: Type.Nominal
+      readonly fields: ReadonlyArray<PatternFieldFact>
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly rest: boolean
+      readonly complete: boolean
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'UniversalPattern'
+      readonly id: Match.PatternId
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly syntax: SyntaxTree.Node
+    }
+
+export interface MatchArmFact {
+  readonly _tag: 'MatchArm'
+  readonly id: Match.ArmId
+  readonly pattern: PatternFact
+  readonly bindings: ReadonlyArray<PatternBindingFact>
+  readonly guard?: ExpressionFact
+  readonly result: ExpressionFact
+  readonly before: ReadonlyArray<Type.Nominal>
+  readonly after: ReadonlyArray<Type.Nominal>
+  readonly reachable: boolean
+  readonly syntax: SyntaxTree.Node
+}
+
+export interface MatchExpressionFact {
+  readonly _tag: 'Match'
+  readonly id: Match.MatchId
+  readonly access: Match.Access
+  readonly scrutinee: ExpressionFact
+  readonly members: ReadonlyArray<Type.Nominal>
+  readonly arms: ReadonlyArray<MatchArmFact>
+  readonly exhaustive: boolean
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -334,6 +418,7 @@ export type ExpressionFact =
   | BooleanExpressionFact
   | IdentifierExpressionFact
   | MoveExpressionFact
+  | MatchExpressionFact
   | StructLiteralExpressionFact
   | ArrayLiteralExpressionFact
   | FieldProjectionExpressionFact
@@ -531,6 +616,7 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'BooleanLiteralExpression',
   'IdentifierExpression',
   'MoveExpression',
+  'MatchExpression',
   'StructLiteralExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
@@ -549,6 +635,7 @@ const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is Syntax
   isExpressionNode(element) &&
   (element.kind === 'CallExpression' ||
     element.kind === 'MoveExpression' ||
+    element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
@@ -695,6 +782,7 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
 interface Scope {
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
+  readonly patternBindings: ReadonlyArray<PatternBindingFact>
 }
 
 interface ValueResolution {
@@ -748,6 +836,21 @@ const resolveValueName = (
         binding,
       }),
       type: binding.inferredType,
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const patternBinding = scope.patternBindings.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === tokenSpelling,
+  )
+  if (patternBinding !== undefined) {
+    return Object.freeze({
+      reference: Object.freeze({
+        _tag: 'ResolvedPattern' as const,
+        spelling: tokenSpelling,
+        token,
+        binding: patternBinding,
+      }),
+      type: patternBinding.type,
       diagnostics: Object.freeze([]),
     })
   }
@@ -913,6 +1016,430 @@ const resolveStructTarget = (
   return Object.freeze({
     fact: Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) }),
     diagnostics: Object.freeze([diagnostic]),
+  })
+}
+
+interface PatternCounters {
+  pattern: number
+  binding: number
+  invalid: boolean
+}
+
+interface PatternResult {
+  readonly fact: PatternFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+const patternDeclaredName = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  token: Token.Token | undefined,
+): DeclaredName =>
+  token === undefined
+    ? Object.freeze({ _tag: 'Unavailable', syntax })
+    : Object.freeze({ _tag: 'Present', spelling: spelling(source, token), token })
+
+const analyzePattern = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  arm: Match.ArmId,
+  access: Match.Access,
+  scope: Scope,
+  resolution: ResolutionContext,
+  counters: PatternCounters,
+  prefix: ReadonlyArray<DeclarationIndex.FieldId> = Object.freeze([]),
+  localNames = new Map<string, SourceSpan.SourceSpan>(),
+): PatternResult => {
+  const id: Match.PatternId = Object.freeze({
+    _tag: 'PatternId',
+    arm,
+    ordinal: counters.pattern,
+  })
+  counters.pattern += 1
+  if (node.kind === 'UniversalPattern') {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UniversalPattern',
+        id,
+        bindings: Object.freeze([]),
+        omitted: Object.freeze(access === 'Move' ? [Object.freeze([])] : []),
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+
+  const target = resolveStructTarget(source, childNode(node, 'TypePath'), resolution)
+  const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
+  const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
+  const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
+  const label = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
+  const seen = new Map<string, PatternFieldFact>()
+  const bindings: Array<PatternBindingFact> = []
+  const fields = SyntaxTree.directNodes(node, 'PatternField').map((fieldNode): PatternFieldFact => {
+    const identifiers = fieldNode.children.filter(
+      (element): element is Token.Token =>
+        SyntaxTree.isToken(element) && element.kind === 'Identifier',
+    )
+    const nameToken = identifiers.at(0)
+    const name = nameToken === undefined ? undefined : spelling(source, nameToken)
+    const lookup =
+      struct === undefined || name === undefined
+        ? undefined
+        : DeclarationIndex.lookupField(struct.fields, name)
+    let state: PatternFieldState = Object.freeze({ _tag: 'Unavailable' })
+    let resolvedField: DeclarationIndex.FieldFact | undefined
+    if (lookup?._tag === 'Resolved') {
+      const original = seen.get(name ?? '')
+      if (original === undefined) {
+        resolvedField = lookup.field
+        state = Object.freeze({ _tag: 'Resolved', field: lookup.field })
+      } else {
+        const diagnostic = Diagnostic.duplicatePatternField(
+          name ?? '',
+          original.syntax.span,
+          nameToken?.span ?? fieldNode.span,
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({
+          _tag: 'Duplicate',
+          field: lookup.field,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      }
+    } else if (name !== undefined) {
+      const diagnostic = Diagnostic.unknownStructField(
+        label,
+        name,
+        nameToken?.span ?? fieldNode.span,
+      )
+      diagnostics.push(diagnostic)
+      state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
+    }
+
+    const nestedNode = SyntaxTree.directNode(fieldNode, 'NominalPattern')
+    let nested: PatternFact | undefined
+    let binding: PatternBindingFact | undefined
+    if (nestedNode !== undefined) {
+      const nestedResult = analyzePattern(
+        source,
+        nestedNode,
+        arm,
+        access,
+        scope,
+        resolution,
+        counters,
+        resolvedField === undefined ? prefix : Object.freeze([...prefix, resolvedField.id]),
+        localNames,
+      )
+      diagnostics.push(...nestedResult.diagnostics)
+      nested = nestedResult.fact
+      const expected =
+        resolvedField?.declaredType._tag === 'Resolved'
+          ? resolvedField.declaredType.type
+          : undefined
+      if (
+        expected !== undefined &&
+        nested._tag === 'NominalPattern' &&
+        nested.member !== undefined &&
+        !Type.equals(expected, nested.member)
+      ) {
+        counters.invalid = true
+        diagnostics.push(
+          Diagnostic.matchMemberNotInScrutinee(
+            Type.encode(nested.member),
+            Type.encode(expected),
+            nestedNode.span,
+          ),
+        )
+      }
+    } else if (resolvedField !== undefined) {
+      const bindingToken = identifiers.at(1) ?? nameToken
+      const declaredName = patternDeclaredName(source, fieldNode, bindingToken)
+      const bindingType =
+        resolvedField.declaredType._tag === 'Resolved'
+          ? availableExpressionType(resolvedField.declaredType.type)
+          : unavailableExpressionType
+      binding = Object.freeze({
+        _tag: 'PatternBinding',
+        id: Object.freeze({
+          _tag: 'PatternBindingId',
+          arm,
+          ordinal: counters.binding,
+        }),
+        name: declaredName,
+        field: resolvedField,
+        path: Object.freeze([...prefix, resolvedField.id]),
+        type: bindingType,
+        access,
+        syntax: fieldNode,
+      })
+      counters.binding += 1
+      bindings.push(binding)
+      if (declaredName._tag === 'Present') {
+        const original =
+          scopeSpanFor(scope, declaredName.spelling) ?? localNames.get(declaredName.spelling)
+        if (original === undefined) localNames.set(declaredName.spelling, declaredName.token.span)
+        else {
+          counters.invalid = true
+          diagnostics.push(
+            Diagnostic.patternBindingConflict(
+              declaredName.spelling,
+              original,
+              declaredName.token.span,
+            ),
+          )
+        }
+      }
+    }
+    if (nested?.bindings !== undefined) bindings.push(...nested.bindings)
+    const fact: PatternFieldFact = Object.freeze({
+      _tag: 'PatternField',
+      name,
+      state,
+      ...(binding === undefined ? {} : { binding }),
+      ...(nested === undefined ? {} : { nested }),
+      syntax: fieldNode,
+    })
+    if (name !== undefined && !seen.has(name)) seen.set(name, fact)
+    return fact
+  })
+
+  const rest = SyntaxTree.directNode(node, 'RestPattern') !== undefined
+  const omitted: Array<ReadonlyArray<DeclarationIndex.FieldId>> = fields.flatMap(
+    (field) => field.nested?.omitted ?? [],
+  )
+  if (struct !== undefined && !rest) {
+    for (const field of struct.fields) {
+      if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
+      diagnostics.push(Diagnostic.missingPatternField(label, field.name.spelling, node.span))
+    }
+  } else if (struct !== undefined && rest) {
+    for (const field of struct.fields) {
+      if (field.name._tag === 'Present' && seen.has(field.name.spelling)) continue
+      omitted.push(Object.freeze([...prefix, field.id]))
+    }
+  }
+  const complete =
+    target.fact._tag === 'Resolved' &&
+    !counters.invalid &&
+    isAvailableSyntax(node) &&
+    fields.every(
+      (field) =>
+        field.state._tag === 'Resolved' &&
+        (field.nested === undefined ||
+          (field.nested._tag === 'NominalPattern' && field.nested.complete)),
+    ) &&
+    (rest ||
+      struct?.fields.every(
+        (field) => field.name._tag !== 'Present' || seen.has(field.name.spelling),
+      ) === true)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'NominalPattern',
+      id,
+      target: target.fact,
+      ...(nominal === undefined ? {} : { member: nominal }),
+      fields: Object.freeze(fields),
+      bindings: Object.freeze(bindings),
+      omitted: Object.freeze(omitted),
+      rest,
+      complete,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
+const unavailableExpression = (syntax: SyntaxTree.Node): ExpressionFact =>
+  Object.freeze({
+    _tag: 'Identifier',
+    reference: Object.freeze({ _tag: 'Unavailable', syntax }),
+    type: unavailableExpressionType,
+    syntax,
+  })
+
+const matchAccess = (node: SyntaxTree.Node): Match.Access => {
+  const access = SyntaxTree.directNode(node, 'MatchAccess')
+  if (access === undefined) return 'Copy'
+  if (directToken(access, 'MoveKeyword') !== undefined) return 'Move'
+  if (directToken(access, 'Ampersand') === undefined) return 'Copy'
+  return directToken(access, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
+}
+
+const analyzeMatch = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  expected?: SemanticType,
+): ExpressionResult => {
+  const id: Match.MatchId = Object.freeze({
+    _tag: 'MatchId',
+    function: declaration.id,
+    span: node.span,
+  })
+  const access = matchAccess(node)
+  const expressionNodes = node.children.filter(isExpressionNode)
+  const scrutineeNode = expressionNodes.at(0)
+  const scrutinee =
+    scrutineeNode === undefined
+      ? undefined
+      : analyzeExpression(source, scrutineeNode, declarations, declaration, scope, resolution)
+  const diagnostics: Array<Diagnostic.Diagnostic> = [...(scrutinee?.diagnostics ?? [])]
+  const members = scrutinee?.type === undefined ? undefined : Match.membersOf(scrutinee.type)
+  if (scrutinee?.type !== undefined && members === undefined) {
+    diagnostics.push(Diagnostic.matchScrutineeNotNominal(Type.encode(scrutinee.type), node.span))
+  }
+
+  const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
+    const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
+    const patternNode =
+      SyntaxTree.directNode(armNode, 'NominalPattern') ??
+      SyntaxTree.directNode(armNode, 'UniversalPattern')
+    if (patternNode === undefined) throw new RangeError('Match arm requires a pattern')
+    const pattern = analyzePattern(source, patternNode, armId, access, scope, resolution, {
+      pattern: 0,
+      binding: 0,
+      invalid: false,
+    })
+    diagnostics.push(...pattern.diagnostics)
+    return Object.freeze({ armNode, armId, pattern: pattern.fact })
+  })
+  const coverage = Match.cover(
+    members ?? Object.freeze([]),
+    preliminary.map(({ armNode, pattern }) =>
+      Object.freeze({
+        ...(pattern._tag === 'NominalPattern' && pattern.member !== undefined
+          ? { member: pattern.member }
+          : {}),
+        universal: pattern._tag === 'UniversalPattern',
+        guarded: directToken(armNode, 'IfKeyword') !== undefined,
+      }),
+    ),
+  )
+  const arms = preliminary.map(({ armNode, armId, pattern }, ordinal): MatchArmFact => {
+    const transition = coverage.transitions.at(ordinal)
+    if (transition === undefined) throw new RangeError('Match coverage lost an arm')
+    if (
+      pattern._tag === 'NominalPattern' &&
+      pattern.member !== undefined &&
+      members !== undefined &&
+      !members.some((member) => Type.equals(member, pattern.member ?? member))
+    ) {
+      diagnostics.push(
+        Diagnostic.matchMemberNotInScrutinee(
+          Type.encode(pattern.member),
+          scrutinee?.type === undefined ? 'unknown' : Type.encode(scrutinee.type),
+          pattern.syntax.span,
+        ),
+      )
+    } else if (!transition.reachable && (members?.length ?? 0) > 0) {
+      diagnostics.push(
+        Diagnostic.unreachableMatchArm(
+          pattern._tag === 'UniversalPattern'
+            ? '_'
+            : pattern.member === undefined
+              ? 'unknown'
+              : Type.encode(pattern.member),
+          armNode.span,
+        ),
+      )
+    }
+    const armExpressions = armNode.children.filter(isExpressionNode)
+    const guarded = directToken(armNode, 'IfKeyword') !== undefined
+    const guardNode = guarded ? armExpressions.at(0) : undefined
+    const resultNode = armExpressions.at(guarded ? 1 : 0)
+    const armScope: Scope = Object.freeze({
+      parameters: scope.parameters,
+      bindings: scope.bindings,
+      patternBindings: Object.freeze([...scope.patternBindings, ...pattern.bindings]),
+    })
+    const guard =
+      guardNode === undefined
+        ? undefined
+        : analyzeExpression(source, guardNode, declarations, declaration, armScope, resolution)
+    if (guard !== undefined) {
+      diagnostics.push(...guard.diagnostics)
+      if (guard.type !== undefined && guard.type !== 'Bool') {
+        diagnostics.push(
+          Diagnostic.matchGuardNotBool(Type.encode(guard.type), guardNode?.span ?? armNode.span),
+        )
+      }
+    }
+    const result =
+      resultNode === undefined
+        ? undefined
+        : analyzeExpression(
+            source,
+            resultNode,
+            declarations,
+            declaration,
+            armScope,
+            resolution,
+            expected,
+          )
+    if (result !== undefined) diagnostics.push(...result.diagnostics)
+    return Object.freeze({
+      _tag: 'MatchArm',
+      id: armId,
+      pattern,
+      bindings: pattern.bindings,
+      ...(guard === undefined ? {} : { guard: guard.fact }),
+      result: result?.fact ?? unavailableExpression(resultNode ?? armNode),
+      before: transition.before,
+      after: transition.after,
+      reachable: transition.reachable,
+      syntax: armNode,
+    })
+  })
+  if (members !== undefined && !coverage.exhaustive) {
+    diagnostics.push(Diagnostic.incompleteMatch(coverage.missing.map(Type.encode), node.span))
+  }
+  const reachableTypes = arms.flatMap((arm) =>
+    arm.reachable && arm.result.type._tag === 'Available' ? [arm.result.type.type] : [],
+  )
+  const unavailableReachableResult = arms.some(
+    (arm) => arm.reachable && arm.result.type._tag !== 'Available',
+  )
+  const joined = Match.join(reachableTypes)
+  if (joined._tag === 'Incompatible') {
+    diagnostics.push(Diagnostic.incompatibleMatchResults(joined.types.map(Type.encode), node.span))
+  }
+  const hasInvalidGuard = arms.some(
+    (arm) =>
+      arm.guard !== undefined &&
+      arm.guard.type._tag === 'Available' &&
+      arm.guard.type.type !== 'Bool',
+  )
+  const type =
+    members !== undefined &&
+    coverage.exhaustive &&
+    arms.every(
+      (arm) => arm.reachable && (arm.pattern._tag !== 'NominalPattern' || arm.pattern.complete),
+    ) &&
+    !unavailableReachableResult &&
+    !hasInvalidGuard &&
+    joined._tag === 'Joined'
+      ? availableExpressionType(joined.type)
+      : unavailableExpressionType
+  const fact: MatchExpressionFact = Object.freeze({
+    _tag: 'Match',
+    id,
+    access,
+    scrutinee: scrutinee?.fact ?? unavailableExpression(scrutineeNode ?? node),
+    members: Object.freeze([...(members ?? [])]),
+    arms: Object.freeze(arms),
+    exhaustive: coverage.exhaustive,
+    type,
+    syntax: node,
+  })
+  return Object.freeze({
+    fact,
+    diagnostics: Object.freeze(diagnostics),
+    type: type._tag === 'Available' ? type.type : undefined,
   })
 }
 
@@ -2154,6 +2681,10 @@ function analyzeExpression(
     })
   }
 
+  if (node.kind === 'MatchExpression') {
+    return analyzeMatch(source, node, declarations, declaration, scope, resolution, expected)
+  }
+
   if (node.kind === 'StructLiteralExpression') {
     return analyzeStructLiteral(source, node, declarations, declaration, scope, resolution)
   }
@@ -2459,6 +2990,11 @@ const scopeSpanFor = (scope: Scope, spellingText: string): SourceSpan.SourceSpan
       return binding.name.token.span
     }
   }
+  for (const binding of scope.patternBindings) {
+    if (binding.name._tag === 'Present' && binding.name.spelling === spellingText) {
+      return binding.name.token.span
+    }
+  }
   return undefined
 }
 
@@ -2551,6 +3087,7 @@ const analyzeStatements = (
           scope = Object.freeze({
             parameters: scope.parameters,
             bindings: Object.freeze([...scope.bindings, binding]),
+            patternBindings: scope.patternBindings,
           })
         } else {
           context.diagnostics.push(
@@ -2814,7 +3351,7 @@ const analyzeFunctionBody = (
   const statements = analyzeStatements(
     context,
     blockNode,
-    Object.freeze({ parameters: declaration.parameters, bindings: [] }),
+    Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
 
   const trailing = [...statements]
@@ -2871,6 +3408,14 @@ const hirReference = (
       span,
     })
   }
+  if (reference._tag === 'ResolvedPattern' && type._tag === 'Available') {
+    return Object.freeze({
+      _tag: 'PatternBindingReference',
+      binding: reference.binding.id,
+      type: type.type,
+      span,
+    })
+  }
   return Object.freeze({
     _tag: 'Unavailable',
     span,
@@ -2918,6 +3463,58 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
           ? Object.freeze({ ...subject, access: 'ConsumeRequested' as const })
           : subject,
       type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'Match') {
+    const scrutinee = hirExpression(fact.scrutinee)
+    if (scrutinee._tag === 'Unavailable' || fact.type._tag !== 'Available') {
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    }
+    const target = fact.type.type
+    return Object.freeze({
+      _tag: 'Match',
+      id: fact.id,
+      access: fact.access,
+      scrutinee,
+      members: fact.members,
+      arms: Object.freeze(
+        fact.arms.map((arm) => {
+          const member = arm.pattern._tag === 'NominalPattern' ? arm.pattern.member : undefined
+          return Object.freeze({
+            id: arm.id,
+            ...(member === undefined ? {} : { member }),
+            universal: arm.pattern._tag === 'UniversalPattern',
+            bindings: Object.freeze(
+              arm.bindings.flatMap((binding) =>
+                binding.type._tag === 'Available'
+                  ? [
+                      Object.freeze({
+                        id: binding.id,
+                        ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+                        field: binding.field.id,
+                        path: binding.path,
+                        type: binding.type.type,
+                        access: binding.access,
+                        span: binding.syntax.span,
+                      }),
+                    ]
+                  : [],
+              ),
+            ),
+            cleanup: arm.pattern.omitted,
+            ...(arm.guard === undefined ? {} : { guard: hirExpression(arm.guard) }),
+            result: Type.isUnion(target)
+              ? hirExpectedExpression(arm.result, target, 'MatchArm', arm.syntax.span)
+              : hirExpression(arm.result),
+            before: arm.before,
+            after: arm.after,
+            reachable: arm.reachable,
+            span: arm.syntax.span,
+          })
+        }),
+      ),
+      type: target,
       span: fact.syntax.span,
     })
   }

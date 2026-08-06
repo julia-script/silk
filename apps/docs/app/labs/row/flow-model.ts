@@ -161,6 +161,7 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   if (expression._tag === 'ArrayLiteral') return `[${expression.elements.length} elements]`
   if (expression._tag === 'IndexProjection')
     return `${argumentLabel({ ...argument, expression: expression.subject })}[index]`
+  if (expression._tag === 'Match') return 'match result'
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'

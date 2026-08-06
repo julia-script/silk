@@ -100,6 +100,61 @@ it('keeps let and move keyword prefixes as identifiers', () => {
   )
 })
 
+it('lexes match access, arm, and rest punctuation with longest recognition', () => {
+  const source = SourceFile.make(
+    'memory://match.silk',
+    ascii('match &value { Token { kind, .. } if guard => kind _ => 0 }'),
+  )
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'MatchKeyword',
+      'Ampersand',
+      'Identifier',
+      'LeftBrace',
+      'Identifier',
+      'LeftBrace',
+      'Identifier',
+      'Comma',
+      'DotDot',
+      'RightBrace',
+      'IfKeyword',
+      'Identifier',
+      'FatArrow',
+      'Identifier',
+      'Identifier',
+      'FatArrow',
+      'DecimalInteger',
+      'RightBrace',
+      'EndOfFile',
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('keeps match prefixes separate and recognizes punctuation independently', () => {
+  const source = SourceFile.make('memory://match-prefixes.silk', ascii('matcher = > . .. => &'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'Identifier', start: 0, end: 7, slice: 'matcher' },
+      { kind: 'Equals', start: 8, end: 9, slice: '=' },
+      { kind: 'Greater', start: 10, end: 11, slice: '>' },
+      { kind: 'Dot', start: 12, end: 13, slice: '.' },
+      { kind: 'DotDot', start: 14, end: 16, slice: '..' },
+      { kind: 'FatArrow', start: 17, end: 19, slice: '=>' },
+      { kind: 'Ampersand', start: 20, end: 21, slice: '&' },
+      { kind: 'EndOfFile', start: 21, end: 21, slice: '' },
+    ],
+  )
+})
+
 it('distinguishes the equals token from the arrow', () => {
   const source = SourceFile.make('memory://equals.silk', ascii('= ->'))
   const result = Lexer.lex(source)

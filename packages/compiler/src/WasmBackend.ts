@@ -10,6 +10,7 @@ import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import * as LayoutPlan from './Layout.js'
+import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Target from './Target.js'
 
@@ -220,6 +221,67 @@ const emitOperation = (
     })
   }
   switch (operation._tag) {
+    case 'Match': {
+      const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
+        operations.flatMap((nested) => emitOperation(nested, layout, resolve))
+      const emitCandidates = (
+        member: (typeof operation.members)[number],
+        candidates: ReadonlyArray<Match.ArmId>,
+        ordinal = 0,
+      ): ReadonlyArray<Instr.Instr> => {
+        const candidate = candidates.at(ordinal)
+        if (candidate === undefined) return [Instr.op('unreachable')]
+        const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
+        if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
+        const bindings = arm.bindings.flatMap((binding) => {
+          const physical = LayoutPlan.memberFieldSlots(
+            operation.scrutineeShape,
+            member,
+            binding.path,
+          )
+          if (physical === undefined) {
+            throw new RangeError('Wasm match lost a pattern payload path')
+          }
+          return copy(
+            physical.flatMap((lane) => {
+              const source = slots(operation.scrutinee).at(lane)
+              return source === undefined ? [] : [source]
+            }),
+            slots(binding.destination),
+          )
+        })
+        const selected = [
+          ...emitMany(arm.selected.operations),
+          ...copy(slots(arm.selected.result), slots(operation.destination)),
+        ]
+        if (arm.guard === undefined) return [...bindings, ...selected]
+        return [
+          ...bindings,
+          ...emitMany(arm.guard.operations),
+          Instr.localGet(scalar(arm.guard.result)),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            selected,
+            emitCandidates(member, candidates, ordinal + 1),
+          ),
+        ]
+      }
+      const emitDecisions = (ordinal = 0): ReadonlyArray<Instr.Instr> => {
+        const decision = operation.decisions.at(ordinal)
+        if (decision === undefined) return [Instr.op('unreachable')]
+        const selected = emitCandidates(decision.member, decision.candidates)
+        if (operation.scrutineeType._tag === 'Nominal') return selected
+        const tag = slots(operation.scrutinee).at(0)
+        if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
+        return [
+          Instr.localGet(tag),
+          Instr.i32Const(ordinal),
+          Instr.op('i32.eq'),
+          Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
+        ]
+      }
+      return emitDecisions()
+    }
     case 'Literal':
       return [Instr.i32Const(operation.value), Instr.localSet(scalar(operation.destination))]
     case 'Move':

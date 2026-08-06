@@ -6,6 +6,17 @@ pub struct Pair {
   choice: Alpha | (Beta | Alpha)
 }
 
+pub struct Span {
+  start: I32
+  end: I32
+}
+
+pub struct Token {
+  span: Span
+}
+
+pub struct End {}
+
 fn helper(value: I32, other: I32) -> I32 {
   let mut moved = move value
   while moved < other {
@@ -22,6 +33,13 @@ fn helper(value: I32, other: I32) -> I32 {
     return Pair {left: [1, 2], right: true}.left[0]
   }
   return moved
+}
+
+fn inspect(event: Token | End) -> I32 {
+  return match &mut event {
+    Token {span: Span {start: offset, ..}, ..} if true => offset
+    _ => 0
+  }
 }
 
 pub fn main() -> I32 {

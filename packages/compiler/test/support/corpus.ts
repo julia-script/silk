@@ -15,6 +15,12 @@ export interface CorpusProgram {
     | { readonly _tag: 'UnavailableEntry'; readonly reason: string }
 }
 
+export interface InvalidCorpusProgram {
+  readonly name: string
+  readonly source: string
+  readonly codes: ReadonlyArray<string>
+}
+
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
@@ -303,6 +309,51 @@ pub fn main() -> I32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'match-guarded-union-shared',
+    source: `struct Left { value: I32 }
+struct Right { value: I32 }
+fn inspect(input: Left | Right) -> I32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => answer + 1
+    Right { value } => value
+  }
+}
+pub fn main() -> I32 { return inspect(Left { value: 41 }) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'match-move-nested-cleanup',
+    source: `struct Token { value: I32 }
+struct Box { token: Token discarded: Token }
+pub fn main() -> I32 {
+  let box = Box { token: Token { value: 42 }, discarded: Token { value: 0 } }
+  return match move box {
+    Box { token: Token { value }, .. } => value
+  }
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'match-universal-fallback',
+    source: `struct Left { value: I32 }
+struct Right { value: I32 }
+fn inspect(input: Left | Right) -> I32 {
+  return match &input { Left { value } => value _ => 42 }
+}
+pub fn main() -> I32 { return inspect(Right { value: 0 }) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'match-exclusive-mutable',
+    source: `struct Token { value: I32 }
+pub fn main() -> I32 {
+  let mut token = Token { value: 42 }
+  return match &mut token { Token { value } => value }
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'nested-loops',
     source: `pub fn main() -> I32 {
   let mut outer = 0
@@ -328,5 +379,65 @@ pub fn main() -> I32 {
     name: 'parameterized-entry',
     source: 'pub fn main(value: I32) -> I32 { return value }',
     expected: { _tag: 'UnavailableEntry', reason: 'ParameterizedEntry' },
+  },
+]
+
+/** Phase-owned invalid matching programs shared by diagnostics and release-gate tests. */
+export const invalidMatchCorpus: ReadonlyArray<InvalidCorpusProgram> = [
+  {
+    name: 'match-incomplete',
+    source: `struct Left {}
+struct Right {}
+fn inspect(input: Left | Right) -> I32 { return match &input { Left {} => 1 } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['SEM0044'],
+  },
+  {
+    name: 'match-unreachable',
+    source: `struct Token {}
+fn inspect(input: Token) -> I32 { return match &input { _ => 0 Token {} => 1 } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['SEM0043'],
+  },
+  {
+    name: 'match-invalid-member-and-field',
+    source: `struct Token { value: I32 }
+struct Other {}
+fn inspect(input: Token) -> I32 { return match &input { Other {} => 0 Token { value, missing } => value } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['SEM0042', 'SEM0022'],
+  },
+  {
+    name: 'match-invalid-guard-and-join',
+    source: `struct Left {}
+struct Right {}
+fn inspect(input: Left | Right) -> I32 { return match &input { Left {} if 1 => 0 Left {} => 0 Right {} => false } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['SEM0045', 'SEM0049'],
+  },
+  {
+    name: 'match-guard-consumes',
+    source: `struct Payload {}
+struct Box { value: Payload }
+fn accept(value: Payload) -> Bool { return true }
+fn inspect(input: Box) -> I32 { return match move input { Box { value } if accept(move value) => 1 Box { value: fallback } => 0 } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['OWN0008'],
+  },
+  {
+    name: 'match-borrow-escape-exclusive-immutable',
+    source: `struct Payload {}
+struct Box { value: Payload }
+fn escape(input: Box) -> Payload { return match &input { Box { value } => value } }
+fn exclusive(input: Box) -> I32 { return match &mut input { Box { .. } => 0 } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['OWN0006', 'OWN0007'],
+  },
+  {
+    name: 'match-malformed-pattern',
+    source: `struct Token { value: I32 }
+fn inspect(input: Token) -> I32 { return match &input { Token { value: } 0 } }
+pub fn main() -> I32 { return 0 }`,
+    codes: ['PAR0001'],
   },
 ]

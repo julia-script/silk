@@ -70,6 +70,18 @@ it.effect('lowers discovered instances deterministically to verifier-clean MIR',
 const bindingSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { let value = identity(42) let extra = 1 return value }`
 
+const nestedMatchSource = `pub struct Token { kind: I32 }
+pub struct Box { token: Token }
+pub fn adjust(value: I32) -> I32 { return I32.add(value, 1) }
+pub fn main() -> I32 {
+  let boxed = Box { token: Token { kind: 41 } }
+  return match move boxed {
+    Box { token } => match move token {
+      Token { kind: answer } => adjust(answer)
+    }
+  }
+}`
+
 it.effect('lowers bindings and ownership violations with generated cleanup or traps', () =>
   Effect.gen(function* () {
     const bindings = Analysis.loweredMir(yield* snapshot(bindingSource))
@@ -116,6 +128,66 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
     assert.strictEqual(
       unavailableFunction === undefined ? undefined : Mir.outcomes(unavailableFunction).at(0)?._tag,
       'Trap',
+    )
+  }),
+)
+
+it.effect('discovers calls and lowers nested matches as structured acyclic operations', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(nestedMatchSource)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => [diagnostic.code, diagnostic.message]),
+      [],
+    )
+    assert.deepEqual(
+      Analysis.instancesOf(result).instances.map((instance) => instance.key.declaration.name),
+      ['main', 'adjust'],
+    )
+    const mir = Analysis.loweredMir(result)
+    assert.deepEqual(Mir.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main')
+    const matches =
+      main === undefined
+        ? []
+        : Mir.operations(main).filter((operation) => operation._tag === 'Match')
+    assert.strictEqual(matches.length, 2)
+    assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
+    assert.strictEqual(matches.at(0)?.decisions.at(0)?.member.name, 'Box')
+    assert.strictEqual(matches.at(1)?.decisions.at(0)?.member.name, 'Token')
+    assert.strictEqual(
+      Mir.encode(mir),
+      Mir.encode(Analysis.loweredMir(yield* snapshot(nestedMatchSource))),
+    )
+  }),
+)
+
+it.effect('rejects hand-built match decisions before evaluation or emission', () =>
+  Effect.gen(function* () {
+    const mir = Analysis.loweredMir(yield* snapshot(nestedMatchSource))
+    let changed = false
+    const malformed: Mir.Module = {
+      ...mir,
+      functions: mir.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag !== 'OperationRegion'
+            ? region
+            : {
+                ...region,
+                operations: region.operations.map((operation) => {
+                  if (changed || operation._tag !== 'Match') return operation
+                  changed = true
+                  return { ...operation, decisions: [] }
+                }),
+              },
+        ),
+      })),
+    }
+
+    assert.strictEqual(changed, true)
+    assert.include(
+      Mir.verify(malformed).map((violation) => violation.rule),
+      'InvalidMatchDecision',
     )
   }),
 )

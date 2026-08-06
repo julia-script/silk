@@ -147,6 +147,7 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LeftBrace',
   'RightBrace',
   'Equals',
+  'FatArrow',
   'LetKeyword',
   'IfKeyword',
   'WhileKeyword',
@@ -158,6 +159,7 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'StructKeyword',
   'FnKeyword',
   'ImportKeyword',
+  'MatchKeyword',
 ])
 
 const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
@@ -171,6 +173,7 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Bang',
   'LeftParenthesis',
   'LeftBracket',
+  'MatchKeyword',
 ])
 
 const significantKindAfter = (
@@ -241,6 +244,7 @@ const primaryKind = (
   | 'Call'
   | 'StructLiteral'
   | 'ArrayLiteral'
+  | 'Match'
   | 'Grouped'
   | 'Prefix' => {
   let index = state.index
@@ -253,6 +257,7 @@ const primaryKind = (
     if (token.kind === 'Bang') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
+    if (token.kind === 'MatchKeyword') return 'Match'
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
     if (token.kind === 'Identifier') {
       const following = significantKindAfter(state, 1)
@@ -275,6 +280,7 @@ const primaryKind = (
       token.kind === 'RightParenthesis' ||
       token.kind === 'RightBracket' ||
       token.kind === 'RightBrace' ||
+      token.kind === 'FatArrow' ||
       token.kind === 'LetKeyword' ||
       token.kind === 'IfKeyword' ||
       token.kind === 'ReturnKeyword' ||
@@ -535,6 +541,174 @@ function parseArrayLiteralExpression(
   })
 }
 
+const isUniversalPatternStart = (state: State): boolean => {
+  const token = significantToken(state)
+  return (
+    token?.kind === 'Identifier' &&
+    Option.contains(SourceFile.spelling(state.lexical.source, token.span), '_')
+  )
+}
+
+const isNominalPatternStart = (state: State): boolean => {
+  if (nextSignificantKind(state) !== 'Identifier') return false
+  const following = significantKindAfter(state, 1)
+  if (following === 'LeftBrace') return true
+  return following === 'Dot' && significantKindAfter(state, 3) === 'LeftBrace'
+}
+
+function parsePattern(initial: State): NodeResult {
+  if (isUniversalPatternStart(initial)) {
+    const identifier = expect(initial, 'Identifier', ['IfKeyword', 'FatArrow', 'RightBrace'])
+    return Object.freeze({
+      state: identifier.state,
+      node: syntaxNode(identifier.state, 'UniversalPattern', identifier.elements),
+    })
+  }
+  return parseNominalPattern(initial)
+}
+
+function parseNominalPattern(initial: State): NodeResult {
+  const target = parseTypePath(initial, ['LeftBrace', 'IfKeyword', 'FatArrow', 'RightBrace'])
+  const left = expect(target.state, 'LeftBrace', [
+    'Identifier',
+    'DotDot',
+    'RightBrace',
+    'IfKeyword',
+    'FatArrow',
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([target.node, ...left.elements])
+
+  while (
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'IfKeyword' &&
+    nextSignificantKind(state) !== 'FatArrow' &&
+    nextSignificantKind(state) !== 'EndOfFile'
+  ) {
+    if (nextSignificantKind(state) === 'DotDot') {
+      const rest = expect(state, 'DotDot', ['Comma', 'RightBrace', 'IfKeyword', 'FatArrow'])
+      children = Object.freeze([...children, syntaxNode(rest.state, 'RestPattern', rest.elements)])
+      state = rest.state
+    } else {
+      const name = expect(state, 'Identifier', [
+        'Colon',
+        'Comma',
+        'RightBrace',
+        'IfKeyword',
+        'FatArrow',
+      ])
+      state = name.state
+      let fieldChildren: ReadonlyArray<SyntaxTree.Element> = name.elements
+      if (nextSignificantKind(state) === 'Colon' || isNominalPatternStart(state)) {
+        const colon = expect(state, 'Colon', [
+          'Identifier',
+          'Comma',
+          'RightBrace',
+          'IfKeyword',
+          'FatArrow',
+        ])
+        state = colon.state
+        if (isNominalPatternStart(state)) {
+          const nested = parseNominalPattern(state)
+          fieldChildren = Object.freeze([...fieldChildren, ...colon.elements, nested.node])
+          state = nested.state
+        } else {
+          const binding = expect(state, 'Identifier', [
+            'Comma',
+            'RightBrace',
+            'IfKeyword',
+            'FatArrow',
+          ])
+          fieldChildren = Object.freeze([...fieldChildren, ...colon.elements, ...binding.elements])
+          state = binding.state
+        }
+      }
+      children = Object.freeze([...children, syntaxNode(state, 'PatternField', fieldChildren)])
+    }
+
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', [
+      'Identifier',
+      'DotDot',
+      'RightBrace',
+      'IfKeyword',
+      'FatArrow',
+    ])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+  }
+
+  const right = expect(state, 'RightBrace', ['IfKeyword', 'FatArrow', 'Identifier', 'RightBrace'])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'NominalPattern', [...children, ...right.elements]),
+  })
+}
+
+function parseMatchArm(initial: State, reservedForEnclosingCalls: number): NodeResult {
+  const pattern = parsePattern(initial)
+  let state = pattern.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([pattern.node])
+
+  if (nextSignificantKind(state) === 'IfKeyword') {
+    const keyword = expect(state, 'IfKeyword', [...expressionStarts, 'FatArrow'])
+    const guard = parseExpression(keyword.state, reservedForEnclosingCalls, 'Identifier', false)
+    children = Object.freeze([...children, ...keyword.elements, guard.node])
+    state = guard.state
+  }
+
+  const arrow = expect(state, 'FatArrow', [...expressionStarts, 'Identifier', 'RightBrace'])
+  const result = parseExpression(arrow.state, reservedForEnclosingCalls, 'Identifier')
+  state = result.state
+  children = Object.freeze([...children, ...arrow.elements, result.node])
+  return Object.freeze({ state, node: syntaxNode(state, 'MatchArm', children) })
+}
+
+function parseMatchExpression(initial: State, reservedForEnclosingCalls: number): NodeResult {
+  const keyword = expect(initial, 'MatchKeyword', ['MoveKeyword', 'Ampersand', ...expressionStarts])
+  let state = keyword.state
+  let accessChildren: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+  if (nextSignificantKind(state) === 'MoveKeyword') {
+    const move = expect(state, 'MoveKeyword', expressionStarts)
+    state = move.state
+    accessChildren = move.elements
+  } else if (nextSignificantKind(state) === 'Ampersand') {
+    const ampersand = expect(state, 'Ampersand', ['MutKeyword', ...expressionStarts])
+    state = ampersand.state
+    accessChildren = ampersand.elements
+    if (nextSignificantKind(state) === 'MutKeyword') {
+      const mut = expect(state, 'MutKeyword', expressionStarts)
+      state = mut.state
+      accessChildren = Object.freeze([...accessChildren, ...mut.elements])
+    }
+  }
+  const access = syntaxNode(state, 'MatchAccess', accessChildren)
+  const scrutinee = parseExpression(state, reservedForEnclosingCalls, 'Identifier', false)
+  const left = expect(scrutinee.state, 'LeftBrace', ['Identifier', 'RightBrace'])
+  state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...keyword.elements,
+    access,
+    scrutinee.node,
+    ...left.elements,
+  ])
+
+  while (
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'EndOfFile'
+  ) {
+    const arm = parseMatchArm(state, reservedForEnclosingCalls)
+    children = Object.freeze([...children, arm.node])
+    state = arm.state
+  }
+
+  const right = expect(state, 'RightBrace', expressionFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'MatchExpression', [...children, ...right.elements]),
+  })
+}
+
 function parsePrimaryExpression(
   initial: State,
   reservedForEnclosingCalls: number,
@@ -547,6 +721,7 @@ function parsePrimaryExpression(
     return parseStructLiteralExpression(initial, reservedForEnclosingCalls)
   if (kind === 'ArrayLiteral')
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls)
+  if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Move') {
     const keyword = expect(initial, 'MoveKeyword', ['Identifier', ...expressionFollowing])
     const subject = parseIdentifierExpression(keyword.state)

@@ -62,6 +62,7 @@ describe('preset catalog', () => {
         'operators',
         'arrays',
         'ownership',
+        'matching',
         'control',
         'discovery',
         'backend',

@@ -321,6 +321,32 @@ export const ownershipRows = (
         onActivate: () => onPick(loopSpan),
       })
     }
+
+    for (const match of fn.matches) {
+      const matchSpan = asSpan(match.span)
+      rows.push({
+        key: `own-${fn.declaration.id.ordinal}-match-${match.span.start}`,
+        depth: 1,
+        dot: 'symbol',
+        label: `match ${match.access.toLowerCase()}`,
+        detail: `${match.arms.length} arm${match.arms.length === 1 ? '' : 's'} · arm-local lifetime`,
+        span: matchSpan,
+        onActivate: () => onPick(matchSpan),
+      })
+      for (const arm of match.arms) {
+        const cleanup = arm.cleanup
+          .map((entry) => entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload')
+          .join(', ')
+        rows.push({
+          key: `own-${fn.declaration.id.ordinal}-match-${match.span.start}-arm${arm.id.ordinal}`,
+          depth: 2,
+          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
+          detail: `${arm.provisionalGuard ? 'provisional guard' : 'direct selection'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · cleanup ${cleanup || 'none'}`,
+          span: matchSpan,
+          onActivate: () => onPick(matchSpan),
+        })
+      }
+    }
   }
 
   return rows
@@ -482,6 +508,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `write ${placeText(operation.root, operation.selectors)} = ${localText(operation.source)}`
     case 'Drop':
       return `drop ${localText(operation.local)}`
+    case 'Match':
+      return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
   }
 }
 
@@ -558,6 +586,38 @@ export const mirRows = (
           span,
           onActivate: () => onPick(span),
         })
+        if (operation._tag === 'Match') {
+          for (const decision of operation.decisions) {
+            rows.push({
+              key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}-decision-${typeText(decision.member)}`,
+              depth: 3,
+              label: `decision ${typeText(decision.member)}`,
+              detail: decision.candidates.map((candidate) => `arm #${candidate.ordinal}`).join(' → '),
+            })
+          }
+          for (const arm of operation.arms) {
+            const armSpan = asSpan(arm.provenance.span)
+            rows.push({
+              key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}`,
+              depth: 3,
+              label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
+              detail: `${arm.guard === undefined ? 'selected' : `guard ${localText(arm.guard.result)}`} · result ${localText(arm.selected.result)} → ${localText(operation.destination)} · cleanup ${arm.selected.cleanup.length}`,
+              span: armSpan,
+              onActivate: () => onPick(armSpan),
+            })
+            for (const binding of arm.bindings) {
+              const bindingSpan = asSpan(binding.provenance.span)
+              rows.push({
+                key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}-binding${binding.id.ordinal}`,
+                depth: 4,
+                label: `${localText(binding.destination)} = payload ${binding.path.map((field) => `#${field.ordinal}`).join('.')}`,
+                detail: `${binding.access.toLowerCase()} · ${typeText(Mir.semanticType(binding.type))}`,
+                span: bindingSpan,
+                onActivate: () => onPick(bindingSpan),
+              })
+            }
+          }
+        }
       }
 
       if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
@@ -687,6 +747,18 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
         .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':
       return `cleanup _${event.local}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`}`
+    case 'MatchDispatch':
+      return `match ${event.access.toLowerCase()} · active ${typeText(event.member)}`
+    case 'MatchCandidate':
+      return event.binding === undefined
+        ? `candidate arm #${event.arm ?? '?'}`
+        : `bind pattern #${event.binding} = ${event.value === undefined ? '?' : valueText(event.value)}`
+    case 'MatchSelected':
+      return `select arm #${event.arm ?? '?'}`
+    case 'MatchCleanup':
+      return `cleanup arm #${event.arm ?? '?'} · ${event.path?.map((field) => `#${field.ordinal}`).join('.') || 'payload'}`
+    case 'MatchBorrowEnd':
+      return `end ${event.access.toLowerCase()} arm view`
     case 'RegionEntry':
       return `enter r${event.region}`
     case 'Condition':
@@ -724,6 +796,11 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'Project':
     case 'PlaceRead':
     case 'Cleanup':
+    case 'MatchDispatch':
+    case 'MatchCandidate':
+    case 'MatchSelected':
+    case 'MatchCleanup':
+    case 'MatchBorrowEnd':
     case 'RegionEntry':
     case 'Condition':
     case 'Iteration':

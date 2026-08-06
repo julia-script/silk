@@ -349,9 +349,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
           unavailable: 'Ownership unavailable — the root module did not elaborate',
         }
       }
+      const matches = Analysis.ownershipMatchesOf(snapshot, snapshot.closure.rootModule)
       return {
         rows: ownershipRows(facts, (span) => onSelectSpan(span)),
-        meta: `${facts.functions.length} fn`,
+        facts:
+          matches.length === 0
+            ? undefined
+            : [{ text: `${matches.length} match lifetime`, tone: 'symbol' }],
+        meta: `${facts.functions.length} fn${matches.length === 0 ? '' : ` · ${matches.length} match`}`,
       }
     },
   },
@@ -416,13 +421,21 @@ export const views: ReadonlyArray<ViewDefinition> = [
       }
       const regions = mir.value.functions.reduce((total, fn) => total + fn.regions.length, 0)
       const conversions = Analysis.mirUnionConversionsOf(snapshot)
+      const matches = Analysis.mirMatchesOf(snapshot)
       return {
         rows: mirRows(mir.value, (span) => onSelectSpan(span)),
         facts:
-          conversions.length === 0
+          conversions.length === 0 && matches.length === 0
             ? undefined
-            : [{ text: `${conversions.length} ConvertUnion`, tone: 'symbol' }],
-        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
+            : [
+                ...(matches.length === 0
+                  ? []
+                  : [{ text: `${matches.length} structured match`, tone: 'symbol' as const }]),
+                ...(conversions.length === 0
+                  ? []
+                  : [{ text: `${conversions.length} ConvertUnion`, tone: 'symbol' as const }]),
+              ],
+        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}${matches.length === 0 ? '' : ` · ${matches.length} match`}${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
       }
     },
   },

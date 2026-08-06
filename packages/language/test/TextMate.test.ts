@@ -80,5 +80,12 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt('/// doc', '/// doc'), 'comment.line.documentation.silk')
   assert.include(scopesAt('// plain', '// plain'), 'comment.line.double-slash.silk')
   assert.notInclude(scopesAt('// plain', '// plain'), 'comment.line.documentation.silk')
+  const match = 'match &mut event { Token { kind, .. } if true => kind _ => 0 }'
+  assert.include(scopesAt(match, 'match'), 'keyword.other.silk')
+  assert.include(scopesAt(match, '&'), 'keyword.operator.silk')
+  assert.include(scopesAt(match, '=>'), 'keyword.operator.silk')
+  assert.include(scopesAt(match, '..'), 'punctuation.definition.pattern.rest.silk')
+  assert.include(scopesAt(match, 'Token'), 'entity.name.type.pattern.silk')
+  assert.include(scopesAt(match, '_'), 'variable.language.wildcard.silk')
   highlighter.dispose()
 })

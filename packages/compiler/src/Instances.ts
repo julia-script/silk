@@ -101,6 +101,16 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<DeclarationIndex
   if (expression._tag === 'BuiltinCall') {
     return expression.arguments.flatMap((argument) => callTargets(argument))
   }
+  if (expression._tag === 'Match') {
+    return [
+      ...callTargets(expression.scrutinee),
+      ...expression.arms.flatMap((arm) =>
+        arm.reachable
+          ? [...(arm.guard === undefined ? [] : callTargets(arm.guard)), ...callTargets(arm.result)]
+          : [],
+      ),
+    ]
+  }
   if (expression._tag !== 'Call') return []
   return [expression.target, ...expression.arguments.flatMap((argument) => callTargets(argument))]
 }
