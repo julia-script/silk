@@ -1,6 +1,7 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Type from './Type.js'
 
 /**
  * HIR: the resolved, typed semantic representation of elaborated bodies. Core operations carry
@@ -72,6 +73,27 @@ export type Expression =
   | {
       readonly _tag: 'Move'
       readonly subject: Expression
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Construct'
+      readonly nominal: Type.Nominal
+      /** Field identities in language evaluation order; `fields` remains canonical storage order. */
+      readonly evaluationOrder: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationIndex.FieldId
+        readonly value: Expression
+      }>
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Project'
+      readonly subject: Expression
+      readonly nominal: Type.Nominal
+      readonly field: DeclarationIndex.FieldId
+      readonly access: 'CopyRead' | 'ConsumeRequested'
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -157,7 +179,10 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'Unavailable':
         return true
       case 'Move':
+      case 'Project':
         return walk(expression.subject)
+      case 'Construct':
+        return expression.fields.some((field) => walk(field.value))
       case 'Call':
       case 'BuiltinCall':
         return expression.arguments.some(walk)
@@ -179,7 +204,15 @@ export const firstUnavailable = (
       case 'Unavailable':
         return expression
       case 'Move':
+      case 'Project':
         return walk(expression.subject)
+      case 'Construct': {
+        for (const field of expression.fields) {
+          const found = walk(field.value)
+          if (found !== undefined) return found
+        }
+        return undefined
+      }
       case 'Call':
       case 'BuiltinCall': {
         for (const argument of expression.arguments) {
@@ -251,33 +284,47 @@ const identityLabel = (declaration: DeclarationIndex.DeclarationFact): string =>
 
 const contractText = (contract: ContractFact): string =>
   contract._tag === 'Contract'
-    ? `(${contract.parameters.join(', ')}) -> ${contract.result}`
+    ? `(${contract.parameters.map(Type.encode).join(', ')}) -> ${Type.encode(contract.result)}`
     : 'contract-unavailable'
 
 const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
     case 'IntegerLiteral':
-      return `${indent}literal ${expression.value} : ${expression.type} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'BooleanLiteral':
-      return `${indent}literal ${expression.value} : ${expression.type} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'ParameterReference':
-      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${expression.type} ${spanText(expression.span)}`
+      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'BindingReference':
-      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${expression.type} ${spanText(expression.span)}`
+      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'Move':
       return [
-        `${indent}move : ${expression.type} ${spanText(expression.span)}`,
+        `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'Construct':
+      return [
+        `${indent}construct ${Type.encode(expression.nominal)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
+        ...expression.fields.map(
+          ({ field, value }) =>
+            `${indent}  field #${field.ordinal}\n${encodeExpression(value, depth + 2)}`,
+        ),
+      ].join('\n')
+    case 'Project':
+      return [
+        `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'Call':
       return [
-        `${indent}call ${expression.target.module}.${expression.target.name} : ${expression.type} ${spanText(expression.span)}`,
+        `${indent}call ${expression.target.module}.${expression.target.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall':
       return [
-        `${indent}builtin I32.${expression.operation} : ${expression.type} ${spanText(expression.span)}`,
+        `${indent}builtin I32.${expression.operation} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'Unavailable':

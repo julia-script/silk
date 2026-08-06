@@ -137,6 +137,10 @@
       "types": "./dist/ToolchainPlan.d.ts",
       "import": "./dist/ToolchainPlan.js"
     },
+    "./Type": {
+      "types": "./dist/Type.d.ts",
+      "import": "./dist/Type.js"
+    },
     "./Target": {
       "types": "./dist/Target.d.ts",
       "import": "./dist/Target.js"

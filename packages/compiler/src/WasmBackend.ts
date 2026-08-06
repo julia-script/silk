@@ -169,19 +169,43 @@ interface Layout {
   readonly scratch: number
   /** Every local the definition must declare beyond the function's parameters. */
   readonly declared: ReadonlyArray<FuncActor.Local>
+  /** Physical wasm locals realizing each logical MIR local's compiler-selected lanes. */
+  readonly slots: ReadonlyArray<ReadonlyArray<number>>
+  readonly lanes: ReadonlyArray<ReadonlyArray<LayoutPlan.CallingLane>>
 }
 
 /** Local names reach the `name` custom section, so release builds declare them unnamed. */
-const layoutOf = (fn: Mir.MirFunction, debug: boolean): Layout => {
+const layoutOf = (fn: Mir.MirFunction, plan: LayoutPlan.Plan, debug: boolean): Layout => {
   const named = (type: ValType.ValType, name: string): FuncActor.Local =>
     debug ? { type, name } : { type }
-  const declared = [
-    ...fn.localTypes
-      .slice(fn.parameterCount)
-      .map((_, index) => named(i32, `local${fn.parameterCount + index}`)),
-    named(i32, 'scratch'),
-  ]
-  return { scratch: fn.localTypes.length, declared: Object.freeze(declared) }
+  const lanes = fn.localTypes.map((type) => {
+    const shape = LayoutPlan.callingShape(plan, Mir.semanticType(type))
+    if (shape === undefined) throw new RangeError('Wasm backend lost a logical calling shape')
+    return shape.lanes
+  })
+  let physical = 0
+  const slots = lanes.map((shape) => Object.freeze(shape.map(() => physical++)))
+  const parameterLaneCount = lanes
+    .slice(0, fn.parameterCount)
+    .reduce((total, shape) => total + shape.length, 0)
+  const declared: Array<FuncActor.Local> = []
+  for (let ordinal = fn.parameterCount; ordinal < fn.localTypes.length; ordinal += 1) {
+    const localSlots = slots.at(ordinal) ?? []
+    for (const [lane] of localSlots.entries()) {
+      declared.push(named(i32, `local${ordinal}_${lane}`))
+    }
+  }
+  const scratch = physical
+  declared.push(named(i32, 'scratch'))
+  if (parameterLaneCount !== (slots.at(fn.parameterCount)?.at(0) ?? parameterLaneCount)) {
+    throw new RangeError('Wasm physical parameter layout is not contiguous')
+  }
+  return {
+    scratch,
+    declared: Object.freeze(declared),
+    slots: Object.freeze(slots),
+    lanes: Object.freeze(lanes),
+  }
 }
 
 /** Emits one MIR operation as a wasm instruction sequence writing its destination local. */
@@ -190,50 +214,88 @@ const emitOperation = (
   layout: Layout,
   resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
 ): ReadonlyArray<Instr.Instr> => {
+  const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
+  const scalar = (local: Mir.LocalId): number => {
+    const selected = slots(local)
+    const first = selected.at(0)
+    if (selected.length !== 1 || first === undefined) {
+      throw new RangeError(`Wasm backend expected scalar local %${local.ordinal}`)
+    }
+    return first
+  }
+  const copy = (source: ReadonlyArray<number>, destination: ReadonlyArray<number>) => {
+    if (source.length !== destination.length) {
+      throw new RangeError('Wasm backend cannot copy mismatched logical lane bundles')
+    }
+    return source.flatMap((value, index) => {
+      const target = destination.at(index)
+      return target === undefined ? [] : [Instr.localGet(value), Instr.localSet(target)]
+    })
+  }
   switch (operation._tag) {
     case 'Literal':
-      return [Instr.i32Const(operation.value), Instr.localSet(operation.destination.ordinal)]
+      return [Instr.i32Const(operation.value), Instr.localSet(scalar(operation.destination))]
     case 'Move':
-      return [
-        Instr.localGet(operation.source.ordinal),
-        Instr.localSet(operation.destination.ordinal),
-      ]
+      return copy(slots(operation.source), slots(operation.destination))
+    case 'Construct':
+      return copy(
+        operation.fields.flatMap((field) => [...slots(field.value)]),
+        slots(operation.destination),
+      )
+    case 'Project': {
+      const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+      const sourceSlots = slots(operation.source)
+      const projected = sourceLanes.flatMap((lane, index) => {
+        const field = lane.path.at(0)
+        const source = sourceSlots.at(index)
+        return field !== undefined &&
+          source !== undefined &&
+          field.ordinal === operation.field.ordinal &&
+          field.struct.sourceId === operation.field.struct.sourceId &&
+          field.struct.ordinal === operation.field.struct.ordinal
+          ? [source]
+          : []
+      })
+      return copy(projected, slots(operation.destination))
+    }
     case 'Drop':
       // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
       return []
     case 'Call':
       return [
-        ...operation.arguments.map((argument) => Instr.localGet(argument.ordinal)),
+        ...operation.arguments.flatMap((argument) =>
+          slots(argument).map((slot) => Instr.localGet(slot)),
+        ),
         Instr.call(resolve(operation)),
-        Instr.localSet(operation.destination.ordinal),
+        ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
       ]
     case 'Binary': {
       const comparison = comparisons[operation.operator]
       if (comparison !== undefined) {
         return [
-          Instr.localGet(operation.left.ordinal),
-          Instr.localGet(operation.right.ordinal),
+          Instr.localGet(scalar(operation.left)),
+          Instr.localGet(scalar(operation.right)),
           Instr.op(comparison),
-          Instr.localSet(operation.destination.ordinal),
+          Instr.localSet(scalar(operation.destination)),
         ]
       }
       const division = divisions[operation.operator]
       if (division !== undefined) {
         return [
-          Instr.localGet(operation.left.ordinal),
-          Instr.localGet(operation.right.ordinal),
+          Instr.localGet(scalar(operation.left)),
+          Instr.localGet(scalar(operation.right)),
           Instr.op(division),
-          Instr.localSet(operation.destination.ordinal),
+          Instr.localSet(scalar(operation.destination)),
         ]
       }
       return [
         ...checkedArithmetic(
           operation.operator as OverflowShape,
-          operation.left.ordinal,
-          operation.right.ordinal,
+          scalar(operation.left),
+          scalar(operation.right),
           layout.scratch,
         ),
-        Instr.localSet(operation.destination.ordinal),
+        Instr.localSet(scalar(operation.destination)),
       ]
     }
   }
@@ -296,7 +358,10 @@ const emitRange = (
     const terminator = block.terminator
     switch (terminator._tag) {
       case 'Return':
-        instructions.push(Instr.localGet(terminator.value.ordinal), Instr.op('return'))
+        instructions.push(
+          ...(layout.slots.at(terminator.value.ordinal) ?? []).map((slot) => Instr.localGet(slot)),
+          Instr.op('return'),
+        )
         return instructions
       case 'Trap':
         instructions.push(Instr.op('unreachable'))
@@ -313,7 +378,12 @@ const emitRange = (
         // ends and emission continues at whichever successor follows it.
         const join = joinOf(fn, taken, otherwise, stop)
         instructions.push(
-          Instr.localGet(terminator.condition.ordinal),
+          Instr.localGet(
+            layout.slots.at(terminator.condition.ordinal)?.at(0) ??
+              (() => {
+                throw new RangeError('Wasm branch condition lost its scalar lane')
+              })(),
+          ),
           Instr.ifElse(
             Instr.emptyBlockType,
             emitRange(fn, taken, Math.min(join, stop), layout, resolve),
@@ -394,7 +464,11 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       })
     }
     // WebAssembly realizes both canonical scalar entries as its four-byte i32 value type.
-    if (program.layout.entries.some((entry) => entry.representation.bits !== 32)) {
+    if (
+      program.layout.entries.some(
+        (entry) => entry.representation._tag !== 'Aggregate' && entry.representation.bits !== 32,
+      )
+    ) {
       return yield* new Backend.BackendError({
         operation: 'Backend.emit',
         backend: 'WebAssembly',
@@ -417,10 +491,19 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       readonly handle: FuncActor.Func
     }> = []
     for (const [ordinal, fn] of program.functions.entries()) {
+      const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
+        const shape = LayoutPlan.callingShape(program.layout, Mir.semanticType(type))
+        if (shape === undefined) throw new RangeError('Wasm declaration lost a calling shape')
+        return shape.lanes
+      }
       const signature = yield* WasmType.func(
         builder,
-        fn.blocks.length === 0 ? [] : Array.from({ length: fn.parameterCount }, () => i32),
-        [i32],
+        fn.blocks.length === 0
+          ? []
+          : fn.localTypes
+              .slice(0, fn.parameterCount)
+              .flatMap((type) => lanesFor(type).map(() => i32)),
+        lanesFor(fn.result).map(() => i32),
       )
       const symbol = symbolFor(fn, ordinal)
       declared.push({
@@ -445,7 +528,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     }
 
     for (const entry of declared) {
-      const layout = layoutOf(entry.fn, debug)
+      const layout = layoutOf(entry.fn, program.layout, debug)
       // A body-less function is a declaration the frontend could not resolve; the LLVM backend
       // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a
       // trapping stub with the same observable behaviour.

@@ -67,6 +67,17 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('recognizes struct only as a complete keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://struct-keyword.silk', ascii('struct structure structs')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['StructKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('lexes binding statements with let, move, and equals tokens', () => {
   const source = SourceFile.make('memory://bindings.silk', ascii('let answer = move value'))
   const result = Lexer.lex(source)

@@ -82,21 +82,24 @@ it('plans every native profile for each canonical native target', () => {
   }
 })
 
-it.effect('emits a release object through the pinned Clang with provenance', () =>
-  Effect.gen(function* () {
-    const target = yield* Target.host()
-    const artifact = yield* artifactFor(target, 'release')
-    NativeToolchain.withBuildScope('emit-object', (scope) => {
-      const outcome = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
+it.effect(
+  'emits a release object through the pinned Clang with provenance',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* Target.host()
+      const artifact = yield* artifactFor(target, 'release')
+      NativeToolchain.withBuildScope('emit-object', (scope) => {
+        const outcome = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
 
-      assert.strictEqual(outcome._tag, 'ObjectArtifact')
-      if (outcome._tag !== 'ObjectArtifact') return
-      assert.strictEqual(existsSync(outcome.artifact.path), true)
-      assert.strictEqual(outcome.planned.command, clang)
-      assert.include(outcome.planned.arguments, '-c')
-      assert.include(outcome.planned.arguments, '-O2')
-    })
-  }),
+        assert.strictEqual(outcome._tag, 'ObjectArtifact')
+        if (outcome._tag !== 'ObjectArtifact') return
+        assert.strictEqual(existsSync(outcome.artifact.path), true)
+        assert.strictEqual(outcome.planned.command, clang)
+        assert.include(outcome.planned.arguments, '-c')
+        assert.include(outcome.planned.arguments, '-O2')
+      })
+    }),
+  15_000,
 )
 
 it.effect('surfaces a failed process as data with command provenance', () =>

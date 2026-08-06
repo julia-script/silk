@@ -149,11 +149,22 @@ export const compile = Effect.fn('Driver.compile')(function* (
       heapBytes: memoryUsage().heapUsed,
     }),
   )
-  const index = phase(
-    'declaration-index',
+  const collected = phase(
+    'declaration-collection',
     closure.modules.length,
     () => DeclarationIndex.collect(closure),
-    (result) => result.modules.reduce((sum, module) => sum + module.declarations.length, 0),
+    (result) => result.modules.reduce((sum, module) => sum + module.members.length, 0),
+    (result) => result.diagnostics.length,
+  )
+  const preliminaryResolution = NameResolution.resolve(closure, collected)
+  const index = phase(
+    'declaration-index',
+    collected.modules.length,
+    () =>
+      DeclarationIndex.complete(collected, (module, path) =>
+        NameResolution.resolveType(preliminaryResolution, collected, module, path),
+      ),
+    (result) => result.modules.reduce((sum, module) => sum + module.members.length, 0),
     (result) => result.diagnostics.length,
   )
   const resolution = phase(
@@ -252,10 +263,12 @@ export const compile = Effect.fn('Driver.compile')(function* (
           }),
         })
       }
+      const catalog = Layout.catalog(selection.target, index)
       return Object.freeze({
         _tag: 'Available' as const,
         target: selection.target,
-        layout: Layout.plan(selection.target, discovery),
+        catalog,
+        layout: Layout.plan(catalog, discovery),
       })
     },
     (result) => (result._tag === 'Available' ? result.layout.entries.length : 0),

@@ -95,3 +95,127 @@ types, backend instructions, backend handles, or backend-specific metadata.
 
 - **WHEN** a consumer inspects every layout entry
 - **THEN** it finds only canonical Silk type identities and target representation facts, with no backend-owned type or instruction
+
+### Requirement: Nominal layout facts precede runtime reachability
+
+After declaration type dependencies resolve and a target is selected, the compiler SHALL compute
+one immutable nominal layout catalog for every concrete non-generic struct in the loaded closure,
+including unused private declarations. The catalog SHALL retain available and unavailable entries
+under canonical nominal identities so analysis and tooling can inspect physical representation
+before instance discovery or backend work. Runtime layout planning SHALL select reachable entries
+from this catalog rather than recomputing their fields.
+
+#### Scenario: Inspect an unused struct layout
+
+- **WHEN** a module declares a valid private struct that no runtime instance reaches
+- **THEN** the nominal catalog contains its target-aware layout while the runtime layout plan omits it
+
+#### Scenario: Reuse a catalog entry in the runtime plan
+
+- **WHEN** instance discovery reaches a struct already present in the nominal catalog
+- **THEN** the runtime plan uses the catalog's identical size, alignment, and offsets without a second layout decision
+
+#### Scenario: Catalog an unavailable declaration
+
+- **WHEN** a struct contains an unknown type or inline recursive dependency
+- **THEN** the catalog retains that struct's unavailable layout state and cause while other entries remain available
+
+### Requirement: Nominal struct layouts are target-aware compiler facts
+
+For each concrete nominal struct, its catalog entry SHALL recursively include every field type
+needed for its representation and SHALL record the struct's size, alignment, and each field's
+physical offset in declaration order. Each field offset SHALL be the smallest offset satisfying its
+field alignment after the preceding field; the completed size SHALL include tail padding to the
+struct alignment. An empty struct SHALL have size zero and alignment one. These facts SHALL be
+selected by the compiler before MIR lowering and MUST NOT be recomputed or changed by a backend.
+
+#### Scenario: Lay out scalar fields with padding
+
+- **WHEN** a reachable struct declares fields whose selected-target alignments require padding
+- **THEN** the layout records declaration-ordered offsets, internal padding, maximum field alignment, and tail-padded size
+
+#### Scenario: Lay out a nested struct
+
+- **WHEN** a reachable struct contains another available nominal struct
+- **THEN** the plan contains both canonical entries and computes the outer offset and size from the inner compiler-owned layout
+
+#### Scenario: Lay out an empty struct
+
+- **WHEN** an empty marker struct is reachable
+- **THEN** its canonical layout entry records size zero, alignment one, and no fields
+
+### Requirement: Struct layout planning is finite and deterministic
+
+Struct layout SHALL follow canonical nominal type dependencies rather than source traversal order.
+An unavailable field type or inline-recursive dependency SHALL make only dependent struct layouts
+unavailable with their originating causes; unrelated scalar and struct layouts SHALL remain
+available. Identical target and declaration inputs SHALL produce byte-identical ordered entries and
+field offsets across fresh processes.
+
+#### Scenario: Refuse an inline recursive layout
+
+- **WHEN** a reachable nominal struct participates in a direct or mutual inline dependency cycle
+- **THEN** its layout remains unavailable and no placeholder size or backend type is created
+
+#### Scenario: Propagate an unavailable nested layout
+
+- **WHEN** an outer struct contains a struct whose field type is unavailable
+- **THEN** the outer layout is unavailable with that dependency cause while unrelated entries remain complete
+
+#### Scenario: Repeat aggregate layout planning
+
+- **WHEN** the same nested nominal types are planned repeatedly for one target
+- **THEN** their canonical entry order, sizes, alignments, field offsets, and encoding are byte-identical
+
+
+### Requirement: Reachable struct values reuse catalog layouts
+
+When runtime discovery reaches a nominal struct, the runtime plan SHALL include the exact available
+catalog entry for that struct and recursively required nominal field entries. It MUST NOT recompute,
+reorder, resize, or omit fields. An unavailable catalog entry SHALL make the dependent runtime plan
+explicitly unavailable before MIR or backend work.
+
+#### Scenario: Select a nested runtime aggregate
+
+- **WHEN** a reachable value has an outer struct containing an inner struct
+- **THEN** the runtime plan includes both canonical catalog entries with byte-identical sizes, alignments, offsets, and padding
+
+#### Scenario: Refuse an unavailable runtime aggregate
+
+- **WHEN** a reachable nominal type has an unavailable declaration-wide layout
+- **THEN** runtime layout planning stops that value path with the catalog's original cause and creates no placeholder ABI
+
+### Requirement: Aggregate calling shape is compiler-owned target data
+
+For every reachable parameter and result type, target planning SHALL publish a deterministic
+backend-neutral calling shape. In this bootstrap slice, a nominal struct SHALL recursively flatten
+to its Copy scalar leaf lanes in canonical declaration order; an empty struct SHALL have zero lanes.
+The shape SHALL retain each lane's canonical field path and scalar representation. Calls and returns
+MUST use that same selected shape in MIR evaluation and every backend.
+
+#### Scenario: Plan a nested struct result
+
+- **WHEN** a reachable function returns a nested struct with three scalar leaves
+- **THEN** the selected target plan records three scalar result lanes ordered by canonical nested field path
+
+#### Scenario: Plan an empty marker parameter
+
+- **WHEN** a reachable function accepts an empty struct
+- **THEN** its calling shape retains the nominal parameter identity with zero runtime lanes
+
+#### Scenario: Repeat aggregate ABI planning
+
+- **WHEN** identical declarations, discovery, and target inputs are planned in fresh processes
+- **THEN** aggregate parameter and result shapes, lane paths, and encodings are byte-identical
+
+### Requirement: Backends cannot choose aggregate ABI independently
+
+The runtime plan SHALL express aggregate call and return shapes without LLVM types, WebAssembly
+value types, registers, instructions, or handles. A backend SHALL either realize the selected shape
+exactly or reject the plan as target-incompatible; it MUST NOT choose a different flattening,
+field order, padding rule, or indirect convention.
+
+#### Scenario: Compare native and WebAssembly planning authority
+
+- **WHEN** native and WebAssembly backends receive plans for the same logical aggregate program
+- **THEN** each consumes its compiler-selected target plan and neither derives aggregate calling shape from its own type system

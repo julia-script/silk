@@ -145,20 +145,136 @@ it.effect('diagnoses import binding conflicts stably without parser cascades', (
   }),
 )
 
-it.effect('discovers one shared diamond target and excludes unreachable declarations', () =>
+it.effect(
+  'discovers one shared diamond target and excludes unreachable imported declarations',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* snapshot('root', {
+        root: 'import left.Api { left }\nimport right.Api { right }\npub fn main() -> I32 { return I32.add(left(), right()) }',
+        'left/Api':
+          'import shared.Value { value }\npub fn left() -> I32 { return value() }\npub fn unused() -> I32 { return 0 }',
+        'right/Api': 'import shared.Value { value }\npub fn right() -> I32 { return value() }',
+        'shared/Value': 'pub fn value() -> I32 { return 21 }',
+      })
+      assert.deepEqual(
+        self.instances.instances.map(
+          (instance) => `${instance.key.declaration.module}.${instance.key.declaration.name}`,
+        ),
+        ['root.main', 'left/Api.left', 'right/Api.right', 'shared/Value.value'],
+      )
+      assert.strictEqual(
+        self.instances.instances.some((instance) => instance.key.declaration.name === 'unused'),
+        false,
+      )
+    }),
+)
+
+it.effect('resolves local, selected, and qualified nominal types in declaration contracts', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot('root', {
-      root: 'import left.Api { left }\nimport right.Api { right }\npub fn main() -> I32 { return I32.add(left(), right()) }',
-      'left/Api':
-        'import shared.Value { value }\npub fn left() -> I32 { return value() }\npub fn unused() -> I32 { return 0 }',
-      'right/Api': 'import shared.Value { value }\npub fn right() -> I32 { return value() }',
-      'shared/Value': 'pub fn value() -> I32 { return 21 }',
+    const self = yield* snapshot('app/Main', {
+      'app/Main':
+        'import syntax.Tree as Ast { Node }\n' +
+        'struct Local { node: Node qualified: Ast.Node }\n' +
+        'fn identity(value: Local) -> Local { return move value }\n' +
+        'pub fn main() -> I32 { return 0 }',
+      'syntax/Tree': 'pub struct Node { value: I32 }',
+    })
+    const local = self.index.modules.find((module) => module.module === 'app/Main')?.structs.at(0)
+    const identity = self.index.modules
+      .find((module) => module.module === 'app/Main')
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'identity',
+      )
+    const identityParameter = identity?.parameters.at(0)?.declaredType
+
+    assert.deepEqual(
+      local?.fields.map((field) =>
+        field.declaredType._tag === 'Resolved' ? field.declaredType.type : field.declaredType._tag,
+      ),
+      [
+        { _tag: 'NominalType', module: 'syntax/Tree', name: 'Node' },
+        { _tag: 'NominalType', module: 'syntax/Tree', name: 'Node' },
+      ],
+    )
+    assert.deepEqual(identityParameter?._tag === 'Resolved' ? identityParameter.type : undefined, {
+      _tag: 'NominalType',
+      module: 'app/Main',
+      name: 'Local',
+    })
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('keeps type-kind and imported visibility failures explicit without fallback lookup', () =>
+  Effect.gen(function* () {
+    const wrongKind = yield* snapshot('root', {
+      root:
+        'fn Value() -> I32 { return 0 }\n' +
+        'struct Box { value: Value }\n' +
+        'pub fn main() -> I32 { return 0 }',
     })
     assert.deepEqual(
-      self.instances.instances.map(
-        (instance) => `${instance.key.declaration.module}.${instance.key.declaration.name}`,
+      wrongKind.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0018'],
+    )
+    assert.deepEqual(
+      wrongKind.diagnostics.map((diagnostic) => ({
+        sourceId: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      })),
+      [{ sourceId: 'root', start: 51, end: 56 }],
+    )
+
+    const privateRoot =
+      'import types.Secret { Secret }\n' +
+      'struct Box { secret: Secret }\n' +
+      'pub fn main() -> I32 { return 0 }'
+    const privateImport = yield* snapshot('root', {
+      root: privateRoot,
+      'types/Secret': 'struct Secret { value: I32 }',
+    })
+    const field = privateImport.index.modules
+      .find((module) => module.module === 'root')
+      ?.structs.at(0)
+      ?.fields.at(0)
+    assert.deepEqual(
+      privateImport.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0015'],
+    )
+    const privateDiagnostic = privateImport.diagnostics.at(0)
+    assert.strictEqual(
+      privateDiagnostic === undefined
+        ? undefined
+        : privateRoot.slice(privateDiagnostic.span.start, privateDiagnostic.span.end),
+      'Secret',
+    )
+    assert.strictEqual(field?.declaredType._tag, 'Unresolved')
+    assert.deepEqual(
+      field?.declaredType._tag === 'Unresolved' ? field.declaredType.candidate : undefined,
+      {
+        _tag: 'NominalType',
+        module: 'types/Secret',
+        name: 'Secret',
+      },
+    )
+  }),
+)
+
+it.effect('distinguishes harmless import cycles from inline nominal dependency cycles', () =>
+  Effect.gen(function* () {
+    const harmless = yield* snapshot('a/A', {
+      'a/A': 'import b.B\npub struct A { value: I32 }\npub fn main() -> I32 { return 0 }',
+      'b/B': 'import a.A\npub struct B { value: Bool }',
+    })
+    assert.deepEqual(harmless.closure.cycles, [['a/A', 'b/B']])
+    assert.deepEqual(harmless.diagnostics, [])
+    assert.strictEqual(
+      harmless.index.modules.every((module) =>
+        module.structs.every((struct) => struct.dependency._tag === 'Available'),
       ),
-      ['root.main', 'left/Api.left', 'right/Api.right', 'shared/Value.value'],
+      true,
     )
   }),
 )

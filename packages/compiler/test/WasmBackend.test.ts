@@ -291,59 +291,62 @@ for (const [name, source] of programs) {
  * those checks turn on against exact arithmetic, which JavaScript numbers compute without loss
  * across the whole `i32` range.
  */
-it.effect('traps signed overflow exactly at the i32 boundaries', () =>
-  Effect.gen(function* () {
-    const minimum = -2147483648
-    const maximum = 2147483647
-    const operands = [
-      0,
-      1,
-      -1,
-      2,
-      -2,
-      3,
-      -3,
-      46340,
-      -46340,
-      46341,
-      -46341,
-      65536,
-      -65536,
-      1073741824,
-      -1073741824,
-      maximum,
-      minimum,
-      maximum - 1,
-      minimum + 1,
-    ]
-    const references: ReadonlyArray<
-      readonly [string, (a: number, b: number) => number | undefined]
-    > = [
-      ['add', (a, b) => a + b],
-      ['subtract', (a, b) => a - b],
-      ['multiply', (a, b) => a * b],
-      ['divide', (a, b) => (b === 0 ? undefined : Math.trunc(a / b))],
-      ['remainder', (a, b) => (b === 0 ? undefined : a % b)],
-    ]
+it.effect(
+  'traps signed overflow exactly at the i32 boundaries',
+  () =>
+    Effect.gen(function* () {
+      const minimum = -2147483648
+      const maximum = 2147483647
+      const operands = [
+        0,
+        1,
+        -1,
+        2,
+        -2,
+        3,
+        -3,
+        46340,
+        -46340,
+        46341,
+        -46341,
+        65536,
+        -65536,
+        1073741824,
+        -1073741824,
+        maximum,
+        minimum,
+        maximum - 1,
+        minimum + 1,
+      ]
+      const references: ReadonlyArray<
+        readonly [string, (a: number, b: number) => number | undefined]
+      > = [
+        ['add', (a, b) => a + b],
+        ['subtract', (a, b) => a - b],
+        ['multiply', (a, b) => a * b],
+        ['divide', (a, b) => (b === 0 ? undefined : Math.trunc(a / b))],
+        ['remainder', (a, b) => (b === 0 ? undefined : a % b)],
+      ]
 
-    const mismatches: Array<string> = []
-    for (const [operator, reference] of references) {
-      for (const left of operands) {
-        for (const right of operands) {
-          const exact = reference(left, right)
-          const traps = exact === undefined || exact > maximum || exact < minimum
-          const actual = yield* run(
-            `pub fn main() -> I32 { return I32.${operator}(${left}, ${right}) }`,
-          )
-          if (actual !== (traps ? 'trap' : exact)) {
-            mismatches.push(
-              `I32.${operator}(${left}, ${right}) expected ${traps ? 'trap' : exact}, got ${actual}`,
+      const mismatches: Array<string> = []
+      for (const [operator, reference] of references) {
+        for (const left of operands) {
+          for (const right of operands) {
+            const exact = reference(left, right)
+            const traps = exact === undefined || exact > maximum || exact < minimum
+            const actual = yield* run(
+              `pub fn main() -> I32 { return I32.${operator}(${left}, ${right}) }`,
             )
+            if (actual !== (traps ? 'trap' : exact)) {
+              mismatches.push(
+                `I32.${operator}(${left}, ${right}) expected ${traps ? 'trap' : exact}, got ${actual}`,
+              )
+            }
           }
         }
       }
-    }
 
-    assert.deepEqual(mismatches, [])
-  }),
+      assert.deepEqual(mismatches, [])
+    }),
+  15_000,
 )

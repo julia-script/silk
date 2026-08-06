@@ -57,6 +57,7 @@ describe('preset catalog', () => {
         'syntax',
         'modules',
         'headers',
+        'structs',
         'names',
         'operators',
         'ownership',

@@ -78,6 +78,7 @@ const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['as', 'AsKeyword'],
   ['if', 'IfKeyword'],
   ['else', 'ElseKeyword'],
+  ['struct', 'StructKeyword'],
   ['true', 'TrueKeyword'],
   ['false', 'FalseKeyword'],
 ])

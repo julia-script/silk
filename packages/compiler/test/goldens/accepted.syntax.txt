@@ -38,8 +38,9 @@ tree:
       ReturnType [25, 32)
         token Whitespace [25, 26) " "
         token Arrow [26, 28) "->"
-        token Whitespace [28, 29) " "
-        token Identifier [29, 32) "I32"
+        TypePath [28, 32)
+          token Whitespace [28, 29) " "
+          token Identifier [29, 32) "I32"
       Block [32, 46)
         token Whitespace [32, 33) " "
         token LeftBrace [33, 34) "{"

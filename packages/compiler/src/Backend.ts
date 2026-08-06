@@ -128,7 +128,7 @@ const positionOf = (table: LineTable, offset: number): { line: number; column: n
 const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
   Effect.gen(function* () {
     const i32Layout = Layout.entry(program.layout, 'I32')
-    if (i32Layout === undefined) {
+    if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
       return yield* new BackendError({
         operation: 'Backend.emit',
         backend: 'LLVM',
@@ -136,9 +136,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
       })
     }
+    const scalarBits = i32Layout.representation.bits
     if (
       program.layout.entries.some(
-        (entry) => entry.representation.bits !== i32Layout.representation.bits,
+        (entry) =>
+          entry.representation._tag !== 'Aggregate' && entry.representation.bits !== scalarBits,
       )
     ) {
       return yield* new BackendError({
@@ -153,7 +155,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       targetTriple: program.layout.target.triple,
       strip: request.mode !== 'debug',
     })
-    const i32 = yield* LlvmType.integer(builder, i32Layout.representation.bits)
+    const i32 = yield* LlvmType.integer(builder, scalarBits)
+    let voidType: LlvmType.Type | undefined
+    const lanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> => {
+      const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
+      if (shape === undefined) {
+        throw new RangeError(`LLVM backend lost calling shape for ${Mir.semanticType(type)}`)
+      }
+      return shape.lanes
+    }
     let overflowSignature:
       | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
       | undefined
@@ -162,17 +172,37 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       readonly fn: Mir.MirFunction
       readonly symbol: string
       readonly handle: FunctionActor.Function
+      readonly resultType: LlvmType.Type
+      readonly resultLaneCount: number
     }> = []
     for (const [ordinal, fn] of program.functions.entries()) {
-      const signature = yield* LlvmType.functionType(
-        builder,
-        i32,
-        fn.blocks.length === 0 ? [] : Array.from({ length: fn.parameterCount }, () => i32),
-      )
+      const resultLaneCount = lanesFor(fn.result).length
+      let resultType: LlvmType.Type
+      if (resultLaneCount === 0) {
+        const selected = voidType ?? (yield* LlvmType.voidType(builder))
+        voidType = selected
+        resultType = selected
+      } else if (resultLaneCount === 1) {
+        resultType = i32
+      } else {
+        resultType = yield* LlvmType.structure(
+          builder,
+          Array.from({ length: resultLaneCount }, () => i32),
+        )
+      }
+      const parameters =
+        fn.blocks.length === 0
+          ? []
+          : fn.localTypes
+              .slice(0, fn.parameterCount)
+              .flatMap((type) => Array.from({ length: lanesFor(type).length }, () => i32))
+      const signature = yield* LlvmType.functionType(builder, resultType, parameters)
       declared.push({
         fn,
         symbol: symbolFor(fn, ordinal),
         handle: yield* FunctionActor.declare(builder, symbolFor(fn, ordinal), signature),
+        resultType,
+        resultLaneCount,
       })
     }
 
@@ -225,16 +255,34 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           }
           let trapBlock: LlvmBlock.Block | undefined
           let checkOrdinal = 0
-          const locals = new Map<number, Value.Input>()
+          const locals = new Map<number, ReadonlyArray<Value.Input>>()
+          let physicalParameter = 0
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
-            locals.set(ordinal, yield* Value.argument(body, ordinal))
+            const logicalType = entry.fn.localTypes.at(ordinal)
+            if (logicalType === undefined) {
+              throw new RangeError(`Backend lost parameter type %${ordinal}`)
+            }
+            const values: Array<Value.Input> = []
+            for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {
+              values.push(yield* Value.argument(body, physicalParameter))
+              physicalParameter += 1
+            }
+            locals.set(ordinal, Object.freeze(values))
           }
-          const readLocal = (local: Mir.LocalId): Value.Input => {
+          const readLocal = (local: Mir.LocalId): ReadonlyArray<Value.Input> => {
             const found = locals.get(local.ordinal)
             if (found === undefined) {
               throw new RangeError(`Backend read undefined local %${local.ordinal}`)
             }
             return found
+          }
+          const readScalar = (local: Mir.LocalId): Value.Input => {
+            const values = readLocal(local)
+            const first = values.at(0)
+            if (values.length !== 1 || first === undefined) {
+              throw new RangeError(`Backend expected scalar local %${local.ordinal}`)
+            }
+            return first
           }
           const locate = (span: SourceSpan.SourceSpan, instruction: unknown) =>
             Effect.gen(function* () {
@@ -262,15 +310,44 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 case 'Literal':
                   locals.set(
                     operation.destination.ordinal,
-                    yield* Constant.integerSigned(builder, i32, BigInt(operation.value)),
+                    Object.freeze([
+                      yield* Constant.integerSigned(builder, i32, BigInt(operation.value)),
+                    ]),
                   )
                   break
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
+                case 'Construct':
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze(operation.fields.flatMap((field) => [...readLocal(field.value)])),
+                  )
+                  break
+                case 'Project': {
+                  const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
+                  if (sourceType === undefined) {
+                    throw new RangeError('Backend projection lost its source type')
+                  }
+                  const sourceLanes = lanesFor(sourceType)
+                  const sourceValues = readLocal(operation.source)
+                  const projected = sourceLanes.flatMap((lane, index) => {
+                    const first = lane.path.at(0)
+                    const selected = sourceValues.at(index)
+                    return first !== undefined &&
+                      selected !== undefined &&
+                      first.ordinal === operation.field.ordinal &&
+                      first.struct.sourceId === operation.field.struct.sourceId &&
+                      first.struct.ordinal === operation.field.struct.ordinal
+                      ? [selected]
+                      : []
+                  })
+                  locals.set(operation.destination.ordinal, Object.freeze(projected))
+                  break
+                }
                 case 'Binary': {
-                  const left = readLocal(operation.left)
-                  const right = readLocal(operation.right)
+                  const left = readScalar(operation.left)
+                  const right = readScalar(operation.right)
                   const ordinal = checkOrdinal
                   checkOrdinal += 1
                   const comparisonPredicates: Readonly<
@@ -301,7 +378,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                     const instruction = yield* Value.instruction(body, flag)
                     yield* locate(operation.provenance.span, instruction)
-                    locals.set(operation.destination.ordinal, widened)
+                    locals.set(operation.destination.ordinal, Object.freeze([widened]))
                     break
                   }
                   let result: Value.Value
@@ -410,7 +487,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   }
                   const instruction = yield* Value.instruction(body, result)
                   yield* locate(operation.provenance.span, instruction)
-                  locals.set(operation.destination.ordinal, result)
+                  locals.set(operation.destination.ordinal, Object.freeze([result]))
                   break
                 }
                 case 'Drop':
@@ -429,15 +506,34 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const result = yield* FunctionBody.callDirect(
                     body,
                     target.handle,
-                    operation.arguments.map(readLocal),
+                    operation.arguments.flatMap((argument) => [...readLocal(argument)]),
                     `t${operation.destination.ordinal}`,
                   )
+                  if (target.resultLaneCount === 0) {
+                    locals.set(operation.destination.ordinal, Object.freeze([]))
+                    break
+                  }
                   if (result === undefined) {
                     throw new RangeError('Backend call produced no value')
                   }
                   const instruction = yield* Value.instruction(body, result)
                   yield* locate(operation.provenance.span, instruction)
-                  locals.set(operation.destination.ordinal, result)
+                  if (target.resultLaneCount === 1) {
+                    locals.set(operation.destination.ordinal, Object.freeze([result]))
+                    break
+                  }
+                  const values: Array<Value.Input> = []
+                  for (let lane = 0; lane < target.resultLaneCount; lane += 1) {
+                    values.push(
+                      yield* FunctionBody.extractValue(
+                        body,
+                        result,
+                        [lane],
+                        `t${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
               }
@@ -445,10 +541,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             const terminator = block.terminator
             switch (terminator._tag) {
               case 'Return': {
-                const instruction = yield* FunctionBody.returnValue(
-                  body,
-                  readLocal(terminator.value),
-                )
+                const returned = readLocal(terminator.value)
+                const instruction =
+                  returned.length === 0
+                    ? yield* FunctionBody.returnVoid(body)
+                    : returned.length === 1
+                      ? yield* FunctionBody.returnValue(body, readScalar(terminator.value))
+                      : yield* FunctionBody.returnValue(
+                          body,
+                          yield* FunctionBody.buildAggregate(
+                            body,
+                            entry.resultType,
+                            returned,
+                            'return_value',
+                          ),
+                        )
                 yield* locate(terminator.provenance.span, instruction)
                 break
               }
@@ -463,7 +570,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 const condition = yield* FunctionBody.integerCompare(
                   body,
                   'ne',
-                  readLocal(terminator.condition),
+                  readScalar(terminator.condition),
                   zero,
                   `c${blockOrdinal}`,
                 )

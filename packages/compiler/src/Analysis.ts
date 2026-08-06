@@ -19,6 +19,7 @@ import * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as Target from './Target.js'
 import type * as Token from './Token.js'
+import type * as Type from './Type.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
@@ -43,6 +44,7 @@ export interface Snapshot {
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
+  readonly layoutCatalog: Targeted<Layout.Catalog>
   readonly layout: Targeted<Layout.Plan>
   readonly mir: Targeted<Mir.Module>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -61,8 +63,9 @@ export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
   const closure = yield* ModuleClosure.load(request)
-  const index = DeclarationIndex.collect(closure)
-  const resolution = NameResolution.resolve(closure, index)
+  const declarations = NameResolution.analyze(closure)
+  const index = declarations.index
+  const resolution = declarations.resolution
   const results = new Map(
     closure.modules.map((module) => {
       const headers = index.modules.find((candidate) => candidate.module === module.name)
@@ -80,10 +83,14 @@ export const make = Effect.fn('Analysis.make')(function* (
   )
   const instances = Instances.discover(request.root.id, results)
   const target = Target.select(request.target)
-  const layout: Targeted<Layout.Plan> =
+  const layoutCatalog: Targeted<Layout.Catalog> =
     target._tag === 'Resolved'
-      ? Object.freeze({ _tag: 'Available', value: Layout.plan(target.target, instances) })
+      ? Object.freeze({ _tag: 'Available', value: Layout.catalog(target.target, index) })
       : Object.freeze({ _tag: 'Unavailable', error: target.error })
+  const layout: Targeted<Layout.Plan> =
+    layoutCatalog._tag === 'Available'
+      ? Object.freeze({ _tag: 'Available', value: Layout.plan(layoutCatalog.value, instances) })
+      : layoutCatalog
   const mir: Targeted<Mir.Module> =
     layout._tag === 'Available'
       ? Object.freeze({
@@ -108,6 +115,7 @@ export const make = Effect.fn('Analysis.make')(function* (
     ownership,
     instances,
     target,
+    layoutCatalog,
     layout,
     mir,
     diagnostics,
@@ -158,7 +166,7 @@ export const lookupName = (
   const scope = moduleScope(self, module)
   return scope === undefined
     ? Object.freeze({ _tag: 'Missing', spelling })
-    : NameResolution.lookup(scope, spelling)
+    : NameResolution.lookup(scope, self.index, spelling)
 }
 export const lookupQualifiedName = (
   self: Snapshot,
@@ -190,6 +198,85 @@ export const rootAnalysis = (self: Snapshot): Elaboration.Result => {
   return result
 }
 
+const nestedExpressionFacts = (
+  expression: Elaboration.ExpressionFact,
+): ReadonlyArray<Elaboration.ExpressionFact> => {
+  const nested: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
+    switch (expression._tag) {
+      case 'Move':
+      case 'FieldProjection':
+        return [expression.subject]
+      case 'StructLiteral':
+        return expression.initializers.map((initializer) => initializer.expression)
+      case 'Grouped':
+        return [expression.expression]
+      case 'Operator':
+      case 'Call':
+        return expression.arguments.map((argument) => argument.expression)
+      case 'Pipeline':
+        return [expression.input, ...expression.arguments.map((argument) => argument.expression)]
+      default:
+        return []
+    }
+  })()
+  return Object.freeze([
+    expression,
+    ...nested.flatMap((candidate) => nestedExpressionFacts(candidate)),
+  ])
+}
+
+const statementExpressionFacts = (
+  statement: Elaboration.StatementFact,
+): ReadonlyArray<Elaboration.ExpressionFact> => {
+  switch (statement._tag) {
+    case 'BindStatement':
+      return nestedExpressionFacts(statement.binding.initializer)
+    case 'ReturnStatement':
+      return nestedExpressionFacts(statement.expression)
+    case 'IfStatement':
+      return Object.freeze([
+        ...nestedExpressionFacts(statement.condition),
+        ...statement.taken.flatMap(statementExpressionFacts),
+        ...statement.otherwise.flatMap(statementExpressionFacts),
+      ])
+  }
+}
+
+/** Returns every semantic expression fact in deterministic source nesting order. */
+export const expressionsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.ExpressionFact> =>
+  Object.freeze(
+    self.results
+      .get(module)
+      ?.functions.flatMap((fn) => fn.statements.flatMap(statementExpressionFacts)) ?? [],
+  )
+
+/** Returns every retained struct literal fact without reconstructing field mappings. */
+export const structLiteralsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.StructLiteralExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.StructLiteralExpressionFact =>
+        expression._tag === 'StructLiteral',
+    ),
+  )
+
+/** Returns every canonical or explicitly unavailable field-projection step. */
+export const fieldProjectionsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.FieldProjectionExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.FieldProjectionExpressionFact =>
+        expression._tag === 'FieldProjection',
+    ),
+  )
+
 /** Returns one module's HIR, or `undefined` for an unknown identity. */
 export const hirOf = (self: Snapshot, module: string): Hir.Module | undefined =>
   self.results.get(module)?.hir
@@ -206,8 +293,24 @@ export const instancesOf = (self: Snapshot): Instances.Discovery => self.instanc
 /** Returns the snapshot's resolved or unavailable target selection. */
 export const targetOf = (self: Snapshot): Target.Selection => self.target
 
+/** Returns the target-selected declaration-wide nominal layout catalog. */
+export const layoutCatalogOf = (self: Snapshot): Targeted<Layout.Catalog> => self.layoutCatalog
+
+/** Looks up one nominal declaration's available or unavailable target-selected layout. */
+export const nominalLayout = (
+  self: Snapshot,
+  type: Type.Nominal,
+): Layout.CatalogEntry | undefined =>
+  self.layoutCatalog._tag === 'Available'
+    ? Layout.catalogEntry(self.layoutCatalog.value, type)
+    : undefined
+
 /** Returns the snapshot's available or explicitly unavailable layout plan. */
 export const layoutOf = (self: Snapshot): Targeted<Layout.Plan> => self.layout
+
+/** Looks up one compiler-owned aggregate calling shape from the completed runtime plan. */
+export const callingShapeOf = (self: Snapshot, type: Type.Type): Layout.CallingShape | undefined =>
+  self.layout._tag === 'Available' ? Layout.callingShape(self.layout.value, type) : undefined
 
 /** Returns the snapshot's available or explicitly unavailable lowered MIR state. */
 export const mirOf = (self: Snapshot): Targeted<Mir.Module> => self.mir
@@ -224,6 +327,26 @@ export const declarationByName = (
   module: string,
   spelling: string,
 ): DeclarationIndex.DeclarationLookup => DeclarationIndex.lookup(self.index, module, spelling)
+
+/** Looks up a function or struct in the shared module-level namespace. */
+export const memberByName = (
+  self: Snapshot,
+  module: string,
+  spelling: string,
+): DeclarationIndex.MemberLookup => DeclarationIndex.member(self.index, module, spelling)
+
+/** Looks up one nominal struct declaration. */
+export const structByName = (
+  self: Snapshot,
+  module: string,
+  spelling: string,
+): DeclarationIndex.StructLookup => DeclarationIndex.struct(self.index, module, spelling)
+
+/** Looks up one declaration-ordered field from a resolved nominal struct. */
+export const fieldByName = (
+  declaration: DeclarationIndex.StructFact,
+  spelling: string,
+): DeclarationIndex.FieldLookup => DeclarationIndex.lookupField(declaration.fields, spelling)
 
 /** Looks up one declaration name within one module's elaborated analysis. */
 export const declarationLookup = (

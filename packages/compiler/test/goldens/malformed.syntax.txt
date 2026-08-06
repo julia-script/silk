@@ -38,8 +38,9 @@ tree:
         missing RightParenthesis [16, 16)
       ReturnType [16, 26)
         token Arrow [16, 18) "->"
-        token Whitespace [18, 19) " "
-        token Identifier [19, 26) "Mystery"
+        TypePath [18, 26)
+          token Whitespace [18, 19) " "
+          token Identifier [19, 26) "Mystery"
       Block [26, 40)
         token Whitespace [26, 27) " "
         token LeftBrace [27, 28) "{"
