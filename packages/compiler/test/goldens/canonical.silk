@@ -1,0 +1,28 @@
+import Core.Math as Math {add as plus, subtract}
+
+pub struct Pair {
+  pub left: Array<I32, 2>
+  right: Bool
+}
+
+fn helper(value: I32, other: I32) -> I32 {
+  let mut moved = move value
+  while moved < other {
+    if false {
+      break
+    } else {
+      continue
+    }
+  }
+  moved = moved + 1
+  if !false {
+    return (moved + other)
+  } else {
+    return Pair {left: [1, 2], right: true}.left[0]
+  }
+  return moved
+}
+
+pub fn main() -> I32 {
+  return helper(-1, 2) |> Core.finish()
+}

@@ -242,6 +242,8 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Diagnostic',
       './Driver',
       './Elaboration',
+      './FormattedDocument',
+      './Formatter',
       './Hir',
       './Instances',
       './Layout',
@@ -573,6 +575,8 @@ console.log(
       'DeclarationIndex',
       'Diagnostic',
       'Elaboration',
+      'FormattedDocument',
+      'Formatter',
       'Hir',
       'Instances',
       'Layout',
@@ -615,6 +619,7 @@ console.log(
     expect(api.deep['./Diagnostic']).toContain('wrongCallArity')
     expect(api.deep['./Diagnostic']).toContain('merge')
     expect(api.deep['./SourceFile']).toContain('make')
+    expect(api.deep['./Formatter']).toContain('format')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.deep['./Operator']).toContain('infix')
     expect(api.deep['./Type']).toContain('nominal')
@@ -762,6 +767,8 @@ test('the compiler CLI release candidate installs with its project-first command
       './CheckCommand',
       './Cli',
       './FileSourceResolver',
+      './FormatCommand',
+      './FormatWorkflow',
       './Program',
       './Project',
       './ProjectOptions',
@@ -801,6 +808,9 @@ test('the compiler CLI release candidate installs with its project-first command
     const help = execFileSync(executable, ['--help'], { cwd: consumerRoot, encoding: 'utf8' })
     expect(help).toContain('build        Build the nearest Silk project.')
     expect(help).toContain('check        Analyze the nearest Silk project')
+    expect(help).toContain(
+      'format       Format Silk project source into its canonical representation.',
+    )
     expect(help).toContain('run          Build and run the nearest Silk project.')
     expect(help).toContain('build-exe    Build one rooted Silk source graph')
     expect(help).not.toContain('\n  compile ')
@@ -831,6 +841,8 @@ test('the compiler CLI release candidate installs with its project-first command
       'CheckCommand',
       'Cli',
       'FileSourceResolver',
+      'FormatCommand',
+      'FormatWorkflow',
       'Program',
       'Project',
       'ProjectOptions',

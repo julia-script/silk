@@ -1,0 +1,313 @@
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
+import * as Result from 'effect/Result'
+import * as FormattedDocument from '../src/FormattedDocument.js'
+import * as Formatter from '../src/Formatter.js'
+import * as Lexer from '../src/Lexer.js'
+import * as Parser from '../src/Parser.js'
+import * as SourceFile from '../src/SourceFile.js'
+import type * as SyntaxFile from '../src/SyntaxFile.js'
+import * as SyntaxTree from '../src/SyntaxTree.js'
+
+const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+const parse = (id: string, source: string): SyntaxFile.SyntaxFile =>
+  Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))
+
+const formattedText = (document: FormattedDocument.FormattedDocument): string =>
+  decoder.decode(FormattedDocument.toUint8Array(document))
+
+interface NormalizedNode {
+  readonly kind: SyntaxTree.NodeKind
+  readonly children: ReadonlyArray<NormalizedNode | string>
+}
+
+const normalized = (syntax: SyntaxFile.SyntaxFile, node: SyntaxTree.Node): NormalizedNode => ({
+  kind: node.kind,
+  children: node.children.flatMap((child): ReadonlyArray<NormalizedNode | string> => {
+    if (SyntaxTree.isNode(child)) return [normalized(syntax, child)]
+    if (SyntaxTree.isMissingToken(child)) return [`missing:${child.expected}`]
+    if (
+      child.kind === 'Whitespace' ||
+      child.kind === 'LineComment' ||
+      child.kind === 'DocComment' ||
+      child.kind === 'Comma' ||
+      child.kind === 'EndOfFile'
+    ) {
+      return []
+    }
+    return [
+      `${child.kind}:${decoder.decode(Option.getOrThrow(SourceFile.slice(syntax.source, child.span)))}`,
+    ]
+  }),
+})
+
+const comments = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<string> =>
+  syntax.tokens
+    .filter((token) => token.kind === 'LineComment' || token.kind === 'DocComment')
+    .map((token) => decoder.decode(Option.getOrThrow(SourceFile.slice(syntax.source, token.span))))
+
+const nodeKinds = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.NodeKind> => [
+  node.kind,
+  ...node.children.flatMap(
+    (child): ReadonlyArray<SyntaxTree.NodeKind> =>
+      SyntaxTree.isNode(child) ? nodeKinds(child) : [],
+  ),
+]
+
+const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
+  'ArgumentList',
+  'ArrayLiteralExpression',
+  'AssignmentStatement',
+  'BindingStatement',
+  'Block',
+  'BooleanLiteralExpression',
+  'BreakStatement',
+  'CallExpression',
+  'ConditionalStatement',
+  'ContinueStatement',
+  'FieldProjectionExpression',
+  'FixedArrayType',
+  'FunctionDeclaration',
+  'GroupedExpression',
+  'IdentifierExpression',
+  'ImportAlias',
+  'ImportDeclaration',
+  'ImportMember',
+  'ImportMemberList',
+  'ImportPath',
+  'IndexProjectionExpression',
+  'InfixExpression',
+  'IntegerLiteralExpression',
+  'MoveExpression',
+  'ParameterDeclaration',
+  'ParameterList',
+  'PipelineExpression',
+  'PipelineTarget',
+  'PrefixExpression',
+  'ReturnStatement',
+  'ReturnType',
+  'SourceFile',
+  'StructDeclaration',
+  'StructField',
+  'StructFieldInitializer',
+  'StructLiteralExpression',
+  'TypePath',
+  'WhileStatement',
+])
+
+const golden = (name: string): string =>
+  readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
+
+it.effect('normalizes physical whitespace and detects canonical source', () =>
+  Effect.gen(function* () {
+    const source = 'pub\tfn main ( ) -> Mystery {\r\n\treturn  value   \r\n}\r\n\r\n'
+    const first = yield* Formatter.format(parse('memory://physical.silk', source))
+    const canonical = 'pub fn main() -> Mystery {\n  return value\n}\n'
+
+    assert.strictEqual(formattedText(first), canonical)
+    assert.strictEqual(first.changed, true)
+
+    const second = yield* Formatter.format(parse('memory://physical.silk', canonical))
+    assert.strictEqual(formattedText(second), canonical)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('rejects lexical and parser damage without producing formatted bytes', () =>
+  Effect.gen(function* () {
+    const lexical = yield* Effect.result(Formatter.format(parse('memory://lexical.silk', '@@@')))
+    const parser = yield* Effect.result(
+      Formatter.format(parse('memory://parser.silk', 'pub fn main() -> I32 { return 42')),
+    )
+
+    assert.strictEqual(Result.isFailure(lexical), true)
+    assert.strictEqual(Result.isFailure(parser), true)
+    if (Result.isFailure(lexical)) {
+      assert.strictEqual(lexical.failure._tag, 'FormatterError')
+      assert.strictEqual(lexical.failure.reason._tag, 'DamagedSyntax')
+      assert.isAbove(lexical.failure.diagnostics.length, 0)
+    }
+  }),
+)
+
+it.effect('formats syntactically complete source without semantic analysis', () =>
+  Effect.gen(function* () {
+    const document = yield* Formatter.format(
+      parse(
+        'memory://semantic.silk',
+        'pub fn identity(value: Missing) -> Missing { return unknown }',
+      ),
+    )
+
+    assert.strictEqual(
+      formattedText(document),
+      'pub fn identity(value: Missing) -> Missing {\n  return unknown\n}\n',
+    )
+  }),
+)
+
+it.effect('breaks over-width lists one item per line with a trailing comma', () =>
+  Effect.gen(function* () {
+    const source =
+      'pub fn combine(firstParameterWithALongName: ExtremelyLongTypeName, ' +
+      'secondParameterWithALongName: AnotherExtremelyLongTypeName) -> Result { return firstParameterWithALongName }'
+    const document = yield* Formatter.format(parse('memory://width.silk', source))
+
+    assert.strictEqual(
+      formattedText(document),
+      [
+        'pub fn combine(',
+        '  firstParameterWithALongName: ExtremelyLongTypeName,',
+        '  secondParameterWithALongName: AnotherExtremelyLongTypeName,',
+        ') -> Result {',
+        '  return firstParameterWithALongName',
+        '}',
+        '',
+      ].join('\n'),
+    )
+  }),
+)
+
+it.effect('preserves comment text and bounded blank-line attachment', () =>
+  Effect.gen(function* () {
+    const source = `/// first line
+/// second line
+pub fn first() -> I32 {
+  let value = 1
+
+
+  // grouped value
+  let next = value // retained trailing comment
+  return next
+}
+
+
+/// unattached
+
+pub fn second() -> I32 { return 2 }
+`
+    const document = yield* Formatter.format(parse('memory://comments.silk', source))
+
+    assert.strictEqual(
+      formattedText(document),
+      `/// first line
+/// second line
+pub fn first() -> I32 {
+  let value = 1
+
+  // grouped value
+  let next = value // retained trailing comment
+  return next
+}
+
+/// unattached
+
+pub fn second() -> I32 {
+  return 2
+}
+`,
+    )
+    assert.include(formattedText(document), '}\n\n/// unattached')
+  }),
+)
+
+it.effect('keeps nested, delimiter, field-documentation, and end-of-file comments in order', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Documented {
+  /// field documentation
+  value: I32
+}
+pub fn main(
+  /// parameter documentation
+  value: I32
+) -> I32 {
+  return helper(
+    value, // trailing argument
+    2
+  ) // trailing call
+}
+// end of file
+`
+    const original = parse('memory://comment-boundaries.silk', source)
+    const document = yield* Formatter.format(original)
+    const reparsed = parse('memory://comment-boundaries.silk', formattedText(document))
+
+    assert.deepEqual(comments(reparsed), comments(original))
+    assert.strictEqual(
+      formattedText(document),
+      `pub struct Documented {
+  /// field documentation
+  value: I32
+}
+
+pub fn main(
+  /// parameter documentation
+  value: I32,
+) -> I32 {
+  return helper(
+    value, // trailing argument
+    2,
+  ) // trailing call
+}
+// end of file
+`,
+    )
+  }),
+)
+
+it.effect('removes only terminal horizontal whitespace from comment spellings', () =>
+  Effect.gen(function* () {
+    const source = '/// documentation  \t\npub fn main() -> I32 { return 1 // value  \t\n}\n'
+    const document = yield* Formatter.format(parse('memory://comment-whitespace.silk', source))
+
+    assert.strictEqual(
+      formattedText(document),
+      '/// documentation\npub fn main() -> I32 {\n  return 1 // value\n}\n',
+    )
+  }),
+)
+
+it.effect('prints and reparses the complete current grammar surface', () =>
+  Effect.gen(function* () {
+    const source = `import Core.Math as Math { add as plus, subtract }
+pub struct Pair {
+  pub left: Array<I32, 2>
+  right: Bool
+}
+fn helper(value: I32, other: I32) -> I32 {
+  let mut moved = move value
+  while moved < other {
+    if false { break } else { continue }
+  }
+  moved = moved + 1
+  if !false { return (moved + other) } else { return Pair { left: [1, 2], right: true }.left[0] }
+  return moved
+}
+pub fn main() -> I32 { return helper(-1, 2) |> Core.finish() }
+`
+    const original = parse('memory://grammar.silk', source)
+    assert.deepEqual(original.lexicalDiagnostics, [])
+    assert.deepEqual(original.parserDiagnostics, [])
+
+    const first = yield* Formatter.format(original)
+    const reparsed = parse('memory://grammar.silk', formattedText(first))
+    assert.deepEqual(reparsed.lexicalDiagnostics, [])
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    assert.strictEqual(SyntaxTree.isAvailableSyntax(reparsed.root), true)
+    assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+    assert.deepEqual(comments(reparsed), comments(original))
+    assert.deepEqual(
+      Array.from(new Set(nodeKinds(original.root))).sort(),
+      Array.from(completeNodeKinds).sort(),
+    )
+    assert.strictEqual(formattedText(first), golden('canonical.silk'))
+
+    const second = yield* Formatter.format(reparsed)
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)

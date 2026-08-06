@@ -60,6 +60,14 @@
       "types": "./dist/FileSourceResolver.d.ts",
       "import": "./dist/FileSourceResolver.js"
     },
+    "./FormatCommand": {
+      "types": "./dist/FormatCommand.d.ts",
+      "import": "./dist/FormatCommand.js"
+    },
+    "./FormatWorkflow": {
+      "types": "./dist/FormatWorkflow.d.ts",
+      "import": "./dist/FormatWorkflow.js"
+    },
     "./Program": {
       "types": "./dist/Program.d.ts",
       "import": "./dist/Program.js"

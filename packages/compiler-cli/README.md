@@ -28,6 +28,50 @@ Project commands search the working directory and its ancestors for the nearest 
 
 ## Commands
 
+### `silk format`
+
+Format every exact `.silk` file beneath the project source root, including files that are not
+reachable from the project entry:
+
+```bash
+silk format
+silk format src/model src/Draft.silk
+silk format --manifest-path ./examples/hello/silk.toml
+```
+
+Positional files and directories restrict the selection. Directories are searched recursively;
+duplicate paths are removed, symlinked directories are not followed, and selections resolving
+outside the source root are rejected. Files are processed and reported in canonical path order.
+
+Formatting is strict about concrete syntax. A file with a lexical error, parser error, missing
+token, or unexpected-token region is reported and left unchanged, while other selected files are
+still processed. Name-resolution and type errors do not prevent formatting.
+
+The canonical source representation has no style options:
+
+- 100-column layout target and two-space indentation
+- spaces instead of tabs and LF line endings
+- no trailing whitespace and exactly one final newline
+- compact lists when they fit; otherwise one item per line with a trailing comma
+- exactly one blank line between top-level declarations
+- at most one author-supplied blank line inside blocks
+- preserved line and documentation comments, except terminal spaces and tabs
+
+`///` lines immediately preceding a declaration or struct field without a blank line form its
+documentation block. Comments are never reflowed and may exceed the width target.
+
+#### How to enforce formatting in CI
+
+Run the same selection without writing files:
+
+```bash
+silk format --check
+```
+
+The check is complete when the command exits `0`. Exit `1` means at least one file needs formatting
+or contains damaged syntax. Exit `2` means project discovery, path selection, source storage, or a
+write operation failed.
+
 ### `silk check`
 
 Analyze the entire reachable module graph without invoking the backend, Clang, or the linker and
@@ -90,6 +134,9 @@ compatibility alias.
 - `--profile <debug|release|release-with-debug>` — select the compilation profile.
 - `--release` — shorthand for `--profile release`; it conflicts with a different explicit profile.
 
+`format` accepts `--manifest-path` but does not accept target, profile, or release options because
+it does not perform semantic analysis or compilation.
+
 ## Module resolution
 
 Imports resolve from the project source root, never from the importing file's directory.
@@ -105,6 +152,8 @@ failures are operational resolver failures. `check` retains all safe frontend fa
 - `0` — checking or building succeeded.
 - `1` — source diagnostics or a missing/invalid entry rejected the program.
 - `2` — project configuration, source storage, target, backend, or toolchain operation failed.
+- `silk format` — `0` for success, `1` for check drift or damaged syntax, and `2` for project,
+  selection, storage, or write failures.
 - `silk run` — after a successful build, the compiled program's exact exit status.
 
 Failed builds do not commit the requested executable. Diagnostics from every loaded module use the
@@ -122,7 +171,6 @@ The CLI intentionally exposes no placeholder commands for these future capabilit
 - `test` and a language-level test model
 - `clean`
 - `new` and `init`
-- `fmt`
 - `doc`
 - target discovery/listing
 - incremental and shared build caching
