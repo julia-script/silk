@@ -45,6 +45,16 @@ it('maps editor offsets back to byte offsets', () => {
   assert.strictEqual(CodeMirror.charOffsetToByteOffset(doc, doc.length), 8)
 })
 
+it('maps byte offsets to editor offsets, inverting the selection mapping', () => {
+  const doc = '// é\nfn'
+  assert.strictEqual(CodeMirror.byteOffsetToCharOffset(doc, 0), 0)
+  assert.strictEqual(CodeMirror.byteOffsetToCharOffset(doc, 5), 4)
+  assert.strictEqual(CodeMirror.byteOffsetToCharOffset(doc, 8), doc.length)
+  const ascii = 'pub fn main'
+  assert.strictEqual(CodeMirror.byteOffsetToCharOffset(ascii, 4), 4)
+  assert.strictEqual(CodeMirror.byteOffsetToCharOffset(ascii, 99), ascii.length)
+})
+
 const stateClasses = (state: EditorState): ReadonlyArray<string> => {
   const classes: Array<string> = []
   const iterator = state.field(CodeMirror.field).iter()

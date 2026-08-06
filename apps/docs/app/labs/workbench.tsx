@@ -119,7 +119,13 @@ function SourceBody() {
 
   return (
     <>
-      <SilkEditor value={text} onChange={onChange} onSelect={setCursor} className={shell.editor} />
+      <SilkEditor
+        value={text}
+        cursor={cursor}
+        onChange={onChange}
+        onSelect={setCursor}
+        className={shell.editor}
+      />
       <div className={shell.sourceFooter}>
         <span>{active}</span>
         <span>{text.length} B</span>

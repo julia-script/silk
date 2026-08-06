@@ -121,6 +121,14 @@ export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
 export const charOffsetToByteOffset = (doc: string, offset: number): number =>
   encoder.encode(doc.slice(0, offset)).length
 
+/** Translates a UTF-8 byte offset from compiler spans into a UTF-16 editor offset. */
+export const byteOffsetToCharOffset = (doc: string, byteOffset: number): number => {
+  const bytes = encoder.encode(doc)
+  if (bytes.length === doc.length) return Math.min(byteOffset, doc.length)
+  const map = byteToCharMap(doc, bytes.length)
+  return map[Math.min(byteOffset, bytes.length)] ?? doc.length
+}
+
 const decorations = (state: EditorState): DecorationSet => {
   const builder = new RangeSetBuilder<Decoration>()
   for (const range of highlightRanges(state.doc.toString())) {

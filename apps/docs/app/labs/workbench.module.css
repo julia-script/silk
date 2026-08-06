@@ -702,6 +702,11 @@
   color: var(--wb-ink-3);
 }
 
+/* The shared span cursor, in the same violet the row panes use for an exact hit. */
+.editor :global(.cm-silk-span-cursor) {
+  background: rgba(183, 166, 214, 0.2);
+}
+
 .editor :global(.cm-silk-invalid) {
   color: var(--wb-error-ink);
   text-decoration: underline wavy var(--wb-error);

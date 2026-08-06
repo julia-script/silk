@@ -10,14 +10,40 @@
  */
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { Annotation, EditorState } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/state'
+import type { DecorationSet } from '@codemirror/view'
+import { Decoration, EditorView, keymap } from '@codemirror/view'
 import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'
 import { useEffect, useRef } from 'react'
 import type { Span } from './row/row'
 
 /** Marks transactions that reconcile external state, so the update listener does not echo them. */
 const External = Annotation.define<boolean>()
+
+/**
+ * The shared span cursor drawn into the editor, so a row click in any pane lights up the same
+ * bytes here — the editor is a phase like any other, in both directions.
+ */
+const setSpanCursor = StateEffect.define<{ readonly from: number; readonly to: number } | null>()
+
+const spanCursorMark = Decoration.mark({ class: 'cm-silk-span-cursor' })
+
+const spanCursorField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update: (value, transaction) => {
+    let next = value.map(transaction.changes)
+    for (const effect of transaction.effects) {
+      if (effect.is(setSpanCursor)) {
+        next =
+          effect.value === null
+            ? Decoration.none
+            : Decoration.set([spanCursorMark.range(effect.value.from, effect.value.to)])
+      }
+    }
+    return next
+  },
+  provide: (self) => EditorView.decorations.from(self),
+})
 
 const theme = EditorView.theme({
   '&': { height: '100%', fontSize: '11.5px', backgroundColor: 'transparent' },
@@ -32,6 +58,7 @@ const theme = EditorView.theme({
 
 export function SilkEditor(props: {
   readonly value: string
+  readonly cursor?: Span | undefined
   readonly onChange: (value: string) => void
   readonly onSelect: (span: Span) => void
   readonly className?: string
@@ -70,6 +97,7 @@ export function SilkEditor(props: {
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           SilkCodeMirror.extension(),
+          spanCursorField,
           theme,
           EditorView.contentAttributes.of({ 'aria-label': 'Silk source code' }),
           listener,
@@ -95,6 +123,30 @@ export function SilkEditor(props: {
       })
     }
   }, [props.value])
+
+  // Reflect the shared span cursor, scrolling to it only when it came from another pane.
+  const cursor = props.cursor
+  useEffect(() => {
+    const view = viewRef.current
+    if (view === null) return
+    if (cursor === undefined) {
+      view.dispatch({ effects: setSpanCursor.of(null) })
+      return
+    }
+    const doc = view.state.doc.toString()
+    const from = SilkCodeMirror.byteOffsetToCharOffset(doc, cursor.start)
+    const to = SilkCodeMirror.byteOffsetToCharOffset(doc, cursor.end)
+    if (to <= from) {
+      view.dispatch({ effects: setSpanCursor.of(null) })
+      return
+    }
+    const selection = view.state.selection.main
+    const effects: Array<StateEffect<unknown>> = [setSpanCursor.of({ from, to })]
+    if (selection.from !== from || selection.to !== to) {
+      effects.push(EditorView.scrollIntoView(from))
+    }
+    view.dispatch({ effects })
+  }, [cursor])
 
   return <div ref={containerRef} className={props.className} />
 }
