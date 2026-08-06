@@ -46,6 +46,23 @@ describe('IndexView', () => {
     expect(markup).toContain('duplicate of root.same')
     expect(markup).toContain('unidentified')
   })
+
+  it('renders nominal identities, ordered fields, visibility, and unavailable dependencies', () => {
+    const index = collect('root', [
+      [
+        'root',
+        'struct Pair { pub left: I32 right: Bool }\nstruct Broken { value: Missing }\nstruct Left { right: Right }\nstruct Right { left: Left }',
+      ],
+    ])
+    const markup = renderToStaticMarkup(<IndexView index={index} />)
+
+    expect(markup).toContain('root.Pair')
+    expect(markup).toContain('aria-label="Fields of Pair"')
+    expect(markup.indexOf('left')).toBeLessThan(markup.indexOf('right'))
+    expect(markup).toContain('Public · field #0')
+    expect(markup).toContain('Missing?')
+    expect(markup).toContain('dependency unavailable')
+  })
 })
 
 describe('DeclarationIndexLab', () => {

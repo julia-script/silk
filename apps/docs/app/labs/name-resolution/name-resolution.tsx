@@ -92,9 +92,7 @@ const target = (binding: NameResolution.Binding): string => {
   }
   if (binding._tag === 'IntrinsicActor') return 'language intrinsic'
   if (binding._tag === 'ModuleNamespace') return binding.module
-  return binding.declaration.canonical._tag === 'Canonical'
-    ? `${binding.declaration.canonical.id.module}.${binding.declaration.canonical.id.name}`
-    : 'unavailable declaration'
+  return `${binding.declaration.module}.${binding.declaration.name}`
 }
 
 export function ResolutionView({

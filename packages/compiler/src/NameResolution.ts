@@ -5,12 +5,13 @@ import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
+import * as Type from './Type.js'
 
 export type Binding =
   | {
       readonly _tag: 'LocalDeclaration'
       readonly spelling: string
-      readonly declaration: DeclarationIndex.DeclarationFact
+      readonly declaration: DeclarationIndex.CanonicalId
     }
   | { readonly _tag: 'IntrinsicActor'; readonly spelling: 'I32' | 'Bool' }
   | {
@@ -24,7 +25,7 @@ export type Binding =
       readonly spelling: string
       readonly sourceSpelling: string
       readonly module: string
-      readonly declaration: DeclarationIndex.DeclarationFact
+      readonly declaration: DeclarationIndex.CanonicalId
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -32,6 +33,7 @@ export type Binding =
       readonly spelling: string
       readonly syntax: SyntaxTree.Element
       readonly cause?: Diagnostic.Identity
+      readonly declaration?: DeclarationIndex.CanonicalId
     }
 
 export type ImportOutcome =
@@ -69,7 +71,7 @@ export type Lookup =
   | {
       readonly _tag: 'Resolved'
       readonly spelling: string
-      readonly declaration: DeclarationIndex.DeclarationFact
+      readonly declaration: DeclarationIndex.MemberFact
     }
   | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: 'I32' | 'Bool' }
   | { readonly _tag: 'Namespace'; readonly spelling: string; readonly module: string }
@@ -77,7 +79,7 @@ export type Lookup =
   | {
       readonly _tag: 'Inaccessible'
       readonly spelling: string
-      readonly declaration: DeclarationIndex.DeclarationFact
+      readonly declaration: DeclarationIndex.MemberFact
       readonly cause: Diagnostic.Identity
     }
   | { readonly _tag: 'Conflict'; readonly spelling: string; readonly conflict: Conflict }
@@ -85,6 +87,7 @@ export type Lookup =
       readonly _tag: 'Unavailable'
       readonly spelling: string
       readonly cause?: Diagnostic.Identity
+      readonly declaration?: DeclarationIndex.MemberFact
     }
 
 const text = (source: SourceFile.SourceFile, token: Token.Token): string =>
@@ -105,13 +108,19 @@ const aliasName = (
   const token = alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')
   return token === undefined ? undefined : Object.freeze({ spelling: text(source, token), token })
 }
+type CanonicalMember = DeclarationIndex.MemberFact & {
+  readonly canonical: Extract<DeclarationIndex.CanonicalState, { readonly _tag: 'Canonical' }>
+}
+const isCanonicalMember = (
+  declaration: DeclarationIndex.MemberFact,
+): declaration is CanonicalMember => declaration.canonical._tag === 'Canonical'
 const canonicalDeclaration = (
   index: DeclarationIndex.Index,
   module: string,
   spelling: string,
-): DeclarationIndex.DeclarationFact | undefined => {
-  const result = DeclarationIndex.lookup(index, module, spelling)
-  return result._tag === 'Resolved' && result.declaration.canonical._tag === 'Canonical'
+): CanonicalMember | undefined => {
+  const result = DeclarationIndex.member(index, module, spelling)
+  return result._tag === 'Resolved' && isCanonicalMember(result.declaration)
     ? result.declaration
     : undefined
 }
@@ -128,13 +137,13 @@ export const resolve = (
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Bool' }),
     ]
     const headers = index.modules.find((value) => value.module === module.name)
-    for (const declaration of headers?.declarations ?? [])
+    for (const declaration of headers?.members ?? [])
       if (declaration.canonical._tag === 'Canonical')
         candidates.push(
           Object.freeze({
             _tag: 'LocalDeclaration',
             spelling: declaration.canonical.id.name,
-            declaration,
+            declaration: declaration.canonical.id,
           }),
         )
     const seenTargets = new Set<string>()
@@ -252,6 +261,7 @@ export const resolve = (
               spelling: alias?.spelling ?? sourceName,
               syntax: member,
               cause: Diagnostic.identity(diagnostic),
+              declaration: declaration.canonical.id,
             }),
           )
           continue
@@ -262,7 +272,7 @@ export const resolve = (
             spelling: alias?.spelling ?? sourceName,
             sourceSpelling: sourceName,
             module: target,
-            declaration,
+            declaration: declaration.canonical.id,
             syntax: member,
           }),
         )
@@ -283,14 +293,17 @@ export const resolve = (
     for (const [spelling, bindings] of grouped)
       if (bindings.length > 1) {
         const last = bindings.at(-1)
-        const span =
-          last?._tag === 'LocalDeclaration' && last.declaration.name._tag === 'Present'
-            ? last.declaration.name.token.span
-            : last?._tag === 'ModuleNamespace' ||
-                last?._tag === 'ImportedMember' ||
-                last?._tag === 'Unavailable'
-              ? last.syntax.span
-              : module.syntax.root.span
+        let span = module.syntax.root.span
+        if (last?._tag === 'LocalDeclaration') {
+          const declaration = DeclarationIndex.byCanonical(index, last.declaration)
+          if (declaration?.name._tag === 'Present') span = declaration.name.token.span
+        } else if (
+          last?._tag === 'ModuleNamespace' ||
+          last?._tag === 'ImportedMember' ||
+          last?._tag === 'Unavailable'
+        ) {
+          span = last.syntax.span
+        }
         const diagnostic = Diagnostic.bindingConflict(spelling, span)
         diagnostics.push(diagnostic)
         conflicts.push(
@@ -322,22 +335,35 @@ export const resolve = (
 
 export const scopeOf = (self: Resolution, module: string): ModuleScope | undefined =>
   self.modules.find((scope) => scope.module === module)
-export const lookup = (scope: ModuleScope, spelling: string): Lookup => {
+export const lookup = (
+  scope: ModuleScope,
+  index: DeclarationIndex.Index,
+  spelling: string,
+): Lookup => {
   const conflict = scope.conflicts.find((value) => value.spelling === spelling)
   if (conflict !== undefined) return Object.freeze({ _tag: 'Conflict', spelling, conflict })
   const binding = scope.bindings.find((value) => value.spelling === spelling)
   if (binding === undefined) return Object.freeze({ _tag: 'Missing', spelling })
   if (binding._tag === 'IntrinsicActor')
     return Object.freeze({ _tag: 'Intrinsic', spelling, actor: binding.spelling })
-  if (binding._tag === 'Unavailable')
+  if (binding._tag === 'Unavailable') {
+    const declaration =
+      binding.declaration === undefined
+        ? undefined
+        : DeclarationIndex.byCanonical(index, binding.declaration)
     return Object.freeze({
       _tag: 'Unavailable',
       spelling,
       ...(binding.cause === undefined ? {} : { cause: binding.cause }),
+      ...(declaration === undefined ? {} : { declaration }),
     })
+  }
   if (binding._tag === 'ModuleNamespace')
     return Object.freeze({ _tag: 'Namespace', spelling, module: binding.module })
-  return Object.freeze({ _tag: 'Resolved', spelling, declaration: binding.declaration })
+  const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
+  return declaration === undefined
+    ? Object.freeze({ _tag: 'Unavailable', spelling })
+    : Object.freeze({ _tag: 'Resolved', spelling, declaration })
 }
 export const lookupQualified = (
   scope: ModuleScope,
@@ -346,7 +372,7 @@ export const lookupQualified = (
   member: string,
   token: Token.Token,
 ): Lookup => {
-  const qualifier = lookup(scope, namespace)
+  const qualifier = lookup(scope, index, namespace)
   if (
     qualifier._tag === 'Intrinsic' ||
     qualifier._tag === 'Conflict' ||
@@ -374,4 +400,148 @@ export const lookupQualified = (
     })
   }
   return Object.freeze({ _tag: 'Resolved', spelling: member, declaration })
+}
+
+const unresolved = (
+  path: DeclarationIndex.TypePathFact,
+  diagnostic: Diagnostic.Diagnostic,
+  candidate?: Type.Nominal,
+): DeclarationIndex.TypeResolution => {
+  const token = path.segments.at(0)?.token
+  if (token === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Unavailable', syntax: path.syntax }),
+      diagnostics: Object.freeze([diagnostic]),
+    })
+  }
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Unresolved',
+      spelling: path.spelling,
+      token,
+      syntax: path.syntax,
+      path,
+      cause: Diagnostic.identity(diagnostic),
+      ...(candidate === undefined ? {} : { candidate }),
+    }),
+    diagnostics: Object.freeze([diagnostic]),
+  })
+}
+
+const unavailable = (
+  path: DeclarationIndex.TypePathFact,
+  cause?: Diagnostic.Identity,
+  candidate?: Type.Nominal,
+): DeclarationIndex.TypeResolution => {
+  const token = path.segments.at(0)?.token
+  if (token === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Unavailable', syntax: path.syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Unresolved',
+      spelling: path.spelling,
+      token,
+      syntax: path.syntax,
+      path,
+      ...(cause === undefined ? {} : { cause }),
+      ...(candidate === undefined ? {} : { candidate }),
+    }),
+    diagnostics: Object.freeze([]),
+  })
+}
+
+const resolvedType = (
+  path: DeclarationIndex.TypePathFact,
+  type: DeclarationIndex.SemanticType,
+): DeclarationIndex.TypeResolution => {
+  const token = path.segments.at(0)?.token
+  return token === undefined
+    ? Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax: path.syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    : Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: path.spelling,
+          token,
+          syntax: path.syntax,
+        }),
+        diagnostics: Object.freeze([]),
+      })
+}
+
+const nominalOf = (declaration: DeclarationIndex.MemberFact): Type.Nominal | undefined =>
+  declaration._tag === 'StructDeclaration' && declaration.canonical._tag === 'Canonical'
+    ? Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
+    : undefined
+
+const typeUseSpan = (path: DeclarationIndex.TypePathFact): Token.Token['span'] =>
+  path.segments.at(-1)?.token.span ?? path.syntax.span
+
+/** Resolves one retained declaration type path through an immutable module scope. */
+export const resolveType = (
+  resolution: Resolution,
+  index: DeclarationIndex.Index,
+  module: string,
+  path: DeclarationIndex.TypePathFact,
+): DeclarationIndex.TypeResolution => {
+  const scope = scopeOf(resolution, module)
+  const first = path.segments.at(0)
+  const second = path.segments.at(1)
+  if (scope === undefined || first === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Unavailable', syntax: path.syntax }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const result =
+    second === undefined
+      ? lookup(scope, index, first.spelling)
+      : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
+  if (result._tag === 'Intrinsic') return resolvedType(path, result.actor)
+  if (result._tag === 'Resolved') {
+    const nominal = nominalOf(result.declaration)
+    if (nominal !== undefined) return resolvedType(path, nominal)
+    return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
+  }
+  if (result._tag === 'Inaccessible') {
+    const nominal = nominalOf(result.declaration)
+    const diagnostic = Diagnostic.inaccessibleImportedMember(
+      result.declaration.canonical._tag === 'Canonical'
+        ? result.declaration.canonical.id.module
+        : module,
+      result.spelling,
+      typeUseSpan(path),
+    )
+    return unresolved(path, diagnostic, nominal)
+  }
+  if (result._tag === 'Conflict') return unavailable(path, result.conflict.cause)
+  if (result._tag === 'Unavailable')
+    return unavailable(
+      path,
+      result.cause,
+      result.declaration === undefined ? undefined : nominalOf(result.declaration),
+    )
+  if (result._tag === 'Namespace') {
+    return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
+  }
+  return unresolved(path, Diagnostic.unknownType(path.spelling, typeUseSpan(path)))
+}
+
+/** Runs identity collection, scope construction, and declared-type completion in phase order. */
+export const analyze = (
+  closure: ModuleClosure.Closure,
+): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
+  const collected = DeclarationIndex.collect(closure)
+  const preliminary = resolve(closure, collected)
+  const index = DeclarationIndex.complete(collected, (module, path) =>
+    resolveType(preliminary, collected, module, path),
+  )
+  return Object.freeze({ index, resolution: resolve(closure, index) })
 }

@@ -260,6 +260,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Target',
       './Token',
       './ToolchainPlan',
+      './Type',
       './WasmBackend',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
@@ -517,6 +518,7 @@ console.log(
     expect(api.root).toEqual([
       'Analysis',
       'Backend',
+      'BackendRegistry',
       'BootstrapEvaluation',
       'DeclarationIndex',
       'Diagnostic',
@@ -539,6 +541,7 @@ console.log(
       'Target',
       'Token',
       'ToolchainPlan',
+      'Type',
       'WasmBackend',
     ])
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
@@ -563,6 +566,7 @@ console.log(
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.deep['./Operator']).toContain('infix')
+    expect(api.deep['./Type']).toContain('nominal')
     expect(api.functionCount).toBe(2)
     expect(api.callCount).toBe(1)
     expect(api.semantic).toEqual({

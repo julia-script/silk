@@ -4,6 +4,7 @@ import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as Type from './Type.js'
 
 /**
  * Lowering: reachable instances become one MIR program module. Statement sequences linearize
@@ -15,7 +16,8 @@ import type * as SourceSpan from './SourceSpan.js'
 const i32: Mir.Type = Object.freeze({ _tag: 'I32' })
 const bool: Mir.Type = Object.freeze({ _tag: 'Bool' })
 
-const mirType = (type: 'I32' | 'Bool'): Mir.Type => (type === 'Bool' ? bool : i32)
+const mirType = (type: Type.Type): Mir.Type | undefined =>
+  typeof type === 'string' ? (type === 'Bool' ? bool : i32) : undefined
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
@@ -116,14 +118,16 @@ const lowerExpression = (
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
-      const destination = fn.alloc(mirType(expression.type))
+      const type = mirType(expression.type)
+      if (type === undefined) return undefined
+      const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({
           _tag: 'Call',
           destination,
           target: expression.target,
           arguments: Object.freeze(argumentLocals),
-          type: mirType(expression.type),
+          type,
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
@@ -166,7 +170,9 @@ const lowerExpression = (
       }
       const [left, right] = argumentLocals
       if (left === undefined || right === undefined) return undefined
-      const destination = fn.alloc(mirType(expression.type))
+      const type = mirType(expression.type)
+      if (type === undefined) return undefined
+      const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({
           _tag: 'Binary',
@@ -174,7 +180,7 @@ const lowerExpression = (
           destination,
           left,
           right,
-          type: mirType(expression.type),
+          type,
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
@@ -365,9 +371,18 @@ const lowerInstance = (
   const contract = fn.contract
   const parameterTypes =
     contract._tag === 'Contract'
-      ? contract.parameters.map(mirType)
+      ? contract.parameters.flatMap((type) => {
+          const lowered = mirType(type)
+          return lowered === undefined ? [] : [lowered]
+        })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
   const resultType = contract._tag === 'Contract' ? mirType(contract.result) : i32
+  if (
+    resultType === undefined ||
+    (contract._tag === 'Contract' && parameterTypes.length !== contract.parameters.length)
+  ) {
+    return trapFunction(instance, 'aggregate values are not executable yet', bodySpan(fn))
+  }
 
   const lowering = new FunctionLowering(parameterTypes)
   const outcome = lowerStatements(lowering, fn.statements, indexExits(plan), undefined)

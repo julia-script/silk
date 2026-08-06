@@ -39,6 +39,7 @@ const compileSource = (
 
 const expectedPhases = [
   'closure',
+  'declaration-collection',
   'declaration-index',
   'name-resolution',
   'elaboration',

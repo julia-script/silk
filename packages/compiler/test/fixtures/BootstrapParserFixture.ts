@@ -35,7 +35,14 @@ export const acceptedShape: ExpectedNodeShape = Object.freeze({
         }),
         Object.freeze({
           kind: 'ReturnType',
-          children: Object.freeze(['Whitespace', 'Arrow', 'Whitespace', 'Identifier']),
+          children: Object.freeze([
+            'Whitespace',
+            'Arrow',
+            Object.freeze({
+              kind: 'TypePath',
+              children: Object.freeze(['Whitespace', 'Identifier']),
+            }),
+          ]),
         }),
         Object.freeze({
           kind: 'Block',
@@ -113,6 +120,14 @@ pub fn main() -> I32 { return identity(identity(42) }`
 export const damagedNestedBeforeNextFunctionSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)
 pub fn after() -> I32 { return 0 }`
+export const validStructSource =
+  'pub struct Token { pub kind: I32 lexeme: Text.Node }\n' +
+  'struct Marker {}\n' +
+  'pub fn main(value: Text.Node) -> Text.Node { return value }'
+export const damagedStructSource =
+  'pub struct Damaged { pub : I32 missing: next: Bool }\n' +
+  'struct Open { value: I32\n' +
+  'pub fn after() -> I32 { return 1 }'
 
 export const invalidUtf8Source = Uint8Array.of(
   ...Array.from('pub fn ', (character) => character.charCodeAt(0)),

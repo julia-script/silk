@@ -12,6 +12,7 @@ import {
   damagedCallBeforeNextFunctionSource,
   damagedNestedBeforeNextFunctionSource,
   damagedNestedSiblingSource,
+  damagedStructSource,
   denseTriviaSource,
   type ExpectedNodeShape,
   emptySource,
@@ -37,6 +38,7 @@ import {
   twoParameterSource,
   unexpectedPunctuationSource,
   validCallSource,
+  validStructSource,
   valueCallArgumentSource,
   whollyUnrelatedSource,
 } from './fixtures/BootstrapParserFixture.js'
@@ -138,6 +140,7 @@ it('parses dense whitespace and line-comment trivia without changing the grammar
     'FunctionDeclaration',
     'ParameterList',
     'ReturnType',
+    'TypePath',
     'Block',
     'ReturnStatement',
     'IntegerLiteralExpression',
@@ -553,7 +556,7 @@ it('parses typed parameters and bare identifier return expressions', () => {
   assert.strictEqual(multipleParameters.length, 2)
   assert.deepEqual(nodeShape(identityParameters.at(0) ?? identity.root), {
     kind: 'ParameterDeclaration',
-    children: ['Identifier', 'Colon', 'Whitespace', 'Identifier'],
+    children: ['Identifier', 'Colon', { kind: 'TypePath', children: ['Whitespace', 'Identifier'] }],
   })
   assert.strictEqual(
     descendants(identity.root).some(
@@ -1320,6 +1323,56 @@ it('bounds operator recovery at expression and declaration boundaries', () => {
   if (after === undefined) return
   assert.strictEqual(directTokenText(result, after, 'Identifier'), 'after')
   assert.deepEqual(missingLeaves(after), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses nominal struct declarations and qualified field types losslessly', () => {
+  const source = validStructSource
+  const result = parseText('memory/structs', source)
+  const structs = SyntaxTree.directNodes(result.root, 'StructDeclaration')
+  const fields = structs.flatMap((struct) => SyntaxTree.directNodes(struct, 'StructField'))
+
+  assert.strictEqual(structs.length, 2)
+  assert.strictEqual(fields.length, 2)
+  assert.deepEqual(
+    fields.map((field) =>
+      SyntaxTree.directNode(field, 'TypePath')
+        ?.children.filter(SyntaxTree.isToken)
+        .map((token) => token.kind),
+    ),
+    [
+      ['Whitespace', 'Identifier'],
+      ['Whitespace', 'Identifier', 'Dot', 'Identifier'],
+    ],
+  )
+  assert.notStrictEqual(
+    SyntaxTree.directToken(structs.at(0) ?? result.root, 'PubKeyword'),
+    undefined,
+  )
+  assert.strictEqual(SyntaxTree.directNodes(structs.at(1) ?? result.root, 'StructField').length, 0)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps damaged struct fields and following declarations separate', () => {
+  const source = damagedStructSource
+  const result = parseText('memory/damaged-structs', source)
+  const structs = SyntaxTree.directNodes(result.root, 'StructDeclaration')
+  const after = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
+
+  assert.strictEqual(structs.length, 2)
+  assert.notStrictEqual(after, undefined)
+  assert.deepEqual(
+    missingLeaves(structs.at(0) ?? result.root).map((leaf) => leaf.expected),
+    ['Identifier', 'Identifier'],
+  )
+  assert.deepEqual(
+    missingLeaves(structs.at(1) ?? result.root).map((leaf) => leaf.expected),
+    ['RightBrace'],
+  )
+  assert.deepEqual(after === undefined ? [] : missingLeaves(after), [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })

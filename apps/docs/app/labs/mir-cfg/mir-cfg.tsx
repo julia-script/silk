@@ -8,6 +8,9 @@ const programSourceId = 'memory/docs/mir-program'
 const defaultProgram = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 
+const typeText = (type: 'I32' | 'Bool' | { readonly module: string; readonly name: string }): string =>
+  typeof type === 'string' ? type : `${type.module}.${type.name}`
+
 const spanText = (span: { readonly start: number; readonly end: number }): string =>
   `[${span.start}, ${span.end})`
 
@@ -181,9 +184,9 @@ export function MirCfgLab() {
         </div>
         <ul className={styles.diagnosticList} aria-label="MIR target layout plan">
           {module.layout.entries.map((entry) => (
-            <li key={entry.type}>
+            <li key={typeText(entry.type)}>
               <div>
-                <code>{entry.type}</code>
+                <code>{typeText(entry.type)}</code>
                 <span>
                   {entry.size} bytes · align {entry.alignment} · {entry.representation._tag}
                 </span>

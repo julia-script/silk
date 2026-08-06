@@ -50,12 +50,32 @@ const presets: ReadonlyArray<Preset> = [
       root: 'pub fn puzzle(value: Mystery) -> Enigma { return 0 }',
     },
   },
+  {
+    label: 'Nominal structs',
+    root: 'root',
+    modules: {
+      root: 'struct Empty {}\nstruct Pair { left: I32 right: Bool }\npub struct Outer { pub pair: Pair }\npub fn main() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Damaged and recursive structs',
+    root: 'root',
+    modules: {
+      root: 'struct Broken { value: Missing }\nstruct Left { right: Right }\nstruct Right { left: Left }\npub fn main() -> I32 { return 42 }',
+    },
+  },
 ]
 
 const encoder = new TextEncoder()
 
 const typeLabel = (fact: DeclarationIndex.DeclaredTypeFact): string =>
-  fact._tag === 'Resolved' ? fact.type : fact._tag === 'Unresolved' ? `${fact.spelling}?` : '∅'
+  fact._tag === 'Resolved'
+    ? typeof fact.type === 'string'
+      ? fact.type
+      : `${fact.type.module}.${fact.type.name}`
+    : fact._tag === 'Unresolved'
+      ? `${fact.spelling}?`
+      : '∅'
 
 const signatureLabel = (declaration: DeclarationIndex.DeclarationFact): string => {
   const parameters = declaration.parameters
@@ -77,6 +97,30 @@ const canonicalLabel = (state: DeclarationIndex.CanonicalState): string => {
   }
 }
 
+const fieldStateLabel = (field: DeclarationIndex.FieldFact): string =>
+  field.state._tag === 'Unique'
+    ? `field #${field.id.ordinal}`
+    : field.state._tag === 'Duplicate'
+      ? `duplicate of field #${field.state.original.ordinal}`
+      : 'unidentified field'
+
+function StructFields({ declaration }: { readonly declaration: DeclarationIndex.StructFact }) {
+  if (declaration.fields.length === 0) return <p>empty · size-ready marker</p>
+  return (
+    <ul aria-label={`Fields of ${declaration.name._tag === 'Present' ? declaration.name.spelling : 'unidentified struct'}`}>
+      {declaration.fields.map((field) => (
+        <li key={field.id.ordinal}>
+          <code>{field.name._tag === 'Present' ? field.name.spelling : '∅'}</code>
+          <span>: {typeLabel(field.declaredType)}</span>
+          <p>
+            {field.visibility} · {fieldStateLabel(field)}
+          </p>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function IndexView({ index }: { readonly index: DeclarationIndex.Index }) {
   return (
     <div className={styles.diagnostics}>
@@ -88,13 +132,13 @@ export function IndexView({ index }: { readonly index: DeclarationIndex.Index })
         >
           <div className={styles.diagnosticHeading}>
             <h3 id={`index-${module.module}`}>{module.module}</h3>
-            <span>{module.declarations.length}</span>
+            <span>{module.members.length}</span>
           </div>
-          {module.declarations.length === 0 ? (
+          {module.members.length === 0 ? (
             <p className={styles.emptyState}>No declarations</p>
           ) : (
             <ul className={styles.diagnosticList} aria-label={`Headers of ${module.module}`}>
-              {module.declarations.map((declaration) => (
+              {module.members.map((declaration) => (
                 <li key={`${module.module}-${declaration.id.ordinal}`}>
                   <div>
                     <code>
@@ -102,8 +146,20 @@ export function IndexView({ index }: { readonly index: DeclarationIndex.Index })
                     </code>
                     <span>{canonicalLabel(declaration.canonical)}</span>
                   </div>
-                  <p>{signatureLabel(declaration)}</p>
-                  <p>{declaration.visibility} · {declaration.visibility === 'Public' ? 'importable' : 'module-private'}</p>
+                  {declaration._tag === 'FunctionDeclaration' ? (
+                    <p>{signatureLabel(declaration)}</p>
+                  ) : (
+                    <>
+                      <p>
+                        struct · dependency {declaration.dependency._tag.toLowerCase()}
+                      </p>
+                      <StructFields declaration={declaration} />
+                    </>
+                  )}
+                  <p>
+                    {declaration.visibility} ·{' '}
+                    {declaration.visibility === 'Public' ? 'importable' : 'module-private'}
+                  </p>
                 </li>
               ))}
             </ul>

@@ -314,6 +314,39 @@ pub fn main() -> I32 { return 0 }`,
     modules: { root: 'pub fn puzzle(value: Mystery) -> Enigma { return 0 }' },
   },
 
+  // ---- structs --------------------------------------------------------------------------
+  one('structs', 'Empty struct', 'struct Marker {}\npub fn main() -> I32 { return 42 }'),
+  one(
+    'structs',
+    'Nested physical layout',
+    'struct Pair { left: I32 right: Bool }\nstruct Outer { pair: Pair value: I32 }\npub fn main() -> I32 { return 42 }',
+  ),
+  {
+    label: 'Imported nominal type',
+    group: 'structs',
+    root: 'app/Main',
+    modules: {
+      'app/Main':
+        'import model.Tree as Ast { Node }\nstruct Root { selected: Node qualified: Ast.Node }\npub fn main() -> I32 { return 42 }',
+      'model/Tree': 'pub struct Node { value: I32 }',
+    },
+  },
+  one(
+    'structs',
+    'Private type exposure',
+    'struct Hidden { value: I32 }\npub struct Visible { pub hidden: Hidden }\npub fn main() -> I32 { return 42 }',
+  ),
+  one(
+    'structs',
+    'Damaged field',
+    'struct Broken { value: Missing next: I32 }\npub fn main() -> I32 { return 42 }',
+  ),
+  one(
+    'structs',
+    'Recursive structs',
+    'struct Left { right: Right }\nstruct Right { left: Left }\npub fn main() -> I32 { return 42 }',
+  ),
+
   // ---- names ----------------------------------------------------------------------------
   // Namespaced imports, aliases, and selective member lists: every binding form the resolver
   // has to answer for, plus the ways one can fail to bind.

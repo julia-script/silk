@@ -1,6 +1,34 @@
-import { ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import type { ViewContext } from './registry'
 import { viewById, views } from './registry'
+
+const renderLayout = (source: string): string => {
+  const sourceId = 'memory/docs/unified-layout'
+  const snapshot = Analysis.ofSource(
+    sourceId,
+    new TextEncoder().encode(source),
+    'aarch64-apple-darwin',
+  )
+  const root = snapshot.closure.rootModule
+  const context: ViewContext = {
+    snapshot,
+    modules: { [root]: source },
+    root,
+    mode: 'release',
+    profile: 'release',
+    selectedDiagnostic: undefined,
+    onSelectDiagnostic: () => undefined,
+    selectedFlowId: undefined,
+    onSelectFlow: () => undefined,
+    evaluation: undefined,
+    onEvaluate: () => undefined,
+  }
+  const view = viewById('layout')
+  expect(view).toBeDefined()
+  return view === undefined ? '' : renderToStaticMarkup(view.render(context))
+}
 
 describe('view registry', () => {
   it('resolves every view by its own id', () => {
@@ -34,6 +62,34 @@ describe('view registry', () => {
     for (const id of ['tokens', 'tree', 'flow', 'evaluation', 'hir', 'diagnostics']) {
       expect(viewById(id)?.id, id).toBe(id)
     }
+  })
+
+  it('renders nominal catalog facts in the unified target-layout pane', () => {
+    const markup = renderLayout(`struct Inner { value: I32 }
+struct Outer { inner: Inner flag: Bool }
+pub fn main() -> I32 { return 42 }`)
+
+    expect(markup).toContain('Declaration-wide nominal layout catalog')
+    expect(markup).toContain('2 declarations')
+    expect(markup).toContain('memory/docs/unified-layout.Outer')
+    expect(markup).toContain('Dependencies: memory/docs/unified-layout.Inner')
+    expect(markup).toContain(
+      'aria-label="Physical fields of memory/docs/unified-layout.Outer"',
+    )
+    expect(markup).toContain('#0 inner: memory/docs/unified-layout.Inner')
+    expect(markup).toContain('offset 0 · padding 0 · size 4 · align 4')
+    expect(markup).toContain('tail padding 0')
+    expect(markup).toContain('Reachable runtime layout plan')
+  })
+
+  it('keeps recursive layout failures and their canonical causes visible', () => {
+    const markup = renderLayout(`struct Node { next: Node }
+pub fn main() -> I32 { return 42 }`)
+
+    expect(markup).toContain('memory/docs/unified-layout.Node')
+    expect(markup).toContain('unavailable · invalid declaration')
+    expect(markup).toContain('Dependencies: memory/docs/unified-layout.Node')
+    expect(markup).toContain('Diagnostic cause: SEM0020 at memory/docs/unified-layout:')
   })
 })
 

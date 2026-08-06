@@ -67,6 +67,10 @@ export const redundantAliasCode = 'SEM0013' as const
 export const unknownImportedMemberCode = 'SEM0014' as const
 export const inaccessibleImportedMemberCode = 'SEM0015' as const
 export const bindingConflictCode = 'SEM0016' as const
+export const duplicateFieldNameCode = 'SEM0017' as const
+export const expectedTypeCode = 'SEM0018' as const
+export const privateTypeExposureCode = 'SEM0019' as const
+export const inlineRecursiveStructCode = 'SEM0020' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -95,6 +99,10 @@ export type Code =
   | typeof unknownImportedMemberCode
   | typeof inaccessibleImportedMemberCode
   | typeof bindingConflictCode
+  | typeof duplicateFieldNameCode
+  | typeof expectedTypeCode
+  | typeof privateTypeExposureCode
+  | typeof inlineRecursiveStructCode
   | typeof useAfterMoveCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -169,6 +177,14 @@ export type Reason =
       readonly spelling: string
     }
   | { readonly _tag: 'BindingConflict'; readonly spelling: string }
+  | {
+      readonly _tag: 'DuplicateFieldName'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'ExpectedType'; readonly spelling: string }
+  | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
+  | { readonly _tag: 'InlineRecursiveStruct'; readonly members: ReadonlyArray<string> }
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
@@ -401,6 +417,64 @@ export const bindingConflict = (spelling: string, span: SourceSpan.SourceSpan): 
     severity: 'error',
     message: `Multiple bindings claim ${spelling}`,
     reason: Object.freeze({ _tag: 'BindingConflict', spelling }),
+    span,
+  })
+
+/** Creates the diagnostic for a field name repeated within one struct. */
+export const duplicateFieldName = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateFieldNameCode,
+    severity: 'error',
+    message: `Duplicate field name ${spelling}`,
+    reason: Object.freeze({ _tag: 'DuplicateFieldName', spelling, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+/** Creates the diagnostic for a value declaration used as a declared type. */
+export const expectedType = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: expectedTypeCode,
+    severity: 'error',
+    message: `Expected a type, found ${spelling}`,
+    reason: Object.freeze({ _tag: 'ExpectedType', spelling }),
+    span,
+  })
+
+/** Creates the diagnostic for a public contract exposing a private nominal type. */
+export const privateTypeExposure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: privateTypeExposureCode,
+    severity: 'error',
+    message: `Public declaration exposes private type ${type}`,
+    reason: Object.freeze({ _tag: 'PrivateTypeExposure', type }),
+    span,
+  })
+
+/** Creates the one canonical diagnostic for an inline recursive struct component. */
+export const inlineRecursiveStruct = (
+  members: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: inlineRecursiveStructCode,
+    severity: 'error',
+    message: `Inline recursive struct layout: ${members.join(' -> ')}`,
+    reason: Object.freeze({ _tag: 'InlineRecursiveStruct', members: Object.freeze([...members]) }),
     span,
   })
 

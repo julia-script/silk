@@ -1,4 +1,3 @@
-import * as DeclarationIndex from '../../src/DeclarationIndex.js'
 import * as Elaboration from '../../src/Elaboration.js'
 import type * as ModuleClosure from '../../src/ModuleClosure.js'
 import * as NameResolution from '../../src/NameResolution.js'
@@ -18,9 +17,10 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     cycles: Object.freeze([]),
     diagnostics: Object.freeze([]),
   })
-  const index = DeclarationIndex.collect(closure)
+  const analyzed = NameResolution.analyze(closure)
+  const index = analyzed.index
   const headers = index.modules.at(0)
-  const scope = NameResolution.scopeOf(NameResolution.resolve(closure, index), syntax.source.id)
+  const scope = NameResolution.scopeOf(analyzed.resolution, syntax.source.id)
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
   return Elaboration.elaborateModule({ syntax, headers, scope, index })

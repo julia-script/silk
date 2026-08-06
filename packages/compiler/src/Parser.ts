@@ -149,6 +149,7 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ReturnKeyword',
   'ElseKeyword',
   'PubKeyword',
+  'StructKeyword',
   'FnKeyword',
   'ImportKeyword',
 ])
@@ -263,6 +264,7 @@ const primaryKind = (
       token.kind === 'IfKeyword' ||
       token.kind === 'ReturnKeyword' ||
       token.kind === 'PubKeyword' ||
+      token.kind === 'StructKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
@@ -285,6 +287,7 @@ const remainingRightParentheses = (state: State): number => {
     if (
       token.kind === 'RightBrace' ||
       token.kind === 'PubKeyword' ||
+      token.kind === 'StructKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
@@ -317,6 +320,7 @@ const expectCallRightParenthesis = (
   return expect(initial, 'RightParenthesis', [
     'RightBrace',
     'PubKeyword',
+    'StructKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -328,6 +332,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     'RightParenthesis',
     'RightBrace',
     'PubKeyword',
+    'StructKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -340,6 +345,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     kind !== 'RightParenthesis' &&
     kind !== 'RightBrace' &&
     kind !== 'PubKeyword' &&
+    kind !== 'StructKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -353,6 +359,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
       kind === 'RightParenthesis' ||
       kind === 'RightBrace' ||
       kind === 'PubKeyword' ||
+      kind === 'StructKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -363,6 +370,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
       'RightParenthesis',
       'RightBrace',
       'PubKeyword',
+      'StructKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -388,6 +396,7 @@ function parseCallExpression(initial: State, reservedForEnclosingCalls: number):
     'RightParenthesis',
     'RightBrace',
     'PubKeyword',
+    'StructKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -641,6 +650,7 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
     'ReturnKeyword',
     'ElseKeyword',
     'PubKeyword',
+    'StructKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -650,12 +660,42 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
   })
 }
 
+const parseTypePath = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+  preserveFieldStart = false,
+): NodeResult => {
+  const fieldStartsHere =
+    preserveFieldStart &&
+    nextSignificantKind(initial) === 'Identifier' &&
+    significantKindAfter(initial, 1) === 'Colon'
+  const first = fieldStartsHere
+    ? (() => {
+        const leading = consumeTrivia(initial)
+        const missing = missingToken(leading.state, 'Identifier')
+        return Object.freeze({
+          state: addDiagnostic(leading.state, Diagnostic.missingToken('Identifier', missing.span)),
+          elements: Object.freeze([...leading.elements, missing]),
+        })
+      })()
+    : expect(initial, 'Identifier', ['Dot', ...following])
+  let state = first.state
+  let children: ReadonlyArray<SyntaxTree.Element> = first.elements
+  if (!fieldStartsHere && nextSignificantKind(state) === 'Dot') {
+    const dot = expect(state, 'Dot', ['Identifier', ...following])
+    const member = expect(dot.state, 'Identifier', following)
+    state = member.state
+    children = Object.freeze([...children, ...dot.elements, ...member.elements])
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'TypePath', children) })
+}
+
 const parseReturnType = (initial: State): NodeResult => {
   const arrow = expect(initial, 'Arrow', ['Identifier', 'LeftBrace'])
-  const name = expect(arrow.state, 'Identifier', ['LeftBrace'])
+  const type = parseTypePath(arrow.state, ['LeftBrace'])
   return Object.freeze({
-    state: name.state,
-    node: syntaxNode(name.state, 'ReturnType', [...arrow.elements, ...name.elements]),
+    state: type.state,
+    node: syntaxNode(type.state, 'ReturnType', [...arrow.elements, type.node]),
   })
 }
 
@@ -674,17 +714,18 @@ const parseParameterList = (initial: State): NodeResult => {
     kind !== 'RightParenthesis' &&
     kind !== 'Arrow' &&
     kind !== 'PubKeyword' &&
+    kind !== 'StructKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
     const name = expect(state, 'Identifier', ['Colon', 'Comma', 'RightParenthesis', 'Arrow'])
     const colon = expect(name.state, 'Colon', ['Identifier', 'Comma', 'RightParenthesis', 'Arrow'])
-    const type = expect(colon.state, 'Identifier', ['Comma', 'RightParenthesis', 'Arrow'])
+    const type = parseTypePath(colon.state, ['Comma', 'RightParenthesis', 'Arrow'])
     const parameter = syntaxNode(type.state, 'ParameterDeclaration', [
       ...name.elements,
       ...colon.elements,
-      ...type.elements,
+      type.node,
     ])
     children = Object.freeze([...children, parameter])
     state = type.state
@@ -694,6 +735,7 @@ const parseParameterList = (initial: State): NodeResult => {
       kind === 'RightParenthesis' ||
       kind === 'Arrow' ||
       kind === 'PubKeyword' ||
+      kind === 'StructKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -704,6 +746,7 @@ const parseParameterList = (initial: State): NodeResult => {
       'RightParenthesis',
       'Arrow',
       'PubKeyword',
+      'StructKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -715,6 +758,7 @@ const parseParameterList = (initial: State): NodeResult => {
   const rightParenthesis = expect(state, 'RightParenthesis', [
     'Arrow',
     'PubKeyword',
+    'StructKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -730,6 +774,7 @@ const parseParameterList = (initial: State): NodeResult => {
 const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ImportKeyword',
   'PubKeyword',
+  'StructKeyword',
   'FnKeyword',
   'EndOfFile',
 ])
@@ -833,10 +878,78 @@ const parseImportDeclaration = (initial: State): NodeResult => {
   return Object.freeze({ state, node: syntaxNode(state, 'ImportDeclaration', children) })
 }
 
+const beginsTopLevelDeclaration = (state: State): boolean => {
+  const kind = nextSignificantKind(state)
+  if (kind === 'ImportKeyword' || kind === 'FnKeyword' || kind === 'StructKeyword') return true
+  if (kind !== 'PubKeyword') return false
+  const following = significantKindAfter(state, 1)
+  return following === 'FnKeyword' || following === 'StructKeyword'
+}
+
+const parseStructField = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['Identifier', 'RightBrace', ...topLevelFollowing])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const name = expect(pubKeyword.state, 'Identifier', ['Colon', 'RightBrace', ...topLevelFollowing])
+  const colon = expect(name.state, 'Colon', ['Identifier', 'RightBrace', ...topLevelFollowing])
+  const type = parseTypePath(colon.state, ['PubKeyword', 'RightBrace', ...topLevelFollowing], true)
+  return Object.freeze({
+    state: type.state,
+    node: syntaxNode(type.state, 'StructField', [
+      ...pubKeyword.elements,
+      ...name.elements,
+      ...colon.elements,
+      type.node,
+    ]),
+  })
+}
+
+const parseStructDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['StructKeyword', 'Identifier', 'LeftBrace'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'StructKeyword', ['Identifier', 'LeftBrace'])
+  const name = expect(keyword.state, 'Identifier', ['LeftBrace', ...topLevelFollowing])
+  const left = expect(name.state, 'LeftBrace', [
+    'PubKeyword',
+    'Identifier',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...pubKeyword.elements,
+    ...keyword.elements,
+    ...name.elements,
+    ...left.elements,
+  ])
+
+  while (
+    !beginsTopLevelDeclaration(state) &&
+    (nextSignificantKind(state) === 'PubKeyword' || nextSignificantKind(state) === 'Identifier')
+  ) {
+    const field = parseStructField(state)
+    children = Object.freeze([...children, field.node])
+    state = field.state
+  }
+
+  const right = expect(state, 'RightBrace', topLevelFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'StructDeclaration', [...children, ...right.elements]),
+  })
+}
+
 const parseTopLevelDeclaration = (state: State): NodeResult =>
   nextSignificantKind(state) === 'ImportKeyword'
     ? parseImportDeclaration(state)
-    : parseFunctionDeclaration(state)
+    : nextSignificantKind(state) === 'StructKeyword' ||
+        (nextSignificantKind(state) === 'PubKeyword' &&
+          significantKindAfter(state, 1) === 'StructKeyword')
+      ? parseStructDeclaration(state)
+      : parseFunctionDeclaration(state)
 
 const parseFunctionDeclaration = (initial: State): NodeResult => {
   let lookahead = initial.index
@@ -845,6 +958,7 @@ const parseFunctionDeclaration = (initial: State): NodeResult => {
   while (
     lookaheadToken !== undefined &&
     lookaheadToken.kind !== 'FnKeyword' &&
+    lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'EndOfFile'
   ) {
     if (lookaheadToken.kind === 'PubKeyword') {

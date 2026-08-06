@@ -8,6 +8,7 @@ export type TokenKind =
   | 'Identifier'
   | 'DecimalInteger'
   | 'PubKeyword'
+  | 'StructKeyword'
   | 'FnKeyword'
   | 'ReturnKeyword'
   | 'ImportKeyword'

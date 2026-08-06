@@ -7,7 +7,7 @@
  */
 
 import { Analysis, BackendRegistry, ToolchainPlan } from '@silk-effect/compiler'
-import type { Backend } from '@silk-effect/compiler'
+import type { Backend, Layout, Type } from '@silk-effect/compiler'
 import * as Effect from 'effect/Effect'
 import { useMemo } from 'react'
 import styles from './syntax-inspector/syntax-inspector.module.css'
@@ -19,6 +19,9 @@ const messageOf = (error: unknown): string =>
 
 const commandText = (planned: ToolchainPlan.PlannedCommand): string =>
   [planned.command, ...planned.arguments].join(' ')
+
+const typeText = (type: Type.Type): string =>
+  typeof type === 'string' ? type : `${type.module}.${type.name}`
 
 const hex = (bytes: Uint8Array): string => {
   const lines: Array<string> = []
@@ -75,7 +78,109 @@ const emit = (
   }
 }
 
-/** The target and its scalar plan, which is what makes an emission reproducible. */
+const dependenciesOf = (
+  snapshot: Analysis.Snapshot,
+  type: Type.Nominal,
+): ReadonlyArray<Type.Nominal> => {
+  const declaration = Analysis.structByName(snapshot, type.module, type.name)
+  return declaration._tag === 'Resolved' ? declaration.declaration.dependency.types : []
+}
+
+const unavailableReasonText = (entry: Layout.UnavailableEntry): string => {
+  switch (entry.reason._tag) {
+    case 'InvalidDeclaration':
+      return `invalid declaration · ${entry.reason.detail}`
+    case 'UnavailableField':
+      return `${
+        entry.reason.field === undefined ? 'unavailable field' : `field #${entry.reason.field.ordinal}`
+      } · ${entry.reason.detail}`
+    case 'UnavailableDependency':
+      return `unavailable dependency · ${typeText(entry.reason.dependency)}`
+  }
+}
+
+function NominalLayoutCatalog({ snapshot }: { readonly snapshot: Analysis.Snapshot }) {
+  const selected = Analysis.layoutCatalogOf(snapshot)
+  if (selected._tag === 'Unavailable') {
+    return (
+      <section className={styles.diagnosticGroup} aria-labelledby="layout-catalog">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="layout-catalog">Declaration-wide nominal layout catalog</h3>
+          <span>target unavailable</span>
+        </div>
+        <p className={styles.emptyState}>{selected.error.message}</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className={styles.diagnosticGroup} aria-labelledby="layout-catalog">
+      <div className={styles.diagnosticHeading}>
+        <h3 id="layout-catalog">Declaration-wide nominal layout catalog</h3>
+        <span>
+          {selected.value.target.id} · {selected.value.entries.length} declarations
+        </span>
+      </div>
+      {selected.value.entries.length === 0 ? (
+        <p className={styles.emptyState}>No nominal structs are declared.</p>
+      ) : (
+        <ul className={styles.diagnosticList} aria-label="Nominal layout catalog">
+          {selected.value.entries.map((entry) => {
+            const dependencies =
+              entry._tag === 'UnavailableLayoutEntry'
+                ? entry.dependencies
+                : typeof entry.type === 'string'
+                  ? []
+                  : dependenciesOf(snapshot, entry.type)
+            return (
+              <li key={typeText(entry.type)}>
+                <div>
+                  <code>{typeText(entry.type)}</code>
+                  <span>
+                    {entry._tag === 'UnavailableLayoutEntry'
+                      ? `unavailable · ${unavailableReasonText(entry)}`
+                      : `${entry.size} bytes · align ${entry.alignment} · ${entry.representation._tag.toLowerCase()}`}
+                  </span>
+                </div>
+                <p>
+                  Dependencies:{' '}
+                  {dependencies.length === 0
+                    ? 'none'
+                    : dependencies.map(typeText).join(', ')}
+                </p>
+                {entry._tag === 'UnavailableLayoutEntry' ? (
+                  <p>
+                    Diagnostic cause:{' '}
+                    {entry.cause === undefined
+                      ? 'none'
+                      : `${entry.cause.code} at ${entry.cause.span.sourceId}:${entry.cause.span.start}-${entry.cause.span.end}`}
+                  </p>
+                ) : entry.representation._tag === 'Aggregate' ? (
+                  <ul aria-label={`Physical fields of ${typeText(entry.type)}`}>
+                    {entry.representation.fields.map((field) => (
+                      <li key={field.id.ordinal}>
+                        <code>
+                          #{field.id.ordinal} {field.name}: {typeText(field.type)}
+                        </code>{' '}
+                        <span>
+                          offset {field.offset} · padding {field.padding} · size {field.size} · align{' '}
+                          {field.alignment}
+                        </span>
+                      </li>
+                    ))}
+                    <li>tail padding {entry.representation.tailPadding}</li>
+                  </ul>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/** The reachable target layout plan that makes an emission reproducible. */
 export function LayoutSummary({
   snapshot,
   id,
@@ -90,7 +195,7 @@ export function LayoutSummary({
     return (
       <section className={styles.diagnosticGroup} aria-labelledby={id}>
         <div className={styles.diagnosticHeading}>
-          <h3 id={id}>Compiler target and scalar plan</h3>
+          <h3 id={id}>Reachable runtime layout plan</h3>
         </div>
         <p className={styles.emptyState}>{layout.error.message}</p>
       </section>
@@ -100,22 +205,35 @@ export function LayoutSummary({
   return (
     <section className={styles.diagnosticGroup} aria-labelledby={id}>
       <div className={styles.diagnosticHeading}>
-        <h3 id={id}>Compiler target and scalar plan</h3>
+        <h3 id={id}>Reachable runtime layout plan</h3>
         <span>{layout.value.target.id}</span>
       </div>
       <ul className={styles.diagnosticList} aria-label={label}>
         {layout.value.entries.map((entry) => (
-          <li key={entry.type}>
+          <li key={typeText(entry.type)}>
             <div>
-              <code>{entry.type}</code>
+              <code>{typeText(entry.type)}</code>
               <span>
-                {entry.size} bytes · align {entry.alignment} · i{entry.representation.bits}
+                {entry.size} bytes · align {entry.alignment} ·{' '}
+                {entry.representation._tag === 'Aggregate'
+                  ? 'aggregate'
+                  : `i${entry.representation.bits}`}
               </span>
             </div>
           </li>
         ))}
       </ul>
     </section>
+  )
+}
+
+/** The canonical target-layout inspector registered by the unified `/labs` workbench. */
+export function LayoutView({ snapshot }: { readonly snapshot: Analysis.Snapshot }) {
+  return (
+    <div className={styles.diagnostics}>
+      <NominalLayoutCatalog snapshot={snapshot} />
+      <LayoutSummary snapshot={snapshot} id="layout-plan" label="Reachable runtime layout plan" />
+    </div>
   )
 }
 

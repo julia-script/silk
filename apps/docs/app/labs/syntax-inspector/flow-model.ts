@@ -1,4 +1,7 @@
-import type { BootstrapEvaluation, Elaboration, SourceSpan } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Elaboration, SourceSpan, Type } from '@silk-effect/compiler'
+
+const typeText = (type: Type.Type): string =>
+  typeof type === 'string' ? type : `${type.module}.${type.name}`
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -269,7 +272,7 @@ const projectCall = (
         argumentId,
         'Argument',
         `Argument #${argument.id.ordinal}: ${argumentLabel(argument)}`,
-        argument.type._tag === 'Available' ? argument.type.type : 'Unavailable type',
+        argument.type._tag === 'Available' ? typeText(argument.type.type) : 'Unavailable type',
         call.contract._tag === 'Compatible' && nestedComplete !== false ? 'Connected' : 'Unmatched',
         argument.syntax.span,
         argument.id.ordinal,
@@ -579,7 +582,7 @@ const projectCall = (
       resultId,
       'CallResult',
       `${declarationName(target)} call result`,
-      call.type._tag === 'Available' ? call.type.type : 'Unavailable type',
+      call.type._tag === 'Available' ? typeText(call.type.type) : 'Unavailable type',
       'Connected',
       call.syntax.span,
     ),

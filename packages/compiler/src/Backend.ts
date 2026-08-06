@@ -128,7 +128,7 @@ const positionOf = (table: LineTable, offset: number): { line: number; column: n
 const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
   Effect.gen(function* () {
     const i32Layout = Layout.entry(program.layout, 'I32')
-    if (i32Layout === undefined) {
+    if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
       return yield* new BackendError({
         operation: 'Backend.emit',
         backend: 'LLVM',
@@ -136,9 +136,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
       })
     }
+    const scalarBits = i32Layout.representation.bits
     if (
       program.layout.entries.some(
-        (entry) => entry.representation.bits !== i32Layout.representation.bits,
+        (entry) =>
+          entry.representation._tag === 'Aggregate' || entry.representation.bits !== scalarBits,
       )
     ) {
       return yield* new BackendError({
@@ -153,7 +155,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       targetTriple: program.layout.target.triple,
       strip: request.mode !== 'debug',
     })
-    const i32 = yield* LlvmType.integer(builder, i32Layout.representation.bits)
+    const i32 = yield* LlvmType.integer(builder, scalarBits)
     let overflowSignature:
       | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
       | undefined

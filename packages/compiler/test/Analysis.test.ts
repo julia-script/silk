@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -103,6 +104,55 @@ it('answers ownership facts and cleanup plans through the facade', () => {
   assert.strictEqual(Analysis.ownershipOf(self, 'absent'), undefined)
 })
 
+it('answers nominal declaration, field, dependency, and layout facts through the facade', () => {
+  const self = Analysis.ofSource(
+    'memory/nominal-facade',
+    ascii('struct Pair { left: I32 right: Bool }\npub fn main() -> I32 { return 42 }'),
+    'aarch64-apple-darwin',
+  )
+  const lookup = Analysis.structByName(self, 'memory/nominal-facade', 'Pair')
+  assert.strictEqual(Analysis.memberByName(self, 'memory/nominal-facade', 'Pair')._tag, 'Resolved')
+  assert.strictEqual(lookup._tag, 'Resolved')
+  if (lookup._tag !== 'Resolved') return
+  assert.strictEqual(Analysis.fieldByName(lookup.declaration, 'right')._tag, 'Resolved')
+  assert.strictEqual(lookup.declaration.dependency._tag, 'Available')
+  const layout = Analysis.nominalLayout(self, Type.nominal('memory/nominal-facade', 'Pair'))
+  assert.strictEqual(layout?._tag, 'LayoutEntry')
+})
+
+it('keeps cross-module nominal identity and recursive unavailability queryable through the facade', () => {
+  const self = snapshot('app/Main', [
+    [
+      'app/Main',
+      'import model.Tree { Node }\nstruct Root { node: Node }\nstruct Loop { next: Loop }\npub fn main() -> I32 { return 42 }',
+    ],
+    ['model/Tree', 'pub struct Node { value: I32 }'],
+  ])
+  const root = Analysis.structByName(self, 'app/Main', 'Root')
+  const loop = Analysis.structByName(self, 'app/Main', 'Loop')
+  assert.strictEqual(root._tag, 'Resolved')
+  assert.strictEqual(loop._tag, 'Resolved')
+  if (root._tag !== 'Resolved' || loop._tag !== 'Resolved') return
+  const node = Analysis.fieldByName(root.declaration, 'node')
+  assert.strictEqual(node._tag, 'Resolved')
+  if (node._tag !== 'Resolved' || node.field.declaredType._tag !== 'Resolved') return
+  assert.deepEqual(node.field.declaredType.type, {
+    _tag: 'NominalType',
+    module: 'model/Tree',
+    name: 'Node',
+  })
+  assert.strictEqual(
+    Analysis.nominalLayout(self, Type.nominal('model/Tree', 'Node'))?._tag,
+    'LayoutEntry',
+  )
+  const unavailable = Analysis.nominalLayout(self, Type.nominal('app/Main', 'Loop'))
+  assert.strictEqual(unavailable?._tag, 'UnavailableLayoutEntry')
+  assert.strictEqual(
+    unavailable?._tag === 'UnavailableLayoutEntry' ? unavailable.cause?.code : undefined,
+    'SEM0020',
+  )
+})
+
 it.effect('emits codegen artifacts through the facade', () =>
   Effect.gen(function* () {
     const self = Analysis.ofSource(
@@ -127,13 +177,22 @@ it('preserves one exact target and layout plan across facade queries and MIR', (
     'wasm32-unknown-unknown',
   )
   const target = Analysis.targetOf(self)
+  const catalog = Analysis.layoutCatalogOf(self)
   const layout = Analysis.layoutOf(self)
   const mir = Analysis.mirOf(self)
 
   assert.strictEqual(target._tag, 'Resolved')
+  assert.strictEqual(catalog._tag, 'Available')
   assert.strictEqual(layout._tag, 'Available')
   assert.strictEqual(mir._tag, 'Available')
-  if (target._tag !== 'Resolved' || layout._tag !== 'Available' || mir._tag !== 'Available') return
+  if (
+    target._tag !== 'Resolved' ||
+    catalog._tag !== 'Available' ||
+    layout._tag !== 'Available' ||
+    mir._tag !== 'Available'
+  )
+    return
+  assert.strictEqual(catalog.value.target, target.target)
   assert.strictEqual(layout.value.target, target.target)
   assert.strictEqual(mir.value.layout, layout.value)
   assert.deepEqual(
@@ -153,6 +212,7 @@ it('keeps unsupported targets explicit and queryable without manufacturing MIR',
   )
 
   assert.strictEqual(Analysis.targetOf(self)._tag, 'Unavailable')
+  assert.strictEqual(Analysis.layoutCatalogOf(self)._tag, 'Unavailable')
   assert.strictEqual(Analysis.layoutOf(self)._tag, 'Unavailable')
   assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
 })

@@ -16,7 +16,7 @@ import { DiscoveryView } from './instances/instances'
 import { CfgView } from './mir-cfg/mir-cfg'
 import { ClosureView } from './module-closure/module-closure'
 import { OwnershipView } from './ownership/ownership'
-import { BackendView, LayoutSummary, ToolchainView } from './panels'
+import { BackendView, LayoutView, ToolchainView } from './panels'
 import {
   ConcreteTree,
   DataFlow,
@@ -164,9 +164,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     id: 'layout',
     title: 'Target layout',
     phase: 'layout',
-    render: ({ snapshot }) => (
-      <LayoutSummary snapshot={snapshot} id="layout-plan" label="Target layout plan" />
-    ),
+    render: ({ snapshot }) => <LayoutView snapshot={snapshot} />,
   },
   {
     id: 'mir',

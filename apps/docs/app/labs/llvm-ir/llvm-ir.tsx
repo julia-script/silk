@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import type { Type } from '@silk-effect/compiler'
 import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
@@ -34,6 +35,8 @@ pub fn main() -> I32 { return choose(1, 42) }`,
 ] as const
 
 const encoder = new TextEncoder()
+const typeText = (type: Type.Type): string =>
+  typeof type === 'string' ? type : `${type.module}.${type.name}`
 
 export function LlvmIrLab() {
   const [text, setText] = useState<string>(presets[0].source)
@@ -88,12 +91,14 @@ export function LlvmIrLab() {
             </div>
             <ul className={styles.diagnosticList} aria-label="LLVM target layout plan">
               {layout.value.entries.map((entry) => (
-                <li key={entry.type}>
+                <li key={typeText(entry.type)}>
                   <div>
-                    <code>{entry.type}</code>
+                    <code>{typeText(entry.type)}</code>
                     <span>
-                      {entry.size} bytes · align {entry.alignment} · LLVM i
-                      {entry.representation.bits}
+                      {entry.size} bytes · align {entry.alignment} ·{' '}
+                      {entry.representation._tag === 'Aggregate'
+                        ? 'aggregate'
+                        : `LLVM i${entry.representation.bits}`}
                     </span>
                   </div>
                 </li>

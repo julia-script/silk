@@ -1,7 +1,7 @@
 'use client'
 
 import { Analysis, Diagnostic, SyntaxTree } from '@silk-effect/compiler'
-import type { BootstrapEvaluation, Elaboration, SourceFile } from '@silk-effect/compiler'
+import type { BootstrapEvaluation, Elaboration, SourceFile, Type } from '@silk-effect/compiler'
 import type { Hir, SourceSpan, SyntaxFile } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import {
@@ -14,6 +14,8 @@ import styles from './syntax-inspector.module.css'
 
 const sourceId = 'memory/docs/syntax-inspector'
 const acceptedSource = 'pub fn main() -> I32 { return 42 }'
+const typeText = (type: Type.Type): string =>
+  typeof type === 'string' ? type : `${type.module}.${type.name}`
 
 const examples = [
   { label: 'Literal result', source: acceptedSource },
@@ -670,7 +672,11 @@ function ParameterRelationship({ expression }: { readonly expression: Identifier
         <div>
           <dt>Expression type</dt>
           <dd>
-            <code>{expression.type._tag === 'Available' ? expression.type.type : 'Unavailable'}</code>
+            <code>
+              {expression.type._tag === 'Available'
+                ? typeText(expression.type.type)
+                : 'Unavailable'}
+            </code>
             <span>{expression.type._tag}</span>
           </dd>
         </div>
@@ -775,7 +781,7 @@ function ParameterFacts({ declaration }: { readonly declaration: Elaboration.Dec
                   <dd>
                     <code>
                       {type._tag === 'Resolved'
-                        ? type.type
+                        ? typeText(type.type)
                         : type._tag === 'Unresolved'
                           ? type.spelling
                           : 'Unavailable'}
@@ -868,7 +874,9 @@ function CallRelationship({
         <div>
           <dt>Call type</dt>
           <dd>
-            <code>{returned.type._tag === 'Available' ? returned.type.type : 'Unavailable'}</code>
+            <code>
+              {returned.type._tag === 'Available' ? typeText(returned.type.type) : 'Unavailable'}
+            </code>
             <span>{returned.type._tag}</span>
           </dd>
         </div>
@@ -905,7 +913,11 @@ function CallRelationship({
                   <div>
                     <span>Argument #{argument.id.ordinal}</span>
                     <strong>{expressionLabel(expression)}</strong>
-                    <code>{argument.type._tag === 'Available' ? argument.type.type : 'Unavailable'}</code>
+                    <code>
+                      {argument.type._tag === 'Available'
+                        ? typeText(argument.type.type)
+                        : 'Unavailable'}
+                    </code>
                   </div>
                   <div>
                     <span>{spanLabel(argument.syntax)}</span>
@@ -916,7 +928,7 @@ function CallRelationship({
                         → parameter #{mapping.parameter.id.ordinal} ·{' '}
                         {parameterLabel(mapping.parameter)} ·{' '}
                         {mapping.parameter.declaredType._tag === 'Resolved'
-                          ? mapping.parameter.declaredType.type
+                          ? typeText(mapping.parameter.declaredType.type)
                           : 'Unavailable'}
                       </code>
                     )}
@@ -1446,7 +1458,7 @@ function SemanticFacts({
                   <dd>
                     <strong>
                       {returnType._tag === 'Resolved'
-                        ? returnType.type
+                        ? typeText(returnType.type)
                         : returnType._tag === 'Unresolved'
                           ? returnType.spelling
                           : 'Unavailable'}
@@ -1477,7 +1489,9 @@ function SemanticFacts({
                       <strong>{String(returned.value)}</strong>
                       <span>
                         Boolean ·{' '}
-                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                        {returned.type._tag === 'Available'
+                          ? typeText(returned.type.type)
+                          : 'Unavailable type'}
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
@@ -1490,7 +1504,9 @@ function SemanticFacts({
                       </strong>
                       <span>
                         {returned._tag} · {returned.reference._tag} ·{' '}
-                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                        {returned.type._tag === 'Available'
+                          ? typeText(returned.type.type)
+                          : 'Unavailable type'}
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
@@ -1499,7 +1515,9 @@ function SemanticFacts({
                       <strong>{expressionLabel(returned.expression)}</strong>
                       <span>
                         Grouped ·{' '}
-                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                        {returned.type._tag === 'Available'
+                          ? typeText(returned.type.type)
+                          : 'Unavailable type'}
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
@@ -1512,7 +1530,9 @@ function SemanticFacts({
                       </strong>
                       <span>
                         {returned._tag} · {returned.contract._tag} ·{' '}
-                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                        {returned.type._tag === 'Available'
+                          ? typeText(returned.type.type)
+                          : 'Unavailable type'}
                       </span>
                       <small>
                         {returned.arguments.length} effective arguments · {spanLabel(returned.syntax)}
@@ -1527,7 +1547,9 @@ function SemanticFacts({
                       </strong>
                       <span>
                         Call · {returned.reference._tag} ·{' '}
-                        {returned.type._tag === 'Available' ? returned.type.type : 'Unavailable type'}
+                        {returned.type._tag === 'Available'
+                          ? typeText(returned.type.type)
+                          : 'Unavailable type'}
                       </span>
                       <small>
                         call {spanLabel(returned.syntax)}

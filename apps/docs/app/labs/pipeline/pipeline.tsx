@@ -50,7 +50,7 @@ export const pipelineRows = (snapshot: Analysis.Snapshot): ReadonlyArray<PhaseRo
       phase: 'declaration index',
       lab: '/docs/labs/declaration-index',
       outputs: `${Analysis.declarationIndex(snapshot).modules.reduce(
-        (sum, module) => sum + module.declarations.length,
+        (sum, module) => sum + module.members.length,
         0,
       )} headers`,
       diagnostics: 0,

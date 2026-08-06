@@ -1,12 +1,31 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Diagnostic from './Diagnostic.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Target from './Target.js'
+import * as Type from './Type.js'
+
+/** One declaration-ordered physical field within an aggregate representation. */
+export interface Field {
+  readonly _tag: 'LayoutField'
+  readonly id: DeclarationIndex.FieldId
+  readonly name: string
+  readonly type: DeclarationIndex.SemanticType
+  readonly offset: number
+  readonly size: number
+  readonly alignment: number
+  readonly padding: number
+}
 
 /** The initial closed representation vocabulary for concrete runtime types. */
 export type Representation =
   | { readonly _tag: 'SignedInteger'; readonly bits: 32 }
   | { readonly _tag: 'Boolean'; readonly bits: 32; readonly falseValue: 0; readonly trueValue: 1 }
+  | {
+      readonly _tag: 'Aggregate'
+      readonly fields: ReadonlyArray<Field>
+      readonly tailPadding: number
+    }
 
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
@@ -17,17 +36,51 @@ export interface Entry {
   readonly representation: Representation
 }
 
-/** The complete layout plan for one target-aware MIR program. */
+/** Why one nominal declaration cannot have a concrete physical representation. */
+export type UnavailableReason =
+  | { readonly _tag: 'InvalidDeclaration'; readonly detail: string }
+  | {
+      readonly _tag: 'UnavailableField'
+      readonly field?: DeclarationIndex.FieldId
+      readonly detail: string
+    }
+  | { readonly _tag: 'UnavailableDependency'; readonly dependency: Type.Nominal }
+
+/** One retained nominal layout failure that does not prevent unrelated layouts. */
+export interface UnavailableEntry {
+  readonly _tag: 'UnavailableLayoutEntry'
+  readonly type: Type.Nominal
+  readonly dependencies: ReadonlyArray<Type.Nominal>
+  readonly reason: UnavailableReason
+  readonly cause?: Diagnostic.Identity
+}
+
+export type CatalogEntry = Entry | UnavailableEntry
+
+/** Every canonical nominal declaration laid out for one selected target. */
+export interface Catalog {
+  readonly _tag: 'LayoutCatalog'
+  readonly target: Target.Target
+  readonly entries: ReadonlyArray<CatalogEntry>
+}
+
+/** The concrete layouts reached by one target-aware MIR program. */
 export interface Plan {
   readonly _tag: 'LayoutPlan'
   readonly target: Target.Target
   readonly entries: ReadonlyArray<Entry>
 }
 
-/** One deterministic explanation of a malformed layout plan. */
+/** One deterministic explanation of malformed layout facts. */
 export interface Violation {
   readonly _tag: 'LayoutViolation'
-  readonly rule: 'NonCanonicalTarget' | 'DuplicateType' | 'NonCanonicalOrder' | 'InvalidScalar'
+  readonly rule:
+    | 'NonCanonicalTarget'
+    | 'DuplicateType'
+    | 'NonCanonicalOrder'
+    | 'InvalidScalar'
+    | 'InvalidAggregate'
+    | 'CatalogMismatch'
   readonly type?: DeclarationIndex.SemanticType
   readonly detail: string
 }
@@ -55,14 +108,195 @@ const bool = (): Entry =>
     }),
   })
 
-const makeEntry = (type: DeclarationIndex.SemanticType): Entry => (type === 'Bool' ? bool() : i32())
+const scalarEntry = (type: Type.Builtin): Entry => (type === 'Bool' ? bool() : i32())
+
+const alignUp = (offset: number, alignment: number): number =>
+  Math.ceil(offset / alignment) * alignment
+
+const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefined =>
+  struct.canonical._tag === 'Canonical'
+    ? Type.nominal(struct.canonical.id.module, struct.canonical.id.name)
+    : undefined
+
+const dependenciesOf = (struct: DeclarationIndex.StructFact): ReadonlyArray<Type.Nominal> => {
+  const dependencies = new Map<string, Type.Nominal>()
+  for (const field of struct.fields) {
+    const type =
+      field.declaredType._tag === 'Resolved' && Type.isNominal(field.declaredType.type)
+        ? field.declaredType.type
+        : field.declaredType._tag === 'Unresolved'
+          ? field.declaredType.candidate
+          : undefined
+    if (type !== undefined) dependencies.set(Type.key(type), type)
+  }
+  return Object.freeze([...dependencies.values()].sort(Type.compare))
+}
+
+const unavailable = (
+  type: Type.Nominal,
+  dependencies: ReadonlyArray<Type.Nominal>,
+  reason: UnavailableReason,
+  cause?: Diagnostic.Identity,
+): UnavailableEntry =>
+  Object.freeze({
+    _tag: 'UnavailableLayoutEntry',
+    type,
+    dependencies,
+    reason: Object.freeze(reason),
+    ...(cause === undefined ? {} : { cause }),
+  })
+
+/** Computes every canonical nominal layout before runtime reachability or backend work. */
+export const catalog = (target: Target.Target, index: DeclarationIndex.Index): Catalog => {
+  const declarations = index.modules
+    .flatMap((module) => module.structs)
+    .flatMap((struct) => {
+      const type = nominalOf(struct)
+      return type === undefined ? [] : [Object.freeze({ struct, type })]
+    })
+    .sort((left, right) => Type.compare(left.type, right.type))
+  const byType = new Map(
+    declarations.map((declaration) => [Type.key(declaration.type), declaration]),
+  )
+  const completed = new Map<string, CatalogEntry>()
+  const visiting = new Set<string>()
+
+  const layout = (type: Type.Nominal): CatalogEntry => {
+    const key = Type.key(type)
+    const existing = completed.get(key)
+    if (existing !== undefined) return existing
+    const declaration = byType.get(key)
+    if (declaration === undefined) {
+      return unavailable(type, Object.freeze([]), {
+        _tag: 'InvalidDeclaration',
+        detail: `missing canonical declaration for ${Type.encode(type)}`,
+      })
+    }
+    const dependencies = dependenciesOf(declaration.struct)
+    if (visiting.has(key)) {
+      const result = unavailable(type, dependencies, {
+        _tag: 'InvalidDeclaration',
+        detail: `recursive dependency for ${Type.encode(type)} was not rejected during declaration analysis`,
+      })
+      completed.set(key, result)
+      return result
+    }
+    if (declaration.struct.dependency._tag === 'Unavailable') {
+      const result = unavailable(
+        type,
+        dependencies,
+        { _tag: 'InvalidDeclaration', detail: `declaration dependencies are unavailable` },
+        declaration.struct.dependency.cause,
+      )
+      completed.set(key, result)
+      return result
+    }
+
+    visiting.add(key)
+    const fields: Array<Field> = []
+    let cursor = 0
+    let aggregateAlignment = 1
+    let failure: UnavailableEntry | undefined
+    for (const field of declaration.struct.fields) {
+      if (field.state._tag !== 'Unique' || field.name._tag !== 'Present') {
+        failure = unavailable(
+          type,
+          dependencies,
+          {
+            _tag: 'UnavailableField',
+            field: field.id,
+            detail: 'field identity is unavailable',
+          },
+          field.state._tag === 'Duplicate' ? field.state.cause : undefined,
+        )
+        break
+      }
+      if (
+        field.declaredType._tag !== 'Resolved' ||
+        field.declaredType.exposureCause !== undefined
+      ) {
+        failure = unavailable(
+          type,
+          dependencies,
+          {
+            _tag: 'UnavailableField',
+            field: field.id,
+            detail: 'field type is unavailable',
+          },
+          field.declaredType._tag === 'Unresolved'
+            ? field.declaredType.cause
+            : field.declaredType._tag === 'Resolved'
+              ? field.declaredType.exposureCause
+              : undefined,
+        )
+        break
+      }
+      const fieldType = field.declaredType.type
+      let fieldLayout: Entry
+      if (Type.isBuiltin(fieldType)) fieldLayout = scalarEntry(fieldType)
+      else {
+        const dependencyLayout = layout(fieldType)
+        if (dependencyLayout._tag === 'UnavailableLayoutEntry') {
+          failure = unavailable(
+            type,
+            dependencies,
+            { _tag: 'UnavailableDependency', dependency: fieldType },
+            dependencyLayout.cause,
+          )
+          break
+        }
+        fieldLayout = dependencyLayout
+      }
+      const offset = alignUp(cursor, fieldLayout.alignment)
+      fields.push(
+        Object.freeze({
+          _tag: 'LayoutField',
+          id: field.id,
+          name: field.name.spelling,
+          type: field.declaredType.type,
+          offset,
+          size: fieldLayout.size,
+          alignment: fieldLayout.alignment,
+          padding: offset - cursor,
+        }),
+      )
+      cursor = offset + fieldLayout.size
+      aggregateAlignment = Math.max(aggregateAlignment, fieldLayout.alignment)
+    }
+    visiting.delete(key)
+    if (failure !== undefined) {
+      completed.set(key, failure)
+      return failure
+    }
+    const size = alignUp(cursor, aggregateAlignment)
+    const entry: Entry = Object.freeze({
+      _tag: 'LayoutEntry',
+      type,
+      size,
+      alignment: aggregateAlignment,
+      representation: Object.freeze({
+        _tag: 'Aggregate',
+        fields: Object.freeze(fields),
+        tailPadding: size - cursor,
+      }),
+    })
+    completed.set(key, entry)
+    return entry
+  }
+
+  return Object.freeze({
+    _tag: 'LayoutCatalog',
+    target,
+    entries: Object.freeze(declarations.map((declaration) => layout(declaration.type))),
+  })
+}
 
 const addExpressionTypes = (
-  types: Set<DeclarationIndex.SemanticType>,
+  types: Map<string, DeclarationIndex.SemanticType>,
   expression: Hir.Expression,
 ): void => {
   if (expression._tag === 'Unavailable') return
-  types.add(expression.type)
+  types.set(Type.key(expression.type), expression.type)
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject)
   if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
     for (const argument of expression.arguments) addExpressionTypes(types, argument)
@@ -70,7 +304,7 @@ const addExpressionTypes = (
 }
 
 const addStatementTypes = (
-  types: Set<DeclarationIndex.SemanticType>,
+  types: Map<string, DeclarationIndex.SemanticType>,
   statements: ReadonlyArray<Hir.Statement>,
 ): void => {
   for (const statement of statements) {
@@ -84,116 +318,309 @@ const addStatementTypes = (
   }
 }
 
-const addFunctionTypes = (types: Set<DeclarationIndex.SemanticType>, fn: Hir.HirFunction): void => {
+const addFunctionTypes = (
+  types: Map<string, DeclarationIndex.SemanticType>,
+  fn: Hir.HirFunction,
+): void => {
   for (const parameter of fn.declaration.parameters) {
-    if (parameter.declaredType._tag === 'Resolved') types.add(parameter.declaredType.type)
+    if (parameter.declaredType._tag === 'Resolved') {
+      types.set(Type.key(parameter.declaredType.type), parameter.declaredType.type)
+    }
   }
-  if (fn.declaration.returnType._tag === 'Resolved') types.add(fn.declaration.returnType.type)
+  if (fn.declaration.returnType._tag === 'Resolved') {
+    types.set(Type.key(fn.declaration.returnType.type), fn.declaration.returnType.type)
+  }
   addStatementTypes(types, fn.statements)
 }
 
-/** Plans only the concrete logical types reached by discovered runtime instances. */
-export const plan = (target: Target.Target, discovery: Instances.Discovery): Plan => {
-  const types = new Set<DeclarationIndex.SemanticType>()
-  for (const instance of discovery.instances) addFunctionTypes(types, instance.function)
+/** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
+export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
+  const reached = new Map<string, DeclarationIndex.SemanticType>()
+  for (const instance of discovery.instances) addFunctionTypes(reached, instance.function)
+  const entries = new Map<string, Entry>()
+  const add = (type: DeclarationIndex.SemanticType): void => {
+    const key = Type.key(type)
+    if (entries.has(key)) return
+    if (Type.isBuiltin(type)) {
+      entries.set(key, scalarEntry(type))
+      return
+    }
+    const candidate = catalogEntry(self, type)
+    if (candidate === undefined || candidate._tag === 'UnavailableLayoutEntry') return
+    entries.set(key, candidate)
+    if (candidate.representation._tag === 'Aggregate') {
+      for (const field of candidate.representation.fields) add(field.type)
+    }
+  }
+  for (const type of reached.values()) add(type)
   return Object.freeze({
     _tag: 'LayoutPlan',
-    target,
-    entries: Object.freeze([...types].sort().map(makeEntry)),
+    target: self.target,
+    entries: Object.freeze(
+      [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
+    ),
   })
 }
 
-/** Constructs a plan for hand-built MIR samples and focused tests. */
-export const make = (
-  target: Target.Target,
-  types: ReadonlyArray<DeclarationIndex.SemanticType>,
-): Plan =>
-  Object.freeze({
+/** Constructs a scalar plan for hand-built MIR samples and focused tests. */
+export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>): Plan => {
+  const entries = new Map(types.map((type) => [Type.key(type), scalarEntry(type)]))
+  return Object.freeze({
     _tag: 'LayoutPlan',
     target,
-    entries: Object.freeze([...new Set(types)].sort().map(makeEntry)),
+    entries: Object.freeze(
+      [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
+    ),
   })
+}
 
-/** Looks up one canonical type entry. */
+/** Looks up one canonical runtime-plan entry. */
 export const entry = (self: Plan, type: DeclarationIndex.SemanticType): Entry | undefined =>
-  self.entries.find((candidate) => candidate.type === type)
+  self.entries.find((candidate) => Type.equals(candidate.type, type))
+
+/** Looks up one available or unavailable nominal catalog entry. */
+export const catalogEntry = (self: Catalog, type: Type.Nominal): CatalogEntry | undefined =>
+  self.entries.find((candidate) => Type.equals(candidate.type, type))
 
 const representationEquals = (left: Representation, right: Representation): boolean =>
   left._tag === right._tag &&
-  left.bits === right.bits &&
-  (left._tag !== 'Boolean' ||
-    (right._tag === 'Boolean' &&
-      left.falseValue === right.falseValue &&
-      left.trueValue === right.trueValue))
+  (left._tag === 'SignedInteger'
+    ? right._tag === 'SignedInteger' && left.bits === right.bits
+    : left._tag === 'Boolean'
+      ? right._tag === 'Boolean' &&
+        left.bits === right.bits &&
+        left.falseValue === right.falseValue &&
+        left.trueValue === right.trueValue
+      : right._tag === 'Aggregate' &&
+        left.tailPadding === right.tailPadding &&
+        left.fields.length === right.fields.length &&
+        left.fields.every((field, index) => {
+          const other = right.fields[index]
+          return (
+            other !== undefined &&
+            field.id.ordinal === other.id.ordinal &&
+            field.name === other.name &&
+            Type.equals(field.type, other.type) &&
+            field.offset === other.offset &&
+            field.size === other.size &&
+            field.alignment === other.alignment &&
+            field.padding === other.padding
+          )
+        }))
 
-/** Verifies canonical target, ordering, uniqueness, and scalar representation facts. */
-export const verify = (self: Plan): ReadonlyArray<Violation> => {
+const invalid = (
+  rule: Violation['rule'],
+  type: DeclarationIndex.SemanticType,
+  detail: string,
+): Violation => Object.freeze({ _tag: 'LayoutViolation', rule, type, detail })
+
+const verifyEntry = (
+  candidate: Entry,
+  available: ReadonlyMap<string, Entry>,
+): ReadonlyArray<Violation> => {
+  if (Type.isBuiltin(candidate.type)) {
+    const expected = scalarEntry(candidate.type)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidScalar',
+            candidate.type,
+            `${Type.encode(candidate.type)} does not match the canonical scalar layout`,
+          ),
+        ])
+  }
+  if (candidate.representation._tag !== 'Aggregate') {
+    return Object.freeze([
+      invalid(
+        'InvalidAggregate',
+        candidate.type,
+        `${Type.encode(candidate.type)} is nominal but not aggregate`,
+      ),
+    ])
+  }
   const violations: Array<Violation> = []
-  if (!Target.isCanonical(self.target)) {
+  let cursor = 0
+  let alignment = 1
+  let previousOrdinal = -1
+  for (const field of candidate.representation.fields) {
+    const fieldLayout = Type.isBuiltin(field.type)
+      ? scalarEntry(field.type)
+      : available.get(Type.key(field.type))
+    if (field.id.ordinal <= previousOrdinal) {
+      violations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `field ${field.name} is out of declaration order`,
+        ),
+      )
+    }
+    if (fieldLayout === undefined) {
+      violations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `field ${field.name} has no available dependency layout`,
+        ),
+      )
+      previousOrdinal = field.id.ordinal
+      continue
+    }
+    const offset = alignUp(cursor, fieldLayout.alignment)
+    if (
+      field.offset !== offset ||
+      field.padding !== offset - cursor ||
+      field.size !== fieldLayout.size ||
+      field.alignment !== fieldLayout.alignment
+    ) {
+      violations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `field ${field.name} has non-canonical physical facts`,
+        ),
+      )
+    }
+    cursor = offset + fieldLayout.size
+    alignment = Math.max(alignment, fieldLayout.alignment)
+    previousOrdinal = field.id.ordinal
+  }
+  const size = alignUp(cursor, alignment)
+  if (
+    candidate.alignment !== alignment ||
+    candidate.size !== size ||
+    candidate.representation.tailPadding !== size - cursor
+  ) {
+    violations.push(
+      invalid(
+        'InvalidAggregate',
+        candidate.type,
+        `${Type.encode(candidate.type)} has non-canonical size or alignment`,
+      ),
+    )
+  }
+  return Object.freeze(violations)
+}
+
+const commonViolations = (
+  target: Target.Target,
+  entries: ReadonlyArray<CatalogEntry>,
+): ReadonlyArray<Violation> => {
+  const violations: Array<Violation> = []
+  if (!Target.isCanonical(target)) {
     violations.push(
       Object.freeze({
         _tag: 'LayoutViolation',
         rule: 'NonCanonicalTarget',
-        detail: `target ${self.target.id} does not match its canonical profile`,
+        detail: `target ${target.id} does not match its canonical profile`,
       }),
     )
   }
-  const seen = new Set<DeclarationIndex.SemanticType>()
+  const available = new Map(
+    entries.flatMap((candidate) =>
+      candidate._tag === 'LayoutEntry' ? [[Type.key(candidate.type), candidate] as const] : [],
+    ),
+  )
+  const seen = new Set<string>()
   let previous: DeclarationIndex.SemanticType | undefined
-  for (const candidate of self.entries) {
-    if (seen.has(candidate.type)) {
+  for (const candidate of entries) {
+    const key = Type.key(candidate.type)
+    if (seen.has(key)) {
       violations.push(
-        Object.freeze({
-          _tag: 'LayoutViolation',
-          rule: 'DuplicateType',
-          type: candidate.type,
-          detail: `layout contains duplicate ${candidate.type} entry`,
-        }),
+        invalid(
+          'DuplicateType',
+          candidate.type,
+          `layout contains duplicate ${Type.encode(candidate.type)} entry`,
+        ),
       )
     }
-    if (previous !== undefined && previous.localeCompare(candidate.type) > 0) {
+    if (previous !== undefined && Type.compare(previous, candidate.type) > 0) {
       violations.push(
-        Object.freeze({
-          _tag: 'LayoutViolation',
-          rule: 'NonCanonicalOrder',
-          type: candidate.type,
-          detail: `${candidate.type} follows ${previous} out of canonical order`,
-        }),
+        invalid(
+          'NonCanonicalOrder',
+          candidate.type,
+          `${Type.encode(candidate.type)} follows ${Type.encode(previous)} out of canonical order`,
+        ),
       )
     }
-    const expected = makeEntry(candidate.type)
-    if (
-      candidate.size !== expected.size ||
-      candidate.alignment !== expected.alignment ||
-      !representationEquals(candidate.representation, expected.representation)
-    ) {
-      violations.push(
-        Object.freeze({
-          _tag: 'LayoutViolation',
-          rule: 'InvalidScalar',
-          type: candidate.type,
-          detail: `${candidate.type} does not match the canonical scalar layout`,
-        }),
-      )
-    }
-    seen.add(candidate.type)
+    if (candidate._tag === 'LayoutEntry') violations.push(...verifyEntry(candidate, available))
+    seen.add(key)
     previous = candidate.type
   }
   return Object.freeze(violations)
 }
 
+/** Verifies canonical target, ordering, uniqueness, and representation facts. */
+export const verify = (self: Plan): ReadonlyArray<Violation> =>
+  commonViolations(self.target, self.entries)
+
+/** Verifies all available entries and deterministic ordering within a nominal catalog. */
+export const verifyCatalog = (self: Catalog): ReadonlyArray<Violation> =>
+  commonViolations(self.target, self.entries)
+
+/** Verifies that every planned nominal layout is exactly the catalog decision. */
+export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArray<Violation> =>
+  Object.freeze(
+    self.entries.flatMap((candidate) => {
+      if (Type.isBuiltin(candidate.type)) return []
+      const expected = catalogEntry(catalog, candidate.type)
+      return expected?._tag === 'LayoutEntry' &&
+        candidate.size === expected.size &&
+        candidate.alignment === expected.alignment &&
+        representationEquals(candidate.representation, expected.representation)
+        ? []
+        : [
+            invalid(
+              'CatalogMismatch',
+              candidate.type,
+              `${Type.encode(candidate.type)} differs from its catalog entry`,
+            ),
+          ]
+    }),
+  )
+
 const representationText = (representation: Representation): string =>
   representation._tag === 'SignedInteger'
     ? `signed-i${representation.bits}`
-    : `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
+    : representation._tag === 'Boolean'
+      ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
+      : `aggregate tail-padding=${representation.tailPadding}`
 
-/** Deterministic textual encoding of a complete layout plan. */
+const entryLines = (candidate: Entry): ReadonlyArray<string> => [
+  `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
+  ...(candidate.representation._tag === 'Aggregate'
+    ? candidate.representation.fields.map(
+        (field) =>
+          `  field ${field.id.ordinal} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+      )
+    : []),
+]
+
+/** Deterministic textual encoding of a complete runtime layout plan. */
 export const encode = (self: Plan): string =>
+  [`target ${Target.encode(self.target)}`, ...self.entries.flatMap(entryLines), ''].join('\n')
+
+const unavailableText = (candidate: UnavailableEntry): string => {
+  const reason =
+    candidate.reason._tag === 'UnavailableDependency'
+      ? `dependency=${Type.encode(candidate.reason.dependency)}`
+      : `detail=${JSON.stringify(candidate.reason.detail)}`
+  const cause =
+    candidate.cause === undefined
+      ? ''
+      : ` cause=${candidate.cause.code}@${candidate.cause.span.sourceId}:${candidate.cause.span.start}-${candidate.cause.span.end}`
+  return `layout ${Type.encode(candidate.type)} unavailable reason=${candidate.reason._tag} ${reason}${cause}`
+}
+
+/** Deterministic textual encoding of every nominal catalog fact. */
+export const encodeCatalog = (self: Catalog): string =>
   [
     `target ${Target.encode(self.target)}`,
-    ...self.entries.map(
-      (candidate) =>
-        `layout ${candidate.type} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
+    ...self.entries.flatMap((candidate) =>
+      candidate._tag === 'LayoutEntry' ? entryLines(candidate) : [unavailableText(candidate)],
     ),
     '',
   ].join('\n')

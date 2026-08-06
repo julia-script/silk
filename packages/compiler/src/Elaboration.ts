@@ -10,6 +10,7 @@ import * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
+import * as Type from './Type.js'
 
 /** The only semantic type recognized by the first analysis slice. */
 export type SemanticType = DeclarationIndex.SemanticType
@@ -750,11 +751,11 @@ const analyzeCallContract = (
       if (
         expected !== undefined &&
         argument.type._tag === 'Available' &&
-        argument.type.type !== expected
+        !Type.equals(argument.type.type, expected)
       ) {
         const mismatch = Diagnostic.argumentTypeMismatch(
-          expected,
-          argument.type.type,
+          Type.encode(expected),
+          Type.encode(argument.type.type),
           argument.syntax.span,
         )
         return Object.freeze({
@@ -840,11 +841,11 @@ const analyzeCallContract = (
     if (
       mapping.argument.type._tag === 'Available' &&
       mapping.parameter.declaredType._tag === 'Resolved' &&
-      mapping.argument.type.type !== mapping.parameter.declaredType.type
+      !Type.equals(mapping.argument.type.type, mapping.parameter.declaredType.type)
     ) {
       const mismatch = Diagnostic.argumentTypeMismatch(
-        mapping.parameter.declaredType.type,
-        mapping.argument.type.type,
+        Type.encode(mapping.parameter.declaredType.type),
+        Type.encode(mapping.argument.type.type),
         mapping.argument.syntax.span,
       )
       return Object.freeze({
@@ -1048,7 +1049,7 @@ const resolveQualifiedReference = (
 ): QualifiedReferenceResult => {
   const qualifier = spelling(source, qualifierToken)
   const member = spelling(source, memberToken)
-  const qualifierLookup = NameResolution.lookup(resolution.scope, qualifier)
+  const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
 
   if (qualifierLookup._tag === 'Intrinsic') {
     const signature = builtinActors[qualifier]?.[member]
@@ -1451,7 +1452,7 @@ function analyzeExpression(
       return analyzeBuiltinCall(source, node, argumentsResult)
     const qualifier = spelling(source, qualifierToken)
     const member = spelling(source, memberToken)
-    const qualifierLookup = NameResolution.lookup(resolution.scope, qualifier)
+    const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag === 'Intrinsic')
       return analyzeBuiltinCall(source, node, argumentsResult)
     if (qualifierLookup._tag === 'Namespace') {
@@ -1533,7 +1534,7 @@ function analyzeExpression(
   }
 
   const tokenSpelling = spelling(source, token)
-  const resolvedLookup = NameResolution.lookup(resolution.scope, tokenSpelling)
+  const resolvedLookup = NameResolution.lookup(resolution.scope, resolution.index, tokenSpelling)
   const localLookup = lookupDeclaration(declarations, tokenSpelling)
   const lookup: DeclarationIndex.DeclarationLookup =
     resolvedLookup._tag === 'Conflict'
@@ -1541,16 +1542,21 @@ function analyzeExpression(
           _tag: 'Ambiguous',
           spelling: tokenSpelling,
           declarations: Object.freeze(
-            resolvedLookup.conflict.bindings.flatMap((binding) =>
-              binding._tag === 'LocalDeclaration' || binding._tag === 'ImportedMember'
-                ? [binding.declaration]
-                : [],
-            ),
+            resolvedLookup.conflict.bindings.flatMap((binding) => {
+              if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
+                return []
+              const declaration = DeclarationIndex.byCanonical(
+                resolution.index,
+                binding.declaration,
+              )
+              return declaration?._tag === 'FunctionDeclaration' ? [declaration] : []
+            }),
           ),
         })
       : localLookup._tag === 'Ambiguous'
         ? localLookup
-        : resolvedLookup._tag === 'Resolved'
+        : resolvedLookup._tag === 'Resolved' &&
+            resolvedLookup.declaration._tag === 'FunctionDeclaration'
           ? Object.freeze({
               _tag: 'Resolved',
               spelling: tokenSpelling,
@@ -1783,7 +1789,10 @@ const analyzeStatements = (
       context.diagnostics.push(...condition.diagnostics)
       if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'Bool') {
         context.diagnostics.push(
-          Diagnostic.conditionNotBool(condition.fact.type.type, condition.fact.syntax.span),
+          Diagnostic.conditionNotBool(
+            Type.encode(condition.fact.type.type),
+            condition.fact.syntax.span,
+          ),
         )
       }
 

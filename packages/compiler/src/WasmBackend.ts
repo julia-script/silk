@@ -394,7 +394,11 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       })
     }
     // WebAssembly realizes both canonical scalar entries as its four-byte i32 value type.
-    if (program.layout.entries.some((entry) => entry.representation.bits !== 32)) {
+    if (
+      program.layout.entries.some(
+        (entry) => entry.representation._tag === 'Aggregate' || entry.representation.bits !== 32,
+      )
+    ) {
       return yield* new Backend.BackendError({
         operation: 'Backend.emit',
         backend: 'WebAssembly',

@@ -16,6 +16,7 @@ import * as Ownership from './Ownership.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as Target from './Target.js'
 import type * as Token from './Token.js'
+import type * as Type from './Type.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
@@ -40,6 +41,7 @@ export interface Snapshot {
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
+  readonly layoutCatalog: Targeted<Layout.Catalog>
   readonly layout: Targeted<Layout.Plan>
   readonly mir: Targeted<Mir.Module>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -48,8 +50,9 @@ export interface Snapshot {
 /** Builds the snapshot of one compilation request. */
 export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
   const closure = ModuleClosure.load(request)
-  const index = DeclarationIndex.collect(closure)
-  const resolution = NameResolution.resolve(closure, index)
+  const declarations = NameResolution.analyze(closure)
+  const index = declarations.index
+  const resolution = declarations.resolution
   const results = new Map(
     closure.modules.map((module) => {
       const headers = index.modules.find((candidate) => candidate.module === module.name)
@@ -67,10 +70,14 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
   )
   const instances = Instances.discover(request.rootModule, results)
   const target = Target.select(request.target)
-  const layout: Targeted<Layout.Plan> =
+  const layoutCatalog: Targeted<Layout.Catalog> =
     target._tag === 'Resolved'
-      ? Object.freeze({ _tag: 'Available', value: Layout.plan(target.target, instances) })
+      ? Object.freeze({ _tag: 'Available', value: Layout.catalog(target.target, index) })
       : Object.freeze({ _tag: 'Unavailable', error: target.error })
+  const layout: Targeted<Layout.Plan> =
+    layoutCatalog._tag === 'Available'
+      ? Object.freeze({ _tag: 'Available', value: Layout.plan(layoutCatalog.value, instances) })
+      : layoutCatalog
   const mir: Targeted<Mir.Module> =
     layout._tag === 'Available'
       ? Object.freeze({
@@ -95,6 +102,7 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     ownership,
     instances,
     target,
+    layoutCatalog,
     layout,
     mir,
     diagnostics,
@@ -129,7 +137,7 @@ export const lookupName = (
   const scope = moduleScope(self, module)
   return scope === undefined
     ? Object.freeze({ _tag: 'Missing', spelling })
-    : NameResolution.lookup(scope, spelling)
+    : NameResolution.lookup(scope, self.index, spelling)
 }
 export const lookupQualifiedName = (
   self: Snapshot,
@@ -177,6 +185,18 @@ export const instancesOf = (self: Snapshot): Instances.Discovery => self.instanc
 /** Returns the snapshot's resolved or unavailable target selection. */
 export const targetOf = (self: Snapshot): Target.Selection => self.target
 
+/** Returns the target-selected declaration-wide nominal layout catalog. */
+export const layoutCatalogOf = (self: Snapshot): Targeted<Layout.Catalog> => self.layoutCatalog
+
+/** Looks up one nominal declaration's available or unavailable target-selected layout. */
+export const nominalLayout = (
+  self: Snapshot,
+  type: Type.Nominal,
+): Layout.CatalogEntry | undefined =>
+  self.layoutCatalog._tag === 'Available'
+    ? Layout.catalogEntry(self.layoutCatalog.value, type)
+    : undefined
+
 /** Returns the snapshot's available or explicitly unavailable layout plan. */
 export const layoutOf = (self: Snapshot): Targeted<Layout.Plan> => self.layout
 
@@ -195,6 +215,26 @@ export const declarationByName = (
   module: string,
   spelling: string,
 ): DeclarationIndex.DeclarationLookup => DeclarationIndex.lookup(self.index, module, spelling)
+
+/** Looks up a function or struct in the shared module-level namespace. */
+export const memberByName = (
+  self: Snapshot,
+  module: string,
+  spelling: string,
+): DeclarationIndex.MemberLookup => DeclarationIndex.member(self.index, module, spelling)
+
+/** Looks up one nominal struct declaration. */
+export const structByName = (
+  self: Snapshot,
+  module: string,
+  spelling: string,
+): DeclarationIndex.StructLookup => DeclarationIndex.struct(self.index, module, spelling)
+
+/** Looks up one declaration-ordered field from a resolved nominal struct. */
+export const fieldByName = (
+  declaration: DeclarationIndex.StructFact,
+  spelling: string,
+): DeclarationIndex.FieldLookup => DeclarationIndex.lookupField(declaration.fields, spelling)
 
 /** Looks up one declaration name within one module's elaborated analysis. */
 export const declarationLookup = (
