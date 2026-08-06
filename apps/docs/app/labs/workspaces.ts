@@ -57,27 +57,3 @@ export const seededWorkspaces: ReadonlyArray<Workspace> = [
 export const slotOrder: ReadonlyArray<Slot> = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2']
 
 export const workspaceStorageKey = 'silk-labs-workbench-workspaces'
-
-/**
- * Saved workspaces, read defensively.
- *
- * This is user data that survives deploys, so a shape from an older build has to degrade to "no
- * saved workspaces" rather than taking the page down on load.
- */
-export const decodeWorkspaces = (raw: string | null): ReadonlyArray<Workspace> => {
-  if (raw === null) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(
-      (entry): entry is Workspace =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        typeof (entry as Workspace).name === 'string' &&
-        typeof (entry as Workspace).panes === 'object' &&
-        (entry as Workspace).panes !== null,
-    )
-  } catch {
-    return []
-  }
-}

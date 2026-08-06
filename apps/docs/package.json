@@ -13,6 +13,7 @@
     "typecheck": "pnpm api && next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@effect/atom-react": "4.0.0-beta.102",
     "@silk-effect/compiler": "workspace:*",
     "dockview": "^7.0.4",
     "dockview-react": "^7.0.4",
