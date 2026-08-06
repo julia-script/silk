@@ -168,9 +168,10 @@ const hirSpan = (span: { readonly start: number; readonly end: number }): Span =
   end: span.end,
 })
 
-const hirContract = (contract: Hir.ContractFact): string =>
+/** Contract types are `Type.Type`, so a struct parameter or result is an object, not a string. */
+export const hirContract = (contract: Hir.ContractFact): string =>
   contract._tag === 'Contract'
-    ? `(${contract.parameters.join(', ')}) -> ${contract.result}`
+    ? `(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}`
     : 'contract unavailable'
 
 const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {

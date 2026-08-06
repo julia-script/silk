@@ -24,7 +24,7 @@ import { PresetPalette } from './preset-palette'
 import { type Preset, presetGroups, presets } from './presets'
 import { type ViewContext, siblingsOf, viewById, views } from './registry'
 import { EmptyState, RowList, type Span } from './row/row'
-import { diagnosticCounts, diagnosticEntries } from './row/project-syntax'
+import { diagnosticCounts, diagnosticEntries, hirContract } from './row/project-syntax'
 import {
   decodeLayout,
   decodeSource,
@@ -630,11 +630,7 @@ export function Workbench() {
       value:
         fn === undefined
           ? 'not elaborated'
-          : `fn#${fn.declaration.id.ordinal} ${
-              fn.contract._tag === 'Contract'
-                ? `(${fn.contract.parameters.join(', ')}) -> ${fn.contract.result}`
-                : 'contract unavailable'
-            }`,
+          : `fn#${fn.declaration.id.ordinal} ${hirContract(fn.contract)}`,
       missing: fn === undefined,
     })
 
