@@ -13,11 +13,11 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** choose the smallest next slice required to express a real compiler pass in
-Silk. The first algorithmic-language slice is now the baseline: target-aware layouts, cross-module
-declarations, operators, nominal structs and values, fixed-size arrays, mutation, structured loops,
-normalized structural unions, and exhaustive matching all run through the inspectable,
-determinism-gated compiler architecture.
+**Current objective:** establish the smallest memory boundary that lets a real compiler pass
+consume source-dependent input and produce source-dependent output. The accepted algorithmic
+baseline already composes target-aware layouts, cross-module declarations, operators, nominal
+structs and values, fixed-size arrays, mutation, structured loops, normalized structural unions,
+and exhaustive matching through the inspectable, determinism-gated compiler architecture.
 
 ## Column rules
 
@@ -89,9 +89,34 @@ control remains a DAG until each backend converts it to its required target form
 
 ## Next
 
-No item is promoted yet. The first algorithmic-language slice is complete; the next planning pass
-should start from a real compiler-shaped program and promote only the smallest capability gap it
-exposes.
+### Handle compiler data whose size is known only at runtime
+
+- **Problem:** The composed remaining-member fold runs through logical, native, and WebAssembly
+  execution only because its six inputs and three output states are baked into `Array<T, N>` types.
+  A real lexer or compiler pass cannot know source length, token count, declaration count, or
+  diagnostic count in its source contract, so it cannot yet express its ordinary input and output
+  boundary in Silk.
+- **Evidence:** `accept-algorithmic-language-slice` composes the complete first language slice and
+  returns `42` across all three engines. Generalizing that same program from a literal candidate
+  list to source-dependent candidates is the first point where the language stops: fixed arrays
+  require cardinality in the type and cannot grow a result set.
+- **Outcome & done-when:** One compiler-shaped pass can borrow or otherwise traverse input whose
+  length is known only at runtime, construct an owned runtime-sized result, and release every
+  backing resource deterministically. Its canonical target-aware representation remains available
+  before backend selection, and evaluator, native, WebAssembly, and `/labs` agree on behavior and
+  lifecycle.
+- **Working hypothesis:** The smallest coherent slice likely combines a non-owning view over
+  runtime-sized contiguous values with one owned growable sequence and scoped allocation. Element
+  abstraction, ownership transfer, failure behavior, and target layout must be shaped together;
+  the exact syntax, generic surface, allocator interface, and delivery sequence remain discovery
+  questions rather than commitments.
+- **Appetite:** First map the boundary against one real pass and existing Wayfinder decisions, then
+  propose only the minimum evidence-producing change or dependency chain. Do not start a broad
+  collections library or general runtime.
+- **Links:** [ownership and scoped allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
+  [types and values](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
+  [compiler pipeline](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
+  [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
 
 ## Later
 
@@ -137,11 +162,19 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
-- Which real compiler algorithm should become the first post-slice acceptance program, and which
-  remaining language, runtime, or library gap does it expose?
+- Which smallest real pass best distinguishes the required memory semantics: byte-to-token
+  lexing, token-to-syntax grouping, or another source-dependent transform?
+- Can one canonical runtime-sized representation serve both borrowed input and owned output, or do
+  their ownership and allocation duties require distinct actors from the first slice?
 
 ## Changelog
 
+- 2026-08-06: The composed remaining-member acceptance fold established the first algorithmic
+  baseline across module resolution, all compiler representations, logical evaluation, native LLVM,
+  direct WebAssembly, fresh-process determinism, and the unified `/labs` workbench. The program
+  succeeds by fixing cardinality in `Array<T, N>`; promoted runtime-sized compiler input and output
+  to Next as the first demonstrated memory boundary, without freezing its syntax or feature
+  sequence.
 - 2026-08-06: Shipped and archived `match-exhaustively`, completing the nine-change algorithmic
   language slice. Precise and structural-union values now support bare, move, shared, and exclusive
   exhaustive matching with guarded and nested destructuring, canonical result joins, selected-path

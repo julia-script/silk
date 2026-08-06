@@ -1,0 +1,65 @@
+import compiler.Member { First, Second, Third, decode }
+
+struct FoldState {
+  remaining: I32
+  score: I32
+  seenFirst: Bool
+  seenSecond: Bool
+  seenThird: Bool
+}
+
+pub fn fold(codes: [I32; 6]) -> I32 {
+  let mut state = FoldState {
+    remaining: 3,
+    score: 10,
+    seenFirst: false,
+    seenSecond: false,
+    seenThird: false,
+  }
+  let mut index = 0
+
+  while index < 6 {
+    let candidate = decode(codes[index])
+    let member = match move candidate {
+      First {} if index == 2 => 0
+      First {} => 1
+      Second {} => 2
+      Third {} => 3
+    }
+
+    if member == 1 {
+      if !state.seenFirst {
+        state.seenFirst = true
+        state.remaining = state.remaining - 1
+        state.score = state.score + 10
+      } else {
+        state.score = state.score + 1
+      }
+    }
+    if member == 2 {
+      if !state.seenSecond {
+        state.seenSecond = true
+        state.remaining = state.remaining - 1
+        state.score = state.score + 10
+      } else {
+        state.score = state.score + 1
+      }
+    }
+    if member == 3 {
+      if !state.seenThird {
+        state.seenThird = true
+        state.remaining = state.remaining - 1
+        state.score = state.score + 10
+      } else {
+        state.score = state.score + 1
+      }
+    }
+
+    index = index + 1
+  }
+
+  if state.remaining != 0 {
+    return 0
+  }
+  return state.score
+}

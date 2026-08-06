@@ -30,6 +30,98 @@ const mainFn = 'pub fn main() -> I32 { return 42 }'
 const identity = 'pub fn identity(value: I32) -> I32 { return value }'
 
 export const presets: ReadonlyArray<Preset> = [
+  // ---- first composed acceptance slice -------------------------------------------------
+  {
+    label: 'Algorithmic coverage fold',
+    group: 'acceptance',
+    root: 'app/Main',
+    modules: {
+      'app/Main': `import compiler.Coverage
+
+pub fn main() -> I32 {
+  return Coverage.fold([1, 2, 1, 3, 2, 1])
+}\n`,
+      'compiler/Member': `pub struct First {}
+pub struct Second {}
+pub struct Third {}
+
+pub fn decode(code: I32) -> First | Second | Third {
+  if code == 1 {
+    return First {}
+  }
+  if code == 2 {
+    return Second {}
+  }
+  return Third {}
+}\n`,
+      'compiler/Coverage': `import compiler.Member { First, Second, Third, decode }
+
+struct FoldState {
+  remaining: I32
+  score: I32
+  seenFirst: Bool
+  seenSecond: Bool
+  seenThird: Bool
+}
+
+pub fn fold(codes: [I32; 6]) -> I32 {
+  let mut state = FoldState {
+    remaining: 3,
+    score: 10,
+    seenFirst: false,
+    seenSecond: false,
+    seenThird: false,
+  }
+  let mut index = 0
+
+  while index < 6 {
+    let candidate = decode(codes[index])
+    let member = match move candidate {
+      First {} if index == 2 => 0
+      First {} => 1
+      Second {} => 2
+      Third {} => 3
+    }
+
+    if member == 1 {
+      if !state.seenFirst {
+        state.seenFirst = true
+        state.remaining = state.remaining - 1
+        state.score = state.score + 10
+      } else {
+        state.score = state.score + 1
+      }
+    }
+    if member == 2 {
+      if !state.seenSecond {
+        state.seenSecond = true
+        state.remaining = state.remaining - 1
+        state.score = state.score + 10
+      } else {
+        state.score = state.score + 1
+      }
+    }
+    if member == 3 {
+      if !state.seenThird {
+        state.seenThird = true
+        state.remaining = state.remaining - 1
+        state.score = state.score + 10
+      } else {
+        state.score = state.score + 1
+      }
+    }
+
+    index = index + 1
+  }
+
+  if state.remaining != 0 {
+    return 0
+  }
+  return state.score
+}\n`,
+    },
+  },
+
   // ---- syntax ---------------------------------------------------------------------------
   one('syntax', 'Literal result', 'pub fn main() -> I32 { return 42 }'),
   one(

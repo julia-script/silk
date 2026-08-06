@@ -1,0 +1,5 @@
+import compiler.Coverage
+
+pub fn main() -> I32 {
+  return Coverage.fold([1, 2, 1, 3, 2, 1])
+}

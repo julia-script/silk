@@ -217,6 +217,14 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
   }
 }
 
+const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
+  (operation._tag === 'ReadPlace' ||
+    operation._tag === 'CheckPlace' ||
+    operation._tag === 'WritePlace') &&
+  operation.selectors.some(
+    (selector) => selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime',
+  )
+
 const expandMatches = (
   fn: Mir.MirFunction,
   input: ReadonlyArray<StructuredBlock>,
@@ -715,6 +723,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               assignments.set(destination.ordinal, (assignments.get(destination.ordinal) ?? 0) + 1)
             }
           }
+          const continuationLocals = entry.linear.flatMap((block) => {
+            let afterRuntimeContinuation = false
+            const ordinals: Array<number> = []
+            for (const operation of block.operations) {
+              if (opensRuntimeContinuation(operation)) afterRuntimeContinuation = true
+              if (!afterRuntimeContinuation) continue
+              const destination = destinationOf(operation)
+              if (destination !== undefined) ordinals.push(destination.ordinal)
+            }
+            return ordinals
+          })
           const mutableRoots = new Set([
             ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
@@ -722,6 +741,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               ),
             ),
             ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
+            ...continuationLocals,
           ])
           const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
           for (const root of [...mutableRoots].sort((left, right) => left - right)) {

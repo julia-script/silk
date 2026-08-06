@@ -1,7 +1,10 @@
 import { Analysis } from '@silk-effect/compiler'
+import { readFileSync } from 'node:fs'
 import * as Snapshot from './snapshot'
 import { describe, expect, it } from 'vitest'
 import { presets } from './presets'
+import { viewById } from './registry'
+import type { ViewContext } from './registry'
 
 const encoder = new TextEncoder()
 
@@ -13,6 +16,25 @@ const snapshotOf = (preset: (typeof presets)[number], target?: string): Analysis
     ),
     ...(target === undefined ? {} : { target }),
   })
+
+const acceptancePreset = presets.find((preset) => preset.label === 'Algorithmic coverage fold')
+
+const acceptanceContext = (
+  preset: (typeof presets)[number],
+  snapshot: Analysis.Snapshot,
+): ViewContext => ({
+  snapshot,
+  modules: preset.modules,
+  root: preset.root,
+  mode: 'release',
+  profile: 'release',
+  cursor: undefined,
+  onSelectSpan: () => undefined,
+  evaluation: Analysis.evaluate(snapshot),
+  onEvaluate: () => undefined,
+  filter: '',
+  showTrivia: false,
+})
 
 describe('preset catalog', () => {
   it('has a unique label per preset, so the picker can key on it', () => {
@@ -55,6 +77,7 @@ describe('preset catalog', () => {
     expect(groups).toEqual(
       new Set([
         'syntax',
+        'acceptance',
         'modules',
         'headers',
         'structs',
@@ -73,5 +96,77 @@ describe('preset catalog', () => {
   it('still carries the multi-module programs, which single-source presets cannot express', () => {
     const multi = presets.filter((preset) => Object.keys(preset.modules).length > 1)
     expect(multi.length).toBeGreaterThanOrEqual(5)
+  })
+
+  it('keeps the algorithmic preset byte-identical to the three-engine fixture', () => {
+    expect(acceptancePreset).toBeDefined()
+    if (acceptancePreset === undefined) return
+
+    expect(acceptancePreset.root).toBe('app/Main')
+    expect(Object.keys(acceptancePreset.modules)).toEqual([
+      'app/Main',
+      'compiler/Member',
+      'compiler/Coverage',
+    ])
+    for (const name of Object.keys(acceptancePreset.modules)) {
+      const fixture = readFileSync(
+        new URL(
+          `../../../../packages/compiler/test/fixtures/algorithmic-acceptance/${name}.silk`,
+          import.meta.url,
+        ),
+        'utf8',
+      )
+      expect(acceptancePreset.modules[name], name).toBe(fixture)
+    }
+  })
+
+  it('coordinates every acceptance phase through existing panes', () => {
+    expect(acceptancePreset).toBeDefined()
+    if (acceptancePreset === undefined) return
+
+    const native = snapshotOf(acceptancePreset, 'aarch64-apple-darwin')
+    const wasm = snapshotOf(acceptancePreset, 'wasm32-unknown-unknown')
+    expect(Analysis.diagnostics(native)).toEqual([])
+    expect(Analysis.modules(native).map((module) => module.name)).toEqual([
+      'app/Main',
+      'compiler/Coverage',
+      'compiler/Member',
+    ])
+    for (const name of Object.keys(acceptancePreset.modules)) {
+      expect(Analysis.hirOf(native, name), name).toBeDefined()
+      expect(Analysis.ownershipOf(native, name), name).toBeDefined()
+    }
+    expect(Analysis.instancesOf(native).instances.length).toBeGreaterThan(0)
+    expect(Analysis.layoutOf(native)._tag).toBe('Available')
+    expect(Analysis.mirOf(native)._tag).toBe('Available')
+    const evaluation = Analysis.evaluate(native)
+    expect(evaluation._tag).toBe('Completed')
+    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+
+    for (const id of [
+      'source',
+      'closure',
+      'resolution',
+      'hir',
+      'ownership',
+      'instances',
+      'layout',
+      'mir',
+      'evaluation',
+      'backend',
+    ]) {
+      expect(viewById(id)?.id, id).toBe(id)
+    }
+    expect(viewById('acceptance')).toBeUndefined()
+
+    const backend = viewById('backend')
+    expect(backend).toBeDefined()
+    if (backend === undefined) return
+    const nativeView = backend.project(acceptanceContext(acceptancePreset, native))
+    const wasmView = backend.project(acceptanceContext(acceptancePreset, wasm))
+    expect(nativeView.unavailable).toBeUndefined()
+    expect(nativeView.rows.length).toBeGreaterThan(0)
+    expect(wasmView.unavailable).toBeUndefined()
+    expect(wasmView.facts?.map((fact) => fact.text)).toContain('runs · agrees')
   })
 })

@@ -163,6 +163,26 @@ pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
   }),
 )
 
+it.effect('orders checked array reads before private match blocks', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `struct A {}
+struct B {}
+fn decode(code: I32) -> A | B { if code == 1 { return A {} } return B {} }
+pub fn main() -> I32 {
+  let codes = [1, 2]
+  let index = 0
+  let candidate = decode(codes[index])
+  return match move candidate { A {} => 42 B {} => 0 }
+}`,
+      { mode: 'release' },
+    )
+
+    assert.include(artifact.ir, 'index0_0_ok')
+    assert.include(artifact.ir, 'match')
+  }),
+)
+
 it.effect('publishes native branch provenance back to canonical loop regions', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
