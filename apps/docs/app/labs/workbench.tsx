@@ -395,6 +395,7 @@ export function Workbench() {
   const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [namingWorkspace, setNamingWorkspace] = useState(false)
   const [api, setApi] = useState<DockviewApi>()
   const [workspaces, setWorkspaces] = useState<ReadonlyArray<Workspace>>(seededWorkspaces)
   const [activeWorkspace, setActiveWorkspace] = useState<string>('Backend triage')
@@ -655,10 +656,10 @@ export function Workbench() {
     return cells
   }, [cursor, modules, root, analysis, snapshot])
 
-  const saveWorkspace = useCallback(() => {
-    if (api === undefined) return
-    const name = window.prompt('Name this workspace')
-    if (name === null || name.trim() === '') return
+  // The name comes from an inline input rather than `window.prompt`: embedded webviews block
+  // prompt() outright, and a native dialog would be the only modal on a page that has none.
+  const saveWorkspace = useCallback((name: string) => {
+    if (api === undefined || name.trim() === '') return
     // A workspace is the *arrangement*, so it stores the views its panes currently show.
     const panes = api.panels.slice(0, 6)
     const entry: Workspace = {
@@ -696,8 +697,13 @@ export function Workbench() {
           data-open={sidebarOpen}
           onClick={() => setSidebarOpen((open) => !open)}
           title={sidebarOpen ? 'Hide the program sidebar' : 'Show the program sidebar'}
+          aria-expanded={sidebarOpen}
         >
           silk
+          {/* The chevron is what makes this read as the sidebar toggle rather than a logo. */}
+          <span className={shell.wordmarkCaret} aria-hidden="true">
+            {sidebarOpen ? '‹' : '›'}
+          </span>
         </button>
 
         <div className={shell.workspaces}>
@@ -716,14 +722,33 @@ export function Workbench() {
               {workspace.name}
             </button>
           ))}
-          <button
-            type="button"
-            className={shell.workspace}
-            onClick={saveWorkspace}
-            title="Save this arrangement as a workspace"
-          >
-            +
-          </button>
+          {namingWorkspace ? (
+            <input
+              className={shell.workspaceInput}
+              placeholder="workspace name…"
+              aria-label="Name for the saved workspace"
+              // The input replaces the `+` the user just clicked, so focus belongs here.
+              // biome-ignore lint/a11y/noAutofocus: appears on explicit click, in place of the trigger
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  saveWorkspace(event.currentTarget.value)
+                  setNamingWorkspace(false)
+                }
+                if (event.key === 'Escape') setNamingWorkspace(false)
+              }}
+              onBlur={() => setNamingWorkspace(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              className={shell.workspace}
+              onClick={() => setNamingWorkspace(true)}
+              title="Save this arrangement as a workspace"
+            >
+              +
+            </button>
+          )}
         </div>
 
         <button type="button" className={shell.barButton} onClick={() => setPaletteOpen(true)}>
@@ -861,7 +886,9 @@ export function Workbench() {
               ))}
 
               <div className={`${shell.sidebarSection} ${shell.sidebarDivider}`}>
-                presets<span className={shell.sidebarCount}>{presets.length}</span>
+                {/* "projects", not "presets": the shipped programs are the first residents, and
+                    user-authored code will live under the same header. */}
+                projects<span className={shell.sidebarCount}>{presets.length}</span>
               </div>
               {presetGroups.map(([group, entries]) => (
                 <button

@@ -57,6 +57,28 @@
   color: var(--wb-ink);
 }
 
+/* State indicator, outside the wordmark's letter-spacing so it reads as a control, not a letter. */
+.wordmarkCaret {
+  margin-left: 6px;
+  color: var(--wb-ink-4);
+  font-size: 11px;
+  letter-spacing: normal;
+}
+
+/* Inline replacement for the `+` while a workspace is being named. Enter saves, Escape cancels. */
+.workspaceInput {
+  width: 118px;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid #1c1a18;
+  background: var(--wb-active-strong);
+  color: var(--wb-ink);
+  font: inherit;
+  font-size: 10.5px;
+  outline: none;
+}
+
 .workspaces {
   display: flex;
   flex: none;
@@ -544,6 +566,8 @@
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* The option row is a fixed 21px; a wrapping title overlaps its neighbours instead of growing. */
+  white-space: nowrap;
 }
 
 .pickerPhase {
