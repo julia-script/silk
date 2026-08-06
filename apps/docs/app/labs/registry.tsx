@@ -16,7 +16,7 @@ import { DiscoveryView } from './instances/instances'
 import { CfgView } from './mir-cfg/mir-cfg'
 import { ClosureView } from './module-closure/module-closure'
 import { OwnershipView } from './ownership/ownership'
-import { BackendView, LayoutView, ToolchainView } from './panels'
+import { BackendView, LayoutView, StructValuesView, ToolchainView } from './panels'
 import {
   ConcreteTree,
   DataFlow,
@@ -39,6 +39,7 @@ export type ViewId =
   | 'index'
   | 'resolution'
   | 'hir'
+  | 'struct-values'
   | 'ownership'
   | 'instances'
   | 'layout'
@@ -140,6 +141,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
     title: 'Typed HIR',
     phase: 'elaboration',
     render: ({ snapshot }) => <HirPanel hir={Analysis.rootAnalysis(snapshot).hir} />,
+  },
+  {
+    id: 'struct-values',
+    title: 'Struct values',
+    phase: 'elaboration + ABI',
+    render: ({ snapshot, root, evaluation }) => (
+      <StructValuesView snapshot={snapshot} module={root} evaluation={evaluation} />
+    ),
   },
   {
     id: 'ownership',

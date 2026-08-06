@@ -7,7 +7,7 @@
  */
 
 import { Analysis, BackendRegistry, ToolchainPlan } from '@silk-effect/compiler'
-import type { Backend, Layout, Type } from '@silk-effect/compiler'
+import type { Backend, BootstrapEvaluation, Layout, Type } from '@silk-effect/compiler'
 import * as Effect from 'effect/Effect'
 import { useMemo } from 'react'
 import styles from './syntax-inspector/syntax-inspector.module.css'
@@ -233,6 +233,130 @@ export function LayoutView({ snapshot }: { readonly snapshot: Analysis.Snapshot 
     <div className={styles.diagnostics}>
       <NominalLayoutCatalog snapshot={snapshot} />
       <LayoutSummary snapshot={snapshot} id="layout-plan" label="Reachable runtime layout plan" />
+    </div>
+  )
+}
+
+/** Canonical struct-value facts coordinated across the unified workbench snapshot. */
+export function StructValuesView({
+  snapshot,
+  module,
+  evaluation,
+}: {
+  readonly snapshot: Analysis.Snapshot
+  readonly module: string
+  readonly evaluation: BootstrapEvaluation.Outcome | undefined
+}) {
+  const literals = Analysis.structLiteralsOf(snapshot, module)
+  const projections = Analysis.fieldProjectionsOf(snapshot, module)
+  const layout = Analysis.layoutOf(snapshot)
+  const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
+  const aggregateEvents =
+    evaluation?.trace.filter(
+      (event) =>
+        event._tag === 'Construct' ||
+        event._tag === 'Project' ||
+        event._tag === 'Cleanup',
+    ) ?? []
+
+  return (
+    <div className={styles.diagnostics}>
+      <section className={styles.diagnosticGroup} aria-labelledby="struct-literals">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="struct-literals">Struct construction</h3>
+          <span>{literals.length}</span>
+        </div>
+        {literals.length === 0 ? (
+          <p className={styles.emptyState}>No struct literals in {module}.</p>
+        ) : (
+          <ul className={styles.diagnosticList} aria-label="Struct literal field mappings">
+            {literals.map((literal) => (
+              <li key={`${literal.syntax.span.start}:${literal.syntax.span.end}`}>
+                <div>
+                  <code>
+                    {literal.target._tag === 'Resolved'
+                      ? typeText(literal.target.type)
+                      : 'unavailable target'}
+                  </code>
+                  <span>{literal.authorized ? 'module-owned' : 'not authorized'}</span>
+                </div>
+                <p>
+                  Source order:{' '}
+                  {literal.initializers.map((initializer) => initializer.name ?? '?').join(', ') ||
+                    'empty'}
+                </p>
+                <p>
+                  Canonical order:{' '}
+                  {literal.fields
+                    .map(({ field }) =>
+                      field.name._tag === 'Present' ? field.name.spelling : '?',
+                    )
+                    .join(', ') || 'empty'}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className={styles.diagnosticGroup} aria-labelledby="struct-projections">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="struct-projections">Field projection chain</h3>
+          <span>{projections.length}</span>
+        </div>
+        <ul className={styles.diagnosticList} aria-label="Canonical field projections">
+          {projections.map((projection) => (
+            <li key={`${projection.syntax.span.start}:${projection.syntax.span.end}`}>
+              <div>
+                <code>
+                  {projection.nominal === undefined ? '?' : typeText(projection.nominal)}.
+                  {projection.fieldName ?? '?'}
+                </code>
+                <span>{projection.state._tag.toLowerCase()}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className={styles.diagnosticGroup} aria-labelledby="aggregate-calling-shapes">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="aggregate-calling-shapes">Compiler-owned calling shapes</h3>
+          <span>{shapes.length}</span>
+        </div>
+        <ul className={styles.diagnosticList} aria-label="Aggregate scalar lane shapes">
+          {shapes.map((shape) => (
+            <li key={typeText(shape.type)}>
+              <div>
+                <code>{typeText(shape.type)}</code>
+                <span>{shape.lanes.length} lanes</span>
+              </div>
+              <p>
+                {shape.lanes
+                  .map(
+                    (lane) =>
+                      `${lane.type}:${lane.path.map((field) => `#${field.ordinal}`).join('.')}`,
+                  )
+                  .join(', ') || 'zero runtime lanes'}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className={styles.diagnosticGroup} aria-labelledby="aggregate-events">
+        <div className={styles.diagnosticHeading}>
+          <h3 id="aggregate-events">Evaluation events</h3>
+          <span>{aggregateEvents.length}</span>
+        </div>
+        <pre aria-label="Aggregate evaluation trace">
+          {aggregateEvents.length === 0
+            ? 'Run evaluation to inspect construction, projection, and cleanup.'
+            : aggregateEvents
+                .map((event) => `${event._tag} ${event.span.start}-${event.span.end}`)
+                .join('\n')}
+        </pre>
+      </section>
     </div>
   )
 }

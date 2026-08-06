@@ -29,6 +29,10 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = move ${localText(operation.source)}`
     case 'Call':
       return `${localText(operation.destination)} = call ${operation.target.name}(${operation.arguments.map(localText).join(', ')})`
+    case 'Construct':
+      return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} }`
+    case 'Project':
+      return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal}`
     case 'Drop':
       return `drop ${localText(operation.local)}`
   }

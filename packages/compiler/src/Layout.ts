@@ -69,6 +69,21 @@ export interface Plan {
   readonly _tag: 'LayoutPlan'
   readonly target: Target.Target
   readonly entries: ReadonlyArray<Entry>
+  readonly callingShapes: ReadonlyArray<CallingShape>
+}
+
+/** One compiler-owned scalar lane used to realize a logical value at a call boundary. */
+export interface CallingLane {
+  readonly _tag: 'CallingLane'
+  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly type: Type.Builtin
+}
+
+/** The deterministic backend-neutral calling shape of one reachable logical type. */
+export interface CallingShape {
+  readonly _tag: 'CallingShape'
+  readonly type: DeclarationIndex.SemanticType
+  readonly lanes: ReadonlyArray<CallingLane>
 }
 
 /** One deterministic explanation of malformed layout facts. */
@@ -80,6 +95,7 @@ export interface Violation {
     | 'NonCanonicalOrder'
     | 'InvalidScalar'
     | 'InvalidAggregate'
+    | 'InvalidCallingShape'
     | 'CatalogMismatch'
   readonly type?: DeclarationIndex.SemanticType
   readonly detail: string
@@ -298,6 +314,10 @@ const addExpressionTypes = (
   if (expression._tag === 'Unavailable') return
   types.set(Type.key(expression.type), expression.type)
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject)
+  if (expression._tag === 'Project') addExpressionTypes(types, expression.subject)
+  if (expression._tag === 'Construct') {
+    for (const field of expression.fields) addExpressionTypes(types, field.value)
+  }
   if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
     for (const argument of expression.arguments) addExpressionTypes(types, argument)
   }
@@ -353,30 +373,71 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     }
   }
   for (const type of reached.values()) add(type)
+  const orderedEntries = Object.freeze(
+    [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
+  )
   return Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
-    entries: Object.freeze(
-      [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
-    ),
+    entries: orderedEntries,
+    callingShapes: callingShapes(orderedEntries),
   })
 }
 
 /** Constructs a scalar plan for hand-built MIR samples and focused tests. */
 export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>): Plan => {
   const entries = new Map(types.map((type) => [Type.key(type), scalarEntry(type)]))
+  const orderedEntries = Object.freeze(
+    [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
+  )
   return Object.freeze({
     _tag: 'LayoutPlan',
     target,
-    entries: Object.freeze(
-      [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
-    ),
+    entries: orderedEntries,
+    callingShapes: callingShapes(orderedEntries),
   })
+}
+
+const lanesOf = (
+  type: DeclarationIndex.SemanticType,
+  entries: ReadonlyMap<string, Entry>,
+  path: ReadonlyArray<DeclarationIndex.FieldId> = Object.freeze([]),
+): ReadonlyArray<CallingLane> => {
+  if (Type.isBuiltin(type)) {
+    return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type })])
+  }
+  const candidate = entries.get(Type.key(type))
+  if (candidate?.representation._tag !== 'Aggregate') return Object.freeze([])
+  return Object.freeze(
+    candidate.representation.fields.flatMap((field) =>
+      lanesOf(field.type, entries, Object.freeze([...path, field.id])),
+    ),
+  )
+}
+
+const callingShapes = (entries: ReadonlyArray<Entry>): ReadonlyArray<CallingShape> => {
+  const byType = new Map(entries.map((candidate) => [Type.key(candidate.type), candidate]))
+  return Object.freeze(
+    entries.map((candidate) =>
+      Object.freeze({
+        _tag: 'CallingShape' as const,
+        type: candidate.type,
+        lanes: lanesOf(candidate.type, byType),
+      }),
+    ),
+  )
 }
 
 /** Looks up one canonical runtime-plan entry. */
 export const entry = (self: Plan, type: DeclarationIndex.SemanticType): Entry | undefined =>
   self.entries.find((candidate) => Type.equals(candidate.type, type))
+
+/** Looks up one compiler-owned calling shape by logical type. */
+export const callingShape = (
+  self: Plan,
+  type: DeclarationIndex.SemanticType,
+): CallingShape | undefined =>
+  self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
 
 /** Looks up one available or unavailable nominal catalog entry. */
 export const catalogEntry = (self: Catalog, type: Type.Nominal): CatalogEntry | undefined =>
@@ -553,9 +614,58 @@ const commonViolations = (
   return Object.freeze(violations)
 }
 
-/** Verifies canonical target, ordering, uniqueness, and representation facts. */
+const fieldIdEquals = (left: DeclarationIndex.FieldId, right: DeclarationIndex.FieldId): boolean =>
+  left.ordinal === right.ordinal &&
+  left.struct.sourceId === right.struct.sourceId &&
+  left.struct.ordinal === right.struct.ordinal
+
+const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
+  const expected = callingShapes(self.entries)
+  const violations: Array<Violation> = []
+  for (const entry of self.entries) {
+    const actual = callingShape(self, entry.type)
+    const canonical = expected.find((candidate) => Type.equals(candidate.type, entry.type))
+    const matches =
+      actual !== undefined &&
+      canonical !== undefined &&
+      actual.lanes.length === canonical.lanes.length &&
+      actual.lanes.every((lane, laneIndex) => {
+        const other = canonical.lanes.at(laneIndex)
+        return (
+          other !== undefined &&
+          lane.type === other.type &&
+          lane.path.length === other.path.length &&
+          lane.path.every((field, fieldIndex) => {
+            const otherField = other.path.at(fieldIndex)
+            return otherField !== undefined && fieldIdEquals(field, otherField)
+          })
+        )
+      })
+    if (!matches) {
+      violations.push(
+        invalid(
+          'InvalidCallingShape',
+          entry.type,
+          `${Type.encode(entry.type)} does not match its canonical scalar-lane shape`,
+        ),
+      )
+    }
+  }
+  if (self.callingShapes.length !== self.entries.length) {
+    violations.push(
+      Object.freeze({
+        _tag: 'LayoutViolation',
+        rule: 'InvalidCallingShape',
+        detail: 'calling-shape collection does not match the reachable layout entries',
+      }),
+    )
+  }
+  return Object.freeze(violations)
+}
+
+/** Verifies canonical target, ordering, uniqueness, representation, and ABI facts. */
 export const verify = (self: Plan): ReadonlyArray<Violation> =>
-  commonViolations(self.target, self.entries)
+  Object.freeze([...commonViolations(self.target, self.entries), ...verifyCallingShapes(self)])
 
 /** Verifies all available entries and deterministic ordering within a nominal catalog. */
 export const verifyCatalog = (self: Catalog): ReadonlyArray<Violation> =>
@@ -601,7 +711,29 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
 export const encode = (self: Plan): string =>
-  [`target ${Target.encode(self.target)}`, ...self.entries.flatMap(entryLines), ''].join('\n')
+  [
+    `target ${Target.encode(self.target)}`,
+    ...self.entries.flatMap(entryLines),
+    ...self.callingShapes.map(
+      (shape) =>
+        `calling ${Type.encode(shape.type)} lanes=${shape.lanes.length}${
+          shape.lanes.length === 0
+            ? ''
+            : ` ${shape.lanes
+                .map(
+                  (lane) =>
+                    `${lane.type}[${lane.path
+                      .map(
+                        (field) =>
+                          `${field.struct.sourceId}#${field.struct.ordinal}.${field.ordinal}`,
+                      )
+                      .join('.')}]`,
+                )
+                .join(',')}`
+        }`,
+    ),
+    '',
+  ].join('\n')
 
 const unavailableText = (candidate: UnavailableEntry): string => {
   const reason =

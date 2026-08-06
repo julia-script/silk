@@ -2,12 +2,13 @@
 
 ### Requirement: Inspect nominal struct declarations and layouts
 
-The docs site SHALL extend its facade-only declaration and layout inspection surfaces to present
-each nominal struct's canonical identity, visibility, ordered fields, resolved type dependencies,
-field visibility, exact provenance, target-selected size and alignment, physical offsets, and
-padding. Missing, duplicate, inaccessible, leaking-private, recursive, and transitively unavailable
-states SHALL remain explicit beside their phase-owned diagnostics. The labs SHALL keep state in
-browser memory and provide accessible text equivalents for every graphical layout relationship.
+The unified `/labs` workbench SHALL extend its facade-only declaration-index and target-layout panes
+to present each nominal struct's canonical identity, visibility, ordered fields, resolved type
+dependencies, field visibility, exact provenance, target-selected size and alignment, physical
+offsets, and padding. Missing, duplicate, inaccessible, leaking-private, recursive, and transitively
+unavailable states SHALL remain explicit beside their phase-owned diagnostics. The workbench SHALL
+keep state in browser memory and provide accessible text equivalents for every graphical layout
+relationship.
 
 #### Scenario: Inspect a padded struct
 

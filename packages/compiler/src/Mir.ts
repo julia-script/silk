@@ -4,6 +4,7 @@ import * as Layout from './Layout.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
+import * as SilkType from './Type.js'
 
 /**
  * MIR: the monomorphic, backend-neutral basic-block control-flow graph over logical Silk types.
@@ -13,7 +14,16 @@ import * as Target from './Target.js'
  */
 
 /** A logical Silk type at the MIR level. */
-export type Type = { readonly _tag: 'I32' } | { readonly _tag: 'Bool' }
+export type Type =
+  | { readonly _tag: 'I32' }
+  | { readonly _tag: 'Bool' }
+  | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
+
+/** Converts a MIR logical type to the shared semantic type vocabulary. */
+export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
+  self._tag === 'Nominal' ? self.type : self._tag
+
+const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 
 /** One ordinal-indexed virtual register local to a function. */
 export interface LocalId {
@@ -85,6 +95,24 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'Construct'
+      readonly destination: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationIndex.FieldId
+        readonly value: LocalId
+      }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'Project'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly field: DeclarationIndex.FieldId
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Drop'
       readonly local: LocalId
       readonly provenance: Provenance
@@ -139,6 +167,8 @@ export interface Violation {
     | 'MissingEntryBlock'
     | 'UnknownBlockTarget'
     | 'UndeclaredLocal'
+    | 'InvalidAggregateOperation'
+    | 'InvalidCallShape'
   readonly function?: DeclarationIndex.CanonicalId
   readonly block?: BlockId
   readonly detail: string
@@ -152,6 +182,12 @@ const localUses = (block: Block): ReadonlyArray<LocalId> => [
     }
     if (operation._tag === 'Move') return [operation.destination, operation.source]
     if (operation._tag === 'Call') return [operation.destination, ...operation.arguments]
+    if (operation._tag === 'Construct') {
+      return [operation.destination, ...operation.fields.map((field) => field.value)]
+    }
+    if (operation._tag === 'Project') {
+      return [operation.destination, operation.source]
+    }
     return [operation.local]
   }),
   ...(block.terminator._tag === 'Return'
@@ -180,8 +216,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
   for (const fn of self.functions) {
     const missingTypes = new Set(
       [...fn.localTypes, fn.result]
-        .map((type) => type._tag)
-        .filter((type) => Layout.entry(self.layout, type) === undefined),
+        .map(semanticType)
+        .filter((type) => Layout.entry(self.layout, type) === undefined)
+        .map(SilkType.key),
     )
     for (const type of [...missingTypes].sort()) {
       violations.push(
@@ -231,6 +268,89 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           )
         }
       }
+      for (const operation of block.operations) {
+        if (operation._tag === 'Construct') {
+          const layout = Layout.entry(self.layout, operation.type.type)
+          const expected =
+            layout?.representation._tag === 'Aggregate' ? layout.representation.fields : []
+          const valid =
+            expected.length === operation.fields.length &&
+            operation.fields.every((field, index) => {
+              const declared = expected.at(index)
+              const valueType = fn.localTypes.at(field.value.ordinal)
+              return (
+                declared !== undefined &&
+                declared.id.ordinal === field.field.ordinal &&
+                valueType !== undefined &&
+                SilkType.equals(semanticType(valueType), declared.type)
+              )
+            })
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                block: block.id,
+                detail: `construction of ${typeText(operation.type)} does not match its canonical fields`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'Project') {
+          const sourceType = fn.localTypes.at(operation.source.ordinal)
+          const sourceLayout =
+            sourceType?._tag === 'Nominal' ? Layout.entry(self.layout, sourceType.type) : undefined
+          const field =
+            sourceLayout?.representation._tag === 'Aggregate'
+              ? sourceLayout.representation.fields.find(
+                  (candidate) => candidate.id.ordinal === operation.field.ordinal,
+                )
+              : undefined
+          if (field === undefined || !SilkType.equals(field.type, semanticType(operation.type))) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                block: block.id,
+                detail: `projection field #${operation.field.ordinal} does not match its source type`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'Call') {
+          const target = self.functions.find(
+            (candidate) =>
+              candidate.id.module === operation.target.module &&
+              candidate.id.name === operation.target.name,
+          )
+          const valid =
+            target !== undefined &&
+            target.parameterCount === operation.arguments.length &&
+            operation.arguments.every((argument, index) => {
+              const actual = fn.localTypes.at(argument.ordinal)
+              const expected = target.localTypes.at(index)
+              return (
+                actual !== undefined &&
+                expected !== undefined &&
+                SilkType.equals(semanticType(actual), semanticType(expected))
+              )
+            }) &&
+            SilkType.equals(semanticType(operation.type), semanticType(target.result))
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidCallShape',
+                function: fn.id,
+                block: block.id,
+                detail: `call ${targetText(operation.target)} does not match its logical contract`,
+              }),
+            )
+          }
+        }
+      }
     }
   }
   return Object.freeze(violations)
@@ -249,13 +369,17 @@ const targetText = (target: DeclarationIndex.CanonicalId): string =>
 const operationText = (operation: Operation): string => {
   switch (operation._tag) {
     case 'Literal':
-      return `${localText(operation.destination)} = literal ${operation.value} : ${operation.type._tag} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Binary':
-      return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${operation.type._tag} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
     case 'Call':
-      return `${localText(operation.destination)} = call ${targetText(operation.target)}(${operation.arguments.map(localText).join(', ')}) : ${operation.type._tag} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = call ${targetText(operation.target)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'Construct':
+      return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
+    case 'Project':
+      return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Drop':
       return `drop ${localText(operation.local)} ${provenanceText(operation.provenance)}`
   }
@@ -284,7 +408,7 @@ export const encode = (self: Module): string =>
     `mir-module ${self.module}`,
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
-      `fn ${targetText(fn.id)} params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${fn.result._tag}`,
+      `fn ${targetText(fn.id)} params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)}`,
       ...fn.blocks.flatMap((block) => [
         `  bb${block.id.ordinal}${block.kind === 'Cleanup' ? ' cleanup' : ''}:`,
         ...block.operations.map((operation) => `    ${operationText(operation)}`),

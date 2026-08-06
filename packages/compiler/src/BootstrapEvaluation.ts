@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Instances from './Instances.js'
 import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as Type from './Type.js'
 
 /**
  * The closed bootstrap interpreter, executing the lowered MIR program from the entry instance
@@ -15,6 +16,18 @@ export interface I32Value {
   readonly _tag: 'I32Value'
   readonly value: number
 }
+
+export interface AggregateValue {
+  readonly _tag: 'AggregateValue'
+  readonly type: Type.Nominal
+  readonly fields: ReadonlyArray<{
+    readonly field: DeclarationIndex.FieldId
+    readonly value: Value
+  }>
+}
+
+/** One immutable logical evaluator value, independent of backend lane realization. */
+export type Value = I32Value | AggregateValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -38,7 +51,7 @@ export interface BindingTraceEvent {
   readonly callSpan: SourceSpan.SourceSpan
   readonly argumentOrdinal: number
   readonly parameterOrdinal: number
-  readonly value: I32Value
+  readonly value: Value
   readonly fromCall: boolean
   readonly span: SourceSpan.SourceSpan
 }
@@ -47,12 +60,42 @@ export interface BindingTraceEvent {
 export interface ReturnTraceEvent {
   readonly _tag: 'Return'
   readonly function: DeclarationIndex.CanonicalId
-  readonly value: I32Value
+  readonly value: Value
   readonly span: SourceSpan.SourceSpan
 }
 
 /** One deterministic event emitted while replaying lowered operations. */
-export type TraceEvent = EntryTraceEvent | CallTraceEvent | BindingTraceEvent | ReturnTraceEvent
+export interface ConstructTraceEvent {
+  readonly _tag: 'Construct'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly type: Type.Nominal
+  readonly fieldCount: number
+  readonly span: SourceSpan.SourceSpan
+}
+
+export interface ProjectTraceEvent {
+  readonly _tag: 'Project'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly type: Type.Nominal
+  readonly field: DeclarationIndex.FieldId
+  readonly span: SourceSpan.SourceSpan
+}
+
+export interface CleanupTraceEvent {
+  readonly _tag: 'Cleanup'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly local: number
+  readonly span: SourceSpan.SourceSpan
+}
+
+export type TraceEvent =
+  | EntryTraceEvent
+  | CallTraceEvent
+  | BindingTraceEvent
+  | ReturnTraceEvent
+  | ConstructTraceEvent
+  | ProjectTraceEvent
+  | CleanupTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -101,7 +144,7 @@ export interface Blocked {
 export type Outcome = Completed | Blocked
 
 type Step =
-  | { readonly _tag: 'Value'; readonly value: I32Value }
+  | { readonly _tag: 'Value'; readonly value: Value }
   | { readonly _tag: 'Blocked'; readonly reason: BlockedReason }
 
 const value = (input: number): I32Value => Object.freeze({ _tag: 'I32Value', value: input })
@@ -118,14 +161,14 @@ const functionFor = (
 ): Mir.MirFunction | undefined => program.functions.find((fn) => sameId(fn.id, id))
 
 interface LocalState {
-  readonly value: I32Value
+  readonly value: Value
   readonly fromCall: boolean
 }
 
 function executeFunction(
   program: Mir.Module,
   fn: Mir.MirFunction,
-  argumentValues: ReadonlyArray<I32Value>,
+  argumentValues: ReadonlyArray<Value>,
   active: ReadonlyArray<DeclarationIndex.CanonicalId>,
   trace: Array<TraceEvent>,
 ): Step {
@@ -136,6 +179,14 @@ function executeFunction(
 
   const read = (local: Mir.LocalId): LocalState =>
     locals.get(local.ordinal) ?? { value: value(0), fromCall: false }
+
+  const readI32 = (local: Mir.LocalId): I32Value => {
+    const found = read(local).value
+    if (found._tag !== 'I32Value') {
+      throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as a scalar`)
+    }
+    return found
+  }
 
   let blockOrdinal = 0
   for (;;) {
@@ -161,8 +212,8 @@ function executeFunction(
           locals.set(operation.destination.ordinal, read(operation.source))
           break
         case 'Binary': {
-          const left = BigInt(read(operation.left).value.value)
-          const right = BigInt(read(operation.right).value.value)
+          const left = BigInt(readI32(operation.left).value)
+          const right = BigInt(readI32(operation.right).value)
           if (
             operation.operator === 'Equals' ||
             operation.operator === 'NotEquals' ||
@@ -224,7 +275,63 @@ function executeFunction(
           })
           break
         }
+        case 'Construct': {
+          const aggregate: AggregateValue = Object.freeze({
+            _tag: 'AggregateValue',
+            type: operation.type.type,
+            fields: Object.freeze(
+              operation.fields.map((field) =>
+                Object.freeze({ field: field.field, value: read(field.value).value }),
+              ),
+            ),
+          })
+          locals.set(operation.destination.ordinal, { value: aggregate, fromCall: false })
+          trace.push(
+            Object.freeze({
+              _tag: 'Construct',
+              function: fn.id,
+              type: aggregate.type,
+              fieldCount: aggregate.fields.length,
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
+        case 'Project': {
+          const aggregate = read(operation.source).value
+          if (aggregate._tag !== 'AggregateValue') {
+            throw new RangeError('MIR verifier allowed projection from a scalar value')
+          }
+          const selected = aggregate.fields.find(
+            (candidate) =>
+              candidate.field.ordinal === operation.field.ordinal &&
+              candidate.field.struct.sourceId === operation.field.struct.sourceId &&
+              candidate.field.struct.ordinal === operation.field.struct.ordinal,
+          )
+          if (selected === undefined) {
+            throw new RangeError('MIR verifier allowed projection of a missing aggregate field')
+          }
+          locals.set(operation.destination.ordinal, { value: selected.value, fromCall: false })
+          trace.push(
+            Object.freeze({
+              _tag: 'Project',
+              function: fn.id,
+              type: aggregate.type,
+              field: operation.field,
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
         case 'Drop':
+          trace.push(
+            Object.freeze({
+              _tag: 'Cleanup',
+              function: fn.id,
+              local: operation.local.ordinal,
+              span: operation.provenance.span,
+            }),
+          )
           break
         case 'Call': {
           const target = functionFor(program, operation.target)
@@ -299,7 +406,7 @@ function executeFunction(
         break
       case 'Branch':
         blockOrdinal =
-          read(terminator.condition).value.value !== 0
+          readI32(terminator.condition).value !== 0
             ? terminator.taken.ordinal
             : terminator.otherwise.ordinal
         break
@@ -366,19 +473,23 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
     }),
   )
   const result = executeFunction(program, fn, [], Object.freeze([entry]), trace)
-  return result._tag === 'Blocked'
-    ? Object.freeze({
-        _tag: 'Blocked',
-        entry,
-        reason: result.reason,
-        trace: Object.freeze([...trace]),
-      })
-    : Object.freeze({
-        _tag: 'Completed',
-        entry,
-        result: result.value,
-        trace: Object.freeze([...trace]),
-      })
+  if (result._tag === 'Blocked') {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry,
+      reason: result.reason,
+      trace: Object.freeze([...trace]),
+    })
+  }
+  if (result.value._tag !== 'I32Value') {
+    throw new RangeError('Bootstrap entry returned a non-I32 value')
+  }
+  return Object.freeze({
+    _tag: 'Completed',
+    entry,
+    result: result.value,
+    trace: Object.freeze([...trace]),
+  })
 }
 
 const raiseNoSpan = (): never => {

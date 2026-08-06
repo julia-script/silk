@@ -17,7 +17,11 @@ const i32: Mir.Type = Object.freeze({ _tag: 'I32' })
 const bool: Mir.Type = Object.freeze({ _tag: 'Bool' })
 
 const mirType = (type: Type.Type): Mir.Type | undefined =>
-  typeof type === 'string' ? (type === 'Bool' ? bool : i32) : undefined
+  typeof type === 'string'
+    ? type === 'Bool'
+      ? bool
+      : i32
+    : Object.freeze({ _tag: 'Nominal', type })
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
@@ -111,6 +115,54 @@ const lowerExpression = (
     }
     case 'Move':
       return lowerExpression(fn, expression.subject)
+    case 'Construct': {
+      const type = mirType(expression.type)
+      if (type?._tag !== 'Nominal') return undefined
+      const canonicalFields = new Map(
+        expression.fields.map((field) => [field.field.ordinal, field] as const),
+      )
+      const loweredFields = new Map<number, Mir.LocalId>()
+      for (const fieldId of expression.evaluationOrder) {
+        const field = canonicalFields.get(fieldId.ordinal)
+        if (field === undefined) return undefined
+        const lowered = lowerExpression(fn, field.value)
+        if (lowered === undefined) return undefined
+        loweredFields.set(field.field.ordinal, lowered.result)
+      }
+      const fields = expression.fields.flatMap((field) => {
+        const value = loweredFields.get(field.field.ordinal)
+        return value === undefined ? [] : [Object.freeze({ field: field.field, value })]
+      })
+      if (fields.length !== expression.fields.length) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'Construct',
+          destination,
+          type,
+          fields: Object.freeze(fields),
+          provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      )
+      return { result: destination }
+    }
+    case 'Project': {
+      const subject = lowerExpression(fn, expression.subject)
+      const type = mirType(expression.type)
+      if (subject === undefined || type === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'Project',
+          destination,
+          source: subject.result,
+          field: expression.field,
+          type,
+          provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      )
+      return { result: destination }
+    }
     case 'Call': {
       const argumentLocals: Array<Mir.LocalId> = []
       for (const argument of expression.arguments) {
@@ -377,11 +429,8 @@ const lowerInstance = (
         })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
   const resultType = contract._tag === 'Contract' ? mirType(contract.result) : i32
-  if (
-    resultType === undefined ||
-    (contract._tag === 'Contract' && parameterTypes.length !== contract.parameters.length)
-  ) {
-    return trapFunction(instance, 'aggregate values are not executable yet', bodySpan(fn))
+  if (resultType === undefined) {
+    return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
   }
 
   const lowering = new FunctionLowering(parameterTypes)

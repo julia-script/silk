@@ -271,7 +271,7 @@ it('resolves local, selected, and qualified nominal types in declaration contrac
     'app/Main':
       'import syntax.Tree as Ast { Node }\n' +
       'struct Local { node: Node qualified: Ast.Node }\n' +
-      'fn identity(value: Local) -> Local { return value }\n' +
+      'fn identity(value: Local) -> Local { return move value }\n' +
       'pub fn main() -> I32 { return 0 }',
     'syntax/Tree': 'pub struct Node { value: I32 }',
   })

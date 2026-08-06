@@ -30,6 +30,32 @@ const renderLayout = (source: string): string => {
   return view === undefined ? '' : renderToStaticMarkup(view.render(context))
 }
 
+const renderStructValues = (source: string): string => {
+  const sourceId = 'memory/docs/unified-struct-values'
+  const snapshot = Analysis.ofSource(
+    sourceId,
+    new TextEncoder().encode(source),
+    'wasm32-unknown-unknown',
+  )
+  const context: ViewContext = {
+    snapshot,
+    modules: { [sourceId]: source },
+    root: sourceId,
+    mode: 'release',
+    profile: 'release',
+    selectedDiagnostic: undefined,
+    onSelectDiagnostic: () => undefined,
+    selectedFlowId: undefined,
+    onSelectFlow: () => undefined,
+    evaluation: Analysis.evaluate(snapshot),
+    onEvaluate: () => undefined,
+  }
+  expect(context.evaluation?._tag).toBe('Completed')
+  const view = viewById('struct-values')
+  expect(view).toBeDefined()
+  return view === undefined ? '' : renderToStaticMarkup(view.render(context))
+}
+
 describe('view registry', () => {
   it('resolves every view by its own id', () => {
     for (const view of views) {
@@ -62,6 +88,22 @@ describe('view registry', () => {
     for (const id of ['tokens', 'tree', 'flow', 'evaluation', 'hir', 'diagnostics']) {
       expect(viewById(id)?.id, id).toBe(id)
     }
+  })
+
+  it('renders struct facts, ABI lanes, and evaluation in the unified workbench', () => {
+    const markup = renderStructValues(`struct Pair { left: I32 right: I32 }
+fn make() -> Pair { return Pair { right: 2, left: 1 } }
+pub fn main() -> I32 { let pair = make() return pair.right }`)
+
+    expect(markup).toContain('Struct construction')
+    expect(markup).toContain('Source order: right, left')
+    expect(markup).toContain('Canonical order: left, right')
+    expect(markup).toContain('Compiler-owned calling shapes')
+    expect(markup).toContain('2 lanes')
+    expect(markup).toContain('Field projection chain')
+    expect(markup).toContain('Evaluation events')
+    expect(markup).toContain('Construct')
+    expect(markup).toContain('Project')
   })
 
   it('renders nominal catalog facts in the unified target-layout pane', () => {

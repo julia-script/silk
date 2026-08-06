@@ -61,6 +61,8 @@ pub fn main() -> I32 { return identity(42) }`)
   const binding = outcome.trace.at(2)
   assert.strictEqual(binding?._tag, 'Binding')
   if (binding?._tag !== 'Binding') return
+  assert.strictEqual(binding.value._tag, 'I32Value')
+  if (binding.value._tag !== 'I32Value') return
   assert.strictEqual(binding.value.value, 42)
   assert.strictEqual(binding.parameterOrdinal, 0)
   assert.strictEqual(binding.fromCall, false)

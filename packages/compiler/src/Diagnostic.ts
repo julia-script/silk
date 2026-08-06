@@ -71,9 +71,19 @@ export const duplicateFieldNameCode = 'SEM0017' as const
 export const expectedTypeCode = 'SEM0018' as const
 export const privateTypeExposureCode = 'SEM0019' as const
 export const inlineRecursiveStructCode = 'SEM0020' as const
+export const externalRawStructLiteralCode = 'SEM0021' as const
+export const unknownStructFieldCode = 'SEM0022' as const
+export const duplicateStructInitializerCode = 'SEM0023' as const
+export const missingStructInitializerCode = 'SEM0024' as const
+export const structFieldTypeMismatchCode = 'SEM0025' as const
+export const projectionOnNonStructCode = 'SEM0026' as const
+export const unknownProjectedFieldCode = 'SEM0027' as const
+export const inaccessibleProjectedFieldCode = 'SEM0028' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
+export const partialMoveCode = 'OWN0002' as const
+export const explicitMoveRequiredCode = 'OWN0003' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
@@ -103,7 +113,17 @@ export type Code =
   | typeof expectedTypeCode
   | typeof privateTypeExposureCode
   | typeof inlineRecursiveStructCode
+  | typeof externalRawStructLiteralCode
+  | typeof unknownStructFieldCode
+  | typeof duplicateStructInitializerCode
+  | typeof missingStructInitializerCode
+  | typeof structFieldTypeMismatchCode
+  | typeof projectionOnNonStructCode
+  | typeof unknownProjectedFieldCode
+  | typeof inaccessibleProjectedFieldCode
   | typeof useAfterMoveCode
+  | typeof partialMoveCode
+  | typeof explicitMoveRequiredCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
 export interface DeclarationEntity {
@@ -185,11 +205,30 @@ export type Reason =
   | { readonly _tag: 'ExpectedType'; readonly spelling: string }
   | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
   | { readonly _tag: 'InlineRecursiveStruct'; readonly members: ReadonlyArray<string> }
+  | { readonly _tag: 'ExternalRawStructLiteral'; readonly type: string }
+  | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
+  | {
+      readonly _tag: 'DuplicateStructInitializer'
+      readonly field: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'MissingStructInitializer'; readonly type: string; readonly field: string }
+  | {
+      readonly _tag: 'StructFieldTypeMismatch'
+      readonly field: string
+      readonly expected: string
+      readonly actual: string
+    }
+  | { readonly _tag: 'ProjectionOnNonStruct'; readonly actual: string }
+  | { readonly _tag: 'UnknownProjectedField'; readonly type: string; readonly field: string }
+  | { readonly _tag: 'InaccessibleProjectedField'; readonly type: string; readonly field: string }
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
       readonly moveSpan: SourceSpan.SourceSpan
     }
+  | { readonly _tag: 'PartialMove' }
+  | { readonly _tag: 'ExplicitMoveRequired'; readonly spelling: string }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
@@ -478,6 +517,122 @@ export const inlineRecursiveStruct = (
     span,
   })
 
+export const externalRawStructLiteral = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: externalRawStructLiteralCode,
+    severity: 'error',
+    message: `Raw construction of ${type} is limited to its defining module`,
+    reason: Object.freeze({ _tag: 'ExternalRawStructLiteral', type }),
+    span,
+  })
+
+export const unknownStructField = (
+  type: string,
+  field: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownStructFieldCode,
+    severity: 'error',
+    message: `${type} has no field ${field}`,
+    reason: Object.freeze({ _tag: 'UnknownStructField', type, field }),
+    span,
+  })
+
+export const duplicateStructInitializer = (
+  field: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateStructInitializerCode,
+    severity: 'error',
+    message: `Field ${field} is initialized more than once`,
+    reason: Object.freeze({ _tag: 'DuplicateStructInitializer', field, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first initialized here', span: originalSpan }),
+    ]),
+  })
+
+export const missingStructInitializer = (
+  type: string,
+  field: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingStructInitializerCode,
+    severity: 'error',
+    message: `Missing initializer for ${type}.${field}`,
+    reason: Object.freeze({ _tag: 'MissingStructInitializer', type, field }),
+    span,
+  })
+
+export const structFieldTypeMismatch = (
+  field: string,
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: structFieldTypeMismatchCode,
+    severity: 'error',
+    message: `Field ${field} expects ${expected} but received ${actual}`,
+    reason: Object.freeze({ _tag: 'StructFieldTypeMismatch', field, expected, actual }),
+    span,
+  })
+
+export const projectionOnNonStruct = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: projectionOnNonStructCode,
+    severity: 'error',
+    message: `Cannot project a field from ${actual}`,
+    reason: Object.freeze({ _tag: 'ProjectionOnNonStruct', actual }),
+    span,
+  })
+
+export const unknownProjectedField = (
+  type: string,
+  field: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownProjectedFieldCode,
+    severity: 'error',
+    message: `${type} has no field ${field}`,
+    reason: Object.freeze({ _tag: 'UnknownProjectedField', type, field }),
+    span,
+  })
+
+export const inaccessibleProjectedField = (
+  type: string,
+  field: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: inaccessibleProjectedFieldCode,
+    severity: 'error',
+    message: `${type}.${field} is private`,
+    reason: Object.freeze({ _tag: 'InaccessibleProjectedField', type, field }),
+    span,
+  })
+
 /** Creates the diagnostic for one present identifier that cannot resolve as a type. */
 export const unknownType = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
@@ -670,6 +825,28 @@ export const useAfterMove = (
     reason: Object.freeze({ _tag: 'UseAfterMove', spelling, moveSpan }),
     span,
     relatedSpans: Object.freeze([Object.freeze({ label: 'moved here', span: moveSpan })]),
+  })
+
+export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: partialMoveCode,
+    severity: 'error',
+    message: 'Struct fields cannot be moved independently',
+    reason: Object.freeze({ _tag: 'PartialMove' }),
+    span,
+  })
+
+export const explicitMoveRequired = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: explicitMoveRequiredCode,
+    severity: 'error',
+    message: `Moving ${spelling} requires an explicit move`,
+    reason: Object.freeze({ _tag: 'ExplicitMoveRequired', spelling }),
+    span,
   })
 
 /** Creates the diagnostic for a uniquely resolved call with the wrong arity. */

@@ -346,6 +346,46 @@ pub fn main() -> I32 { return 0 }`,
     'Recursive structs',
     'struct Left { right: Right }\nstruct Right { left: Left }\npub fn main() -> I32 { return 42 }',
   ),
+  one(
+    'structs',
+    'Construct and project fields',
+    `struct Pair { left: I32 right: I32 }
+fn make() -> Pair { return Pair { right: 2, left: 1 } }
+pub fn main() -> I32 { let pair = make() return pair.right }`,
+  ),
+  one(
+    'structs',
+    'Nested projections',
+    `struct Inner { value: I32 }
+struct Outer { inner: Inner }
+fn make() -> Outer { return Outer { inner: Inner { value: 42 } } }
+pub fn main() -> I32 { let outer = make() return outer.inner.value }`,
+  ),
+  one(
+    'structs',
+    'Zero-lane struct value',
+    `struct Marker {}
+fn marker() -> Marker { return Marker {} }
+pub fn main() -> I32 { let value = marker() return 42 }`,
+  ),
+  one(
+    'structs',
+    'Invalid struct literal',
+    `struct Pair { left: I32 right: I32 }
+fn broken() -> Pair { return Pair { left: true, left: 2, extra: 3 } }
+pub fn main() -> I32 { return 42 }`,
+  ),
+  {
+    label: 'Public struct factory',
+    group: 'structs',
+    root: 'app/Main',
+    modules: {
+      'app/Main':
+        'import model.Pair { Pair, make }\npub fn main() -> I32 { let pair = make(20, 22) return pair.right }',
+      'model/Pair':
+        'pub struct Pair { pub left: I32 pub right: I32 }\npub fn make(left: I32, right: I32) -> Pair { return Pair { right: right, left: left } }',
+    },
+  },
 
   // ---- names ----------------------------------------------------------------------------
   // Namespaced imports, aliases, and selective member lists: every binding form the resolver

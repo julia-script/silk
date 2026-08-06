@@ -362,16 +362,22 @@ function HirExpressionRows({
   const reveal =
     expression._tag === 'Unavailable'
       ? `unavailable ${hirSpanLabel(expression.span)}`
-      : `${expression.type} ${hirSpanLabel(expression.span)}`
+      : `${typeText(expression.type)} ${hirSpanLabel(expression.span)}`
   const label =
     expression._tag === 'IntegerLiteral'
       ? `literal ${expression.value}`
+      : expression._tag === 'BooleanLiteral'
+        ? `literal ${expression.value}`
       : expression._tag === 'ParameterReference'
         ? `param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal}`
         : expression._tag === 'BindingReference'
           ? `binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal}`
           : expression._tag === 'Move'
             ? 'move'
+            : expression._tag === 'Construct'
+              ? `construct ${typeText(expression.nominal)}`
+              : expression._tag === 'Project'
+                ? `project ${typeText(expression.nominal)}.#${expression.field.ordinal}`
             : expression._tag === 'Call'
               ? `call ${expression.target.name}`
               : expression._tag === 'BuiltinCall'
@@ -398,6 +404,18 @@ function HirExpressionRows({
       {expression._tag === 'Move' ? (
         <HirExpressionRows expression={expression.subject} depth={depth + 1} />
       ) : null}
+      {expression._tag === 'Project' ? (
+        <HirExpressionRows expression={expression.subject} depth={depth + 1} />
+      ) : null}
+      {expression._tag === 'Construct'
+        ? expression.fields.map(({ field, value }) => (
+            <HirExpressionRows
+              key={`${field.ordinal}-${value.span.start}`}
+              expression={value}
+              depth={depth + 1}
+            />
+          ))
+        : null}
     </>
   )
 }
@@ -621,10 +639,17 @@ const expressionLabel = (expression: Elaboration.ExpressionFact): string => {
       ? String(expression.integer.value)
       : expression.integer._tag
   if (expression._tag === 'Boolean') return String(expression.value)
-  if (expression._tag === 'Identifier' || expression._tag === 'Move')
+  if (expression._tag === 'Identifier')
     return expression.reference._tag === 'Unavailable'
       ? 'Unavailable reference'
       : expression.reference.spelling
+  if (expression._tag === 'Move') return `move ${expressionLabel(expression.subject)}`
+  if (expression._tag === 'StructLiteral')
+    return expression.target._tag === 'Resolved'
+      ? `${typeText(expression.target.type)} {…}`
+      : 'Unavailable struct literal'
+  if (expression._tag === 'FieldProjection')
+    return `${expressionLabel(expression.subject)}.${expression.fieldName ?? '?'}`
   if (expression._tag === 'Grouped') return `Grouped ${expressionLabel(expression.expression)}`
   if (expression._tag === 'Operator') return `${expression.operator} expression`
   if (expression._tag === 'Pipeline') return 'Pipeline expression'
@@ -1229,6 +1254,13 @@ const traceRows = (
   })
 }
 
+const evaluationValueLabel = (value: BootstrapEvaluation.Value): string =>
+  value._tag === 'I32Value'
+    ? String(value.value)
+    : `${typeText(value.type)} { ${value.fields
+        .map(({ field, value: nested }) => `#${field.ordinal}: ${evaluationValueLabel(nested)}`)
+        .join(', ')} }`
+
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
     case 'Entry':
@@ -1237,10 +1269,16 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `${event.caller.name} calls ${event.target.name}`
     case 'Binding':
       return event.fromCall
-        ? `Nested result ${event.value.value} from [${event.callSpan.start}, ${event.callSpan.end}) binds to ${event.target.name} parameter #${event.parameterOrdinal}`
-        : `Argument #${event.argumentOrdinal} binds ${event.value.value} to ${event.target.name} parameter #${event.parameterOrdinal}`
+        ? `Nested result ${evaluationValueLabel(event.value)} from [${event.callSpan.start}, ${event.callSpan.end}) binds to ${event.target.name} parameter #${event.parameterOrdinal}`
+        : `Argument #${event.argumentOrdinal} binds ${evaluationValueLabel(event.value)} to ${event.target.name} parameter #${event.parameterOrdinal}`
     case 'Return':
-      return `${event.function.name} returns ${event.value.value}`
+      return `${event.function.name} returns ${evaluationValueLabel(event.value)}`
+    case 'Construct':
+      return `${event.function.name} constructs ${typeText(event.type)} (${event.fieldCount} fields)`
+    case 'Project':
+      return `${event.function.name} projects ${typeText(event.type)}.#${event.field.ordinal}`
+    case 'Cleanup':
+      return `${event.function.name} cleans up %${event.local}`
   }
 }
 
@@ -1495,7 +1533,7 @@ function SemanticFacts({
                       </span>
                       <small>{spanLabel(returned.syntax)}</small>
                     </dd>
-                  ) : returned._tag === 'Identifier' || returned._tag === 'Move' ? (
+                  ) : returned._tag === 'Identifier' ? (
                     <dd>
                       <strong>
                         {returned.reference._tag === 'Unavailable'
@@ -1503,7 +1541,20 @@ function SemanticFacts({
                           : returned.reference.spelling}
                       </strong>
                       <span>
-                        {returned._tag} · {returned.reference._tag} ·{' '}
+                        Identifier · {returned.reference._tag} ·{' '}
+                        {returned.type._tag === 'Available'
+                          ? typeText(returned.type.type)
+                          : 'Unavailable type'}
+                      </span>
+                      <small>{spanLabel(returned.syntax)}</small>
+                    </dd>
+                  ) : returned._tag === 'Move' ||
+                    returned._tag === 'StructLiteral' ||
+                    returned._tag === 'FieldProjection' ? (
+                    <dd>
+                      <strong>{expressionLabel(returned)}</strong>
+                      <span>
+                        {returned._tag} ·{' '}
                         {returned.type._tag === 'Available'
                           ? typeText(returned.type.type)
                           : 'Unavailable type'}
