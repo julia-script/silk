@@ -1,0 +1,72 @@
+{
+  "name": "@silk-effect/compiler-cli",
+  "version": "0.0.0",
+  "description": "Command line interface for the Silk Effect bootstrap compiler.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "directory": "packages/compiler-cli"
+  },
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
+  "keywords": [
+    "compiler",
+    "cli",
+    "effect",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "silk": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./Cli": {
+      "types": "./dist/Cli.d.ts",
+      "import": "./dist/Cli.js"
+    },
+    "./CompileCommand": {
+      "types": "./dist/CompileCommand.d.ts",
+      "import": "./dist/CompileCommand.js"
+    },
+    "./Report": {
+      "types": "./dist/Report.d.ts",
+      "import": "./dist/Report.js"
+    },
+    "./SourceEntry": {
+      "types": "./dist/SourceEntry.d.ts",
+      "import": "./dist/SourceEntry.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.103",
+    "@silk-effect/compiler": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1"
+  }
+}
