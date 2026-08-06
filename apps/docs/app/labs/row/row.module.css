@@ -1,0 +1,217 @@
+/*
+ * One row grammar for every inspector.
+ *
+ * Tokens, CST, HIR, MIR, names, ownership, instances, layout, closure, index, flow, evaluation,
+ * toolchain, diagnostics and backend text are all the same 17px row:
+ *
+ *   [lead#] [indent+guides] [caret] [dot] [label] [detail ……] [span]
+ *
+ * The old panes each invented their own card markup, which is what made them cost roughly six
+ * times the vertical space of a row. Sharing the row means a density change happens once here
+ * rather than in fifteen stylesheets.
+ */
+
+.rows {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
+}
+
+.row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  height: var(--wb-row-h);
+  padding-right: 8px;
+  border: 0;
+  /* The 2px left rule is the row's state channel: severity and span-cursor exactness both show
+     up here, so a row never has to grow to report its state. */
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+/* Rows that carry a span are clickable: they move the workbench span cursor. */
+.row[data-pickable='true'] {
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--wb-hover);
+}
+
+.row:focus-visible {
+  outline: 1px solid var(--wb-violet);
+  outline-offset: -1px;
+}
+
+/*
+ * Span-cursor states. `exact` is the row whose span equals the cursor; `contains` is any row
+ * whose span encloses it — which is what makes one click light up the same construct in every
+ * open phase at once.
+ */
+.row[data-cursor='exact'] {
+  border-left-color: var(--wb-violet);
+  background: rgba(183, 166, 214, 0.2);
+}
+
+.row[data-cursor='contains'] {
+  background: rgba(183, 166, 214, 0.14);
+}
+
+.row[data-tone='error'] {
+  border-left-color: var(--wb-error);
+  background: rgba(224, 112, 60, 0.07);
+}
+
+.row[data-tone='warning'] {
+  border-left-color: var(--wb-warn);
+  background: rgba(224, 163, 85, 0.06);
+}
+
+/* Cursor state wins over severity tint: the cursor is the thing being moved right now. */
+.row[data-tone='error'][data-cursor='exact'],
+.row[data-tone='warning'][data-cursor='exact'] {
+  background: rgba(183, 166, 214, 0.2);
+}
+
+.lead {
+  flex: none;
+  width: 26px;
+  margin-right: 4px;
+  text-align: right;
+  color: var(--wb-gutter);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Tree indentation, drawn as a repeating 1px guide rather than as nested elements.
+ *
+ * A background gradient keeps the row flat — one element per row at any depth — so depth costs
+ * width and nothing else. Nested `<ul>`s would put the guides in the markup and force every
+ * inspector to render a real tree just to get them.
+ */
+.indent {
+  flex: none;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--wb-hairline) 0 1px,
+    transparent 1px 13px
+  );
+}
+
+.caret {
+  flex: none;
+  width: 9px;
+  color: var(--wb-gutter);
+  font-size: 8px;
+  text-align: center;
+}
+
+.dot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.dot[data-kind='token'] {
+  background: var(--wb-violet);
+}
+
+.dot[data-kind='node'] {
+  background: var(--wb-ink-4);
+}
+
+.dot[data-kind='missing'] {
+  background: var(--wb-warn);
+}
+
+.dot[data-kind='error'] {
+  background: var(--wb-error);
+}
+
+.dot[data-kind='warning'] {
+  background: var(--wb-warn);
+}
+
+.dot[data-kind='ok'] {
+  background: var(--wb-green);
+}
+
+.dot[data-kind='symbol'] {
+  background: var(--wb-amber);
+}
+
+.label {
+  flex: none;
+  /* `pre` so IR text and indentation inside a label survive verbatim. */
+  white-space: pre;
+  color: var(--wb-ink-2);
+  font-size: 10.5px;
+}
+
+.row[data-head='true'] .label {
+  color: var(--wb-ink);
+  font-weight: 700;
+}
+
+.label[data-tone='error'] {
+  color: var(--wb-error-ink);
+}
+
+.label[data-tone='warning'] {
+  color: var(--wb-warn);
+}
+
+.label[data-tone='symbol'] {
+  color: var(--wb-amber);
+}
+
+.label[data-tone='ok'] {
+  color: var(--wb-green-ink);
+}
+
+.detail {
+  min-width: 0;
+  flex: 1;
+  margin-left: 7px;
+  overflow: hidden;
+  color: var(--wb-ink-3);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.span {
+  flex: none;
+  padding-left: 8px;
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A pane that has nothing to show says why, in one row's worth of space.
+ *
+ * Downstream phases go empty for a *reason* — a program that did not elaborate has no MIR — and
+ * a blank pane hides which phase actually broke. This is the shape that states it.
+ */
+.empty {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--wb-ink-3);
+  font-size: 10.5px;
+}
+
+.emptyReason {
+  color: var(--wb-warn);
+}

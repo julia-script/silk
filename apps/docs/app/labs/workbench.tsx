@@ -10,18 +10,21 @@
  *
  * Panes are keyed by instance, so the same phase can be open twice; arrangement is dockview's
  * (drag to split, stack as tabs, resize) and lives in the URL alongside the source.
+ *
+ * Chrome is deliberately thin. The app bar is 32px, a pane header is 22px and a row is 17px,
+ * because the thing that limits how many phases you can see at once is chrome, not screen.
  */
 
-import { Analysis } from '@silk-effect/compiler'
-import { ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, Target } from '@silk-effect/compiler'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PresetPalette } from './preset-palette'
-import { type Preset, presets } from './presets'
-import { type ViewContext, viewById, views } from './registry'
-import styles from './syntax-inspector/syntax-inspector.module.css'
+import { type Preset, presetGroups, presets } from './presets'
+import { type ViewContext, siblingsOf, viewById, views } from './registry'
+import { EmptyState, RowList, type Span } from './row/row'
+import { diagnosticCounts, diagnosticEntries } from './row/project-syntax'
 import {
   decodeLayout,
   decodeSource,
@@ -31,6 +34,13 @@ import {
   sourceParam,
 } from './url-state'
 import shell from './workbench.module.css'
+import {
+  decodeWorkspaces,
+  seededWorkspaces,
+  slotOrder,
+  type Workspace,
+  workspaceStorageKey,
+} from './workspaces'
 
 const encoder = new TextEncoder()
 
@@ -44,15 +54,14 @@ const initialPreset = presets.find((preset) => preset.label === 'Nested calls') 
  * is written on every render and read during the pane's own render, so panes always see current
  * state without being recreated on each keystroke.
  */
-interface WorkbenchState extends ViewContext {
+interface WorkbenchState extends Omit<ViewContext, 'filter' | 'showTrivia'> {
   readonly setModuleSource: (name: string, value: string) => void
-  readonly setProfile: (value: ToolchainPlan.OptimizationProfile) => void
   readonly openPalette: () => void
   readonly addModule: () => void
-  readonly removeModule: (name: string) => void
   readonly setRoot: (name: string) => void
   readonly activeModule: string
   readonly setActiveModule: (name: string) => void
+  readonly addPane: (viewId: string) => void
 }
 
 const stateRef: { current: WorkbenchState | undefined } = { current: undefined }
@@ -74,83 +83,91 @@ function usePaneState(): WorkbenchState | undefined {
   return stateRef.current
 }
 
-/**
- * The source editor, itself a pane so it can be moved and resized like any other.
- *
- * A compilation request is a set of named modules, not one file, so the editor carries a tab per
- * module. Most programs have exactly one and the tab strip stays out of the way; module closure
- * and the declaration index only become explorable once more than one is possible.
- */
-function SourcePane() {
-  const state = usePaneState()
-  if (state === undefined) return null
-
-  const names = Object.keys(state.modules)
-  const active = names.includes(state.activeModule) ? state.activeModule : (names[0] ?? '')
-
+/** The phase picker: a 214px menu of all 16 views, opened from the pane's own title. */
+function PhasePicker({
+  active,
+  onPick,
+  onClose,
+}: {
+  readonly active: string
+  readonly onPick: (id: string) => void
+  readonly onClose: () => void
+}) {
   return (
-    <div className={shell.sourcePane}>
-      <div className={shell.moduleBar}>
-        {names.map((name) => (
-          <span key={name} className={shell.moduleTab} data-active={name === active}>
-            <button type="button" onClick={() => state.setActiveModule(name)}>
-              {name}
-              {name === state.root ? <i className={shell.rootDot} title="root module" /> : null}
-            </button>
-            {names.length > 1 ? (
-              <button
-                type="button"
-                className={shell.moduleClose}
-                aria-label={`Remove module ${name}`}
-                onClick={() => state.removeModule(name)}
-              >
-                ×
-              </button>
-            ) : null}
-          </span>
-        ))}
+    <div className={shell.pickerMenu} role="menu">
+      {views.map((view) => (
         <button
+          key={view.id}
           type="button"
-          className={shell.moduleAdd}
-          onClick={state.addModule}
-          aria-label="Add a module"
+          role="menuitem"
+          className={shell.pickerOption}
+          data-active={view.id === active}
+          onClick={() => {
+            onPick(view.id)
+            onClose()
+          }}
         >
-          +
+          <span className={shell.pickerTag}>{view.tag}</span>
+          <span className={shell.pickerTitle}>{view.title}</span>
+          <span className={shell.pickerPhase}>{view.phase}</span>
         </button>
-        <span className={shell.toolbarSpacer} />
-        {active === state.root ? null : (
-          <button type="button" className={shell.moduleAdd} onClick={() => state.setRoot(active)}>
-            make root
-          </button>
-        )}
-        <button type="button" className={shell.moduleAdd} onClick={state.openPalette}>
-          presets…
-        </button>
-      </div>
-
-      <label className="sr-only" htmlFor="workbench-source">
-        Silk source code
-      </label>
-      <textarea
-        id="workbench-source"
-        className={`${styles.editor} ${shell.editorFill}`}
-        value={state.modules[active] ?? ''}
-        onChange={(event) => state.setModuleSource(active, event.target.value)}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-      />
+      ))}
     </div>
   )
 }
 
 /**
- * Every non-source pane. The pane's `view` parameter decides what it renders, and the header
- * picker rewrites that parameter — which is what lets one pane become any phase, and lets the
- * same phase be open in two panes at once.
+ * The source editor, itself a pane so it can be moved and resized like any other.
+ *
+ * Modules used to be a tab strip inside this pane, which stopped scaling at about four; they now
+ * live in the sidebar, so this pane is only the editor and its 19px footer.
+ */
+function SourceBody({ state }: { readonly state: WorkbenchState }) {
+  const names = Object.keys(state.modules)
+  const active = names.includes(state.activeModule) ? state.activeModule : (names[0] ?? '')
+  const text = state.modules[active] ?? ''
+  const cursor = state.cursor
+
+  return (
+    <>
+      <label className="sr-only" htmlFor="workbench-source">
+        Silk source code
+      </label>
+      <textarea
+        id="workbench-source"
+        className={shell.editor}
+        value={text}
+        onChange={(event) => state.setModuleSource(active, event.target.value)}
+        onSelect={(event) => {
+          // The editor is a phase like any other: selecting text moves the same span cursor a
+          // row click moves, so a selection lights up every downstream pane.
+          const target = event.currentTarget
+          if (target.selectionStart === target.selectionEnd) return
+          state.onSelectSpan({ start: target.selectionStart, end: target.selectionEnd })
+        }}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+      />
+      <div className={shell.sourceFooter}>
+        <span>{active}</span>
+        <span>{text.length} B</span>
+        <span className={shell.spacer} />
+        <span>{cursor === undefined ? 'no selection' : `sel [${cursor.start}, ${cursor.end})`}</span>
+      </div>
+    </>
+  )
+}
+
+/**
+ * Every pane. One 22px bar carries the phase picker, sibling phases, any pane-local control and
+ * the pane's meta; the body is either the editor or a list of rows.
  */
 function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   const state = usePaneState()
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [filter, setFilter] = useState('')
+  const [showTrivia, setShowTrivia] = useState(false)
   const viewId = props.params.view
   const definition = viewById(viewId)
 
@@ -166,75 +183,205 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
 
   if (state === undefined) return null
 
+  if (definition === undefined) {
+    return (
+      <div className={shell.pane}>
+        <div className={shell.paneBar}>
+          <span className={shell.paneMeta}>Unknown view: {viewId}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const isSource = definition.id === 'source'
+  const result = isSource
+    ? undefined
+    : definition.project({ ...state, filter, showTrivia })
+  const siblings = siblingsOf(definition)
+
   return (
     <div className={shell.pane}>
       <div className={shell.paneBar}>
-        <label className="sr-only" htmlFor={`pick-${props.api.id}`}>
-          Pane content
-        </label>
-        <select
-          id={`pick-${props.api.id}`}
+        <button
+          type="button"
           className={shell.panePicker}
-          // A pane restored from an older layout carries a retired id; showing the view it
-          // resolved to keeps the picker honest about what is actually rendered below.
-          value={definition?.id ?? viewId}
-          onChange={(event) => onPick(event.target.value)}
+          data-open={pickerOpen}
+          aria-haspopup="menu"
+          aria-expanded={pickerOpen}
+          onClick={() => setPickerOpen((open) => !open)}
         >
-          {views.map((view) => (
-            <option key={view.id} value={view.id}>
-              {view.title}
-            </option>
+          <i className={shell.paneDot} aria-hidden="true" />
+          <span>{definition.title}</span>
+          <span className={shell.paneCaret} aria-hidden="true">
+            ▾
+          </span>
+        </button>
+
+        {siblings.map((sibling) => (
+          <button
+            key={sibling.id}
+            type="button"
+            className={shell.paneTab}
+            onClick={() => onPick(sibling.id)}
+          >
+            {sibling.title}
+          </button>
+        ))}
+
+        {definition.hasFilter === true ? (
+          <>
+            <label className="sr-only" htmlFor={`filter-${props.api.id}`}>
+              Filter rows
+            </label>
+            <input
+              id={`filter-${props.api.id}`}
+              className={shell.paneFilter}
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="filter…"
+            />
+            <button
+              type="button"
+              className={shell.paneToggle}
+              aria-pressed={showTrivia}
+              onClick={() => setShowTrivia((current) => !current)}
+            >
+              trivia
+            </button>
+          </>
+        ) : null}
+
+        {definition.action === undefined ? null : (
+          <button
+            type="button"
+            className={shell.paneToggle}
+            onClick={() => definition.action?.run({ ...state, filter, showTrivia })}
+          >
+            {definition.action.label}
+          </button>
+        )}
+
+        <span className={shell.spacer} />
+        <span className={shell.paneMeta}>{result?.meta ?? ''}</span>
+      </div>
+
+      {result?.facts === undefined ? null : (
+        <div className={shell.factStrip}>
+          {result.facts.map((fact) => (
+            <span key={fact.text} data-tone={fact.tone ?? 'default'}>
+              {fact.text}
+            </span>
           ))}
-        </select>
-        {definition === undefined ? null : (
-          <span className={shell.panePhase}>{definition.phase}</span>
-        )}
-      </div>
-      <div className={shell.paneBody}>
-        {definition === undefined ? (
-          <p className={styles.emptyState}>Unknown view: {viewId}</p>
-        ) : (
-          definition.render(state)
-        )}
-      </div>
+        </div>
+      )}
+
+      {isSource ? (
+        <SourceBody state={state} />
+      ) : result?.unavailable !== undefined ? (
+        <EmptyState reason>{result.unavailable}</EmptyState>
+      ) : (
+        <RowList
+          rows={result?.rows ?? []}
+          cursor={state.cursor}
+          label={`${definition.title} rows`}
+        />
+      )}
+
+      {pickerOpen ? (
+        <PhasePicker active={definition.id} onPick={onPick} onClose={() => setPickerOpen(false)} />
+      ) : null}
     </div>
   )
 }
 
-const components = { source: SourcePane, view: ViewPane }
+const components = { source: ViewPane, view: ViewPane }
 
-/** Opened when there is no layout in the URL and nothing saved locally. */
-const defaultLayout = (api: DockviewApi): void => {
-  const source = api.addPanel({ id: 'source', component: 'source', title: 'Source' })
-  const mir = api.addPanel({
-    id: 'pane-mir',
+/**
+ * Opens a workspace's six panes as three columns of two.
+ *
+ * Order matters. Splitting a pane downward and *then* splitting the result rightward nests the
+ * new column inside the first column's row, and the six panes come out at wildly different sizes
+ * — dockview sizes each split relative to the panel it was given, so the errors compound.
+ * Building the three columns first and only then splitting each one downward keeps the tree two
+ * levels deep, which is the shape the 30/35/35 × 56/44 proportions can actually be applied to.
+ */
+const openWorkspace = (api: DockviewApi, workspace: Workspace): void => {
+  for (const panel of [...api.panels]) api.removePanel(panel)
+
+  const [a1, a2, b1, b2, c1, c2] = slotOrder.map((slot) => workspace.panes[slot])
+
+  const columnA = api.addPanel({
+    id: 'pane-a1',
     component: 'view',
-    title: 'MIR control flow',
-    params: { view: 'mir' },
-    position: { direction: 'right', referencePanel: source },
+    title: viewById(a1 as string)?.title ?? 'Source',
+    params: { view: a1 },
+  })
+  const columnB = api.addPanel({
+    id: 'pane-b1',
+    component: 'view',
+    title: viewById(b1 as string)?.title ?? '',
+    params: { view: b1 },
+    position: { direction: 'right', referencePanel: columnA },
+  })
+  const columnC = api.addPanel({
+    id: 'pane-c1',
+    component: 'view',
+    title: viewById(c1 as string)?.title ?? '',
+    params: { view: c1 },
+    position: { direction: 'right', referencePanel: columnB },
+  })
+
+  api.addPanel({
+    id: 'pane-a2',
+    component: 'view',
+    title: viewById(a2 as string)?.title ?? '',
+    params: { view: a2 },
+    position: { direction: 'below', referencePanel: columnA },
   })
   api.addPanel({
-    id: 'pane-backend',
+    id: 'pane-b2',
     component: 'view',
-    title: 'Backend output',
-    params: { view: 'backend' },
-    position: { direction: 'below', referencePanel: mir },
+    title: viewById(b2 as string)?.title ?? '',
+    params: { view: b2 },
+    position: { direction: 'below', referencePanel: columnB },
   })
   api.addPanel({
-    id: 'pane-diagnostics',
+    id: 'pane-c2',
     component: 'view',
-    title: 'Diagnostics',
-    params: { view: 'diagnostics' },
-    position: { direction: 'below', referencePanel: source },
+    title: viewById(c2 as string)?.title ?? '',
+    params: { view: c2 },
+    position: { direction: 'below', referencePanel: columnC },
   })
+
+  // Proportions are applied after the tree exists, because a split can only divide the space its
+  // reference panel already had — asking for 30/35/35 while building would be measured against
+  // whatever the previous split happened to leave.
+  const width = api.width
+  const height = api.height
+  if (width > 0 && height > 0) {
+    const top = Math.round(height * 0.56)
+    columnA.api.setSize({ width: Math.round(width * 0.3), height: top })
+    columnB.api.setSize({ width: Math.round(width * 0.35), height: top })
+    columnC.api.setSize({ width: Math.round(width * 0.35), height: top })
+  }
 }
 
 const storageKey = 'silk-labs-workbench-layout'
+
+const targets = [
+  'aarch64-apple-darwin',
+  'x86_64-unknown-linux-gnu',
+  'aarch64-unknown-linux-gnu',
+  'wasm32-unknown-unknown',
+] as const
+
+const profiles = ['debug', 'release', 'release-with-debug'] as const
 
 export function Workbench() {
   const [modules, setModules] = useState<Readonly<Record<string, string>>>(initialPreset.modules)
   const [root, setRoot] = useState<string>(initialPreset.root)
   const [activeModule, setActiveModule] = useState<string>(initialPreset.root)
+  const [programName, setProgramName] = useState<string>(initialPreset.label)
   // One optimization profile drives both panes. Codegen's debug-info mode is *derived* from it
   // rather than being its own control: the profile already says whether debug info is wanted
   // (`-g`), so a separate toggle only adds states where the two disagree — the backend pane
@@ -244,12 +391,13 @@ export function Workbench() {
   // The target belongs to the request, not to a backend: the same program lowers differently for
   // each, which is exactly the comparison the layout and MIR panes are for.
   const [target, setTarget] = useState<Target.Id>('aarch64-apple-darwin')
-  const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
-  const [selectedFlowId, setSelectedFlowId] = useState<string>()
+  const [cursor, setCursor] = useState<Span>()
   const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const [api, setApi] = useState<DockviewApi>()
-  const [theme, setTheme] = useState('dockview-theme-dark')
+  const [workspaces, setWorkspaces] = useState<ReadonlyArray<Workspace>>(seededWorkspaces)
+  const [activeWorkspace, setActiveWorkspace] = useState<string>('Backend triage')
   const paneCounter = useRef(0)
   const dockRef = useRef<HTMLDivElement>(null)
 
@@ -272,14 +420,28 @@ export function Workbench() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: the snapshot IS the dependency here
   useEffect(() => {
     setEvaluation(undefined)
-    setSelectedFlowId(undefined)
+    setCursor(undefined)
   }, [snapshot])
+
+  const analysis = useMemo(() => Analysis.rootAnalysis(snapshot), [snapshot])
+  const counts = useMemo(
+    () =>
+      diagnosticCounts(
+        diagnosticEntries(
+          analysis.syntax.lexicalDiagnostics,
+          analysis.syntax.parserDiagnostics,
+          analysis.diagnostics,
+        ),
+      ),
+    [analysis],
+  )
 
   const loadPreset = useCallback((preset: Preset) => {
     setModules(preset.modules)
     setRoot(preset.root)
     setActiveModule(preset.root)
-    setSelectedDiagnostic(undefined)
+    setProgramName(preset.label)
+    setCursor(undefined)
   }, [])
 
   const addModule = useCallback(() => {
@@ -295,22 +457,21 @@ export function Workbench() {
     })
   }, [])
 
-  const removeModule = useCallback(
-    (name: string) => {
-      setModules((current) => {
-        const { [name]: _removed, ...rest } = current
-        const remaining = Object.keys(rest)
-        if (remaining.length === 0) return current
-        // Removing the root would leave the request pointing at a module that is not there, so
-        // the root moves to whatever is left rather than the request becoming unloadable.
-        if (name === root) setRoot(remaining[0] as string)
-        setActiveModule((activeName) =>
-          activeName === name ? (remaining[0] as string) : activeName,
-        )
-        return rest
+  const addPane = useCallback(
+    (viewId: string) => {
+      if (api === undefined) return
+      const definition = viewById(viewId)
+      if (definition === undefined) return
+      paneCounter.current += 1
+      api.addPanel({
+        // Instance-keyed, not phase-keyed: opening MIR twice must produce two panes.
+        id: `pane-${viewId}-${paneCounter.current}`,
+        component: 'view',
+        title: definition.title,
+        params: { view: viewId },
       })
     },
-    [root],
+    [api],
   )
 
   // Publish current state to the panes, which live outside this component's React tree.
@@ -320,10 +481,8 @@ export function Workbench() {
     root,
     mode,
     profile,
-    selectedDiagnostic,
-    onSelectDiagnostic: setSelectedDiagnostic,
-    selectedFlowId,
-    onSelectFlow: setSelectedFlowId,
+    cursor,
+    onSelectSpan: setCursor,
     evaluation,
     // Evaluation runs the lowered MIR, which is absent when the target did not resolve.
     onEvaluate: () =>
@@ -331,23 +490,21 @@ export function Workbench() {
         Analysis.mirOf(snapshot)._tag === 'Available' ? Analysis.evaluate(snapshot) : undefined,
       ),
     setModuleSource: (name, value) => setModules((current) => ({ ...current, [name]: value })),
-    setProfile,
     openPalette: () => setPaletteOpen(true),
     addModule,
-    removeModule,
     setRoot,
     activeModule,
     setActiveModule,
+    addPane,
   }
   useEffect(notify)
 
-  // A palette anywhere in the page, so a preset is reachable without hunting for the source pane.
-  //
-  // Not ⌘K: fumadocs binds that to the docs search, and this page still carries the site nav.
-  // ⌘P leaves that alone and matches the "go to file" muscle memory from editors.
+  // ⌘P for the program palette, ⌘K for the pane palette. ⌘K used to belong to fumadocs' docs
+  // search, which this page no longer carries.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'p' && (event.metaKey || event.ctrlKey)) {
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (event.key === 'p') {
         event.preventDefault()
         setPaletteOpen((current) => !current)
       }
@@ -356,40 +513,11 @@ export function Workbench() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Follow the site's light/dark choice, which fumadocs writes onto <html>.
+  // Restore saved workspaces once, on mount.
   useEffect(() => {
-    const sync = (): void =>
-      setTheme(
-        document.documentElement.classList.contains('dark')
-          ? 'dockview-theme-dark'
-          : 'dockview-theme-light',
-      )
-    sync()
-    const observer = new MutationObserver(sync)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
+    const saved = decodeWorkspaces(window.localStorage.getItem(workspaceStorageKey))
+    if (saved.length > 0) setWorkspaces([...seededWorkspaces, ...saved])
   }, [])
-
-  /**
-   * Put the theme on `.dv-shell`.
-   *
-   * Dockview writes its own default theme class there, so passing `className` to
-   * `DockviewReact` adds a class rather than replacing the default — the old one has to come off
-   * explicitly or both are present and the loser is whichever the stylesheet orders last.
-   *
-   * Sizing is deliberately *not* done here. Dockview already sets `height: 100%` on its wrapper
-   * and shell, which is all they need; adding `flex: 1` on top sets `flex-basis: 0%`, and in a
-   * column flex container that zeroes the height and beats the percentage. The container just
-   * has to have a definite height of its own, which `.dock` does.
-   */
-  useEffect(() => {
-    const shellElement = dockRef.current?.querySelector('.dv-shell')
-    if (!(shellElement instanceof HTMLElement)) return
-    for (const candidate of [...shellElement.classList]) {
-      if (candidate.startsWith('dockview-theme-')) shellElement.classList.remove(candidate)
-    }
-    shellElement.classList.add(theme)
-  }, [api, theme])
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     setApi(event.api)
@@ -430,12 +558,13 @@ export function Workbench() {
             event.api.fromJSON(layout)
             return
           } catch {
-            // Fall through to the default layout.
+            // Fall through to the default workspace.
           }
         }
       }
 
-      defaultLayout(event.api)
+      const seeded = seededWorkspaces.find((entry) => entry.name === 'Backend triage')
+      if (seeded !== undefined) openWorkspace(event.api, seeded)
     }
 
     void restore()
@@ -476,30 +605,135 @@ export function Workbench() {
     }
   }, [api, modules, root, target])
 
-  const addPane = useCallback(
-    (viewId: string) => {
-      if (api === undefined) return
-      const definition = viewById(viewId)
-      if (definition === undefined) return
-      paneCounter.current += 1
-      api.addPanel({
-        // Instance-keyed, not phase-keyed: opening MIR twice must produce two panes.
-        id: `pane-${viewId}-${paneCounter.current}`,
-        component: 'view',
-        title: definition.title,
-        params: { view: viewId },
-      })
-    },
-    [api],
-  )
+  /** The span cursor read through every phase — the join that links the panes. */
+  const trail = useMemo(() => {
+    if (cursor === undefined) return []
+    const source = modules[root] ?? ''
+    const slice = source.slice(cursor.start, cursor.end)
+    const cells: Array<{ phase: string; value: string; missing?: boolean }> = [
+      { phase: 'src', value: slice.trim() === '' ? '—' : slice.trim() },
+    ]
+
+    const token = analysis.syntax.tokens.find(
+      (candidate) =>
+        candidate.span.start <= cursor.start && candidate.span.end >= cursor.end,
+    )
+    cells.push({ phase: 'cst', value: token?.kind ?? 'no token', missing: token === undefined })
+
+    const fn = analysis.hir.functions.find(
+      (candidate) =>
+        candidate.declaration.syntax.span.start <= cursor.start &&
+        candidate.declaration.syntax.span.end >= cursor.end,
+    )
+    cells.push({
+      phase: 'hir',
+      value:
+        fn === undefined
+          ? 'not elaborated'
+          : `fn#${fn.declaration.id.ordinal} ${
+              fn.contract._tag === 'Contract'
+                ? `(${fn.contract.parameters.join(', ')}) -> ${fn.contract.result}`
+                : 'contract unavailable'
+            }`,
+      missing: fn === undefined,
+    })
+
+    const mir = Analysis.mirOf(snapshot)
+    cells.push({
+      phase: 'mir',
+      value:
+        mir._tag === 'Available'
+          ? (mir.value.functions.find((candidate) =>
+              candidate.blocks.some((block) =>
+                block.operations.some(
+                  (operation) =>
+                    operation.provenance.span.start <= cursor.start &&
+                    operation.provenance.span.end >= cursor.end,
+                ),
+              ),
+            )?.id.name ?? 'no operation')
+          : 'unavailable',
+      missing: mir._tag !== 'Available',
+    })
+
+    return cells
+  }, [cursor, modules, root, analysis, snapshot])
+
+  const saveWorkspace = useCallback(() => {
+    if (api === undefined) return
+    const name = window.prompt('Name this workspace')
+    if (name === null || name.trim() === '') return
+    // A workspace is the *arrangement*, so it stores the views its panes currently show.
+    const panes = api.panels.slice(0, 6)
+    const entry: Workspace = {
+      name: name.trim(),
+      panes: Object.fromEntries(
+        slotOrder.map((slot, index) => [
+          slot,
+          (panes[index]?.params as { view?: string } | undefined)?.view ?? 'source',
+        ]),
+      ) as Workspace['panes'],
+    }
+    setWorkspaces((current) => {
+      const next = [...current.filter((candidate) => candidate.name !== entry.name), entry]
+      try {
+        window.localStorage.setItem(
+          workspaceStorageKey,
+          JSON.stringify(next.filter((candidate) => !seededWorkspaces.includes(candidate))),
+        )
+      } catch {
+        // Private-mode quota failures should not break the workbench.
+      }
+      return next
+    })
+    setActiveWorkspace(entry.name)
+  }, [api])
+
+  const moduleNames = Object.keys(modules)
 
   return (
-    <div className={shell.workbench}>
-      <div className={shell.toolbar}>
-        <h1 className={shell.toolbarTitle}>Compiler workbench</h1>
+    <div className={`${shell.workbench} workbenchRoot`}>
+      <div className={shell.appBar}>
+        <button
+          type="button"
+          className={shell.wordmark}
+          data-open={sidebarOpen}
+          onClick={() => setSidebarOpen((open) => !open)}
+          title={sidebarOpen ? 'Hide the program sidebar' : 'Show the program sidebar'}
+        >
+          silk
+        </button>
 
-        <button type="button" className={shell.toggle} onClick={() => setPaletteOpen(true)}>
-          Presets… <kbd className={shell.kbd}>⌘P</kbd>
+        <div className={shell.workspaces}>
+          {workspaces.map((workspace) => (
+            <button
+              key={workspace.name}
+              type="button"
+              className={shell.workspace}
+              data-active={workspace.name === activeWorkspace}
+              onClick={() => {
+                if (api === undefined) return
+                openWorkspace(api, workspace)
+                setActiveWorkspace(workspace.name)
+              }}
+            >
+              {workspace.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={shell.workspace}
+            onClick={saveWorkspace}
+            title="Save this arrangement as a workspace"
+          >
+            +
+          </button>
+        </div>
+
+        <button type="button" className={shell.barButton} onClick={() => setPaletteOpen(true)}>
+          <span className={shell.eyebrow}>prog</span>
+          <span className={shell.barValue}>{programName}</span>
+          <span className={shell.kbd}>⌘P</span>
         </button>
 
         <label className="sr-only" htmlFor="add-pane">
@@ -507,7 +741,7 @@ export function Workbench() {
         </label>
         <select
           id="add-pane"
-          className={shell.toggle}
+          className={shell.barButton}
           value=""
           onChange={(event) => {
             addPane(event.target.value)
@@ -515,7 +749,7 @@ export function Workbench() {
           }}
         >
           <option value="" disabled>
-            + Add pane
+            + pane
           </option>
           {views.map((view) => (
             <option key={view.id} value={view.id}>
@@ -526,62 +760,169 @@ export function Workbench() {
 
         <button
           type="button"
-          className={shell.toggle}
+          className={shell.barButton}
+          title="Reset to this workspace's arrangement"
           onClick={() => {
-            if (api === undefined) return
-            for (const panel of [...api.panels]) api.removePanel(panel)
-            defaultLayout(api)
+            const workspace = workspaces.find((entry) => entry.name === activeWorkspace)
+            if (api !== undefined && workspace !== undefined) openWorkspace(api, workspace)
           }}
         >
-          Reset layout
+          ↺
         </button>
 
-        <span className={shell.toolbarSpacer} />
+        <span className={shell.spacer} />
 
-        <label className="sr-only" htmlFor="target">
-          Compilation target
-        </label>
-        <select
-          id="target"
-          className={shell.toggle}
-          value={target}
-          onChange={(event) => setTarget(event.target.value as Target.Id)}
-        >
-          {(
-            [
-              'aarch64-apple-darwin',
-              'x86_64-unknown-linux-gnu',
-              'aarch64-unknown-linux-gnu',
-              'wasm32-unknown-unknown',
-            ] as const
-          ).map((candidate) => (
-            <option key={candidate} value={candidate}>
-              {candidate}
-            </option>
-          ))}
-        </select>
+        <span className={shell.barField}>
+          <span className={shell.eyebrow}>target</span>
+          <label className="sr-only" htmlFor="target">
+            Compilation target
+          </label>
+          <select
+            id="target"
+            className={shell.barSelect}
+            value={target}
+            onChange={(event) => setTarget(event.target.value as Target.Id)}
+          >
+            {targets.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+        </span>
 
-        <label className="sr-only" htmlFor="profile">
-          Optimization profile
-        </label>
-        <select
-          id="profile"
-          className={shell.toggle}
-          value={profile}
-          onChange={(event) => setProfile(event.target.value as ToolchainPlan.OptimizationProfile)}
-        >
-          {(['debug', 'release', 'release-with-debug'] as const).map((candidate) => (
-            <option key={candidate} value={candidate}>
-              {candidate}
-            </option>
-          ))}
-        </select>
+        <span className={shell.barField}>
+          <span className={shell.eyebrow}>profile</span>
+          <label className="sr-only" htmlFor="profile">
+            Optimization profile
+          </label>
+          <select
+            id="profile"
+            className={shell.barSelect}
+            value={profile}
+            onChange={(event) =>
+              setProfile(event.target.value as ToolchainPlan.OptimizationProfile)
+            }
+          >
+            {profiles.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+        </span>
+
+        <div className={shell.health}>
+          <span className={shell.healthItem} data-state={counts.errors === 0 ? 'ok' : 'error'}>
+            <i className={shell.healthDot} aria-hidden="true" />
+            {counts.errors} err
+          </span>
+          <span className={shell.healthItem}>{analysis.hir.functions.length} fn</span>
+        </div>
       </div>
 
-      <div className={shell.dockFrame}>
-        <div className={shell.dock} ref={dockRef}>
-          <DockviewReact components={components} onReady={onReady} />
+      <div className={shell.body}>
+        {sidebarOpen ? (
+          <div className={shell.sidebar}>
+            <div className={shell.sidebarHeader}>
+              <span className={shell.eyebrow}>program</span>
+              <span className={shell.spacer} />
+              <button
+                type="button"
+                className={shell.sidebarButton}
+                onClick={addModule}
+                title="Add a module"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className={shell.sidebarButton}
+                onClick={() => setSidebarOpen(false)}
+                title="Hide sidebar"
+              >
+                ‹
+              </button>
+            </div>
+            <div className={shell.sidebarScroll}>
+              <div className={shell.sidebarSection}>
+                modules<span className={shell.sidebarCount}>{moduleNames.length}</span>
+              </div>
+              {moduleNames.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className={shell.sidebarRow}
+                  data-active={name === activeModule}
+                  onClick={() => setActiveModule(name)}
+                >
+                  <span className={shell.sidebarRowName}>{name}</span>
+                  {name === root ? <i className={shell.rootDot} title="root module" /> : null}
+                  <span className={shell.sidebarRowMeta}>
+                    {(modules[name] ?? '').length} B
+                  </span>
+                </button>
+              ))}
+
+              <div className={`${shell.sidebarSection} ${shell.sidebarDivider}`}>
+                presets<span className={shell.sidebarCount}>{presets.length}</span>
+              </div>
+              {presetGroups.map(([group, entries]) => (
+                <button
+                  key={group}
+                  type="button"
+                  className={shell.sidebarRow}
+                  onClick={() => setPaletteOpen(true)}
+                >
+                  <span className={shell.sidebarRowName}>{group}</span>
+                  <span className={shell.sidebarRowMeta}>{entries.length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className={shell.dockFrame}>
+          <div className={shell.dock} ref={dockRef}>
+            <DockviewReact components={components} onReady={onReady} />
+          </div>
         </div>
+      </div>
+
+      <div className={shell.spanBar}>
+        <span className={shell.spanCursor}>
+          <i className={shell.spanDot} aria-hidden="true" />
+          <span className={shell.eyebrow}>span</span>
+          <span className={shell.spanValue}>
+            {cursor === undefined ? '—' : `[${cursor.start}, ${cursor.end})`}
+          </span>
+        </span>
+        {trail.map((cell) => (
+          <span key={cell.phase} className={shell.spanCell}>
+            <span className={shell.spanCellPhase}>{cell.phase}</span>
+            <span
+              className={shell.spanCellValue}
+              data-tone={cell.missing === true ? 'missing' : undefined}
+            >
+              {cell.value}
+            </span>
+          </span>
+        ))}
+        <span className={shell.spacer} />
+        {cursor === undefined ? (
+          <span className={shell.spanHint}>click any row in any pane to move the span cursor</span>
+        ) : null}
+      </div>
+
+      <div className={shell.statusBar}>
+        <span className={shell.statusCell} data-tone={counts.errors === 0 ? 'ok' : 'error'}>
+          {counts.errors === 0 ? 'syntax ok' : `${counts.errors} error`}
+        </span>
+        <span className={shell.statusCell}>{analysis.hir.functions.length} fn</span>
+        <span className={shell.statusCell}>{moduleNames.length} mod</span>
+        <span className={shell.spacer} />
+        <span className={shell.statusEnd}>layout · {activeWorkspace}</span>
+        <span className={shell.statusEnd}>url synced</span>
       </div>
 
       <PresetPalette

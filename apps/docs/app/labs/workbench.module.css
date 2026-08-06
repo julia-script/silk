@@ -1,80 +1,337 @@
 /*
- * Chrome for the workbench. Pane arrangement belongs to dockview; this file styles the toolbar
- * and the inside of a pane. Panel *contents* keep using syntax-inspector.module.css.
+ * Workbench chrome: app bar, sidebar, pane header, span bar, status bar.
+ *
+ * Pane *arrangement* still belongs to dockview and pane *contents* to the row grammar. What
+ * changed is the budget: the old chrome spent ~72px per pane (a 35px dockview tab strip plus a
+ * ~37px picker row), and this spends 22. Four panes used to fit at 1232×750; six do now.
+ *
+ * No border-radius anywhere except the 4px state dots, and no shadows except the picker menu.
+ * The reference is Figma's flatness with Blender's pane density.
  */
 
 .workbench {
+  position: fixed;
   display: flex;
-  min-height: 0;
-  flex: 1;
   flex-direction: column;
-  /* Dockview measures itself against a real height, so the shell must be given one rather than
-     growing with its content. Filling the flex parent beats subtracting a nav height from
-     `100vh`: the nav is laid out above this element, so a viewport-height box overflows by
-     exactly the nav, and there is no reliable variable to subtract. */
+  inset: 0;
+  background: var(--wb-bg-deep);
+  color: var(--wb-ink);
+  font-family: var(--wb-font);
+  font-size: 11px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
-.toolbar {
+/* ── app bar ──────────────────────────────────────────────────────────────── */
+
+.appBar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  border-bottom: 1px solid var(--color-fd-border);
-  padding: 0.55rem 0.9rem;
-}
-
-.toolbarTitle {
-  margin: 0 0.5rem 0 0;
-  color: var(--color-fd-foreground);
-  font-size: 0.9rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  flex: none;
+  align-items: stretch;
+  height: 32px;
+  border-bottom: 1px solid var(--wb-hairline-strong);
+  background: var(--wb-bg-bar);
+  overflow: hidden;
   white-space: nowrap;
 }
 
-.toolbarSpacer {
+.wordmark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 0 10px 0 9px;
+  border: 0;
+  border-right: 1px solid var(--wb-hairline-strong);
+  background: transparent;
+  color: var(--wb-ink-4);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wordmark:hover,
+.wordmark[data-open='true'] {
+  background: var(--wb-active);
+  color: var(--wb-ink);
+}
+
+.workspaces {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  border-right: 1px solid var(--wb-hairline-strong);
+}
+
+.workspace {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid #1c1a18;
+  background: transparent;
+  color: var(--wb-ink-4);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.workspace:hover {
+  color: var(--wb-ink);
+}
+
+.workspace[data-active='true'] {
+  background: var(--wb-active-strong);
+  color: var(--wb-ink);
+}
+
+.barButton {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid var(--wb-hairline-strong);
+  background: transparent;
+  color: var(--wb-ink-4);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.barButton:hover {
+  background: var(--wb-active);
+  color: var(--wb-ink);
+}
+
+.barValue {
+  color: var(--wb-ink);
+}
+
+.eyebrow {
+  color: var(--wb-ink-4);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.kbd {
+  color: var(--wb-ink-4);
+  font-size: 9px;
+}
+
+.spacer {
   flex: 1;
 }
 
-.toggle {
-  border: 1px solid var(--color-fd-border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-fd-card) 92%, transparent);
-  padding: 0.24rem 0.68rem;
-  color: var(--color-fd-muted-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.7rem;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.toggle:hover,
-.toggle:focus-visible {
-  border-color: color-mix(in srgb, var(--color-fd-primary) 45%, var(--color-fd-border));
-  color: var(--color-fd-foreground);
-}
-
-.toggle[aria-pressed='true'] {
-  border-color: color-mix(in srgb, var(--color-fd-primary) 55%, transparent);
-  background: color-mix(in srgb, var(--color-fd-primary) 14%, transparent);
-  color: var(--color-fd-foreground);
-}
-
 /*
- * Dockview fills whatever is left under the toolbar.
+ * Target and profile as plain labelled text.
  *
- * `DockviewReact` renders a themed wrapper div and puts `.dv-dockview` *inside* it, so both
- * levels need to stretch — sizing only the outer one leaves the grid itself at its default
- * height, and dockview then measures that and lays the panes out in a sliver.
+ * A native `<select>` keeps the keyboard and screen-reader behaviour for free; the border and
+ * background are stripped so it reads as bar text rather than as a control.
  */
-/*
- * Dockview sizes its wrapper and shell with `height: 100%`, so this container must resolve to a
- * definite height for those percentages to mean anything. `position: relative` + absolute inset
- * gives one that does not depend on flex basis resolution — `flex: 1` here would leave the
- * children resolving 100% against an indefinite height and collapsing to zero.
- */
+.barSelect {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid var(--wb-hairline-strong);
+  background: transparent;
+  color: var(--wb-ink);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.barSelect:hover {
+  background: var(--wb-active);
+}
+
+.barField {
+  display: flex;
+  flex: none;
+  align-items: center;
+  border-left: 1px solid var(--wb-hairline-strong);
+}
+
+.barField .eyebrow {
+  padding-left: 10px;
+}
+
+/* The glance target: errors, emitted size, wall time. */
+.health {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 0 11px;
+  border-left: 1px solid var(--wb-hairline-strong);
+}
+
+.healthItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--wb-ink-3);
+  font-size: 10px;
+}
+
+.healthDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--wb-green);
+}
+
+.healthItem[data-state='error'] {
+  color: var(--wb-error-ink);
+}
+
+.healthItem[data-state='error'] .healthDot {
+  background: var(--wb-error);
+}
+
+/* ── body ─────────────────────────────────────────────────────────────────── */
+
+.body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.sidebar {
+  display: flex;
+  flex: none;
+  width: 178px;
+  flex-direction: column;
+  border-right: 1px solid var(--wb-hairline-strong);
+  background: var(--wb-bg-bar);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebarHeader {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: var(--wb-bar-h);
+  border-bottom: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-header);
+}
+
+.sidebarHeader .eyebrow {
+  padding: 0 8px;
+  letter-spacing: 0.12em;
+}
+
+.sidebarButton {
+  display: grid;
+  width: 20px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--wb-ink-4);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.sidebarButton:hover {
+  color: var(--wb-ink);
+}
+
+.sidebarScroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 3px 0;
+}
+
+.sidebarSection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--wb-strip-h);
+  padding: 0 8px;
+  color: var(--wb-ink-4);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sidebarSection + .sidebarSection,
+.sidebarDivider {
+  margin-top: 6px;
+  border-top: 1px solid var(--wb-hairline);
+}
+
+.sidebarCount {
+  color: #6b645c;
+}
+
+.sidebarRow {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  height: var(--wb-strip-h);
+  padding-right: 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--wb-ink-2);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebarRow:hover {
+  background: #1c1a18;
+}
+
+.sidebarRow[data-active='true'] {
+  border-left-color: var(--wb-amber);
+  background: var(--wb-active);
+  color: var(--wb-ink);
+}
+
+.sidebarRowName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebarRowMeta {
+  flex: none;
+  margin-left: 7px;
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rootDot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--wb-amber);
+}
+
+/* ── pane grid ────────────────────────────────────────────────────────────── */
+
 .dockFrame {
   position: relative;
+  min-width: 0;
   min-height: 0;
   flex: 1;
 }
@@ -84,146 +341,377 @@
   inset: 0;
 }
 
-/*
- * `DockviewReact` renders an *unclassed* wrapper around `.dv-shell`, and dockview's stylesheet
- * gives neither of them a height — the shell is positioned internally and assumes its container
- * is already sized. Left alone the chain collapses to zero and every pane lands in a ~100px
- * sliver.
- *
- * These rules are applied imperatively in `workbench.tsx` rather than from here: the wrapper
- * carries no class of ours to hook, and a descendant selector on dockview's own class names is
- * a bet on its internal DOM staying put across upgrades.
- */
-
 .pane,
 .sourcePane {
   display: flex;
   height: 100%;
+  min-width: 0;
   flex-direction: column;
   overflow: hidden;
+  background: var(--wb-bg-pane);
 }
 
+/*
+ * One 22px bar per pane, and it is also the drag handle.
+ *
+ * The dockview tab strip is hidden (see `:global(.dv-tabs-and-actions-container)` below), so
+ * this bar carries what the strip and the old picker row carried between them: the phase picker,
+ * sibling phases, any pane-local control, and the pane's own meta.
+ */
 .paneBar {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 0.5rem;
-  border-bottom: 1px solid var(--color-fd-border);
-  padding: 0.35rem 0.6rem;
+  height: var(--wb-bar-h);
+  border-bottom: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-header);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-/* The pane's content picker: this is what lets any pane become any phase. */
 .panePicker {
-  border: 1px solid var(--color-fd-border);
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--color-fd-card) 92%, transparent);
-  padding: 0.15rem 0.4rem;
-  color: var(--color-fd-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.7rem;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--wb-hairline);
+  background: transparent;
+  color: var(--wb-ink);
+  font: inherit;
+  font-size: 10.5px;
   cursor: pointer;
 }
 
-.panePhase {
-  color: var(--color-fd-muted-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.13em;
+.panePicker:hover,
+.panePicker[data-open='true'] {
+  background: #1c1a18;
+}
+
+.paneDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #a89b8b;
+}
+
+.paneCaret {
+  color: var(--wb-ink-4);
+  font-size: 8px;
+}
+
+/* Sibling phases from the same group: one click to switch, no menu. */
+.paneTab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--wb-hairline);
+  background: transparent;
+  color: var(--wb-ink-3);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.paneTab:hover {
+  color: var(--wb-ink);
+}
+
+.paneFilter {
+  min-width: 40px;
+  flex: 1;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--wb-hairline);
+  background: transparent;
+  color: var(--wb-ink);
+  font: inherit;
+  font-size: 10px;
+  outline: none;
+}
+
+.paneToggle {
+  flex: none;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--wb-hairline);
+  background: transparent;
+  color: var(--wb-ink-4);
+  font: inherit;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.paneToggle[aria-pressed='true'] {
+  background: var(--wb-active-strong);
+  color: var(--wb-ink);
+}
+
+.paneMeta {
+  flex: none;
+  padding: 0 8px;
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
+}
+
+/* A headline result that is one line gets a strip, not a card grid. */
+.factStrip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+  height: var(--wb-strip-h);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-strip);
+  overflow: hidden;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.factStrip [data-tone='symbol'] {
+  color: var(--wb-amber);
+}
+
+.factStrip [data-tone='ok'] {
+  color: var(--wb-green-ink);
+}
+
+.factStrip [data-tone='warning'] {
+  color: var(--wb-warn);
+}
+
+.factStrip [data-tone='muted'] {
+  color: var(--wb-ink-3);
+}
+
+.pickerMenu {
+  position: absolute;
+  z-index: 20;
+  top: var(--wb-bar-h);
+  left: 0;
+  width: 214px;
+  max-height: 340px;
+  border: 1px solid #34302c;
+  border-top: 0;
+  background: var(--wb-active);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 55%);
+  overflow: auto;
+}
+
+.pickerOption {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  height: 21px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--wb-ink-2);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pickerOption:hover {
+  background: #252119;
+  color: var(--wb-ink);
+}
+
+.pickerOption[data-active='true'] {
+  background: var(--wb-active-strong);
+  color: var(--wb-ink);
+}
+
+.pickerTag {
+  flex: none;
+  width: 26px;
+  color: var(--wb-ink-4);
+  font-size: 9px;
+}
+
+.pickerTitle {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pickerPhase {
+  flex: none;
+  color: var(--wb-ink-4);
+  font-size: 9px;
+}
+
+/* ── source pane ──────────────────────────────────────────────────────────── */
+
+.editor {
+  min-height: 0;
+  flex: 1;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--wb-ink);
+  font-family: var(--wb-font);
+  font-size: 11.5px;
+  line-height: 19px;
+  resize: none;
+  outline: none;
+  tab-size: 2;
+}
+
+.sourceFooter {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: var(--wb-strip-h);
+  padding: 0 8px;
+  border-top: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-header);
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
+}
+
+/* ── span bar + status bar ────────────────────────────────────────────────── */
+
+/*
+ * The span cursor read through every phase.
+ *
+ * The phases were already comparable but not *linked* — this bar is the link made visible, and
+ * it is why every row carries a byte span.
+ */
+.spanBar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 26px;
+  border-top: 1px solid var(--wb-hairline-strong);
+  background: var(--wb-bg-header);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.spanCursor {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 9px;
+  border-right: 1px solid var(--wb-hairline);
+  background: var(--wb-active);
+}
+
+.spanDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--wb-violet);
+}
+
+.spanValue {
+  color: var(--wb-ink);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.spanCell {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 9px;
+  border-right: 1px solid var(--wb-hairline);
+}
+
+.spanCellPhase {
+  color: var(--wb-ink-4);
+  font-size: 9px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.paneBody {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 0.6rem 0.75rem;
+.spanCellValue {
+  color: var(--wb-ink-2);
+  font-size: 10.5px;
 }
 
-.kbd {
-  margin-left: 0.3rem;
-  border: 1px solid var(--color-fd-border);
-  border-radius: 0.25rem;
-  padding: 0 0.22rem;
-  font-size: 0.62rem;
+.spanCellValue[data-tone='missing'] {
+  color: var(--wb-ink-4);
 }
 
-/* One tab per module of the compilation request. */
-.moduleBar {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--color-fd-border);
-  padding: 0.3rem 0.5rem;
+.spanHint {
+  padding: 0 10px;
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
 }
 
-.moduleTab {
+.statusBar {
   display: flex;
   flex: none;
   align-items: center;
-  border: 1px solid transparent;
-  border-radius: 0.35rem;
+  height: 20px;
+  border-top: 1px solid var(--wb-hairline-strong);
+  background: var(--wb-bg-bar);
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.moduleTab button {
-  border: 0;
-  background: transparent;
-  padding: 0.15rem 0.4rem;
-  color: var(--color-fd-muted-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.7rem;
-  cursor: pointer;
+.statusCell {
+  padding: 0 9px;
+  border-right: 1px solid var(--wb-hairline);
 }
 
-.moduleTab[data-active='true'] {
-  border-color: color-mix(in srgb, var(--color-fd-primary) 45%, transparent);
-  background: color-mix(in srgb, var(--color-fd-primary) 12%, transparent);
+.statusCell[data-tone='error'] {
+  color: var(--wb-error-ink);
 }
 
-.moduleTab[data-active='true'] button {
-  color: var(--color-fd-foreground);
+.statusCell[data-tone='ok'] {
+  color: var(--wb-ink-3);
 }
 
-/* Marks the module the compilation request is rooted at. */
-.rootDot {
-  display: inline-block;
-  width: 0.32rem;
-  height: 0.32rem;
-  margin-left: 0.3rem;
-  border-radius: 50%;
-  background: var(--color-fd-primary);
-  vertical-align: middle;
+.statusEnd {
+  padding: 0 9px;
+  border-right: 0;
+  border-left: 1px solid var(--wb-hairline);
 }
 
-.moduleClose {
-  opacity: 0.55;
-  padding: 0 0.25rem 0 0 !important;
+/* ── dockview overrides ───────────────────────────────────────────────────── */
+
+/*
+ * Hide dockview's tab strip: each pane's own 22px bar replaces it.
+ *
+ * Zeroing the height variable is what dockview documents for this, and it keeps the container in
+ * the DOM so dockview's own drag bookkeeping still works — `display: none` breaks pane dragging.
+ */
+.dock :global(.dv-tabs-and-actions-container) {
+  --dv-tabs-and-actions-container-height: 0;
+  height: 0;
+  overflow: hidden;
 }
 
-.moduleClose:hover {
-  opacity: 1;
+.dock :global(.dv-groupview) {
+  background: var(--wb-bg-pane);
 }
 
-.moduleAdd {
-  flex: none;
-  border: 1px solid var(--color-fd-border);
-  border-radius: 0.35rem;
-  background: transparent;
-  padding: 0.1rem 0.4rem;
-  color: var(--color-fd-muted-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.68rem;
-  cursor: pointer;
+.dock :global(.dv-void-container) {
+  background: var(--wb-bg-deep);
 }
 
-.moduleAdd:hover {
-  border-color: color-mix(in srgb, var(--color-fd-primary) 45%, var(--color-fd-border));
-  color: var(--color-fd-foreground);
-}
-
-.sourcePane .editorFill {
-  min-height: 0;
-  flex: 1;
-  resize: none;
-  border-bottom: 0;
+/* Pane gaps read as hairlines rather than as gutters. */
+.dock :global(.dv-sash) {
+  background: var(--wb-hairline-strong);
 }
