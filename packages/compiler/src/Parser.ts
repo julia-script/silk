@@ -146,8 +146,12 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'RightBracket',
   'LeftBrace',
   'RightBrace',
+  'Equals',
   'LetKeyword',
   'IfKeyword',
+  'WhileKeyword',
+  'BreakKeyword',
+  'ContinueKeyword',
   'ReturnKeyword',
   'ElseKeyword',
   'PubKeyword',
@@ -735,12 +739,17 @@ const parseReturnStatement = (initial: State): NodeResult => {
 
 const parseBindingStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'LetKeyword', [
+    'MutKeyword',
     'Identifier',
     'Equals',
     'ReturnKeyword',
     'RightBrace',
   ])
-  const name = expect(keyword.state, 'Identifier', [
+  const mut =
+    nextSignificantKind(keyword.state) === 'MutKeyword'
+      ? expect(keyword.state, 'MutKeyword', ['Identifier', 'Equals', 'RightBrace'])
+      : Object.freeze({ state: keyword.state, elements: Object.freeze([]) })
+  const name = expect(mut.state, 'Identifier', [
     'Equals',
     'LetKeyword',
     'ReturnKeyword',
@@ -757,7 +766,31 @@ const parseBindingStatement = (initial: State): NodeResult => {
     state: expression.state,
     node: syntaxNode(expression.state, 'BindingStatement', [
       ...keyword.elements,
+      ...mut.elements,
       ...name.elements,
+      ...equals.elements,
+      expression.node,
+    ]),
+  })
+}
+
+const parseAssignmentStatement = (initial: State): NodeResult => {
+  const place = parseProjectionChain(parseIdentifierExpression(initial))
+  const equals = expect(place.state, 'Equals', [
+    ...expressionStarts,
+    'LetKeyword',
+    'IfKeyword',
+    'WhileKeyword',
+    'BreakKeyword',
+    'ContinueKeyword',
+    'ReturnKeyword',
+    'RightBrace',
+  ])
+  const expression = parseExpression(equals.state, 0, 'Identifier')
+  return Object.freeze({
+    state: expression.state,
+    node: syntaxNode(expression.state, 'AssignmentStatement', [
+      place.node,
       ...equals.elements,
       expression.node,
     ]),
@@ -788,10 +821,47 @@ function parseConditionalStatement(initial: State): NodeResult {
   })
 }
 
+function parseWhileStatement(initial: State): NodeResult {
+  const keyword = expect(initial, 'WhileKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
+  const condition = parseExpression(keyword.state, 0, 'Identifier', false)
+  const body = parseBlock(condition.state, false)
+  return Object.freeze({
+    state: body.state,
+    node: syntaxNode(body.state, 'WhileStatement', [
+      ...keyword.elements,
+      condition.node,
+      body.node,
+    ]),
+  })
+}
+
+const parseTransferStatement = (
+  initial: State,
+  keyword: 'BreakKeyword' | 'ContinueKeyword',
+  kind: 'BreakStatement' | 'ContinueStatement',
+): NodeResult => {
+  const result = expect(initial, keyword, [
+    'LetKeyword',
+    'IfKeyword',
+    'WhileKeyword',
+    'BreakKeyword',
+    'ContinueKeyword',
+    'ReturnKeyword',
+    'RightBrace',
+  ])
+  return Object.freeze({
+    state: result.state,
+    node: syntaxNode(result.state, kind, result.elements),
+  })
+}
+
 function parseBlock(initial: State, requireReturn: boolean): NodeResult {
   const leftBrace = expect(initial, 'LeftBrace', [
     'LetKeyword',
     'IfKeyword',
+    'WhileKeyword',
+    'BreakKeyword',
+    'ContinueKeyword',
     'ReturnKeyword',
     ...expressionStarts,
     'RightBrace',
@@ -801,13 +871,29 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
   let sawReturn = false
 
   let kind = nextSignificantKind(state)
-  while (kind === 'LetKeyword' || kind === 'ReturnKeyword' || kind === 'IfKeyword') {
+  while (
+    kind === 'LetKeyword' ||
+    kind === 'ReturnKeyword' ||
+    kind === 'IfKeyword' ||
+    kind === 'WhileKeyword' ||
+    kind === 'BreakKeyword' ||
+    kind === 'ContinueKeyword' ||
+    (kind === 'Identifier' && significantKindAfter(state, 1) !== 'Colon')
+  ) {
     const statement =
       kind === 'LetKeyword'
         ? parseBindingStatement(state)
         : kind === 'IfKeyword'
           ? parseConditionalStatement(state)
-          : parseReturnStatement(state)
+          : kind === 'WhileKeyword'
+            ? parseWhileStatement(state)
+            : kind === 'BreakKeyword'
+              ? parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
+              : kind === 'ContinueKeyword'
+                ? parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
+                : kind === 'Identifier'
+                  ? parseAssignmentStatement(state)
+                  : parseReturnStatement(state)
     if (kind === 'ReturnKeyword') sawReturn = true
     children = Object.freeze([...children, statement.node])
     state = statement.state
@@ -823,6 +909,9 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
   const rightBrace = expect(state, 'RightBrace', [
     'LetKeyword',
     'IfKeyword',
+    'WhileKeyword',
+    'BreakKeyword',
+    'ContinueKeyword',
     'ReturnKeyword',
     'ElseKeyword',
     'PubKeyword',

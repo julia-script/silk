@@ -17,6 +17,7 @@ import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@sil
 import { backendEmission, execute, toolchainCommands } from './panels'
 import {
   arrayValueRows,
+  backendControlRows,
   backendTextRows,
   closureRows,
   evaluationRows,
@@ -393,7 +394,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
   },
   {
     id: 'mir',
-    title: 'MIR control flow',
+    title: 'Control DAG',
     phase: 'lowering',
     tag: 'MIR',
     group: 'backend',
@@ -404,10 +405,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
       if (mir._tag !== 'Available') {
         return { rows: noRows, unavailable: `MIR unavailable — ${mir.error.message}` }
       }
-      const blocks = mir.value.functions.reduce((total, fn) => total + fn.blocks.length, 0)
+      const regions = mir.value.functions.reduce((total, fn) => total + fn.regions.length, 0)
       return {
         rows: mirRows(mir.value, (span) => onSelectSpan(span)),
-        meta: `${mir.value.functions.length} fn · ${blocks} bb`,
+        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}`,
       }
     },
   },
@@ -417,7 +418,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     phase: 'backend',
     tag: 'IR',
     group: 'backend',
-    project: ({ snapshot, mode }) => {
+    project: ({ snapshot, mode, onSelectSpan }) => {
       const emission = backendEmission(snapshot, mode)
       if (emission._tag === 'Rejected') {
         return {
@@ -498,6 +499,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         rows: [
           ...symbolRows(artifact.symbols),
           ...executionRows,
+          ...backendControlRows(artifact.control, (span) => onSelectSpan(span)),
           ...backendTextRows(artifact.ir),
           ...(runnable ? hexRows(artifact.bitcode) : []),
         ],

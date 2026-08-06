@@ -15,31 +15,18 @@ import * as Target from './Target.js'
 
 /**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
- * same MIR subset the bootstrap LLVM backend covers: `I32` locals, trapping arithmetic,
- * non-trapping comparisons, direct calls, and arbitrary basic-block control flow.
+ * same MIR subset the bootstrap LLVM backend covers: logical scalar/aggregate locals, trapping
+ * arithmetic, direct calls, checked replacement, and canonical structured control regions.
  *
  * The artifact reuses the nominal `Backend.Artifact` shape: `bitcode` carries the wasm binary and
  * `ir` carries the WAT inspection text, mirroring how the LLVM backend pairs bitcode with IR text.
  */
 
 /**
- * MIR keeps the structure the source had: lowering builds branch diamonds from `if` statements
- * with explicit join blocks, and the language has no loops, so a function's CFG is a DAG whose
- * edges always run forward in block order. That shape is a property of MIR every backend may
- * rely on — MIR is backend-neutral, not structureless. Consuming a DAG is each backend's own
- * job, done the way its target demands: the LLVM backend emits the blocks as-is because LLVM
- * takes an arbitrary CFG, and this backend recovers `if`/`else` because WebAssembly requires
- * structured control flow. Neither shape belongs in MIR, which is why the translation lives
- * here rather than in lowering.
- *
- * A `Branch` becomes a wasm `if`/`else` whose arms are the sub-CFGs reachable from each
- * successor before they reconverge; the reconvergence point — the join block — is emitted after
- * the `if` closes, which is exactly where lowering put it. `Jump` needs no instruction at all
- * when its target is that join, since emission continues there anyway.
- *
- * ponytail: assumes the forward-only DAG lowering produces today, asserted per function before
- * emission. Loops would add back-edges, at which point this backend needs a loop construct and
- * `requireForwardDag` fails loudly instead of emitting something subtly wrong.
+ * MIR already publishes a backend-neutral structured DAG. This backend consumes its conditional
+ * and loop regions directly: a loop becomes an exit `block` containing a repeat `loop`, and
+ * lexical `Repeat`/`Exit` outcomes become exact `br` depths through the active label stack. It
+ * never reconstructs source structure from a CFG and never introduces a dispatch loop.
  */
 
 /** The wasm value type every MIR `I32` and `Bool` local lowers to. */
@@ -360,6 +347,95 @@ const emitOperation = (
       }
       return instructions
     }
+    case 'CheckPlace': {
+      const instructions: Array<Instr.Instr> = []
+      for (const selector of operation.selectors) {
+        if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
+        instructions.push(
+          Instr.localGet(scalar(selector.index.local)),
+          Instr.i32Const(selector.length),
+          Instr.op('i32.lt_u'),
+          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+        )
+      }
+      return instructions
+    }
+    case 'WritePlace': {
+      if (operation.selectors.length === 0) {
+        return copy(slots(operation.source), slots(operation.root))
+      }
+      const rootLanes = layout.lanes.at(operation.root.ordinal) ?? []
+      const rootSlots = slots(operation.root)
+      const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+      const sourceSlots = slots(operation.source)
+      const instructions: Array<Instr.Instr> = []
+      for (const [rootOrdinal, rootLane] of rootLanes.entries()) {
+        const conditions: Array<{ readonly local: Mir.LocalId; readonly element: number }> = []
+        let matches = true
+        for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
+          const physical = rootLane.path.at(selectorOrdinal)
+          if (physical === undefined) {
+            matches = false
+            break
+          }
+          if (selector._tag === 'FieldSelector') {
+            if (
+              physical._tag !== 'FieldId' ||
+              physical.ordinal !== selector.field.ordinal ||
+              physical.struct.sourceId !== selector.field.struct.sourceId ||
+              physical.struct.ordinal !== selector.field.struct.ordinal
+            ) {
+              matches = false
+              break
+            }
+          } else if (physical._tag !== 'ElementSelector') {
+            matches = false
+            break
+          } else if (selector.index._tag === 'Proven') {
+            if (physical.index !== selector.index.value) {
+              matches = false
+              break
+            }
+          } else {
+            conditions.push(Object.freeze({ local: selector.index.local, element: physical.index }))
+          }
+        }
+        if (!matches) continue
+        const suffix = rootLane.path.slice(operation.selectors.length)
+        const sourceOrdinal = sourceLanes.findIndex(
+          (lane) =>
+            lane.path.length === suffix.length &&
+            lane.path.every((physical, ordinal) => {
+              const expected = suffix.at(ordinal)
+              if (expected === undefined || physical._tag !== expected._tag) return false
+              return physical._tag === 'ElementSelector'
+                ? expected._tag === 'ElementSelector' && physical.index === expected.index
+                : expected._tag === 'FieldId' &&
+                    physical.ordinal === expected.ordinal &&
+                    physical.struct.sourceId === expected.struct.sourceId &&
+                    physical.struct.ordinal === expected.struct.ordinal
+            }),
+        )
+        const source = sourceSlots.at(sourceOrdinal)
+        const destination = rootSlots.at(rootOrdinal)
+        if (source === undefined || destination === undefined) {
+          throw new RangeError(`Wasm backend could not realize place-write lane ${rootOrdinal}`)
+        }
+        const assignment = [Instr.localGet(source), Instr.localSet(destination)]
+        if (conditions.length === 0) {
+          instructions.push(...assignment)
+          continue
+        }
+        const condition = conditions.flatMap((element, ordinal) => [
+          Instr.localGet(scalar(element.local)),
+          Instr.i32Const(element.element),
+          Instr.op('i32.eq'),
+          ...(ordinal === 0 ? [] : [Instr.op('i32.and')]),
+        ])
+        instructions.push(...condition, Instr.ifElse(Instr.emptyBlockType, assignment, []))
+      }
+      return instructions
+    }
     case 'Drop':
       // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
       return []
@@ -392,7 +468,11 @@ const emitOperation = (
       }
       return [
         ...checkedArithmetic(
-          operation.operator as OverflowShape,
+          operation.operator === 'Add'
+            ? 'Add'
+            : operation.operator === 'Subtract'
+              ? 'Subtract'
+              : 'Multiply',
           scalar(operation.left),
           scalar(operation.right),
           layout.scratch,
@@ -403,159 +483,119 @@ const emitOperation = (
   }
 }
 
-/** The successor blocks one terminator can transfer control to, in emission order. */
-const successors = (terminator: Mir.Terminator): ReadonlyArray<number> => {
-  switch (terminator._tag) {
-    case 'Jump':
-      return [terminator.target.ordinal]
-    case 'Branch':
-      return [terminator.taken.ordinal, terminator.otherwise.ordinal]
-    default:
-      return []
-  }
+type Label =
+  | { readonly _tag: 'If' }
+  | { readonly _tag: 'Repeat'; readonly loop: number }
+  | { readonly _tag: 'Exit'; readonly loop: number }
+
+const branchDepth = (
+  labels: ReadonlyArray<Label>,
+  tag: 'Repeat' | 'Exit',
+  loop: number,
+): number => {
+  const depth = labels.findIndex((label) => label._tag === tag && label.loop === loop)
+  if (depth < 0)
+    throw new RangeError(`Wasm backend lost ${tag.toLowerCase()} label for loop${loop}`)
+  return depth
 }
 
-/**
- * Rejects any CFG this backend's structured emission does not model: an edge that runs backward
- * or sideways means the language grew loops or arbitrary jumps, and the `if`/`else` recovery
- * below would silently emit the wrong control flow rather than fail.
- */
-const forwardDagViolation = (fn: Mir.MirFunction): string | undefined => {
-  for (const block of fn.blocks) {
-    for (const target of successors(block.terminator)) {
-      if (target <= block.id.ordinal) {
-        return `WasmBackend requires a forward-only CFG, but ${fn.id.name} jumps from bb${block.id.ordinal} to bb${target}`
-      }
-    }
-  }
-  return undefined
-}
-
-/**
- * Emits the blocks of one function from `entry` up to but excluding `stop`, as one straight-line
- * instruction sequence with branch diamonds recovered as `if`/`else`.
- *
- * `stop` is the block at which the caller will continue emitting — for a branch's arms it is the
- * join block, so each arm covers exactly the blocks between its successor and the reconvergence
- * point. Because lowering emits a diamond's arms before its join and never reuses a block across
- * two diamonds, the join is simply the first block both arms can reach.
- */
-const emitRange = (
-  fn: Mir.MirFunction,
-  entry: number,
-  stop: number,
-  layout: Layout,
-  resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
-): ReadonlyArray<Instr.Instr> => {
-  const instructions: Array<Instr.Instr> = []
-  let ordinal = entry
-
-  while (ordinal < stop) {
-    const block = fn.blocks[ordinal]
-    if (block === undefined) throw new RangeError(`WasmBackend reached missing block bb${ordinal}`)
-    for (const operation of block.operations) {
-      instructions.push(...emitOperation(operation, layout, resolve))
-    }
-
-    const terminator = block.terminator
-    switch (terminator._tag) {
-      case 'Return':
-        instructions.push(
-          ...(layout.slots.at(terminator.value.ordinal) ?? []).map((slot) => Instr.localGet(slot)),
-          Instr.op('return'),
-        )
-        return instructions
-      case 'Trap':
-        instructions.push(Instr.op('unreachable'))
-        return instructions
-      case 'Jump':
-        // Emission continues at the target, so a jump to the very next block — which is what
-        // lowering's join arms produce — costs no instruction at all.
-        ordinal = terminator.target.ordinal
-        break
-      case 'Branch': {
-        const taken = terminator.taken.ordinal
-        const otherwise = terminator.otherwise.ordinal
-        // The arms reconverge at the join, or — when an arm returns outright — the diamond simply
-        // ends and emission continues at whichever successor follows it.
-        const join = joinOf(fn, taken, otherwise, stop)
-        instructions.push(
-          Instr.localGet(
-            layout.slots.at(terminator.condition.ordinal)?.at(0) ??
-              (() => {
-                throw new RangeError('Wasm branch condition lost its scalar lane')
-              })(),
-          ),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            emitRange(fn, taken, Math.min(join, stop), layout, resolve),
-            emitRange(fn, otherwise, Math.min(join, stop), layout, resolve),
-          ),
-        )
-        if (join >= stop) return instructions
-        ordinal = join
-        break
-      }
-    }
-  }
-
-  return instructions
-}
-
-/**
- * The block at which a branch's two arms reconverge, or `bound` when they never do because both
- * arms leave the function. Each arm is followed forward through the blocks it falls into; the
- * first block reachable from both is the join lowering created for the diamond.
- */
-const joinOf = (fn: Mir.MirFunction, taken: number, otherwise: number, bound: number): number => {
-  const reachable = (from: number): ReadonlySet<number> => {
-    const seen = new Set<number>()
-    const pending = [from]
-    while (pending.length > 0) {
-      const ordinal = pending.pop()
-      if (ordinal === undefined || ordinal >= bound || seen.has(ordinal)) continue
-      seen.add(ordinal)
-      const block = fn.blocks[ordinal]
-      if (block !== undefined) pending.push(...successors(block.terminator))
-    }
-    return seen
-  }
-
-  const fromTaken = reachable(taken)
-  const fromOtherwise = reachable(otherwise)
-  // Forward-only edges make the lowest shared ordinal the reconvergence point.
-  for (let ordinal = Math.max(taken, otherwise); ordinal < bound; ordinal += 1) {
-    if (fromTaken.has(ordinal) && fromOtherwise.has(ordinal)) return ordinal
-  }
-  return bound
-}
-
-/**
- * Builds one function body. Every path through a MIR function ends in a return or a trap, so the
- * emitted body needs no trailing fallthrough value — but a diamond whose arms both return leaves
- * wasm's validator unable to see that, so an `unreachable` closes the body.
- */
+/** Direct structured emission from canonical regions; no CFG recovery or dispatch loop exists. */
 const emitBody = (
   fn: Mir.MirFunction,
   layout: Layout,
   resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
 ): ReadonlyArray<Instr.Instr> => {
-  return [...emitRange(fn, 0, fn.blocks.length, layout, resolve), Instr.op('unreachable')]
+  const regions = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
+  const scalar = (local: Mir.LocalId): number => {
+    const slots = layout.slots.at(local.ordinal) ?? []
+    const first = slots.at(0)
+    if (slots.length !== 1 || first === undefined) {
+      throw new RangeError(`Wasm backend expected scalar local %${local.ordinal}`)
+    }
+    return first
+  }
+
+  const emitOutcome = (
+    outcome: Mir.Outcome,
+    labels: ReadonlyArray<Label>,
+    stop: Mir.RegionId | undefined,
+  ): ReadonlyArray<Instr.Instr> => {
+    switch (outcome._tag) {
+      case 'Forward':
+        return stop?.ordinal === outcome.target.ordinal
+          ? []
+          : emitRegion(outcome.target, labels, stop)
+      case 'Return':
+        return [
+          ...(layout.slots.at(outcome.value.ordinal) ?? []).map((slot) => Instr.localGet(slot)),
+          Instr.op('return'),
+        ]
+      case 'Trap':
+        return [Instr.op('unreachable')]
+      case 'Repeat':
+        return [Instr.br(branchDepth(labels, 'Repeat', outcome.loop.ordinal))]
+      case 'Exit':
+        return [Instr.br(branchDepth(labels, 'Exit', outcome.loop.ordinal))]
+      case 'Yield':
+        throw new RangeError('Wasm backend reached loop condition outside its loop region')
+    }
+  }
+
+  const emitRegion = (
+    id: Mir.RegionId,
+    labels: ReadonlyArray<Label>,
+    stop?: Mir.RegionId,
+  ): ReadonlyArray<Instr.Instr> => {
+    if (stop?.ordinal === id.ordinal) return []
+    const region = regions.get(id.ordinal)
+    if (region === undefined)
+      throw new RangeError(`Wasm backend reached missing region r${id.ordinal}`)
+    if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
+      const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
+      return [
+        ...operations.flatMap((operation) => emitOperation(operation, layout, resolve)),
+        ...emitOutcome(region.outcome, labels, stop),
+      ]
+    }
+    if (region._tag === 'ConditionalRegion') {
+      const innerLabels = Object.freeze([{ _tag: 'If' as const }, ...labels])
+      return [
+        Instr.localGet(scalar(region.condition)),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          emitRegion(region.taken, innerLabels, region.following),
+          emitRegion(region.otherwise, innerLabels, region.following),
+        ),
+        ...(region.following === undefined ? [] : emitRegion(region.following, labels, stop)),
+      ]
+    }
+    const condition = regions.get(region.condition.ordinal)
+    if (condition?._tag !== 'OperationRegion' || condition.outcome._tag !== 'Yield') {
+      throw new RangeError('Wasm loop condition is not one yielding operation region')
+    }
+    const loopLabels: ReadonlyArray<Label> = Object.freeze([
+      { _tag: 'Repeat', loop: region.loop.ordinal },
+      { _tag: 'Exit', loop: region.loop.ordinal },
+      ...labels,
+    ])
+    const loopBody = [
+      ...condition.operations.flatMap((operation) => emitOperation(operation, layout, resolve)),
+      Instr.localGet(scalar(region.conditionValue)),
+      Instr.op('i32.eqz'),
+      Instr.brIf(branchDepth(loopLabels, 'Exit', region.loop.ordinal)),
+      ...emitRegion(region.body, loopLabels),
+    ]
+    return [
+      Instr.block(Instr.emptyBlockType, [Instr.loop(Instr.emptyBlockType, loopBody)]),
+      ...emitRegion(region.following, labels, stop),
+    ]
+  }
+
+  return [...emitRegion(fn.entry, Object.freeze([])), Instr.op('unreachable')]
 }
 
 const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
   Effect.gen(function* () {
-    for (const fn of program.functions) {
-      const violation = forwardDagViolation(fn)
-      if (violation !== undefined) {
-        return yield* new Backend.BackendError({
-          operation: 'Backend.emit',
-          backend: 'WebAssembly',
-          message: violation,
-          reason: { _tag: 'UnsupportedMir', detail: violation },
-        })
-      }
-    }
     const i32Layout = LayoutPlan.entry(program.layout, 'I32')
     if (i32Layout === undefined) {
       return yield* new Backend.BackendError({
@@ -603,7 +643,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       }
       const signature = yield* WasmType.func(
         builder,
-        fn.blocks.length === 0
+        fn.regions.length === 0
           ? []
           : fn.localTypes
               .slice(0, fn.parameterCount)
@@ -638,11 +678,11 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a
       // trapping stub with the same observable behaviour.
       const body =
-        entry.fn.blocks.length === 0
+        entry.fn.regions.length === 0
           ? [Instr.op('unreachable')]
           : emitBody(entry.fn, layout, resolve)
       yield* FuncActor.define(builder, entry.handle, {
-        locals: entry.fn.blocks.length === 0 ? [] : layout.declared,
+        locals: entry.fn.regions.length === 0 ? [] : layout.declared,
         body,
       })
       // Every function is exported so the artifact is directly instantiable for inspection.
@@ -657,6 +697,89 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       bitcode: yield* Binary.encode(builder),
     }
   })
+
+const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlProvenance> =>
+  Object.freeze(
+    program.functions.flatMap((fn) => {
+      const loops = new Map(
+        fn.regions.flatMap((region) =>
+          region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+        ),
+      )
+      const conditions = new Map(
+        [...loops.values()].map((loop) => [loop.condition.ordinal, loop] as const),
+      )
+      return Mir.topologicalRegions(fn).flatMap(
+        (region): ReadonlyArray<Backend.ControlProvenance> => {
+          if (region._tag === 'ConditionalRegion') {
+            return [
+              Object.freeze({
+                _tag: 'BackendControlProvenance' as const,
+                backend: 'WebAssembly' as const,
+                function: fn.id,
+                region: region.id,
+                construct: 'WasmIf' as const,
+                targets: Object.freeze([
+                  region.taken,
+                  region.otherwise,
+                  ...(region.following === undefined ? [] : [region.following]),
+                ]),
+                span: region.provenance.span,
+              }),
+            ]
+          }
+          if (region._tag === 'LoopRegion') {
+            return [
+              Object.freeze({
+                _tag: 'BackendControlProvenance' as const,
+                backend: 'WebAssembly' as const,
+                function: fn.id,
+                region: region.id,
+                construct: 'WasmLoop' as const,
+                targets: Object.freeze([region.condition, region.body, region.following]),
+                loop: region.loop,
+                span: region.provenance.span,
+              }),
+            ]
+          }
+          const outcome = region.outcome
+          const loop =
+            outcome._tag === 'Repeat' || outcome._tag === 'Exit'
+              ? loops.get(outcome.loop.ordinal)
+              : outcome._tag === 'Yield'
+                ? conditions.get(region.id.ordinal)
+                : undefined
+          const construct =
+            outcome._tag === 'Repeat' || outcome._tag === 'Exit' || outcome._tag === 'Yield'
+              ? 'WasmBr'
+              : outcome._tag === 'Return'
+                ? 'WasmReturn'
+                : outcome._tag === 'Trap'
+                  ? 'WasmTrap'
+                  : undefined
+          if (construct === undefined) return []
+          const target =
+            outcome._tag === 'Repeat'
+              ? loop?.id
+              : outcome._tag === 'Exit' || outcome._tag === 'Yield'
+                ? loop?.following
+                : undefined
+          return [
+            Object.freeze({
+              _tag: 'BackendControlProvenance' as const,
+              backend: 'WebAssembly' as const,
+              function: fn.id,
+              region: region.id,
+              construct,
+              targets: target === undefined ? Object.freeze([]) : Object.freeze([target]),
+              ...(loop === undefined ? {} : { loop: loop.loop }),
+              span: outcome.provenance.span,
+            }),
+          ]
+        },
+      )
+    }),
+  )
 
 /**
  * The WebAssembly backend over the Silk wasm builder. It satisfies the same nominal `Backend`
@@ -688,6 +811,7 @@ export const WasmBackend: Backend.Backend = Object.freeze({
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
+      control: controlProvenance(program),
       bitcode: output.bitcode,
       ir: output.ir,
     })

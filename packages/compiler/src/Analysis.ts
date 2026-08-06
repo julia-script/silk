@@ -10,7 +10,7 @@ import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
@@ -243,8 +243,102 @@ const statementExpressionFacts = (
         ...statement.taken.flatMap(statementExpressionFacts),
         ...statement.otherwise.flatMap(statementExpressionFacts),
       ])
+    case 'WriteStatement':
+      return Object.freeze([
+        ...nestedExpressionFacts(statement.destination),
+        ...nestedExpressionFacts(statement.value),
+      ])
+    case 'WhileStatement':
+      return Object.freeze([
+        ...nestedExpressionFacts(statement.condition),
+        ...statement.body.flatMap(statementExpressionFacts),
+      ])
+    case 'BreakStatement':
+    case 'ContinueStatement':
+      return Object.freeze([])
   }
 }
+
+const nestedStatementFacts = (
+  statement: Elaboration.StatementFact,
+): ReadonlyArray<Elaboration.StatementFact> => {
+  switch (statement._tag) {
+    case 'IfStatement':
+      return Object.freeze([
+        statement,
+        ...statement.taken.flatMap(nestedStatementFacts),
+        ...statement.otherwise.flatMap(nestedStatementFacts),
+      ])
+    case 'WhileStatement':
+      return Object.freeze([statement, ...statement.body.flatMap(nestedStatementFacts)])
+    default:
+      return Object.freeze([statement])
+  }
+}
+
+/** Returns every semantic statement fact in deterministic source nesting order. */
+export const statementsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.StatementFact> =>
+  Object.freeze(
+    self.results
+      .get(module)
+      ?.functions.flatMap((fn) => fn.statements.flatMap(nestedStatementFacts)) ?? [],
+  )
+
+/** Returns every binding with its canonical identity and immutable/mutable classification. */
+export const bindingsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.BindingDeclarationFact> =>
+  Object.freeze(self.results.get(module)?.functions.flatMap((fn) => fn.bindings) ?? [])
+
+/** Returns every complete or unavailable assignment fact in source order. */
+export const writesOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Extract<Elaboration.StatementFact, { readonly _tag: 'WriteStatement' }>> =>
+  Object.freeze(
+    statementsOf(self, module).filter(
+      (
+        statement,
+      ): statement is Extract<Elaboration.StatementFact, { readonly _tag: 'WriteStatement' }> =>
+        statement._tag === 'WriteStatement',
+    ),
+  )
+
+/** Returns canonical loop identities, lexical parents, conditions, and ordered bodies. */
+export const loopsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Extract<Elaboration.StatementFact, { readonly _tag: 'WhileStatement' }>> =>
+  Object.freeze(
+    statementsOf(self, module).filter(
+      (
+        statement,
+      ): statement is Extract<Elaboration.StatementFact, { readonly _tag: 'WhileStatement' }> =>
+        statement._tag === 'WhileStatement',
+    ),
+  )
+
+/** Returns every lexical loop transfer, including explicitly unresolved invalid transfers. */
+export const transfersOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<
+  Extract<Elaboration.StatementFact, { readonly _tag: 'BreakStatement' | 'ContinueStatement' }>
+> =>
+  Object.freeze(
+    statementsOf(self, module).filter(
+      (
+        statement,
+      ): statement is Extract<
+        Elaboration.StatementFact,
+        { readonly _tag: 'BreakStatement' | 'ContinueStatement' }
+      > => statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement',
+    ),
+  )
 
 /** Returns every semantic expression fact in deterministic source nesting order. */
 export const expressionsOf = (
@@ -345,6 +439,17 @@ export const ownershipOf = (
   module: string,
 ): Ownership.ModuleOwnership | undefined => self.ownership.get(module)
 
+/** Returns deterministic loop-header ownership fixed points for one module. */
+export const ownershipFixedPointsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Ownership.LoopFixedPoint> =>
+  Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.fixedPoints) ?? [])
+
+/** Returns every lexical cleanup exit, including loop fallthrough and transfers. */
+export const cleanupExitsOf = (self: Snapshot, module: string): ReadonlyArray<Ownership.ExitPlan> =>
+  Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.exits) ?? [])
+
 /** Returns the snapshot's instance discovery: entry state and ordered instances. */
 export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
 
@@ -388,6 +493,41 @@ export const callingShapeOf = (self: Snapshot, type: Type.Type): Layout.CallingS
 
 /** Returns the snapshot's available or explicitly unavailable lowered MIR state. */
 export const mirOf = (self: Snapshot): Targeted<Mir.Module> => self.mir
+
+export interface ControlRegionFact {
+  readonly function: DeclarationIndex.CanonicalId
+  readonly region: Mir.Region
+}
+
+/** Returns every MIR region in canonical per-function topological order. */
+export const controlRegionsOf = (self: Snapshot): ReadonlyArray<ControlRegionFact> =>
+  self.mir._tag === 'Unavailable'
+    ? Object.freeze([])
+    : Object.freeze(
+        self.mir.value.functions.flatMap((fn) =>
+          Mir.topologicalRegions(fn).map((region) => Object.freeze({ function: fn.id, region })),
+        ),
+      )
+
+export interface ControlEdgeFact {
+  readonly function: DeclarationIndex.CanonicalId
+  readonly edge: Mir.ControlEdge
+}
+
+/** Returns compiler-owned structural DAG edges; lexical repeat/exit remain outcomes, not edges. */
+export const controlEdgesOf = (self: Snapshot): ReadonlyArray<ControlEdgeFact> =>
+  self.mir._tag === 'Unavailable'
+    ? Object.freeze([])
+    : Object.freeze(
+        self.mir.value.functions.flatMap((fn) =>
+          Mir.controlEdges(fn).map((edge) => Object.freeze({ function: fn.id, edge })),
+        ),
+      )
+
+/** Returns one execution's immutable, source-linked trace for tooling projections. */
+export const traceOf = (
+  outcome: BootstrapEvaluation.Outcome,
+): ReadonlyArray<BootstrapEvaluation.TraceEvent> => outcome.trace
 
 /** Returns the snapshot's lowered MIR program for callers that already established availability. */
 export const loweredMir = (self: Snapshot): Mir.Module => {
@@ -503,6 +643,11 @@ export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
 > {
   return yield* codegen(self, request, WasmBackend.WasmBackend)
 })
+
+/** Returns backend-local control constructs with canonical region and source provenance. */
+export const backendControlOf = (
+  artifact: Backend.Artifact,
+): ReadonlyArray<Backend.ControlProvenance> => artifact.control
 
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>

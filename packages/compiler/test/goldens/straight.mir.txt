@@ -1,12 +1,8 @@
-mir-module sample://straight.silk
+mir-module sample://regions.silk
 target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
 layout I32 size=4 align=4 repr=signed-i32
 calling I32 lanes=1 I32[]
-fn sample://straight.silk.answer params=0 locals=1 -> I32
-  bb0:
+fn sample://regions.silk.answer params=0 locals=1 -> I32 entry=r0
+  r0 operation:
     %0 = literal 42 : I32 [32, 34)
     return %0 [25, 34)
-fn sample://straight.silk.main params=0 locals=1 -> I32
-  bb0:
-    %0 = call sample://straight.silk.answer() : I32 [67, 75)
-    return %0 [60, 75)

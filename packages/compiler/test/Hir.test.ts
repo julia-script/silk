@@ -229,7 +229,7 @@ it('elaborates conditionals with typed Bool conditions and arm scopes', () => {
   assert.strictEqual(armBind.binding.ordinal, 1)
   assert.strictEqual(conditional.taken.at(1)?._tag, 'Return')
   const encoded = Hir.encode(result.hir)
-  assert.include(encoded, 'if [')
+  assert.include(encoded, 'if r')
   assert.include(encoded, 'then')
 })
 

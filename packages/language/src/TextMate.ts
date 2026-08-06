@@ -15,9 +15,13 @@ export const keywords: Record<KeywordKind, string> = {
   ImportKeyword: 'import',
   AsKeyword: 'as',
   LetKeyword: 'let',
+  MutKeyword: 'mut',
   MoveKeyword: 'move',
   IfKeyword: 'if',
   ElseKeyword: 'else',
+  WhileKeyword: 'while',
+  BreakKeyword: 'break',
+  ContinueKeyword: 'continue',
   TrueKeyword: 'true',
   FalseKeyword: 'false',
 }

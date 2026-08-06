@@ -7,47 +7,44 @@ import * as Target from './Target.js'
 import * as SilkType from './Type.js'
 
 /**
- * MIR: the monomorphic, backend-neutral basic-block control-flow graph over logical Silk types.
- * It contains no LLVM types, instructions, intrinsics, attributes, metadata, or physical field
- * offsets, and adopts no WebAssembly control shapes. It carries the compiler-owned concrete
- * target and layout plan that every consumer must realize.
+ * MIR is the monomorphic, target-aware, backend-neutral structured control DAG. Structural child
+ * and continuation references are acyclic. Loop repetition and exit are lexical outcomes rather
+ * than graph edges; only a backend-private lowering may introduce a cyclic CFG.
  */
 
-/** A logical Silk type at the MIR level. */
 export type Type =
   | { readonly _tag: 'I32' }
   | { readonly _tag: 'Bool' }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
 
-/** Converts a MIR logical type to the shared semantic type vocabulary. */
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
   self._tag === 'Nominal' || self._tag === 'FixedArray' ? self.type : self._tag
 
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
-
 const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
   SilkType.isBuiltin(type) || (SilkType.isFixedArray(type) && isCopyType(type.element))
 
-/** One ordinal-indexed virtual register local to a function. */
 export interface LocalId {
   readonly _tag: 'Local'
   readonly ordinal: number
 }
 
-/** One ordinal-indexed basic block local to a function. */
-export interface BlockId {
-  readonly _tag: 'Block'
+export interface RegionId {
+  readonly _tag: 'Region'
   readonly ordinal: number
 }
 
-/** Source provenance: the causative span, with compiler-generated operations marked. */
+export interface LoopId {
+  readonly _tag: 'Loop'
+  readonly ordinal: number
+}
+
 export interface Provenance {
   readonly span: SourceSpan.SourceSpan
   readonly generated: boolean
 }
 
-/** The closed binary operator vocabulary: trapping arithmetic and non-trapping comparisons. */
 export type BinaryOperator =
   | 'Add'
   | 'Subtract'
@@ -76,7 +73,6 @@ export type PlaceSelector =
       readonly provenance: Provenance
     }
 
-/** One MIR operation. */
 export type Operation =
   | {
       readonly _tag: 'Literal'
@@ -86,11 +82,6 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /**
-       * Trapping arithmetic: signed overflow, division by zero, and MIN divided or remaindered
-       * by -1 abort the function like an explicit trap. Division truncates toward zero and
-       * remainder takes the dividend's sign.
-       */
       readonly _tag: 'Binary'
       readonly operator: BinaryOperator
       readonly destination: LocalId
@@ -147,44 +138,87 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'CheckPlace'
+      readonly root: LocalId
+      readonly selectors: ReadonlyArray<PlaceSelector>
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'WritePlace'
+      readonly root: LocalId
+      readonly selectors: ReadonlyArray<PlaceSelector>
+      readonly source: LocalId
+      readonly rootType: Type
+      readonly type: Type
+      readonly mutable: true
+      readonly replacement: 'Copy' | 'Owned'
+      readonly commit: 'AfterCleanup'
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Drop'
       readonly local: LocalId
       readonly provenance: Provenance
     }
 
-/** One MIR terminator. */
-export type Terminator =
+export type Outcome =
+  | { readonly _tag: 'Forward'; readonly target: RegionId; readonly provenance: Provenance }
   | { readonly _tag: 'Return'; readonly value: LocalId; readonly provenance: Provenance }
-  | { readonly _tag: 'Jump'; readonly target: BlockId; readonly provenance: Provenance }
-  | {
-      readonly _tag: 'Branch'
-      readonly condition: LocalId
-      readonly taken: BlockId
-      readonly otherwise: BlockId
-      readonly provenance: Provenance
-    }
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Provenance }
+  | { readonly _tag: 'Repeat'; readonly loop: LoopId; readonly provenance: Provenance }
+  | { readonly _tag: 'Exit'; readonly loop: LoopId; readonly provenance: Provenance }
+  | { readonly _tag: 'Yield'; readonly provenance: Provenance }
 
-/** One basic block. Cleanup paths are explicitly marked cleanup blocks. */
-export interface Block {
-  readonly _tag: 'MirBlock'
-  readonly id: BlockId
-  readonly kind: 'Normal' | 'Cleanup'
-  readonly operations: ReadonlyArray<Operation>
-  readonly terminator: Terminator
+interface RegionBase {
+  readonly id: RegionId
+  readonly ownerLoop?: LoopId
 }
 
-/** One monomorphic MIR function. Parameters pre-bind to the first locals. */
+export interface OperationRegion extends RegionBase {
+  readonly _tag: 'OperationRegion'
+  readonly operations: ReadonlyArray<Operation>
+  readonly outcome: Outcome
+}
+
+export interface CleanupRegion extends RegionBase {
+  readonly _tag: 'CleanupRegion'
+  readonly releases: ReadonlyArray<Extract<Operation, { readonly _tag: 'Drop' }>>
+  readonly outcome: Outcome
+}
+
+export interface ConditionalRegion extends RegionBase {
+  readonly _tag: 'ConditionalRegion'
+  readonly condition: LocalId
+  readonly taken: RegionId
+  readonly otherwise: RegionId
+  readonly following?: RegionId
+  readonly provenance: Provenance
+}
+
+export interface LoopRegion extends RegionBase {
+  readonly _tag: 'LoopRegion'
+  readonly loop: LoopId
+  readonly parent?: LoopId
+  readonly condition: RegionId
+  readonly conditionValue: LocalId
+  readonly body: RegionId
+  readonly following: RegionId
+  readonly provenance: Provenance
+}
+
+export type Region = OperationRegion | CleanupRegion | ConditionalRegion | LoopRegion
+
 export interface MirFunction {
   readonly _tag: 'MirFunction'
   readonly id: DeclarationIndex.CanonicalId
   readonly parameterCount: number
   readonly localTypes: ReadonlyArray<Type>
   readonly result: Type
-  readonly blocks: ReadonlyArray<Block>
+  readonly entry: RegionId
+  readonly regions: ReadonlyArray<Region>
 }
 
-/** One MIR module. */
 export interface Module {
   readonly _tag: 'MirModule'
   readonly module: string
@@ -192,72 +226,198 @@ export interface Module {
   readonly functions: ReadonlyArray<MirFunction>
 }
 
-/** One structural invariant violation, reported as data. */
+export interface ControlEdge {
+  readonly _tag: 'ControlEdge'
+  readonly from: RegionId
+  readonly to: RegionId
+  readonly kind: 'Forward' | 'Taken' | 'Otherwise' | 'Following' | 'Condition' | 'Body'
+}
+
+const outcomeTarget = (
+  outcome: Outcome,
+): ReadonlyArray<readonly [RegionId, ControlEdge['kind']]> =>
+  outcome._tag === 'Forward' ? [[outcome.target, 'Forward']] : []
+
+const regionTargets = (region: Region): ReadonlyArray<readonly [RegionId, ControlEdge['kind']]> => {
+  switch (region._tag) {
+    case 'OperationRegion':
+    case 'CleanupRegion':
+      return outcomeTarget(region.outcome)
+    case 'ConditionalRegion':
+      return [
+        [region.taken, 'Taken'],
+        [region.otherwise, 'Otherwise'],
+        ...(region.following === undefined ? [] : ([[region.following, 'Following']] as const)),
+      ]
+    case 'LoopRegion':
+      return [
+        [region.condition, 'Condition'],
+        [region.body, 'Body'],
+        [region.following, 'Following'],
+      ]
+  }
+}
+
+export const controlEdges = (self: MirFunction): ReadonlyArray<ControlEdge> =>
+  Object.freeze(
+    self.regions.flatMap((region) =>
+      regionTargets(region).map(([to, kind]) =>
+        Object.freeze({ _tag: 'ControlEdge' as const, from: region.id, to, kind }),
+      ),
+    ),
+  )
+
+/** Canonical parent-before-child traversal over structural edges only. */
+export const topologicalRegions = (self: MirFunction): ReadonlyArray<Region> => {
+  const byId = new Map(self.regions.map((region) => [region.id.ordinal, region] as const))
+  const visited = new Set<number>()
+  const ordered: Array<Region> = []
+  const visit = (id: RegionId): void => {
+    if (visited.has(id.ordinal)) return
+    visited.add(id.ordinal)
+    const region = byId.get(id.ordinal)
+    if (region === undefined) return
+    ordered.push(region)
+    for (const [target] of regionTargets(region)) visit(target)
+  }
+  visit(self.entry)
+  for (const region of [...self.regions].sort(
+    (left, right) => left.id.ordinal - right.id.ordinal,
+  )) {
+    visit(region.id)
+  }
+  return Object.freeze(ordered)
+}
+
 export interface Violation {
   readonly _tag: 'Violation'
   readonly rule:
     | 'InvalidLayout'
     | 'MissingTypeLayout'
-    | 'MissingEntryBlock'
-    | 'UnknownBlockTarget'
+    | 'MissingEntryRegion'
+    | 'DuplicateRegionIdentity'
+    | 'UnknownRegionTarget'
+    | 'StructuralCycle'
+    | 'InvalidLexicalOwner'
+    | 'InvalidLoopTarget'
     | 'UndeclaredLocal'
     | 'InvalidAggregateOperation'
     | 'InvalidCallShape'
+    | 'InvalidWrite'
   readonly function?: DeclarationIndex.CanonicalId
-  readonly block?: BlockId
+  readonly region?: RegionId
   readonly detail: string
 }
 
-const localUses = (block: Block): ReadonlyArray<LocalId> => [
-  ...block.operations.flatMap((operation): ReadonlyArray<LocalId> => {
-    if (operation._tag === 'Literal') return [operation.destination]
-    if (operation._tag === 'Binary') {
-      return [operation.destination, operation.left, operation.right]
-    }
-    if (operation._tag === 'Move') return [operation.destination, operation.source]
-    if (operation._tag === 'Call') return [operation.destination, ...operation.arguments]
-    if (operation._tag === 'Construct') {
-      return [operation.destination, ...operation.fields.map((field) => field.value)]
-    }
-    if (operation._tag === 'ConstructArray') {
-      return [operation.destination, ...operation.elements]
-    }
-    if (operation._tag === 'Project') {
-      return [operation.destination, operation.source]
-    }
-    if (operation._tag === 'ReadPlace') {
-      return [
-        operation.destination,
-        operation.root,
-        ...operation.selectors.flatMap((selector) =>
-          selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
-            ? [selector.index.local]
-            : [],
-        ),
-      ]
-    }
-    return [operation.local]
-  }),
-  ...(block.terminator._tag === 'Return'
-    ? [block.terminator.value]
-    : block.terminator._tag === 'Branch'
-      ? [block.terminator.condition]
-      : []),
-]
-
-const blockTargets = (block: Block): ReadonlyArray<BlockId> =>
-  block.terminator._tag === 'Jump'
-    ? [block.terminator.target]
-    : block.terminator._tag === 'Branch'
-      ? [block.terminator.taken, block.terminator.otherwise]
+const operationsOf = (region: Region): ReadonlyArray<Operation> =>
+  region._tag === 'OperationRegion'
+    ? region.operations
+    : region._tag === 'CleanupRegion'
+      ? region.releases
       : []
 
-/** Verifies structural invariants, returning an ordered deterministic violation collection. */
+/** Source-stable operations across canonical topological region order. */
+export const operations = (self: MirFunction): ReadonlyArray<Operation> =>
+  Object.freeze(topologicalRegions(self).flatMap(operationsOf))
+
+export const outcomes = (self: MirFunction): ReadonlyArray<Outcome> =>
+  Object.freeze(topologicalRegions(self).flatMap((region) => outcomeOf(region) ?? []))
+
+const outcomeOf = (region: Region): Outcome | undefined =>
+  region._tag === 'OperationRegion' || region._tag === 'CleanupRegion' ? region.outcome : undefined
+
+const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
+  switch (operation._tag) {
+    case 'Literal':
+      return [operation.destination]
+    case 'Binary':
+      return [operation.destination, operation.left, operation.right]
+    case 'Move':
+      return [operation.destination, operation.source]
+    case 'Call':
+      return [operation.destination, ...operation.arguments]
+    case 'Construct':
+      return [operation.destination, ...operation.fields.map((field) => field.value)]
+    case 'ConstructArray':
+      return [operation.destination, ...operation.elements]
+    case 'Project':
+      return [operation.destination, operation.source]
+    case 'ReadPlace':
+      return [operation.destination, operation.root, ...selectorLocals(operation.selectors)]
+    case 'CheckPlace':
+      return [operation.root, ...selectorLocals(operation.selectors)]
+    case 'WritePlace':
+      return [operation.root, operation.source, ...selectorLocals(operation.selectors)]
+    case 'Drop':
+      return [operation.local]
+  }
+}
+
+const localUses = (region: Region): ReadonlyArray<LocalId> => [
+  ...operationsOf(region).flatMap(operationLocals),
+  ...(region._tag === 'ConditionalRegion' ? [region.condition] : []),
+  ...(region._tag === 'LoopRegion' ? [region.conditionValue] : []),
+  ...(outcomeOf(region)?._tag === 'Return'
+    ? [(outcomeOf(region) as Extract<Outcome, { readonly _tag: 'Return' }>).value]
+    : []),
+]
+
+const selectorLocals = (selectors: ReadonlyArray<PlaceSelector>): ReadonlyArray<LocalId> =>
+  selectors.flatMap((selector) =>
+    selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
+      ? [selector.index.local]
+      : [],
+  )
+
+const placeType = (
+  fn: MirFunction,
+  layout: Layout.Plan,
+  root: LocalId,
+  selectors: ReadonlyArray<PlaceSelector>,
+): DeclarationIndex.SemanticType | undefined => {
+  const rootType = fn.localTypes.at(root.ordinal)
+  let current = rootType === undefined ? undefined : semanticType(rootType)
+  for (const selector of selectors) {
+    if (selector._tag === 'FieldSelector') {
+      const entry =
+        current !== undefined && SilkType.isNominal(current)
+          ? Layout.entry(layout, current)
+          : undefined
+      const field =
+        entry?.representation._tag === 'Aggregate'
+          ? entry.representation.fields.find(
+              (candidate) =>
+                candidate.id.ordinal === selector.field.ordinal &&
+                candidate.id.struct.sourceId === selector.field.struct.sourceId &&
+                candidate.id.struct.ordinal === selector.field.struct.ordinal,
+            )
+          : undefined
+      current = field?.type
+      continue
+    }
+    if (
+      current === undefined ||
+      !SilkType.isFixedArray(current) ||
+      current.length !== selector.length
+    ) {
+      return undefined
+    }
+    if (selector.index._tag === 'Proven') {
+      if (selector.index.value < 0 || selector.index.value >= selector.length) return undefined
+    } else if (fn.localTypes.at(selector.index.local.ordinal)?._tag !== 'I32') return undefined
+    current = current.element
+  }
+  return current
+}
+
+const targetText = (target: DeclarationIndex.CanonicalId): string =>
+  `${target.module}.${target.name}`
+
 export const verify = (self: Module): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = Layout.verify(self.layout).map((violation) =>
     Object.freeze({
-      _tag: 'Violation',
-      rule: 'InvalidLayout',
+      _tag: 'Violation' as const,
+      rule: 'InvalidLayout' as const,
       detail: `${violation.rule}: ${violation.detail}`,
     }),
   )
@@ -278,53 +438,135 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         }),
       )
     }
-    if (fn.blocks.length === 0) {
+
+    const byId = new Map<number, Region>()
+    for (const region of fn.regions) {
+      if (byId.has(region.id.ordinal)) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'DuplicateRegionIdentity',
+            function: fn.id,
+            region: region.id,
+            detail: `region r${region.id.ordinal} is declared more than once`,
+          }),
+        )
+      } else byId.set(region.id.ordinal, region)
+    }
+    if (!byId.has(fn.entry.ordinal)) {
       violations.push(
         Object.freeze({
           _tag: 'Violation',
-          rule: 'MissingEntryBlock',
+          rule: 'MissingEntryRegion',
           function: fn.id,
-          detail: 'function has no entry block',
+          detail: `entry region r${fn.entry.ordinal} is missing`,
         }),
       )
-      continue
     }
-    for (const block of fn.blocks) {
-      for (const target of blockTargets(block)) {
-        if (target.ordinal < 0 || target.ordinal >= fn.blocks.length) {
+    for (const region of fn.regions) {
+      for (const [target] of regionTargets(region)) {
+        if (!byId.has(target.ordinal)) {
           violations.push(
             Object.freeze({
               _tag: 'Violation',
-              rule: 'UnknownBlockTarget',
+              rule: 'UnknownRegionTarget',
               function: fn.id,
-              block: block.id,
-              detail: `terminator targets missing block bb${target.ordinal}`,
+              region: region.id,
+              detail: `region references missing r${target.ordinal}`,
             }),
           )
         }
       }
-      for (const local of localUses(block)) {
-        if (local.ordinal < 0 || local.ordinal >= fn.localTypes.length) {
+    }
+
+    const color = new Map<number, 0 | 1 | 2>()
+    const visit = (region: Region): void => {
+      color.set(region.id.ordinal, 1)
+      for (const [target] of regionTargets(region)) {
+        const targetRegion = byId.get(target.ordinal)
+        if (targetRegion === undefined) continue
+        if (color.get(target.ordinal) === 1) {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'StructuralCycle',
+              function: fn.id,
+              region: region.id,
+              detail: `structural edge r${region.id.ordinal} -> r${target.ordinal} forms a cycle`,
+            }),
+          )
+        } else if (color.get(target.ordinal) !== 2) visit(targetRegion)
+      }
+      color.set(region.id.ordinal, 2)
+    }
+    for (const region of [...fn.regions].sort((a, b) => a.id.ordinal - b.id.ordinal)) {
+      if (color.get(region.id.ordinal) === undefined) visit(region)
+    }
+
+    const loops = new Map<number, LoopRegion>()
+    for (const region of fn.regions) {
+      if (region._tag === 'LoopRegion') loops.set(region.loop.ordinal, region)
+    }
+    const isAncestor = (owner: LoopId | undefined, target: LoopId): boolean => {
+      let current = owner
+      const seen = new Set<number>()
+      while (current !== undefined && !seen.has(current.ordinal)) {
+        if (current.ordinal === target.ordinal) return true
+        seen.add(current.ordinal)
+        current = loops.get(current.ordinal)?.parent
+      }
+      return false
+    }
+    for (const region of fn.regions) {
+      if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal)) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLexicalOwner',
+            function: fn.id,
+            region: region.id,
+            detail: `owner loop loop${region.ownerLoop.ordinal} is missing`,
+          }),
+        )
+      }
+      const outcome = outcomeOf(region)
+      if (
+        (outcome?._tag === 'Repeat' || outcome?._tag === 'Exit') &&
+        !isAncestor(region.ownerLoop, outcome.loop)
+      ) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLoopTarget',
+            function: fn.id,
+            region: region.id,
+            detail: `${outcome._tag.toLowerCase()} targets non-ancestor loop${outcome.loop.ordinal}`,
+          }),
+        )
+      }
+      for (const used of localUses(region)) {
+        if (used.ordinal < 0 || used.ordinal >= fn.localTypes.length) {
           violations.push(
             Object.freeze({
               _tag: 'Violation',
               rule: 'UndeclaredLocal',
               function: fn.id,
-              block: block.id,
-              detail: `references undeclared local %${local.ordinal}`,
+              region: region.id,
+              detail: `references undeclared local %${used.ordinal}`,
             }),
           )
         }
       }
-      for (const operation of block.operations) {
+      const operations = operationsOf(region)
+      for (const [index, operation] of operations.entries()) {
         if (operation._tag === 'Construct') {
           const layout = Layout.entry(self.layout, operation.type.type)
           const expected =
             layout?.representation._tag === 'Aggregate' ? layout.representation.fields : []
           const valid =
             expected.length === operation.fields.length &&
-            operation.fields.every((field, index) => {
-              const declared = expected.at(index)
+            operation.fields.every((field, ordinal) => {
+              const declared = expected.at(ordinal)
               const valueType = fn.localTypes.at(field.value.ordinal)
               return (
                 declared !== undefined &&
@@ -339,7 +581,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 _tag: 'Violation',
                 rule: 'InvalidAggregateOperation',
                 function: fn.id,
-                block: block.id,
+                region: region.id,
                 detail: `construction of ${typeText(operation.type)} does not match its canonical fields`,
               }),
             )
@@ -365,7 +607,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 _tag: 'Violation',
                 rule: 'InvalidAggregateOperation',
                 function: fn.id,
-                block: block.id,
+                region: region.id,
                 detail: `construction of ${typeText(operation.type)} does not match its canonical element count or type`,
               }),
             )
@@ -387,72 +629,59 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 _tag: 'Violation',
                 rule: 'InvalidAggregateOperation',
                 function: fn.id,
-                block: block.id,
+                region: region.id,
                 detail: `projection field #${operation.field.ordinal} does not match its source type`,
               }),
             )
           }
         }
-        if (operation._tag === 'ReadPlace') {
-          const root = fn.localTypes.at(operation.root.ordinal)
-          const destination = fn.localTypes.at(operation.destination.ordinal)
-          let current = root === undefined ? undefined : semanticType(root)
-          let valid = root !== undefined && destination !== undefined
-          for (const selector of operation.selectors) {
-            if (selector._tag === 'FieldSelector') {
-              const sourceLayout =
-                current !== undefined && SilkType.isNominal(current)
-                  ? Layout.entry(self.layout, current)
-                  : undefined
-              const field =
-                sourceLayout?.representation._tag === 'Aggregate'
-                  ? sourceLayout.representation.fields.find(
-                      (candidate) =>
-                        candidate.id.ordinal === selector.field.ordinal &&
-                        candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-                        candidate.id.struct.ordinal === selector.field.struct.ordinal,
-                    )
-                  : undefined
-              if (field === undefined) {
-                valid = false
-                current = undefined
-              } else current = field.type
-              continue
-            }
-            if (
-              current === undefined ||
-              !SilkType.isFixedArray(current) ||
-              current.length !== selector.length
-            ) {
-              valid = false
-              current = undefined
-              continue
-            }
-            if (selector.index._tag === 'Proven') {
-              if (selector.index.value < 0 || selector.index.value >= selector.length) valid = false
-            } else {
-              const indexType = fn.localTypes.at(selector.index.local.ordinal)
-              if (indexType?._tag !== 'I32') valid = false
-            }
-            current = current.element
-          }
+        if (operation._tag === 'ReadPlace' || operation._tag === 'CheckPlace') {
+          const selected = placeType(fn, self.layout, operation.root, operation.selectors)
           if (
-            current === undefined ||
-            !isCopyType(current) ||
-            !SilkType.equals(current, semanticType(operation.type)) ||
-            destination === undefined ||
-            !SilkType.equals(semanticType(destination), semanticType(operation.type))
+            selected === undefined ||
+            !SilkType.equals(selected, semanticType(operation.type)) ||
+            (operation._tag === 'ReadPlace' && !isCopyType(selected))
           ) {
-            valid = false
-          }
-          if (!valid) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidAggregateOperation',
                 function: fn.id,
-                block: block.id,
-                detail: `checked place read does not match its root, selectors, or destination`,
+                region: region.id,
+                detail: `${operation._tag} does not match its root, selectors, or type`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'WritePlace') {
+          const selected = placeType(fn, self.layout, operation.root, operation.selectors)
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const root = fn.localTypes.at(operation.root.ordinal)
+          const checked = operations
+            .slice(0, index)
+            .some(
+              (candidate) =>
+                candidate._tag === 'CheckPlace' &&
+                candidate.root.ordinal === operation.root.ordinal &&
+                candidate.selectors === operation.selectors,
+            )
+          if (
+            selected === undefined ||
+            source === undefined ||
+            root === undefined ||
+            !checked ||
+            !SilkType.equals(selected, semanticType(operation.type)) ||
+            !SilkType.equals(semanticType(source), selected) ||
+            !SilkType.equals(semanticType(root), semanticType(operation.rootType))
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidWrite',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'write lacks a matching precheck or has inconsistent root/source/place types',
               }),
             )
           }
@@ -466,9 +695,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const valid =
             target !== undefined &&
             target.parameterCount === operation.arguments.length &&
-            operation.arguments.every((argument, index) => {
+            operation.arguments.every((argument, ordinal) => {
               const actual = fn.localTypes.at(argument.ordinal)
-              const expected = target.localTypes.at(index)
+              const expected = target?.localTypes.at(ordinal)
               return (
                 actual !== undefined &&
                 expected !== undefined &&
@@ -482,7 +711,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 _tag: 'Violation',
                 rule: 'InvalidCallShape',
                 function: fn.id,
-                block: block.id,
+                region: region.id,
                 detail: `call ${targetText(operation.target)} does not match its logical contract`,
               }),
             )
@@ -495,14 +724,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
 }
 
 const spanText = (span: SourceSpan.SourceSpan): string => `[${span.start}, ${span.end})`
-
 const provenanceText = (provenance: Provenance): string =>
   `${spanText(provenance.span)}${provenance.generated ? ' generated' : ''}`
-
 const localText = (local: LocalId): string => `%${local.ordinal}`
-
-const targetText = (target: DeclarationIndex.CanonicalId): string =>
-  `${target.module}.${target.name}`
+const regionText = (region: RegionId): string => `r${region.ordinal}`
+const loopText = (loop: LoopId): string => `loop${loop.ordinal}`
+const selectorText = (selectors: ReadonlyArray<PlaceSelector>): string =>
+  selectors
+    .map((selector) =>
+      selector._tag === 'FieldSelector'
+        ? `.#${selector.field.ordinal}`
+        : `[${selector.index._tag === 'Proven' ? selector.index.value : localText(selector.index.local)}/${selector.length}]`,
+    )
+    .join('')
 
 const operationText = (operation: Operation): string => {
   switch (operation._tag) {
@@ -521,51 +755,66 @@ const operationText = (operation: Operation): string => {
     case 'Project':
       return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ReadPlace':
-      return `${localText(operation.destination)} = read-place ${localText(operation.root)}${operation.selectors
-        .map((selector) =>
-          selector._tag === 'FieldSelector'
-            ? `.#${selector.field.ordinal}`
-            : `[${
-                selector.index._tag === 'Proven'
-                  ? selector.index.value
-                  : localText(selector.index.local)
-              }/${selector.length}]`,
-        )
-        .join('')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = read-place ${localText(operation.root)}${selectorText(operation.selectors)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'CheckPlace':
+      return `check-place ${localText(operation.root)}${selectorText(operation.selectors)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'WritePlace':
+      return `write-place ${localText(operation.root)}${selectorText(operation.selectors)} <- ${localText(operation.source)} : ${typeText(operation.type)} replacement=${operation.replacement} commit=${operation.commit} ${provenanceText(operation.provenance)}`
     case 'Drop':
       return `drop ${localText(operation.local)} ${provenanceText(operation.provenance)}`
   }
 }
 
-const terminatorText = (terminator: Terminator): string => {
-  switch (terminator._tag) {
+const outcomeText = (outcome: Outcome): string => {
+  switch (outcome._tag) {
+    case 'Forward':
+      return `forward ${regionText(outcome.target)} ${provenanceText(outcome.provenance)}`
     case 'Return':
-      return `return ${localText(terminator.value)} ${provenanceText(terminator.provenance)}`
-    case 'Jump':
-      return `jump bb${terminator.target.ordinal} ${provenanceText(terminator.provenance)}`
-    case 'Branch':
-      return `branch ${localText(terminator.condition)} ? bb${terminator.taken.ordinal} : bb${terminator.otherwise.ordinal} ${provenanceText(terminator.provenance)}`
+      return `return ${localText(outcome.value)} ${provenanceText(outcome.provenance)}`
     case 'Trap':
-      return `trap "${terminator.reason}" ${provenanceText(terminator.provenance)}`
+      return `trap "${outcome.reason}" ${provenanceText(outcome.provenance)}`
+    case 'Repeat':
+      return `repeat ${loopText(outcome.loop)} ${provenanceText(outcome.provenance)}`
+    case 'Exit':
+      return `exit ${loopText(outcome.loop)} ${provenanceText(outcome.provenance)}`
+    case 'Yield':
+      return `yield ${provenanceText(outcome.provenance)}`
   }
 }
 
-/**
- * Deterministic textual encoding of one MIR module for debugging, inspection, and golden tests.
- * The compiler-selected target and canonical layout lead the encoding; no compatibility promise
- * attaches to this inspection format.
- */
+const regionLines = (region: Region): ReadonlyArray<string> => {
+  const owner = region.ownerLoop === undefined ? '' : ` owner=${loopText(region.ownerLoop)}`
+  switch (region._tag) {
+    case 'OperationRegion':
+      return [
+        `  ${regionText(region.id)} operation${owner}:`,
+        ...region.operations.map((operation) => `    ${operationText(operation)}`),
+        `    ${outcomeText(region.outcome)}`,
+      ]
+    case 'CleanupRegion':
+      return [
+        `  ${regionText(region.id)} cleanup${owner}:`,
+        ...region.releases.map((release) => `    ${operationText(release)}`),
+        `    ${outcomeText(region.outcome)}`,
+      ]
+    case 'ConditionalRegion':
+      return [
+        `  ${regionText(region.id)} conditional${owner} condition=${localText(region.condition)} taken=${regionText(region.taken)} otherwise=${regionText(region.otherwise)}${region.following === undefined ? '' : ` following=${regionText(region.following)}`} ${provenanceText(region.provenance)}`,
+      ]
+    case 'LoopRegion':
+      return [
+        `  ${regionText(region.id)} loop ${loopText(region.loop)}${region.parent === undefined ? '' : ` parent=${loopText(region.parent)}`} condition=${regionText(region.condition)} value=${localText(region.conditionValue)} body=${regionText(region.body)} following=${regionText(region.following)} ${provenanceText(region.provenance)}`,
+      ]
+  }
+}
+
 export const encode = (self: Module): string =>
   [
     `mir-module ${self.module}`,
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
-      `fn ${targetText(fn.id)} params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)}`,
-      ...fn.blocks.flatMap((block) => [
-        `  bb${block.id.ordinal}${block.kind === 'Cleanup' ? ' cleanup' : ''}:`,
-        ...block.operations.map((operation) => `    ${operationText(operation)}`),
-        `    ${terminatorText(block.terminator)}`,
-      ]),
+      `fn ${targetText(fn.id)} params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)} entry=${regionText(fn.entry)}`,
+      ...topologicalRegions(fn).flatMap(regionLines),
     ]),
     '',
   ].join('\n')
@@ -579,200 +828,107 @@ const sampleSpan = (
     SourceSpan.make(source, start, end),
     () => new RangeError('MIR sample produced an invalid span'),
   )
-
 const local = (ordinal: number): LocalId => Object.freeze({ _tag: 'Local', ordinal })
-const block = (ordinal: number): BlockId => Object.freeze({ _tag: 'Block', ordinal })
+const region = (ordinal: number): RegionId => Object.freeze({ _tag: 'Region', ordinal })
 const i32: Type = Object.freeze({ _tag: 'I32' })
-
+const bool: Type = Object.freeze({ _tag: 'Bool' })
 const canonical = (module: string, name: string): DeclarationIndex.CanonicalId =>
   Object.freeze({ _tag: 'CanonicalDeclarationId', module, name })
 
-/**
- * Hand-built sample modules for tests, goldens, and the CFG lab. They are dev fixtures pinned by
- * goldens until lowering produces real MIR, then retire.
- */
 export const samples = (): ReadonlyArray<Module> => {
-  const straightSource = SourceFile.make(
-    'sample://straight.silk',
-    Uint8Array.from(
-      'pub fn answer() -> I32 { return 42 }\npub fn main() -> I32 { return answer() }',
-      (c) => c.charCodeAt(0),
-    ),
+  const source = SourceFile.make(
+    'sample://regions.silk',
+    Uint8Array.from('pub fn answer() -> I32 { return 42 }', (char) => char.charCodeAt(0)),
   )
+  const provenance = (start: number, end: number, generated = false): Provenance =>
+    Object.freeze({ span: sampleSpan(source, start, end), generated })
   const straight: Module = Object.freeze({
     _tag: 'MirModule',
-    module: 'sample://straight.silk',
+    module: source.id,
     layout: Layout.make(Target.aarch64AppleDarwin, ['I32']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,
-        id: canonical('sample://straight.silk', 'answer'),
+        id: canonical(source.id, 'answer'),
         parameterCount: 0,
         localTypes: Object.freeze([i32]),
         result: i32,
-        blocks: Object.freeze([
+        entry: region(0),
+        regions: Object.freeze([
           Object.freeze({
-            _tag: 'MirBlock' as const,
-            id: block(0),
-            kind: 'Normal' as const,
+            _tag: 'OperationRegion' as const,
+            id: region(0),
             operations: Object.freeze([
               Object.freeze({
                 _tag: 'Literal' as const,
                 destination: local(0),
                 type: i32,
                 value: 42,
-                provenance: Object.freeze({
-                  span: sampleSpan(straightSource, 32, 34),
-                  generated: false,
-                }),
+                provenance: provenance(32, 34),
               }),
             ]),
-            terminator: Object.freeze({
+            outcome: Object.freeze({
               _tag: 'Return' as const,
               value: local(0),
-              provenance: Object.freeze({
-                span: sampleSpan(straightSource, 25, 34),
-                generated: false,
-              }),
-            }),
-          }),
-        ]),
-      }),
-      Object.freeze({
-        _tag: 'MirFunction' as const,
-        id: canonical('sample://straight.silk', 'main'),
-        parameterCount: 0,
-        localTypes: Object.freeze([i32]),
-        result: i32,
-        blocks: Object.freeze([
-          Object.freeze({
-            _tag: 'MirBlock' as const,
-            id: block(0),
-            kind: 'Normal' as const,
-            operations: Object.freeze([
-              Object.freeze({
-                _tag: 'Call' as const,
-                destination: local(0),
-                target: canonical('sample://straight.silk', 'answer'),
-                arguments: Object.freeze([]),
-                type: i32,
-                provenance: Object.freeze({
-                  span: sampleSpan(straightSource, 67, 75),
-                  generated: false,
-                }),
-              }),
-            ]),
-            terminator: Object.freeze({
-              _tag: 'Return' as const,
-              value: local(0),
-              provenance: Object.freeze({
-                span: sampleSpan(straightSource, 60, 75),
-                generated: false,
-              }),
+              provenance: provenance(25, 34),
             }),
           }),
         ]),
       }),
     ]),
   })
-
-  const branchingSource = SourceFile.make(
-    'sample://branching.silk',
-    Uint8Array.from('pub fn choose(flag: I32) -> I32 { return flag }', (c) => c.charCodeAt(0)),
-  )
-  const branching: Module = Object.freeze({
+  const conditional: Module = Object.freeze({
     _tag: 'MirModule',
-    module: 'sample://branching.silk',
-    layout: Layout.make(Target.aarch64AppleDarwin, ['I32']),
+    module: source.id,
+    layout: Layout.make(Target.aarch64AppleDarwin, ['I32', 'Bool']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,
-        id: canonical('sample://branching.silk', 'choose'),
+        id: canonical(source.id, 'choose'),
         parameterCount: 1,
-        localTypes: Object.freeze([i32, i32]),
+        localTypes: Object.freeze([bool, i32]),
         result: i32,
-        blocks: Object.freeze([
+        entry: region(0),
+        regions: Object.freeze([
           Object.freeze({
-            _tag: 'MirBlock' as const,
-            id: block(0),
-            kind: 'Normal' as const,
-            operations: Object.freeze([]),
-            terminator: Object.freeze({
-              _tag: 'Branch' as const,
-              condition: local(0),
-              taken: block(1),
-              otherwise: block(2),
-              provenance: Object.freeze({
-                span: sampleSpan(branchingSource, 34, 45),
-                generated: false,
-              }),
-            }),
+            _tag: 'ConditionalRegion' as const,
+            id: region(0),
+            condition: local(0),
+            taken: region(1),
+            otherwise: region(2),
+            provenance: provenance(25, 34),
           }),
           Object.freeze({
-            _tag: 'MirBlock' as const,
-            id: block(1),
-            kind: 'Normal' as const,
+            _tag: 'OperationRegion' as const,
+            id: region(1),
             operations: Object.freeze([
               Object.freeze({
-                _tag: 'Move' as const,
+                _tag: 'Literal' as const,
                 destination: local(1),
-                source: local(0),
-                provenance: Object.freeze({
-                  span: sampleSpan(branchingSource, 41, 45),
-                  generated: false,
-                }),
+                type: i32,
+                value: 1,
+                provenance: provenance(32, 33),
               }),
             ]),
-            terminator: Object.freeze({
-              _tag: 'Jump' as const,
-              target: block(3),
-              provenance: Object.freeze({
-                span: sampleSpan(branchingSource, 34, 45),
-                generated: true,
-              }),
-            }),
-          }),
-          Object.freeze({
-            _tag: 'MirBlock' as const,
-            id: block(2),
-            kind: 'Normal' as const,
-            operations: Object.freeze([]),
-            terminator: Object.freeze({
-              _tag: 'Trap' as const,
-              reason: 'unreachable flag state',
-              provenance: Object.freeze({
-                span: sampleSpan(branchingSource, 34, 45),
-                generated: true,
-              }),
-            }),
-          }),
-          Object.freeze({
-            _tag: 'MirBlock' as const,
-            id: block(3),
-            kind: 'Cleanup' as const,
-            operations: Object.freeze([
-              Object.freeze({
-                _tag: 'Drop' as const,
-                local: local(0),
-                provenance: Object.freeze({
-                  span: sampleSpan(branchingSource, 34, 45),
-                  generated: true,
-                }),
-              }),
-            ]),
-            terminator: Object.freeze({
+            outcome: Object.freeze({
               _tag: 'Return' as const,
               value: local(1),
-              provenance: Object.freeze({
-                span: sampleSpan(branchingSource, 34, 45),
-                generated: false,
-              }),
+              provenance: provenance(25, 34),
+            }),
+          }),
+          Object.freeze({
+            _tag: 'OperationRegion' as const,
+            id: region(2),
+            operations: Object.freeze([]),
+            outcome: Object.freeze({
+              _tag: 'Trap' as const,
+              reason: 'otherwise',
+              provenance: provenance(25, 34, true),
             }),
           }),
         ]),
       }),
     ]),
   })
-
-  return Object.freeze([straight, branching])
+  return Object.freeze([straight, conditional])
 }

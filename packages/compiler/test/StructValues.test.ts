@@ -81,11 +81,11 @@ pub fn main() -> I32 { let pair = make() return pair.left }`),
     )
     const make = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'make')
     const calls =
-      make?.blocks.flatMap((block) =>
-        block.operations.flatMap((operation) =>
-          operation._tag === 'Call' ? [operation.target.name] : [],
-        ),
-      ) ?? []
+      make === undefined
+        ? []
+        : Mir.operations(make).flatMap((operation) =>
+            operation._tag === 'Call' ? [operation.target.name] : [],
+          )
 
     assert.deepEqual(calls, ['right', 'left'])
     assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])

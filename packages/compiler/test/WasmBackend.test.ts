@@ -98,14 +98,13 @@ pub fn main() -> I32 { return identity(identity(42)) }`)
   }),
 )
 
-it.effect('recovers branch diamonds as structured if/else', () =>
+it.effect('emits source conditionals directly as structured if', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
       'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }',
     )
 
     assert.match(artifact.ir, /\bif\b/)
-    assert.match(artifact.ir, /\belse\b/)
     // The structure is taken from MIR rather than rebuilt, so no dispatch scaffolding appears.
     assert.notMatch(artifact.ir, /br_table/)
     assert.notMatch(artifact.ir, /\bloop\b/)
@@ -134,28 +133,33 @@ it.effect('nests an if inside an arm for nested source conditionals', () =>
   }),
 )
 
-it.effect('rejects a CFG with a back-edge instead of emitting wrong control flow', () =>
+it.effect('rejects a structural MIR cycle before structured emission', () =>
   Effect.gen(function* () {
     const snapshot = yield* snapshotOf('pub fn main() -> I32 { return 42 }')
     const program = Analysis.loweredMir(snapshot)
     const main = program.functions[0]
-    const entry = main?.blocks[0]
+    const entry = main?.regions.at(0)
     if (main === undefined || entry === undefined) {
-      throw new Error('sample program lost its entry block')
+      throw new Error('sample program lost its entry region')
     }
-    // A self-jump is the smallest back-edge; structured emission cannot model it.
+    const provenance =
+      entry._tag === 'OperationRegion' || entry._tag === 'CleanupRegion'
+        ? entry.outcome.provenance
+        : entry.provenance
     const looping: Mir.Module = {
       ...program,
       functions: [
         {
           ...main,
-          blocks: [
+          regions: [
             {
-              ...entry,
-              terminator: {
-                _tag: 'Jump',
-                target: { _tag: 'Block', ordinal: 0 },
-                provenance: entry.terminator.provenance,
+              _tag: 'OperationRegion',
+              id: { _tag: 'Region', ordinal: 0 },
+              operations: [],
+              outcome: {
+                _tag: 'Forward',
+                target: { _tag: 'Region', ordinal: 0 },
+                provenance,
               },
             },
           ],
@@ -166,8 +170,9 @@ it.effect('rejects a CFG with a back-edge instead of emitting wrong control flow
     const failure = yield* Effect.flip(
       Backend.emit(WasmBackend.WasmBackend, looping, { mode: 'release' }),
     )
-    assert.strictEqual(failure.reason._tag, 'UnsupportedMir')
-    assert.include(failure.message, 'forward-only CFG')
+    assert.strictEqual(failure.reason._tag, 'InvalidMir')
+    if (failure.reason._tag !== 'InvalidMir') return
+    assert.strictEqual(failure.reason.violations.at(0)?.rule, 'StructuralCycle')
   }),
 )
 
@@ -237,6 +242,60 @@ it.effect('maps divisions onto wasm operators that already trap, with no guard e
 )
 
 const programs: ReadonlyArray<readonly [string, string]> = [
+  [
+    'nested loops',
+    `pub fn main() -> I32 {
+  let mut outer = 0
+  let mut total = 0
+  while outer < 6 {
+    let mut inner = 0
+    while inner < 7 { total = total + 1 inner = inner + 1 }
+    outer = outer + 1
+  }
+  return total
+}`,
+  ],
+  [
+    'mutable struct loop',
+    `struct Pair { left: I32 right: I32 }
+pub fn main() -> I32 {
+  let mut pair = Pair { left: 0, right: 40 }
+  while pair.left < 2 { pair.left = pair.left + 1 }
+  return pair.left + pair.right
+}`,
+  ],
+  [
+    'mutable scalar loop',
+    `pub fn main() -> I32 {
+  let mut count = 0
+  while count < 42 { count = count + 1 }
+  return count
+}`,
+  ],
+  [
+    'mutable array loop',
+    `pub fn main() -> I32 {
+  let mut values = [40, 0]
+  let mut index = 0
+  while index < 2 {
+    values[index] = values[index] + 1
+    index = index + 1
+  }
+  return values[0] + values[1]
+}`,
+  ],
+  [
+    'loop continue and break',
+    `pub fn main() -> I32 {
+  let mut index = 0
+  while index < 50 {
+    index = index + 1
+    if index == 2 { continue }
+    if index == 42 { break }
+  }
+  return index
+}`,
+  ],
   ['literal', 'pub fn main() -> I32 { return 42 }'],
   [
     'direct call',

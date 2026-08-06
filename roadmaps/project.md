@@ -2,7 +2,7 @@
 
 > Direction, not commitment — Now is committed; Next is planned; Later is exploration.
 > Only Now items may be promised to anyone. This document changes as we learn.
-> Last reviewed: 2026-08-05 · Review cadence: after each OpenSpec archive, or monthly when no
+> Last reviewed: 2026-08-06 · Review cadence: after each OpenSpec archive, or monthly when no
 > change ships · Scope: whole project
 
 ## Vision
@@ -14,9 +14,9 @@ compiling its own compiler; broader language and ecosystem work follows evidence
 self-hosting core.
 
 **Current objective:** make the bootstrap language capable of expressing small real algorithms over
-compiler-shaped data. With target-aware layout and cross-module declarations complete, the next
-work standardizes operators, then adds nominal structs, fixed-size arrays, and structured loops
-before structural unions and exhaustive matching grow through the same inspectable,
+compiler-shaped data. With target-aware layout, cross-module declarations, operators, nominal
+structs, struct values, fixed-size arrays, mutation, and structured loops complete, the current work
+normalizes structural unions before exhaustive matching grows through the same inspectable,
 determinism-gated architecture.
 
 ## Column rules
@@ -53,10 +53,10 @@ determinism-gated architecture.
 
 ### Make the language algorithmic: modules, operators, data, and loops
 
-**Status: in progress; target-aware layout and cross-module declarations complete, operator
-semantics next.** The module, struct, array, union, and matching semantics are substantially pinned
-in Wayfinder. The operator surface and minimal mutable-loop model remain focused decisions for
-their own changes.
+**Status: in progress; structural unions current.** Target-aware layout, cross-module declarations,
+operators, nominal structs, struct values, fixed-size arrays, mutation, and structured loops are
+complete. Compiler-published control remains a DAG until each backend converts it to its required
+target form.
 
 - **Problem:** The compiler spine is complete, but the language can only express small scalar,
   call, binding, and branching examples. It lacks a settled operator surface, aggregate data,
@@ -70,11 +70,11 @@ their own changes.
 - **Sequence:**
   1. `standardize-target-aware-layouts` — complete and archived
   2. `resolve-cross-module-declarations` — complete and archived
-  3. `standardize-expression-and-operator-semantics`
-  4. `declare-nominal-struct-types`
-  5. `construct-and-project-struct-values`
-  6. `add-fixed-size-arrays-and-indexing`
-  7. `add-mutable-bindings-and-structured-loops`
+  3. `standardize-expression-and-operator-semantics` — complete and archived
+  4. `declare-nominal-struct-types` — complete and archived
+  5. `construct-and-project-struct-values` — complete and archived
+  6. `add-fixed-size-arrays-and-indexing` — complete and archived
+  7. `add-mutable-bindings-and-structured-loops` — complete and archived
   8. `normalize-structural-unions`
   9. `match-exhaustively`
 - **Dependencies:** cross-module resolution precedes operator desugaring into canonical actor
@@ -138,11 +138,23 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
-- How far should backend agnosticism go before a second backend exists? The `Backend` service and
-  neutral MIR are pinned; the artifact hand-off (`bitcode` + Clang object step) deliberately stays
-  LLVM-shaped per issue 06 until a real second backend pairs it with its own toolchain plan.
+- Which additional control regions will structural unions and matching require? The invariant is
+  pinned: compiler-published relationships stay acyclic and target-aware, while each backend owns
+  flattening or nesting them into its private control representation.
 
 ## Changelog
+
+- 2026-08-06: Shipped and archived `add-mutable-bindings-and-structured-loops`. Silk now has explicit
+  `let mut`, transactional whole-value assignment through binding/field/index places, structured
+  `while` with lexical `break` and `continue`, deterministic loop-header ownership fixed points,
+  exact cleanup on every transfer, and evaluator/native/WebAssembly parity. Compiler-published HIR
+  and MIR control are canonical DAGs; repetition is an explicit loop-region semantic, while cyclic
+  LLVM control and WebAssembly nesting remain backend-private derivations. Next:
+  `normalize-structural-unions`.
+- 2026-08-06: Began `add-mutable-bindings-and-structured-loops` after shipping fixed-size arrays.
+  Corrected the compiler-pipeline boundary before implementation: compiler-published control is a
+  structured DAG with explicit loop semantics, LLVM owns derived cyclic back-edges, and WebAssembly
+  consumes the preserved structure without CFG reconstruction.
 
 - 2026-08-05: Shipped and archived `resolve-cross-module-declarations`. Dotted logical imports now
   support namespace, selective, aliased, and hybrid bindings over canonical slash module identities;

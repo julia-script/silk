@@ -38,12 +38,34 @@ export interface SymbolEntry {
   readonly symbol: string
 }
 
+/** One backend-local control construct traced back to its canonical MIR region and source span. */
+export interface ControlProvenance {
+  readonly _tag: 'BackendControlProvenance'
+  readonly backend: 'LLVM' | 'WebAssembly'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly region: Mir.RegionId
+  readonly construct:
+    | 'LlvmJump'
+    | 'LlvmBranch'
+    | 'LlvmReturn'
+    | 'LlvmTrap'
+    | 'WasmIf'
+    | 'WasmLoop'
+    | 'WasmBr'
+    | 'WasmReturn'
+    | 'WasmTrap'
+  readonly targets: ReadonlyArray<Mir.RegionId>
+  readonly loop?: Mir.LoopId
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** The backend's program artifact: deterministic bitcode plus the IR inspection text. */
 export interface Artifact {
   readonly _tag: 'BackendArtifact'
   readonly module: string
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<SymbolEntry>
+  readonly control: ReadonlyArray<ControlProvenance>
   readonly bitcode: Uint8Array
   readonly ir: string
 }
@@ -125,6 +147,192 @@ const positionOf = (table: LineTable, offset: number): { line: number; column: n
   return { line: line + 1, column: offset - (table.lineStarts[line] ?? 0) + 1 }
 }
 
+type LinearTerminator =
+  | { readonly _tag: 'Return'; readonly value: Mir.LocalId; readonly provenance: Mir.Provenance }
+  | { readonly _tag: 'Jump'; readonly target: Mir.RegionId; readonly provenance: Mir.Provenance }
+  | {
+      readonly _tag: 'Branch'
+      readonly condition: Mir.LocalId
+      readonly taken: Mir.RegionId
+      readonly otherwise: Mir.RegionId
+      readonly provenance: Mir.Provenance
+    }
+  | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Mir.Provenance }
+
+interface LinearBlock {
+  readonly id: Mir.RegionId
+  readonly kind: 'Normal' | 'Cleanup'
+  readonly operations: ReadonlyArray<Mir.Operation>
+  readonly terminator: LinearTerminator
+}
+
+const destinationOf = (operation: Mir.Operation): Mir.LocalId | undefined => {
+  switch (operation._tag) {
+    case 'Literal':
+    case 'Binary':
+    case 'Move':
+    case 'Call':
+    case 'Construct':
+    case 'ConstructArray':
+    case 'Project':
+    case 'ReadPlace':
+      return operation.destination
+    case 'CheckPlace':
+    case 'WritePlace':
+    case 'Drop':
+      return undefined
+  }
+}
+
+/** LLVM-private flattening of the compiler-owned DAG. Repeat is the only source of a back-edge. */
+const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
+  const loops = new Map(
+    fn.regions.flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+    ),
+  )
+  const conditionOwners = new Map(
+    fn.regions.flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.condition.ordinal, region] as const] : [],
+    ),
+  )
+  const outcome = (region: Mir.OperationRegion | Mir.CleanupRegion): LinearTerminator => {
+    const value = region.outcome
+    switch (value._tag) {
+      case 'Forward':
+      case 'Return':
+      case 'Trap':
+        return value._tag === 'Forward'
+          ? Object.freeze({ _tag: 'Jump', target: value.target, provenance: value.provenance })
+          : value
+      case 'Repeat': {
+        const loop = loops.get(value.loop.ordinal)
+        if (loop === undefined) throw new RangeError('LLVM linearizer lost repeat loop')
+        return Object.freeze({ _tag: 'Jump', target: loop.id, provenance: value.provenance })
+      }
+      case 'Exit': {
+        const loop = loops.get(value.loop.ordinal)
+        if (loop === undefined) throw new RangeError('LLVM linearizer lost exit loop')
+        return Object.freeze({ _tag: 'Jump', target: loop.following, provenance: value.provenance })
+      }
+      case 'Yield': {
+        const loop = conditionOwners.get(region.id.ordinal)
+        if (loop === undefined) throw new RangeError('LLVM linearizer found unowned yield')
+        return Object.freeze({
+          _tag: 'Branch',
+          condition: loop.conditionValue,
+          taken: loop.body,
+          otherwise: loop.following,
+          provenance: value.provenance,
+        })
+      }
+    }
+  }
+  const raw = Mir.topologicalRegions(fn).map((region): LinearBlock => {
+    if (region._tag === 'ConditionalRegion') {
+      return Object.freeze({
+        id: region.id,
+        kind: 'Normal',
+        operations: Object.freeze([]),
+        terminator: Object.freeze({
+          _tag: 'Branch',
+          condition: region.condition,
+          taken: region.taken,
+          otherwise: region.otherwise,
+          provenance: region.provenance,
+        }),
+      })
+    }
+    if (region._tag === 'LoopRegion') {
+      return Object.freeze({
+        id: region.id,
+        kind: 'Normal',
+        operations: Object.freeze([]),
+        terminator: Object.freeze({
+          _tag: 'Jump',
+          target: region.condition,
+          provenance: region.provenance,
+        }),
+      })
+    }
+    return Object.freeze({
+      id: region.id,
+      kind: region._tag === 'CleanupRegion' ? 'Cleanup' : 'Normal',
+      operations: region._tag === 'CleanupRegion' ? region.releases : region.operations,
+      terminator: outcome(region),
+    })
+  })
+  const incoming = new Map<number, number>()
+  for (const edge of Mir.controlEdges(fn)) {
+    incoming.set(edge.to.ordinal, (incoming.get(edge.to.ordinal) ?? 0) + 1)
+  }
+  const byId = new Map(raw.map((block) => [block.id.ordinal, block] as const))
+  const regionsById = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
+  const inlined = new Set<number>()
+  const blocks = raw.map((block): LinearBlock => {
+    let operations = [...block.operations]
+    let terminator = block.terminator
+    const seen = new Set<number>()
+    while (terminator._tag === 'Jump' && !seen.has(terminator.target.ordinal)) {
+      const target = byId.get(terminator.target.ordinal)
+      const targetRegion = regionsById.get(terminator.target.ordinal)
+      const inlineable =
+        target !== undefined &&
+        incoming.get(target.id.ordinal) === 1 &&
+        (target.kind === 'Cleanup' || targetRegion?._tag === 'ConditionalRegion')
+      if (!inlineable) break
+      seen.add(target.id.ordinal)
+      inlined.add(target.id.ordinal)
+      operations = [...operations, ...target.operations]
+      terminator = target.terminator
+    }
+    return Object.freeze({ ...block, operations: Object.freeze(operations), terminator })
+  })
+  return Object.freeze(blocks.filter((block) => !inlined.has(block.id.ordinal)))
+}
+
+const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenance> =>
+  Object.freeze(
+    program.functions.flatMap((fn) =>
+      linearize(fn).map((block): ControlProvenance => {
+        const terminator = block.terminator
+        return Object.freeze({
+          _tag: 'BackendControlProvenance',
+          backend: 'LLVM',
+          function: fn.id,
+          region: block.id,
+          construct:
+            terminator._tag === 'Jump'
+              ? 'LlvmJump'
+              : terminator._tag === 'Branch'
+                ? 'LlvmBranch'
+                : terminator._tag === 'Return'
+                  ? 'LlvmReturn'
+                  : 'LlvmTrap',
+          targets:
+            terminator._tag === 'Jump'
+              ? Object.freeze([terminator.target])
+              : terminator._tag === 'Branch'
+                ? Object.freeze([terminator.taken, terminator.otherwise])
+                : Object.freeze([]),
+          span: terminator.provenance.span,
+        })
+      }),
+    ),
+  )
+
+const functionStart = (fn: Mir.MirFunction): number => {
+  const region = fn.regions.find((candidate) => candidate.id.ordinal === fn.entry.ordinal)
+  if (region === undefined) return 0
+  if (region._tag === 'ConditionalRegion' || region._tag === 'LoopRegion') {
+    return region.provenance.span.start
+  }
+  return (
+    (region._tag === 'OperationRegion' ? region.operations : region.releases).at(0)?.provenance.span
+      .start ?? region.outcome.provenance.span.start
+  )
+}
+
 const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
   Effect.gen(function* () {
     const i32Layout = Layout.entry(program.layout, 'I32')
@@ -176,6 +384,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       readonly handle: FunctionActor.Function
       readonly resultType: LlvmType.Type
       readonly resultLaneCount: number
+      readonly linear: ReadonlyArray<LinearBlock>
     }> = []
     for (const [ordinal, fn] of program.functions.entries()) {
       const resultLaneCount = lanesFor(fn.result).length
@@ -193,7 +402,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         )
       }
       const parameters =
-        fn.blocks.length === 0
+        fn.regions.length === 0
           ? []
           : fn.localTypes
               .slice(0, fn.parameterCount)
@@ -205,6 +414,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         handle: yield* FunctionActor.declare(builder, symbolFor(fn, ordinal), signature),
         resultType,
         resultLaneCount,
+        linear: linearize(fn),
       })
     }
 
@@ -225,10 +435,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     for (const entry of declared) {
       let subprogram: LlvmMetadata.Optional
       if (debug && file !== undefined && compileUnit !== undefined) {
-        const startLine = positionOf(
-          table,
-          entry.fn.blocks.at(0)?.terminator.provenance.span.start ?? 0,
-        ).line
+        const startLine = positionOf(table, functionStart(entry.fn)).line
         const symbolName = yield* LlvmMetadata.string(builder, entry.symbol)
         subprogram = yield* LlvmMetadata.subprogram(builder, file, symbolName, {
           line: startLine,
@@ -246,9 +453,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         builder,
         entry.handle,
         Effect.fnUntraced(function* (body) {
-          const blocks = []
-          for (const block of entry.fn.blocks) {
-            blocks.push(
+          const blocks = new Map<number, LlvmBlock.Block>()
+          for (const block of entry.linear) {
+            blocks.set(
+              block.id.ordinal,
               yield* LlvmBlock.make(
                 body,
                 `bb${block.id.ordinal}${block.kind === 'Cleanup' ? '_cleanup' : ''}`,
@@ -258,6 +466,24 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           let trapBlock: LlvmBlock.Block | undefined
           let checkOrdinal = 0
           const locals = new Map<number, ReadonlyArray<Value.Input>>()
+          const mutableRoots = new Set(
+            entry.linear.flatMap((block) =>
+              block.operations.flatMap((operation) =>
+                operation._tag === 'WritePlace' ? [operation.root.ordinal] : [],
+              ),
+            ),
+          )
+          const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
+          for (const root of [...mutableRoots].sort((left, right) => left - right)) {
+            const logicalType = entry.fn.localTypes.at(root)
+            if (logicalType === undefined)
+              throw new RangeError(`Backend lost mutable root %${root}`)
+            const storage: Array<Value.Input> = []
+            for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {
+              storage.push(yield* FunctionBody.alloca(body, i32, `mut${root}_${lane}`))
+            }
+            mutableStorage.set(root, Object.freeze(storage))
+          }
           let physicalParameter = 0
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
             const logicalType = entry.fn.localTypes.at(ordinal)
@@ -270,6 +496,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               physicalParameter += 1
             }
             locals.set(ordinal, Object.freeze(values))
+            const storage = mutableStorage.get(ordinal)
+            if (storage !== undefined) {
+              for (const [lane, pointer] of storage.entries()) {
+                const stored = values.at(lane)
+                if (stored !== undefined) yield* FunctionBody.store(body, stored, pointer)
+              }
+            }
           }
           const readLocal = (local: Mir.LocalId): ReadonlyArray<Value.Input> => {
             const found = locals.get(local.ordinal)
@@ -303,10 +536,36 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               )
             })
 
-          for (const [blockOrdinal, block] of entry.fn.blocks.entries()) {
-            const blockHandle = blocks[blockOrdinal]
+          const storeMutable = Effect.fnUntraced(function* (
+            root: Mir.LocalId,
+            values: ReadonlyArray<Value.Input>,
+          ) {
+            const storage = mutableStorage.get(root.ordinal)
+            if (storage === undefined) return
+            for (const [lane, pointer] of storage.entries()) {
+              const stored = values.at(lane)
+              if (stored === undefined) throw new RangeError('Mutable root lost a physical lane')
+              yield* FunctionBody.store(body, stored, pointer)
+            }
+          })
+
+          for (const [blockOrdinal, block] of entry.linear.entries()) {
+            const blockHandle = blocks.get(block.id.ordinal)
             if (blockHandle === undefined) continue
             if (blockOrdinal > 0) yield* LlvmBlock.setInsertionPoint(body, blockHandle)
+            if (blockOrdinal > 0) {
+              for (const root of [...mutableRoots].sort((left, right) => left - right)) {
+                const storage = mutableStorage.get(root)
+                if (storage === undefined) continue
+                const loaded: Array<Value.Input> = []
+                for (const [lane, pointer] of storage.entries()) {
+                  loaded.push(
+                    yield* FunctionBody.load(body, i32, pointer, `mut${root}_${lane}_load`),
+                  )
+                }
+                locals.set(root, Object.freeze(loaded))
+              }
+            }
             for (const operation of block.operations) {
               switch (operation._tag) {
                 case 'Literal':
@@ -515,6 +774,167 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(selectedValues))
                   break
                 }
+                case 'CheckPlace': {
+                  const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
+                    selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
+                      ? [
+                          Object.freeze({
+                            local: selector.index.local,
+                            length: selector.length,
+                            span: selector.provenance.span,
+                            ordinal,
+                          }),
+                        ]
+                      : [],
+                  )
+                  for (const [runtimeOrdinal, selector] of runtimeSelectors.entries()) {
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    const limit = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(selector.length),
+                    )
+                    const inBounds = yield* FunctionBody.integerCompare(
+                      body,
+                      'ult',
+                      readScalar(selector.local),
+                      limit,
+                      `write_index${checkOrdinal}_${runtimeOrdinal}_in_bounds`,
+                    )
+                    const instruction = yield* Value.instruction(body, inBounds)
+                    yield* locate(selector.span, instruction)
+                    const continueBlock = yield* LlvmBlock.make(
+                      body,
+                      `write_index${checkOrdinal}_${runtimeOrdinal}_ok`,
+                    )
+                    yield* FunctionBody.conditionalBranch(body, inBounds, continueBlock, trapBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+                  }
+                  checkOrdinal += 1
+                  break
+                }
+                case 'WritePlace': {
+                  const rootLanes = lanesFor(operation.rootType)
+                  const rootValues = readLocal(operation.root)
+                  const sourceLanes = lanesFor(operation.type)
+                  const sourceValues = readLocal(operation.source)
+                  if (operation.selectors.length === 0) {
+                    locals.set(operation.root.ordinal, sourceValues)
+                    yield* storeMutable(operation.root, sourceValues)
+                    break
+                  }
+                  const updated: Array<Value.Input> = []
+                  for (const [rootOrdinal, rootLane] of rootLanes.entries()) {
+                    const previous = rootValues.at(rootOrdinal)
+                    if (previous === undefined) throw new RangeError('Mutable root lost a lane')
+                    const runtimeElements: Array<{
+                      readonly local: Mir.LocalId
+                      readonly element: number
+                    }> = []
+                    let matches = true
+                    for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
+                      const physical = rootLane.path.at(selectorOrdinal)
+                      if (physical === undefined) {
+                        matches = false
+                        break
+                      }
+                      if (selector._tag === 'FieldSelector') {
+                        if (
+                          physical._tag !== 'FieldId' ||
+                          physical.ordinal !== selector.field.ordinal ||
+                          physical.struct.sourceId !== selector.field.struct.sourceId ||
+                          physical.struct.ordinal !== selector.field.struct.ordinal
+                        ) {
+                          matches = false
+                          break
+                        }
+                      } else if (physical._tag !== 'ElementSelector') {
+                        matches = false
+                        break
+                      } else if (selector.index._tag === 'Proven') {
+                        if (physical.index !== selector.index.value) {
+                          matches = false
+                          break
+                        }
+                      } else {
+                        runtimeElements.push(
+                          Object.freeze({
+                            local: selector.index.local,
+                            element: physical.index,
+                          }),
+                        )
+                      }
+                    }
+                    if (!matches) {
+                      updated.push(previous)
+                      continue
+                    }
+                    const suffix = rootLane.path.slice(operation.selectors.length)
+                    const sourceOrdinal = sourceLanes.findIndex(
+                      (lane) =>
+                        lane.path.length === suffix.length &&
+                        lane.path.every((physical, ordinal) => {
+                          const expected = suffix.at(ordinal)
+                          if (expected === undefined || physical._tag !== expected._tag)
+                            return false
+                          return physical._tag === 'ElementSelector'
+                            ? expected._tag === 'ElementSelector' &&
+                                physical.index === expected.index
+                            : expected._tag === 'FieldId' &&
+                                physical.ordinal === expected.ordinal &&
+                                physical.struct.sourceId === expected.struct.sourceId &&
+                                physical.struct.ordinal === expected.struct.ordinal
+                        }),
+                    )
+                    const replacement = sourceValues.at(sourceOrdinal)
+                    if (replacement === undefined) {
+                      throw new RangeError(
+                        `Backend could not realize place-write lane ${rootOrdinal}`,
+                      )
+                    }
+                    let condition: Value.Input | undefined
+                    for (const [elementOrdinal, element] of runtimeElements.entries()) {
+                      const expected = yield* Constant.integerSigned(
+                        builder,
+                        i32,
+                        BigInt(element.element),
+                      )
+                      const equal = yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        readScalar(element.local),
+                        expected,
+                        `write_index${checkOrdinal}_${rootOrdinal}_${elementOrdinal}`,
+                      )
+                      condition =
+                        condition === undefined
+                          ? equal
+                          : yield* FunctionBody.binary(
+                              body,
+                              'and',
+                              condition,
+                              equal,
+                              `write_index${checkOrdinal}_${rootOrdinal}_${elementOrdinal}_all`,
+                            )
+                    }
+                    updated.push(
+                      condition === undefined
+                        ? replacement
+                        : yield* FunctionBody.select(
+                            body,
+                            condition,
+                            replacement,
+                            previous,
+                            `write_index${checkOrdinal}_${rootOrdinal}_value`,
+                          ),
+                    )
+                  }
+                  checkOrdinal += 1
+                  const frozen = Object.freeze(updated)
+                  locals.set(operation.root.ordinal, frozen)
+                  yield* storeMutable(operation.root, frozen)
+                  break
+                }
                 case 'Binary': {
                   const left = readScalar(operation.left)
                   const right = readScalar(operation.right)
@@ -707,6 +1127,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
               }
+              const destination = destinationOf(operation)
+              if (destination !== undefined && mutableRoots.has(destination.ordinal)) {
+                yield* storeMutable(destination, readLocal(destination))
+              }
             }
             const terminator = block.terminator
             switch (terminator._tag) {
@@ -730,7 +1154,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 break
               }
               case 'Jump': {
-                const target = blocks[terminator.target.ordinal]
+                const target = blocks.get(terminator.target.ordinal)
                 if (target === undefined) throw new RangeError('Backend jump to missing block')
                 yield* FunctionBody.branch(body, target)
                 break
@@ -744,8 +1168,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   zero,
                   `c${blockOrdinal}`,
                 )
-                const taken = blocks[terminator.taken.ordinal]
-                const otherwise = blocks[terminator.otherwise.ordinal]
+                const taken = blocks.get(terminator.taken.ordinal)
+                const otherwise = blocks.get(terminator.otherwise.ordinal)
                 if (taken === undefined || otherwise === undefined) {
                   throw new RangeError('Backend branch to missing block')
                 }
@@ -805,6 +1229,7 @@ export const LlvmBackend: Backend = Object.freeze({
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
+      control: llvmControl(program),
       bitcode: output.bitcode,
       ir: output.ir,
     })

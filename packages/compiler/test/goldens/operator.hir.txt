@@ -1,6 +1,6 @@
 hir-module golden/operator
-fn golden/operator.main () -> I32
-  return [29, 53)
+fn golden/operator.main () -> I32 entry=r0 regions=r0
+  return r0 [29, 53)
     builtin I32.Add : I32 [29, 53)
       builtin I32.Add : I32 [29, 39)
         literal 2 : I32 [29, 31)

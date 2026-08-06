@@ -258,6 +258,68 @@ pub fn main() -> I32 { return choose([], 0) }`,
     expected: { _tag: 'Trap' },
   },
   {
+    name: 'mutable-scalar-loop',
+    source: `pub fn main() -> I32 {
+  let mut count = 0
+  while count < 42 { count = count + 1 }
+  return count
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'mutable-array-loop',
+    source: `pub fn main() -> I32 {
+  let mut values = [40, 0]
+  let mut index = 0
+  while index < 2 {
+    values[index] = values[index] + 1
+    index = index + 1
+  }
+  return values[0] + values[1]
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'loop-continue-break',
+    source: `pub fn main() -> I32 {
+  let mut index = 0
+  while index < 50 {
+    index = index + 1
+    if index == 2 { continue }
+    if index == 42 { break }
+  }
+  return index
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'mutable-struct-loop',
+    source: `struct Pair { left: I32 right: I32 }
+pub fn main() -> I32 {
+  let mut pair = Pair { left: 0, right: 40 }
+  while pair.left < 2 { pair.left = pair.left + 1 }
+  return pair.left + pair.right
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'nested-loops',
+    source: `pub fn main() -> I32 {
+  let mut outer = 0
+  let mut total = 0
+  while outer < 6 {
+    let mut inner = 0
+    while inner < 7 {
+      total = total + 1
+      inner = inner + 1
+    }
+    outer = outer + 1
+  }
+  return total
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'missing-entry',
     source: 'pub fn answer() -> I32 { return 42 }',
     expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },

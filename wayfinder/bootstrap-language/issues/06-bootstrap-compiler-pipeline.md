@@ -47,15 +47,18 @@ diagnostics without exposing raw HIR storage. Bootstrap need not implement every
 query, but its identities, recovery states, provenance, and phase boundaries must allow the facade
 to grow without reimplementing Silk semantics in a separate tool.
 
-The compiler has two owned intermediate representations between syntax and LLVM. HIR is the
+The compiler has two owned intermediate representations between syntax and code generation. HIR is the
 resolved, typed, generic-aware semantic representation. It uses canonical declaration and type IDs,
 normalized function contracts and rows, core semantic operations, and source provenance while
-retaining type and contract-row parameters. MIR is a monomorphic, backend-neutral control-flow
-graph. It makes moves, borrows, drops, cleanup paths, success/failure branches, service slots,
-witness calls, matches, traps, and runtime-helper calls explicit without containing LLVM types,
-instructions, intrinsics, attributes, or metadata nodes. MIR is backend-neutral but target-aware:
-the complete compiler-selected target and concrete data-layout plan are part of the MIR program,
-including physical field offsets when aggregate types require them.
+retaining type and contract-row parameters. MIR is a monomorphic, backend-neutral structured
+control DAG. Ordered operations, conditionals, loops, cleanup, and terminal outcomes retain their
+canonical region identities; repetition is the meaning of an explicit loop region rather than a
+graph back-edge. MIR makes moves, borrows, drops, cleanup paths, success/failure outcomes, service
+slots, witness calls, matches, traps, and runtime-helper calls explicit without containing LLVM or
+WebAssembly types, instructions, labels, branch depths, intrinsics, attributes, or metadata nodes.
+MIR is backend-neutral but target-aware: the complete compiler-selected target and concrete
+data-layout plan are part of the MIR program, including physical field offsets when aggregate types
+require them.
 
 Frontend checking proceeds in this order:
 
@@ -83,9 +86,10 @@ Frontend checking proceeds in this order:
    concrete runtime type discovered by the instance worklist. This phase runs before MIR lowering
    so layout facts and diagnostics are available to the compiler and its analysis facade early,
    while generic types that have no concrete runtime instance need no speculative layout.
-7. Lower reachable instances to MIR, turning structured control flow into basic blocks and inserting
-   concrete drops and cleanup edges from the generic ownership proof. Typed failures become
-   explicit success/failure branches, requirements become canonical hidden service slots, and
+7. Lower reachable instances to MIR while preserving structured control as an acyclic region graph
+   and inserting concrete drops and cleanup regions from the generic ownership proof. Loop repeat
+   and exit outcomes name lexical loop ports rather than successor edges. Typed failures become
+   explicit success/failure outcomes, requirements become canonical hidden service slots, and
    source and semantic provenance remain attached to lowered operations.
 
 MIR uses logical Silk types and operations together with the compiler's canonical target and layout
@@ -94,9 +98,10 @@ alignments, field offsets, union discriminant and payload placement, scalar repr
 private ABI decisions without using LLVM or another backend's types. A backend must realize this
 plan exactly and cannot independently choose physical layouts at emission time. MIR does not adopt
 LLVM control flow merely because LLVM is the bootstrap backend, nor WebAssembly stack and
-structured control flow in anticipation of a future backend. A direct WebAssembly backend may
-reject an unsupported target or require its own CFG-structuring and ABI work, but it does not need
-the frontend or MIR semantics redesigned.
+structured control flow in anticipation of a future backend. LLVM deterministically flattens the
+common DAG into backend-private blocks and back-edges; WebAssembly maps the same regions directly to
+its nested control constructs. Neither backend may reconstruct compiler-known source structure from
+a flattened graph.
 
 Code generation is selected through a nominal `Backend` service. Its bootstrap operation consumes
 the whole target-aware monomorphized MIR program plus a codegen request and produces one relocatable
@@ -159,8 +164,8 @@ binding and type provenance must remain available to add it without replacing MI
 DWARF metadata is the source-map mechanism; bootstrap does not create a separate JavaScript-style
 source-map artifact.
 
-MIR performs no general optimization. It may remove lowering-created unreachable blocks, fold
-branches whose conditions are already constant, merge mechanically identical cleanup blocks, and
+MIR performs no general optimization. It may remove lowering-created unreachable regions, fold
+conditions whose values are already constant, share mechanically identical cleanup regions, and
 verify its invariants while preserving provenance. LLVM owns optimization through three bootstrap
 profiles: debug uses `-O0` with debug metadata, release uses `-O2` and strips debug metadata by
 default, and release-with-debug uses `-O2` with line information. Bootstrap excludes a Silk SSA
@@ -191,3 +196,12 @@ The compiler is backend-agnostic, not target-agnostic. This amendment moves cano
 all concrete layout decisions from backend emission into an explicit compiler phase after concrete
 instance discovery and before MIR lowering. It supersedes the earlier backend-owned aggregate and
 union layout wording.
+
+## Amendment — 2026-08-06
+
+All compiler-published control relationships remain DAG-shaped. MIR preserves structured operation,
+conditional, loop, cleanup, and continuation regions; `repeat` and `exit` are lexical outcomes of an
+enclosing loop, not traversable graph edges. Cyclic CFG blocks and back-edges are backend-private
+derived artifacts for targets such as LLVM. Structured targets such as WebAssembly consume the same
+DAG directly and must not recover loops or conditionals from flattened control flow. This amendment
+supersedes the earlier basic-block lowering and WebAssembly CFG-structuring wording.

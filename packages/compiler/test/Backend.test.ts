@@ -138,3 +138,28 @@ pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
     assert.strictEqual(first.ir, second.ir)
   }),
 )
+
+it.effect('publishes native branch provenance back to canonical loop regions', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      'pub fn main() -> I32 { let mut value = 0 while value < 2 { value = value + 1 } return value }',
+      { mode: 'release' },
+    )
+    assert.strictEqual(
+      artifact.control.every((entry) => entry.backend === 'LLVM'),
+      true,
+    )
+    assert.strictEqual(
+      artifact.control.some((entry) => entry.construct === 'LlvmBranch'),
+      true,
+    )
+    assert.strictEqual(
+      artifact.control.some(
+        (entry) =>
+          entry.construct === 'LlvmJump' &&
+          entry.targets.some((target) => target.ordinal <= entry.region.ordinal),
+      ),
+      true,
+    )
+  }),
+)

@@ -27,6 +27,7 @@ export interface BindingFact {
   readonly _tag: 'Binding'
   readonly site: BindingSite
   readonly name: string | undefined
+  readonly mutability: 'Immutable' | 'Mutable'
   readonly category: OwnershipCategory
   readonly type?: DeclarationIndex.SemanticType
   readonly cleanup: CleanupPlan
@@ -64,10 +65,23 @@ export type CleanupPlan =
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
   readonly _tag: 'Exit'
-  readonly kind: 'Return' | 'ArmEnd'
+  readonly kind: 'Return' | 'ArmEnd' | 'LoopFallthrough' | 'Break' | 'Continue'
   readonly span: SourceSpan.SourceSpan
   readonly arm?: 'Taken' | 'Otherwise'
+  readonly target?: Hir.LoopId
   readonly releases: ReadonlyArray<Release>
+}
+
+/** The finite owner-liveness states used to establish one deterministic loop header. */
+export interface LoopFixedPoint {
+  readonly _tag: 'LoopFixedPoint'
+  readonly loop: Hir.LoopId
+  readonly span: SourceSpan.SourceSpan
+  readonly incoming: ReadonlyArray<BindingSite>
+  readonly repeating: ReadonlyArray<ReadonlyArray<BindingSite>>
+  readonly following: ReadonlyArray<BindingSite>
+  readonly compatible: boolean
+  readonly iterations: number
 }
 
 /** The closed outcome of checking one function. */
@@ -82,6 +96,7 @@ export interface FunctionOwnership {
   readonly declaration: DeclarationIndex.DeclarationFact
   readonly bindings: ReadonlyArray<BindingFact>
   readonly exits: ReadonlyArray<ExitPlan>
+  readonly fixedPoints: ReadonlyArray<LoopFixedPoint>
   readonly verdict: Verdict
 }
 
@@ -112,6 +127,7 @@ const siteKey = (site: BindingSite): string =>
 interface MutableBinding {
   readonly site: BindingSite
   readonly name: string | undefined
+  readonly mutability: 'Immutable' | 'Mutable'
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
   readonly type?: DeclarationIndex.SemanticType
@@ -238,9 +254,10 @@ interface CheckedFunction {
 }
 
 interface ExitDescriptor {
-  readonly kind: 'Return' | 'ArmEnd'
+  readonly kind: ExitPlan['kind']
   readonly span: SourceSpan.SourceSpan
   readonly arm?: 'Taken' | 'Otherwise'
+  readonly target?: Hir.LoopId
   readonly sites: ReadonlyArray<string>
 }
 
@@ -326,6 +343,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
     const binding: MutableBinding = {
       site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
+      mutability: 'Immutable',
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
       category: categoryOf(type),
@@ -338,6 +356,32 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
   }
 
   const exits: Array<ExitDescriptor> = []
+  const continueStates = new Map<number, Array<Set<string>>>()
+  const breakStates = new Map<number, Array<Set<string>>>()
+  const fixedPoints: Array<{
+    readonly loop: Hir.LoopId
+    readonly span: SourceSpan.SourceSpan
+    readonly incoming: Set<string>
+    readonly repeating: ReadonlyArray<Set<string>>
+    readonly following: Set<string>
+    readonly compatible: boolean
+    readonly iterations: number
+  }> = []
+  const appendLoopState = (
+    states: Map<number, Array<Set<string>>>,
+    loop: Hir.LoopId,
+    live: Set<string>,
+  ): void => {
+    const existing = states.get(loop.ordinal)
+    if (existing === undefined) states.set(loop.ordinal, [new Set(live)])
+    else existing.push(new Set(live))
+  }
+  const sameLive = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
+    left.size === right.size && [...left].every((site) => right.has(site))
+  const intersection = (states: ReadonlyArray<ReadonlySet<string>>): Set<string> => {
+    const [first, ...rest] = states
+    return new Set([...(first ?? [])].filter((site) => rest.every((state) => state.has(site))))
+  }
   const frameSitesInnerFirst = (
     frames: ReadonlyArray<ReadonlyArray<string>>,
     live: ReadonlySet<string>,
@@ -349,6 +393,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
     enclosingSpan: SourceSpan.SourceSpan,
     initial: Set<string>,
     frames: Array<Array<string>>,
+    loopScopes: ReadonlyArray<{ readonly loop: Hir.LoopId; readonly frame: number }> = [],
   ): { readonly returned: boolean; readonly live: Set<string> } => {
     let live = initial
     for (const statement of statements) {
@@ -359,6 +404,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
         const binding: MutableBinding = {
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
           name: statement.name,
+          mutability: statement.mutability,
           liveFrom: statement.span,
           liveTo: enclosingSpan,
           category: categoryOf(type),
@@ -379,7 +425,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           ['Otherwise', statement.otherwise],
         ] as const) {
           const armFrames = [...frames.map((frame) => [...frame]), []]
-          const result = walkStatements(body, statement.span, new Set(live), armFrames)
+          const result = walkStatements(body, statement.span, new Set(live), armFrames, loopScopes)
           const frame = armFrames.at(-1) ?? []
           if (!result.returned && frame.length > 0) {
             exits.push(
@@ -402,6 +448,113 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
             continuing.every((candidate) => candidate.has(site)),
           ),
         )
+        continue
+      }
+      if (statement._tag === 'Write') {
+        for (const selector of statement.place.selectors) {
+          if (selector._tag === 'Index') checkExpression(state, live, selector.index, false)
+        }
+        const rootSite: BindingSite = Object.freeze({
+          _tag: 'Let',
+          binding: statement.place.root,
+        })
+        const rootKey = siteKey(rootSite)
+        const root = state.bindings.get(rootKey)
+        const wasLive = live.has(rootKey)
+        if (!wasLive && statement.place.selectors.length > 0 && root !== undefined) {
+          checkUse(state, live, rootSite, statement.place.span, false)
+        }
+        checkExpression(state, live, statement.value, true)
+        if (wasLive && !live.has(rootKey)) {
+          state.diagnostics.push(
+            Diagnostic.overlappingAssignment(root?.name ?? '?', statement.span),
+          )
+        } else if (statement.place.selectors.length === 0) {
+          live.add(rootKey)
+        }
+        continue
+      }
+      if (statement._tag === 'While') {
+        checkExpression(state, live, statement.condition, false)
+        const incoming = new Set(live)
+        const previousContinues = continueStates.get(statement.loop.ordinal)?.length ?? 0
+        const previousBreaks = breakStates.get(statement.loop.ordinal)?.length ?? 0
+        const loopFrames = [...frames.map((frame) => [...frame]), []]
+        const loopResult = walkStatements(
+          statement.body,
+          statement.span,
+          new Set(live),
+          loopFrames,
+          [...loopScopes, { loop: statement.loop, frame: loopFrames.length - 1 }],
+        )
+        const loopFrame = loopFrames.at(-1) ?? []
+        const repeating: Array<Set<string>> = [
+          ...(continueStates.get(statement.loop.ordinal)?.slice(previousContinues) ?? []),
+        ]
+        if (!loopResult.returned) {
+          exits.push(
+            Object.freeze({
+              kind: 'LoopFallthrough' as const,
+              span: statement.span,
+              target: statement.loop,
+              sites: Object.freeze(
+                [...loopFrame].reverse().filter((site) => loopResult.live.has(site)),
+              ),
+            }),
+          )
+          repeating.push(new Set(loopResult.live))
+        }
+        for (const candidate of repeating) {
+          for (const site of loopFrame) candidate.delete(site)
+        }
+        const compatible = repeating.every((candidate) => sameLive(candidate, incoming))
+        if (!compatible) {
+          state.diagnostics.push(
+            Diagnostic.incompatibleLoopHeader(statement.loop.ordinal, statement.span),
+          )
+        }
+        const exitsFromLoop = breakStates.get(statement.loop.ordinal)?.slice(previousBreaks) ?? []
+        for (const candidate of exitsFromLoop) {
+          for (const site of loopFrame) candidate.delete(site)
+        }
+        live = intersection([incoming, ...exitsFromLoop])
+        fixedPoints.push({
+          loop: statement.loop,
+          span: statement.span,
+          incoming,
+          repeating: Object.freeze(repeating.map((candidate) => new Set(candidate))),
+          following: new Set(live),
+          compatible,
+          iterations: repeating.length === 0 ? 1 : 2,
+        })
+        continue
+      }
+      if (statement._tag === 'Break' || statement._tag === 'Continue') {
+        const targetScope = [...loopScopes]
+          .reverse()
+          .find((scope) => scope.loop.ordinal === statement.target.ordinal)
+        const transferFrames =
+          targetScope === undefined ? [frames.at(-1) ?? []] : frames.slice(targetScope.frame)
+        const transferSites = [...transferFrames].reverse().flatMap((frame) => [...frame].reverse())
+        const sites = Object.freeze(transferSites.filter((site) => live.has(site)))
+        exits.push(
+          Object.freeze({
+            kind: statement._tag,
+            span: statement.span,
+            target: statement.target,
+            sites,
+          }),
+        )
+        const next = new Set(live)
+        for (const site of transferSites) next.delete(site)
+        appendLoopState(
+          statement._tag === 'Break' ? breakStates : continueStates,
+          statement.target,
+          next,
+        )
+        return Object.freeze({ returned: true, live })
+      }
+      if (statement._tag === 'UnavailableStatement') {
         continue
       }
       checkExpression(state, live, statement.expression, true)
@@ -438,6 +591,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           _tag: 'Binding',
           site: binding.site,
           name: binding.name,
+          mutability: binding.mutability,
           category: binding.category,
           ...(binding.type === undefined ? {} : { type: binding.type }),
           cleanup:
@@ -460,6 +614,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           kind: exit.kind,
           span: exit.span,
           ...(exit.arm === undefined ? {} : { arm: exit.arm }),
+          ...(exit.target === undefined ? {} : { target: exit.target }),
           releases: Object.freeze(
             exit.sites.flatMap((site): ReadonlyArray<Release> => {
               const fact = bindingBySite.get(site)
@@ -504,6 +659,27 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
       declaration,
       bindings,
       exits: exitPlans,
+      fixedPoints: Object.freeze(
+        fixedPoints.map((point) => {
+          const sites = (keys: ReadonlySet<string>): ReadonlyArray<BindingSite> =>
+            Object.freeze(
+              [...keys].flatMap((key): ReadonlyArray<BindingSite> => {
+                const binding = bindingBySite.get(key)
+                return binding === undefined ? [] : [binding.site]
+              }),
+            )
+          return Object.freeze({
+            _tag: 'LoopFixedPoint' as const,
+            loop: point.loop,
+            span: point.span,
+            incoming: sites(point.incoming),
+            repeating: Object.freeze(point.repeating.map(sites)),
+            following: sites(point.following),
+            compatible: point.compatible,
+            iterations: point.iterations,
+          })
+        }),
+      ),
       verdict,
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
@@ -577,10 +753,20 @@ export const encode = (self: ModuleOwnership): string =>
         return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
       }),
       ...fn.exits.map((exit) => {
-        const label =
-          exit.kind === 'Return'
-            ? 'return'
-            : `arm-end ${exit.arm === 'Otherwise' ? 'otherwise' : 'taken'}`
+        const label = (() => {
+          switch (exit.kind) {
+            case 'Return':
+              return 'return'
+            case 'ArmEnd':
+              return `arm-end ${exit.arm === 'Otherwise' ? 'otherwise' : 'taken'}`
+            case 'LoopFallthrough':
+              return `loop${exit.target?.ordinal ?? '?'} fallthrough`
+            case 'Break':
+              return `break loop${exit.target?.ordinal ?? '?'}`
+            case 'Continue':
+              return `continue loop${exit.target?.ordinal ?? '?'}`
+          }
+        })()
         return exit.releases.length === 0
           ? `  exit ${label} ${spanText(exit.span)} releases none`
           : [
@@ -591,6 +777,10 @@ export const encode = (self: ModuleOwnership): string =>
               ),
             ].join('\n')
       }),
+      ...fn.fixedPoints.map(
+        (point) =>
+          `  loop${point.loop.ordinal} fixed-point ${point.compatible ? 'compatible' : 'incompatible'} iterations=${point.iterations} incoming=${point.incoming.map(siteText).join(',') || 'none'} repeating=${point.repeating.map((state) => `[${state.map(siteText).join(',')}]`).join(',') || 'none'} following=${point.following.map(siteText).join(',') || 'none'}`,
+      ),
     ]),
     '',
   ].join('\n')

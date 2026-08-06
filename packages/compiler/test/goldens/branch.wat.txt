@@ -21,12 +21,11 @@
       local.set 3
       local.get 3
       return
-    else
-      i32.const 0
-      local.set 4
-      local.get 4
-      return
     end
+    i32.const 0
+    local.set 4
+    local.get 4
+    return
     unreachable
   )
   (export "silk_main" (func 0))

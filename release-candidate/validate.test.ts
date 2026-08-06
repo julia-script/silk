@@ -667,13 +667,13 @@ console.log(
     expect(api.evaluation).toEqual({
       rootTag: 'Completed',
       rootResult: { _tag: 'I32Value', value: 42 },
-      rootTrace: ['Entry', 'Call', 'Binding', 'Return', 'Return'],
+      rootTrace: ['Entry', 'RegionEntry', 'Call', 'Binding', 'RegionEntry', 'Return', 'Return'],
       deepTag: 'Completed',
       deepResult: { _tag: 'I32Value', value: 42 },
       cycleTag: 'Blocked',
       cycleReason: 'RecursiveCycle',
       cycleNames: ['main', 'main'],
-      cycleTrace: ['Entry', 'Call'],
+      cycleTrace: ['Entry', 'RegionEntry', 'Call'],
     })
     expect(api.nested).toEqual({
       callCount: 2,
@@ -690,11 +690,14 @@ console.log(
       evaluationResult: { _tag: 'I32Value', value: 42 },
       evaluationTrace: [
         'Entry',
+        'RegionEntry',
         'Call',
         'Binding',
+        'RegionEntry',
         'Return',
         'Call',
         'Binding',
+        'RegionEntry',
         'Return',
         'Return',
       ],

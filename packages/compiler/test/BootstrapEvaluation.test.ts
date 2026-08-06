@@ -60,9 +60,9 @@ pub fn main() -> I32 { return identity(42) }`)
     assert.strictEqual(outcome._tag, 'Completed')
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
-      ['Entry', 'Call', 'Binding', 'Return', 'Return'],
+      ['Entry', 'RegionEntry', 'Call', 'Binding', 'RegionEntry', 'Return', 'Return'],
     )
-    const binding = outcome.trace.at(2)
+    const binding = outcome.trace.at(3)
     assert.strictEqual(binding?._tag, 'Binding')
     if (binding?._tag !== 'Binding') return
     assert.strictEqual(binding.value._tag, 'I32Value')
@@ -82,20 +82,23 @@ pub fn main() -> I32 { return identity(identity(42)) }`)
     const tags = outcome.trace.map((event) => event._tag)
     assert.deepEqual(tags, [
       'Entry',
+      'RegionEntry',
       'Call',
       'Binding',
+      'RegionEntry',
       'Return',
       'Call',
       'Binding',
+      'RegionEntry',
       'Return',
       'Return',
     ])
-    const outerBinding = outcome.trace.at(5)
+    const outerBinding = outcome.trace.at(7)
     assert.strictEqual(outerBinding?._tag, 'Binding')
     if (outerBinding?._tag !== 'Binding') return
     assert.strictEqual(outerBinding.fromCall, true)
-    const innerCall = outcome.trace.at(1)
-    const outerCall = outcome.trace.at(4)
+    const innerCall = outcome.trace.at(2)
+    const outerCall = outcome.trace.at(6)
     assert.strictEqual(innerCall?._tag, 'Call')
     assert.strictEqual(outerCall?._tag, 'Call')
     if (innerCall?._tag !== 'Call' || outerCall?._tag !== 'Call') return
@@ -114,7 +117,7 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
     assert.strictEqual(outcome.reason._tag, 'Trap')
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
-      ['Entry'],
+      ['Entry', 'RegionEntry'],
     )
   }),
 )

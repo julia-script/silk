@@ -7,10 +7,8 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /**
- * Lowering: reachable instances become one MIR program module. Statement sequences linearize
- * into basic blocks; conditionals become user-authored branch diamonds with join blocks; each
- * `let` binding occupies one typed local; drops follow the ownership plan's exits; unavailable
- * bodies and ownership violations lower to explicit generated traps.
+ * Lowering preserves source control as canonical acyclic regions. Repetition is represented by a
+ * loop region plus lexical repeat/exit outcomes; backend-private CFGs are derived later.
  */
 
 const i32: Mir.Type = Object.freeze({ _tag: 'I32' })
@@ -29,33 +27,33 @@ const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', o
 
 const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
 
-interface OpenBlock {
-  readonly id: Mir.BlockId
-  readonly kind: 'Normal'
-  operations: Array<Mir.Operation>
-  terminator: Mir.Terminator | undefined
-}
-
 class FunctionLowering {
-  readonly blocks: Array<OpenBlock> = []
+  readonly regions: Array<Mir.Region | undefined> = []
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()
-  current: OpenBlock
+  private operations: Array<Mir.Operation> = []
 
   constructor(parameterTypes: ReadonlyArray<Mir.Type>) {
     this.localTypes.push(...parameterTypes)
-    this.current = this.open()
   }
 
-  open(): OpenBlock {
-    const block: OpenBlock = {
-      id: Object.freeze({ _tag: 'Block', ordinal: this.blocks.length }),
-      kind: 'Normal',
-      operations: [],
-      terminator: undefined,
-    }
-    this.blocks.push(block)
-    return block
+  reserve(): Mir.RegionId {
+    const id = Object.freeze({ _tag: 'Region' as const, ordinal: this.regions.length })
+    this.regions.push(undefined)
+    return id
+  }
+
+  publish(region: Mir.Region): void {
+    this.regions[region.id.ordinal] = region
+  }
+
+  capture<A>(body: () => A): readonly [A, ReadonlyArray<Mir.Operation>] {
+    const previous = this.operations
+    this.operations = []
+    const result = body()
+    const operations = Object.freeze([...this.operations])
+    this.operations = previous
+    return [result, operations]
   }
 
   alloc(type: Mir.Type): Mir.LocalId {
@@ -65,11 +63,7 @@ class FunctionLowering {
   }
 
   emit(operation: Mir.Operation): void {
-    this.current.operations.push(operation)
-  }
-
-  terminate(terminator: Mir.Terminator): void {
-    if (this.current.terminator === undefined) this.current.terminator = terminator
+    this.operations.push(operation)
   }
 }
 
@@ -337,16 +331,33 @@ function lowerExpression(
 interface ExitIndex {
   readonly returns: ReadonlyMap<string, Ownership.ExitPlan>
   readonly armEnds: ReadonlyMap<string, Ownership.ExitPlan>
+  readonly loopFallthroughs: ReadonlyMap<number, Ownership.ExitPlan>
+  readonly transfers: ReadonlyMap<string, Ownership.ExitPlan>
 }
 
 const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex => {
   const returns = new Map<string, Ownership.ExitPlan>()
   const armEnds = new Map<string, Ownership.ExitPlan>()
+  const loopFallthroughs = new Map<number, Ownership.ExitPlan>()
+  const transfers = new Map<string, Ownership.ExitPlan>()
   for (const exit of plan?.exits ?? []) {
-    if (exit.kind === 'Return') returns.set(spanKey(exit.span), exit)
-    else armEnds.set(`${spanKey(exit.span)}:${exit.arm ?? 'Taken'}`, exit)
+    switch (exit.kind) {
+      case 'Return':
+        returns.set(spanKey(exit.span), exit)
+        break
+      case 'ArmEnd':
+        armEnds.set(`${spanKey(exit.span)}:${exit.arm ?? 'Taken'}`, exit)
+        break
+      case 'LoopFallthrough':
+        if (exit.target !== undefined) loopFallthroughs.set(exit.target.ordinal, exit)
+        break
+      case 'Break':
+      case 'Continue':
+        transfers.set(spanKey(exit.span), exit)
+        break
+    }
   }
-  return { returns, armEnds }
+  return { returns, armEnds, loopFallthroughs, transfers }
 }
 
 const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined): void => {
@@ -367,98 +378,418 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
   }
 }
 
-// ponytail: drops precede the return read; sound while every type is copyable — move the
-// returned value out before releasing once cleanup-bearing types exist.
-const lowerStatements = (
+const copyType = (type: Type.Type): boolean =>
+  Type.isBuiltin(type) || (Type.isFixedArray(type) && copyType(type.element))
+
+const ownerFields = (ownerLoop: Mir.LoopId | undefined): { readonly ownerLoop?: Mir.LoopId } =>
+  ownerLoop === undefined ? {} : { ownerLoop }
+
+const generated = (span: SourceSpan.SourceSpan): Mir.Provenance =>
+  Object.freeze({ span, generated: true })
+
+const authored = (span: SourceSpan.SourceSpan): Mir.Provenance =>
+  Object.freeze({ span, generated: false })
+
+const lowerWriteSelectors = (
+  fn: FunctionLowering,
+  selectors: ReadonlyArray<Hir.WriteSelector>,
+): ReadonlyArray<Mir.PlaceSelector> | undefined => {
+  const lowered: Array<Mir.PlaceSelector> = []
+  for (const selector of selectors) {
+    if (selector._tag === 'Field') {
+      lowered.push(
+        Object.freeze({
+          _tag: 'FieldSelector',
+          field: selector.field,
+          provenance: authored(selector.span),
+        }),
+      )
+      continue
+    }
+    const index =
+      selector.bounds._tag === 'Proven'
+        ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+        : (() => {
+            const expression = lowerExpression(fn, selector.index)
+            return expression === undefined
+              ? undefined
+              : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+          })()
+    if (index === undefined) return undefined
+    lowered.push(
+      Object.freeze({
+        _tag: 'ElementSelector',
+        length: selector.array.length,
+        index,
+        provenance: authored(selector.span),
+      }),
+    )
+  }
+  return Object.freeze(lowered)
+}
+
+const lowerSequence = (
   fn: FunctionLowering,
   statements: ReadonlyArray<Hir.Statement>,
   exits: ExitIndex,
-  arm: 'Taken' | 'Otherwise' | undefined,
-): boolean | undefined => {
-  for (const statement of statements) {
-    if (statement._tag === 'Bind') {
-      const initializer = lowerExpression(fn, statement.initializer)
-      if (initializer === undefined) return undefined
-      const destination = fn.alloc(fn.localTypes[initializer.result.ordinal] ?? i32)
+  ownerLoop: Mir.LoopId | undefined,
+  terminal: Mir.Outcome,
+  reserved?: Mir.RegionId,
+  armExit?: Ownership.ExitPlan,
+): Mir.RegionId | undefined => {
+  const id = reserved ?? fn.reserve()
+  const [statement, ...rest] = statements
+  if (statement === undefined) {
+    const [, releases] = fn.capture(() => emitReleases(fn, armExit))
+    if (releases.length > 0) {
+      fn.publish(
+        Object.freeze({
+          _tag: 'CleanupRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          releases: Object.freeze(
+            releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+          ),
+          outcome: terminal,
+        }),
+      )
+    } else {
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations: Object.freeze([]),
+          outcome: terminal,
+        }),
+      )
+    }
+    return id
+  }
+
+  if (statement._tag === 'UnavailableStatement') {
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: Object.freeze([]),
+        outcome: Object.freeze({
+          _tag: 'Trap',
+          reason: 'unavailable statement',
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    return id
+  }
+
+  if (statement._tag === 'Bind') {
+    const [initializer, operations] = fn.capture(() => {
+      const lowered = lowerExpression(fn, statement.initializer)
+      if (lowered === undefined) return undefined
+      const destination = fn.alloc(fn.localTypes.at(lowered.result.ordinal) ?? i32)
       fn.emit(
         Object.freeze({
           _tag: 'Move',
           destination,
-          source: initializer.result,
-          provenance: Object.freeze({ span: statement.span, generated: false }),
+          source: lowered.result,
+          provenance: authored(statement.span),
         }),
       )
       fn.bindingLocals.set(statement.binding.ordinal, destination)
-      continue
-    }
-    if (statement._tag === 'If') {
-      const condition = lowerExpression(fn, statement.condition)
-      if (condition === undefined) return undefined
-      const entry = fn.current
-
-      const takenBlock = fn.open()
-      fn.current = takenBlock
-      const takenReturned = lowerStatements(fn, statement.taken, exits, 'Taken')
-      if (takenReturned === undefined) return undefined
-      const takenEnd = fn.current
-
-      const hasOtherwise = statement.otherwise.length > 0
-      let otherwiseBlock: OpenBlock | undefined
-      let otherwiseEnd: OpenBlock | undefined
-      let otherwiseReturned = false
-      if (hasOtherwise) {
-        otherwiseBlock = fn.open()
-        fn.current = otherwiseBlock
-        const lowered = lowerStatements(fn, statement.otherwise, exits, 'Otherwise')
-        if (lowered === undefined) return undefined
-        otherwiseReturned = lowered
-        otherwiseEnd = fn.current
-      }
-
-      const bothReturn = takenReturned && hasOtherwise && otherwiseReturned
-      let join: OpenBlock | undefined
-      if (!bothReturn) join = fn.open()
-
-      entry.terminator = Object.freeze({
-        _tag: 'Branch',
-        condition: condition.result,
-        taken: takenBlock.id,
-        otherwise: (otherwiseBlock ?? join)?.id ?? takenBlock.id,
-        provenance: Object.freeze({ span: statement.span, generated: false }),
-      })
-
-      const joinArm = (end: OpenBlock, armName: 'Taken' | 'Otherwise'): void => {
-        if (end.terminator !== undefined || join === undefined) return
-        fn.current = end
-        emitReleases(fn, exits.armEnds.get(`${spanKey(statement.span)}:${armName}`))
-        end.terminator = Object.freeze({
-          _tag: 'Jump',
-          target: join.id,
-          provenance: Object.freeze({ span: statement.span, generated: true }),
-        })
-      }
-      if (!takenReturned) joinArm(takenEnd, 'Taken')
-      if (hasOtherwise && !otherwiseReturned && otherwiseEnd !== undefined) {
-        joinArm(otherwiseEnd, 'Otherwise')
-      }
-
-      if (join === undefined) return true
-      fn.current = join
-      continue
-    }
-    const returned = lowerExpression(fn, statement.expression)
-    if (returned === undefined) return undefined
-    emitReleases(fn, exits.returns.get(spanKey(statement.span)))
-    fn.terminate(
+      return destination
+    })
+    if (initializer === undefined) return undefined
+    const following = fn.reserve()
+    fn.publish(
       Object.freeze({
-        _tag: 'Return',
-        value: returned.result,
-        provenance: Object.freeze({ span: statement.span, generated: false }),
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        }),
       }),
     )
-    return true
+    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+      ? undefined
+      : id
   }
-  return arm === undefined ? undefined : false
+
+  if (statement._tag === 'Write') {
+    const root = fn.bindingLocals.get(statement.place.root.ordinal)
+    const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
+    const type = mirType(statement.place.type)
+    const [written, operations] = fn.capture(() => {
+      if (root === undefined || rootType === undefined || type === undefined) return false
+      const selectors = lowerWriteSelectors(fn, statement.place.selectors)
+      if (selectors === undefined) return false
+      fn.emit(
+        Object.freeze({
+          _tag: 'CheckPlace',
+          root,
+          selectors,
+          type,
+          provenance: authored(statement.place.span),
+        }),
+      )
+      const value = lowerExpression(fn, statement.value)
+      if (value === undefined) return false
+      fn.emit(
+        Object.freeze({
+          _tag: 'WritePlace',
+          root,
+          selectors,
+          source: value.result,
+          rootType,
+          type,
+          mutable: true,
+          replacement: copyType(statement.place.type) ? 'Copy' : 'Owned',
+          commit: 'AfterCleanup',
+          provenance: authored(statement.span),
+        }),
+      )
+      return true
+    })
+    if (!written) return undefined
+    const following = fn.reserve()
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+      ? undefined
+      : id
+  }
+
+  if (statement._tag === 'If') {
+    const conditional = fn.reserve()
+    const taken = fn.reserve()
+    const otherwise = fn.reserve()
+    const following = fn.reserve()
+    const [condition, operations] = fn.capture(() => lowerExpression(fn, statement.condition))
+    if (condition === undefined) return undefined
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: conditional,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    fn.publish(
+      Object.freeze({
+        _tag: 'ConditionalRegion',
+        id: conditional,
+        ...ownerFields(ownerLoop),
+        condition: condition.result,
+        taken,
+        otherwise,
+        following,
+        provenance: authored(statement.span),
+      }),
+    )
+    const forward = Object.freeze({
+      _tag: 'Forward' as const,
+      target: following,
+      provenance: generated(statement.span),
+    })
+    if (
+      lowerSequence(
+        fn,
+        statement.taken,
+        exits,
+        ownerLoop,
+        forward,
+        taken,
+        exits.armEnds.get(`${spanKey(statement.span)}:Taken`),
+      ) === undefined ||
+      lowerSequence(
+        fn,
+        statement.otherwise,
+        exits,
+        ownerLoop,
+        forward,
+        otherwise,
+        exits.armEnds.get(`${spanKey(statement.span)}:Otherwise`),
+      ) === undefined ||
+      lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+    ) {
+      return undefined
+    }
+    return id
+  }
+
+  if (statement._tag === 'While') {
+    const loop: Mir.LoopId = Object.freeze({ _tag: 'Loop', ordinal: statement.loop.ordinal })
+    const conditionId = fn.reserve()
+    const bodyId = fn.reserve()
+    const following = fn.reserve()
+    const [condition, conditionOperations] = fn.capture(() =>
+      lowerExpression(fn, statement.condition),
+    )
+    if (condition === undefined) return undefined
+    fn.publish(
+      Object.freeze({
+        _tag: 'LoopRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        loop,
+        ...(ownerLoop === undefined ? {} : { parent: ownerLoop }),
+        condition: conditionId,
+        conditionValue: condition.result,
+        body: bodyId,
+        following,
+        provenance: authored(statement.span),
+      }),
+    )
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id: conditionId,
+        ownerLoop: loop,
+        operations: conditionOperations,
+        outcome: Object.freeze({ _tag: 'Yield', provenance: generated(statement.span) }),
+      }),
+    )
+    const repeat = Object.freeze({
+      _tag: 'Repeat' as const,
+      loop,
+      provenance: generated(statement.span),
+    })
+    if (
+      lowerSequence(
+        fn,
+        statement.body,
+        exits,
+        loop,
+        repeat,
+        bodyId,
+        exits.loopFallthroughs.get(statement.loop.ordinal),
+      ) === undefined ||
+      lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+    ) {
+      return undefined
+    }
+    return id
+  }
+
+  if (statement._tag === 'Break' || statement._tag === 'Continue') {
+    const target: Mir.LoopId = Object.freeze({ _tag: 'Loop', ordinal: statement.target.ordinal })
+    const outcome: Mir.Outcome = Object.freeze({
+      _tag: statement._tag === 'Break' ? ('Exit' as const) : ('Repeat' as const),
+      loop: target,
+      provenance: authored(statement.span),
+    })
+    const [, releases] = fn.capture(() =>
+      emitReleases(fn, exits.transfers.get(spanKey(statement.span))),
+    )
+    if (releases.length === 0) {
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations: Object.freeze([]),
+          outcome,
+        }),
+      )
+    } else {
+      const cleanup = fn.reserve()
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations: Object.freeze([]),
+          outcome: Object.freeze({
+            _tag: 'Forward',
+            target: cleanup,
+            provenance: generated(statement.span),
+          }),
+        }),
+      )
+      fn.publish(
+        Object.freeze({
+          _tag: 'CleanupRegion',
+          id: cleanup,
+          ...ownerFields(ownerLoop),
+          releases: Object.freeze(
+            releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+          ),
+          outcome,
+        }),
+      )
+    }
+    return id
+  }
+
+  const [returned, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
+  if (returned === undefined) return undefined
+  const returnOutcome: Mir.Outcome = Object.freeze({
+    _tag: 'Return',
+    value: returned.result,
+    provenance: authored(statement.span),
+  })
+  const [, releases] = fn.capture(() =>
+    emitReleases(fn, exits.returns.get(spanKey(statement.span))),
+  )
+  if (releases.length === 0) {
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: returnOutcome,
+      }),
+    )
+  } else {
+    const cleanup = fn.reserve()
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: cleanup,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    fn.publish(
+      Object.freeze({
+        _tag: 'CleanupRegion',
+        id: cleanup,
+        ...ownerFields(ownerLoop),
+        releases: Object.freeze(
+          releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+        ),
+        outcome: returnOutcome,
+      }),
+    )
+  }
+  return id
 }
 
 const trapFunction = (
@@ -473,13 +804,13 @@ const trapFunction = (
     parameterCount,
     localTypes: Object.freeze(Array.from({ length: parameterCount }, () => i32)),
     result: i32,
-    blocks: Object.freeze([
+    entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
+    regions: Object.freeze([
       Object.freeze({
-        _tag: 'MirBlock' as const,
-        id: Object.freeze({ _tag: 'Block' as const, ordinal: 0 }),
-        kind: 'Normal' as const,
+        _tag: 'OperationRegion' as const,
+        id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
         operations: Object.freeze([]),
-        terminator: Object.freeze({
+        outcome: Object.freeze({
           _tag: 'Trap' as const,
           reason,
           provenance: Object.freeze({ span, generated: true }),
@@ -525,9 +856,14 @@ const lowerInstance = (
   }
 
   const lowering = new FunctionLowering(parameterTypes)
-  const outcome = lowerStatements(lowering, fn.statements, indexExits(plan), undefined)
+  const terminal: Mir.Outcome = Object.freeze({
+    _tag: 'Trap',
+    reason: 'body fell through without return',
+    provenance: generated(bodySpan(fn)),
+  })
+  const entry = lowerSequence(lowering, fn.statements, indexExits(plan), undefined, terminal)
 
-  if (outcome !== true || lowering.blocks.some((block) => block.terminator === undefined)) {
+  if (entry === undefined || lowering.regions.some((region) => region === undefined)) {
     const unavailable = Hir.firstUnavailable(fn)
     return trapFunction(instance, 'unavailable body', unavailable?.span ?? bodySpan(fn))
   }
@@ -538,20 +874,9 @@ const lowerInstance = (
     parameterCount: fn.declaration.parameterCount,
     localTypes: Object.freeze([...lowering.localTypes]),
     result: resultType,
-    blocks: Object.freeze(
-      lowering.blocks.map((block) => {
-        const terminator = block.terminator
-        if (terminator === undefined) {
-          throw new RangeError('Lowering left an unterminated block')
-        }
-        return Object.freeze({
-          _tag: 'MirBlock' as const,
-          id: block.id,
-          kind: block.kind,
-          operations: Object.freeze([...block.operations]),
-          terminator,
-        })
-      }),
+    entry,
+    regions: Object.freeze(
+      lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
     ),
   })
 }

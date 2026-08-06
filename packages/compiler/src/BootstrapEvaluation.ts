@@ -119,6 +119,23 @@ export interface CleanupTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface ControlTraceEvent {
+  readonly _tag:
+    | 'RegionEntry'
+    | 'Condition'
+    | 'Iteration'
+    | 'WriteCheck'
+    | 'ReplacementCleanup'
+    | 'Replacement'
+    | 'Repeat'
+    | 'Exit'
+    | 'Transfer'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly region: number
+  readonly loop?: number
+  readonly span: SourceSpan.SourceSpan
+}
+
 export type TraceEvent =
   | EntryTraceEvent
   | CallTraceEvent
@@ -129,6 +146,7 @@ export type TraceEvent =
   | ArrayConstructTraceEvent
   | PlaceReadTraceEvent
   | CleanupTraceEvent
+  | ControlTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -221,19 +239,166 @@ function executeFunction(
     return found
   }
 
-  let blockOrdinal = 0
+  const regions = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
+  const loops = new Map(
+    fn.regions.flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+    ),
+  )
+  const conditionOwners = new Map(
+    fn.regions.flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.condition.ordinal, region] as const] : [],
+    ),
+  )
+  const checkedPlaces = new Map<ReadonlyArray<Mir.PlaceSelector>, ReadonlyArray<number>>()
+
+  const resolvePlace = (
+    root: Mir.LocalId,
+    selectors: ReadonlyArray<Mir.PlaceSelector>,
+  ):
+    | {
+        readonly _tag: 'Resolved'
+        readonly selected: Value
+        readonly indexes: ReadonlyArray<number>
+      }
+    | { readonly _tag: 'Blocked'; readonly step: Step } => {
+    let selected = read(root).value
+    const indexes: Array<number> = []
+    for (const selector of selectors) {
+      if (selector._tag === 'FieldSelector') {
+        if (selected._tag !== 'AggregateValue') {
+          throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
+        }
+        const field = selected.fields.find(
+          (candidate) =>
+            candidate.field.ordinal === selector.field.ordinal &&
+            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+            candidate.field.struct.ordinal === selector.field.struct.ordinal,
+        )
+        if (field === undefined)
+          throw new RangeError('MIR verifier allowed a missing field selector')
+        selected = field.value
+        indexes.push(selector.field.ordinal)
+        continue
+      }
+      if (selected._tag !== 'ArrayValue') {
+        throw new RangeError('MIR verifier allowed an element selector on a non-array value')
+      }
+      const index =
+        selector.index._tag === 'Proven'
+          ? selector.index.value
+          : readI32(selector.index.local).value
+      if (index < 0 || index >= selector.length) {
+        return {
+          _tag: 'Blocked',
+          step: blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: `array index ${index} is outside length ${selector.length} in ${fn.id.module}.${fn.id.name}`,
+            span: selector.provenance.span,
+          }),
+        }
+      }
+      const element = selected.elements.at(index)
+      if (element === undefined)
+        throw new RangeError('MIR verifier allowed an incomplete array value')
+      indexes.push(index)
+      selected = element
+    }
+    return { _tag: 'Resolved', selected, indexes: Object.freeze(indexes) }
+  }
+
+  const replacePlace = (
+    current: Value,
+    selectors: ReadonlyArray<Mir.PlaceSelector>,
+    indexes: ReadonlyArray<number>,
+    replacement: Value,
+    depth = 0,
+  ): Value => {
+    const selector = selectors.at(depth)
+    if (selector === undefined) return replacement
+    const ordinal = indexes.at(depth)
+    if (ordinal === undefined) throw new RangeError('Checked place omitted one selector index')
+    if (selector._tag === 'FieldSelector') {
+      if (current._tag !== 'AggregateValue') throw new RangeError('Invalid aggregate replacement')
+      return Object.freeze({
+        _tag: 'AggregateValue',
+        type: current.type,
+        fields: Object.freeze(
+          current.fields.map((field) =>
+            field.field.ordinal === selector.field.ordinal
+              ? Object.freeze({
+                  field: field.field,
+                  value: replacePlace(field.value, selectors, indexes, replacement, depth + 1),
+                })
+              : field,
+          ),
+        ),
+      })
+    }
+    if (current._tag !== 'ArrayValue') throw new RangeError('Invalid array replacement')
+    return Object.freeze({
+      _tag: 'ArrayValue',
+      type: current.type,
+      elements: Object.freeze(
+        current.elements.map((element, index) =>
+          index === ordinal
+            ? replacePlace(element, selectors, indexes, replacement, depth + 1)
+            : element,
+        ),
+      ),
+    })
+  }
+
+  let regionOrdinal = fn.entry.ordinal
   for (;;) {
-    const block = fn.blocks.at(blockOrdinal)
-    if (block === undefined) {
+    const region = regions.get(regionOrdinal)
+    if (region === undefined) {
       return blockedStep({
         _tag: 'Trap',
         function: fn.id,
-        reason: `missing block bb${blockOrdinal}`,
-        span: fn.blocks.at(0)?.terminator.provenance.span ?? argumentSpanFallback(fn),
+        reason: `missing region r${regionOrdinal}`,
+        span: argumentSpanFallback(fn),
       })
     }
 
-    for (const operation of block.operations) {
+    const regionSpan =
+      region._tag === 'ConditionalRegion' || region._tag === 'LoopRegion'
+        ? region.provenance.span
+        : region._tag === 'OperationRegion'
+          ? (region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span)
+          : (region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span)
+    trace.push(
+      Object.freeze({
+        _tag: 'RegionEntry',
+        function: fn.id,
+        region: region.id.ordinal,
+        ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+        span: regionSpan,
+      }),
+    )
+
+    if (region._tag === 'ConditionalRegion') {
+      const taken = readI32(region.condition).value !== 0
+      trace.push(
+        Object.freeze({
+          _tag: 'Condition',
+          function: fn.id,
+          region: region.id.ordinal,
+          ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+          span: region.provenance.span,
+        }),
+      )
+      regionOrdinal = taken ? region.taken.ordinal : region.otherwise.ordinal
+      continue
+    }
+    if (region._tag === 'LoopRegion') {
+      regionOrdinal = region.condition.ordinal
+      continue
+    }
+
+    const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
+    for (const operation of operations) {
       switch (operation._tag) {
         case 'Literal':
           locals.set(operation.destination.ordinal, {
@@ -437,6 +602,53 @@ function executeFunction(
           )
           break
         }
+        case 'CheckPlace': {
+          const resolved = resolvePlace(operation.root, operation.selectors)
+          if (resolved._tag === 'Blocked') return resolved.step
+          checkedPlaces.set(operation.selectors, resolved.indexes)
+          trace.push(
+            Object.freeze({
+              _tag: 'WriteCheck',
+              function: fn.id,
+              region: region.id.ordinal,
+              ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
+        case 'WritePlace': {
+          const indexes = checkedPlaces.get(operation.selectors)
+          if (indexes === undefined) throw new RangeError('MIR write executed without its precheck')
+          const root = read(operation.root)
+          const replacement = read(operation.source)
+          if (operation.replacement === 'Owned') {
+            trace.push(
+              Object.freeze({
+                _tag: 'ReplacementCleanup',
+                function: fn.id,
+                region: region.id.ordinal,
+                ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+                span: operation.provenance.span,
+              }),
+            )
+          }
+          locals.set(operation.root.ordinal, {
+            value: replacePlace(root.value, operation.selectors, indexes, replacement.value),
+            fromCall: replacement.fromCall,
+          })
+          checkedPlaces.delete(operation.selectors)
+          trace.push(
+            Object.freeze({
+              _tag: 'Replacement',
+              function: fn.id,
+              region: region.id.ordinal,
+              ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
         case 'Drop':
           trace.push(
             Object.freeze({
@@ -501,46 +713,97 @@ function executeFunction(
       }
     }
 
-    const terminator = block.terminator
-    switch (terminator._tag) {
+    const outcome = region.outcome
+    switch (outcome._tag) {
       case 'Return': {
-        const result = read(terminator.value)
+        const result = read(outcome.value)
         trace.push(
           Object.freeze({
             _tag: 'Return',
             function: fn.id,
             value: result.value,
-            span: terminator.provenance.span,
+            span: outcome.provenance.span,
           }),
         )
         return Object.freeze({ _tag: 'Value', value: result.value })
       }
-      case 'Jump':
-        blockOrdinal = terminator.target.ordinal
+      case 'Forward':
+        regionOrdinal = outcome.target.ordinal
         break
-      case 'Branch':
-        blockOrdinal =
-          readI32(terminator.condition).value !== 0
-            ? terminator.taken.ordinal
-            : terminator.otherwise.ordinal
+      case 'Repeat': {
+        const loop = loops.get(outcome.loop.ordinal)
+        if (loop === undefined) throw new RangeError('MIR verifier allowed a missing repeat loop')
+        trace.push(
+          Object.freeze({
+            _tag: 'Repeat',
+            function: fn.id,
+            region: region.id.ordinal,
+            loop: outcome.loop.ordinal,
+            span: outcome.provenance.span,
+          }),
+        )
+        regionOrdinal = loop.id.ordinal
         break
+      }
+      case 'Exit': {
+        const loop = loops.get(outcome.loop.ordinal)
+        if (loop === undefined) throw new RangeError('MIR verifier allowed a missing exit loop')
+        trace.push(
+          Object.freeze({
+            _tag: 'Exit',
+            function: fn.id,
+            region: region.id.ordinal,
+            loop: outcome.loop.ordinal,
+            span: outcome.provenance.span,
+          }),
+        )
+        regionOrdinal = loop.following.ordinal
+        break
+      }
+      case 'Yield': {
+        const loop = conditionOwners.get(region.id.ordinal)
+        if (loop === undefined) throw new RangeError('MIR verifier allowed an unowned yield')
+        const enter = readI32(loop.conditionValue).value !== 0
+        trace.push(
+          Object.freeze({
+            _tag: enter ? 'Iteration' : 'Condition',
+            function: fn.id,
+            region: region.id.ordinal,
+            loop: loop.loop.ordinal,
+            span: outcome.provenance.span,
+          }),
+        )
+        regionOrdinal = enter ? loop.body.ordinal : loop.following.ordinal
+        break
+      }
       case 'Trap':
         return blockedStep({
           _tag: 'Trap',
           function: fn.id,
-          reason: terminator.reason,
-          span: terminator.provenance.span,
+          reason: outcome.reason,
+          span: outcome.provenance.span,
         })
     }
   }
 }
 
 const argumentSpanFallback = (fn: Mir.MirFunction): SourceSpan.SourceSpan => {
-  const span = fn.blocks.at(0)?.terminator.provenance.span
+  const region = fn.regions.find((candidate) => candidate.id.ordinal === fn.entry.ordinal)
+  const span =
+    region?._tag === 'ConditionalRegion' || region?._tag === 'LoopRegion'
+      ? region.provenance.span
+      : region?._tag === 'OperationRegion'
+        ? (region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span)
+        : (region?.releases.at(0)?.provenance.span ?? region?.outcome.provenance.span)
   if (span === undefined) {
-    throw new RangeError(`Lowered function ${fn.id.name} has no blocks`)
+    throw new RangeError(`Lowered function ${fn.id.name} has no regions`)
   }
   return span
+}
+
+const firstFunctionSpan = (program: Mir.Module): SourceSpan.SourceSpan => {
+  const first = program.functions.at(0)
+  return first === undefined ? raiseNoSpan() : argumentSpanFallback(first)
 }
 
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
@@ -572,7 +835,7 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
       reason: Object.freeze({
         _tag: 'MissingFunction',
         target: entry,
-        span: program.functions.at(0)?.blocks.at(0)?.terminator.provenance.span ?? raiseNoSpan(),
+        span: firstFunctionSpan(program),
       }),
       trace: Object.freeze([]),
     })

@@ -442,6 +442,16 @@ const addStatementTypes = (
       addStatementTypes(types, statement.taken)
       addStatementTypes(types, statement.otherwise)
     }
+    if (statement._tag === 'Write') {
+      addExpressionTypes(types, statement.value)
+      for (const selector of statement.place.selectors) {
+        if (selector._tag === 'Index') addExpressionTypes(types, selector.index)
+      }
+    }
+    if (statement._tag === 'While') {
+      addExpressionTypes(types, statement.condition)
+      addStatementTypes(types, statement.body)
+    }
   }
 }
 

@@ -41,6 +41,7 @@ export interface BindingDeclarationFact {
   readonly _tag: 'BindingFact'
   readonly id: Hir.BindingId
   readonly name: DeclaredName
+  readonly mutability: 'Immutable' | 'Mutable'
   readonly inferredType: ExpressionTypeFact
   readonly initializer: ExpressionFact
   readonly syntax: SyntaxTree.Node
@@ -411,17 +412,53 @@ export type DeclarationFact = DeclarationIndex.DeclarationFact
 
 /** One analyzed body statement in source order, nesting through conditionals. */
 export type StatementFact =
-  | { readonly _tag: 'BindStatement'; readonly binding: BindingDeclarationFact }
+  | {
+      readonly _tag: 'BindStatement'
+      readonly binding: BindingDeclarationFact
+      readonly region: Hir.RegionId
+    }
   | {
       readonly _tag: 'IfStatement'
       readonly condition: ExpressionFact
       readonly taken: ReadonlyArray<StatementFact>
       readonly otherwise: ReadonlyArray<StatementFact>
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'WriteStatement'
+      readonly destination: ExpressionFact
+      readonly root?: BindingDeclarationFact
+      readonly value: ExpressionFact
+      readonly compatible: boolean
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'WhileStatement'
+      readonly loop: Hir.LoopId
+      readonly parent?: Hir.LoopId
+      readonly condition: ExpressionFact
+      readonly body: ReadonlyArray<StatementFact>
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'BreakStatement'
+      readonly target?: Hir.LoopId
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'ContinueStatement'
+      readonly target?: Hir.LoopId
+      readonly region: Hir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'ReturnStatement'
       readonly expression: ExpressionFact
+      readonly region: Hir.RegionId
       readonly syntax: SyntaxTree.Node
     }
 
@@ -431,6 +468,7 @@ export interface FunctionFact {
   readonly declaration: DeclarationFact
   readonly statements: ReadonlyArray<StatementFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
+  readonly regionOrder: ReadonlyArray<Hir.RegionId>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
 }
@@ -2393,6 +2431,8 @@ interface BodyContext {
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly bindings: Array<BindingDeclarationFact>
   readonly diagnostics: Array<Diagnostic.Diagnostic>
+  readonly regions: Array<Hir.RegionId>
+  readonly loops: Array<Hir.LoopId>
   readonly resolution: ResolutionContext
 }
 
@@ -2405,14 +2445,37 @@ const analyzeStatements = (
   context: BodyContext,
   blockNode: SyntaxTree.Node,
   initialScope: Scope,
+  loopStack: ReadonlyArray<Hir.LoopId> = Object.freeze([]),
 ): ReadonlyArray<StatementFact> => {
   const facts: Array<StatementFact> = []
   let scope = initialScope
+
+  const nextRegion = (): Hir.RegionId => {
+    const region = Object.freeze({
+      _tag: 'HirRegion' as const,
+      function: context.declaration.id,
+      ordinal: context.regions.length,
+    })
+    context.regions.push(region)
+    return region
+  }
+
+  const assignmentRoot = (fact: ExpressionFact): BindingDeclarationFact | undefined => {
+    if (fact._tag === 'Identifier') {
+      return fact.reference._tag === 'ResolvedBinding' ? fact.reference.binding : undefined
+    }
+    if (fact._tag === 'FieldProjection' || fact._tag === 'IndexProjection') {
+      return assignmentRoot(fact.subject)
+    }
+    if (fact._tag === 'Grouped') return assignmentRoot(fact.expression)
+    return undefined
+  }
 
   for (const element of blockNode.children) {
     if (!SyntaxTree.isNode(element)) continue
 
     if (element.kind === 'BindingStatement') {
+      const region = nextRegion()
       const initializerNode = statementExpressionNode(element)
       const initializer = analyzeExpression(
         context.source,
@@ -2436,12 +2499,14 @@ const analyzeStatements = (
           ordinal: context.bindings.length,
         }),
         name,
+        mutability:
+          SyntaxTree.directToken(element, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
         inferredType: initializer.fact.type,
         initializer: initializer.fact,
         syntax: element,
       })
       context.bindings.push(binding)
-      facts.push(Object.freeze({ _tag: 'BindStatement', binding }))
+      facts.push(Object.freeze({ _tag: 'BindStatement', binding, region }))
 
       if (name._tag === 'Present') {
         const originalSpan = scopeSpanFor(scope, name.spelling)
@@ -2460,6 +2525,7 @@ const analyzeStatements = (
     }
 
     if (element.kind === 'ConditionalStatement') {
+      const region = nextRegion()
       const conditionNode = statementExpressionNode(element)
       const condition = analyzeExpression(
         context.source,
@@ -2486,16 +2552,159 @@ const analyzeStatements = (
       const taken =
         arms.at(0) === undefined
           ? []
-          : analyzeStatements(context, arms[0] as SyntaxTree.Node, scope)
+          : analyzeStatements(context, arms[0] as SyntaxTree.Node, scope, loopStack)
       const otherwiseArm = arms.at(1)
       const otherwise =
-        otherwiseArm === undefined ? [] : analyzeStatements(context, otherwiseArm, scope)
+        otherwiseArm === undefined ? [] : analyzeStatements(context, otherwiseArm, scope, loopStack)
       facts.push(
         Object.freeze({
           _tag: 'IfStatement',
           condition: condition.fact,
           taken: Object.freeze([...taken]),
           otherwise: Object.freeze([...otherwise]),
+          region,
+          syntax: element,
+        }),
+      )
+      continue
+    }
+
+    if (element.kind === 'AssignmentStatement') {
+      const region = nextRegion()
+      const nodes = element.children.filter(
+        (child): child is SyntaxTree.Node => SyntaxTree.isNode(child) && isExpressionNode(child),
+      )
+      const destinationNode = nodes.at(0)
+      const valueNode = nodes.at(1)
+      if (destinationNode === undefined || valueNode === undefined) {
+        context.diagnostics.push(Diagnostic.invalidAssignmentPlace(element.span))
+        continue
+      }
+      const destination = analyzeExpression(
+        context.source,
+        destinationNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+      )
+      if (destination === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${destinationNode.kind}`)
+      }
+      context.diagnostics.push(...destination.diagnostics)
+      const value = analyzeExpression(
+        context.source,
+        valueNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+        destination.type,
+      )
+      if (value === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${valueNode.kind}`)
+      }
+      context.diagnostics.push(...value.diagnostics)
+      const root = assignmentRoot(destination.fact)
+      if (root === undefined) {
+        context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+      } else if (root.mutability === 'Immutable') {
+        context.diagnostics.push(
+          Diagnostic.immutableAssignment(
+            root.name._tag === 'Present' ? root.name.spelling : '?',
+            destinationNode.span,
+          ),
+        )
+      }
+      const compatible =
+        destination.type !== undefined &&
+        value.type !== undefined &&
+        Type.equals(destination.type, value.type)
+      if (destination.type !== undefined && value.type !== undefined && !compatible) {
+        context.diagnostics.push(
+          Diagnostic.assignmentTypeMismatch(
+            Type.encode(destination.type),
+            Type.encode(value.type),
+            valueNode.span,
+          ),
+        )
+      }
+      facts.push(
+        Object.freeze({
+          _tag: 'WriteStatement',
+          destination: destination.fact,
+          ...(root === undefined ? {} : { root }),
+          value: value.fact,
+          compatible,
+          region,
+          syntax: element,
+        }),
+      )
+      continue
+    }
+
+    if (element.kind === 'WhileStatement') {
+      const region = nextRegion()
+      const loop = Object.freeze({
+        _tag: 'HirLoop' as const,
+        function: context.declaration.id,
+        ordinal: context.loops.length,
+      })
+      context.loops.push(loop)
+      const conditionNode = statementExpressionNode(element)
+      const condition = analyzeExpression(
+        context.source,
+        conditionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+      )
+      if (condition === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+      }
+      context.diagnostics.push(...condition.diagnostics)
+      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'Bool') {
+        context.diagnostics.push(
+          Diagnostic.conditionNotBool(Type.encode(condition.fact.type.type), conditionNode.span),
+        )
+      }
+      const bodyNode = SyntaxTree.directNode(element, 'Block')
+      const body =
+        bodyNode === undefined
+          ? []
+          : analyzeStatements(context, bodyNode, scope, Object.freeze([...loopStack, loop]))
+      const parent = loopStack.at(-1)
+      facts.push(
+        Object.freeze({
+          _tag: 'WhileStatement',
+          loop,
+          ...(parent === undefined ? {} : { parent }),
+          condition: condition.fact,
+          body: Object.freeze([...body]),
+          region,
+          syntax: element,
+        }),
+      )
+      continue
+    }
+
+    if (element.kind === 'BreakStatement' || element.kind === 'ContinueStatement') {
+      const region = nextRegion()
+      const target = loopStack.at(-1)
+      if (target === undefined) {
+        context.diagnostics.push(
+          Diagnostic.transferOutsideLoop(
+            element.kind === 'BreakStatement' ? 'break' : 'continue',
+            element.span,
+          ),
+        )
+      }
+      facts.push(
+        Object.freeze({
+          _tag: element.kind,
+          ...(target === undefined ? {} : { target }),
+          region,
           syntax: element,
         }),
       )
@@ -2503,6 +2712,7 @@ const analyzeStatements = (
     }
 
     if (element.kind === 'ReturnStatement') {
+      const region = nextRegion()
       const expressionNode = statementExpressionNode(element)
       const expression = analyzeExpression(
         context.source,
@@ -2520,7 +2730,12 @@ const analyzeStatements = (
       }
       context.diagnostics.push(...expression.diagnostics)
       facts.push(
-        Object.freeze({ _tag: 'ReturnStatement', expression: expression.fact, syntax: element }),
+        Object.freeze({
+          _tag: 'ReturnStatement',
+          expression: expression.fact,
+          region,
+          syntax: element,
+        }),
       )
       break
     }
@@ -2542,6 +2757,8 @@ const analyzeFunctionBody = (
     declarations,
     bindings: [],
     diagnostics: [],
+    regions: [],
+    loops: [],
     resolution,
   }
   const statements = analyzeStatements(
@@ -2573,6 +2790,7 @@ const analyzeFunctionBody = (
       declaration,
       statements,
       bindings: Object.freeze([...context.bindings]),
+      regionOrder: Object.freeze([...context.regions]),
       returnedExpression: expression,
       returnCompatibility,
     }),
@@ -2790,6 +3008,72 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
   })
 }
 
+const hirWritePlace = (
+  fact: ExpressionFact,
+  root: BindingDeclarationFact,
+): Hir.WritePlace | undefined => {
+  const selectors: Array<Hir.WriteSelector> = []
+  const walk = (current: ExpressionFact): boolean => {
+    if (current._tag === 'Grouped') return walk(current.expression)
+    if (current._tag === 'Identifier') {
+      return (
+        current.reference._tag === 'ResolvedBinding' &&
+        current.reference.binding.id.ordinal === root.id.ordinal
+      )
+    }
+    if (current._tag === 'FieldProjection') {
+      if (
+        !walk(current.subject) ||
+        current.state._tag !== 'Resolved' ||
+        current.type._tag !== 'Available'
+      ) {
+        return false
+      }
+      selectors.push(
+        Object.freeze({
+          _tag: 'Field',
+          field: current.state.field.id,
+          type: current.type.type,
+          span: current.syntax.span,
+        }),
+      )
+      return true
+    }
+    if (current._tag === 'IndexProjection') {
+      if (
+        !walk(current.subject) ||
+        current.array === undefined ||
+        current.type._tag !== 'Available' ||
+        (current.bounds._tag !== 'Proven' && current.bounds._tag !== 'Runtime')
+      ) {
+        return false
+      }
+      const index = hirExpression(current.index)
+      if (index._tag === 'Unavailable') return false
+      selectors.push(
+        Object.freeze({
+          _tag: 'Index',
+          index,
+          array: current.array,
+          bounds: current.bounds,
+          type: current.type.type,
+          span: current.syntax.span,
+        }),
+      )
+      return true
+    }
+    return false
+  }
+  if (!walk(fact) || fact.type._tag !== 'Available') return undefined
+  return Object.freeze({
+    _tag: 'WritePlace',
+    root: root.id,
+    selectors: Object.freeze(selectors),
+    type: fact.type.type,
+    span: fact.syntax.span,
+  })
+}
+
 /** Elaborates every declaration body into immutable facts and the module's HIR. */
 export interface Input {
   readonly syntax: SyntaxFile.SyntaxFile
@@ -2821,7 +3105,9 @@ export const elaborateModule = (input: Input): Result => {
               statement.binding.name._tag === 'Present'
                 ? statement.binding.name.spelling
                 : undefined,
+            mutability: statement.binding.mutability,
             initializer: hirExpression(statement.binding.initializer),
+            region: statement.region,
             span: statement.binding.syntax.span,
           })
         }
@@ -2831,14 +3117,68 @@ export const elaborateModule = (input: Input): Result => {
             condition: hirExpression(statement.condition),
             taken: hirStatements(statement.taken),
             otherwise: hirStatements(statement.otherwise),
+            region: statement.region,
             span: statement.syntax.span,
           })
         }
-        return Object.freeze({
-          _tag: 'Return' as const,
-          expression: hirExpression(statement.expression),
-          span: statement.expression.syntax.span,
-        })
+        if (statement._tag === 'WriteStatement') {
+          const place =
+            statement.root === undefined
+              ? undefined
+              : hirWritePlace(statement.destination, statement.root)
+          if (
+            place === undefined ||
+            statement.root?.mutability !== 'Mutable' ||
+            !statement.compatible
+          ) {
+            return Object.freeze({
+              _tag: 'UnavailableStatement' as const,
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          }
+          return Object.freeze({
+            _tag: 'Write' as const,
+            place,
+            value: hirExpression(statement.value),
+            region: statement.region,
+            span: statement.syntax.span,
+          })
+        }
+        if (statement._tag === 'WhileStatement') {
+          return Object.freeze({
+            _tag: 'While' as const,
+            loop: statement.loop,
+            ...(statement.parent === undefined ? {} : { parent: statement.parent }),
+            condition: hirExpression(statement.condition),
+            body: hirStatements(statement.body),
+            region: statement.region,
+            span: statement.syntax.span,
+          })
+        }
+        if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement') {
+          if (statement.target === undefined) {
+            return Object.freeze({
+              _tag: 'UnavailableStatement' as const,
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          }
+          return Object.freeze({
+            _tag: statement._tag === 'BreakStatement' ? ('Break' as const) : ('Continue' as const),
+            target: statement.target,
+            region: statement.region,
+            span: statement.syntax.span,
+          })
+        }
+        if (statement._tag === 'ReturnStatement')
+          return Object.freeze({
+            _tag: 'Return' as const,
+            expression: hirExpression(statement.expression),
+            region: statement.region,
+            span: statement.expression.syntax.span,
+          })
+        throw new RangeError('Unknown statement fact')
       }),
     )
   const hir: Hir.Module = Object.freeze({
@@ -2846,12 +3186,23 @@ export const elaborateModule = (input: Input): Result => {
     module: source.id,
     functions: Object.freeze(
       functions.map((fact) =>
-        Object.freeze({
-          _tag: 'HirFunction' as const,
-          declaration: fact.declaration,
-          contract: Hir.contractOf(fact.declaration),
-          statements: hirStatements(fact.statements),
-        }),
+        (() => {
+          const entryRegion =
+            fact.regionOrder.at(0) ??
+            Object.freeze({
+              _tag: 'HirRegion' as const,
+              function: fact.declaration.id,
+              ordinal: 0,
+            })
+          return Object.freeze({
+            _tag: 'HirFunction' as const,
+            declaration: fact.declaration,
+            contract: Hir.contractOf(fact.declaration),
+            entryRegion,
+            regionOrder: fact.regionOrder,
+            statements: hirStatements(fact.statements),
+          })
+        })(),
       ),
     ),
   })

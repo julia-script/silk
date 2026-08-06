@@ -28,6 +28,20 @@ export interface BindingId {
   readonly ordinal: number
 }
 
+/** A canonical source-ordered region identity local to one function. */
+export interface RegionId {
+  readonly _tag: 'HirRegion'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly ordinal: number
+}
+
+/** A canonical lexical loop identity local to one function. */
+export interface LoopId {
+  readonly _tag: 'HirLoop'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly ordinal: number
+}
+
 /** The closed built-in operation vocabulary of the compiler-known actors. */
 export type BuiltinOperation =
   | 'Add'
@@ -47,6 +61,32 @@ export type BuiltinOperation =
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }
   | { readonly _tag: 'Runtime'; readonly length: number }
+
+/** One selector in a writable place, retained in source evaluation order. */
+export type WriteSelector =
+  | {
+      readonly _tag: 'Field'
+      readonly field: DeclarationIndex.FieldId
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Index'
+      readonly index: Expression
+      readonly array: Type.FixedArray
+      readonly bounds: BoundsMode
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+
+/** One complete typed replacement rooted in a mutable binding. */
+export interface WritePlace {
+  readonly _tag: 'WritePlace'
+  readonly root: BindingId
+  readonly selectors: ReadonlyArray<WriteSelector>
+  readonly type: DeclarationIndex.SemanticType
+  readonly span: SourceSpan.SourceSpan
+}
 
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
@@ -140,10 +180,17 @@ export type Expression =
 /** One elaborated body statement in source order. */
 export type Statement =
   | {
+      readonly _tag: 'UnavailableStatement'
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'Bind'
       readonly binding: BindingId
       readonly name: string | undefined
+      readonly mutability: 'Immutable' | 'Mutable'
       readonly initializer: Expression
+      readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -151,11 +198,41 @@ export type Statement =
       readonly condition: Expression
       readonly taken: ReadonlyArray<Statement>
       readonly otherwise: ReadonlyArray<Statement>
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Write'
+      readonly place: WritePlace
+      readonly value: Expression
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'While'
+      readonly loop: LoopId
+      readonly parent?: LoopId
+      readonly condition: Expression
+      readonly body: ReadonlyArray<Statement>
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Break'
+      readonly target: LoopId
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Continue'
+      readonly target: LoopId
+      readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'Return'
       readonly expression: Expression
+      readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
     }
 
@@ -164,6 +241,8 @@ export interface HirFunction {
   readonly _tag: 'HirFunction'
   readonly declaration: DeclarationIndex.DeclarationFact
   readonly contract: ContractFact
+  readonly entryRegion: RegionId
+  readonly regionOrder: ReadonlyArray<RegionId>
   readonly statements: ReadonlyArray<Statement>
 }
 
@@ -179,10 +258,24 @@ export const returned = (self: HirFunction): Expression => {
 /** Every expression directly carried by one statement, nesting through conditionals. */
 export const statementExpressions = (statement: Statement): ReadonlyArray<Expression> => {
   switch (statement._tag) {
+    case 'UnavailableStatement':
+      return []
     case 'Bind':
       return [statement.initializer]
+    case 'Write':
+      return [
+        ...statement.place.selectors.flatMap((selector) =>
+          selector._tag === 'Index' ? [selector.index] : [],
+        ),
+        statement.value,
+      ]
     case 'Return':
       return [statement.expression]
+    case 'Break':
+    case 'Continue':
+      return []
+    case 'While':
+      return [statement.condition, ...statement.body.flatMap(statementExpressions)]
     case 'If':
       return [
         statement.condition,
@@ -384,14 +477,29 @@ const encodeExpression = (expression: Expression, depth: number): string => {
 const encodeStatement = (statement: Statement, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (statement._tag) {
+    case 'UnavailableStatement':
+      return `${indent}unavailable-statement r${statement.region.ordinal} ${spanText(statement.span)}`
     case 'Bind':
       return [
-        `${indent}bind b${statement.binding.ordinal} ${statement.name ?? '?'} ${spanText(statement.span)}`,
+        `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.initializer, depth + 1),
+      ].join('\n')
+    case 'Write':
+      return [
+        `${indent}write b${statement.place.root.ordinal}${statement.place.selectors
+          .map((selector) =>
+            selector._tag === 'Field'
+              ? `.#${selector.field.ordinal}`
+              : `[${selector.bounds._tag === 'Proven' ? selector.bounds.index : 'runtime'}/${selector.array.length}]`,
+          )
+          .join(
+            '',
+          )} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        encodeExpression(statement.value, depth + 1),
       ].join('\n')
     case 'If':
       return [
-        `${indent}if ${spanText(statement.span)}`,
+        `${indent}if r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.condition, depth + 1),
         `${indent}then`,
         ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
@@ -402,9 +510,18 @@ const encodeStatement = (statement: Statement, depth: number): string => {
               ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
             ]),
       ].join('\n')
+    case 'While':
+      return [
+        `${indent}while loop${statement.loop.ordinal} r${statement.region.ordinal}${statement.parent === undefined ? '' : ` parent=loop${statement.parent.ordinal}`} ${spanText(statement.span)}`,
+        encodeExpression(statement.condition, depth + 1),
+        ...statement.body.map((inner) => encodeStatement(inner, depth + 1)),
+      ].join('\n')
+    case 'Break':
+    case 'Continue':
+      return `${indent}${statement._tag.toLowerCase()} loop${statement.target.ordinal} r${statement.region.ordinal} ${spanText(statement.span)}`
     case 'Return':
       return [
-        `${indent}return ${spanText(statement.span)}`,
+        `${indent}return r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
   }
@@ -418,7 +535,7 @@ export const encode = (self: Module): string =>
   [
     `hir-module ${self.module}`,
     ...self.functions.flatMap((fn) => [
-      `fn ${identityLabel(fn.declaration)} ${contractText(fn.contract)}`,
+      `fn ${identityLabel(fn.declaration)} ${contractText(fn.contract)} entry=r${fn.entryRegion.ordinal} regions=${fn.regionOrder.map((region) => `r${region.ordinal}`).join(',')}`,
       ...fn.statements.map((statement) => encodeStatement(statement, 1)),
     ]),
     '',

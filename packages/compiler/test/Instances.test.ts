@@ -73,13 +73,13 @@ pub fn main() -> I32 { let value = identity(42) let extra = 1 return value }`
 it.effect('lowers bindings and ownership violations with generated cleanup or traps', () =>
   Effect.gen(function* () {
     const bindings = Analysis.loweredMir(yield* snapshot(bindingSource))
+    const bindingFunction = bindings.functions.at(0)
     assert.deepEqual(Mir.verify(bindings), [])
     assert.strictEqual(Mir.encode(bindings), golden('bindings.mir.txt'))
     assert.deepEqual(
-      bindings.functions
-        .at(0)
-        ?.blocks.at(0)
-        ?.operations.map((operation) => operation._tag),
+      bindingFunction === undefined
+        ? []
+        : Mir.operations(bindingFunction).map((operation) => operation._tag),
       ['Literal', 'Call', 'Move', 'Literal', 'Move', 'Drop', 'Drop'],
     )
 
@@ -87,9 +87,11 @@ it.effect('lowers bindings and ownership violations with generated cleanup or tr
       yield* snapshot(`pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { let value = 42 return choose(move value, value) }`),
     )
-    const terminator = violated.functions.at(0)?.blocks.at(0)?.terminator
-    assert.strictEqual(terminator?._tag, 'Trap')
-    assert.strictEqual(terminator?._tag === 'Trap' ? terminator.reason : '', 'ownership violation')
+    const violatedFunction = violated.functions.at(0)
+    const outcome =
+      violatedFunction === undefined ? undefined : Mir.outcomes(violatedFunction).at(0)
+    assert.strictEqual(outcome?._tag, 'Trap')
+    assert.strictEqual(outcome?._tag === 'Trap' ? outcome.reason : '', 'ownership violation')
   }),
 )
 
@@ -98,19 +100,23 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
     const builtins = Analysis.loweredMir(
       yield* snapshot('pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }'),
     )
+    const builtinFunction = builtins.functions.at(0)
     assert.deepEqual(
-      builtins.functions
-        .at(0)
-        ?.blocks.at(0)
-        ?.operations.map((operation) =>
-          operation._tag === 'Binary' ? `Binary:${operation.operator}` : operation._tag,
-        ),
+      builtinFunction === undefined
+        ? []
+        : Mir.operations(builtinFunction).map((operation) =>
+            operation._tag === 'Binary' ? `Binary:${operation.operator}` : operation._tag,
+          ),
       ['Literal', 'Literal', 'Binary:Multiply', 'Literal', 'Binary:Subtract'],
     )
     const unavailable = Analysis.loweredMir(
       yield* snapshot('pub fn main() -> I32 { return missing() }'),
     )
-    assert.strictEqual(unavailable.functions.at(0)?.blocks.at(0)?.terminator._tag, 'Trap')
+    const unavailableFunction = unavailable.functions.at(0)
+    assert.strictEqual(
+      unavailableFunction === undefined ? undefined : Mir.outcomes(unavailableFunction).at(0)?._tag,
+      'Trap',
+    )
   }),
 )
 

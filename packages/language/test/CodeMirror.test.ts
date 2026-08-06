@@ -31,6 +31,16 @@ it('booleans are their own category', () => {
   assert.deepStrictEqual(spellings('let ok = true', 'boolean'), ['true'])
 })
 
+it('highlights mutable loop keywords through the compiler lexer', () => {
+  assert.deepStrictEqual(spellings('let mut value = 0 while true { break continue }', 'keyword'), [
+    'let',
+    'mut',
+    'while',
+    'break',
+    'continue',
+  ])
+})
+
 it('places highlights correctly after multi-byte characters', () => {
   const doc = '// café \u{1f600}\nfn x() {}'
   assert.deepStrictEqual(spellings(doc, 'keyword'), ['fn'])

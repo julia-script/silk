@@ -85,11 +85,17 @@ export const arrayLengthMismatchCode = 'SEM0031' as const
 export const indexOnNonArrayCode = 'SEM0032' as const
 export const indexNotI32Code = 'SEM0033' as const
 export const indexOutOfBoundsCode = 'SEM0034' as const
+export const immutableAssignmentCode = 'SEM0035' as const
+export const invalidAssignmentPlaceCode = 'SEM0036' as const
+export const assignmentTypeMismatchCode = 'SEM0037' as const
+export const transferOutsideLoopCode = 'SEM0038' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
 export const partialMoveCode = 'OWN0002' as const
 export const explicitMoveRequiredCode = 'OWN0003' as const
+export const overlappingAssignmentCode = 'OWN0004' as const
+export const incompatibleLoopHeaderCode = 'OWN0005' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
@@ -133,9 +139,15 @@ export type Code =
   | typeof indexOnNonArrayCode
   | typeof indexNotI32Code
   | typeof indexOutOfBoundsCode
+  | typeof immutableAssignmentCode
+  | typeof invalidAssignmentPlaceCode
+  | typeof assignmentTypeMismatchCode
+  | typeof transferOutsideLoopCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
+  | typeof overlappingAssignmentCode
+  | typeof incompatibleLoopHeaderCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
 export interface DeclarationEntity {
@@ -249,6 +261,14 @@ export type Reason =
   | { readonly _tag: 'IndexOnNonArray'; readonly actual: string }
   | { readonly _tag: 'IndexNotI32'; readonly actual: string }
   | { readonly _tag: 'IndexOutOfBounds'; readonly index: number; readonly length: number }
+  | { readonly _tag: 'ImmutableAssignment'; readonly spelling: string }
+  | { readonly _tag: 'InvalidAssignmentPlace' }
+  | {
+      readonly _tag: 'AssignmentTypeMismatch'
+      readonly expected: string
+      readonly actual: string
+    }
+  | { readonly _tag: 'TransferOutsideLoop'; readonly transfer: 'break' | 'continue' }
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
@@ -256,6 +276,8 @@ export type Reason =
     }
   | { readonly _tag: 'PartialMove' }
   | { readonly _tag: 'ExplicitMoveRequired'; readonly spelling: string }
+  | { readonly _tag: 'OverlappingAssignment'; readonly spelling: string }
+  | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
@@ -904,6 +926,57 @@ export const conditionNotBool = (actual: string, span: SourceSpan.SourceSpan): D
     span,
   })
 
+export const immutableAssignment = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: immutableAssignmentCode,
+    severity: 'error',
+    message: `Cannot assign through immutable binding ${spelling}`,
+    reason: Object.freeze({ _tag: 'ImmutableAssignment', spelling }),
+    span,
+  })
+
+export const invalidAssignmentPlace = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidAssignmentPlaceCode,
+    severity: 'error',
+    message: 'Assignment requires a writable binding, field, or indexed place',
+    reason: Object.freeze({ _tag: 'InvalidAssignmentPlace' }),
+    span,
+  })
+
+export const assignmentTypeMismatch = (
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: assignmentTypeMismatchCode,
+    severity: 'error',
+    message: `Assignment expected ${expected} but received ${actual}`,
+    reason: Object.freeze({ _tag: 'AssignmentTypeMismatch', expected, actual }),
+    span,
+  })
+
+export const transferOutsideLoop = (
+  transfer: 'break' | 'continue',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: transferOutsideLoopCode,
+    severity: 'error',
+    message: `${transfer} is only valid inside a loop`,
+    reason: Object.freeze({ _tag: 'TransferOutsideLoop', transfer }),
+    span,
+  })
+
 /** Creates the diagnostic for a call argument whose type mismatches its parameter. */
 export const argumentTypeMismatch = (
   expected: string,
@@ -956,6 +1029,28 @@ export const explicitMoveRequired = (spelling: string, span: SourceSpan.SourceSp
     severity: 'error',
     message: `Moving ${spelling} requires an explicit move`,
     reason: Object.freeze({ _tag: 'ExplicitMoveRequired', spelling }),
+    span,
+  })
+
+export const overlappingAssignment = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: overlappingAssignmentCode,
+    severity: 'error',
+    message: `Assignment to ${spelling} consumes the same owner before replacement commits`,
+    reason: Object.freeze({ _tag: 'OverlappingAssignment', spelling }),
+    span,
+  })
+
+export const incompatibleLoopHeader = (loop: number, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: incompatibleLoopHeaderCode,
+    severity: 'error',
+    message: `Loop ${loop} repeats with incompatible owner liveness`,
+    reason: Object.freeze({ _tag: 'IncompatibleLoopHeader', loop }),
     span,
   })
 

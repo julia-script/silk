@@ -270,7 +270,8 @@ export const hirRows = (
       rows.push({
         key: `${path}-bind-${span.start}`,
         depth,
-        label: `bind b${node.binding.ordinal} ${node.name ?? '∅'}`,
+        label: `bind ${node.mutability.toLowerCase()} b${node.binding.ordinal} ${node.name ?? '∅'}`,
+        detail: `r${node.region.ordinal}`,
         span,
         onActivate: () => onPick(span),
       })
@@ -290,10 +291,66 @@ export const hirRows = (
       node.otherwise.forEach((inner, index) => statement(inner, depth + 1, `${path}.e${index}`))
       return
     }
+    if (node._tag === 'Write') {
+      rows.push({
+        key: `${path}-write-${span.start}`,
+        depth,
+        label: `write b${node.place.root.ordinal}${node.place.selectors
+          .map((selector) =>
+            selector._tag === 'Field' ? `.#${selector.field.ordinal}` : '[index]',
+          )
+          .join('')}`,
+        detail: `r${node.region.ordinal}`,
+        span,
+        onActivate: () => onPick(span),
+      })
+      for (const [index, selector] of node.place.selectors.entries()) {
+        if (selector._tag === 'Index') expression(selector.index, depth + 1, `${path}.s${index}`)
+      }
+      expression(node.value, depth + 1, `${path}.v`)
+      return
+    }
+    if (node._tag === 'While') {
+      rows.push({
+        key: `${path}-while-${span.start}`,
+        depth,
+        label: `while loop${node.loop.ordinal}`,
+        detail: `r${node.region.ordinal}${node.parent === undefined ? '' : ` · parent loop${node.parent.ordinal}`}`,
+        span,
+        onActivate: () => onPick(span),
+      })
+      expression(node.condition, depth + 1, `${path}.c`)
+      node.body.forEach((inner, index) => statement(inner, depth + 1, `${path}.b${index}`))
+      return
+    }
+    if (node._tag === 'Break' || node._tag === 'Continue') {
+      rows.push({
+        key: `${path}-${node._tag.toLowerCase()}-${span.start}`,
+        depth,
+        label: `${node._tag.toLowerCase()} loop${node.target.ordinal}`,
+        detail: `r${node.region.ordinal}`,
+        span,
+        onActivate: () => onPick(span),
+      })
+      return
+    }
+    if (node._tag === 'UnavailableStatement') {
+      rows.push({
+        key: `${path}-unavailable-${span.start}`,
+        depth,
+        label: 'unavailable statement',
+        detail: `r${node.region.ordinal}`,
+        span,
+        tone: 'warning',
+        onActivate: () => onPick(span),
+      })
+      return
+    }
     rows.push({
       key: `${path}-return-${span.start}`,
       depth,
       label: 'return',
+      detail: `r${node.region.ordinal}`,
       span,
       onActivate: () => onPick(span),
     })

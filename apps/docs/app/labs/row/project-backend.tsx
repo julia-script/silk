@@ -9,13 +9,14 @@
  * returning nothing, which is what keeps a broken pipeline readable.
  */
 
+import { Mir } from '@silk-effect/compiler'
 import type {
   BootstrapEvaluation,
+  Backend,
   DeclarationIndex,
   Elaboration,
   Instances,
   Layout,
-  Mir,
   ModuleClosure,
   NameResolution,
   Ownership,
@@ -275,9 +276,7 @@ export const ownershipRows = (
         key: `own-${fn.declaration.id.ordinal}-b${ordinal}`,
         depth: 1,
         label: binding.name ?? '∅',
-        detail: `${bindingSiteText(binding)} · ${binding.category._tag.toLowerCase()} · live [${
-          binding.liveFrom.start
-        }, ${binding.liveTo.end})${binding.movedAt === undefined ? '' : ' · moved'}`,
+        detail: `${bindingSiteText(binding)} · ${binding.mutability.toLowerCase()} · ${binding.category._tag.toLowerCase()} · live [${binding.liveFrom.start}, ${binding.liveTo.end})${binding.movedAt === undefined ? '' : ' · moved'}`,
         span: bindSpan,
         onActivate: () => onPick(bindSpan),
       })
@@ -300,6 +299,20 @@ export const ownershipRows = (
                 .join(', '),
         span: exitSpan,
         onActivate: () => onPick(exitSpan),
+      })
+    }
+
+    for (const point of fn.fixedPoints) {
+      const loopSpan = asSpan(point.span)
+      rows.push({
+        key: `own-${fn.declaration.id.ordinal}-loop${point.loop.ordinal}`,
+        depth: 1,
+        dot: point.compatible ? 'ok' : 'warning',
+        label: `loop${point.loop.ordinal} fixed point`,
+        detail: `${point.compatible ? 'compatible' : 'incompatible'} · ${point.iterations} step${point.iterations === 1 ? '' : 's'} · ${point.repeating.length} repeating path${point.repeating.length === 1 ? '' : 's'}`,
+        span: loopSpan,
+        ...(point.compatible ? {} : { tone: 'warning' as const }),
+        onActivate: () => onPick(loopSpan),
       })
     }
   }
@@ -414,6 +427,19 @@ export const layoutRows = (
 
 const localText = (local: Mir.LocalId): string => `_${local.ordinal}`
 
+const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector>): string =>
+  `${localText(root)}${selectors
+    .map((selector) =>
+      selector._tag === 'FieldSelector'
+        ? `.#${selector.field.ordinal}`
+        : `[${
+            selector.index._tag === 'Proven'
+              ? selector.index.value
+              : localText(selector.index.local)
+          }/${selector.length}]`,
+    )
+    .join('')}`
+
 const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
     case 'Literal':
@@ -439,34 +465,51 @@ const operationLabel = (operation: Mir.Operation): string => {
     case 'Project':
       return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal}`
     case 'ReadPlace':
-      return `${localText(operation.destination)} = read ${localText(operation.root)}${operation.selectors
-        .map((selector) =>
-          selector._tag === 'FieldSelector'
-            ? `.#${selector.field.ordinal}`
-            : `[${
-                selector.index._tag === 'Proven'
-                  ? selector.index.value
-                  : localText(selector.index.local)
-              }/${selector.length}]`,
-        )
-        .join('')}`
+      return `${localText(operation.destination)} = read ${placeText(operation.root, operation.selectors)}`
+    case 'CheckPlace':
+      return `check ${placeText(operation.root, operation.selectors)}`
+    case 'WritePlace':
+      return `write ${placeText(operation.root, operation.selectors)} = ${localText(operation.source)}`
     case 'Drop':
       return `drop ${localText(operation.local)}`
   }
 }
 
-const terminatorLabel = (terminator: Mir.Terminator): string => {
-  switch (terminator._tag) {
+const outcomeLabel = (outcome: Mir.Outcome): string => {
+  switch (outcome._tag) {
     case 'Return':
-      return `return ${localText(terminator.value)}`
-    case 'Jump':
-      return `jump bb${terminator.target.ordinal}`
-    case 'Branch':
-      return `branch ${localText(terminator.condition)} ? bb${terminator.taken.ordinal} : bb${
-        terminator.otherwise.ordinal
-      }`
+      return `return ${localText(outcome.value)}`
+    case 'Forward':
+      return `forward r${outcome.target.ordinal}`
     case 'Trap':
-      return `trap "${terminator.reason}"`
+      return `trap "${outcome.reason}"`
+    case 'Repeat':
+      return `repeat loop${outcome.loop.ordinal}`
+    case 'Exit':
+      return `exit loop${outcome.loop.ordinal}`
+    case 'Yield':
+      return 'yield condition'
+  }
+}
+
+const regionOperations = (region: Mir.Region): ReadonlyArray<Mir.Operation> =>
+  region._tag === 'OperationRegion'
+    ? region.operations
+    : region._tag === 'CleanupRegion'
+      ? region.releases
+      : []
+
+const regionDetail = (region: Mir.Region): string => {
+  const owner = region.ownerLoop === undefined ? '' : ` · owner loop${region.ownerLoop.ordinal}`
+  switch (region._tag) {
+    case 'OperationRegion':
+      return `operations${owner}`
+    case 'CleanupRegion':
+      return `cleanup${owner}`
+    case 'ConditionalRegion':
+      return `if ${localText(region.condition)} · r${region.taken.ordinal} / r${region.otherwise.ordinal}${owner}`
+    case 'LoopRegion':
+      return `loop${region.loop.ordinal} · condition r${region.condition.ordinal} · body r${region.body.ordinal} · following r${region.following.ordinal}${owner}`
   }
 }
 
@@ -477,28 +520,28 @@ export const mirRows = (
   const rows: Array<RowModel> = []
 
   for (const fn of module.functions) {
-    const localCount = fn.blocks.reduce((total, block) => total + block.operations.length, 0)
+    const operationCount = Mir.operations(fn).length
     rows.push({
       key: `mir-${fn.id.name}`,
       dot: 'symbol',
       label: fn.id.name,
-      detail: `fn · ${fn.blocks.length} bb · ${localCount} op${localCount === 1 ? '' : 's'}`,
+      detail: `fn · entry r${fn.entry.ordinal} · ${fn.regions.length} region${fn.regions.length === 1 ? '' : 's'} · ${operationCount} op${operationCount === 1 ? '' : 's'}`,
       head: true,
       tone: 'symbol',
     })
 
-    for (const block of fn.blocks) {
+    for (const region of Mir.topologicalRegions(fn)) {
       rows.push({
-        key: `mir-${fn.id.name}-bb${block.id.ordinal}`,
+        key: `mir-${fn.id.name}-r${region.id.ordinal}`,
         depth: 1,
-        label: `bb${block.id.ordinal}`,
-        detail: block.kind === 'Cleanup' ? 'cleanup' : 'entry',
+        label: `r${region.id.ordinal} · ${region._tag.replace('Region', '').toLowerCase()}`,
+        detail: regionDetail(region),
       })
 
-      for (const [ordinal, operation] of block.operations.entries()) {
+      for (const [ordinal, operation] of regionOperations(region).entries()) {
         const span = asSpan(operation.provenance.span)
         rows.push({
-          key: `mir-${fn.id.name}-bb${block.id.ordinal}-${ordinal}`,
+          key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}`,
           depth: 2,
           label: operationLabel(operation),
           detail: operation.provenance.generated ? 'generated' : operation._tag.toLowerCase(),
@@ -507,15 +550,30 @@ export const mirRows = (
         })
       }
 
-      const span = asSpan(block.terminator.provenance.span)
-      rows.push({
-        key: `mir-${fn.id.name}-bb${block.id.ordinal}-term`,
-        depth: 2,
-        label: terminatorLabel(block.terminator),
-        detail: 'terminator',
-        span,
-        onActivate: () => onPick(span),
-      })
+      if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
+        const span = asSpan(region.outcome.provenance.span)
+        rows.push({
+          key: `mir-${fn.id.name}-r${region.id.ordinal}-outcome`,
+          depth: 2,
+          label: outcomeLabel(region.outcome),
+          detail: 'outcome',
+          span,
+          onActivate: () => onPick(span),
+        })
+      } else {
+        const span = asSpan(region.provenance.span)
+        rows.push({
+          key: `mir-${fn.id.name}-r${region.id.ordinal}-control`,
+          depth: 2,
+          label:
+            region._tag === 'ConditionalRegion'
+              ? `taken r${region.taken.ordinal} · otherwise r${region.otherwise.ordinal}${region.following === undefined ? '' : ` · following r${region.following.ordinal}`}`
+              : `condition r${region.condition.ordinal} · body r${region.body.ordinal} · following r${region.following.ordinal}`,
+          detail: 'structural edges',
+          span,
+          onActivate: () => onPick(span),
+        })
+      }
     }
   }
 
@@ -534,6 +592,30 @@ export const backendTextRows = (ir: string): ReadonlyArray<RowModel> =>
     lead: index + 1,
     label: line,
   }))
+
+/** Backend-local jumps/branches with canonical region and source provenance kept visible. */
+export const backendControlRows = (
+  control: ReadonlyArray<Backend.ControlProvenance>,
+  onPick: (span: Span) => void,
+): ReadonlyArray<RowModel> => [
+  {
+    key: 'backend-control',
+    label: 'control conversion',
+    detail: `${control.length} emitted construct${control.length === 1 ? '' : 's'}`,
+    head: true,
+  },
+  ...control.map((entry, ordinal) => {
+    const span = asSpan(entry.span)
+    return {
+      key: `backend-control-${entry.function.name}-${entry.region.ordinal}-${ordinal}`,
+      depth: 1,
+      label: `${entry.construct} · r${entry.region.ordinal}`,
+      detail: `${entry.targets.map((target) => `r${target.ordinal}`).join(', ') || 'terminal'}${entry.loop === undefined ? '' : ` · loop${entry.loop.ordinal}`}`,
+      span,
+      onActivate: () => onPick(span),
+    }
+  }),
+]
 
 export const symbolRows = (
   symbols: ReadonlyArray<{
@@ -591,6 +673,24 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
         .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':
       return `cleanup _${event.local}`
+    case 'RegionEntry':
+      return `enter r${event.region}`
+    case 'Condition':
+      return `condition r${event.region}${event.loop === undefined ? '' : ` · loop${event.loop}`}`
+    case 'Iteration':
+      return `iterate loop${event.loop ?? '?'} · body r${event.region}`
+    case 'WriteCheck':
+      return `check write in r${event.region}`
+    case 'ReplacementCleanup':
+      return `cleanup replaced owner in r${event.region}`
+    case 'Replacement':
+      return `commit replacement in r${event.region}`
+    case 'Repeat':
+      return `repeat loop${event.loop ?? '?'}`
+    case 'Exit':
+      return `exit loop${event.loop ?? '?'}`
+    case 'Transfer':
+      return `transfer in r${event.region}${event.loop === undefined ? '' : ` · loop${event.loop}`}`
   }
 }
 
@@ -609,6 +709,15 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'Project':
     case 'PlaceRead':
     case 'Cleanup':
+    case 'RegionEntry':
+    case 'Condition':
+    case 'Iteration':
+    case 'WriteCheck':
+    case 'ReplacementCleanup':
+    case 'Replacement':
+    case 'Repeat':
+    case 'Exit':
+    case 'Transfer':
       return 2
   }
 }

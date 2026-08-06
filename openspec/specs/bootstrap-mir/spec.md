@@ -6,34 +6,34 @@ every backend and the interpreter consume — its data model, structural invaria
 the compiler-owned target/layout plan, and the deterministic textual encoder, stabilized against
 hand-built samples before lowering exists.
 ## Requirements
-### Requirement: MIR is a backend-neutral CFG over logical types
+### Requirement: MIR is a backend-neutral structured control DAG over logical types
 
-A MIR module SHALL represent each function as a basic-block control-flow graph over logical Silk
-types with typed locals: explicit operations (integer literals, moves, canonical-target calls,
-drops) and explicit terminators (return, jump, conditional branch, trap), with cleanup paths as
-marked cleanup blocks. MIR SHALL carry a compiler-selected target and layout table, but MUST NOT
-contain LLVM types, instructions, intrinsics, attributes, metadata nodes, WebAssembly value types,
-or backend-owned physical representations. Physical facts in the canonical layout table belong to
-Silk rather than to any backend. The operation vocabulary is restricted to the frozen slice's needs
-while its closed unions leave room for the full pinned vocabulary.
+A MIR module SHALL represent each function as a structured control DAG over logical Silk types and
+typed locals. Ordered operation blocks, conditional regions, loop regions, cleanup regions, and
+terminal outcomes SHALL retain canonical identities and provenance. Child and continuation edges
+MUST be acyclic and deterministically ordered. Repetition SHALL exist only as the semantics of an
+explicit loop region whose condition and body are themselves DAG regions; arbitrary block back-edges
+MUST fail verification.
 
-This prohibition constrains MIR's own operation and control vocabulary, not the compiler-owned
-layout facts attached to the program. MIR preserves the control structure lowering derived from
-the source, and backends MAY rely on the structural guarantees the verifier and lowering establish.
-Consuming that shape is each backend's own responsibility, done as its target demands: a backend
-targeting an arbitrary-CFG form emits the blocks directly, while one targeting structured control
-flow recovers the source's constructs from the same graph. Neither target's control shape belongs
-in MIR.
+MIR SHALL carry the compiler-selected target and layout plan but MUST NOT contain LLVM or WebAssembly
+types, instructions, labels, nesting depths, or backend-owned physical representations. A backend
+SHALL receive the preserved DAG and convert it into its own control form without recovering source
+structure from flattened control flow.
 
 #### Scenario: Model a straight-line function
 
-- **WHEN** a hand-built sample models `main` returning a called constant
-- **THEN** its function has one entry block whose operations are a literal and a canonical-target call ending in a return terminator, all over logical `I32`, while the program carries the selected target and `I32` layout
+- **WHEN** a hand-built function returns a called constant
+- **THEN** its entry region contains ordered literal and call operations ending in a return outcome over logical `I32`
 
-#### Scenario: Model a cleanup path
+#### Scenario: Model structured repetition without a cycle
 
-- **WHEN** a hand-built sample routes an exit through a cleanup block
-- **THEN** the cleanup block is explicitly marked, contains ordered drops, and ends in a jump without introducing a backend-specific representation
+- **WHEN** MIR represents a `while` loop with a conditional `continue` and `break`
+- **THEN** one loop region owns acyclic condition and body regions whose terminal outcomes name repeat or exit ports without a graph back-edge
+
+#### Scenario: Reject an arbitrary cycle
+
+- **WHEN** a hand-built MIR region directly or indirectly lists itself as a child or continuation
+- **THEN** verification reports the cycle deterministically before evaluation or emission
 
 ### Requirement: Every operation carries provenance
 
@@ -286,3 +286,41 @@ provenance in stable order.
 
 - **WHEN** an `Array<I32, 3>` construction carries two operands
 - **THEN** verification reports the exact completeness violation before evaluation or emission
+
+### Requirement: MIR writes replace typed places explicitly
+
+MIR SHALL represent assignment as one checked `WritePlace` carrying the root local, ordered field and
+index selectors, dynamic index locals and canonical lengths, exact destination and source types,
+replacement cleanup, and provenance. Place checks and right-hand evaluation SHALL precede the commit,
+and the verifier SHALL reject inconsistent mutability, selectors, types, layouts, calling shapes, or
+cleanup modes.
+
+#### Scenario: Lower an array element replacement
+
+- **WHEN** HIR assigns a complete value to `values[index]`
+- **THEN** MIR checks the index and evaluates the source before one verified write commits
+
+### Requirement: MIR loop outcomes preserve lexical cleanup
+
+Each loop region SHALL expose canonical repeat and exit outcomes. Lowering SHALL map body fallthrough
+and `continue` to repeat, `break` to exit, and `return` to the function outcome through the exact
+cleanup regions selected by ownership. Cleanup sharing MAY make the representation a DAG rather than
+a tree, but every owner SHALL be released at most once on any execution path.
+
+#### Scenario: Lower continue through cleanup
+
+- **WHEN** an iteration-local owner is live at `continue`
+- **THEN** the transfer traverses its cleanup region before reaching the loop repeat outcome
+
+### Requirement: Control DAG verification and encoding are deterministic
+
+Verification SHALL reject missing or duplicate region identities, cyclic child/continuation edges,
+invalid lexical transfer targets, incompatible loop-header locals, unreachable required outcomes,
+and operation/type/layout disagreements as ordered data. Text encoding SHALL traverse regions in one
+canonical topological order and encode structured children, outcomes, selectors, cleanup, and
+provenance identically across fresh processes.
+
+#### Scenario: Repeat loop encoding
+
+- **WHEN** one nested mutable-loop program is lowered repeatedly in fresh processes
+- **THEN** its region identities, topological order, operations, outcomes, and textual bytes are identical

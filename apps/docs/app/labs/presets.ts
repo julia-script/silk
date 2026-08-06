@@ -614,6 +614,95 @@ pub fn main() -> I32 { return choose(1, 2) }`,
   one('ownership', 'Damaged body', 'pub fn main() -> I32 { return missing() }'),
   one('ownership', 'Unknown parameter type', 'pub fn puzzle(value: Mystery) -> I32 { return value }'),
 
+  // ---- mutation and structured loops ----------------------------------------------------
+  one(
+    'control',
+    'Immutable write rejection',
+    `pub fn main() -> I32 { let value = 1 value = 2 return value }`,
+  ),
+  one(
+    'control',
+    'Scalar mutation',
+    `pub fn main() -> I32 { let mut value = 40 value = value + 2 return value }`,
+  ),
+  one(
+    'control',
+    'Field mutation',
+    `struct Pair { left: I32 right: I32 }
+pub fn main() -> I32 { let mut pair = Pair { left: 1, right: 42 } pair.left = 40 return pair.left + 2 }`,
+  ),
+  one(
+    'control',
+    'Indexed mutation',
+    `pub fn main() -> I32 { let mut values = [1, 2, 3] let index = 1 values[index] = 42 return values[1] }`,
+  ),
+  one(
+    'control',
+    'Move-only replacement',
+    `struct Token { value: I32 }
+pub fn main() -> I32 { let mut token = Token { value: 1 } token = Token { value: 42 } return token.value }`,
+  ),
+  one(
+    'control',
+    'Zero-iteration loop',
+    `pub fn main() -> I32 { let mut value = 42 while false { value = 0 } return value }`,
+  ),
+  one(
+    'control',
+    'Counting loop',
+    `pub fn main() -> I32 { let mut value = 0 while value < 42 { value = value + 1 } return value }`,
+  ),
+  one(
+    'control',
+    'Nested loops',
+    `pub fn main() -> I32 {
+  let mut outer = 0
+  let mut total = 0
+  while outer < 6 {
+    let mut inner = 0
+    while inner < 7 { total = total + 1 inner = inner + 1 }
+    outer = outer + 1
+  }
+  return total
+}`,
+  ),
+  one(
+    'control',
+    'Conditional break',
+    `pub fn main() -> I32 { let mut value = 0 while true { if value == 42 { break } value = value + 1 } return value }`,
+  ),
+  one(
+    'control',
+    'Continue',
+    `pub fn main() -> I32 { let mut value = 0 while value < 42 { value = value + 1 if value < 42 { continue } } return value }`,
+  ),
+  one(
+    'control',
+    'Early loop return',
+    `pub fn main() -> I32 { while true { return 42 } return 0 }`,
+  ),
+  one(
+    'control',
+    'Write bounds trap',
+    `pub fn main() -> I32 { let mut values = [1, 2] let index = 2 values[index] = 42 return 0 }`,
+  ),
+  one('control', 'Invalid loop condition', 'pub fn main() -> I32 { while 1 { break } return 42 }'),
+  one('control', 'Invalid transfer', 'pub fn main() -> I32 { continue return 42 }'),
+  one(
+    'control',
+    'Incompatible loop owner',
+    `struct Token { value: I32 }
+pub fn main() -> I32 {
+  let mut token = Token { value: 1 }
+  let mut iteration = 0
+  while iteration < 1 {
+    if iteration == 0 { let old = move token continue }
+    iteration = iteration + 1
+  }
+  return 42
+}`,
+  ),
+
   // ---- discovery ------------------------------------------------------------------------
   one(
     'discovery',

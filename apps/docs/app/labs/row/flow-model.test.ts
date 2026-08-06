@@ -67,7 +67,7 @@ describe('projectDataFlow', () => {
 
     expect(children.map((group) => group.ordinal)).toEqual([0, 1])
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
-    expect(children.map((group) => group.evaluation?.order)).toEqual([2, 5])
+    expect(children.map((group) => group.evaluation?.order)).toEqual([3, 7])
     expect(flow.mode).toBe('Evaluated')
     expect(flow.nodes.some((item) => item.evaluation?.value === 2)).toBe(true)
   })

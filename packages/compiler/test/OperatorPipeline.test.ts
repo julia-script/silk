@@ -19,7 +19,8 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
       encoder.encode('pub fn main() -> I32 { let value = 42 return -value }'),
       'aarch64-apple-darwin',
     )
-    const operations = Analysis.loweredMir(snapshot).functions.at(0)?.blocks.at(0)?.operations ?? []
+    const fn = Analysis.loweredMir(snapshot).functions.at(0)
+    const operations = fn === undefined ? [] : Mir.operations(fn)
     const zero = operations.find(
       (operation) => operation._tag === 'Literal' && operation.value === 0,
     )

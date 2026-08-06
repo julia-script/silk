@@ -212,6 +212,47 @@ pub fn main() -> I32 { return 42 }`,
   })
 })
 
+describe('control DAG view', () => {
+  it('shows structured loop regions and lexical repeat outcomes', () => {
+    const result = project(
+      'mir',
+      `pub fn main() -> I32 {
+  let mut value = 0
+  while value < 2 { value = value + 1 }
+  return value
+}`,
+    )
+    const rendered = text(result)
+    expect(rendered).toContain('loop0')
+    expect(rendered).toContain('condition r')
+    expect(rendered).toContain('repeat loop0')
+    expect(result.meta).toContain('region')
+    expect(result.rows.some((row) => row.span !== undefined && row.onActivate !== undefined)).toBe(
+      true,
+    )
+  })
+
+  it('shows ownership fixed points and source-linked backend control conversion', () => {
+    const source = `pub fn main() -> I32 {
+  let mut value = 0
+  while value < 2 { value = value + 1 }
+  return value
+}`
+    const ownership = project('ownership', source)
+    expect(text(ownership)).toContain('mutable')
+    expect(text(ownership)).toContain('loop0 fixed point compatible')
+
+    const backend = project('backend', source)
+    expect(text(backend)).toContain('control conversion')
+    expect(text(backend)).toContain('LlvmBranch')
+    expect(
+      backend.rows.some(
+        (row) => row.key.startsWith('backend-control-') && row.onActivate !== undefined,
+      ),
+    ).toBe(true)
+  })
+})
+
 describe('downstream panes state why they are empty', () => {
   // A blank pane and a pane for a program that never got that far look identical, which hides
   // the phase that actually broke. Every absent phase has to name its reason.

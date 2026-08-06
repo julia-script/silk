@@ -10,7 +10,7 @@
  * cached until a dependency changes, instead of per-component `useMemo` chains.
  */
 
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, Mir, ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, Target } from '@silk-effect/compiler'
 import * as Schema from 'effect/Schema'
 import { KeyValueStore } from 'effect/unstable/persistence'
@@ -137,12 +137,10 @@ export const trailAtom = Atom.make((get): ReadonlyArray<TrailCell> => {
     value:
       mir._tag === 'Available'
         ? (mir.value.functions.find((candidate) =>
-            candidate.blocks.some((block) =>
-              block.operations.some(
-                (operation) =>
-                  operation.provenance.span.start <= cursor.start &&
-                  operation.provenance.span.end >= cursor.end,
-              ),
+            Mir.operations(candidate).some(
+              (operation) =>
+                operation.provenance.span.start <= cursor.start &&
+                operation.provenance.span.end >= cursor.end,
             ),
           )?.id.name ?? 'no operation')
         : 'unavailable',

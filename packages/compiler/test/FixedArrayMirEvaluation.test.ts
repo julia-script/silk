@@ -22,7 +22,7 @@ pub fn main() -> I32 {
     const mir = Analysis.loweredMir(self)
     assert.deepEqual(Mir.verify(mir), [])
     const choose = mir.functions.find((fn) => fn.id.name === 'choose')
-    const operations = choose?.blocks.flatMap((block) => block.operations) ?? []
+    const operations = choose === undefined ? [] : Mir.operations(choose)
     const reads = operations.filter((operation) => operation._tag === 'ReadPlace')
     assert.strictEqual(reads.length, 1)
     assert.deepEqual(
@@ -128,16 +128,19 @@ it.effect('rejects incomplete array construction before evaluation', () =>
       functions: mir.functions.map(
         (fn): Mir.MirFunction => ({
           ...fn,
-          blocks: fn.blocks.map(
-            (block): Mir.Block => ({
-              ...block,
-              operations: block.operations.map(
-                (operation): Mir.Operation =>
-                  operation._tag === 'ConstructArray'
-                    ? { ...operation, elements: operation.elements.slice(0, 2) }
-                    : operation,
-              ),
-            }),
+          regions: fn.regions.map(
+            (region): Mir.Region =>
+              region._tag === 'OperationRegion'
+                ? {
+                    ...region,
+                    operations: region.operations.map(
+                      (operation): Mir.Operation =>
+                        operation._tag === 'ConstructArray'
+                          ? { ...operation, elements: operation.elements.slice(0, 2) }
+                          : operation,
+                    ),
+                  }
+                : region,
           ),
         }),
       ),
