@@ -1,8 +1,9 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as Type from './Type.js'
 
 /**
  * The ownership and scope phase over typed HIR. It runs once per declaration and is a producer:
@@ -11,8 +12,10 @@ import type * as SourceSpan from './SourceSpan.js'
  * for copyable types, and later uses are `OWN0001` violations.
  */
 
-/** The ownership category of one binding. The bootstrap slice knows only copyable values. */
-export type OwnershipCategory = { readonly _tag: 'Copyable' }
+/** The ownership category of one binding. Nominal structs are whole-value move-only owners. */
+export type OwnershipCategory =
+  | { readonly _tag: 'Copyable' }
+  | { readonly _tag: 'MoveOnly'; readonly type: Type.Nominal }
 
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
@@ -34,6 +37,7 @@ export interface BindingFact {
 export interface Release {
   readonly _tag: 'Release'
   readonly binding: BindingFact
+  readonly fields: ReadonlyArray<DeclarationIndex.FieldId>
 }
 
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
@@ -72,6 +76,9 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
+const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
+  type !== undefined && Type.isNominal(type) ? Object.freeze({ _tag: 'MoveOnly', type }) : copyable
+
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter' ? `p${site.parameter.ordinal}` : `b${site.binding.ordinal}`
 
@@ -79,6 +86,7 @@ interface MutableBinding {
   readonly site: BindingSite
   readonly name: string | undefined
   readonly liveFrom: SourceSpan.SourceSpan
+  readonly category: OwnershipCategory
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
 }
@@ -102,38 +110,78 @@ const useSite = (expression: Hir.Expression): BindingSite | undefined => {
 
 const checkUse = (
   state: CheckState,
+  live: Set<string>,
   site: BindingSite,
   span: SourceSpan.SourceSpan,
   consuming: boolean,
 ): void => {
-  const binding = state.bindings.get(siteKey(site))
+  const key = siteKey(site)
+  const binding = state.bindings.get(key)
   if (binding === undefined) return
-  if (binding.movedAt !== undefined) {
-    state.diagnostics.push(Diagnostic.useAfterMove(binding.name ?? '?', binding.movedAt, span))
+  if (!live.has(key)) {
+    state.diagnostics.push(
+      Diagnostic.useAfterMove(binding.name ?? '?', binding.movedAt ?? binding.liveTo, span),
+    )
     return
   }
   if (consuming) {
-    binding.movedAt = span
+    binding.movedAt ??= span
     binding.liveTo = span
+    live.delete(key)
   }
 }
 
-const checkExpression = (state: CheckState, expression: Hir.Expression): void => {
+const checkExpression = (
+  state: CheckState,
+  live: Set<string>,
+  expression: Hir.Expression,
+  consuming: boolean,
+): void => {
   switch (expression._tag) {
     case 'ParameterReference':
     case 'BindingReference': {
       const site = useSite(expression)
-      if (site !== undefined) checkUse(state, site, expression.span, false)
+      if (site === undefined) return
+      const binding = state.bindings.get(siteKey(site))
+      if (consuming && binding?.category._tag === 'MoveOnly') {
+        state.diagnostics.push(
+          Diagnostic.explicitMoveRequired(binding.name ?? '?', expression.span),
+        )
+      }
+      checkUse(state, live, site, expression.span, false)
       return
     }
     case 'Move': {
+      if (expression.subject._tag === 'Project') {
+        checkExpression(state, live, expression.subject, false)
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
+        return
+      }
       const site = useSite(expression.subject)
-      if (site !== undefined) checkUse(state, site, expression.span, true)
+      if (site !== undefined) checkUse(state, live, site, expression.span, true)
+      else checkExpression(state, live, expression.subject, true)
       return
     }
-    case 'Call':
+    case 'Construct': {
+      const fields = new Map(
+        expression.fields.map((field) => [field.field.ordinal, field.value] as const),
+      )
+      for (const field of expression.evaluationOrder) {
+        const value = fields.get(field.ordinal)
+        if (value !== undefined) checkExpression(state, live, value, true)
+      }
+      return
+    }
+    case 'Project': {
+      checkExpression(state, live, expression.subject, false)
+      return
+    }
     case 'BuiltinCall': {
-      for (const argument of expression.arguments) checkExpression(state, argument)
+      for (const argument of expression.arguments) checkExpression(state, live, argument, false)
+      return
+    }
+    case 'Call': {
+      for (const argument of expression.arguments) checkExpression(state, live, argument, true)
       return
     }
     default:
@@ -153,7 +201,32 @@ interface ExitDescriptor {
   readonly sites: ReadonlyArray<string>
 }
 
-const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
+const cleanupFields = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal,
+  seen = new Set<string>(),
+): ReadonlyArray<DeclarationIndex.FieldId> => {
+  const key = Type.key(type)
+  if (seen.has(key)) return Object.freeze([])
+  const nextSeen = new Set(seen).add(key)
+  const declaration = DeclarationIndex.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return Object.freeze([])
+  return Object.freeze(
+    declaration.fields.flatMap((field) => {
+      if (field.declaredType._tag !== 'Resolved') return [field.id]
+      const nested = field.declaredType.type
+      return Type.isNominal(nested)
+        ? [field.id, ...cleanupFields(index, nested, nextSeen)]
+        : [field.id]
+    }),
+  )
+}
+
+const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): CheckedFunction => {
   const declaration = fn.declaration
   const state: CheckState = {
     bindings: new Map(),
@@ -161,83 +234,109 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
     diagnostics: [],
   }
 
+  const initialLive = new Set<string>()
   for (const parameter of declaration.parameters) {
     const binding: MutableBinding = {
       site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
+      category: categoryOf(
+        parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined,
+      ),
     }
-    state.bindings.set(siteKey(binding.site), binding)
+    const key = siteKey(binding.site)
+    state.bindings.set(key, binding)
     state.order.push(binding)
+    initialLive.add(key)
   }
 
-  // Frames of let-bindings: index 0 is the function body, deeper indices are open arms.
-  const frames: Array<Array<MutableBinding>> = [[]]
   const exits: Array<ExitDescriptor> = []
-  const frameSitesInnerFirst = (): ReadonlyArray<string> =>
-    [...frames].reverse().flatMap((frame) => [...frame].reverse().map((b) => siteKey(b.site)))
+  const frameSitesInnerFirst = (
+    frames: ReadonlyArray<ReadonlyArray<string>>,
+    live: ReadonlySet<string>,
+  ): ReadonlyArray<string> =>
+    [...frames].reverse().flatMap((frame) => [...frame].reverse().filter((site) => live.has(site)))
 
   const walkStatements = (
     statements: ReadonlyArray<Hir.Statement>,
     enclosingSpan: SourceSpan.SourceSpan,
-  ): boolean => {
+    initial: Set<string>,
+    frames: Array<Array<string>>,
+  ): { readonly returned: boolean; readonly live: Set<string> } => {
+    let live = initial
     for (const statement of statements) {
       if (statement._tag === 'Bind') {
-        checkExpression(state, statement.initializer)
+        checkExpression(state, live, statement.initializer, true)
         const binding: MutableBinding = {
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
           name: statement.name,
           liveFrom: statement.span,
           liveTo: enclosingSpan,
+          category: categoryOf(
+            statement.initializer._tag === 'Unavailable' ? undefined : statement.initializer.type,
+          ),
         }
-        state.bindings.set(siteKey(binding.site), binding)
+        const key = siteKey(binding.site)
+        state.bindings.set(key, binding)
         state.order.push(binding)
-        frames.at(-1)?.push(binding)
+        frames.at(-1)?.push(key)
+        live.add(key)
         continue
       }
       if (statement._tag === 'If') {
-        checkExpression(state, statement.condition)
+        checkExpression(state, live, statement.condition, false)
+        const continuing: Array<Set<string>> = []
         for (const [arm, body] of [
           ['Taken', statement.taken],
           ['Otherwise', statement.otherwise],
         ] as const) {
-          frames.push([])
-          const returned = walkStatements(body, statement.span)
-          const frame = frames.pop() ?? []
-          if (!returned && frame.length > 0) {
+          const armFrames = [...frames.map((frame) => [...frame]), []]
+          const result = walkStatements(body, statement.span, new Set(live), armFrames)
+          const frame = armFrames.at(-1) ?? []
+          if (!result.returned && frame.length > 0) {
             exits.push(
               Object.freeze({
                 kind: 'ArmEnd' as const,
                 span: statement.span,
                 arm,
-                sites: Object.freeze([...frame].reverse().map((b) => siteKey(b.site))),
+                sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
               }),
             )
           }
+          if (!result.returned) {
+            for (const site of frame) result.live.delete(site)
+            continuing.push(result.live)
+          }
         }
+        if (continuing.length === 0) return Object.freeze({ returned: true, live })
+        live = new Set(
+          [...(continuing.at(0) ?? [])].filter((site) =>
+            continuing.every((candidate) => candidate.has(site)),
+          ),
+        )
         continue
       }
-      checkExpression(state, statement.expression)
+      checkExpression(state, live, statement.expression, true)
       exits.push(
         Object.freeze({
           kind: 'Return' as const,
           span: statement.span,
-          sites: frameSitesInnerFirst(),
+          sites: frameSitesInnerFirst(frames, live),
         }),
       )
-      return true
+      return Object.freeze({ returned: true, live })
     }
-    return false
+    return Object.freeze({ returned: false, live })
   }
 
-  const returnedAtTop = walkStatements(fn.statements, declaration.syntax.span)
-  if (!returnedAtTop) {
+  const result = walkStatements(fn.statements, declaration.syntax.span, initialLive, [[]])
+  if (!result.returned) {
     exits.push(
       Object.freeze({
         kind: 'Return' as const,
         span: fn.statements.at(-1)?.span ?? declaration.syntax.span,
-        sites: frameSitesInnerFirst(),
+        sites: frameSitesInnerFirst([[]], result.live),
       }),
     )
   }
@@ -249,7 +348,7 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
           _tag: 'Binding',
           site: binding.site,
           name: binding.name,
-          category: copyable,
+          category: binding.category,
           liveFrom: binding.liveFrom,
           liveTo: binding.liveTo,
           ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
@@ -258,8 +357,6 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
   )
   const bindingBySite = new Map(bindings.map((binding) => [siteKey(binding.site), binding]))
 
-  // ponytail: releases use final moved state — sound while every type is copyable; per-path
-  // liveness arrives with cleanup-bearing types.
   const exitPlans = Object.freeze(
     exits.map(
       (exit): ExitPlan =>
@@ -271,9 +368,17 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
           releases: Object.freeze(
             exit.sites.flatMap((site): ReadonlyArray<Release> => {
               const fact = bindingBySite.get(site)
-              return fact === undefined || fact.movedAt !== undefined
-                ? []
-                : [Object.freeze({ _tag: 'Release' as const, binding: fact })]
+              if (fact === undefined) return []
+              return [
+                Object.freeze({
+                  _tag: 'Release' as const,
+                  binding: fact,
+                  fields:
+                    fact.category._tag === 'MoveOnly'
+                      ? cleanupFields(index, fact.category.type)
+                      : Object.freeze([]),
+                }),
+              ]
             }),
           ),
         }),
@@ -311,7 +416,7 @@ const checkFunction = (fn: Hir.HirFunction): CheckedFunction => {
 
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (result: Elaboration.Result): ModuleOwnership => {
-  const checked = result.hir.functions.map(checkFunction)
+  const checked = result.hir.functions.map((fn) => checkFunction(fn, result.index))
   return Object.freeze({
     _tag: 'OwnershipFacts',
     module: result.syntax.source.id,
@@ -358,10 +463,13 @@ export const encode = (self: ModuleOwnership): string =>
     `ownership-module ${self.module}`,
     ...self.functions.flatMap((fn) => [
       `fn ${identityLabel(fn.declaration)} ${verdictText(fn.verdict)}`,
-      ...fn.bindings.map(
-        (binding) =>
-          `  binding ${siteText(binding.site)} ${binding.name ?? '?'} copyable live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`,
-      ),
+      ...fn.bindings.map((binding) => {
+        const category =
+          binding.category._tag === 'Copyable'
+            ? 'copyable'
+            : `move-only ${Type.encode(binding.category.type)}`
+        return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
+      }),
       ...fn.exits.map((exit) => {
         const label =
           exit.kind === 'Return'
@@ -371,7 +479,10 @@ export const encode = (self: ModuleOwnership): string =>
           ? `  exit ${label} ${spanText(exit.span)} releases none`
           : [
               `  exit ${label} ${spanText(exit.span)}`,
-              ...exit.releases.map((release) => `    release ${siteText(release.binding.site)}`),
+              ...exit.releases.map(
+                (release) =>
+                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}`,
+              ),
             ].join('\n')
       }),
     ]),

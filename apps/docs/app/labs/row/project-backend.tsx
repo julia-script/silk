@@ -12,6 +12,7 @@
 import type {
   BootstrapEvaluation,
   DeclarationIndex,
+  Elaboration,
   Instances,
   Layout,
   Mir,
@@ -403,6 +404,12 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = call ${operation.target.name}(${operation.arguments
         .map(localText)
         .join(', ')})`
+    case 'Construct':
+      return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
+        .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
+        .join(', ')} }`
+    case 'Project':
+      return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal}`
     case 'Drop':
       return `drop ${localText(operation.local)}`
   }
@@ -502,6 +509,16 @@ export const symbolRows = (
     tone: 'symbol',
   }))
 
+/**
+ * A traced value is no longer always a scalar: constructing a struct binds an aggregate. An
+ * aggregate renders as its type plus lane values, recursively, so `Pair { 1, 2 }` stays legible
+ * in one trace cell.
+ */
+const valueText = (value: BootstrapEvaluation.Value): string =>
+  value._tag === 'I32Value'
+    ? String(value.value)
+    : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
     case 'Entry':
@@ -509,9 +526,17 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
     case 'Call':
       return `call ${event.target.module}.${event.target.name}`
     case 'Binding':
-      return `bind p${event.parameterOrdinal} = ${event.value.value}`
+      return `bind p${event.parameterOrdinal} = ${valueText(event.value)}`
     case 'Return':
-      return `return ${event.value.value}`
+      return `return ${valueText(event.value)}`
+    case 'Construct':
+      return `construct ${typeText(event.type)} · ${event.fieldCount} field${
+        event.fieldCount === 1 ? '' : 's'
+      }`
+    case 'Project':
+      return `project ${typeText(event.type)}.#${event.field.ordinal}`
+    case 'Cleanup':
+      return `cleanup _${event.local}`
   }
 }
 
@@ -525,6 +550,10 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
       return 2
     case 'Return':
       return 1
+    case 'Construct':
+    case 'Project':
+    case 'Cleanup':
+      return 2
   }
 }
 
@@ -591,6 +620,139 @@ export const evaluationRows = (
           tone: 'warning',
         },
   )
+
+  return rows
+}
+
+/**
+ * Canonical struct-value facts: literals, projections, calling shapes, and — after a run —
+ * the aggregate evaluation events.
+ *
+ * The literal's two orders are the point: the source wrote `{ right: 2, left: 1 }` but the
+ * canonical struct order is `left, right`, and the compiler owns that reordering. Showing both
+ * on one row pair is what makes the reordering inspectable rather than folklore.
+ */
+export const structValueRows = (
+  literals: ReadonlyArray<Elaboration.StructLiteralExpressionFact>,
+  projections: ReadonlyArray<Elaboration.FieldProjectionExpressionFact>,
+  shapes: ReadonlyArray<Layout.CallingShape>,
+  evaluation: BootstrapEvaluation.Outcome | undefined,
+  onPick: (span: Span) => void,
+): ReadonlyArray<RowModel> => {
+  const rows: Array<RowModel> = []
+
+  rows.push({
+    key: 'literals',
+    label: 'struct construction',
+    detail: literals.length === 0 ? 'no struct literals' : `${literals.length}`,
+    head: true,
+  })
+  for (const literal of literals) {
+    const span = asSpan(literal.syntax.span)
+    const key = `lit-${span.start}-${span.end}`
+    rows.push({
+      key,
+      depth: 1,
+      dot: literal.target._tag === 'Resolved' ? 'symbol' : 'warning',
+      label: literal.target._tag === 'Resolved' ? typeText(literal.target.type) : 'unavailable target',
+      detail: literal.authorized ? 'module-owned' : 'not authorized',
+      span,
+      ...(literal.target._tag === 'Resolved' && literal.authorized
+        ? {}
+        : { tone: 'warning' as const }),
+      onActivate: () => onPick(span),
+    })
+    rows.push({
+      key: `${key}-source`,
+      depth: 2,
+      label: 'source order',
+      detail:
+        literal.initializers.map((initializer) => initializer.name ?? '?').join(', ') || 'empty',
+    })
+    rows.push({
+      key: `${key}-canonical`,
+      depth: 2,
+      label: 'canonical order',
+      detail:
+        literal.fields
+          .map(({ field }) => (field.name._tag === 'Present' ? field.name.spelling : '?'))
+          .join(', ') || 'empty',
+    })
+  }
+
+  rows.push({
+    key: 'projections',
+    label: 'field projection chain',
+    detail: projections.length === 0 ? 'none' : `${projections.length}`,
+    head: true,
+  })
+  for (const projection of projections) {
+    const span = asSpan(projection.syntax.span)
+    const unresolved = projection.state._tag !== 'Resolved'
+    rows.push({
+      key: `proj-${span.start}-${span.end}`,
+      depth: 1,
+      ...(unresolved ? { dot: 'warning' as const, tone: 'warning' as const } : {}),
+      label: `${projection.nominal === undefined ? '?' : typeText(projection.nominal)}.${
+        projection.fieldName ?? '?'
+      }`,
+      detail: projection.state._tag.toLowerCase(),
+      span,
+      onActivate: () => onPick(span),
+    })
+  }
+
+  rows.push({
+    key: 'shapes',
+    label: 'compiler-owned calling shapes',
+    detail: shapes.length === 0 ? 'none reachable' : `${shapes.length}`,
+    head: true,
+  })
+  for (const shape of shapes) {
+    rows.push({
+      key: `shape-${typeText(shape.type)}`,
+      depth: 1,
+      label: typeText(shape.type),
+      detail:
+        shape.lanes
+          .map(
+            (lane) => `${lane.type}:${lane.path.map((field) => `#${field.ordinal}`).join('.')}`,
+          )
+          .join(', ') || 'zero runtime lanes',
+    })
+  }
+
+  const aggregateEvents =
+    evaluation?.trace.filter(
+      (event) =>
+        event._tag === 'Construct' || event._tag === 'Project' || event._tag === 'Cleanup',
+    ) ?? []
+  rows.push({
+    key: 'events',
+    label: 'evaluation events',
+    detail:
+      evaluation === undefined
+        ? 'run evaluation to inspect construction, projection, and cleanup'
+        : `${aggregateEvents.length}`,
+    head: true,
+  })
+  for (const [index, event] of aggregateEvents.entries()) {
+    const span = asSpan(event.span)
+    rows.push({
+      key: `event-${index}`,
+      depth: 1,
+      dot: 'ok',
+      label: event._tag.toLowerCase(),
+      detail:
+        event._tag === 'Construct'
+          ? `${typeText(event.type)} · ${event.fieldCount} field${event.fieldCount === 1 ? '' : 's'}`
+          : event._tag === 'Project'
+            ? `${typeText(event.type)}.#${event.field.ordinal}`
+            : `local _${event.local}`,
+      span,
+      onActivate: () => onPick(span),
+    })
+  }
 
   return rows
 }

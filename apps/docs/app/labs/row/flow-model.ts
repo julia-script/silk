@@ -115,6 +115,21 @@ const parameterName = (parameter: Elaboration.ParameterFact): string =>
 const callName = (call: CallFact): string =>
   call.reference._tag === 'Unavailable' ? 'unavailable call' : call.reference.spelling
 
+const directReference = (
+  expression: Elaboration.ExpressionFact,
+): Elaboration.IdentifierExpressionFact['reference'] | undefined => {
+  switch (expression._tag) {
+    case 'Identifier':
+      return expression.reference
+    case 'Move':
+      return directReference(expression.subject)
+    case 'Grouped':
+      return directReference(expression.expression)
+    default:
+      return undefined
+  }
+}
+
 const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   const expression = argument.expression
   if (expression._tag === 'Identifier') {
@@ -124,14 +139,19 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   }
   if (expression._tag === 'Call') return `${callName(expression)}(…)`
   if (expression._tag === 'Move') {
-    return expression.reference._tag === 'Unavailable'
-      ? 'unavailable move'
-      : `move ${expression.reference.spelling}`
+    return `move ${argumentLabel({ ...argument, expression: expression.subject })}`
   }
   if (expression._tag === 'Boolean') return String(expression.value)
-  if (expression._tag === 'Grouped') return `(${argumentLabel({ ...argument, expression: expression.expression })})`
+  if (expression._tag === 'Grouped')
+    return `(${argumentLabel({ ...argument, expression: expression.expression })})`
   if (expression._tag === 'Operator') return `${expression.operator} expression`
   if (expression._tag === 'Pipeline') return 'pipeline result'
+  if (expression._tag === 'StructLiteral')
+    return expression.target._tag === 'Resolved'
+      ? `${typeText(expression.target.type)} {…}`
+      : 'unavailable struct literal'
+  if (expression._tag === 'FieldProjection')
+    return `${argumentLabel({ ...argument, expression: expression.subject })}.${expression.fieldName ?? '?'}`
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'
@@ -474,9 +494,10 @@ const projectCall = (
 
   const targetFact = functionFor(analysis, target)
   const returned = targetFact?.returnedExpression
+  const returnedReference = returned === undefined ? undefined : directReference(returned)
   if (
     returned === undefined ||
-    (returned._tag !== 'Integer' && returned._tag !== 'Identifier' && returned._tag !== 'Move')
+    (returned._tag !== 'Integer' && returnedReference === undefined)
   ) {
     const terminalId = `${id}-return-stop`
     addNode(
@@ -516,10 +537,13 @@ const projectCall = (
       return Object.freeze({ groupId: id, resultId: undefined, complete: false })
     }
   } else {
+    if (returnedReference === undefined) {
+      return Object.freeze({ groupId: id, resultId: undefined, complete: false })
+    }
     const referenceLabel =
-      returned.reference._tag === 'Unavailable'
+      returnedReference._tag === 'Unavailable'
         ? 'Unavailable reference'
-        : returned.reference.spelling
+        : returnedReference.spelling
     addNode(
       draft,
       group,
@@ -528,17 +552,17 @@ const projectCall = (
         returnedId,
         'Reference',
         `Returned reference: ${referenceLabel}`,
-        returned.reference._tag,
-        returned.reference._tag === 'Resolved'
+        returnedReference._tag,
+        returnedReference._tag === 'Resolved'
           ? 'Connected'
-          : returned.reference._tag === 'Ambiguous'
+          : returnedReference._tag === 'Ambiguous'
             ? 'Branched'
             : 'Stopped',
         returned.syntax.span,
       ),
     )
-    if (returned.reference._tag === 'Ambiguous') {
-      for (const parameter of returned.reference.parameters) {
+    if (returnedReference._tag === 'Ambiguous') {
+      for (const parameter of returnedReference.parameters) {
         addEdge(
           draft,
           group,
@@ -553,14 +577,14 @@ const projectCall = (
           ),
         )
       }
-    } else if (returned.reference._tag === 'Resolved') {
+    } else if (returnedReference._tag === 'Resolved') {
       addEdge(
         draft,
         group,
         semanticEdge(
           group,
           `${id}-parameter-reference`,
-          `${id}-parameter-${returned.reference.parameter.id.ordinal}`,
+          `${id}-parameter-${returnedReference.parameter.id.ordinal}`,
           returnedId,
           'is read by',
           'Connected',
@@ -568,7 +592,7 @@ const projectCall = (
         ),
       )
     }
-    if (returned.reference._tag !== 'Resolved') {
+    if (returnedReference._tag !== 'Resolved') {
       return Object.freeze({ groupId: id, resultId: undefined, complete: false })
     }
   }
@@ -654,11 +678,11 @@ const traceOverlay = (draft: ProjectionDraft, outcome: BootstrapEvaluation.Outco
     target.canonical.id.name === id.name
 
   for (const [index, event] of outcome.trace.entries()) {
+    const eventValue =
+      event._tag === 'Binding' || event._tag === 'Return' ? event.value : undefined
     const evidence = Object.freeze({
       order: index + 1,
-      ...(event._tag === 'Binding' || event._tag === 'Return'
-        ? { value: event.value.value }
-        : {}),
+      ...(eventValue?._tag === 'I32Value' ? { value: eventValue.value } : {}),
     })
     if (event._tag === 'Call') {
       const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.span))

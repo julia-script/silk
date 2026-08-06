@@ -34,6 +34,37 @@ const project = (viewId: string, source: string): ViewResult => {
 const text = (result: ViewResult): string =>
   result.rows.map((row) => `${row.label} ${row.detail ?? ''}`).join('\n')
 
+/**
+ * The struct-values view wants the whole pipeline: an evaluated wasm run, so the aggregate
+ * Construct/Project events are in the trace alongside the elaboration facts.
+ */
+const projectStructValues = (source: string): ViewResult => {
+  const sourceId = 'memory/docs/unified-struct-values'
+  const snapshot = Analysis.ofSource(
+    sourceId,
+    new TextEncoder().encode(source),
+    'wasm32-unknown-unknown',
+  )
+  const evaluation = Analysis.evaluate(snapshot)
+  expect(evaluation._tag).toBe('Completed')
+  const view = viewById('struct-values')
+  expect(view).toBeDefined()
+  if (view === undefined) throw new Error('missing struct-values view')
+  return view.project({
+    snapshot,
+    modules: { [sourceId]: source },
+    root: sourceId,
+    mode: 'release',
+    profile: 'release',
+    cursor: undefined,
+    onSelectSpan: () => undefined,
+    evaluation,
+    onEvaluate: () => undefined,
+    filter: '',
+    showTrivia: false,
+  })
+}
+
 describe('view registry', () => {
   it('resolves every view by its own id', () => {
     for (const view of views) {
@@ -75,6 +106,26 @@ describe('view registry', () => {
     const siblings = siblingsOf(tree)
     expect(siblings.map((view) => view.id)).not.toContain('tree')
     for (const sibling of siblings) expect(sibling.group).toBe(tree.group)
+  })
+})
+
+describe('struct values view', () => {
+  it('reports struct facts, ABI lanes, and aggregate evaluation events', () => {
+    const result = projectStructValues(`struct Pair { left: I32 right: I32 }
+fn make() -> Pair { return Pair { right: 2, left: 1 } }
+pub fn main() -> I32 { let pair = make() return pair.right }`)
+
+    const rendered = text(result)
+    expect(rendered).toContain('struct construction')
+    // The compiler owns the reordering from written order to canonical order; both must show.
+    expect(rendered).toContain('source order right, left')
+    expect(rendered).toContain('canonical order left, right')
+    expect(rendered).toContain('field projection chain')
+    expect(rendered).toContain('compiler-owned calling shapes')
+    expect(rendered).toMatch(/I32:#0, I32:#1/)
+    expect(rendered).toContain('construct')
+    expect(rendered).toContain('project')
+    expect(result.meta).toContain('1 lit')
   })
 })
 

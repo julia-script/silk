@@ -184,9 +184,13 @@ const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
   }
 }
 
+const hirTypeText = (type: string | { readonly module: string; readonly name: string }): string =>
+  typeof type === 'string' ? type : `${type.module}.${type.name}`
+
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
     case 'IntegerLiteral':
+    case 'BooleanLiteral':
       return `const ${expression.value}`
     case 'ParameterReference':
       return `param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal}`
@@ -194,6 +198,10 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal}`
     case 'Move':
       return 'move'
+    case 'Construct':
+      return `construct ${hirTypeText(expression.nominal)}`
+    case 'Project':
+      return `project ${hirTypeText(expression.nominal)}.#${expression.field.ordinal}`
     case 'Call':
       return `call ${expression.target.name}`
     case 'BuiltinCall':
@@ -216,7 +224,7 @@ export const hirRows = (
       depth,
       dot: node._tag === 'Unavailable' ? 'warning' : undefined,
       label: hirExpressionLabel(node),
-      detail: node._tag === 'Unavailable' ? 'unavailable' : `: ${node.type}`,
+      detail: node._tag === 'Unavailable' ? 'unavailable' : `: ${hirTypeText(node.type)}`,
       span,
       ...(node._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
       onActivate: () => onPick(span),
@@ -226,7 +234,16 @@ export const hirRows = (
         expression(argument, depth + 1, `${path}.${index}`),
       )
     }
-    if (node._tag === 'Move') expression(node.subject, depth + 1, `${path}.s`)
+    if (node._tag === 'Move' || node._tag === 'Project') {
+      expression(node.subject, depth + 1, `${path}.s`)
+    }
+    if (node._tag === 'Construct') {
+      // Canonical storage order, one child per field — the reordering from source order is the
+      // struct-values pane's story; here the construct is just a typed expression tree.
+      node.fields.forEach(({ field, value }) =>
+        expression(value, depth + 1, `${path}.f${field.ordinal}`),
+      )
+    }
   }
 
   const statement = (node: Hir.Statement, depth: number, path: string): void => {

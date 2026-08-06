@@ -42,14 +42,20 @@ it('reports malformed target, order, duplicates, and scalar facts as data', () =
   const i32 = canonical.entries.at(1)
   if (bool === undefined || i32 === undefined) throw new Error('expected scalar layouts')
   const malformed: Layout.Plan = {
-    _tag: 'LayoutPlan',
+    ...canonical,
     target: { ...Target.aarch64AppleDarwin, pointerSize: 4 },
     entries: [i32, { ...bool, size: 1 }, bool],
   }
 
   assert.deepEqual(
     Layout.verify(malformed).map((violation) => violation.rule),
-    ['NonCanonicalTarget', 'NonCanonicalOrder', 'InvalidScalar', 'DuplicateType'],
+    [
+      'NonCanonicalTarget',
+      'NonCanonicalOrder',
+      'InvalidScalar',
+      'DuplicateType',
+      'InvalidCallingShape',
+    ],
   )
 })
 
@@ -60,7 +66,8 @@ it('catalogs empty and nested structs before reachability and reuses their exact
 struct Pair { left: I32 right: Bool }
 struct Outer { marker: Empty pair: Pair }
 struct Unused { value: I32 }
-pub fn main() -> Outer { return 42 }`),
+fn make() -> Outer { return Outer { marker: Empty {}, pair: Pair { right: true, left: 42 } } }
+pub fn main() -> I32 { let outer = make() return outer.pair.left }`),
     'wasm32-unknown-unknown',
   )
   const catalog = Analysis.layoutCatalogOf(snapshot)
@@ -209,6 +216,7 @@ it('reports malformed aggregate facts and divergence from the catalog', () => {
     _tag: 'LayoutPlan',
     target: selected.value.target,
     entries: [malformed],
+    callingShapes: [],
   }
 
   assert.include(

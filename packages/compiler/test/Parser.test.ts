@@ -997,7 +997,10 @@ it('parses a move operand with its keyword and name', () => {
   assert.notStrictEqual(move, undefined)
   if (move === undefined) return
   assert.notStrictEqual(SyntaxTree.directToken(move, 'MoveKeyword'), undefined)
-  assert.strictEqual(directTokenText(result, move, 'Identifier'), 'value')
+  const subject = SyntaxTree.directNode(move, 'IdentifierExpression')
+  assert.notStrictEqual(subject, undefined)
+  if (subject === undefined) return
+  assert.strictEqual(directTokenText(result, subject, 'Identifier'), 'value')
   assert.deepEqual(result.parserDiagnostics, [])
 })
 
@@ -1080,9 +1083,7 @@ it('recovers a bare move with a missing identifier', () => {
   assert.notStrictEqual(move, undefined)
   if (move === undefined) return
   assert.strictEqual(
-    move.children.some(
-      (element) => SyntaxTree.isMissingToken(element) && element.expected === 'Identifier',
-    ),
+    missingLeaves(move).some((element) => element.expected === 'Identifier'),
     true,
   )
   assert.deepEqual(

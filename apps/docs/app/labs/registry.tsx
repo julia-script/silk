@@ -27,6 +27,7 @@ import {
   ownershipRows,
   pipelineRows,
   resolutionRows,
+  structValueRows,
   symbolRows,
   toolchainRows,
 } from './row/project-backend'
@@ -53,6 +54,7 @@ export type ViewId =
   | 'index'
   | 'resolution'
   | 'hir'
+  | 'struct-values'
   | 'ownership'
   | 'instances'
   | 'layout'
@@ -274,6 +276,30 @@ export const views: ReadonlyArray<ViewDefinition> = [
       return {
         rows: hirRows(hir, (span) => onSelectSpan(span)),
         meta: `${hir.functions.length} fn`,
+      }
+    },
+  },
+  {
+    id: 'struct-values',
+    title: 'Struct values',
+    phase: 'elaboration + ABI',
+    tag: 'STR',
+    group: 'semantics',
+    /**
+     * One aggregate story in one pane: literal field mappings (source order vs canonical order),
+     * the projection chain, the compiler-owned scalar calling shapes, and — after a run — the
+     * Construct/Project/Cleanup events that realized them.
+     */
+    project: ({ snapshot, root, evaluation, onSelectSpan }) => {
+      const literals = Analysis.structLiteralsOf(snapshot, root)
+      const projections = Analysis.fieldProjectionsOf(snapshot, root)
+      const layout = Analysis.layoutOf(snapshot)
+      const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
+      return {
+        rows: structValueRows(literals, projections, shapes, evaluation, (span) =>
+          onSelectSpan(span),
+        ),
+        meta: `${literals.length} lit · ${projections.length} proj`,
       }
     },
   },

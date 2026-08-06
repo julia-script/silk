@@ -203,7 +203,7 @@ it('releases an unmoved arm binding at the arm end when the arm falls through', 
   )
 })
 
-it('treats a move inside one arm as consuming for later uses', () => {
+it('keeps a value live when the only arm that moves it returns', () => {
   const facts = check(
     'golden://conditional-move.silk',
     `pub fn identity(value: I32) -> I32 { return value }
@@ -211,7 +211,6 @@ pub fn main() -> I32 { let value = 1 if I32.equals(1, 1) { return identity(move 
   )
   const main = facts.functions.at(1)
 
-  assert.strictEqual(main?.verdict._tag, 'Violation')
-  if (main?.verdict._tag !== 'Violation') return
-  assert.strictEqual(main.verdict.cause.code, 'OWN0001')
+  assert.strictEqual(main?.verdict._tag, 'Satisfied')
+  assert.deepEqual(facts.diagnostics, [])
 })

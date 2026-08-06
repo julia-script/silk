@@ -169,6 +169,85 @@ export const rootAnalysis = (self: Snapshot): Elaboration.Result => {
   return result
 }
 
+const nestedExpressionFacts = (
+  expression: Elaboration.ExpressionFact,
+): ReadonlyArray<Elaboration.ExpressionFact> => {
+  const nested: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
+    switch (expression._tag) {
+      case 'Move':
+      case 'FieldProjection':
+        return [expression.subject]
+      case 'StructLiteral':
+        return expression.initializers.map((initializer) => initializer.expression)
+      case 'Grouped':
+        return [expression.expression]
+      case 'Operator':
+      case 'Call':
+        return expression.arguments.map((argument) => argument.expression)
+      case 'Pipeline':
+        return [expression.input, ...expression.arguments.map((argument) => argument.expression)]
+      default:
+        return []
+    }
+  })()
+  return Object.freeze([
+    expression,
+    ...nested.flatMap((candidate) => nestedExpressionFacts(candidate)),
+  ])
+}
+
+const statementExpressionFacts = (
+  statement: Elaboration.StatementFact,
+): ReadonlyArray<Elaboration.ExpressionFact> => {
+  switch (statement._tag) {
+    case 'BindStatement':
+      return nestedExpressionFacts(statement.binding.initializer)
+    case 'ReturnStatement':
+      return nestedExpressionFacts(statement.expression)
+    case 'IfStatement':
+      return Object.freeze([
+        ...nestedExpressionFacts(statement.condition),
+        ...statement.taken.flatMap(statementExpressionFacts),
+        ...statement.otherwise.flatMap(statementExpressionFacts),
+      ])
+  }
+}
+
+/** Returns every semantic expression fact in deterministic source nesting order. */
+export const expressionsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.ExpressionFact> =>
+  Object.freeze(
+    self.results
+      .get(module)
+      ?.functions.flatMap((fn) => fn.statements.flatMap(statementExpressionFacts)) ?? [],
+  )
+
+/** Returns every retained struct literal fact without reconstructing field mappings. */
+export const structLiteralsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.StructLiteralExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.StructLiteralExpressionFact =>
+        expression._tag === 'StructLiteral',
+    ),
+  )
+
+/** Returns every canonical or explicitly unavailable field-projection step. */
+export const fieldProjectionsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.FieldProjectionExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.FieldProjectionExpressionFact =>
+        expression._tag === 'FieldProjection',
+    ),
+  )
+
 /** Returns one module's HIR, or `undefined` for an unknown identity. */
 export const hirOf = (self: Snapshot, module: string): Hir.Module | undefined =>
   self.results.get(module)?.hir
@@ -199,6 +278,10 @@ export const nominalLayout = (
 
 /** Returns the snapshot's available or explicitly unavailable layout plan. */
 export const layoutOf = (self: Snapshot): Targeted<Layout.Plan> => self.layout
+
+/** Looks up one compiler-owned aggregate calling shape from the completed runtime plan. */
+export const callingShapeOf = (self: Snapshot, type: Type.Type): Layout.CallingShape | undefined =>
+  self.layout._tag === 'Available' ? Layout.callingShape(self.layout.value, type) : undefined
 
 /** Returns the snapshot's available or explicitly unavailable lowered MIR state. */
 export const mirOf = (self: Snapshot): Targeted<Mir.Module> => self.mir

@@ -717,3 +717,73 @@ equivalent.
 
 - **WHEN** a valid or trapping operator preset is evaluated and emitted
 - **THEN** the lab presents the same result or trap provenance beside the shared MIR and target-aware native and WebAssembly artifacts
+
+### Requirement: Inspect nominal struct declarations and layouts
+
+The unified `/labs` workbench SHALL extend its facade-only declaration-index and target-layout panes
+to present each nominal struct's canonical identity, visibility, ordered fields, resolved type
+dependencies, field visibility, exact provenance, target-selected size and alignment, physical
+offsets, and padding. Missing, duplicate, inaccessible, leaking-private, recursive, and transitively
+unavailable states SHALL remain explicit beside their phase-owned diagnostics. The workbench SHALL
+keep state in browser memory and provide accessible text equivalents for every graphical layout
+relationship.
+
+#### Scenario: Inspect a padded struct
+
+- **WHEN** a developer selects a struct whose fields require padding on the selected target
+- **THEN** the lab shows declaration order beside exact offsets, padding, final size, and alignment from the facade layout
+
+#### Scenario: Inspect a cross-module nominal dependency
+
+- **WHEN** a field resolves through an imported namespace alias
+- **THEN** the lab links its syntax, type lookup, canonical imported struct, and nested layout entry
+
+#### Scenario: Inspect inline recursion
+
+- **WHEN** a preset contains a direct or mutual inline struct cycle
+- **THEN** the lab retains every declaration and dependency edge while marking the participating layouts unavailable with their canonical cause
+
+#### Scenario: Inspect damaged fields
+
+- **WHEN** a struct contains missing, duplicate, unknown, or inaccessible field data
+- **THEN** the lab presents each retained field state and exact diagnostic while unrelated structs remain fully inspectable
+
+
+### Requirement: Inspect struct values in the unified workbench
+
+The unified `/labs` workbench SHALL present struct literal syntax, source-to-canonical field
+mappings, projection chains, typed aggregate HIR, whole-value ownership and cleanup, runtime layout
+and calling shapes, aggregate MIR, evaluation events, and native and WebAssembly artifacts through
+facade queries. Every graphical aggregate relationship SHALL have an accessible text equivalent and
+all source, pane, selection, and evaluation state SHALL remain browser-local.
+
+#### Scenario: Inspect reordered construction end to end
+
+- **WHEN** a preset constructs a struct with reordered fields and projects one field
+- **THEN** the workbench shows source order beside canonical field order and links the projected value through HIR, MIR, evaluation, and emission
+
+#### Scenario: Inspect a nested aggregate call
+
+- **WHEN** a public factory returns a nested struct through an internal call
+- **THEN** the workbench links canonical types, field paths, calling-shape lanes, symbols, and the final projected result across panes
+
+#### Scenario: Inspect a whole-value move
+
+- **WHEN** a preset moves a struct binding and then attempts to reuse it
+- **THEN** ownership and diagnostics panes show the transfer, source liveness end, cleanup owner, and exact use-after-move cause
+
+#### Scenario: Inspect invalid construction and projection
+
+- **WHEN** presets contain external raw construction, missing or duplicate fields, a mistyped initializer, an unknown projection, a private projection, or a partial move
+- **THEN** each retained syntax and semantic fact remains visible beside its phase-owned cause without a fabricated successful aggregate path
+
+### Requirement: Struct-value presets cover the complete slice
+
+Browser-local presets SHALL cover empty, scalar, reordered, nested, cross-module factory, chained
+projection, whole move, use after move, external literal refusal, missing, duplicate, unknown,
+mistyped, private, and partial-move cases on native and WebAssembly targets where applicable.
+
+#### Scenario: Reload after aggregate inspection
+
+- **WHEN** the workbench reloads after editing, selecting, evaluating, or emitting an aggregate preset
+- **THEN** it returns to its canonical browser-local state without persisting source or derived compiler facts
