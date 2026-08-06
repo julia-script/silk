@@ -224,6 +224,53 @@ const emitOperation = (
       return [Instr.i32Const(operation.value), Instr.localSet(scalar(operation.destination))]
     case 'Move':
       return copy(slots(operation.source), slots(operation.destination))
+    case 'ConvertUnion': {
+      const source = slots(operation.source)
+      const destination = slots(operation.destination)
+      const tag = destination.at(0)
+      if (tag === undefined) throw new RangeError('Wasm union destination has no tag lane')
+      const instructions: Array<Instr.Instr> = []
+      if (operation.conversion === 'Inject') {
+        const mapping = operation.mappings.at(0)
+        if (mapping === undefined) throw new RangeError('Wasm union injection has no member map')
+        instructions.push(Instr.i32Const(mapping.targetOrdinal), Instr.localSet(tag))
+        for (let slot = 1; slot < destination.length; slot += 1) {
+          const target = destination.at(slot)
+          const value = source.at(slot - 1)
+          if (target === undefined) continue
+          instructions.push(
+            ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
+            Instr.localSet(target),
+          )
+        }
+        return instructions
+      }
+      const sourceTag = source.at(0)
+      if (sourceTag === undefined) throw new RangeError('Wasm union source has no tag lane')
+      instructions.push(Instr.i32Const(0), Instr.localSet(layout.scratch))
+      for (const mapping of operation.mappings) {
+        instructions.push(
+          Instr.i32Const(mapping.targetOrdinal),
+          Instr.localGet(layout.scratch),
+          Instr.localGet(sourceTag),
+          Instr.i32Const(mapping.sourceOrdinal),
+          Instr.op('i32.eq'),
+          Instr.op('select'),
+          Instr.localSet(layout.scratch),
+        )
+      }
+      instructions.push(Instr.localGet(layout.scratch), Instr.localSet(tag))
+      for (let slot = 1; slot < destination.length; slot += 1) {
+        const target = destination.at(slot)
+        const value = source.at(slot)
+        if (target === undefined) continue
+        instructions.push(
+          ...(value === undefined ? [Instr.i32Const(0)] : [Instr.localGet(value)]),
+          Instr.localSet(target),
+        )
+      }
+      return instructions
+    }
     case 'Construct':
       return copy(
         operation.fields.flatMap((field) => [...slots(field.value)]),
@@ -299,13 +346,7 @@ const emitOperation = (
           const suffix = sourceLane.path.slice(operation.selectors.length)
           const sameSuffix = suffix.every((physical, ordinal) => {
             const expected = destinationLane.path.at(ordinal)
-            if (expected === undefined || physical._tag !== expected._tag) return false
-            return physical._tag === 'ElementSelector'
-              ? expected._tag === 'ElementSelector' && physical.index === expected.index
-              : expected._tag === 'FieldId' &&
-                  physical.ordinal === expected.ordinal &&
-                  physical.struct.sourceId === expected.struct.sourceId &&
-                  physical.struct.ordinal === expected.struct.ordinal
+            return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
           })
           const source = sourceSlots.at(sourceOrdinal)
           return sameSuffix && source !== undefined ? [Object.freeze({ source, conditions })] : []
@@ -407,13 +448,7 @@ const emitOperation = (
             lane.path.length === suffix.length &&
             lane.path.every((physical, ordinal) => {
               const expected = suffix.at(ordinal)
-              if (expected === undefined || physical._tag !== expected._tag) return false
-              return physical._tag === 'ElementSelector'
-                ? expected._tag === 'ElementSelector' && physical.index === expected.index
-                : expected._tag === 'FieldId' &&
-                    physical.ordinal === expected.ordinal &&
-                    physical.struct.sourceId === expected.struct.sourceId &&
-                    physical.struct.ordinal === expected.struct.ordinal
+              return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
             }),
         )
         const source = sourceSlots.at(sourceOrdinal)

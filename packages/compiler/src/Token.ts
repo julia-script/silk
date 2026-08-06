@@ -44,6 +44,7 @@ export type TokenKind =
   | 'LessEqual'
   | 'Greater'
   | 'GreaterEqual'
+  | 'Pipe'
   | 'PipeGreater'
   | 'Dot'
   | 'Arrow'

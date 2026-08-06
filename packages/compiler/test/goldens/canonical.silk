@@ -3,6 +3,7 @@ import Core.Math as Math {add as plus, subtract}
 pub struct Pair {
   pub left: Array<I32, 2>
   right: Bool
+  choice: Alpha | (Beta | Alpha)
 }
 
 fn helper(value: I32, other: I32) -> I32 {

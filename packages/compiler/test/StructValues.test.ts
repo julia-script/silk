@@ -106,7 +106,13 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     assert.deepEqual(
       shape?.lanes.map((lane) =>
         lane.path.map((selector) =>
-          selector._tag === 'ElementSelector' ? `[${selector.index}]` : selector.ordinal,
+          selector._tag === 'ElementSelector'
+            ? `[${selector.index}]`
+            : selector._tag === 'FieldId'
+              ? selector.ordinal
+              : selector._tag === 'UnionTagSelector'
+                ? 'tag'
+                : `payload:${selector.slot}`,
         ),
       ),
       [[0], [1]],

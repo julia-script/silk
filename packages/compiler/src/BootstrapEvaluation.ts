@@ -2,7 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Instances from './Instances.js'
 import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
-import type * as Type from './Type.js'
+import * as Type from './Type.js'
 
 /**
  * The closed bootstrap interpreter, executing the lowered MIR program from the entry instance
@@ -32,8 +32,15 @@ export interface ArrayValue {
   readonly elements: ReadonlyArray<Value>
 }
 
+export interface UnionValue {
+  readonly _tag: 'UnionValue'
+  readonly type: Type.StructuralUnion
+  readonly member: Type.Nominal
+  readonly payload: AggregateValue
+}
+
 /** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value = I32Value | AggregateValue | ArrayValue
+export type Value = I32Value | AggregateValue | ArrayValue | UnionValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -95,6 +102,16 @@ export interface ArrayConstructTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface UnionConversionTraceEvent {
+  readonly _tag: 'UnionConversion'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly conversion: 'Inject' | 'Widen'
+  readonly source: Type.Nominal | Type.StructuralUnion
+  readonly target: Type.StructuralUnion
+  readonly member: Type.Nominal
+  readonly span: SourceSpan.SourceSpan
+}
+
 export interface PlaceReadTraceEvent {
   readonly _tag: 'PlaceRead'
   readonly function: DeclarationIndex.CanonicalId
@@ -116,6 +133,7 @@ export interface CleanupTraceEvent {
   readonly _tag: 'Cleanup'
   readonly function: DeclarationIndex.CanonicalId
   readonly local: number
+  readonly members?: ReadonlyArray<Type.Nominal>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -133,6 +151,7 @@ export interface ControlTraceEvent {
   readonly function: DeclarationIndex.CanonicalId
   readonly region: number
   readonly loop?: number
+  readonly members?: ReadonlyArray<Type.Nominal>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -144,6 +163,7 @@ export type TraceEvent =
   | ConstructTraceEvent
   | ProjectTraceEvent
   | ArrayConstructTraceEvent
+  | UnionConversionTraceEvent
   | PlaceReadTraceEvent
   | CleanupTraceEvent
   | ControlTraceEvent
@@ -251,6 +271,37 @@ function executeFunction(
     ),
   )
   const checkedPlaces = new Map<ReadonlyArray<Mir.PlaceSelector>, ReadonlyArray<number>>()
+
+  const cleanupMembers = (
+    cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
+    owner: Value,
+  ): ReadonlyArray<Type.Nominal> => {
+    if (cleanup._tag === 'NoCleanup') return Object.freeze([])
+    if (cleanup._tag === 'UnionCleanup') {
+      if (owner._tag !== 'UnionValue') return Object.freeze([])
+      const active = cleanup.cases.find((candidate) => Type.equals(candidate.member, owner.member))
+      return Object.freeze([
+        owner.member,
+        ...(active === undefined ? [] : cleanupMembers(active.cleanup, owner.payload)),
+      ])
+    }
+    if (cleanup._tag === 'ArrayCleanup') {
+      return owner._tag === 'ArrayValue'
+        ? Object.freeze(
+            owner.elements.flatMap((element) => cleanupMembers(cleanup.element, element)),
+          )
+        : Object.freeze([])
+    }
+    if (owner._tag !== 'AggregateValue') return Object.freeze([])
+    return Object.freeze(
+      cleanup.fields.flatMap((field) => {
+        const value = owner.fields.find(
+          (candidate) => candidate.field.ordinal === field.field.ordinal,
+        )
+        return value === undefined ? [] : cleanupMembers(field.cleanup, value.value)
+      }),
+    )
+  }
 
   const resolvePlace = (
     root: Mir.LocalId,
@@ -409,6 +460,45 @@ function executeFunction(
         case 'Move':
           locals.set(operation.destination.ordinal, read(operation.source))
           break
+        case 'ConvertUnion': {
+          const source = read(operation.source).value
+          const mapping =
+            operation.conversion === 'Inject'
+              ? operation.mappings.at(0)
+              : source._tag === 'UnionValue'
+                ? operation.mappings.find((candidate) =>
+                    Type.equals(candidate.source, source.member),
+                  )
+                : undefined
+          const payload =
+            operation.conversion === 'Inject' && source._tag === 'AggregateValue'
+              ? source
+              : operation.conversion === 'Widen' && source._tag === 'UnionValue'
+                ? source.payload
+                : undefined
+          if (mapping === undefined || payload === undefined) {
+            throw new RangeError('MIR verifier allowed an invalid logical union conversion')
+          }
+          const converted: UnionValue = Object.freeze({
+            _tag: 'UnionValue',
+            type: operation.targetType.type,
+            member: mapping.target,
+            payload,
+          })
+          locals.set(operation.destination.ordinal, { value: converted, fromCall: false })
+          trace.push(
+            Object.freeze({
+              _tag: 'UnionConversion',
+              function: fn.id,
+              conversion: operation.conversion,
+              source: operation.sourceType.type,
+              target: operation.targetType.type,
+              member: converted.member,
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
         case 'Binary': {
           const left = BigInt(readI32(operation.left).value)
           const right = BigInt(readI32(operation.right).value)
@@ -623,12 +713,19 @@ function executeFunction(
           const root = read(operation.root)
           const replacement = read(operation.source)
           if (operation.replacement === 'Owned') {
+            const previous = resolvePlace(operation.root, operation.selectors)
+            if (previous._tag === 'Blocked') return previous.step
+            const members =
+              previous.selected._tag === 'UnionValue'
+                ? Object.freeze([previous.selected.member])
+                : Object.freeze([])
             trace.push(
               Object.freeze({
                 _tag: 'ReplacementCleanup',
                 function: fn.id,
                 region: region.id.ordinal,
                 ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+                ...(members.length === 0 ? {} : { members }),
                 span: operation.provenance.span,
               }),
             )
@@ -649,16 +746,20 @@ function executeFunction(
           )
           break
         }
-        case 'Drop':
+        case 'Drop': {
+          const dropped = read(operation.local).value
+          const members = cleanupMembers(operation.cleanup, dropped)
           trace.push(
             Object.freeze({
               _tag: 'Cleanup',
               function: fn.id,
               local: operation.local.ordinal,
+              ...(members.length === 0 ? {} : { members }),
               span: operation.provenance.span,
             }),
           )
           break
+        }
         case 'Call': {
           const target = functionFor(program, operation.target)
           if (target === undefined) {

@@ -6,7 +6,7 @@ import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
-import type * as Hir from './Hir.js'
+import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
@@ -479,6 +479,14 @@ export const repeatedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =
       )
     : Object.freeze([])
 
+/** Returns every reachable compiler-owned structural-union layout. */
+export const unionLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
+  self.layout._tag === 'Available'
+    ? Object.freeze(
+        self.layout.value.entries.filter((entry) => entry.representation._tag === 'Union'),
+      )
+    : Object.freeze([])
+
 /** Returns every reachable array calling shape and its canonical physical paths. */
 export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
   self.layout._tag === 'Available'
@@ -486,6 +494,40 @@ export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.Calli
         self.layout.value.callingShapes.filter((shape) => Type.isFixedArray(shape.type)),
       )
     : Object.freeze([])
+
+/** Returns every reachable structural-union sum calling shape. */
+export const unionCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
+  self.layout._tag === 'Available'
+    ? Object.freeze(self.layout.value.callingShapes.filter((shape) => Type.isUnion(shape.type)))
+    : Object.freeze([])
+
+/** Returns every explicit HIR union conversion in source semantic order. */
+export const hirUnionConversionsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>> =>
+  Object.freeze(
+    (self.results.get(module)?.hir.functions ?? []).flatMap((fn) =>
+      fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => (expression._tag === 'UnionConvert' ? [expression] : [])),
+    ),
+  )
+
+/** Returns every verified MIR union conversion in canonical topological order. */
+export const mirUnionConversionsOf = (
+  self: Snapshot,
+): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'ConvertUnion' }>> =>
+  self.mir._tag === 'Unavailable'
+    ? Object.freeze([])
+    : Object.freeze(
+        self.mir.value.functions.flatMap((fn) =>
+          Mir.operations(fn).flatMap((operation) =>
+            operation._tag === 'ConvertUnion' ? [operation] : [],
+          ),
+        ),
+      )
 
 /** Looks up one compiler-owned aggregate calling shape from the completed runtime plan. */
 export const callingShapeOf = (self: Snapshot, type: Type.Type): Layout.CallingShape | undefined =>
@@ -667,5 +709,16 @@ export const arrayTraceEventsOf = (
         | BootstrapEvaluation.ArrayConstructTraceEvent
         | BootstrapEvaluation.PlaceReadTraceEvent =>
         event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
+    ),
+  )
+
+/** Returns logical injection and widening events without exposing physical backend tags. */
+export const unionTraceEventsOf = (
+  outcome: BootstrapEvaluation.Outcome,
+): ReadonlyArray<BootstrapEvaluation.UnionConversionTraceEvent> =>
+  Object.freeze(
+    outcome.trace.filter(
+      (event): event is BootstrapEvaluation.UnionConversionTraceEvent =>
+        event._tag === 'UnionConversion',
     ),
   )

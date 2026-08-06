@@ -61,6 +61,15 @@ export type CleanupPlan =
       readonly length: number
       readonly element: CleanupPlan
     }
+  | {
+      readonly _tag: 'UnionCleanup'
+      readonly type: Type.StructuralUnion
+      readonly cases: ReadonlyArray<{
+        readonly member: Type.Nominal
+        readonly ordinal: number
+        readonly cleanup: CleanupPlan
+      }>
+    }
 
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
@@ -113,7 +122,7 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
 const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
-  type === undefined || Type.isBuiltin(type)
+  type === undefined || Type.isBuiltin(type) || Type.isNever(type)
     ? copyable
     : Type.isFixedArray(type)
       ? categoryOf(type.element)._tag === 'Copyable'
@@ -206,6 +215,9 @@ const checkExpression = (
       else checkExpression(state, live, expression.subject, true)
       return
     }
+    case 'UnionConvert':
+      checkExpression(state, live, expression.source, expression.access === 'Owned')
+      return
     case 'Construct': {
       const fields = new Map(
         expression.fields.map((field) => [field.field.ordinal, field.value] as const),
@@ -292,12 +304,28 @@ const cleanupPlan = (
   seen = new Set<string>(),
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
       type,
       length: type.length,
       element: cleanupPlan(index, type.element, seen),
+    })
+  }
+  if (Type.isUnion(type)) {
+    return Object.freeze({
+      _tag: 'UnionCleanup',
+      type,
+      cases: Object.freeze(
+        type.members.map((member, ordinal) =>
+          Object.freeze({
+            member,
+            ordinal,
+            cleanup: cleanupPlan(index, member, seen),
+          }),
+        ),
+      ),
     })
   }
   const key = Type.key(type)
@@ -730,6 +758,14 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
   if (cleanup._tag === 'ArrayCleanup') {
     return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
+  }
+  if (cleanup._tag === 'UnionCleanup') {
+    return `union:${Type.encode(cleanup.type)} cases=${cleanup.cases
+      .map(
+        (member) =>
+          `${member.ordinal}:${Type.encode(member.member)}(${cleanupText(member.cleanup)})`,
+      )
+      .join(',')}`
   }
   return `struct:${Type.encode(cleanup.type)} fields=${cleanup.fields
     .map((field) => `#${field.field.ordinal}(${cleanupText(field.cleanup)})`)

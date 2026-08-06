@@ -190,7 +190,9 @@ const hirTypeText = (type: Type.Type): string =>
     ? type
     : type._tag === 'NominalType'
       ? `${type.module}.${type.name}`
-      : `Array<${hirTypeText(type.element)}, ${type.length}>`
+      : type._tag === 'FixedArrayType'
+        ? `Array<${hirTypeText(type.element)}, ${type.length}>`
+        : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -203,6 +205,8 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal}`
     case 'Move':
       return 'move'
+    case 'UnionConvert':
+      return `${expression.conversion.toLowerCase()} → ${hirTypeText(expression.target)}`
     case 'Construct':
       return `construct ${hirTypeText(expression.nominal)}`
     case 'ArrayConstruct':
@@ -245,6 +249,9 @@ export const hirRows = (
     }
     if (node._tag === 'Move' || node._tag === 'Project') {
       expression(node.subject, depth + 1, `${path}.s`)
+    }
+    if (node._tag === 'UnionConvert') {
+      expression(node.source, depth + 1, `${path}.u`)
     }
     if (node._tag === 'IndexPlace') {
       expression(node.subject, depth + 1, `${path}.s`)

@@ -171,6 +171,7 @@ const destinationOf = (operation: Mir.Operation): Mir.LocalId | undefined => {
     case 'Literal':
     case 'Binary':
     case 'Move':
+    case 'ConvertUnion':
     case 'Call':
     case 'Construct':
     case 'ConstructArray':
@@ -579,6 +580,75 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
+                case 'ConvertUnion': {
+                  const source = readLocal(operation.source)
+                  const targetWidth = operation.targetShape.laneCount
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  if (operation.conversion === 'Inject') {
+                    const mapping = operation.mappings.at(0)
+                    if (mapping === undefined) {
+                      throw new RangeError('LLVM union injection has no member map')
+                    }
+                    const tag = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(mapping.targetOrdinal),
+                    )
+                    locals.set(
+                      operation.destination.ordinal,
+                      Object.freeze([
+                        tag,
+                        ...Array.from(
+                          { length: Math.max(0, targetWidth - 1) },
+                          (_, ordinal) => source.at(ordinal) ?? zero,
+                        ),
+                      ]),
+                    )
+                    break
+                  }
+                  const sourceTag = source.at(0)
+                  if (sourceTag === undefined) {
+                    throw new RangeError('LLVM union widening has no source tag')
+                  }
+                  let tag: Value.Input = zero
+                  for (const [ordinal, mapping] of operation.mappings.entries()) {
+                    const sourceOrdinal = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(mapping.sourceOrdinal),
+                    )
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      sourceTag,
+                      sourceOrdinal,
+                      `union${operation.destination.ordinal}_${ordinal}_matches`,
+                    )
+                    const targetOrdinal = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(mapping.targetOrdinal),
+                    )
+                    tag = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      targetOrdinal,
+                      tag,
+                      `union${operation.destination.ordinal}_${ordinal}_tag`,
+                    )
+                  }
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([
+                      tag,
+                      ...Array.from(
+                        { length: Math.max(0, targetWidth - 1) },
+                        (_, ordinal) => source.at(ordinal + 1) ?? zero,
+                      ),
+                    ]),
+                  )
+                  break
+                }
                 case 'Construct':
                   locals.set(
                     operation.destination.ordinal,
@@ -703,13 +773,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       const suffix = sourceLane.path.slice(operation.selectors.length)
                       const sameSuffix = suffix.every((physical, ordinal) => {
                         const expected = destinationLane.path.at(ordinal)
-                        if (expected === undefined || physical._tag !== expected._tag) return false
-                        return physical._tag === 'ElementSelector'
-                          ? expected._tag === 'ElementSelector' && physical.index === expected.index
-                          : expected._tag === 'FieldId' &&
-                              physical.ordinal === expected.ordinal &&
-                              physical.struct.sourceId === expected.struct.sourceId &&
-                              physical.struct.ordinal === expected.struct.ordinal
+                        return expected !== undefined && Layout.selectorEquals(physical, expected)
                       })
                       const selected = sourceValues.at(sourceOrdinal)
                       return sameSuffix && selected !== undefined
@@ -875,15 +939,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         lane.path.length === suffix.length &&
                         lane.path.every((physical, ordinal) => {
                           const expected = suffix.at(ordinal)
-                          if (expected === undefined || physical._tag !== expected._tag)
-                            return false
-                          return physical._tag === 'ElementSelector'
-                            ? expected._tag === 'ElementSelector' &&
-                                physical.index === expected.index
-                            : expected._tag === 'FieldId' &&
-                                physical.ordinal === expected.ordinal &&
-                                physical.struct.sourceId === expected.struct.sourceId &&
-                                physical.struct.ordinal === expected.struct.ordinal
+                          return expected !== undefined && Layout.selectorEquals(physical, expected)
                         }),
                     )
                     const replacement = sourceValues.at(sourceOrdinal)

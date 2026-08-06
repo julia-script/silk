@@ -265,6 +265,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Token',
       './ToolchainPlan',
       './Type',
+      './TypeCompatibility',
       './WasmBackend',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
@@ -423,6 +424,24 @@ const wasmArrayInstance = new WebAssembly.Instance(
   new WebAssembly.Module(wasmArrayArtifact.bitcode.slice()),
   {},
 );
+const unionText = 'struct A {}\\nstruct B { value: I32 }\\nstruct C { left: I32 right: I32 }\\nfn accept(value: A | B | C) -> I32 { return 42 }\\nfn widen(value: A | B) -> I32 { return accept(move value) }\\npub fn main() -> I32 { return widen(A {}) }';
+const unionBytes = new TextEncoder().encode(unionText);
+const nativeUnionSnapshot = Effect.runSync(
+  api.Analysis.ofSource('memory/packed-union', unionBytes, 'aarch64-apple-darwin'),
+);
+const wasmUnionSnapshot = Effect.runSync(
+  api.Analysis.ofSource('memory/packed-union', unionBytes, 'wasm32-unknown-unknown'),
+);
+const nativeUnionArtifact = Effect.runSync(
+  api.Analysis.codegen(nativeUnionSnapshot, { mode: 'release' }),
+);
+const wasmUnionArtifact = Effect.runSync(
+  api.Analysis.codegen(wasmUnionSnapshot, { mode: 'release' }),
+);
+const wasmUnionInstance = new WebAssembly.Instance(
+  new WebAssembly.Module(wasmUnionArtifact.bitcode.slice()),
+  {},
+);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -554,6 +573,17 @@ console.log(
       wasmBytes: Array.from(wasmArrayArtifact.bitcode),
       wasmResult: wasmArrayInstance.exports.silk_main(),
     },
+    unions: {
+      diagnostics: api.Analysis.diagnostics(nativeUnionSnapshot),
+      types: api.Analysis.unionLayoutsOf(nativeUnionSnapshot).map((entry) => api.Type.encode(entry.type)),
+      hir: api.Hir.encode(api.Analysis.rootAnalysis(nativeUnionSnapshot).hir),
+      layout: api.Layout.encode(api.Analysis.layoutOf(nativeUnionSnapshot).value),
+      mir: api.Mir.encode(api.Analysis.loweredMir(nativeUnionSnapshot)),
+      trace: api.Analysis.evaluate(nativeUnionSnapshot).trace,
+      nativeIr: nativeUnionArtifact.ir,
+      wasmWat: wasmUnionArtifact.ir,
+      wasmResult: wasmUnionInstance.exports.silk_main(),
+    },
     parserDiagnostics: parse.parserDiagnostics.map((diagnostic) => diagnostic.code),
   }),
 );`,
@@ -597,6 +627,7 @@ console.log(
       'Token',
       'ToolchainPlan',
       'Type',
+      'TypeCompatibility',
       'WasmBackend',
     ])
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
@@ -624,6 +655,7 @@ console.log(
     expect(api.deep['./Operator']).toContain('infix')
     expect(api.deep['./Type']).toContain('nominal')
     expect(api.deep['./Type']).toContain('fixedArray')
+    expect(api.deep['./TypeCompatibility']).toContain('check')
     expect(api.functionCount).toBe(2)
     expect(api.callCount).toBe(1)
     expect(api.arrays.diagnostics).toEqual([])
@@ -644,6 +676,23 @@ console.log(
     expect(api.arrays.nativeIr).toContain('icmp ult')
     expect(api.arrays.wasmWat).toContain('i32.lt_u')
     expect(api.arrays.wasmResult).toBe(42)
+    expect(api.unions.diagnostics).toEqual([])
+    expect(api.unions.types).toEqual([
+      'memory/packed-union.A | memory/packed-union.B',
+      'memory/packed-union.A | memory/packed-union.B | memory/packed-union.C',
+    ])
+    expect(api.unions.hir).toContain('union-inject')
+    expect(api.unions.hir).toContain('union-widen')
+    expect(api.unions.layout).toContain('repr=union tag=i32')
+    expect(api.unions.layout).toContain('I32[tag],I32[payload[0]]')
+    expect(api.unions.mir).toContain('union-inject')
+    expect(api.unions.mir).toContain('union-widen')
+    expect(api.unions.trace.map((event: { _tag: string }) => event._tag)).toEqual(
+      expect.arrayContaining(['UnionConversion']),
+    )
+    expect(api.unions.nativeIr).toContain('union')
+    expect(api.unions.wasmWat).toContain('select')
+    expect(api.unions.wasmResult).toBe(42)
     expect(api.semantic).toEqual({
       names: ['identity', 'main'],
       ordinals: [0, 1],
@@ -711,7 +760,7 @@ console.log(
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
-})
+}, 15_000)
 
 test('the compiler CLI release candidate installs with its project-first command surface', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-compiler-cli-release-candidate-'))

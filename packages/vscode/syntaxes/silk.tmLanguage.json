@@ -20,12 +20,16 @@
       "match": "\\b(?:true|false)\\b"
     },
     {
+      "name": "support.type.builtin.silk",
+      "match": "\\b(?:I32|Bool|Never)\\b"
+    },
+    {
       "name": "constant.numeric.integer.silk",
       "match": "\\b[0-9]+\\b"
     },
     {
       "name": "keyword.operator.silk",
-      "match": "->|\\|>|[=!<>]=|[-+*/%!<>=]"
+      "match": "->|\\|>|\\||[=!<>]=|[-+*/%!<>=]"
     },
     {
       "name": "punctuation.silk",

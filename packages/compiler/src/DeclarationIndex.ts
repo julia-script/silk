@@ -86,6 +86,7 @@ export type DeclaredTypeFact =
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Element
       readonly exposureCause?: Diagnostic.Identity
+      readonly unionSource?: UnionSourceFact
     }
   | {
       readonly _tag: 'Unresolved'
@@ -105,10 +106,27 @@ export type DeclaredTypeFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      readonly _tag: 'Union'
+      readonly members: ReadonlyArray<DeclaredTypeFact>
+      readonly separators: ReadonlyArray<Token.Token>
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Unavailable'
       readonly syntax: SyntaxTree.Element
       readonly cause?: Diagnostic.Identity
     }
+
+/** Source-ordered union syntax retained beside one normalized resolved outcome. */
+export interface UnionSourceFact {
+  readonly _tag: 'UnionSource'
+  readonly members: ReadonlyArray<DeclaredTypeFact>
+  readonly separators: ReadonlyArray<Token.Token>
+  readonly syntax: SyntaxTree.Node
+}
 
 export type ReturnTypeFact = DeclaredTypeFact
 
@@ -258,11 +276,16 @@ const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTr
   return child
 }
 
+const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
+  SyntaxTree.isNode(element) &&
+  (element.kind === 'TypePath' ||
+    element.kind === 'FixedArrayType' ||
+    element.kind === 'ParenthesizedType' ||
+    element.kind === 'UnionType')
+
 const declaredTypeNode = (parent: SyntaxTree.Node): SyntaxTree.Node => {
-  const child = parent.children.find(
-    (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) &&
-      (element.kind === 'TypePath' || element.kind === 'FixedArrayType'),
+  const child = parent.children.find((element): element is SyntaxTree.Node =>
+    isDeclaredTypeNode(element),
   )
   if (child === undefined) throw new RangeError(`Header collection expected a declared type`)
   return child
@@ -283,13 +306,96 @@ export const analyzeDeclaredType = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
 ): TypeResolution => {
+  if (syntax.kind === 'ParenthesizedType') {
+    const inner = syntax.children.find(isDeclaredTypeNode)
+    if (inner === undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    const analyzed = analyzeDeclaredType(source, inner)
+    return Object.freeze({
+      fact: Object.freeze({ ...analyzed.fact, syntax }),
+      diagnostics: analyzed.diagnostics,
+    })
+  }
+  if (syntax.kind === 'UnionType') {
+    const members = syntax.children
+      .filter(isDeclaredTypeNode)
+      .map((member) => analyzeDeclaredType(source, member))
+    const diagnostics: Array<Diagnostic.Diagnostic> = members.flatMap((member) =>
+      Array.from(member.diagnostics),
+    )
+    const facts = Object.freeze(members.map((member) => member.fact))
+    const separators = Object.freeze(
+      syntax.children.filter(
+        (element): element is Token.Token => SyntaxTree.isToken(element) && element.kind === 'Pipe',
+      ),
+    )
+    const firstResolved = facts.find(
+      (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
+        fact._tag === 'Resolved',
+    )
+    const firstToken = SyntaxTree.tokens(syntax).find((token) => token.kind === 'Identifier')
+    if (firstToken === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
+    if (facts.every((fact) => fact._tag === 'Resolved')) {
+      const resolved = facts.filter(
+        (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
+          fact._tag === 'Resolved',
+      )
+      const normalized = Type.union(resolved.map((fact) => fact.type))
+      if (normalized._tag === 'Normalized') {
+        return Object.freeze({
+          fact: Object.freeze({
+            _tag: 'Resolved',
+            type: normalized.type,
+            spelling: Type.encode(normalized.type),
+            token: firstResolved?.token ?? firstToken,
+            syntax,
+            unionSource: Object.freeze({
+              _tag: 'UnionSource',
+              members: facts,
+              separators,
+              syntax,
+            }),
+          }),
+          diagnostics: Object.freeze(diagnostics),
+        })
+      }
+      for (const invalid of normalized.members) {
+        const sourceFact = resolved.find((fact) => Type.equals(fact.type, invalid))
+        diagnostics.push(
+          Diagnostic.invalidUnionMember(
+            Type.encode(invalid),
+            sourceFact?.syntax.span ?? syntax.span,
+          ),
+        )
+      }
+    }
+    const cause = diagnostics.at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Union',
+        members: facts,
+        separators,
+        spelling: facts
+          .map((fact) => (fact._tag === 'Resolved' ? Type.encode(fact.type) : 'unavailable'))
+          .join(' | '),
+        token: firstResolved?.token ?? firstToken,
+        syntax,
+        ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
+      }),
+      diagnostics: Object.freeze(diagnostics),
+    })
+  }
   if (syntax.kind === 'FixedArrayType') {
     const arrayName = SyntaxTree.directToken(syntax, 'Identifier')
-    const elementSyntax = syntax.children.find(
-      (element): element is SyntaxTree.Node =>
-        SyntaxTree.isNode(element) &&
-        (element.kind === 'TypePath' || element.kind === 'FixedArrayType'),
-    )
+    const elementSyntax = syntax.children.find(isDeclaredTypeNode)
     const lengthToken = SyntaxTree.directToken(syntax, 'DecimalInteger')
     if (arrayName === undefined || elementSyntax === undefined) {
       return Object.freeze({
@@ -379,7 +485,10 @@ export const analyzeDeclaredType = (
     segments: Object.freeze(segments),
     syntax,
   })
-  if (segments.length === 1 && (first.spelling === 'I32' || first.spelling === 'Bool')) {
+  if (
+    segments.length === 1 &&
+    (first.spelling === 'I32' || first.spelling === 'Bool' || first.spelling === 'Never')
+  ) {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',
@@ -631,61 +740,112 @@ const resolveDeclaredType = (
   module: string,
   fact: DeclaredTypeFact,
   resolver: TypeResolver,
-): TypeResolution =>
-  fact._tag === 'Unresolved'
-    ? resolver(module, fact.path)
-    : fact._tag !== 'FixedArray'
-      ? Object.freeze({ fact, diagnostics: Object.freeze([]) })
-      : (() => {
-          const element = resolveDeclaredType(module, fact.element, resolver)
-          if (fact.length._tag !== 'Available') {
-            return Object.freeze({
-              fact: Object.freeze({
-                _tag: 'Unavailable' as const,
-                syntax: fact.syntax,
-                ...(fact.length._tag === 'OutOfRange' ? { cause: fact.length.cause } : {}),
-              }),
-              diagnostics: element.diagnostics,
-            })
-          }
-          if (element.fact._tag === 'Resolved') {
-            const type = Type.fixedArray(element.fact.type, fact.length.value)
-            return Object.freeze({
-              fact: Object.freeze({
-                _tag: 'Resolved' as const,
-                type,
-                spelling: Type.encode(type),
-                token: fact.token,
-                syntax: fact.syntax,
-                ...(element.fact.exposureCause === undefined
-                  ? {}
-                  : { exposureCause: element.fact.exposureCause }),
-              }),
-              diagnostics: element.diagnostics,
-            })
-          }
-          if (element.fact._tag === 'Unresolved') {
-            return Object.freeze({
-              fact: Object.freeze({
-                ...element.fact,
-                spelling: fact.spelling,
-                token: fact.token,
-                syntax: fact.syntax,
-              }),
-              diagnostics: element.diagnostics,
-            })
-          }
-          return Object.freeze({
-            fact: Object.freeze({
-              _tag: 'Unavailable' as const,
+): TypeResolution => {
+  if (fact._tag === 'Unresolved') return resolver(module, fact.path)
+  if (fact._tag === 'Union') {
+    const resolvedMembers = fact.members.map((member) =>
+      resolveDeclaredType(module, member, resolver),
+    )
+    const diagnostics: Array<Diagnostic.Diagnostic> = resolvedMembers.flatMap((member) =>
+      Array.from(member.diagnostics),
+    )
+    const members = Object.freeze(resolvedMembers.map((member) => member.fact))
+    if (members.every((member) => member._tag === 'Resolved')) {
+      const available = members.filter(
+        (member): member is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
+          member._tag === 'Resolved',
+      )
+      const normalized = Type.union(available.map((member) => member.type))
+      if (normalized._tag === 'Normalized') {
+        return Object.freeze({
+          fact: Object.freeze({
+            _tag: 'Resolved' as const,
+            type: normalized.type,
+            spelling: Type.encode(normalized.type),
+            token: fact.token,
+            syntax: fact.syntax,
+            unionSource: Object.freeze({
+              _tag: 'UnionSource' as const,
+              members,
+              separators: fact.separators,
               syntax: fact.syntax,
-              ...(element.fact._tag === 'Unavailable' && element.fact.cause !== undefined
-                ? { cause: element.fact.cause }
-                : {}),
             }),
-            diagnostics: element.diagnostics,
-          })
-        })()
+          }),
+          diagnostics: Object.freeze(diagnostics),
+        })
+      }
+      for (const invalid of normalized.members) {
+        const sourceFact = available.find((member) => Type.equals(member.type, invalid))
+        diagnostics.push(
+          Diagnostic.invalidUnionMember(
+            Type.encode(invalid),
+            sourceFact?.syntax.span ?? fact.syntax.span,
+          ),
+        )
+      }
+    }
+    const cause = diagnostics.at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        members,
+        ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
+      }),
+      diagnostics: Object.freeze(diagnostics),
+    })
+  }
+  if (fact._tag !== 'FixedArray') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
+  return (() => {
+    const element = resolveDeclaredType(module, fact.element, resolver)
+    if (fact.length._tag !== 'Available') {
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Unavailable' as const,
+          syntax: fact.syntax,
+          ...(fact.length._tag === 'OutOfRange' ? { cause: fact.length.cause } : {}),
+        }),
+        diagnostics: element.diagnostics,
+      })
+    }
+    if (element.fact._tag === 'Resolved') {
+      const type = Type.fixedArray(element.fact.type, fact.length.value)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved' as const,
+          type,
+          spelling: Type.encode(type),
+          token: fact.token,
+          syntax: fact.syntax,
+          ...(element.fact.exposureCause === undefined
+            ? {}
+            : { exposureCause: element.fact.exposureCause }),
+        }),
+        diagnostics: element.diagnostics,
+      })
+    }
+    if (element.fact._tag === 'Unresolved') {
+      return Object.freeze({
+        fact: Object.freeze({
+          ...element.fact,
+          spelling: fact.spelling,
+          token: fact.token,
+          syntax: fact.syntax,
+        }),
+        diagnostics: element.diagnostics,
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Unavailable' as const,
+        syntax: fact.syntax,
+        ...(element.fact._tag === 'Unavailable' && element.fact.cause !== undefined
+          ? { cause: element.fact.cause }
+          : {}),
+      }),
+      diagnostics: element.diagnostics,
+    })
+  })()
+}
 
 const canonicalKey = (id: CanonicalId): string => `${id.module}.${id.name}`
 

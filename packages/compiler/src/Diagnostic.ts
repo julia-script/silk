@@ -89,6 +89,8 @@ export const immutableAssignmentCode = 'SEM0035' as const
 export const invalidAssignmentPlaceCode = 'SEM0036' as const
 export const assignmentTypeMismatchCode = 'SEM0037' as const
 export const transferOutsideLoopCode = 'SEM0038' as const
+export const invalidUnionMemberCode = 'SEM0039' as const
+export const incompatibleUnionConversionCode = 'SEM0040' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -143,6 +145,8 @@ export type Code =
   | typeof invalidAssignmentPlaceCode
   | typeof assignmentTypeMismatchCode
   | typeof transferOutsideLoopCode
+  | typeof invalidUnionMemberCode
+  | typeof incompatibleUnionConversionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -269,6 +273,13 @@ export type Reason =
       readonly actual: string
     }
   | { readonly _tag: 'TransferOutsideLoop'; readonly transfer: 'break' | 'continue' }
+  | { readonly _tag: 'InvalidUnionMember'; readonly type: string }
+  | {
+      readonly _tag: 'IncompatibleUnionConversion'
+      readonly source: string
+      readonly target: string
+      readonly missing: ReadonlyArray<string>
+    }
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
@@ -974,6 +985,38 @@ export const transferOutsideLoop = (
     severity: 'error',
     message: `${transfer} is only valid inside a loop`,
     reason: Object.freeze({ _tag: 'TransferOutsideLoop', transfer }),
+    span,
+  })
+
+export const invalidUnionMember = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidUnionMemberCode,
+    severity: 'error',
+    message: `Structural union members must be nominal types, found ${type}`,
+    reason: Object.freeze({ _tag: 'InvalidUnionMember', type }),
+    span,
+  })
+
+export const incompatibleUnionConversion = (
+  source: string,
+  target: string,
+  missing: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: incompatibleUnionConversionCode,
+    severity: 'error',
+    message: `${source} cannot widen to ${target}; missing ${missing.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'IncompatibleUnionConversion',
+      source,
+      target,
+      missing: Object.freeze([...missing]),
+    }),
     span,
   })
 

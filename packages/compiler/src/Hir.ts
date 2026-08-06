@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
+import type * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
  * HIR: the resolved, typed semantic representation of elaborated bodies. Core operations carry
@@ -118,6 +119,19 @@ export type Expression =
       readonly _tag: 'Move'
       readonly subject: Expression
       readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'UnionConvert'
+      readonly source: Expression
+      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Never
+      readonly target: Type.StructuralUnion
+      readonly conversion: 'Inject' | 'Widen'
+      readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
+      readonly access: 'Copy' | 'Owned'
+      readonly context: 'Return' | 'Argument' | 'StructField' | 'ArrayElement' | 'Assignment'
+      readonly expectedAt: SourceSpan.SourceSpan
+      readonly type: Type.StructuralUnion
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -285,6 +299,30 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
   }
 }
 
+/** One expression and all of its semantic children in deterministic preorder. */
+export const expressionTree = (expression: Expression): ReadonlyArray<Expression> => {
+  const children: ReadonlyArray<Expression> = (() => {
+    switch (expression._tag) {
+      case 'Move':
+      case 'Project':
+      case 'UnionConvert':
+        return [expression._tag === 'UnionConvert' ? expression.source : expression.subject]
+      case 'IndexPlace':
+        return [expression.subject, expression.index]
+      case 'Construct':
+        return expression.fields.map((field) => field.value)
+      case 'ArrayConstruct':
+        return expression.elements
+      case 'Call':
+      case 'BuiltinCall':
+        return expression.arguments
+      default:
+        return []
+    }
+  })()
+  return Object.freeze([expression, ...children.flatMap(expressionTree)])
+}
+
 /** Tests whether any expression in the body is an explicit unavailable state. */
 export const hasUnavailable = (self: HirFunction): boolean => {
   const walk = (expression: Expression): boolean => {
@@ -293,8 +331,11 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return true
       case 'Move':
       case 'Project':
-      case 'IndexPlace':
         return walk(expression.subject)
+      case 'UnionConvert':
+        return walk(expression.source)
+      case 'IndexPlace':
+        return walk(expression.subject) || walk(expression.index)
       case 'Construct':
         return expression.fields.some((field) => walk(field.value))
       case 'ArrayConstruct':
@@ -321,8 +362,11 @@ export const firstUnavailable = (
         return expression
       case 'Move':
       case 'Project':
-      case 'IndexPlace':
         return walk(expression.subject)
+      case 'UnionConvert':
+        return walk(expression.source)
+      case 'IndexPlace':
+        return walk(expression.subject) ?? walk(expression.index)
       case 'Construct': {
         for (const field of expression.fields) {
           const found = walk(field.value)
@@ -426,6 +470,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return [
         `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'UnionConvert':
+      return [
+        `${indent}union-${expression.conversion.toLowerCase()} ${Type.encode(expression.sourceType)} -> ${Type.encode(expression.target)} access=${expression.access} context=${expression.context} expected=${spanText(expression.expectedAt)} ${spanText(expression.span)}`,
+        `${indent}  mapping ${expression.mappings.map((mapping) => `${Type.encode(mapping.source)}#${mapping.sourceOrdinal}->${Type.encode(mapping.target)}#${mapping.targetOrdinal}`).join(', ') || 'empty'}`,
+        encodeExpression(expression.source, depth + 1),
       ].join('\n')
     case 'Construct':
       return [

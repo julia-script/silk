@@ -5,7 +5,9 @@ const typeText = (type: Type.Type): string =>
     ? type
     : type._tag === 'NominalType'
       ? `${type.module}.${type.name}`
-      : `Array<${typeText(type.element)}, ${type.length}>`
+      : type._tag === 'FixedArrayType'
+        ? `Array<${typeText(type.element)}, ${type.length}>`
+        : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'

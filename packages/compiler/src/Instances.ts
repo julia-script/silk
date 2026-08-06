@@ -87,6 +87,7 @@ const resolveEntry = (root: Elaboration.Result): Entry => {
 
 const callTargets = (expression: Hir.Expression): ReadonlyArray<DeclarationIndex.CanonicalId> => {
   if (expression._tag === 'Move') return callTargets(expression.subject)
+  if (expression._tag === 'UnionConvert') return callTargets(expression.source)
   if (expression._tag === 'Project') return callTargets(expression.subject)
   if (expression._tag === 'IndexPlace') {
     return [...callTargets(expression.subject), ...callTargets(expression.index)]

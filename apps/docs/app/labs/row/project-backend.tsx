@@ -29,7 +29,9 @@ const typeText = (type: Type.Type): string =>
     ? type
     : type._tag === 'NominalType'
       ? `${type.module}.${type.name}`
-      : `Array<${typeText(type.element)}, ${type.length}>`
+      : type._tag === 'FixedArrayType'
+        ? `Array<${typeText(type.element)}, ${type.length}>`
+        : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,
@@ -245,6 +247,10 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
         .join(' → ')}`
     case 'ArrayCleanup':
       return `${typeText(cleanup.type)} elements in reverse order · ${cleanupText(cleanup.element)}`
+    case 'UnionCleanup':
+      return `${typeText(cleanup.type)} active case · ${cleanup.cases
+        .map((member) => `${member.ordinal}:${typeText(member.member)}`)
+        .join(', ')}`
   }
 }
 
@@ -395,7 +401,9 @@ export const layoutRows = (
             ? 'aggregate'
             : entry.representation._tag === 'Repeated'
               ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
-              : `i${entry.representation.bits}`
+              : entry.representation._tag === 'Union'
+                ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
+                : `i${entry.representation.bits}`
         }`,
       })
     }
@@ -450,6 +458,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       )}, ${localText(operation.right)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)}`
+    case 'ConvertUnion':
+      return `${localText(operation.destination)} = ${operation.conversion.toLowerCase()} ${localText(operation.source)} → ${typeText(operation.targetType.type)}`
     case 'Call':
       return `${localText(operation.destination)} = call ${operation.target.name}(${operation.arguments
         .map(localText)
@@ -641,7 +651,9 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
     ? String(value.value)
     : value._tag === 'ArrayValue'
       ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
-      : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+      : value._tag === 'UnionValue'
+        ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
+        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -661,6 +673,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `construct ${typeText(event.type)} · ${event.elementCount} element${
         event.elementCount === 1 ? '' : 's'
       }`
+    case 'UnionConversion':
+      return `${event.conversion.toLowerCase()} ${typeText(event.member)} → ${typeText(event.target)}`
     case 'Project':
       return `project ${typeText(event.type)}.#${event.field.ordinal}`
     case 'PlaceRead':
@@ -672,7 +686,7 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
         )
         .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':
-      return `cleanup _${event.local}`
+      return `cleanup _${event.local}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`}`
     case 'RegionEntry':
       return `enter r${event.region}`
     case 'Condition':
@@ -682,7 +696,7 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
     case 'WriteCheck':
       return `check write in r${event.region}`
     case 'ReplacementCleanup':
-      return `cleanup replaced owner in r${event.region}`
+      return `cleanup replaced owner in r${event.region}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`}`
     case 'Replacement':
       return `commit replacement in r${event.region}`
     case 'Repeat':
@@ -706,6 +720,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
       return 1
     case 'Construct':
     case 'ArrayConstruct':
+    case 'UnionConversion':
     case 'Project':
     case 'PlaceRead':
     case 'Cleanup':
@@ -923,7 +938,13 @@ export const structValueRows = (
 const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
   path
     .map((selector) =>
-      selector._tag === 'ElementSelector' ? `[${selector.index}]` : `#${selector.ordinal}`,
+      selector._tag === 'ElementSelector'
+        ? `[${selector.index}]`
+        : selector._tag === 'FieldId'
+          ? `#${selector.ordinal}`
+          : selector._tag === 'UnionTagSelector'
+            ? 'tag'
+            : `payload[${selector.slot}]`,
     )
     .join('.')
 

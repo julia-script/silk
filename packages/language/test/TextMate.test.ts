@@ -76,6 +76,7 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt(program, 'return'), 'keyword.other.silk')
   assert.include(scopesAt(program, '42'), 'constant.numeric.integer.silk')
   assert.include(scopesAt('let ok = true', 'true'), 'constant.language.boolean.silk')
+  assert.include(scopesAt('fn stop() -> Never', 'Never'), 'support.type.builtin.silk')
   assert.include(scopesAt('/// doc', '/// doc'), 'comment.line.documentation.silk')
   assert.include(scopesAt('// plain', '// plain'), 'comment.line.double-slash.silk')
   assert.notInclude(scopesAt('// plain', '// plain'), 'comment.line.documentation.silk')

@@ -971,14 +971,31 @@ const isArrayConstructor = (state: State): boolean => {
   return Option.contains(SourceFile.spelling(state.lexical.source, token.span), 'Array')
 }
 
-function parseType(
+const parseTypePrimary = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
-): NodeResult {
+): NodeResult => {
+  if (nextSignificantKind(initial) === 'LeftParenthesis') {
+    const left = expect(initial, 'LeftParenthesis', [
+      'Identifier',
+      'RightParenthesis',
+      ...following,
+    ])
+    const type = parseType(left.state, ['RightParenthesis', ...following])
+    const right = expect(type.state, 'RightParenthesis', following)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'ParenthesizedType', [
+        ...left.elements,
+        type.node,
+        ...right.elements,
+      ]),
+    })
+  }
   if (!isArrayConstructor(initial)) return parseTypePath(initial, following, preserveFieldStart)
   const arrayName = expect(initial, 'Identifier', ['Less', ...following])
-  const less = expect(arrayName.state, 'Less', ['Identifier', ...following])
+  const less = expect(arrayName.state, 'Less', ['Identifier', 'LeftParenthesis', ...following])
   const element = parseType(less.state, ['Comma', 'Greater', ...following])
   const comma = expect(element.state, 'Comma', ['DecimalInteger', 'Greater', ...following])
   const length = expect(comma.state, 'DecimalInteger', ['Greater', ...following])
@@ -996,8 +1013,27 @@ function parseType(
   })
 }
 
+function parseType(
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+  preserveFieldStart = false,
+): NodeResult {
+  const first = parseTypePrimary(initial, ['Pipe', ...following], preserveFieldStart)
+  let state = first.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([first.node])
+  while (nextSignificantKind(state) === 'Pipe') {
+    const pipe = expect(state, 'Pipe', ['Identifier', 'LeftParenthesis', ...following])
+    const member = parseTypePrimary(pipe.state, ['Pipe', ...following], preserveFieldStart)
+    children = Object.freeze([...children, ...pipe.elements, member.node])
+    state = member.state
+  }
+  return children.length === 1
+    ? first
+    : Object.freeze({ state, node: syntaxNode(state, 'UnionType', children) })
+}
+
 const parseReturnType = (initial: State): NodeResult => {
-  const arrow = expect(initial, 'Arrow', ['Identifier', 'LeftBrace'])
+  const arrow = expect(initial, 'Arrow', ['Identifier', 'LeftParenthesis', 'LeftBrace'])
   const type = parseType(arrow.state, ['LeftBrace'])
   return Object.freeze({
     state: type.state,
@@ -1026,7 +1062,13 @@ const parseParameterList = (initial: State): NodeResult => {
     kind !== 'EndOfFile'
   ) {
     const name = expect(state, 'Identifier', ['Colon', 'Comma', 'RightParenthesis', 'Arrow'])
-    const colon = expect(name.state, 'Colon', ['Identifier', 'Comma', 'RightParenthesis', 'Arrow'])
+    const colon = expect(name.state, 'Colon', [
+      'Identifier',
+      'LeftParenthesis',
+      'Comma',
+      'RightParenthesis',
+      'Arrow',
+    ])
     const type = parseType(colon.state, ['Comma', 'RightParenthesis', 'Arrow'])
     const parameter = syntaxNode(type.state, 'ParameterDeclaration', [
       ...name.elements,
@@ -1198,7 +1240,12 @@ const parseStructField = (initial: State): NodeResult => {
     ? expect(initial, 'PubKeyword', ['Identifier', 'RightBrace', ...topLevelFollowing])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
   const name = expect(pubKeyword.state, 'Identifier', ['Colon', 'RightBrace', ...topLevelFollowing])
-  const colon = expect(name.state, 'Colon', ['Identifier', 'RightBrace', ...topLevelFollowing])
+  const colon = expect(name.state, 'Colon', [
+    'Identifier',
+    'LeftParenthesis',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
   const type = parseType(colon.state, ['PubKeyword', 'RightBrace', ...topLevelFollowing], true)
   return Object.freeze({
     state: type.state,

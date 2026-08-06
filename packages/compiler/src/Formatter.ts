@@ -438,6 +438,31 @@ const printNode = (
         printToken(context, tokenOf(node, 'DecimalInteger'), FormatDocument.text(' ')),
         printToken(context, tokenOf(node, 'Greater')),
       )
+    case 'ParenthesizedType':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'LeftParenthesis'), prefix, preserveBlank),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        printToken(context, tokenOf(node, 'RightParenthesis')),
+      )
+    case 'UnionType': {
+      const members = directNodes(node)
+      const separators = directTokens(node).filter((token) => token.kind === 'Pipe')
+      const first = members.at(0)
+      if (first === undefined) throw new FormatterImplementationError('UnionType has no members')
+      const documents: Array<FormatDocument.Document> = [
+        printNode(context, first, prefix, preserveBlank),
+      ]
+      for (const [index, separator] of separators.entries()) {
+        const member = members.at(index + 1)
+        if (member === undefined)
+          throw new FormatterImplementationError('UnionType has no member after separator')
+        documents.push(
+          printToken(context, separator, FormatDocument.text(' ')),
+          printNode(context, member, FormatDocument.text(' ')),
+        )
+      }
+      return FormatDocument.concat(...documents)
+    }
     case 'FunctionDeclaration':
       return printFunctionDeclaration(context, node, prefix)
     case 'ParameterList':

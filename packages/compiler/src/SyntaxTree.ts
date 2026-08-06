@@ -15,6 +15,8 @@ export type NodeKind =
   | 'StructField'
   | 'TypePath'
   | 'FixedArrayType'
+  | 'ParenthesizedType'
+  | 'UnionType'
   | 'FunctionDeclaration'
   | 'ParameterList'
   | 'ParameterDeclaration'

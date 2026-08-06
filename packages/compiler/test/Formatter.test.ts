@@ -85,6 +85,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'MoveExpression',
   'ParameterDeclaration',
   'ParameterList',
+  'ParenthesizedType',
   'PipelineExpression',
   'PipelineTarget',
   'PrefixExpression',
@@ -96,6 +97,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'StructFieldInitializer',
   'StructLiteralExpression',
   'TypePath',
+  'UnionType',
   'WhileStatement',
 ])
 
@@ -277,6 +279,7 @@ it.effect('prints and reparses the complete current grammar surface', () =>
 pub struct Pair {
   pub left: Array<I32, 2>
   right: Bool
+  choice: Alpha | (Beta | Alpha)
 }
 fn helper(value: I32, other: I32) -> I32 {
   let mut moved = move value

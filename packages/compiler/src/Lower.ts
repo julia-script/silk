@@ -1,6 +1,6 @@
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
-import type * as Layout from './Layout.js'
+import * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -16,12 +16,16 @@ const bool: Mir.Type = Object.freeze({ _tag: 'Bool' })
 
 const mirType = (type: Type.Type): Mir.Type | undefined =>
   typeof type === 'string'
-    ? type === 'Bool'
-      ? bool
-      : i32
+    ? type === 'Never'
+      ? undefined
+      : type === 'Bool'
+        ? bool
+        : i32
     : Type.isNominal(type)
       ? Object.freeze({ _tag: 'Nominal', type })
-      : Object.freeze({ _tag: 'FixedArray', type })
+      : Type.isFixedArray(type)
+        ? Object.freeze({ _tag: 'FixedArray', type })
+        : Object.freeze({ _tag: 'Union', type })
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
@@ -33,7 +37,10 @@ class FunctionLowering {
   readonly bindingLocals = new Map<number, Mir.LocalId>()
   private operations: Array<Mir.Operation> = []
 
-  constructor(parameterTypes: ReadonlyArray<Mir.Type>) {
+  constructor(
+    readonly layout: Layout.Plan,
+    parameterTypes: ReadonlyArray<Mir.Type>,
+  ) {
     this.localTypes.push(...parameterTypes)
   }
 
@@ -190,6 +197,39 @@ function lowerExpression(
     }
     case 'Move':
       return lowerExpression(fn, expression.subject)
+    case 'UnionConvert': {
+      const source = lowerExpression(fn, expression.source)
+      const sourceType = mirType(expression.sourceType)
+      const targetType = mirType(expression.target)
+      const sourceShape = Layout.callingShape(fn.layout, expression.sourceType)
+      const targetShape = Layout.callingShape(fn.layout, expression.target)
+      if (
+        source === undefined ||
+        sourceShape === undefined ||
+        targetShape === undefined ||
+        (sourceType?._tag !== 'Nominal' && sourceType?._tag !== 'Union') ||
+        targetType?._tag !== 'Union'
+      ) {
+        return undefined
+      }
+      const destination = fn.alloc(targetType)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ConvertUnion',
+          destination,
+          source: source.result,
+          sourceType,
+          targetType,
+          conversion: expression.conversion,
+          mappings: expression.mappings,
+          sourceShape,
+          targetShape,
+          access: expression.access,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
     case 'Construct': {
       const type = mirType(expression.type)
       if (type?._tag !== 'Nominal') return undefined
@@ -372,6 +412,7 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
       Object.freeze({
         _tag: 'Drop',
         local: dropped,
+        cleanup: release.cleanup,
         provenance: Object.freeze({ span: release.binding.liveFrom, generated: true }),
       }),
     )
@@ -834,6 +875,7 @@ const bodySpan = (fn: Hir.HirFunction): SourceSpan.SourceSpan =>
 const lowerInstance = (
   instance: Instances.Instance,
   ownership: Ownership.ModuleOwnership | undefined,
+  layout: Layout.Plan,
 ): Mir.MirFunction => {
   const fn = instance.function
   const plan = planFor(ownership, fn)
@@ -855,7 +897,7 @@ const lowerInstance = (
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
   }
 
-  const lowering = new FunctionLowering(parameterTypes)
+  const lowering = new FunctionLowering(layout, parameterTypes)
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
     reason: 'body fell through without return',
@@ -893,7 +935,7 @@ export const lowerProgram = (
     layout,
     functions: Object.freeze(
       discovery.instances.map((instance) =>
-        lowerInstance(instance, ownership.get(instance.key.declaration.module)),
+        lowerInstance(instance, ownership.get(instance.key.declaration.module), layout),
       ),
     ),
   })

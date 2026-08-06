@@ -58,8 +58,9 @@ export const grammar: Grammar = {
     { name: 'comment.line.double-slash.silk', match: '//[^\\n]*' },
     { name: 'keyword.other.silk', match: `\\b(?:${plainSpellings.join('|')})\\b` },
     { name: 'constant.language.boolean.silk', match: `\\b(?:${booleanSpellings.join('|')})\\b` },
+    { name: 'support.type.builtin.silk', match: '\\b(?:I32|Bool|Never)\\b' },
     { name: 'constant.numeric.integer.silk', match: '\\b[0-9]+\\b' },
-    { name: 'keyword.operator.silk', match: '->|\\|>|[=!<>]=|[-+*/%!<>=]' },
+    { name: 'keyword.operator.silk', match: '->|\\|>|\\||[=!<>]=|[-+*/%!<>=]' },
     { name: 'punctuation.silk', match: '[(){}\\[\\]:,.]' },
   ],
 }

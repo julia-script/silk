@@ -43,3 +43,35 @@ it('keeps fixed-array element type and length in recursive structural identity',
   assert.deepEqual(Type.nominals(nested).map(Type.encode), ['model/Token.Token'])
   assert.strictEqual(Object.isFrozen(three), true)
 })
+
+it('normalizes structural unions as canonical nominal sets', () => {
+  const token = Type.nominal('model/Token', 'Token')
+  const end = Type.nominal('model/End', 'End')
+  const first = Type.union([token, end, token])
+  const permuted = Type.union([end, token])
+  assert.strictEqual(first._tag, 'Normalized')
+  assert.strictEqual(permuted._tag, 'Normalized')
+  if (first._tag !== 'Normalized' || permuted._tag !== 'Normalized') return
+  assert.strictEqual(Type.isUnion(first.type), true)
+  assert.strictEqual(Type.equals(first.type, permuted.type), true)
+  assert.strictEqual(Type.encode(first.type), 'model/End.End | model/Token.Token')
+  assert.deepEqual(Type.nominals(first.type).map(Type.encode), [
+    'model/End.End',
+    'model/Token.Token',
+  ])
+  assert.strictEqual(Object.isFrozen(first.type), true)
+  assert.strictEqual(Type.isUnion(first.type) ? Object.isFrozen(first.type.members) : false, true)
+})
+
+it('collapses empty and singleton unions and rejects non-nominal leaves', () => {
+  const token = Type.nominal('model/Token', 'Token')
+  const empty = Type.union(['Never'])
+  const singleton = Type.union(['Never', token, token])
+  const invalid = Type.union([token, 'I32', Type.fixedArray(token, 2)])
+  assert.deepEqual(empty, { _tag: 'Normalized', type: 'Never' })
+  assert.strictEqual(singleton._tag, 'Normalized')
+  if (singleton._tag === 'Normalized') assert.strictEqual(Type.equals(singleton.type, token), true)
+  assert.strictEqual(invalid._tag, 'InvalidMembers')
+  if (invalid._tag === 'InvalidMembers')
+    assert.deepEqual(invalid.members.map(Type.encode), ['I32', 'Array<model/Token.Token, 2>'])
+})

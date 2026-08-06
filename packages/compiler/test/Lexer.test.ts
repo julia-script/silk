@@ -116,6 +116,14 @@ it('distinguishes the equals token from the arrow', () => {
   )
 })
 
+it('distinguishes a type union separator from the pipeline operator', () => {
+  const result = Lexer.lex(SourceFile.make('memory://unions.silk', ascii('Token | End |> inspect')))
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Identifier', 'Pipe', 'Identifier', 'PipeGreater', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes typed parameter and argument punctuation with exact spans', () => {
   const source = SourceFile.make(
     'memory://parameter-punctuation.silk',

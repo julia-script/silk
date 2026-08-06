@@ -746,6 +746,55 @@ pub fn main() -> I32 { return choose(1, 42) }`,
   one('backend', 'Checked arithmetic', 'pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
   one('backend', 'Overflow traps', 'pub fn main() -> I32 { return I32.add(2147483647, 1) }'),
   one('backend', 'Divide by zero traps', 'pub fn main() -> I32 { return I32.divide(1, 0) }'),
+  one(
+    'syntax',
+    'Union normalization + Never',
+    `struct A {}
+struct B {}
+fn normalized(value: B | (A | B)) -> A | B { return value }
+fn impossible(value: Never) -> Never { return value }
+pub fn main() -> I32 { return 42 }`,
+  ),
+  one(
+    'structs',
+    'Union injection + widening',
+    `struct A {}
+struct B { value: I32 }
+struct C { left: I32 right: I32 }
+fn accept(value: A | B | C) -> I32 { return 42 }
+fn widen(value: A | B) -> I32 { return accept(move value) }
+pub fn main() -> I32 { return widen(A {}) }`,
+  ),
+  one(
+    'arrays',
+    'Union array containment',
+    `struct A {}
+struct B {}
+fn accept(values: Array<A | B, 2>) -> I32 { return 42 }
+pub fn main() -> I32 { return accept([A {}, B {}]) }`,
+  ),
+  one(
+    'ownership',
+    'Union field replacement',
+    `struct A {}
+struct B { value: I32 }
+struct Box { value: A | B }
+pub fn main() -> I32 {
+  let mut box = Box { value: A {} }
+  box.value = B { value: 42 }
+  return 42
+}`,
+  ),
+  one(
+    'syntax',
+    'Invalid union member',
+    'fn broken(value: I32 | Never) -> I32 { return 0 }\npub fn main() -> I32 { return 42 }',
+  ),
+  one(
+    'syntax',
+    'Unavailable union member',
+    'fn broken(value: Missing | Never) -> I32 { return 0 }\npub fn main() -> I32 { return 42 }',
+  ),
 ]
 
 /** Presets in catalog order, grouped by phase, for the picker. */

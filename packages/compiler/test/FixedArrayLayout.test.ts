@@ -39,7 +39,11 @@ pub fn main() -> I32 {
         lane.path.map((selector) =>
           selector._tag === 'ElementSelector'
             ? `element:${selector.index}`
-            : `field:${selector.ordinal}`,
+            : selector._tag === 'FieldId'
+              ? `field:${selector.ordinal}`
+              : selector._tag === 'UnionTagSelector'
+                ? 'union:tag'
+                : `union:payload:${selector.slot}`,
         ),
       ),
       [

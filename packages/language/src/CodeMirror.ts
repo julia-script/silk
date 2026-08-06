@@ -19,6 +19,7 @@ const keyword: Category = { name: 'keyword', tags: [tags.keyword] }
 const boolean_: Category = { name: 'boolean', tags: [tags.bool] }
 const operator: Category = { name: 'operator', tags: [tags.operator] }
 const punctuation: Category = { name: 'punctuation', tags: [tags.punctuation] }
+const builtinType: Category = { name: 'type', tags: [tags.typeName] }
 
 /** Exhaustive over `TokenKind`, so a lexer token change fails this package's typecheck. */
 const categories: Record<Token.TokenKind, Category | undefined> = {
@@ -65,6 +66,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   LessEqual: operator,
   Greater: operator,
   GreaterEqual: operator,
+  Pipe: operator,
   PipeGreater: operator,
   Arrow: operator,
   Invalid: { name: 'invalid', tags: [tags.invalid] },
@@ -72,7 +74,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
 }
 
 const tagsByCategory = new Map(
-  Object.values(categories).flatMap((category) =>
+  [...Object.values(categories), builtinType].flatMap((category) =>
     category === undefined ? [] : [[category.name, category.tags] as const],
   ),
 )
@@ -112,10 +114,14 @@ export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
   const map = bytes.length === doc.length ? undefined : byteToCharMap(doc, bytes.length)
   const ranges: Array<HighlightRange> = []
   for (const token of result.tokens) {
-    const category = categories[token.kind]
-    if (category === undefined) continue
     const from = map === undefined ? token.span.start : (map[token.span.start] ?? 0)
     const to = map === undefined ? token.span.end : (map[token.span.end] ?? 0)
+    const text = doc.slice(from, to)
+    const category =
+      token.kind === 'Identifier' && (text === 'I32' || text === 'Bool' || text === 'Never')
+        ? builtinType
+        : categories[token.kind]
+    if (category === undefined) continue
     if (to > from) ranges.push({ from, to, category: category.name })
   }
   return ranges

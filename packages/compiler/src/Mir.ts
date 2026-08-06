@@ -1,10 +1,12 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Layout from './Layout.js'
+import type * as Ownership from './Ownership.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
  * MIR is the monomorphic, target-aware, backend-neutral structured control DAG. Structural child
@@ -17,9 +19,12 @@ export type Type =
   | { readonly _tag: 'Bool' }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
+  | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
 
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
-  self._tag === 'Nominal' || self._tag === 'FixedArray' ? self.type : self._tag
+  self._tag === 'Nominal' || self._tag === 'FixedArray' || self._tag === 'Union'
+    ? self.type
+    : self._tag
 
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
@@ -97,6 +102,21 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'ConvertUnion'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType:
+        | Extract<Type, { readonly _tag: 'Nominal' }>
+        | Extract<Type, { readonly _tag: 'Union' }>
+      readonly targetType: Extract<Type, { readonly _tag: 'Union' }>
+      readonly conversion: 'Inject' | 'Widen'
+      readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
+      readonly sourceShape: Layout.CallingShape
+      readonly targetShape: Layout.CallingShape
+      readonly access: 'Copy' | 'Owned'
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Call'
       readonly destination: LocalId
       readonly target: DeclarationIndex.CanonicalId
@@ -159,6 +179,7 @@ export type Operation =
   | {
       readonly _tag: 'Drop'
       readonly local: LocalId
+      readonly cleanup: Ownership.CleanupPlan
       readonly provenance: Provenance
     }
 
@@ -333,6 +354,8 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
     case 'Move':
+      return [operation.destination, operation.source]
+    case 'ConvertUnion':
       return [operation.destination, operation.source]
     case 'Call':
       return [operation.destination, ...operation.arguments]
@@ -559,6 +582,78 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
       const operations = operationsOf(region)
       for (const [index, operation] of operations.entries()) {
+        if (operation._tag === 'ConvertUnion') {
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const compatibility = TypeCompatibility.check(
+            semanticType(operation.sourceType),
+            operation.targetType.type,
+          )
+          const mappingsValid =
+            compatibility._tag === operation.conversion &&
+            compatibility.mappings.length === operation.mappings.length &&
+            compatibility.mappings.every((mapping, ordinal) => {
+              const actual = operation.mappings.at(ordinal)
+              return (
+                actual !== undefined &&
+                mapping.sourceOrdinal === actual.sourceOrdinal &&
+                mapping.targetOrdinal === actual.targetOrdinal &&
+                SilkType.equals(mapping.source, actual.source) &&
+                SilkType.equals(mapping.target, actual.target)
+              )
+            })
+          const valid =
+            source !== undefined &&
+            destination !== undefined &&
+            SilkType.equals(semanticType(source), semanticType(operation.sourceType)) &&
+            SilkType.equals(semanticType(destination), operation.targetType.type) &&
+            mappingsValid &&
+            SilkType.equals(operation.sourceShape.type, semanticType(operation.sourceType)) &&
+            SilkType.equals(operation.targetShape.type, operation.targetType.type) &&
+            Layout.callingShape(self.layout, operation.sourceShape.type) !== undefined &&
+            Layout.callingShape(self.layout, operation.targetShape.type) !== undefined
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'union conversion disagrees with its locals, mapping, or layout shapes',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'Drop') {
+          const dropped = fn.localTypes.at(operation.local.ordinal)
+          const cleanup = operation.cleanup
+          const unionCasesValid =
+            cleanup._tag !== 'UnionCleanup' ||
+            (cleanup.cases.length === cleanup.type.members.length &&
+              cleanup.cases.every((member, ordinal) => {
+                const expected = cleanup.type.members.at(ordinal)
+                return (
+                  expected !== undefined &&
+                  member.ordinal === ordinal &&
+                  SilkType.equals(member.member, expected)
+                )
+              }))
+          if (
+            dropped === undefined ||
+            !SilkType.equals(semanticType(dropped), operation.cleanup.type) ||
+            !unionCasesValid
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'drop cleanup disagrees with its local type or canonical union cases',
+              }),
+            )
+          }
+        }
         if (operation._tag === 'Construct') {
           const layout = Layout.entry(self.layout, operation.type.type)
           const expected =
@@ -746,6 +841,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
+    case 'ConvertUnion':
+      return `${localText(operation.destination)} = union-${operation.conversion.toLowerCase()} ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.targetType)} access=${operation.access} mapping=${operation.mappings.map((mapping) => `${SilkType.encode(mapping.source)}#${mapping.sourceOrdinal}->${SilkType.encode(mapping.target)}#${mapping.targetOrdinal}`).join(',')} ${provenanceText(operation.provenance)}`
     case 'Call':
       return `${localText(operation.destination)} = call ${targetText(operation.target)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Construct':
@@ -761,7 +858,7 @@ const operationText = (operation: Operation): string => {
     case 'WritePlace':
       return `write-place ${localText(operation.root)}${selectorText(operation.selectors)} <- ${localText(operation.source)} : ${typeText(operation.type)} replacement=${operation.replacement} commit=${operation.commit} ${provenanceText(operation.provenance)}`
     case 'Drop':
-      return `drop ${localText(operation.local)} ${provenanceText(operation.provenance)}`
+      return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`} ${provenanceText(operation.provenance)}`
   }
 }
 

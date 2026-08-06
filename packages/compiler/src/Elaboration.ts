@@ -11,6 +11,7 @@ import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 /** The only semantic type recognized by the first analysis slice. */
 export type SemanticType = DeclarationIndex.SemanticType
@@ -505,6 +506,26 @@ const availableExpressionType = (type: SemanticType): ExpressionTypeFact =>
       : Object.freeze({ _tag: 'Available', type })
 const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
 
+const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
+  TypeCompatibility.isCompatible(TypeCompatibility.check(source, target))
+
+const unionConversionDiagnostic = (
+  source: SemanticType,
+  target: SemanticType,
+  span: SourceSpan.SourceSpan,
+): Diagnostic.Diagnostic | undefined => {
+  const compatibility = TypeCompatibility.check(source, target)
+  return compatibility._tag === 'Incompatible' &&
+    (Type.isUnion(source) || Type.isNever(source) || Type.isUnion(target) || Type.isNever(target))
+    ? Diagnostic.incompatibleUnionConversion(
+        Type.encode(source),
+        Type.encode(target),
+        compatibility.missing.map(Type.encode),
+        span,
+      )
+    : undefined
+}
+
 const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IntegerLiteralExpression',
   'BooleanLiteralExpression',
@@ -965,14 +986,20 @@ const analyzeStructLiteral = (
         } else if (
           fieldLookup.field.declaredType._tag === 'Resolved' &&
           expression.type !== undefined &&
-          !Type.equals(fieldLookup.field.declaredType.type, expression.type)
+          !typesCompatible(expression.type, fieldLookup.field.declaredType.type)
         ) {
-          const diagnostic = Diagnostic.structFieldTypeMismatch(
-            name,
-            Type.encode(fieldLookup.field.declaredType.type),
-            Type.encode(expression.type),
-            expressionNode.span,
-          )
+          const diagnostic =
+            unionConversionDiagnostic(
+              expression.type,
+              fieldLookup.field.declaredType.type,
+              expressionNode.span,
+            ) ??
+            Diagnostic.structFieldTypeMismatch(
+              name,
+              Type.encode(fieldLookup.field.declaredType.type),
+              Type.encode(expression.type),
+              expressionNode.span,
+            )
           diagnostics.push(diagnostic)
           state = Object.freeze({
             _tag: 'TypeMismatch',
@@ -1073,13 +1100,15 @@ const analyzeArrayLiteral = (
     let compatibility: ArrayElementFact['compatibility']
     if (element.type === undefined || elementType === undefined) {
       compatibility = Object.freeze({ _tag: 'Unavailable' })
-    } else if (!Type.equals(elementType, element.type)) {
-      const diagnostic = Diagnostic.arrayElementTypeMismatch(
-        Type.encode(elementType),
-        Type.encode(element.type),
-        ordinal,
-        elementNode.span,
-      )
+    } else if (!typesCompatible(element.type, elementType)) {
+      const diagnostic =
+        unionConversionDiagnostic(element.type, elementType, elementNode.span) ??
+        Diagnostic.arrayElementTypeMismatch(
+          Type.encode(elementType),
+          Type.encode(element.type),
+          ordinal,
+          elementNode.span,
+        )
       diagnostics.push(diagnostic)
       compatibility = Object.freeze({
         _tag: 'TypeMismatch',
@@ -1449,13 +1478,15 @@ const analyzeCallContract = (
       if (
         expected !== undefined &&
         argument.type._tag === 'Available' &&
-        !Type.equals(argument.type.type, expected)
+        !typesCompatible(argument.type.type, expected)
       ) {
-        const mismatch = Diagnostic.argumentTypeMismatch(
-          Type.encode(expected),
-          Type.encode(argument.type.type),
-          argument.syntax.span,
-        )
+        const mismatch =
+          unionConversionDiagnostic(argument.type.type, expected, argument.syntax.span) ??
+          Diagnostic.argumentTypeMismatch(
+            Type.encode(expected),
+            Type.encode(argument.type.type),
+            argument.syntax.span,
+          )
         return Object.freeze({
           mappings: Object.freeze([]),
           fact: Object.freeze({
@@ -1539,13 +1570,19 @@ const analyzeCallContract = (
     if (
       mapping.argument.type._tag === 'Available' &&
       mapping.parameter.declaredType._tag === 'Resolved' &&
-      !Type.equals(mapping.argument.type.type, mapping.parameter.declaredType.type)
+      !typesCompatible(mapping.argument.type.type, mapping.parameter.declaredType.type)
     ) {
-      const mismatch = Diagnostic.argumentTypeMismatch(
-        Type.encode(mapping.parameter.declaredType.type),
-        Type.encode(mapping.argument.type.type),
-        mapping.argument.syntax.span,
-      )
+      const mismatch =
+        unionConversionDiagnostic(
+          mapping.argument.type.type,
+          mapping.parameter.declaredType.type,
+          mapping.argument.syntax.span,
+        ) ??
+        Diagnostic.argumentTypeMismatch(
+          Type.encode(mapping.parameter.declaredType.type),
+          Type.encode(mapping.argument.type.type),
+          mapping.argument.syntax.span,
+        )
       return Object.freeze({
         mappings,
         fact: Object.freeze({
@@ -2619,14 +2656,15 @@ const analyzeStatements = (
       const compatible =
         destination.type !== undefined &&
         value.type !== undefined &&
-        Type.equals(destination.type, value.type)
+        typesCompatible(value.type, destination.type)
       if (destination.type !== undefined && value.type !== undefined && !compatible) {
         context.diagnostics.push(
-          Diagnostic.assignmentTypeMismatch(
-            Type.encode(destination.type),
-            Type.encode(value.type),
-            valueNode.span,
-          ),
+          unionConversionDiagnostic(value.type, destination.type, valueNode.span) ??
+            Diagnostic.assignmentTypeMismatch(
+              Type.encode(destination.type),
+              Type.encode(value.type),
+              valueNode.span,
+            ),
         )
       }
       facts.push(
@@ -2729,6 +2767,18 @@ const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
       }
       context.diagnostics.push(...expression.diagnostics)
+      if (
+        context.declaration.returnType._tag === 'Resolved' &&
+        expression.type !== undefined &&
+        !typesCompatible(expression.type, context.declaration.returnType.type)
+      ) {
+        const diagnostic = unionConversionDiagnostic(
+          expression.type,
+          context.declaration.returnType.type,
+          expressionNode.span,
+        )
+        if (diagnostic !== undefined) context.diagnostics.push(diagnostic)
+      }
       facts.push(
         Object.freeze({
           _tag: 'ReturnStatement',
@@ -2780,7 +2830,9 @@ const analyzeFunctionBody = (
   const expressionType = expression.type._tag === 'Available' ? expression.type.type : undefined
 
   const returnCompatibility =
-    declaration.returnType._tag === 'Resolved' && expressionType === declaration.returnType.type
+    declaration.returnType._tag === 'Resolved' &&
+    expressionType !== undefined &&
+    typesCompatible(expressionType, declaration.returnType.type)
       ? compatible
       : unavailableCompatibility
 
@@ -2892,9 +2944,18 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
         ),
       ),
       fields: Object.freeze(
-        fact.fields.map(({ field, initializer }) =>
-          Object.freeze({ field: field.id, value: hirExpression(initializer.expression) }),
-        ),
+        fact.fields.map(({ field, initializer }) => {
+          const value =
+            field.declaredType._tag === 'Resolved'
+              ? hirExpectedExpression(
+                  initializer.expression,
+                  field.declaredType.type,
+                  'StructField',
+                  field.syntax.span,
+                )
+              : hirExpression(initializer.expression)
+          return Object.freeze({ field: field.id, value })
+        }),
       ),
       type: fact.type.type,
       span: fact.syntax.span,
@@ -2906,7 +2967,18 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     }
     return Object.freeze({
       _tag: 'ArrayConstruct',
-      elements: Object.freeze(fact.elements.map((element) => hirExpression(element.expression))),
+      elements: Object.freeze(
+        fact.elements.map((element) =>
+          element.expected === undefined
+            ? hirExpression(element.expression)
+            : hirExpectedExpression(
+                element.expression,
+                element.expected,
+                'ArrayElement',
+                element.syntax.span,
+              ),
+        ),
+      ),
       type: fact.state.type,
       span: fact.syntax.span,
     })
@@ -2985,11 +3057,22 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
+    const target = fact.reference.declaration
     return Object.freeze({
       _tag: 'Call',
       target: fact.reference.declaration.canonical.id,
       arguments: Object.freeze(
-        fact.arguments.map((argument) => hirExpression(argument.expression)),
+        fact.arguments.map((argument, ordinal) => {
+          const parameter = target.parameters.at(ordinal)
+          return parameter?.declaredType._tag === 'Resolved'
+            ? hirExpectedExpression(
+                argument.expression,
+                parameter.declaredType.type,
+                'Argument',
+                parameter.syntax.span,
+              )
+            : hirExpression(argument.expression)
+        }),
       ),
       type: fact.type.type,
       span: fact.syntax.span,
@@ -3005,6 +3088,34 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     _tag: 'Unavailable',
     span: fact.syntax.span,
     ...(cause === undefined ? {} : { cause }),
+  })
+}
+
+const hirExpectedExpression = (
+  fact: ExpressionFact,
+  target: SemanticType,
+  context: Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
+  expectedAt: SourceSpan.SourceSpan,
+): Hir.Expression => {
+  const source = hirExpression(fact)
+  if (source._tag === 'Unavailable') return source
+  const compatibility = TypeCompatibility.check(source.type, target)
+  if (compatibility._tag === 'Exact') return source
+  if (compatibility._tag === 'Incompatible') {
+    return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
+  return Object.freeze({
+    _tag: 'UnionConvert',
+    source,
+    sourceType: compatibility.source,
+    target: compatibility.target,
+    conversion: compatibility._tag,
+    mappings: compatibility.mappings,
+    access: 'Owned',
+    context,
+    expectedAt,
+    type: compatibility.target,
+    span: fact.syntax.span,
   })
 }
 
@@ -3094,7 +3205,10 @@ export const elaborateModule = (input: Input): Result => {
     ...headers.diagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
   ].sort(compareDiagnostics)
-  const hirStatements = (facts: ReadonlyArray<StatementFact>): ReadonlyArray<Hir.Statement> =>
+  const hirStatements = (
+    facts: ReadonlyArray<StatementFact>,
+    resultType?: SemanticType,
+  ): ReadonlyArray<Hir.Statement> =>
     Object.freeze(
       facts.map((statement): Hir.Statement => {
         if (statement._tag === 'BindStatement') {
@@ -3115,8 +3229,8 @@ export const elaborateModule = (input: Input): Result => {
           return Object.freeze({
             _tag: 'If' as const,
             condition: hirExpression(statement.condition),
-            taken: hirStatements(statement.taken),
-            otherwise: hirStatements(statement.otherwise),
+            taken: hirStatements(statement.taken, resultType),
+            otherwise: hirStatements(statement.otherwise, resultType),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -3140,7 +3254,7 @@ export const elaborateModule = (input: Input): Result => {
           return Object.freeze({
             _tag: 'Write' as const,
             place,
-            value: hirExpression(statement.value),
+            value: hirExpectedExpression(statement.value, place.type, 'Assignment', place.span),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -3151,7 +3265,7 @@ export const elaborateModule = (input: Input): Result => {
             loop: statement.loop,
             ...(statement.parent === undefined ? {} : { parent: statement.parent }),
             condition: hirExpression(statement.condition),
-            body: hirStatements(statement.body),
+            body: hirStatements(statement.body, resultType),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -3174,7 +3288,15 @@ export const elaborateModule = (input: Input): Result => {
         if (statement._tag === 'ReturnStatement')
           return Object.freeze({
             _tag: 'Return' as const,
-            expression: hirExpression(statement.expression),
+            expression:
+              resultType === undefined
+                ? hirExpression(statement.expression)
+                : hirExpectedExpression(
+                    statement.expression,
+                    resultType,
+                    'Return',
+                    statement.syntax.span,
+                  ),
             region: statement.region,
             span: statement.expression.syntax.span,
           })
@@ -3200,7 +3322,12 @@ export const elaborateModule = (input: Input): Result => {
             contract: Hir.contractOf(fact.declaration),
             entryRegion,
             regionOrder: fact.regionOrder,
-            statements: hirStatements(fact.statements),
+            statements: hirStatements(
+              fact.statements,
+              fact.declaration.returnType._tag === 'Resolved'
+                ? fact.declaration.returnType.type
+                : undefined,
+            ),
           })
         })(),
       ),

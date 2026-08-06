@@ -11,7 +11,8 @@ const spellings = (doc: string, category: string): ReadonlyArray<string> =>
 it('classifies keywords, identifiers, numbers, and operators', () => {
   const doc = 'pub fn main() -> I32 { return 42 }'
   assert.deepStrictEqual(spellings(doc, 'keyword'), ['pub', 'fn', 'return'])
-  assert.deepStrictEqual(spellings(doc, 'identifier'), ['main', 'I32'])
+  assert.deepStrictEqual(spellings(doc, 'identifier'), ['main'])
+  assert.deepStrictEqual(spellings(doc, 'type'), ['I32'])
   assert.deepStrictEqual(spellings(doc, 'number'), ['42'])
   assert.include(spellings(doc, 'operator'), '->')
   assert.include(spellings(doc, 'punctuation'), '{')
@@ -39,6 +40,14 @@ it('highlights mutable loop keywords through the compiler lexer', () => {
     'break',
     'continue',
   ])
+})
+
+it('highlights type unions separately from pipelines', () => {
+  assert.deepStrictEqual(spellings('Token | End |> inspect', 'operator'), ['|', '|>'])
+})
+
+it('classifies Never and executable scalar names as builtin types', () => {
+  assert.deepStrictEqual(spellings('Never | I32 | Bool', 'type'), ['Never', 'I32', 'Bool'])
 })
 
 it('places highlights correctly after multi-byte characters', () => {

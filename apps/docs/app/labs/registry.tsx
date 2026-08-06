@@ -276,9 +276,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'semantics',
     project: ({ snapshot, onSelectSpan }) => {
       const hir = Analysis.rootAnalysis(snapshot).hir
+      const conversions = Analysis.hirUnionConversionsOf(snapshot, snapshot.closure.rootModule)
       return {
         rows: hirRows(hir, (span) => onSelectSpan(span)),
-        meta: `${hir.functions.length} fn`,
+        facts:
+          conversions.length === 0
+            ? undefined
+            : [{ text: `${conversions.length} union conversion`, tone: 'symbol' }],
+        meta: `${hir.functions.length} fn${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
       }
     },
   },
@@ -374,6 +379,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const catalog = Analysis.layoutCatalogOf(snapshot)
       const plan = Analysis.layoutOf(snapshot)
       const target = Analysis.targetOf(snapshot)
+      const unions = Analysis.unionLayoutsOf(snapshot)
       const rows = layoutRows(
         catalog._tag === 'Available' ? catalog.value : undefined,
         plan._tag === 'Available' ? plan.value : undefined,
@@ -387,6 +393,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
                 text: `${target.target.endianness} endian · ptr ${target.target.pointerSize} B`,
                 tone: 'muted',
               },
+              ...(unions.length === 0
+                ? []
+                : [{ text: `${unions.length} sum layout`, tone: 'symbol' as const }]),
             ]
           : [{ text: 'target unavailable', tone: 'warning' }]
       return { rows, facts, meta: plan._tag === 'Available' ? `${plan.value.entries.length}` : '—' }
@@ -406,9 +415,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
         return { rows: noRows, unavailable: `MIR unavailable — ${mir.error.message}` }
       }
       const regions = mir.value.functions.reduce((total, fn) => total + fn.regions.length, 0)
+      const conversions = Analysis.mirUnionConversionsOf(snapshot)
       return {
         rows: mirRows(mir.value, (span) => onSelectSpan(span)),
-        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}`,
+        facts:
+          conversions.length === 0
+            ? undefined
+            : [{ text: `${conversions.length} ConvertUnion`, tone: 'symbol' }],
+        meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
       }
     },
   },

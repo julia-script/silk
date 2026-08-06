@@ -32,6 +32,21 @@ export type Representation =
       readonly length: number
       readonly stride: number
     }
+  | {
+      readonly _tag: 'Union'
+      readonly tag: { readonly bits: 32; readonly size: 4 }
+      readonly members: ReadonlyArray<{
+        readonly type: Type.Nominal
+        readonly ordinal: number
+        readonly size: number
+        readonly alignment: number
+      }>
+      readonly payloadOffset: number
+      readonly payloadSize: number
+      readonly payloadAlignment: number
+      readonly tagPadding: number
+      readonly tailPadding: number
+    }
 
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
@@ -88,8 +103,11 @@ export interface CallingLane {
 export type Selector =
   | DeclarationIndex.FieldId
   | { readonly _tag: 'ElementSelector'; readonly index: number }
+  | { readonly _tag: 'UnionTagSelector' }
+  | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
 
 export type CallingShapeNode =
+  | { readonly _tag: 'EmptyShape'; readonly type: Type.Never; readonly laneCount: 0 }
   | { readonly _tag: 'ScalarShape'; readonly type: Type.Builtin; readonly laneCount: 1 }
   | {
       readonly _tag: 'ProductShape'
@@ -105,6 +123,20 @@ export type CallingShapeNode =
       readonly type: Type.FixedArray
       readonly length: number
       readonly element: CallingShapeNode
+      readonly laneCount: number
+    }
+  | {
+      readonly _tag: 'SumShape'
+      readonly type: Type.StructuralUnion
+      readonly tag: { readonly type: 'I32'; readonly lane: 0 }
+      readonly payloadLaneCount: number
+      readonly zeroFill: true
+      readonly members: ReadonlyArray<{
+        readonly member: Type.Nominal
+        readonly ordinal: number
+        readonly shape: CallingShapeNode
+        readonly payloadSlots: ReadonlyArray<number>
+      }>
       readonly laneCount: number
     }
 
@@ -175,6 +207,44 @@ const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined
       element: type.element,
       length: type.length,
       stride,
+    }),
+  })
+}
+
+const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<Entry>): Entry => {
+  const payloadAlignment = members.reduce(
+    (maximum, member) => Math.max(maximum, member.alignment),
+    1,
+  )
+  const payloadSize = members.reduce((maximum, member) => Math.max(maximum, member.size), 0)
+  const payloadOffset = alignUp(4, payloadAlignment)
+  const alignment = Math.max(4, payloadAlignment)
+  const contentSize = payloadOffset + payloadSize
+  const size = alignUp(contentSize, alignment)
+  return Object.freeze({
+    _tag: 'LayoutEntry',
+    type,
+    size,
+    alignment,
+    representation: Object.freeze({
+      _tag: 'Union',
+      tag: Object.freeze({ bits: 32, size: 4 }),
+      members: Object.freeze(
+        type.members.map((member, ordinal) => {
+          const layout = members.at(ordinal)
+          return Object.freeze({
+            type: member,
+            ordinal,
+            size: layout?.size ?? 0,
+            alignment: layout?.alignment ?? 1,
+          })
+        }),
+      ),
+      payloadOffset,
+      payloadSize,
+      payloadAlignment,
+      tagPadding: payloadOffset - 4,
+      tailPadding: size - contentSize,
     }),
   })
 }
@@ -347,10 +417,36 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
 
   const layoutType = (type: DeclarationIndex.SemanticType): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(type)
+    if (Type.isNever(type)) {
+      return unavailable(type, Object.freeze([]), {
+        _tag: 'InvalidDeclaration',
+        detail: 'Never is uninhabited and has no runtime layout',
+      })
+    }
     if (Type.isNominal(type)) return layoutNominal(type)
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
+    if (Type.isUnion(type)) {
+      const members: Array<Entry> = []
+      for (const member of type.members) {
+        const memberLayout = layoutNominal(member)
+        if (memberLayout._tag === 'UnavailableLayoutEntry') {
+          const result = unavailable(
+            type,
+            type.members,
+            { _tag: 'UnavailableDependency', dependency: member },
+            memberLayout.cause,
+          )
+          completed.set(key, result)
+          return result
+        }
+        members.push(memberLayout)
+      }
+      const result = unionEntry(type, Object.freeze(members))
+      completed.set(key, result)
+      return result
+    }
     const element = layoutType(type.element)
     const dependencies = Object.freeze(Type.nominals(type.element))
     if (element._tag === 'UnavailableLayoutEntry') {
@@ -380,6 +476,7 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
   const addReferenced = (type: DeclarationIndex.SemanticType): void => {
     referenced.set(Type.key(type), type)
     if (Type.isFixedArray(type)) addReferenced(type.element)
+    if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
   }
   for (const module of index.modules) {
     for (const member of module.members) {
@@ -396,7 +493,9 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
     }
   }
   for (const declaration of declarations) layoutNominal(declaration.type)
-  for (const type of referenced.values()) if (!Type.isBuiltin(type)) layoutType(type)
+  for (const type of referenced.values()) {
+    if (!Type.isBuiltin(type) && !Type.isNever(type)) layoutType(type)
+  }
 
   return Object.freeze({
     _tag: 'LayoutCatalog',
@@ -414,6 +513,7 @@ const addExpressionTypes = (
   if (expression._tag === 'Unavailable') return
   types.set(Type.key(expression.type), expression.type)
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject)
+  if (expression._tag === 'UnionConvert') addExpressionTypes(types, expression.source)
   if (expression._tag === 'Project') addExpressionTypes(types, expression.subject)
   if (expression._tag === 'IndexPlace') {
     addExpressionTypes(types, expression.subject)
@@ -477,6 +577,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(type)
+    if (Type.isNever(type)) return undefined
     const candidate = catalogEntry(self, type)
     if (candidate?._tag === 'LayoutEntry') return candidate
     if (!Type.isFixedArray(type) || candidate?._tag === 'UnavailableLayoutEntry') return undefined
@@ -493,6 +594,8 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       for (const field of candidate.representation.fields) add(field.type)
     } else if (candidate.representation._tag === 'Repeated') {
       add(candidate.representation.element)
+    } else if (candidate.representation._tag === 'Union') {
+      for (const member of candidate.representation.members) add(member.type)
     }
   }
   for (const type of reached.values()) add(type)
@@ -528,6 +631,9 @@ const shapeNode = (
   if (Type.isBuiltin(type)) {
     return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
   }
+  if (Type.isNever(type)) {
+    return Object.freeze({ _tag: 'EmptyShape', type, laneCount: 0 })
+  }
   const candidate = entries.get(Type.key(type))
   if (Type.isFixedArray(type)) {
     const element = shapeNode(type.element, entries)
@@ -541,6 +647,32 @@ const shapeNode = (
       length: type.length,
       element,
       laneCount,
+    })
+  }
+  if (Type.isUnion(type)) {
+    const members = Object.freeze(
+      type.members.map((member, ordinal) => {
+        const shape = shapeNode(member, entries)
+        return Object.freeze({
+          member,
+          ordinal,
+          shape,
+          payloadSlots: Object.freeze(Array.from({ length: shape.laneCount }, (_, slot) => slot)),
+        })
+      }),
+    )
+    const payloadLaneCount = members.reduce(
+      (maximum, member) => Math.max(maximum, member.shape.laneCount),
+      0,
+    )
+    return Object.freeze({
+      _tag: 'SumShape',
+      type,
+      tag: Object.freeze({ type: 'I32', lane: 0 }),
+      payloadLaneCount,
+      zeroFill: true,
+      members,
+      laneCount: 1 + payloadLaneCount,
     })
   }
   const fields =
@@ -561,6 +693,7 @@ const materializeLanes = (
   node: CallingShapeNode,
   path: ReadonlyArray<Selector> = Object.freeze([]),
 ): ReadonlyArray<CallingLane> => {
+  if (node._tag === 'EmptyShape') return Object.freeze([])
   if (node._tag === 'ScalarShape') {
     return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.type })])
   }
@@ -570,6 +703,25 @@ const materializeLanes = (
         materializeLanes(field.shape, Object.freeze([...path, field.field])),
       ),
     )
+  }
+  if (node._tag === 'SumShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        type: 'I32' as const,
+      }),
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
+        Object.freeze({
+          _tag: 'CallingLane' as const,
+          path: Object.freeze([
+            ...path,
+            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+          ]),
+          type: 'I32' as const,
+        }),
+      ),
+    ])
   }
   const lanes: Array<CallingLane> = []
   for (let index = 0; index < node.length; index += 1) {
@@ -619,36 +771,66 @@ export const catalogEntry = (
   type: DeclarationIndex.SemanticType,
 ): CatalogEntry | undefined => self.entries.find((candidate) => Type.equals(candidate.type, type))
 
-const representationEquals = (left: Representation, right: Representation): boolean =>
-  left._tag === right._tag &&
-  (left._tag === 'SignedInteger'
-    ? right._tag === 'SignedInteger' && left.bits === right.bits
-    : left._tag === 'Boolean'
-      ? right._tag === 'Boolean' &&
-        left.bits === right.bits &&
-        left.falseValue === right.falseValue &&
-        left.trueValue === right.trueValue
-      : left._tag === 'Repeated'
-        ? right._tag === 'Repeated' &&
-          Type.equals(left.element, right.element) &&
-          left.length === right.length &&
-          left.stride === right.stride
-        : right._tag === 'Aggregate' &&
-          left.tailPadding === right.tailPadding &&
-          left.fields.length === right.fields.length &&
-          left.fields.every((field, index) => {
-            const other = right.fields[index]
-            return (
-              other !== undefined &&
-              field.id.ordinal === other.id.ordinal &&
-              field.name === other.name &&
-              Type.equals(field.type, other.type) &&
-              field.offset === other.offset &&
-              field.size === other.size &&
-              field.alignment === other.alignment &&
-              field.padding === other.padding
-            )
-          }))
+const representationEquals = (left: Representation, right: Representation): boolean => {
+  if (left._tag !== right._tag) return false
+  if (left._tag === 'SignedInteger')
+    return right._tag === 'SignedInteger' && left.bits === right.bits
+  if (left._tag === 'Boolean') {
+    return (
+      right._tag === 'Boolean' &&
+      left.bits === right.bits &&
+      left.falseValue === right.falseValue &&
+      left.trueValue === right.trueValue
+    )
+  }
+  if (left._tag === 'Repeated') {
+    return (
+      right._tag === 'Repeated' &&
+      Type.equals(left.element, right.element) &&
+      left.length === right.length &&
+      left.stride === right.stride
+    )
+  }
+  if (left._tag === 'Union') {
+    return (
+      right._tag === 'Union' &&
+      left.payloadOffset === right.payloadOffset &&
+      left.payloadSize === right.payloadSize &&
+      left.payloadAlignment === right.payloadAlignment &&
+      left.tagPadding === right.tagPadding &&
+      left.tailPadding === right.tailPadding &&
+      left.members.length === right.members.length &&
+      left.members.every((member, ordinal) => {
+        const other = right.members.at(ordinal)
+        return (
+          other !== undefined &&
+          Type.equals(member.type, other.type) &&
+          member.ordinal === other.ordinal &&
+          member.size === other.size &&
+          member.alignment === other.alignment
+        )
+      })
+    )
+  }
+  return (
+    right._tag === 'Aggregate' &&
+    left.tailPadding === right.tailPadding &&
+    left.fields.length === right.fields.length &&
+    left.fields.every((field, index) => {
+      const other = right.fields[index]
+      return (
+        other !== undefined &&
+        field.id.ordinal === other.id.ordinal &&
+        field.name === other.name &&
+        Type.equals(field.type, other.type) &&
+        field.offset === other.offset &&
+        field.size === other.size &&
+        field.alignment === other.alignment &&
+        field.padding === other.padding
+      )
+    })
+  )
+}
 
 const invalid = (
   rule: Violation['rule'],
@@ -700,6 +882,38 @@ const verifyEntry = (
             `${Type.encode(candidate.type)} has non-canonical repeated layout facts`,
           ),
         ])
+  }
+  if (Type.isUnion(candidate.type)) {
+    const members = candidate.type.members.flatMap((member): ReadonlyArray<Entry> => {
+      const memberLayout = available.get(Type.key(member))
+      return memberLayout === undefined ? [] : [memberLayout]
+    })
+    if (members.length !== candidate.type.members.length) {
+      return Object.freeze([
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has unavailable union members`,
+        ),
+      ])
+    }
+    const expected = unionEntry(candidate.type, Object.freeze(members))
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `${Type.encode(candidate.type)} has non-canonical union layout facts`,
+          ),
+        ])
+  }
+  if (Type.isNever(candidate.type)) {
+    return Object.freeze([
+      invalid('InvalidAggregate', candidate.type, 'Never cannot have a runtime layout entry'),
+    ])
   }
   if (candidate.representation._tag !== 'Aggregate') {
     return Object.freeze([
@@ -827,10 +1041,15 @@ const fieldIdEquals = (left: DeclarationIndex.FieldId, right: DeclarationIndex.F
   left.struct.sourceId === right.struct.sourceId &&
   left.struct.ordinal === right.struct.ordinal
 
-const selectorEquals = (left: Selector, right: Selector): boolean =>
+/** Compares two compiler-planned physical selectors. */
+export const selectorEquals = (left: Selector, right: Selector): boolean =>
   left._tag === 'ElementSelector'
     ? right._tag === 'ElementSelector' && left.index === right.index
-    : right._tag === 'FieldId' && fieldIdEquals(left, right)
+    : left._tag === 'UnionTagSelector'
+      ? right._tag === 'UnionTagSelector'
+      : left._tag === 'UnionPayloadSelector'
+        ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
+        : right._tag === 'FieldId' && fieldIdEquals(left, right)
 
 const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
   const expected = callingShapes(self.entries)
@@ -913,7 +1132,9 @@ const representationText = (representation: Representation): string =>
       ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
       : representation._tag === 'Repeated'
         ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-        : `aggregate tail-padding=${representation.tailPadding}`
+        : representation._tag === 'Union'
+          ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+          : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -926,7 +1147,12 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
       ? [
           `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
         ]
-      : []),
+      : candidate.representation._tag === 'Union'
+        ? candidate.representation.members.map(
+            (member) =>
+              `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+          )
+        : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
@@ -946,7 +1172,11 @@ export const encode = (self: Plan): string =>
                       .map((selector) =>
                         selector._tag === 'ElementSelector'
                           ? `[${selector.index}]`
-                          : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
+                          : selector._tag === 'UnionTagSelector'
+                            ? 'tag'
+                            : selector._tag === 'UnionPayloadSelector'
+                              ? `payload[${selector.slot}]`
+                              : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )
