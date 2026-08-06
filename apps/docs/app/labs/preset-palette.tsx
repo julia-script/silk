@@ -122,15 +122,15 @@ export function PresetPalette({
         className={styles.palette}
         role="dialog"
         aria-modal="true"
-        aria-label="Load a preset program"
+        aria-label="Load a project"
         onClick={(event) => event.stopPropagation()}
       >
         <input
           ref={inputRef}
           className={styles.search}
           value={query}
-          placeholder={`Filter ${presets.length} presets…`}
-          aria-label="Filter presets"
+          placeholder={`Filter ${presets.length} projects…`}
+          aria-label="Filter projects"
           spellCheck={false}
           autoComplete="off"
           onChange={(event) => {

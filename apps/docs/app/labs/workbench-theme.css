@@ -1,0 +1,46 @@
+/*
+ * The workbench's own visual language, derived from the wireframe-`S` logo: warm near-black,
+ * hairlines, off-white ink.
+ *
+ * These are plain custom properties on `.workbenchRoot` rather than fumadocs' `--color-fd-*`
+ * tokens because the workbench is a tool, not a document — it is dark regardless of the site
+ * theme, and reusing the doc tokens would make it follow a light site into an unusable state.
+ *
+ * The dim tones carry contrast floors in their comments. The first pass of this palette landed
+ * two of them at 1.9:1 and 2.3:1, which is what those notes exist to prevent recurring.
+ */
+
+.workbenchRoot {
+  --wb-bg-deep: #0e0d0c;
+  --wb-bg-bar: #121110;
+  --wb-bg-header: #131211;
+  --wb-bg-pane: #161513;
+  --wb-bg-strip: #141312;
+  --wb-hover: #201d1a;
+  --wb-active: #1a1815;
+  --wb-active-strong: #1e1b18;
+  --wb-hairline: #201e1b;
+  --wb-hairline-strong: #262320;
+  --wb-ink: #ece7df;
+  --wb-ink-2: #cfc8bf;
+  --wb-ink-3: #9a9289;
+  /* Meta, spans, status. ~5:1 on --wb-bg-pane; do not go darker. */
+  --wb-ink-4: #8d857c;
+  /* Line numbers. ~3.5:1 on --wb-bg-pane; do not go darker. */
+  --wb-gutter: #726b63;
+  --wb-amber: #c6a678;
+  --wb-warn: #e0a355;
+  --wb-error: #e0703c;
+  --wb-error-ink: #e89468;
+  --wb-violet: #b7a6d6;
+  --wb-green: #5a9c78;
+  --wb-green-ink: #8fc7a8;
+
+  --wb-row-h: 17px;
+  --wb-bar-h: 22px;
+  --wb-strip-h: 19px;
+
+  /* The current page never defines `--font-mono`, so the workbench names its own stack rather
+     than silently falling back to `ui-monospace` the way the old chrome did. */
+  --wb-font: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
