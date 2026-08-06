@@ -56,7 +56,7 @@ export const grammar: Grammar = {
     { name: 'constant.language.boolean.silk', match: `\\b(?:${booleanSpellings.join('|')})\\b` },
     { name: 'constant.numeric.integer.silk', match: '\\b[0-9]+\\b' },
     { name: 'keyword.operator.silk', match: '->|\\|>|[=!<>]=|[-+*/%!<>=]' },
-    { name: 'punctuation.silk', match: '[(){}:,.]' },
+    { name: 'punctuation.silk', match: '[(){}\\[\\]:,.]' },
   ],
 }
 
@@ -65,14 +65,17 @@ export const languageConfiguration = {
   comments: { lineComment: '//' },
   brackets: [
     ['{', '}'],
+    ['[', ']'],
     ['(', ')'],
   ],
   autoClosingPairs: [
     { open: '{', close: '}' },
+    { open: '[', close: ']' },
     { open: '(', close: ')' },
   ],
   surroundingPairs: [
     ['{', '}'],
+    ['[', ']'],
     ['(', ')'],
   ],
 }

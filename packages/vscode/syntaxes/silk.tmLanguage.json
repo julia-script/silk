@@ -29,7 +29,7 @@
     },
     {
       "name": "punctuation.silk",
-      "match": "[(){}:,.]"
+      "match": "[(){}\\[\\]:,.]"
     }
   ]
 }

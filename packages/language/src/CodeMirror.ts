@@ -43,6 +43,8 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   RightParenthesis: punctuation,
   LeftBrace: punctuation,
   RightBrace: punctuation,
+  LeftBracket: punctuation,
+  RightBracket: punctuation,
   Colon: punctuation,
   Comma: punctuation,
   Dot: punctuation,
