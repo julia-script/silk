@@ -1,38 +1,136 @@
 # @silk-effect/compiler-cli
 
-The `silk` command line interface for the Silk Effect bootstrap compiler.
+The project-oriented command line interface for the Silk Effect bootstrap compiler.
 
-## Usage
+## Project setup
+
+A Silk project is rooted by a `silk.toml` manifest:
+
+```toml
+[package]
+name = "hello"
+root = "src/Main.silk"
+```
+
+`package.name` starts with a lowercase letter and contains only lowercase letters, digits, and
+hyphens. `package.root` is resolved relative to the manifest. By default, the entry file's
+directory is also its source root. A wider root can be selected explicitly:
+
+```toml
+[package]
+name = "hello"
+root = "src/app/Main.silk"
+source-root = "src"
+```
+
+Project commands search the working directory and its ancestors for the nearest `silk.toml`.
+`--manifest-path <path>` selects one exact manifest instead and disables upward discovery.
+
+## Commands
+
+### `silk check`
+
+Analyze the entire reachable module graph without invoking the backend, Clang, or the linker and
+without creating `.silk` build output.
 
 ```bash
-silk compile main.silk -o ./main
+silk check
+silk check --manifest-path ./examples/hello/silk.toml
 ```
 
+### `silk build`
+
+Build the nearest project as a native executable:
+
+```bash
+silk build
+silk build --release
+silk build --profile release-with-debug
 ```
-FLAGS
-  --output, -o string    Destination path for the linked executable (default: a.out).
-  --target choice        Compilation target. Defaults to the host target.
-  --profile choice       Optimization profile: debug, release, release-with-debug.
-  --clang string         Path to the pinned Clang used for object emission and linking.
-  --save-temps           Keep the build scope intermediates for inspection.
-  --timings              Print the per-phase timing and memory report.
+
+Artifacts have a deterministic location:
+
+```text
+.silk/build/<target>/<profile>/<package-name>
 ```
 
-The command exits `0` on a successful compilation and `1` when any phase reports failure.
-Diagnostics are printed as `path:line:column: severity[CODE] message`.
+### `silk run`
 
-## Scope: one file
+Build for the host and run the resulting executable. Arguments after `--` are passed literally to
+the program, and stdin, stdout, and stderr are inherited:
 
-The compiler resolves imports only among the sources it is handed and has no filesystem module
-resolution yet, so `compile` accepts exactly one source file. The file's name, minus every
-extension, becomes the module identity (`main.silk` → `main`), which must be made of letters,
-digits, underscores, or hyphens.
+```bash
+silk run
+silk run --release -- --verbose input.txt
+```
 
-An `import` inside that file therefore reports an unknown module rather than searching the disk.
-Multi-file projects are a compiler change — filesystem resolution in `ModuleClosure` — after which
-this command grows a directory or manifest input.
+Cross-target execution is rejected before compilation. A successful build followed by program
+execution returns the program's exact exit status.
+
+### `silk build-exe`
+
+Compile an explicitly selected root source without a manifest. This is the low-level escape hatch
+for scripts, compiler experiments, and one-off files:
+
+```bash
+silk build-exe main.silk -o ./main
+silk build-exe ./src/app/Main.silk --source-root ./src -o ./main
+```
+
+`build-exe` supports `--source-root`, `--output`/`-o`, `--target`, `--profile`, `--clang`,
+`--save-temps`, and `--timings`. The former `silk compile` command was removed; there is no
+compatibility alias.
+
+## Shared project options
+
+`build`, `check`, and `run` accept:
+
+- `--manifest-path <path>` — select an exact manifest.
+- `--target <target>` — select a native target; the host is the default.
+- `--profile <debug|release|release-with-debug>` — select the compilation profile.
+- `--release` — shorthand for `--profile release`; it conflicts with a different explicit profile.
+
+## Module resolution
+
+Imports resolve from the project source root, never from the importing file's directory.
+`import compiler.Syntax` requests exactly `<source-root>/compiler/Syntax.silk`. Resolution does not
+probe alternate extensions, index files, parent directories, or case-folded names.
+
+A missing imported file is a recoverable source diagnostic. Permission, I/O, and equivalent access
+failures are operational resolver failures. `check` retains all safe frontend facts for tooling;
+`build` and `run` stop before backend work when resolution or source validation fails.
+
+## Exit behavior
+
+- `0` — checking or building succeeded.
+- `1` — source diagnostics or a missing/invalid entry rejected the program.
+- `2` — project configuration, source storage, target, backend, or toolchain operation failed.
+- `silk run` — after a successful build, the compiled program's exact exit status.
+
+Failed builds do not commit the requested executable. Diagnostics from every loaded module use the
+form `path:line:column: severity[CODE] message`.
 
 ## Toolchain
 
-Object emission and linking shell out to Clang. The path is never discovered from `PATH` by the
-compiler itself; pass `--clang` to pin it (defaults to `clang`).
+Project workflows currently use `clang` from the process environment. `build-exe --clang <path>`
+can pin a specific executable. Automatic toolchain discovery and management are not implemented.
+
+## Planned, not yet supported
+
+The CLI intentionally exposes no placeholder commands for these future capabilities:
+
+- `test` and a language-level test model
+- `clean`
+- `new` and `init`
+- `fmt`
+- `doc`
+- target discovery/listing
+- incremental and shared build caching
+- multi-package workspaces
+- dependency and package management
+- stable machine-readable output
+- language-server command integration
+- toolchain installation, discovery, and version management
+
+Their eventual interfaces should be designed from real compiler and project requirements rather
+than reserved prematurely in the command surface.

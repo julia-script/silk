@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { Ownership } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
@@ -128,7 +129,7 @@ export function OwnershipLab() {
   const [text, setText] = useState<string>(presets[0].source)
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
 
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
+  const snapshot = useMemo(() => Snapshot.ofSource(sourceId, encoder.encode(text)), [text])
   const facts = Analysis.ownershipOf(snapshot, sourceId)
 
   return (

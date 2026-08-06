@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { ModuleClosure } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
@@ -72,6 +73,8 @@ const targetLabel = (target: ModuleClosure.ImportTarget): string => {
       return `${target.module} · unknown ${spanLabel(target.token.span)}`
     case 'Self':
       return `${target.module} · self ${spanLabel(target.token.span)}`
+    case 'Failed':
+      return `${target.module} · resolution failed ${spanLabel(target.token.span)}`
     case 'Unavailable':
       return `unavailable ${spanLabel(target.syntax.span)}`
   }
@@ -143,7 +146,7 @@ export function ModuleClosureLab() {
 
   const closure = useMemo(
     () =>
-      Analysis.make({
+      Snapshot.make({
         rootModule: preset.root,
         sources: new Map(Object.entries(sources).map(([name, text]) => [name, encoder.encode(text)])),
       }).closure,

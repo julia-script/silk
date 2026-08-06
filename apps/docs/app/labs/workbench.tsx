@@ -13,6 +13,7 @@
  */
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from './snapshot'
 import { ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, Target } from '@silk-effect/compiler'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
@@ -255,7 +256,7 @@ export function Workbench() {
 
   const snapshot = useMemo(
     () =>
-      Analysis.make({
+      Snapshot.make({
         rootModule: root,
         sources: new Map(
           Object.entries(modules).map(([name, text]) => [name, encoder.encode(text)]),

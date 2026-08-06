@@ -13,7 +13,10 @@ const ascii = (value: string): Uint8Array =>
 const snapshotOf = (text: string) =>
   Analysis.ofSource('wasm/program', ascii(text), 'wasm32-unknown-unknown')
 
-const emit = (text: string) => Analysis.codegenWasm(snapshotOf(text), { mode: 'release' })
+const emit = (text: string) =>
+  Effect.flatMap(snapshotOf(text), (snapshot) =>
+    Analysis.codegenWasm(snapshot, { mode: 'release' }),
+  )
 
 /**
  * Instantiates the emitted module and calls its entry export, reporting a wasm trap as the
@@ -36,10 +39,10 @@ const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
 /** The bootstrap interpreter is the oracle every emission is differentially checked against. */
-const interpret = (text: string): number | 'trap' => {
-  const outcome = Analysis.evaluate(snapshotOf(text))
+const interpret = Effect.fnUntraced(function* (text: string) {
+  const outcome = Analysis.evaluate(yield* snapshotOf(text))
   return outcome._tag === 'Completed' ? outcome.result.value : 'trap'
-}
+})
 
 it.effect('emits an instantiable module whose entry is exported as silk_main', () =>
   Effect.gen(function* () {
@@ -133,7 +136,7 @@ it.effect('nests an if inside an arm for nested source conditionals', () =>
 
 it.effect('rejects a CFG with a back-edge instead of emitting wrong control flow', () =>
   Effect.gen(function* () {
-    const snapshot = snapshotOf('pub fn main() -> I32 { return 42 }')
+    const snapshot = yield* snapshotOf('pub fn main() -> I32 { return 42 }')
     const program = Analysis.loweredMir(snapshot)
     const main = program.functions[0]
     const entry = main?.blocks[0]
@@ -170,7 +173,7 @@ it.effect('rejects a CFG with a back-edge instead of emitting wrong control flow
 
 it.effect('rejects native-target MIR before constructing a WebAssembly module', () =>
   Effect.gen(function* () {
-    const snapshot = Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSource(
       'wasm/native-plan',
       ascii('pub fn main() -> I32 { return 42 }'),
       'aarch64-apple-darwin',
@@ -193,8 +196,8 @@ it.effect('emits the name section only for debug builds', () =>
   Effect.gen(function* () {
     const source = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`
-    const debug = yield* Analysis.codegenWasm(snapshotOf(source), { mode: 'debug' })
-    const release = yield* Analysis.codegenWasm(snapshotOf(source), { mode: 'release' })
+    const debug = yield* Analysis.codegenWasm(yield* snapshotOf(source), { mode: 'debug' })
+    const release = yield* Analysis.codegenWasm(yield* snapshotOf(source), { mode: 'release' })
 
     const decoder = new TextDecoder('utf8', { fatal: false })
     assert.include(decoder.decode(debug.bitcode), 'name')
@@ -213,7 +216,9 @@ it.effect('runs identically whether or not names were stripped', () =>
   Effect.gen(function* () {
     const source = 'pub fn main() -> I32 { return I32.add(40, 2) }'
     const instantiate = Effect.fnUntraced(function* (mode: 'debug' | 'release') {
-      const bytes = (yield* Analysis.codegenWasm(snapshotOf(source), { mode })).bitcode.slice()
+      const bytes = (yield* Analysis.codegenWasm(yield* snapshotOf(source), {
+        mode,
+      })).bitcode.slice()
       const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {})
       return (instance.exports.silk_main as () => number)()
     })
@@ -270,13 +275,12 @@ pub fn main() -> I32 { return choose(1, 42) }`,
   ['addition overflow traps', 'pub fn main() -> I32 { return I32.add(2147483647, 1) }'],
   ['subtraction overflow traps', 'pub fn main() -> I32 { return I32.subtract(-2147483648, 1) }'],
   ['multiplication overflow traps', 'pub fn main() -> I32 { return I32.multiply(2147483647, 2) }'],
-  ['unresolved call traps', 'pub fn main() -> I32 { return missing() }'],
 ]
 
 for (const [name, source] of programs) {
   it.effect(`executes ${name} exactly as the bootstrap interpreter does`, () =>
     Effect.gen(function* () {
-      assert.strictEqual(yield* run(source), interpret(source))
+      assert.strictEqual(yield* run(source), yield* interpret(source))
     }),
   )
 }

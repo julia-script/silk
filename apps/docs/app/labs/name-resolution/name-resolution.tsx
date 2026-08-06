@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { NameResolution } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -142,7 +143,7 @@ export function NameResolutionLab() {
   )
   const snapshot = useMemo(
     () =>
-      Analysis.make({
+      Snapshot.make({
         rootModule: preset.root,
         sources: new Map(
           Object.entries(preset.modules).map(([name, source]) => [

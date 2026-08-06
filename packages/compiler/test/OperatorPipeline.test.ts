@@ -12,32 +12,36 @@ const encoder = new TextEncoder()
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/operator.${name}`, import.meta.url), 'utf8')
 
-it('lowers negation to generated zero plus source-authored trapping subtraction', () => {
-  const snapshot = Analysis.ofSource(
-    'golden/negation',
-    encoder.encode('pub fn main() -> I32 { let value = 42 return -value }'),
-    'aarch64-apple-darwin',
-  )
-  const operations = Analysis.loweredMir(snapshot).functions.at(0)?.blocks.at(0)?.operations ?? []
-  const zero = operations.find((operation) => operation._tag === 'Literal' && operation.value === 0)
-  const subtraction = operations.find(
-    (operation) => operation._tag === 'Binary' && operation.operator === 'Subtract',
-  )
+it.effect('lowers negation to generated zero plus source-authored trapping subtraction', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'golden/negation',
+      encoder.encode('pub fn main() -> I32 { let value = 42 return -value }'),
+      'aarch64-apple-darwin',
+    )
+    const operations = Analysis.loweredMir(snapshot).functions.at(0)?.blocks.at(0)?.operations ?? []
+    const zero = operations.find(
+      (operation) => operation._tag === 'Literal' && operation.value === 0,
+    )
+    const subtraction = operations.find(
+      (operation) => operation._tag === 'Binary' && operation.operator === 'Subtract',
+    )
 
-  assert.strictEqual(zero?._tag, 'Literal')
-  assert.strictEqual(zero?.provenance.generated, true)
-  assert.strictEqual(subtraction?._tag, 'Binary')
-  assert.strictEqual(subtraction?.provenance.generated, false)
-})
+    assert.strictEqual(zero?._tag, 'Literal')
+    assert.strictEqual(zero?.provenance.generated, true)
+    assert.strictEqual(subtraction?._tag, 'Binary')
+    assert.strictEqual(subtraction?.provenance.generated, false)
+  }),
+)
 
 it.effect('pins one operator pipeline through canonical HIR, MIR, LLVM, and WebAssembly', () =>
   Effect.gen(function* () {
-    const native = Analysis.ofSource(
+    const native = yield* Analysis.ofSource(
       'golden/operator',
       encoder.encode(source),
       'aarch64-apple-darwin',
     )
-    const wasm = Analysis.ofSource(
+    const wasm = yield* Analysis.ofSource(
       'golden/operator',
       encoder.encode(source),
       'wasm32-unknown-unknown',

@@ -1,4 +1,5 @@
 import { Analysis, Diagnostic } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { Elaboration } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -16,7 +17,7 @@ import {
 const encoder = new TextEncoder()
 
 const snap = (text: string): Analysis.Snapshot =>
-  Analysis.ofSource('memory/component-flow', encoder.encode(text))
+  Snapshot.ofSource('memory/component-flow', encoder.encode(text))
 
 const analyze = (text: string): Elaboration.Result => Analysis.rootAnalysis(snap(text))
 

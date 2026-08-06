@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import * as Effect from 'effect/Effect'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -20,7 +21,7 @@ describe('LlvmIrLab', () => {
   })
 
   it('shows the checked arithmetic expansion through the facade', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/llvm-arith-test',
       encoder.encode('pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
     )
@@ -37,7 +38,7 @@ describe('LlvmIrLab', () => {
   })
 
   it('connects operator provenance to the same canonical MIR and LLVM operations', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/llvm-operator-test',
       encoder.encode('pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }'),
     )
@@ -60,7 +61,7 @@ describe('LlvmIrLab', () => {
   })
 
   it('shows user-authored branch diamonds through the facade', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/llvm-branch-test',
       encoder.encode('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
     )
@@ -76,7 +77,7 @@ describe('LlvmIrLab', () => {
   })
 
   it('answers debug emission with metadata through the facade', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/llvm-ir-test',
       encoder.encode('pub fn main() -> I32 { return 42 }'),
     )

@@ -1,5 +1,9 @@
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import type * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import type * as Path from 'effect/Path'
+import * as FileSourceResolver from './FileSourceResolver.js'
 
 /**
  * Terminal rendering of driver outcomes: diagnostics, per-phase timings, and failure provenance.
@@ -12,6 +16,31 @@ export interface Position {
   readonly line: number
   readonly column: number
 }
+
+/** Physical display path and exact bytes for one loaded canonical module. */
+export interface DisplaySource {
+  readonly path: string
+  readonly bytes: Uint8Array
+}
+
+/** Loaded sources keyed by the diagnostic source identities they own. */
+export type SourceCatalog = ReadonlyMap<string, DisplaySource>
+
+/** Builds display locations for the canonical modules loaded through one filesystem resolver. */
+export const catalog = (
+  resolver: FileSourceResolver.FileSourceResolver,
+  sources: ReadonlyMap<string, SourceFile.SourceFile>,
+  path: Path.Path,
+): SourceCatalog =>
+  new Map(
+    [...sources].map(([module, source]) => [
+      module,
+      {
+        path: FileSourceResolver.sourcePath(resolver, module, path),
+        bytes: SourceFile.toUint8Array(source),
+      },
+    ]),
+  )
 
 const lineFeed = 0x0a
 
@@ -34,10 +63,11 @@ export const positionAt = (bytes: Uint8Array, offset: number): Position => {
 }
 
 /** Renders one diagnostic as a `path:line:column: severity[CODE] message` line with its notes. */
-export const diagnostic = (
-  self: Diagnostic.Diagnostic,
-  source: { readonly path: string; readonly bytes: Uint8Array },
-): string => {
+export const diagnostic = (self: Diagnostic.Diagnostic, sources: SourceCatalog): string => {
+  const source = sources.get(self.span.sourceId)
+  if (source === undefined) {
+    return `${self.span.sourceId}:?:?: ${self.severity}[${self.code}] ${self.message}`
+  }
   const at = positionAt(source.bytes, self.span.start)
   const head = `${source.path}:${at.line}:${at.column}: ${self.severity}[${self.code}] ${self.message}`
   const notes = (self.notes ?? []).map((note) => `  note: ${note}`)
@@ -47,8 +77,8 @@ export const diagnostic = (
 /** Renders every diagnostic of one run, in the order the driver published them. */
 export const diagnostics = (
   self: ReadonlyArray<Diagnostic.Diagnostic>,
-  source: { readonly path: string; readonly bytes: Uint8Array },
-): string => self.map((entry) => diagnostic(entry, source)).join('\n')
+  sources: SourceCatalog,
+): string => self.map((entry) => diagnostic(entry, sources)).join('\n')
 
 const milliseconds = (value: number): string => `${value.toFixed(1)}ms`
 
@@ -114,32 +144,33 @@ const entryReason = (reason: Extract<Driver.NoEntry, { _tag: 'NoEntry' }>['reaso
 /** The human-readable summary of one outcome, excluding the phase table. */
 export const outcome = (
   self: Driver.Outcome,
-  source: { readonly path: string; readonly bytes: Uint8Array },
+  sources: SourceCatalog,
+  entryPath: string,
 ): string => {
   switch (self._tag) {
     case 'Compiled': {
-      const rendered = diagnostics(self.diagnostics, source)
+      const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
-        `Compiled ${source.path} -> ${self.executable} (${self.target.id}, ${self.symbols.length} symbols)`,
+        `Compiled ${entryPath} -> ${self.executable} (${self.target.id}, ${self.symbols.length} symbols)`,
       ].join('\n')
     }
     case 'NoEntry': {
-      const rendered = diagnostics(self.diagnostics, source)
+      const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
         `No entry point: ${entryReason(self.reason)}`,
       ].join('\n')
     }
     case 'TargetFailed': {
-      const rendered = diagnostics(self.diagnostics, source)
+      const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
         `Target error: ${self.error.message}`,
       ].join('\n')
     }
     case 'BackendFailed': {
-      const rendered = diagnostics(self.diagnostics, source)
+      const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
         `Backend error: ${self.error.message}`,
@@ -147,8 +178,26 @@ export const outcome = (
     }
     case 'Failed':
       return toolchainFailure(self.stage, self.failure)
+    case 'Rejected':
+      return diagnostics(self.diagnostics, sources)
   }
 }
+
+/** Renders a typed source-resolution failure with every safe frontend diagnostic. */
+export const sourceResolutionFailed = (
+  self: Driver.SourceResolutionFailed,
+  sources: SourceCatalog,
+): string => {
+  const renderedDiagnostics = diagnostics(self.diagnostics, sources)
+  const failures = resolutionFailures(self.failures)
+  return [...(renderedDiagnostics.length > 0 ? [renderedDiagnostics] : []), ...failures].join('\n')
+}
+
+/** Renders operational source resolver failures independently of any strict driver outcome. */
+export const resolutionFailures = (
+  self: ReadonlyArray<SourceResolver.SourceResolverError>,
+): ReadonlyArray<string> =>
+  self.map((failure) => `Source resolution error [${failure.module}]: ${failure.message}`)
 
 /** Whether an outcome represents a successful compilation, deciding the process exit status. */
 export const succeeded = (self: Driver.Outcome): self is Driver.Compiled => self._tag === 'Compiled'

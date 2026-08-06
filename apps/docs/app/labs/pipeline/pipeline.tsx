@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -117,7 +118,7 @@ export function PipelineLab() {
 
   const { snapshot, elapsedMs } = useMemo(() => {
     const startedAt = performance.now()
-    const built = Analysis.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin')
+    const built = Snapshot.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin')
     return { snapshot: built, elapsedMs: performance.now() - startedAt }
   }, [text])
   const rows = pipelineRows(snapshot)

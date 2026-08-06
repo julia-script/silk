@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
 import * as Target from '../src/Target.js'
@@ -6,20 +7,22 @@ import * as Target from '../src/Target.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-it('plans only concrete types reached through discovered instances', () => {
-  const snapshot = Analysis.ofSource(
-    'layout/program',
-    ascii(`pub fn unused(value: Bool) -> Bool { return value }
+it.effect('plans only concrete types reached through discovered instances', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'layout/program',
+      ascii(`pub fn unused(value: Bool) -> Bool { return value }
 pub fn main() -> I32 { return 42 }`),
-  )
-  const plan = Layout.plan(Target.aarch64AppleDarwin, Analysis.instancesOf(snapshot))
+    )
+    const plan = Layout.plan(Target.aarch64AppleDarwin, Analysis.instancesOf(snapshot))
 
-  assert.deepEqual(
-    plan.entries.map((candidate) => candidate.type),
-    ['I32'],
-  )
-  assert.deepEqual(Layout.verify(plan), [])
-})
+    assert.deepEqual(
+      plan.entries.map((candidate) => candidate.type),
+      ['I32'],
+    )
+    assert.deepEqual(Layout.verify(plan), [])
+  }),
+)
 
 it('orders and encodes canonical scalar entries identically on every target', () => {
   for (const target of Target.all) {

@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { PipelineLab, pipelineRows } from './pipeline'
@@ -35,7 +36,7 @@ describe('PipelineLab', () => {
 
 describe('pipelineRows', () => {
   it('shows per-phase diagnostic counts and explicit recovery states for damaged programs', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/pipeline-test',
       new TextEncoder().encode('@ pub fn main( -> Mystery { return 42 }'),
     )

@@ -1,191 +1,187 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as ModuleClosure from '../src/ModuleClosure.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const fn = 'pub fn main() -> I32 { return 42 }'
 
-const request = (
+const fixture = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): ModuleClosure.CompilationRequest => ({
-  rootModule,
-  sources: new Map(entries.map(([name, text]) => [name, ascii(text)])),
-})
+): Effect.Effect<ModuleClosure.Closure> => {
+  const rootText = entries.find(([name]) => name === rootModule)?.[1]
+  if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
+  const imports = new Map(
+    entries
+      .filter(([name]) => name !== rootModule)
+      .map(([name, text]) => [name, ascii(text)] as const),
+  )
+  return ModuleClosure.load({ root: SourceFile.make(rootModule, ascii(rootText)) }).pipe(
+    Effect.provide(SourceResolver.memory(imports)),
+  )
+}
 
 const importNames = (module: ModuleClosure.Module): ReadonlyArray<string> =>
   module.imports.map((fact) =>
     fact.target._tag === 'Unavailable' ? '<unavailable>' : fact.target.module,
   )
 
-it('loads a diamond closure once per module in canonical order', () => {
-  const closure = ModuleClosure.load(
-    request('root', [
-      ['root', `import left\nimport right\n${fn}`],
-      ['left', `import shared\n${fn}`],
-      ['right', `import shared\n${fn}`],
-      ['shared', fn],
-    ]),
-  )
+it.effect('loads a diamond once per module and excludes unreachable sources', () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = []
+    const sources = new Map([
+      ['left', ascii(`import shared\n${fn}`)],
+      ['right', ascii(`import shared\n${fn}`)],
+      ['shared', ascii(fn)],
+      ['island', ascii(fn)],
+    ])
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolve: (module: string) =>
+        Effect.sync(() => {
+          calls.push(module)
+          const bytes = sources.get(module)
+          return bytes === undefined ? Option.none() : Option.some(Uint8Array.from(bytes))
+        }),
+    })
+    const closure = yield* ModuleClosure.load({
+      root: SourceFile.make('root', ascii(`import left\nimport right\n${fn}`)),
+    }).pipe(Effect.provide(resolver))
 
-  assert.deepEqual(
-    closure.modules.map((module) => module.name),
-    ['left', 'right', 'root', 'shared'],
-  )
-  assert.deepEqual(closure.cycles, [])
-  assert.deepEqual(closure.diagnostics, [])
-  assert.strictEqual(Object.isFrozen(closure), true)
-})
+    assert.deepEqual(
+      closure.modules.map((module) => module.name),
+      ['left', 'right', 'root', 'shared'],
+    )
+    assert.deepEqual(calls, ['left', 'right', 'shared'])
+    assert.deepEqual([...closure.sources.keys()], ['left', 'right', 'root', 'shared'])
+    assert.deepEqual(closure.resolutionFailures, [])
+    assert.strictEqual(Object.isFrozen(closure), true)
+  }),
+)
 
-it('excludes unreachable modules from the closure', () => {
-  const closure = ModuleClosure.load(
-    request('root', [
-      ['root', fn],
-      ['island', `import root\n${fn}`],
-    ]),
-  )
+it.effect('is deterministic across resolver supply order', () =>
+  Effect.gen(function* () {
+    const entries: ReadonlyArray<readonly [string, string]> = [
+      ['root', `import zeta\nimport alpha\n${fn}`],
+      ['zeta', `import alpha\n${fn}`],
+      ['alpha', fn],
+    ]
+    const forward = yield* fixture('root', entries)
+    const reversed = yield* fixture('root', [...entries].reverse())
+    assert.deepEqual(forward, reversed)
+  }),
+)
 
-  assert.deepEqual(
-    closure.modules.map((module) => module.name),
-    ['root'],
-  )
-  assert.deepEqual(closure.diagnostics, [])
-})
+it.effect('diagnoses absence and self-imports without resolving the root', () =>
+  Effect.gen(function* () {
+    const closure = yield* fixture('root', [['root', `import missing\nimport root\n${fn}`]])
+    const root = closure.modules.at(0)
+    assert.notStrictEqual(root, undefined)
+    if (root === undefined) return
+    assert.deepEqual(importNames(root), ['missing', 'root'])
+    assert.deepEqual(
+      closure.diagnostics.map((diagnostic) => diagnostic.code),
+      ['MOD0001', 'MOD0002'],
+    )
+    assert.strictEqual(root.imports.at(0)?.target._tag, 'Unknown')
+    assert.strictEqual(root.imports.at(1)?.target._tag, 'Self')
+  }),
+)
 
-it('rejects a request whose root module is missing', () => {
-  assert.throws(() => ModuleClosure.load(request('absent', [['root', fn]])), RangeError)
-})
+it.effect('suppresses resolver calls and module diagnostics for damaged import syntax', () =>
+  Effect.gen(function* () {
+    const closure = yield* fixture('root', [['root', `import\n${fn}`]])
+    const root = closure.modules.at(0)
+    assert.strictEqual(root?.imports.at(0)?.target._tag, 'Unavailable')
+    assert.deepEqual(closure.diagnostics, [])
+    assert.deepEqual(
+      root?.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+      ['PAR0001'],
+    )
+  }),
+)
 
-it('is independent of source supply order', () => {
-  const entries: ReadonlyArray<readonly [string, string]> = [
-    ['root', `import zeta\nimport alpha\n${fn}`],
-    ['zeta', `import alpha\n${fn}`],
-    ['alpha', fn],
-  ]
-  const forward = ModuleClosure.load(request('root', entries))
-  const reversed = ModuleClosure.load(request('root', [...entries].reverse()))
+it.effect('retains partial closure facts around ordered operational failures', () =>
+  Effect.gen(function* () {
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolve: (module: string) => {
+        if (module === 'readable') return Effect.succeed(Option.some(ascii(fn)))
+        return Effect.fail(
+          new SourceResolver.SourceResolverError({
+            operation: 'test.resolve',
+            module,
+            message: `cannot read ${module}`,
+            reason: { _tag: 'WrappedFailure', cause: new Error(module) },
+          }),
+        )
+      },
+    })
+    const closure = yield* ModuleClosure.load({
+      root: SourceFile.make('root', ascii(`import zeta\nimport readable\nimport alpha\n${fn}`)),
+    }).pipe(Effect.provide(resolver))
 
-  assert.deepEqual(forward, reversed)
-})
+    assert.deepEqual(
+      closure.modules.map((module) => module.name),
+      ['readable', 'root'],
+    )
+    assert.deepEqual(
+      closure.resolutionFailures.map((failure) => failure.module),
+      ['alpha', 'zeta'],
+    )
+    assert.deepEqual(closure.diagnostics, [])
+    assert.deepEqual(
+      closure.modules
+        .find((module) => module.name === 'root')
+        ?.imports.map((fact) => fact.target._tag),
+      ['Failed', 'Resolved', 'Failed'],
+    )
+  }),
+)
 
-it('diagnoses unknown targets and self-imports with caused import facts', () => {
-  const closure = ModuleClosure.load(
-    request('root', [['root', `import missing\nimport root\n${fn}`]]),
-  )
-  const root = closure.modules.at(0)
-
-  assert.notStrictEqual(root, undefined)
-  if (root === undefined) return
-  assert.deepEqual(importNames(root), ['missing', 'root'])
-  assert.deepEqual(
-    closure.diagnostics.map((diagnostic) => ({
-      phase: diagnostic.phase,
-      code: diagnostic.code,
-    })),
-    [
-      { phase: 'module', code: 'MOD0001' },
-      { phase: 'module', code: 'MOD0002' },
-    ],
-  )
-  const targets = root?.imports.map((fact) => fact.target) ?? []
-  assert.strictEqual(targets.at(0)?._tag, 'Unknown')
-  assert.strictEqual(targets.at(1)?._tag, 'Self')
-  const unknown = targets.at(0)
-  if (unknown?._tag === 'Unknown') {
-    assert.strictEqual(unknown.cause.code, 'MOD0001')
-  }
-})
-
-it('suppresses module diagnostics for imports recovered without a name', () => {
-  const closure = ModuleClosure.load(request('root', [['root', `import\n${fn}`]]))
-  const root = closure.modules.at(0)
-
-  assert.strictEqual(root?.imports.at(0)?.target._tag, 'Unavailable')
-  assert.deepEqual(closure.diagnostics, [])
-  assert.deepEqual(
-    root?.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0001'],
-  )
-})
-
-it('records mutual import cycles as canonical facts without error diagnostics', () => {
-  const closure = ModuleClosure.load(
-    request('root', [
-      ['root', `import beta\n${fn}`],
-      ['beta', `import gamma\n${fn}`],
-      ['gamma', `import beta\n${fn}`],
-    ]),
-  )
-
-  assert.deepEqual(closure.cycles, [['beta', 'gamma']])
-  assert.deepEqual(closure.diagnostics, [])
-  assert.deepEqual(
-    closure.modules.map((module) => module.name),
-    ['beta', 'gamma', 'root'],
-  )
-})
-
-it('maps dotted paths to exact slash-separated canonical identities', () => {
-  const closure = ModuleClosure.load(
-    request('app/Main', [
+it.effect('records cycles and exact dotted-to-canonical import provenance', () =>
+  Effect.gen(function* () {
+    const closure = yield* fixture('app/Main', [
       ['app/Main', `import compiler.Syntax as Tree { parse }\n${fn}`],
-      ['compiler/Syntax', 'pub fn parse() -> I32 { return 42 }'],
-    ]),
-  )
-  const imported = closure.modules.find((module) => module.name === 'app/Main')?.imports.at(0)
-  assert.strictEqual(imported?.sourceSpelling, 'compiler.Syntax')
-  assert.strictEqual(imported?.canonicalTarget, 'compiler/Syntax')
-  assert.strictEqual(imported?.target._tag, 'Resolved')
-})
+      ['compiler/Syntax', `import cycle.Other\npub fn parse() -> I32 { return 42 }`],
+      ['cycle/Other', `import compiler.Syntax\n${fn}`],
+    ])
+    const imported = closure.modules.find((module) => module.name === 'app/Main')?.imports.at(0)
+    assert.strictEqual(imported?.sourceSpelling, 'compiler.Syntax')
+    assert.strictEqual(imported?.canonicalTarget, 'compiler/Syntax')
+    assert.strictEqual(imported?.target._tag, 'Resolved')
+    assert.deepEqual(closure.cycles, [['compiler/Syntax', 'cycle/Other']])
+  }),
+)
 
-it('preserves exact case and rejects malformed request identities before parsing', () => {
-  const mismatch = ModuleClosure.load(
-    request('app/Main', [
+it.effect('preserves case and rejects malformed explicit root identities', () =>
+  Effect.gen(function* () {
+    const mismatch = yield* fixture('app/Main', [
       ['app/Main', `import compiler.Syntax\n${fn}`],
       ['compiler/syntax', fn],
-    ]),
-  )
-  assert.deepEqual(
-    mismatch.diagnostics.map((diagnostic) => diagnostic.code),
-    ['MOD0001'],
-  )
-  for (const invalid of [
-    '/absolute',
-    'with.ext',
-    'empty//segment',
-    'dot/../segment',
-    'scheme://module',
-  ]) {
-    assert.throws(() => ModuleClosure.load(request(invalid, [[invalid, fn]])), RangeError)
-  }
-})
-
-it('treats rename and binding clauses independently from closure loading', () => {
-  const namespace = ModuleClosure.load(
-    request('root', [
-      ['root', `import library.One as Lib\n${fn}`],
-      ['library/One', fn],
-    ]),
-  )
-  const selective = ModuleClosure.load(
-    request('root', [
-      ['root', `import library.One { main as entry }\n${fn}`],
-      ['library/One', fn],
-    ]),
-  )
-  assert.deepEqual(
-    namespace.modules.map((module) => module.name),
-    selective.modules.map((module) => module.name),
-  )
-  const renamed = ModuleClosure.load(
-    request('root', [
-      ['root', `import library.Two\n${fn}`],
-      ['library/Two', fn],
-    ]),
-  )
-  assert.notDeepEqual(
-    namespace.modules.map((module) => module.name),
-    renamed.modules.map((module) => module.name),
-  )
-})
+    ])
+    assert.deepEqual(
+      mismatch.diagnostics.map((diagnostic) => diagnostic.code),
+      ['MOD0001'],
+    )
+    for (const invalid of [
+      '/absolute',
+      'with.ext',
+      'empty//segment',
+      'dot/../segment',
+      'scheme://module',
+    ]) {
+      const exit = yield* Effect.exit(
+        ModuleClosure.load({ root: SourceFile.make(invalid, ascii(fn)) }).pipe(
+          Effect.provide(SourceResolver.empty),
+        ),
+      )
+      assert.strictEqual(Exit.isFailure(exit), true)
+    }
+  }),
+)

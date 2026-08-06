@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis, Diagnostic, SyntaxTree } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { BootstrapEvaluation, Elaboration, SourceFile } from '@silk-effect/compiler'
 import type { Hir, SourceSpan, SyntaxFile } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
@@ -1573,7 +1574,7 @@ export function SyntaxInspector() {
   const [selectedFlowId, setSelectedFlowId] = useState<string>()
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
   const [evaluation, setEvaluation] = useState<BootstrapEvaluation.Outcome>()
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
+  const snapshot = useMemo(() => Snapshot.ofSource(sourceId, encoder.encode(text)), [text])
   const analysis = Analysis.rootAnalysis(snapshot)
   const result = analysis.syntax
 

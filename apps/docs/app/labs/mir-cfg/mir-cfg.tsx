@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis, Mir } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
@@ -134,7 +135,7 @@ export function MirCfgLab() {
   const [text, setText] = useState<string>(defaultProgram)
   const snapshot = useMemo(
     () =>
-      Analysis.ofSource(programSourceId, new TextEncoder().encode(text), 'aarch64-apple-darwin'),
+      Snapshot.ofSource(programSourceId, new TextEncoder().encode(text), 'aarch64-apple-darwin'),
     [text],
   )
   const program = useMemo(() => Analysis.loweredMir(snapshot), [snapshot])

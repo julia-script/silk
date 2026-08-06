@@ -12,7 +12,7 @@ const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 
 const emit = Effect.fnUntraced(function* (text: string, request: Backend.CodegenRequest) {
-  const snapshot = Analysis.ofSource('golden/program', ascii(text), 'aarch64-apple-darwin')
+  const snapshot = yield* Analysis.ofSource('golden/program', ascii(text), 'aarch64-apple-darwin')
   return yield* Analysis.codegen(snapshot, request)
 })
 
@@ -54,13 +54,13 @@ it.effect('emits byte-identical bitcode across repeated fresh runs', () =>
   }),
 )
 
-it.effect('lowers trap bodies to an unreachable trap sequence', () =>
+it.effect('refuses diagnosed trap bodies before backend emission', () =>
   Effect.gen(function* () {
-    const artifact = yield* emit('pub fn main() -> I32 { return missing() }', { mode: 'release' })
-
-    assert.include(artifact.ir, '@llvm.trap()')
-    assert.include(artifact.ir, 'unreachable')
-    assert.notInclude(artifact.ir, 'ret i32 0')
+    const result = yield* Effect.result(
+      emit('pub fn main() -> I32 { return missing() }', { mode: 'release' }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag === 'Failure') assert.strictEqual(result.failure._tag, 'CodegenUnavailable')
   }),
 )
 

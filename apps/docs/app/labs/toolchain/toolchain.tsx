@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
@@ -20,7 +21,7 @@ export function ToolchainLab() {
   const [profile, setProfile] = useState<ToolchainPlan.OptimizationProfile>('release')
 
   const snapshot = useMemo(
-    () => Analysis.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin'),
+    () => Snapshot.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin'),
     [text],
   )
   const artifact = useMemo(

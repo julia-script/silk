@@ -17,6 +17,8 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     modules: Object.freeze([module]),
     cycles: Object.freeze([]),
     diagnostics: Object.freeze([]),
+    sources: new Map([[syntax.source.id, syntax.source]]),
+    resolutionFailures: Object.freeze([]),
   })
   const index = DeclarationIndex.collect(closure)
   const headers = index.modules.at(0)

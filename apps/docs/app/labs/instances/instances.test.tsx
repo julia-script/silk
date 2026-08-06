@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { CfgView } from '../mir-cfg/mir-cfg'
@@ -7,7 +8,7 @@ import { DiscoveryView, InstancesLab } from './instances'
 const encoder = new TextEncoder()
 
 const snapshot = (text: string): Analysis.Snapshot =>
-  Analysis.ofSource('memory/instances-test', encoder.encode(text))
+  Snapshot.ofSource('memory/instances-test', encoder.encode(text))
 
 const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`

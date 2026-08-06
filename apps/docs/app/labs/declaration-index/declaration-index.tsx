@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { DeclarationIndex } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
@@ -124,7 +125,7 @@ export function DeclarationIndexLab() {
   const index = useMemo(
     () =>
       Analysis.declarationIndex(
-        Analysis.make({
+        Snapshot.make({
           rootModule: preset.root,
           sources: new Map(
             Object.entries(sources).map(([name, text]) => [name, encoder.encode(text)]),

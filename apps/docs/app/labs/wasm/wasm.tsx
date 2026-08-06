@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
@@ -88,7 +89,7 @@ export function WasmLab() {
   const [mode, setMode] = useState<'release' | 'debug'>('debug')
 
   const snapshot = useMemo(
-    () => Analysis.ofSource(sourceId, encoder.encode(text), 'wasm32-unknown-unknown'),
+    () => Snapshot.ofSource(sourceId, encoder.encode(text), 'wasm32-unknown-unknown'),
     [text],
   )
 

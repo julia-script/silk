@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
@@ -40,7 +41,7 @@ export function LlvmIrLab() {
   const [mode, setMode] = useState<'release' | 'debug'>('release')
 
   const snapshot = useMemo(
-    () => Analysis.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin'),
+    () => Snapshot.ofSource(sourceId, encoder.encode(text), 'aarch64-apple-darwin'),
     [text],
   )
   const artifact = useMemo(

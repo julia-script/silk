@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { DeclarationIndex } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -11,7 +12,7 @@ const collect = (
   entries: ReadonlyArray<readonly [string, string]>,
 ): DeclarationIndex.Index =>
   Analysis.declarationIndex(
-    Analysis.make({
+    Snapshot.make({
       rootModule,
       sources: new Map(entries.map(([name, text]) => [name, encoder.encode(text)])),
     }),

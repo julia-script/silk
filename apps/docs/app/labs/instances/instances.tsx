@@ -1,6 +1,7 @@
 'use client'
 
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { Instances } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import { DiagnosticPanel, diagnosticEntries } from '../syntax-inspector/syntax-inspector'
@@ -69,7 +70,7 @@ export function InstancesLab() {
   const [text, setText] = useState<string>(presets[0].source)
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<number>()
 
-  const snapshot = useMemo(() => Analysis.ofSource(sourceId, encoder.encode(text)), [text])
+  const snapshot = useMemo(() => Snapshot.ofSource(sourceId, encoder.encode(text)), [text])
   const discovery = Analysis.instancesOf(snapshot)
 
   return (

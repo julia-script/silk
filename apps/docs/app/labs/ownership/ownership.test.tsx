@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import type { Ownership } from '@silk-effect/compiler'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -8,7 +9,7 @@ const encoder = new TextEncoder()
 
 const check = (text: string): Ownership.ModuleOwnership | undefined =>
   Analysis.ownershipOf(
-    Analysis.ofSource('memory/ownership-test', encoder.encode(text)),
+    Snapshot.ofSource('memory/ownership-test', encoder.encode(text)),
     'memory/ownership-test',
   )
 

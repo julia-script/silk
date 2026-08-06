@@ -53,6 +53,10 @@
       "types": "./dist/SourceFile.d.ts",
       "import": "./dist/SourceFile.js"
     },
+    "./SourceResolver": {
+      "types": "./dist/SourceResolver.d.ts",
+      "import": "./dist/SourceResolver.js"
+    },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
       "import": "./dist/SourceSpan.js"

@@ -1,3 +1,4 @@
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
@@ -13,6 +14,8 @@ import type * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
+import * as SourceFile from './SourceFile.js'
+import * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as Target from './Target.js'
 import type * as Token from './Token.js'
@@ -45,9 +48,19 @@ export interface Snapshot {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+/** Source facts that make backend emission unavailable while keeping analysis queryable. */
+export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
+  readonly operation: 'Analysis.codegen'
+  readonly message: string
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly resolutionFailures: ReadonlyArray<SourceResolver.SourceResolverError>
+}> {}
+
 /** Builds the snapshot of one compilation request. */
-export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
-  const closure = ModuleClosure.load(request)
+export const make = Effect.fn('Analysis.make')(function* (
+  request: ModuleClosure.CompilationRequest,
+): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
+  const closure = yield* ModuleClosure.load(request)
   const index = DeclarationIndex.collect(closure)
   const resolution = NameResolution.resolve(closure, index)
   const results = new Map(
@@ -65,7 +78,7 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
   const ownership = new Map(
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
-  const instances = Instances.discover(request.rootModule, results)
+  const instances = Instances.discover(request.root.id, results)
   const target = Target.select(request.target)
   const layout: Targeted<Layout.Plan> =
     target._tag === 'Resolved'
@@ -99,19 +112,35 @@ export const make = (request: ModuleClosure.CompilationRequest): Snapshot => {
     mir,
     diagnostics,
   })
-}
+})
 
 /** Builds the snapshot of one single-module source. */
-export const ofSource = (sourceId: string, bytes: Uint8Array, target?: string): Snapshot =>
-  target === undefined
-    ? make({ rootModule: sourceId, sources: new Map([[sourceId, bytes]]) })
-    : make({ rootModule: sourceId, sources: new Map([[sourceId, bytes]]), target })
+export const ofSource = (
+  sourceId: string,
+  bytes: Uint8Array,
+  target?: string,
+): Effect.Effect<Snapshot> =>
+  Effect.provide(
+    target === undefined
+      ? make({ root: SourceFile.make(sourceId, bytes) })
+      : make({ root: SourceFile.make(sourceId, bytes), target }),
+    SourceResolver.empty,
+  )
 
 /** Returns every loaded module of the snapshot in canonical identity order. */
 export const modules = (self: Snapshot): ReadonlyArray<ModuleClosure.Module> => self.closure.modules
 
 /** Returns the snapshot's import cycle facts in canonical order. */
 export const cycles = (self: Snapshot): ReadonlyArray<ReadonlyArray<string>> => self.closure.cycles
+
+/** Returns exact immutable source snapshots for every successfully loaded module. */
+export const sources = (self: Snapshot): ReadonlyMap<string, SourceFile.SourceFile> =>
+  self.closure.sources
+
+/** Returns operational source-resolution failures in canonical module order. */
+export const resolutionFailures = (
+  self: Snapshot,
+): ReadonlyArray<SourceResolver.SourceResolverError> => self.closure.resolutionFailures
 
 /** Returns the closure's declaration index. */
 export const declarationIndex = (self: Snapshot): DeclarationIndex.Index => self.index
@@ -223,7 +252,18 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
   backend?: Backend.Backend,
-): Effect.fn.Return<Backend.Artifact, Backend.BackendError | Target.TargetError> {
+): Effect.fn.Return<
+  Backend.Artifact,
+  Backend.BackendError | Target.TargetError | CodegenUnavailable
+> {
+  if (Diagnostic.hasErrors(self.diagnostics) || self.closure.resolutionFailures.length > 0) {
+    return yield* new CodegenUnavailable({
+      operation: 'Analysis.codegen',
+      message: 'Backend emission is unavailable for an invalid analysis snapshot',
+      diagnostics: self.diagnostics,
+      resolutionFailures: self.closure.resolutionFailures,
+    })
+  }
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
   const target = self.mir.value.layout.target
   const selected = backend ?? BackendRegistry.forTarget(target)
@@ -260,7 +300,10 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
 export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
-): Effect.fn.Return<Backend.Artifact, Backend.BackendError | Target.TargetError> {
+): Effect.fn.Return<
+  Backend.Artifact,
+  Backend.BackendError | Target.TargetError | CodegenUnavailable
+> {
   return yield* codegen(self, request, WasmBackend.WasmBackend)
 })
 

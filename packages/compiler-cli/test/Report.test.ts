@@ -6,11 +6,12 @@ import * as Report from '../src/Report.js'
 const ascii = (text: string): Uint8Array =>
   Uint8Array.from(text.split('').map((character) => character.charCodeAt(0)))
 
-const source = (text: string) => ({ path: 'main.silk', bytes: ascii(text) })
+const source = (text: string): Report.SourceCatalog =>
+  new Map([['main', { path: 'main.silk', bytes: ascii(text) }]])
 
 // Spans are nominal, so tests build them structurally rather than through the private constructor.
-const span = (start: number, end: number): Diagnostic.Diagnostic['span'] =>
-  ({ sourceId: 'main', start, end }) as unknown as Diagnostic.Diagnostic['span']
+const span = (start: number, end: number, sourceId = 'main'): Diagnostic.Diagnostic['span'] =>
+  ({ sourceId, start, end }) as unknown as Diagnostic.Diagnostic['span']
 
 const diagnostic = (
   overrides: Partial<Diagnostic.Diagnostic> & { readonly span: Diagnostic.Diagnostic['span'] },
@@ -57,6 +58,28 @@ it('indents diagnostic notes beneath their diagnostic', () => {
   assert.strictEqual(rendered, 'main.silk:1:1: error[SEM0001] Unknown type Nope\n  note: try I32')
 })
 
+it('renders each diagnostic against the physical file for its source identity', () => {
+  const catalog: Report.SourceCatalog = new Map([
+    ['app.Main', { path: '/project/app/Main.silk', bytes: ascii('pub fn main() -> Nope') }],
+    ['compiler.Syntax', { path: '/project/compiler/Syntax.silk', bytes: ascii('\npub type Nope') }],
+  ])
+  const rendered = Report.diagnostics(
+    [
+      diagnostic({ span: span(17, 21, 'app.Main') }),
+      diagnostic({ span: span(1, 4, 'compiler.Syntax'), message: 'Imported declaration failed' }),
+    ],
+    catalog,
+  )
+
+  assert.strictEqual(
+    rendered,
+    [
+      '/project/app/Main.silk:1:18: error[SEM0001] Unknown type Nope',
+      '/project/compiler/Syntax.silk:2:1: error[SEM0001] Imported declaration failed',
+    ].join('\n'),
+  )
+})
+
 it('explains a missing entry in terms of the declaration the user must add', () => {
   const outcome: Driver.Outcome = {
     _tag: 'NoEntry',
@@ -65,7 +88,7 @@ it('explains a missing entry in terms of the declaration the user must add', () 
     report: [],
   }
   assert.strictEqual(
-    Report.outcome(outcome, source('pub fn other() -> I32 { return 1 }')),
+    Report.outcome(outcome, source('pub fn other() -> I32 { return 1 }'), 'main.silk'),
     'No entry point: the root module declares no `main`',
   )
 })
@@ -85,7 +108,7 @@ it('names the executable, target, and symbol count on success', () => {
     report: [],
   }
   assert.strictEqual(
-    Report.outcome(outcome, source('pub fn main() -> I32 { return 42 }')),
+    Report.outcome(outcome, source('pub fn main() -> I32 { return 42 }'), 'main.silk'),
     'Compiled main.silk -> /tmp/a.out (aarch64-apple-darwin, 1 symbols)',
   )
 })
@@ -108,7 +131,7 @@ it('keeps the failing command so a toolchain failure is reproducible by hand', (
     } as Driver.Failed['failure'],
     report: [],
   }
-  const rendered = Report.outcome(outcome, source(''))
+  const rendered = Report.outcome(outcome, source(''), 'main.silk')
   assert.strictEqual(
     rendered,
     [

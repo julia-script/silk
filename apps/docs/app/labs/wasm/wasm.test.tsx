@@ -1,4 +1,5 @@
 import { Analysis } from '@silk-effect/compiler'
+import * as Snapshot from '../snapshot'
 import * as Effect from 'effect/Effect'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -7,7 +8,7 @@ import { WasmLab } from './wasm'
 const encoder = new TextEncoder()
 
 const run = (source: string): number | 'trap' => {
-  const snapshot = Analysis.ofSource(
+  const snapshot = Snapshot.ofSource(
     'memory/wasm-lab-test',
     encoder.encode(source),
     'wasm32-unknown-unknown',
@@ -37,7 +38,7 @@ describe('WasmLab', () => {
   })
 
   it('emits a module the WebAssembly engine accepts and runs through the facade', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/wasm-exec-test',
       encoder.encode('pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
       'wasm32-unknown-unknown',
@@ -49,7 +50,7 @@ describe('WasmLab', () => {
   })
 
   it('recovers the source conditional as structured if/else', () => {
-    const snapshot = Analysis.ofSource(
+    const snapshot = Snapshot.ofSource(
       'memory/wasm-branch-test',
       encoder.encode('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
