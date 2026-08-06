@@ -233,13 +233,19 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
             <label className="sr-only" htmlFor={`filter-${props.api.id}`}>
               Filter rows
             </label>
-            <input
-              id={`filter-${props.api.id}`}
-              className={shell.paneFilter}
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder="filter…"
-            />
+            {/* Recessed well + glyph: what separates a field from the buttons beside it. */}
+            <span className={shell.filterWell}>
+              <span className={shell.filterGlyph} aria-hidden="true">
+                ⌕
+              </span>
+              <input
+                id={`filter-${props.api.id}`}
+                className={shell.paneFilter}
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder="filter…"
+              />
+            </span>
             <button
               type="button"
               className={shell.paneToggle}
@@ -396,6 +402,9 @@ export function Workbench() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [namingWorkspace, setNamingWorkspace] = useState(false)
+  // Which project groups are expanded in the sidebar. Collapsed by default: 98 programs is a
+  // list to opt into, not to scroll past.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set())
   const [api, setApi] = useState<DockviewApi>()
   const [workspaces, setWorkspaces] = useState<ReadonlyArray<Workspace>>(seededWorkspaces)
   const [activeWorkspace, setActiveWorkspace] = useState<string>('Backend triage')
@@ -691,20 +700,8 @@ export function Workbench() {
   return (
     <div className={`${shell.workbench} workbenchRoot`}>
       <div className={shell.appBar}>
-        <button
-          type="button"
-          className={shell.wordmark}
-          data-open={sidebarOpen}
-          onClick={() => setSidebarOpen((open) => !open)}
-          title={sidebarOpen ? 'Hide the program sidebar' : 'Show the program sidebar'}
-          aria-expanded={sidebarOpen}
-        >
-          silk
-          {/* The chevron is what makes this read as the sidebar toggle rather than a logo. */}
-          <span className={shell.wordmarkCaret} aria-hidden="true">
-            {sidebarOpen ? '‹' : '›'}
-          </span>
-        </button>
+        {/* A mark, not a control: the sidebar's own header and the peek tab do the toggling. */}
+        <span className={shell.wordmark}>silk</span>
 
         <div className={shell.workspaces}>
           {workspaces.map((workspace) => (
@@ -890,20 +887,58 @@ export function Workbench() {
                     user-authored code will live under the same header. */}
                 projects<span className={shell.sidebarCount}>{presets.length}</span>
               </div>
-              {presetGroups.map(([group, entries]) => (
-                <button
-                  key={group}
-                  type="button"
-                  className={shell.sidebarRow}
-                  onClick={() => setPaletteOpen(true)}
-                >
-                  <span className={shell.sidebarRowName}>{group}</span>
-                  <span className={shell.sidebarRowMeta}>{entries.length}</span>
-                </button>
-              ))}
+              {presetGroups.map(([group, entries]) => {
+                const open = openGroups.has(group)
+                return (
+                  <div key={group}>
+                    <button
+                      type="button"
+                      className={shell.sidebarRow}
+                      aria-expanded={open}
+                      onClick={() =>
+                        setOpenGroups((current) => {
+                          const next = new Set(current)
+                          if (open) next.delete(group)
+                          else next.add(group)
+                          return next
+                        })
+                      }
+                    >
+                      <span className={shell.sidebarCaret} aria-hidden="true">
+                        {open ? '▾' : '▸'}
+                      </span>
+                      <span className={shell.sidebarRowName}>{group}</span>
+                      <span className={shell.sidebarRowMeta}>{entries.length}</span>
+                    </button>
+                    {open
+                      ? entries.map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            className={shell.sidebarRow}
+                            data-active={preset.label === programName}
+                            onClick={() => loadPreset(preset)}
+                          >
+                            <span className={shell.sidebarChildIndent} aria-hidden="true" />
+                            <span className={shell.sidebarRowName}>{preset.label}</span>
+                          </button>
+                        ))
+                      : null}
+                  </div>
+                )
+              })}
             </div>
           </div>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            className={shell.sidebarPeek}
+            onClick={() => setSidebarOpen(true)}
+            title="Show the program sidebar"
+          >
+            ›
+          </button>
+        )}
 
         <div className={shell.dockFrame}>
           <div className={shell.dock} ref={dockRef}>

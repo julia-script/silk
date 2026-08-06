@@ -40,43 +40,33 @@
   flex: none;
   align-items: center;
   padding: 0 10px 0 9px;
-  border: 0;
   border-right: 1px solid var(--wb-hairline-strong);
-  background: transparent;
   color: var(--wb-ink-4);
-  font: inherit;
   font-size: 10px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  cursor: pointer;
 }
 
-.wordmark:hover,
-.wordmark[data-open='true'] {
-  background: var(--wb-active);
-  color: var(--wb-ink);
-}
-
-/* State indicator, outside the wordmark's letter-spacing so it reads as a control, not a letter. */
-.wordmarkCaret {
-  margin-left: 6px;
-  color: var(--wb-ink-4);
-  font-size: 11px;
-  letter-spacing: normal;
-}
-
-/* Inline replacement for the `+` while a workspace is being named. Enter saves, Escape cancels. */
+/*
+ * Inline replacement for the `+` while a workspace is being named. Enter saves, Escape cancels.
+ * Fields sit in a recessed well (the page's deep background) so they cannot be mistaken for the
+ * flat buttons around them.
+ */
 .workspaceInput {
   width: 118px;
   height: 100%;
   padding: 0 10px;
   border: 0;
   border-right: 1px solid #1c1a18;
-  background: var(--wb-active-strong);
+  background: var(--wb-bg-deep);
   color: var(--wb-ink);
   font: inherit;
   font-size: 10.5px;
   outline: none;
+}
+
+.workspaceInput:focus {
+  caret-color: var(--wb-violet);
 }
 
 .workspaces {
@@ -223,6 +213,8 @@
 /* ── body ─────────────────────────────────────────────────────────────────── */
 
 .body {
+  /* Anchors the collapsed-sidebar peek tab. */
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
@@ -349,6 +341,48 @@
   background: var(--wb-amber);
 }
 
+.sidebarCaret {
+  flex: none;
+  width: 14px;
+  padding-left: 4px;
+  color: var(--wb-ink-4);
+  font-size: 8px;
+}
+
+.sidebarChildIndent {
+  flex: none;
+  width: 18px;
+}
+
+/*
+ * The collapsed sidebar's way back: a small tab hanging off the left edge, where the sidebar
+ * was. It sits where the eye already goes to look for the missing panel, which is what the
+ * wordmark-as-toggle got wrong.
+ */
+.sidebarPeek {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: 15px;
+  height: var(--wb-bar-h);
+  border: 0;
+  border-right: 1px solid var(--wb-hairline-strong);
+  border-bottom: 1px solid var(--wb-hairline-strong);
+  background: var(--wb-bg-bar);
+  color: var(--wb-ink-4);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.sidebarPeek:hover {
+  background: var(--wb-active);
+  color: var(--wb-ink);
+}
+
 /* ── pane grid ────────────────────────────────────────────────────────────── */
 
 .dockFrame {
@@ -444,18 +478,40 @@
   color: var(--wb-ink);
 }
 
-.paneFilter {
+/* The filter's recessed well: deep background + a search glyph, so a field never reads as a
+   button. The well owns the cell border; the input inside is bare. */
+.filterWell {
+  display: flex;
   min-width: 40px;
   flex: 1;
+  align-items: center;
   height: 100%;
-  padding: 0 8px;
-  border: 0;
   border-right: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-deep);
+}
+
+.filterGlyph {
+  flex: none;
+  padding: 0 2px 0 8px;
+  color: var(--wb-ink-4);
+  font-size: 11px;
+}
+
+.paneFilter {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0 8px 0 4px;
+  border: 0;
   background: transparent;
   color: var(--wb-ink);
   font: inherit;
   font-size: 10px;
   outline: none;
+}
+
+.paneFilter:focus {
+  caret-color: var(--wb-violet);
 }
 
 .paneToggle {
