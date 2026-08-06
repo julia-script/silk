@@ -1,52 +1,89 @@
+/*
+ * The ⌘P palette, in the workbench's own language: hairlines, no radius, the picker menu's
+ * surface and shadow. Styled as a generic filter-a-list palette rather than anything
+ * project-specific — the list it filters is expected to change.
+ */
+
 .backdrop {
   position: fixed;
   z-index: 50;
   display: flex;
-  justify-content: center;
   align-items: flex-start;
+  justify-content: center;
   inset: 0;
-  background: color-mix(in srgb, black 45%, transparent);
+  background: rgb(0 0 0 / 45%);
   padding-top: 12vh;
 }
 
 .palette {
   display: flex;
-  width: min(34rem, calc(100vw - 2rem));
+  width: min(26rem, calc(100vw - 2rem));
   max-height: 62vh;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--color-fd-border);
-  border-radius: 0.9rem;
-  background: var(--color-fd-popover, var(--color-fd-card));
-  box-shadow: 0 24px 70px color-mix(in srgb, black 45%, transparent);
+  border: 1px solid #34302c;
+  background: var(--wb-active);
+  /* The one sanctioned shadow: this is a floating menu, same as the pane picker. */
+  box-shadow: 0 12px 28px rgb(0 0 0 / 55%);
+  color: var(--wb-ink);
+  font-family: var(--wb-font);
+  font-size: 11px;
+}
+
+/* Same recessed well + glyph as the pane filters: a field, unmistakably. */
+.searchWell {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 28px;
+  border-bottom: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-deep);
+}
+
+.searchGlyph {
+  flex: none;
+  padding: 0 4px 0 10px;
+  color: var(--wb-ink-4);
+  font-size: 12px;
 }
 
 .search {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0 10px 0 4px;
   border: 0;
-  border-bottom: 1px solid var(--color-fd-border);
-  outline: none;
   background: transparent;
-  padding: 0.85rem 1rem;
-  color: var(--color-fd-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.85rem;
+  color: var(--wb-ink);
+  font: inherit;
+  outline: none;
+}
+
+.search:focus {
+  caret-color: var(--wb-violet);
+}
+
+.search::placeholder {
+  color: #6b645c;
 }
 
 .results {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 0.35rem 0;
+  padding: 3px 0;
 }
 
 .group {
-  margin: 0.5rem 0 0.15rem;
-  padding: 0 1rem;
-  color: var(--color-fd-muted-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  display: flex;
+  align-items: center;
+  height: 19px;
+  margin: 0;
+  padding: 0 10px;
+  color: var(--wb-ink-4);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -54,25 +91,33 @@
   display: flex;
   width: 100%;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  gap: 8px;
+  height: 21px;
+  padding: 0 10px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
-  padding: 0.32rem 1rem;
-  color: var(--color-fd-foreground);
-  font-family: inherit;
-  font-size: 0.82rem;
+  color: var(--wb-ink-2);
+  font: inherit;
+  font-size: 10.5px;
   text-align: left;
   cursor: pointer;
 }
 
+.row:hover {
+  background: #252119;
+}
+
+/* The keyboard-active row carries the same violet the span cursor uses: it is the selection. */
 .row[data-active='true'] {
-  border-left-color: var(--color-fd-primary);
-  background: color-mix(in srgb, var(--color-fd-primary) 13%, transparent);
+  border-left-color: var(--wb-violet);
+  background: rgba(183, 166, 214, 0.14);
+  color: var(--wb-ink);
 }
 
 .rowLabel {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -81,23 +126,20 @@
 /* Character-level highlight, so a subsequence match shows why it matched. */
 .hit {
   background: transparent;
-  color: var(--color-fd-primary);
+  color: var(--wb-violet);
   font-weight: 700;
 }
 
 .badge {
   flex: none;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-fd-primary) 18%, transparent);
-  padding: 0.05rem 0.4rem;
-  color: var(--color-fd-muted-foreground);
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.62rem;
+  color: var(--wb-ink-4);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .empty {
-  margin: 1.5rem 0;
-  color: var(--color-fd-muted-foreground);
-  text-align: center;
-  font-size: 0.82rem;
+  margin: 0;
+  padding: 10px;
+  color: var(--wb-ink-3);
+  font-size: 10.5px;
 }

@@ -125,35 +125,40 @@ export function PresetPalette({
         aria-label="Load a project"
         onClick={(event) => event.stopPropagation()}
       >
-        <input
-          ref={inputRef}
-          className={styles.search}
-          value={query}
-          placeholder={`Filter ${presets.length} projects…`}
-          aria-label="Filter projects"
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(event) => {
-            setQuery(event.target.value)
-            setActive(0)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') onClose()
-            if (event.key === 'Enter') choose(active)
-            if (event.key === 'ArrowDown') {
-              event.preventDefault()
-              setActive((current) => Math.min(matches.length - 1, current + 1))
-            }
-            if (event.key === 'ArrowUp') {
-              event.preventDefault()
-              setActive((current) => Math.max(0, current - 1))
-            }
-          }}
-        />
+        <span className={styles.searchWell}>
+          <span className={styles.searchGlyph} aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            ref={inputRef}
+            className={styles.search}
+            value={query}
+            placeholder={`Filter ${presets.length} projects…`}
+            aria-label="Filter projects"
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setActive(0)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') onClose()
+              if (event.key === 'Enter') choose(active)
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setActive((current) => Math.min(matches.length - 1, current + 1))
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setActive((current) => Math.max(0, current - 1))
+              }
+            }}
+          />
+        </span>
 
         <div className={styles.results} ref={listRef}>
           {matches.length === 0 ? (
-            <p className={styles.empty}>No preset matches “{query}”</p>
+            <p className={styles.empty}>No project matches “{query}”</p>
           ) : (
             matches.map((match, index) => {
               const previous = index === 0 ? undefined : matches[index - 1]?.preset.group
