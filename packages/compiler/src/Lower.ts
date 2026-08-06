@@ -136,28 +136,29 @@ const lowerExpression = (
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
-      if (expression.operation === 'Not') {
+      if (expression.operation === 'Not' || expression.operation === 'Negate') {
         const [subject] = argumentLocals
         if (subject === undefined) return undefined
-        const zero = fn.alloc(bool)
+        const operandType = expression.operation === 'Not' ? bool : i32
+        const zero = fn.alloc(operandType)
         fn.emit(
           Object.freeze({
             _tag: 'Literal',
             destination: zero,
-            type: bool,
+            type: operandType,
             value: 0,
             provenance: Object.freeze({ span: expression.span, generated: true }),
           }),
         )
-        const destination = fn.alloc(bool)
+        const destination = fn.alloc(operandType)
         fn.emit(
           Object.freeze({
             _tag: 'Binary',
-            operator: 'Equals',
+            operator: expression.operation === 'Not' ? 'Equals' : 'Subtract',
             destination,
-            left: subject,
-            right: zero,
-            type: bool,
+            left: expression.operation === 'Not' ? subject : zero,
+            right: expression.operation === 'Not' ? zero : subject,
+            type: operandType,
             provenance: Object.freeze({ span: expression.span, generated: false }),
           }),
         )

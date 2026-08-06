@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
-import * as Elaboration from '../src/Elaboration.js'
+import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import { elaborate as elaborateSyntax } from './support/elaborate.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -15,7 +16,7 @@ const damagedSource = `pub fn puzzle(value: Mystery) -> I32 { return value }
 pub fn main() -> I32 { return missing(2147483648) }`
 
 const elaborate = (id: string, text: string): Elaboration.Result =>
-  Elaboration.elaborateModule(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text)))))
+  elaborateSyntax(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text)))))
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -278,4 +279,41 @@ pub fn main() -> I32 { return pick(42) }`,
   const mainFn = builtinArg.hir.functions.at(0)
   const returned = mainFn === undefined ? undefined : Hir.returned(mainFn)
   assert.strictEqual(returned?._tag, 'Unavailable')
+})
+
+it('erases grouping and operators into canonical builtin HIR calls', () => {
+  const result = elaborate(
+    'golden://operators.silk',
+    'pub fn main() -> I32 { return -(2 + 3 * 4) }',
+  )
+  const fn = result.hir.functions.at(0)
+  const returned = fn === undefined ? undefined : Hir.returned(fn)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(returned?._tag, 'BuiltinCall')
+  if (returned?._tag !== 'BuiltinCall') return
+  assert.strictEqual(returned.operation, 'Negate')
+  const addition = returned.arguments.at(0)
+  assert.strictEqual(addition?._tag, 'BuiltinCall')
+  if (addition?._tag !== 'BuiltinCall') return
+  assert.strictEqual(addition.operation, 'Add')
+  const multiplication = addition.arguments.at(1)
+  assert.strictEqual(multiplication?._tag, 'BuiltinCall')
+  if (multiplication?._tag !== 'BuiltinCall') return
+  assert.strictEqual(multiplication.operation, 'Multiply')
+})
+
+it('erases builtin pipelines into ordinary builtin HIR calls', () => {
+  const result = elaborate(
+    'golden://pipeline.silk',
+    'pub fn main() -> I32 { return 2 |> I32.add(3) }',
+  )
+  const fn = result.hir.functions.at(0)
+  const returned = fn === undefined ? undefined : Hir.returned(fn)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(returned?._tag, 'BuiltinCall')
+  if (returned?._tag !== 'BuiltinCall') return
+  assert.strictEqual(returned.operation, 'Add')
+  assert.strictEqual(returned.arguments.length, 2)
 })

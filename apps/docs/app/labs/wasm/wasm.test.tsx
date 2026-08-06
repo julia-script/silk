@@ -8,7 +8,7 @@ const encoder = new TextEncoder()
 
 const run = (source: string): number | 'trap' => {
   const snapshot = Analysis.ofSource(
-    'memory://wasm-lab-test.silk',
+    'memory/wasm-lab-test',
     encoder.encode(source),
     'wasm32-unknown-unknown',
   )
@@ -38,7 +38,7 @@ describe('WasmLab', () => {
 
   it('emits a module the WebAssembly engine accepts and runs through the facade', () => {
     const snapshot = Analysis.ofSource(
-      'memory://wasm-exec-test.silk',
+      'memory/wasm-exec-test',
       encoder.encode('pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
       'wasm32-unknown-unknown',
     )
@@ -50,7 +50,7 @@ describe('WasmLab', () => {
 
   it('recovers the source conditional as structured if/else', () => {
     const snapshot = Analysis.ofSource(
-      'memory://wasm-branch-test.silk',
+      'memory/wasm-branch-test',
       encoder.encode('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
     )
@@ -66,5 +66,7 @@ describe('WasmLab', () => {
     expect(run('pub fn main() -> I32 { if I32.equals(1, 2) { return 0 } return 42 }')).toBe(42)
     expect(run('pub fn main() -> I32 { return I32.divide(1, 0) }')).toBe('trap')
     expect(run('pub fn main() -> I32 { return I32.add(2147483647, 1) }')).toBe('trap')
+    expect(run('pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }')).toBe(15)
+    expect(run('pub fn main() -> I32 { return -(-2147483648) }')).toBe('trap')
   })
 })

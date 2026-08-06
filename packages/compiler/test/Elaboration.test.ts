@@ -57,6 +57,7 @@ import {
   unresolvedTargetTypeCallSource,
   validCallSource,
 } from './fixtures/BootstrapSemanticFixture.js'
+import { elaborate } from './support/elaborate.js'
 import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -66,7 +67,7 @@ const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
   Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source))))
 
 const analyzeText = (id: string, source: string): Elaboration.Result =>
-  Elaboration.elaborateModule(parseText(id, source))
+  elaborate(parseText(id, source))
 
 const functionAt = (result: Elaboration.Result, index: number): Elaboration.FunctionFact =>
   result.functions.at(index) ?? raise(`expected function fact at index ${index}`)
@@ -105,7 +106,7 @@ const directToken = (node: SyntaxTree.Node, kind: Token.TokenKind): Token.Token 
 
 it('publishes one immutable function fact with exact accepted provenance', () => {
   const parse = parseText('fixture://semantic-accepted.silk', acceptedSource)
-  const result = Elaboration.elaborateModule(parse)
+  const result = elaborate(parse)
   const fact = functionAt(result, 0)
   const declaration = fact.declaration
   const name = declaration.name
@@ -1127,4 +1128,63 @@ it('links unresolved types and missing parameter references to their diagnostics
     Diagnostic.identityEquals(referenceCause, Diagnostic.identity(referenceDiagnostic)),
     true,
   )
+})
+
+it('canonicalizes operator facts with typed builtin operand mappings', () => {
+  const result = analyzeText(
+    'fixture://operators.silk',
+    'pub fn main() -> Bool { return !(2 + 3 * 4 == 14) }',
+  )
+  const returned = functionAt(result, 0).returnedExpression
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(returned._tag, 'Operator')
+  if (returned._tag !== 'Operator') return
+  assert.strictEqual(returned.operator, 'Not')
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'Bool' })
+  assert.deepEqual(
+    returned.mappings.map((mapping) => [mapping.ordinal, mapping.expected]),
+    [[0, 'Bool']],
+  )
+  const grouped = returned.arguments.at(0)?.expression
+  assert.strictEqual(grouped?._tag, 'Grouped')
+  if (grouped?._tag !== 'Grouped') return
+  assert.strictEqual(grouped.expression._tag, 'Operator')
+  if (grouped.expression._tag !== 'Operator') return
+  assert.strictEqual(grouped.expression.operator, 'Equals')
+})
+
+it('inserts pipeline inputs as argument zero across a left-to-right chain', () => {
+  const result = analyzeText(
+    'fixture://pipeline.silk',
+    'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }',
+  )
+  const returned = functionAt(result, 0).returnedExpression
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(returned._tag, 'Pipeline')
+  if (returned._tag !== 'Pipeline') return
+  assert.strictEqual(returned.arguments.length, 2)
+  assert.deepEqual(
+    returned.arguments.map((argument) => argument.id.ordinal),
+    [0, 1],
+  )
+  assert.strictEqual(returned.arguments.at(0)?.expression._tag, 'Pipeline')
+  assert.strictEqual(returned.reference._tag, 'ResolvedBuiltin')
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'I32' })
+})
+
+it('withholds mistyped operator results after one local diagnostic', () => {
+  const result = analyzeText(
+    'fixture://operator-mismatch.silk',
+    'pub fn main() -> I32 { return true + 1 }',
+  )
+  const returned = functionAt(result, 0).returnedExpression
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0012'],
+  )
+  assert.strictEqual(returned._tag, 'Operator')
+  assert.deepEqual(returned.type, { _tag: 'Unavailable' })
 })

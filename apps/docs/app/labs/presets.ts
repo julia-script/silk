@@ -314,6 +314,116 @@ pub fn main() -> I32 { return 0 }`,
     modules: { root: 'pub fn puzzle(value: Mystery) -> Enigma { return 0 }' },
   },
 
+  // ---- names ----------------------------------------------------------------------------
+  // Namespaced imports, aliases, and selective member lists: every binding form the resolver
+  // has to answer for, plus the ways one can fail to bind.
+  {
+    label: 'Namespace import',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main': 'import compiler.Syntax\npub fn main() -> I32 { return Syntax.parse() }',
+      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Selective alias',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main':
+        'import compiler.Syntax { parse as read }\npub fn main() -> I32 { return read() }',
+      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Hybrid alias',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main':
+        'import compiler.Syntax as Tree { parse }\npub fn main() -> I32 { return Tree.parse() }',
+      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Private member',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main': 'import compiler.Syntax { hidden }\npub fn main() -> I32 { return 0 }',
+      'compiler/Syntax': 'fn hidden() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Unknown member',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main':
+        'import compiler.Syntax { missing }\npub fn main() -> I32 { return missing() }',
+      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Damaged alias',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main': 'import compiler.Syntax as\npub fn main() -> I32 { return 0 }',
+      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Import collision',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main':
+        'import compiler.Syntax { parse }\npub fn parse() -> I32 { return 0 }\npub fn main() -> I32 { return parse() }',
+      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }',
+    },
+  },
+  {
+    label: 'Import cycle (names)',
+    group: 'names',
+    root: 'app/Main',
+    modules: {
+      'app/Main': 'import cycle.A { a }\npub fn main() -> I32 { return a() }',
+      'cycle/A': 'import cycle.B { b }\npub fn a() -> I32 { return b() }',
+      'cycle/B': 'import cycle.A { a }\npub fn b() -> I32 { return a() }',
+    },
+  },
+
+  // ---- operators ------------------------------------------------------------------------
+  one('operators', 'Operator precedence', 'pub fn main() -> I32 { return 2 + 5 * 8 }'),
+  one('operators', 'Pipeline', 'pub fn main() -> I32 { return 2 |> I32.add(40) }'),
+  one(
+    'operators',
+    'Unary bool pipeline',
+    'pub fn main() -> I32 { if true |> Bool.not { return 0 } return 42 }',
+  ),
+  one('operators', 'Bool not', 'pub fn main() -> I32 { if !(1 == 2) { return 42 } return 0 }'),
+  one('operators', 'Negation overflow traps', 'pub fn main() -> I32 { return -(-2147483648) }'),
+  one(
+    'operators',
+    'Closed operator surface',
+    `pub fn main() -> I32 {
+if 6 * 7 != 42 { return 0 }
+if 84 / 2 != 42 { return 0 }
+if 85 % 43 != 42 { return 0 }
+if 44 - 2 != 42 { return 0 }
+if 40 + 2 != 42 { return 0 }
+if !(1 < 2) { return 0 }
+if !(2 <= 2) { return 0 }
+if !(3 > 2) { return 0 }
+if !(3 >= 3) { return 0 }
+if true != true { return 0 }
+if false == true { return 0 }
+return (40 + 2) * 1
+}`,
+  ),
+
   // ---- ownership ------------------------------------------------------------------------
   one(
     'ownership',

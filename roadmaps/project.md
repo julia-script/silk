@@ -13,10 +13,11 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** give the bootstrap language compiler-shaped data over the accepted compiler
-spine. The next work first standardizes target-aware layout in the compiler, then resolves
-cross-module declarations before nominal structs, structural unions, and exhaustive matching grow
-through the same inspectable, determinism-gated architecture.
+**Current objective:** make the bootstrap language capable of expressing small real algorithms over
+compiler-shaped data. With target-aware layout and cross-module declarations complete, the next
+work standardizes operators, then adds nominal structs, fixed-size arrays, and structured loops
+before structural unions and exhaustive matching grow through the same inspectable,
+determinism-gated architecture.
 
 ## Column rules
 
@@ -50,27 +51,37 @@ through the same inspectable, determinism-gated architecture.
   [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md) ·
   [realignment record](compiler-realignment.md)
 
-### Give the language its data: structs, unions, and matching
+### Make the language algorithmic: modules, operators, data, and loops
 
-**Status: shaped; first change ready to propose.** The semantic choices are pinned in Wayfinder,
-including compiler-owned target layout and the concrete import, construction, and matching forms.
+**Status: in progress; target-aware layout and cross-module declarations complete, operator
+semantics next.** The module, struct, array, union, and matching semantics are substantially pinned
+in Wayfinder. The operator surface and minimal mutable-loop model remain focused decisions for
+their own changes.
 
-- **Problem:** A compiler-shaped program is mostly data manipulation; expressions and branches
-  alone cannot express tokens, trees, or facts. The current backend-owned layout seam also hides
-  target facts until emission, where multiple backends could repeat or disagree on Silk layout.
-- **Outcome & done-when:** the compiler selects a supported target before lowering, computes one
-  backend-neutral layout plan after concrete instance discovery, and embeds it in MIR. The language
-  then gains cross-module resolution, nominal structs, struct values, normalized structural unions,
-  and exhaustive mode-aware matching without allowing a backend to reinterpret their layouts.
+- **Problem:** The compiler spine is complete, but the language can only express small scalar,
+  call, binding, and branching examples. It lacks a settled operator surface, aggregate data,
+  indexed inline storage, mutation, and loops, so it cannot yet express even compact algorithms
+  over compiler-shaped values.
+- **Outcome & done-when:** Silk programs resolve declarations across modules and define, construct,
+  and project nominal structs; compute through a coherent operator model; store values in checked
+  fixed-size arrays; and use mutable bindings with structured loops. The same foundation then grows
+  normalized structural unions and exhaustive mode-aware matching. Every capability runs through
+  layout, ownership, MIR, interpretation, native and WebAssembly emission, and the inspector labs.
 - **Sequence:**
-  1. `standardize-target-aware-layouts`
-  2. `resolve-cross-module-declarations`
-  3. `declare-nominal-struct-types`
-  4. `construct-and-project-struct-values`
-  5. `normalize-structural-unions`
-  6. `match-exhaustively`
-- **Dependencies:** layout and cross-module resolution both precede struct declarations; struct
-  declarations precede construction; construction and layout precede unions; unions precede match.
+  1. `standardize-target-aware-layouts` — complete and archived
+  2. `resolve-cross-module-declarations` — complete and archived
+  3. `standardize-expression-and-operator-semantics`
+  4. `declare-nominal-struct-types`
+  5. `construct-and-project-struct-values`
+  6. `add-fixed-size-arrays-and-indexing`
+  7. `add-mutable-bindings-and-structured-loops`
+  8. `normalize-structural-unions`
+  9. `match-exhaustively`
+- **Dependencies:** cross-module resolution precedes operator desugaring into canonical actor
+  operations and all cross-module data use. Struct declarations precede construction. Arrays build
+  on aggregate layout and the expression/operator foundation; the first useful loop slice adds
+  `let mut`, assignment, `while`, `break`, and `continue` over checked array access. Construction
+  and layout precede unions, and unions precede match.
 - **Appetite:** one focused OpenSpec change at a time, followed by implementation, inspection,
   archive, and reassessment before proposing the next ticket.
 - **Links:** [type and value decision](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
@@ -81,7 +92,7 @@ including compiler-owned target layout and the concrete import, construction, an
 ## Next
 
 No item is promoted yet. Reassess after each data-slice change is implemented and archived; the
-six-item Now sequence is intentionally allowed to change when implementation evidence demands it.
+remaining Now sequence is intentionally allowed to change when implementation evidence demands it.
 
 ## Later
 
@@ -133,6 +144,16 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-05: Shipped and archived `resolve-cross-module-declarations`. Dotted logical imports now
+  support namespace, selective, aliased, and hybrid bindings over canonical slash module identities;
+  declarations are private by default with explicit `pub`; closure-wide name resolution feeds
+  ordinary canonical HIR calls, instance discovery, MIR, interpreter, native, and WebAssembly
+  paths; and the facade-only name-resolution lab exposes bindings, conflicts, visibility failures,
+  cycles, and diagnostic causes. Next: `standardize-expression-and-operator-semantics`.
+- 2026-08-05: Shipped and archived `standardize-target-aware-layouts`, then expanded the active
+  compiler-data sequence into an algorithmic-language milestone. Operators, fixed-size arrays,
+  mutable bindings, and structured loops now land before unions and matching so the language can
+  express small real algorithms rather than only declare data shapes.
 - 2026-08-05: Promoted the compiler-data slice to Now and shaped six dependency-ordered changes.
   Settled that the compiler is backend-agnostic but target-aware: canonical target and concrete
   layout are computed before MIR lowering and embedded in MIR. Also fixed the bootstrap import,

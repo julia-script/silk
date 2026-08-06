@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react'
 import { CfgView } from '../mir-cfg/mir-cfg'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
-const sourceId = 'memory://docs/llvm-ir.silk'
+const sourceId = 'memory/docs/llvm-ir'
 
 const presets = [
   {
@@ -18,6 +18,14 @@ pub fn main() -> I32 { return identity(identity(42)) }`,
     label: 'Two parameters',
     source: `pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(1, 42) }`,
+  },
+  {
+    label: 'Operator pipeline',
+    source: 'pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }',
+  },
+  {
+    label: 'Negation trap',
+    source: 'pub fn main() -> I32 { return -(-2147483648) }',
   },
   {
     label: 'Trap body',

@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
-import * as Elaboration from '../src/Elaboration.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import { elaborate } from './support/elaborate.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -15,9 +15,7 @@ const damagedSource = `pub fn puzzle(value: Mystery) -> I32 { return value }
 pub fn main() -> I32 { return missing() }`
 
 const check = (id: string, text: string): Ownership.ModuleOwnership =>
-  Ownership.checkModule(
-    Elaboration.elaborateModule(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))),
-  )
+  Ownership.checkModule(elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))))
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')

@@ -52,7 +52,16 @@ describe('preset catalog', () => {
   it('keeps the phases the labs shipped presets for', () => {
     const groups = new Set(presets.map((preset) => preset.group))
     expect(groups).toEqual(
-      new Set(['syntax', 'modules', 'headers', 'ownership', 'discovery', 'backend']),
+      new Set([
+        'syntax',
+        'modules',
+        'headers',
+        'names',
+        'operators',
+        'ownership',
+        'discovery',
+        'backend',
+      ]),
     )
   })
 

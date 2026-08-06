@@ -28,8 +28,8 @@ const compileSource = (
 ): Effect.Effect<Driver.Outcome> =>
   Driver.compile({
     compilation: {
-      rootModule: 'memory://driver.silk',
-      sources: new Map([['memory://driver.silk', ascii(text)]]),
+      rootModule: 'memory/driver',
+      sources: new Map([['memory/driver', ascii(text)]]),
     },
     toolchain,
     profile: 'release',
@@ -40,6 +40,7 @@ const compileSource = (
 const expectedPhases = [
   'closure',
   'declaration-index',
+  'name-resolution',
   'elaboration',
   'ownership',
   'instance-discovery',
@@ -63,11 +64,34 @@ it.effect('compiles the nested program to a running executable matching the inte
     assert.strictEqual(outcome.target.kind, 'Native')
     assert.strictEqual(existsSync(outcome.executable), true)
     const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
-    const interpreted = Analysis.evaluate(
-      Analysis.ofSource('memory://driver.silk', ascii(nested.source)),
-    )
+    const interpreted = Analysis.evaluate(Analysis.ofSource('memory/driver', ascii(nested.source)))
     assert.strictEqual(interpreted._tag, 'Completed')
     if (interpreted._tag !== 'Completed') return
+    assert.strictEqual(run.status, interpreted.result.value)
+  }),
+)
+
+it.effect('compiles a three-module call chain to native execution matching the interpreter', () =>
+  Effect.gen(function* () {
+    const sources = new Map([
+      [
+        'app/Main',
+        ascii('import library.Answer { answer }\npub fn main() -> I32 { return answer() }'),
+      ],
+      [
+        'library/Answer',
+        ascii('import values.Number { two }\npub fn answer() -> I32 { return I32.add(40, two()) }'),
+      ],
+      ['values/Number', ascii('pub fn two() -> I32 { return 2 }')],
+    ])
+    const outcome = yield* compileSource('cross-module', '', {
+      compilation: { rootModule: 'app/Main', sources },
+    })
+    const interpreted = Analysis.evaluate(Analysis.make({ rootModule: 'app/Main', sources }))
+    assert.strictEqual(outcome._tag, 'Compiled')
+    assert.strictEqual(interpreted._tag, 'Completed')
+    if (outcome._tag !== 'Compiled' || interpreted._tag !== 'Completed') return
+    const run = spawnSync(outcome.executable, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, interpreted.result.value)
   }),
 )
@@ -147,7 +171,7 @@ it.effect(
     Effect.gen(function* () {
       for (const program of corpus) {
         const interpreted = Analysis.evaluate(
-          Analysis.ofSource('memory://driver.silk', ascii(program.source)),
+          Analysis.ofSource('memory/driver', ascii(program.source)),
         )
         const outcome = yield* compileSource(`corpus-${program.name}`, program.source)
 
@@ -195,10 +219,8 @@ it.effect('stops unsupported and WebAssembly targets before MIR or native tools'
         'pub fn main() -> I32 { return 42 }',
         {
           compilation: {
-            rootModule: 'memory://driver.silk',
-            sources: new Map([
-              ['memory://driver.silk', ascii('pub fn main() -> I32 { return 42 }')],
-            ]),
+            rootModule: 'memory/driver',
+            sources: new Map([['memory/driver', ascii('pub fn main() -> I32 { return 42 }')]]),
             target,
           },
         },

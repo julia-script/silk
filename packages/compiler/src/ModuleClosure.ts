@@ -42,6 +42,9 @@ export type ImportTarget =
 export interface ImportFact {
   readonly _tag: 'Import'
   readonly syntax: SyntaxTree.Node
+  readonly path: SyntaxTree.Node
+  readonly sourceSpelling?: string
+  readonly canonicalTarget?: string
   readonly target: ImportTarget
 }
 
@@ -62,6 +65,29 @@ export interface Closure {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+const isCanonicalIdentity = (identity: string): boolean =>
+  identity.length > 0 &&
+  !identity.startsWith('/') &&
+  !identity.endsWith('/') &&
+  !identity.includes('\\') &&
+  !identity.includes('.') &&
+  identity
+    .split('/')
+    .every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== '.' &&
+        segment !== '..' &&
+        /^[A-Za-z0-9_-]+$/.test(segment),
+    )
+
+const validateRequest = (request: CompilationRequest): void => {
+  const identities = [request.rootModule, ...request.sources.keys()]
+  const invalid = identities.find((identity) => !isCanonicalIdentity(identity))
+  if (invalid !== undefined)
+    throw new RangeError(`Compilation request module identity ${invalid} is not canonical`)
+}
+
 const spelling = (source: SourceFile.SourceFile, token: Token.Token): string => {
   const bytes = Option.getOrThrowWith(
     SourceFile.slice(source, token.span),
@@ -70,13 +96,8 @@ const spelling = (source: SourceFile.SourceFile, token: Token.Token): string => 
   return Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
 }
 
-const directToken = (parent: SyntaxTree.Node, kind: Token.TokenKind): Token.Token | undefined =>
-  parent.children.find(
-    (element): element is Token.Token => SyntaxTree.isToken(element) && element.kind === kind,
-  )
-
 const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
-  parent.children.find((element) => SyntaxTree.isMissingToken(element)) ?? parent
+  SyntaxTree.unavailableElement(parent.children, parent)
 
 interface ModuleAnalysis {
   readonly module: Module
@@ -92,27 +113,38 @@ const analyzeModule = (
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const imports = syntax.root.children.flatMap((element): ReadonlyArray<ImportFact> => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
-    const token = directToken(element, 'Identifier')
-    if (token === undefined) {
+    const path = SyntaxTree.directNode(element, 'ImportPath')
+    const tokens =
+      path?.children.filter(
+        (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'Identifier',
+      ) ?? []
+    if (path === undefined || tokens.length === 0 || !SyntaxTree.isAvailableSyntax(path)) {
       return [
         Object.freeze({
           _tag: 'Import' as const,
           syntax: element,
+          path: path ?? element,
           target: Object.freeze({
             _tag: 'Unavailable' as const,
-            syntax: unavailableSyntax(element),
+            syntax: unavailableSyntax(path ?? element),
           }),
         }),
       ]
     }
-    const module = spelling(syntax.source, token)
+    const sourceSpelling = tokens.map((token) => spelling(syntax.source, token)).join('.')
+    const module = tokens.map((token) => spelling(syntax.source, token)).join('/')
+    const token = tokens.at(0)
+    if (token === undefined) throw new RangeError('Available import path lost its first segment')
     if (module === name) {
-      const diagnostic = Diagnostic.selfImport(module, token.span)
+      const diagnostic = Diagnostic.selfImport(module, path.span)
       diagnostics.push(diagnostic)
       return [
         Object.freeze({
           _tag: 'Import' as const,
           syntax: element,
+          path,
+          sourceSpelling,
+          canonicalTarget: module,
           target: Object.freeze({
             _tag: 'Self' as const,
             module,
@@ -123,12 +155,15 @@ const analyzeModule = (
       ]
     }
     if (!sources.has(module)) {
-      const diagnostic = Diagnostic.unknownModule(module, token.span)
+      const diagnostic = Diagnostic.unknownModule(module, path.span)
       diagnostics.push(diagnostic)
       return [
         Object.freeze({
           _tag: 'Import' as const,
           syntax: element,
+          path,
+          sourceSpelling,
+          canonicalTarget: module,
           target: Object.freeze({
             _tag: 'Unknown' as const,
             module,
@@ -142,6 +177,9 @@ const analyzeModule = (
       Object.freeze({
         _tag: 'Import' as const,
         syntax: element,
+        path,
+        sourceSpelling,
+        canonicalTarget: module,
         target: Object.freeze({ _tag: 'Resolved' as const, module, token }),
       }),
     ]
@@ -231,6 +269,7 @@ const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray
  * the result. A missing root module violates the caller contract and is rejected.
  */
 export const load = (request: CompilationRequest): Closure => {
+  validateRequest(request)
   const rootBytes = request.sources.get(request.rootModule)
   if (rootBytes === undefined) {
     throw new RangeError(

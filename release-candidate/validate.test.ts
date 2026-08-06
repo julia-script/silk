@@ -248,7 +248,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Lower',
       './Mir',
       './ModuleClosure',
+      './NameResolution',
       './NativeToolchain',
+      './Operator',
       './Ownership',
       './Parser',
       './SourceFile',
@@ -314,7 +316,7 @@ const modules = await Promise.all(
   paths.map((path) => import(\`@silk-effect/compiler/\${path.slice(2)}\`)),
 );
 const source = api.SourceFile.make(
-  'memory://packed.silk',
+  'memory/packed',
   new TextEncoder().encode(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
   ),
@@ -330,53 +332,48 @@ const visit = (element) => {
   for (const child of element.children) visit(child);
 };
 visit(parse.root);
-const analysis = api.Elaboration.elaborateModule(parse);
-const deepAnalysis = semanticModule.elaborateModule(parse);
 const rootSnapshot = api.Analysis.ofSource(
-  'memory://packed.silk',
+  'memory/packed',
   new TextEncoder().encode(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
   ),
 );
+const inputOf = (snapshot) => ({
+  syntax: api.Analysis.rootAnalysis(snapshot).syntax,
+  headers: api.Analysis.declarationIndex(snapshot).modules[0],
+  scope: api.Analysis.moduleScope(snapshot, snapshot.closure.rootModule),
+  index: api.Analysis.declarationIndex(snapshot),
+});
+const analysis = api.Analysis.rootAnalysis(rootSnapshot);
+const deepAnalysis = semanticModule.elaborateModule(inputOf(rootSnapshot));
 const evaluation = api.Analysis.evaluate(rootSnapshot);
 const deepEvaluation = evaluationModule.evaluate(
   api.Analysis.instancesOf(rootSnapshot),
   api.Analysis.loweredMir(rootSnapshot),
 );
 const call = analysis.functions[1]?.returnedExpression;
-const unknownSource = api.SourceFile.make(
-  'memory://packed-unknown.silk',
+const unknownAnalysis = api.Analysis.rootAnalysis(api.Analysis.ofSource(
+  'memory/packed-unknown',
   new TextEncoder().encode('pub fn main() -> I32 { return missing() }'),
-);
-const unknownAnalysis = semanticModule.elaborateModule(api.Parser.parse(api.Lexer.lex(unknownSource)));
-const unknownLocalSource = api.SourceFile.make(
-  'memory://packed-unknown-local.silk',
+));
+const unknownLocalAnalysis = api.Analysis.rootAnalysis(api.Analysis.ofSource(
+  'memory/packed-unknown-local',
   new TextEncoder().encode('pub fn main() -> I32 { return missing }'),
-);
-const unknownLocalAnalysis = semanticModule.elaborateModule(
-  api.Parser.parse(api.Lexer.lex(unknownLocalSource)),
-);
-const wrongAritySource = api.SourceFile.make(
-  'memory://packed-wrong-arity.silk',
+));
+const wrongArityAnalysis = api.Analysis.rootAnalysis(api.Analysis.ofSource(
+  'memory/packed-wrong-arity',
   new TextEncoder().encode(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity() }',
   ),
-);
-const wrongArityAnalysis = semanticModule.elaborateModule(
-  api.Parser.parse(api.Lexer.lex(wrongAritySource)),
-);
-const cycleSource = api.SourceFile.make(
-  'memory://packed-cycle.silk',
-  new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
-);
+));
 const cycleEvaluation = api.Analysis.evaluate(
   api.Analysis.ofSource(
-    'memory://packed-cycle.silk',
+    'memory/packed-cycle',
     new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
   ),
 );
 const nestedSource = api.SourceFile.make(
-  'memory://packed-nested.silk',
+  'memory/packed-nested',
   new TextEncoder().encode(
     'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(identity(42)) }',
   ),
@@ -389,17 +386,14 @@ const visitNested = (element) => {
   for (const child of element.children) visitNested(child);
 };
 visitNested(nestedParse.root);
-const nestedAnalysis = semanticModule.elaborateModule(nestedParse);
+const nestedSnapshot = api.Analysis.ofSource(
+  'memory/packed-nested',
+  Uint8Array.from(nestedParse.source.bytes),
+);
+const nestedAnalysis = semanticModule.elaborateModule(inputOf(nestedSnapshot));
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
-const nestedEvaluation = api.Analysis.evaluate(
-  api.Analysis.ofSource(
-    'memory://packed-nested.silk',
-    new TextEncoder().encode(
-      'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(identity(42)) }',
-    ),
-  ),
-);
+const nestedEvaluation = api.Analysis.evaluate(nestedSnapshot);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -534,6 +528,8 @@ console.log(
       'Lower',
       'Mir',
       'ModuleClosure',
+      'NameResolution',
+      'Operator',
       'Ownership',
       'Parser',
       'SourceFile',
@@ -566,6 +562,7 @@ console.log(
     expect(api.deep['./Diagnostic']).toContain('merge')
     expect(api.deep['./SourceFile']).toContain('make')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
+    expect(api.deep['./Operator']).toContain('infix')
     expect(api.functionCount).toBe(2)
     expect(api.callCount).toBe(1)
     expect(api.semantic).toEqual({

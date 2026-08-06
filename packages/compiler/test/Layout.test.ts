@@ -8,7 +8,7 @@ const ascii = (value: string): Uint8Array =>
 
 it('plans only concrete types reached through discovered instances', () => {
   const snapshot = Analysis.ofSource(
-    'layout://program.silk',
+    'layout/program',
     ascii(`pub fn unused(value: Bool) -> Bool { return value }
 pub fn main() -> I32 { return 42 }`),
   )

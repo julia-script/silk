@@ -21,7 +21,7 @@ describe('LlvmIrLab', () => {
 
   it('shows the checked arithmetic expansion through the facade', () => {
     const snapshot = Analysis.ofSource(
-      'memory://llvm-arith-test.silk',
+      'memory/llvm-arith-test',
       encoder.encode('pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
     )
     const artifact = Effect.runSync(Analysis.codegen(snapshot, { mode: 'release' }))
@@ -36,9 +36,32 @@ describe('LlvmIrLab', () => {
     ).toEqual(['Add', 'Divide'])
   })
 
+  it('connects operator provenance to the same canonical MIR and LLVM operations', () => {
+    const snapshot = Analysis.ofSource(
+      'memory/llvm-operator-test',
+      encoder.encode('pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }'),
+    )
+    const operators = Analysis.loweredMir(snapshot).functions.at(0)?.blocks.at(0)?.operations ?? []
+
+    expect(
+      operators.flatMap((operation) =>
+        operation._tag === 'Binary'
+          ? [[operation.operator, operation.provenance.generated] as const]
+          : [],
+      ),
+    ).toEqual([
+      ['Multiply', false],
+      ['Add', false],
+      ['Add', false],
+    ])
+    const artifact = Effect.runSync(Analysis.codegen(snapshot, { mode: 'release' }))
+    expect(artifact.ir).toContain('llvm.smul.with.overflow')
+    expect(artifact.ir).toContain('llvm.sadd.with.overflow')
+  })
+
   it('shows user-authored branch diamonds through the facade', () => {
     const snapshot = Analysis.ofSource(
-      'memory://llvm-branch-test.silk',
+      'memory/llvm-branch-test',
       encoder.encode('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
     )
     const mir = Analysis.loweredMir(snapshot)
@@ -54,7 +77,7 @@ describe('LlvmIrLab', () => {
 
   it('answers debug emission with metadata through the facade', () => {
     const snapshot = Analysis.ofSource(
-      'memory://llvm-ir-test.silk',
+      'memory/llvm-ir-test',
       encoder.encode('pub fn main() -> I32 { return 42 }'),
     )
     const debug = Effect.runSync(Analysis.codegen(snapshot, { mode: 'debug' }))

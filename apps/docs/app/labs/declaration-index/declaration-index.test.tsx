@@ -31,6 +31,12 @@ describe('IndexView', () => {
     expect(markup).toContain('(left: I32, right: I32) -&gt; I32')
   })
 
+  it('distinguishes public and default-private headers', () => {
+    const markup = renderToStaticMarkup(<IndexView index={collect('root', [['root', 'pub fn visible() -> I32 { return 1 }\nfn helper() -> I32 { return 2 }']])} />)
+    expect(markup).toContain('Public · importable')
+    expect(markup).toContain('Private · module-private')
+  })
+
   it('marks duplicate and unidentified headers explicitly', () => {
     const index = collect('root', [
       ['root', 'pub fn same() -> I32 { return 1 }\npub fn same() -> I32 { return 2 }\npub fn () -> I32 { return 0 }'],

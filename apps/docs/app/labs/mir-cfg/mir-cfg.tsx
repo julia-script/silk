@@ -4,7 +4,7 @@ import { Analysis, Mir } from '@silk-effect/compiler'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
-const programSourceId = 'memory://docs/mir-program.silk'
+const programSourceId = 'memory/docs/mir-program'
 const defaultProgram = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 
@@ -147,7 +147,7 @@ export function MirCfgLab() {
       <div className={styles.exampleBar} aria-label="MIR samples">
         {samples.map((candidate, index) => (
           <button key={candidate.module} type="button" onClick={() => setSelected(index)}>
-            {candidate.module.replace('sample://', '').replace('.silk', '')}
+            {candidate.module.replace('sample://', '').replace('', '')}
           </button>
         ))}
         <button type="button" onClick={() => setSelected(samples.length)}>

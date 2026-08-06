@@ -5,7 +5,7 @@ import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
-const sourceId = 'memory://docs/toolchain.silk'
+const sourceId = 'memory/docs/toolchain'
 const defaultSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 

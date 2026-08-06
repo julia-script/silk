@@ -1,8 +1,8 @@
-mir-module golden://program.silk
+mir-module golden/program
 target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
 layout Bool size=4 align=4 repr=bool-i32 false=0 true=1
 layout I32 size=4 align=4 repr=signed-i32
-fn golden://program.silk.main params=0 locals=8 -> I32
+fn golden/program.main params=0 locals=8 -> I32
   bb0:
     %0 = literal 40 : I32 [33, 36)
     %1 = move %0 [22, 36)

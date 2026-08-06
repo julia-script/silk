@@ -18,7 +18,7 @@ const presets: ReadonlyArray<Preset> = [
     root: 'root',
     modules: {
       root: 'import lib\npub fn main() -> I32 { return 42 }',
-      lib: 'pub fn answer() -> I32 { return 1 }\npub fn choose(left: I32, right: I32) -> I32 { return left }',
+      lib: 'pub fn answer() -> I32 { return 1 }\nfn choose(left: I32, right: I32) -> I32 { return left }',
     },
   },
   {
@@ -103,6 +103,7 @@ export function IndexView({ index }: { readonly index: DeclarationIndex.Index })
                     <span>{canonicalLabel(declaration.canonical)}</span>
                   </div>
                   <p>{signatureLabel(declaration)}</p>
+                  <p>{declaration.visibility} · {declaration.visibility === 'Public' ? 'importable' : 'module-private'}</p>
                 </li>
               ))}
             </ul>

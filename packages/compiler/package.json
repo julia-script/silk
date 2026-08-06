@@ -97,6 +97,10 @@
       "types": "./dist/ModuleClosure.d.ts",
       "import": "./dist/ModuleClosure.js"
     },
+    "./NameResolution": {
+      "types": "./dist/NameResolution.d.ts",
+      "import": "./dist/NameResolution.js"
+    },
     "./SyntaxFile": {
       "types": "./dist/SyntaxFile.d.ts",
       "import": "./dist/SyntaxFile.js"
@@ -108,6 +112,10 @@
     "./Ownership": {
       "types": "./dist/Ownership.d.ts",
       "import": "./dist/Ownership.js"
+    },
+    "./Operator": {
+      "types": "./dist/Operator.d.ts",
+      "import": "./dist/Operator.js"
     },
     "./Parser": {
       "types": "./dist/Parser.d.ts",

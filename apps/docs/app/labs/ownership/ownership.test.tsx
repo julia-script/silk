@@ -8,8 +8,8 @@ const encoder = new TextEncoder()
 
 const check = (text: string): Ownership.ModuleOwnership | undefined =>
   Analysis.ownershipOf(
-    Analysis.ofSource('memory://ownership-test.silk', encoder.encode(text)),
-    'memory://ownership-test.silk',
+    Analysis.ofSource('memory/ownership-test', encoder.encode(text)),
+    'memory/ownership-test',
   )
 
 describe('OwnershipView', () => {

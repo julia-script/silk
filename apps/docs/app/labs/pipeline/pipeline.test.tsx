@@ -28,6 +28,7 @@ describe('PipelineLab', () => {
     expect(markup).toContain('no diagnostics')
     expect(markup).toContain('href="/docs/labs/mir-cfg"')
     expect(markup).toContain('href="/docs/labs/toolchain"')
+    expect(markup).toContain('2 + 3 * 4 |&gt; I32.add(1)')
     expect(markup).toMatch(/snapshot built in \d+(\.\d+)? ms/)
   })
 })
@@ -35,7 +36,7 @@ describe('PipelineLab', () => {
 describe('pipelineRows', () => {
   it('shows per-phase diagnostic counts and explicit recovery states for damaged programs', () => {
     const snapshot = Analysis.ofSource(
-      'memory://pipeline-test.silk',
+      'memory/pipeline-test',
       new TextEncoder().encode('@ pub fn main( -> Mystery { return 42 }'),
     )
     const rows = pipelineRows(snapshot)

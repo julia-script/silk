@@ -11,6 +11,7 @@
 import { Analysis } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, ToolchainPlan } from '@silk-effect/compiler'
 import { IndexView } from './declaration-index/declaration-index'
+import { ResolutionView } from './name-resolution/name-resolution'
 import { DiscoveryView } from './instances/instances'
 import { CfgView } from './mir-cfg/mir-cfg'
 import { ClosureView } from './module-closure/module-closure'
@@ -36,6 +37,7 @@ export type ViewId =
   | 'evaluation'
   | 'closure'
   | 'index'
+  | 'resolution'
   | 'hir'
   | 'ownership'
   | 'instances'
@@ -124,6 +126,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
     title: 'Declaration index',
     phase: 'headers',
     render: ({ snapshot }) => <IndexView index={Analysis.declarationIndex(snapshot)} />,
+  },
+  {
+    id: 'resolution',
+    title: 'Name resolution',
+    phase: 'names',
+    render: ({ snapshot }) => (
+      <ResolutionView resolution={Analysis.nameResolution(snapshot)} />
+    ),
   },
   {
     id: 'hir',

@@ -23,7 +23,7 @@ pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
 
 describe('projectDataFlow', () => {
   it('projects the canonical flat semantic path without evaluation claims', () => {
-    const flow = projectDataFlow(analyze('memory://flow-complete.silk', identitySource))
+    const flow = projectDataFlow(analyze('memory/flow-complete', identitySource))
 
     expect(flow.mode).toBe('Semantic')
     expect(flow.status).toBe('Complete')
@@ -46,7 +46,7 @@ describe('projectDataFlow', () => {
   })
 
   it('groups nested calls and connects the inner result to the outer argument', () => {
-    const flow = projectDataFlow(analyze('memory://flow-nested.silk', nestedSource))
+    const flow = projectDataFlow(analyze('memory/flow-nested', nestedSource))
 
     expect(flow.status).toBe('Complete')
     expect(flow.groups.map((group) => [group.depth, group.ordinal])).toEqual([
@@ -58,7 +58,7 @@ describe('projectDataFlow', () => {
   })
 
   it('keeps repeated sibling call sites distinct and source ordered', () => {
-    const snapshot = snap('memory://flow-siblings.silk', siblingSource)
+    const snapshot = snap('memory/flow-siblings', siblingSource)
     const analysis = Analysis.rootAnalysis(snapshot)
     const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
@@ -74,7 +74,7 @@ describe('projectDataFlow', () => {
   it('terminates an unavailable inner type contract without inventing an enclosing result', () => {
     const flow = projectDataFlow(
       analyze(
-        'memory://flow-missing.silk',
+        'memory/flow-missing',
         `pub fn identity(value: I32) -> I32 { return value }
 pub fn uncertain(value: Mystery) -> I32 { return 0 }
 pub fn main() -> I32 { return identity(uncertain(42)) }`,
@@ -90,7 +90,7 @@ pub fn main() -> I32 { return identity(uncertain(42)) }`,
   it('keeps positional facts but stops a wrong-arity nested call before results', () => {
     const flow = projectDataFlow(
       analyze(
-        'memory://flow-arity.silk',
+        'memory/flow-arity',
         `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity()) }`,
       ),
@@ -107,7 +107,7 @@ pub fn main() -> I32 { return identity(identity()) }`,
   })
 
   it('overlays only the completed prefix when a later sibling blocks', () => {
-    const snapshot = snap('memory://flow-blocked.silk', `pub fn identity(value: I32) -> I32 { return value }
+    const snapshot = snap('memory/flow-blocked', `pub fn identity(value: I32) -> I32 { return value }
 pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
     const analysis = Analysis.rootAnalysis(snapshot)
@@ -127,7 +127,7 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
   })
 
   it('renders a recursive cycle as one finite trace-backed terminal', () => {
-    const snapshot = snap('memory://flow-cycle.silk', `pub fn identity(value: I32) -> I32 { return value }
+    const snapshot = snap('memory/flow-cycle', `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(main()) }`)
     const analysis = Analysis.rootAnalysis(snapshot)
     const outcome = Analysis.evaluate(snapshot)
@@ -143,8 +143,8 @@ pub fn main() -> I32 { return identity(main()) }`)
   })
 
   it('recomputes deterministically from equivalent disposable analysis state', () => {
-    const first = projectDataFlow(analyze('memory://flow-repeat.silk', identitySource))
-    const second = projectDataFlow(analyze('memory://flow-repeat.silk', identitySource))
+    const first = projectDataFlow(analyze('memory/flow-repeat', identitySource))
+    const second = projectDataFlow(analyze('memory/flow-repeat', identitySource))
 
     expect(first).toEqual(second)
   })

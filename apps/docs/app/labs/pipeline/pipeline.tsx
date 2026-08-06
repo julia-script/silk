@@ -5,9 +5,8 @@ import * as Effect from 'effect/Effect'
 import { useMemo, useState } from 'react'
 import styles from '../syntax-inspector/syntax-inspector.module.css'
 
-const sourceId = 'memory://docs/pipeline.silk'
-const defaultSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+const sourceId = 'memory/docs/pipeline'
+const defaultSource = 'pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }'
 
 const encoder = new TextEncoder()
 
@@ -55,6 +54,12 @@ export const pipelineRows = (snapshot: Analysis.Snapshot): ReadonlyArray<PhaseRo
         0,
       )} headers`,
       diagnostics: 0,
+    },
+    {
+      phase: 'name resolution',
+      lab: '/docs/labs/name-resolution',
+      outputs: `${Analysis.nameResolution(snapshot).modules.reduce((sum, module) => sum + module.bindings.length, 0)} bindings`,
+      diagnostics: phaseDiagnostics('semantic'),
     },
     {
       phase: 'elaboration (HIR)',

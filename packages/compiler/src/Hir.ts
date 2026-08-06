@@ -34,6 +34,7 @@ export type BuiltinOperation =
   | 'Multiply'
   | 'Divide'
   | 'Remainder'
+  | 'Negate'
   | 'Equals'
   | 'NotEquals'
   | 'LessThan'

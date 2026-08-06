@@ -29,9 +29,6 @@ const isIdentifierContinue = (byte: number | undefined): boolean =>
 const isLineCommentStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2f && bytes[index + 1] === 0x2f
 
-const isArrowStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
-  bytes[index] === 0x2d && bytes[index + 1] === 0x3e
-
 const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x28 ||
   byte === 0x29 ||
@@ -41,7 +38,29 @@ const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x2c ||
   byte === 0x3d ||
   byte === 0x2d ||
+  byte === 0x2b ||
+  byte === 0x2a ||
+  byte === 0x2f ||
+  byte === 0x25 ||
+  byte === 0x21 ||
+  byte === 0x3c ||
+  byte === 0x3e ||
   byte === 0x2e
+
+const compoundPunctuationKind = (
+  bytes: ReadonlyArray<number>,
+  index: number,
+): Token.TokenKind | undefined => {
+  const first = bytes[index]
+  const second = bytes[index + 1]
+  if (first === 0x2d && second === 0x3e) return 'Arrow'
+  if (first === 0x3d && second === 0x3d) return 'EqualEqual'
+  if (first === 0x21 && second === 0x3d) return 'BangEqual'
+  if (first === 0x3c && second === 0x3d) return 'LessEqual'
+  if (first === 0x3e && second === 0x3d) return 'GreaterEqual'
+  if (first === 0x7c && second === 0x3e) return 'PipeGreater'
+  return undefined
+}
 
 const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boolean => {
   const byte = bytes[index]
@@ -50,12 +69,13 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
     isIdentifierStart(byte) ||
     isDecimalDigit(byte) ||
     isLineCommentStart(bytes, index) ||
-    isArrowStart(bytes, index) ||
+    compoundPunctuationKind(bytes, index) !== undefined ||
     isPunctuation(byte)
   )
 }
 
 const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
+  ['as', 'AsKeyword'],
   ['if', 'IfKeyword'],
   ['else', 'ElseKeyword'],
   ['true', 'TrueKeyword'],
@@ -150,6 +170,20 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'Equals'
     case 0x2d:
       return 'Minus'
+    case 0x2b:
+      return 'Plus'
+    case 0x2a:
+      return 'Star'
+    case 0x2f:
+      return 'Slash'
+    case 0x25:
+      return 'Percent'
+    case 0x21:
+      return 'Bang'
+    case 0x3c:
+      return 'Less'
+    case 0x3e:
+      return 'Greater'
     case 0x2e:
       return 'Dot'
     default:
@@ -214,9 +248,10 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       continue
     }
 
-    if (isArrowStart(bytes, index)) {
+    const compound = compoundPunctuationKind(bytes, index)
+    if (compound !== undefined) {
       index += 2
-      pushToken('Arrow', start, index)
+      pushToken(compound, start, index)
       continue
     }
 

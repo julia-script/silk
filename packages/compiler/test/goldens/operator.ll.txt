@@ -1,0 +1,28 @@
+source_filename = "golden/operator"
+target triple = "aarch64-apple-darwin"
+
+define i32 @silk_main() {
+bb0:
+  %arith0_pair = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 3, i32 4)
+  %arith0 = extractvalue { i32, i1 } %arith0_pair, 0
+  %arith0_flag = extractvalue { i32, i1 } %arith0_pair, 1
+  br i1 %arith0_flag, label %arith_trap, label %arith0_ok
+arith_trap:
+  call void @llvm.trap()
+  unreachable
+arith0_ok:
+  %arith1_pair = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 2, i32 %arith0)
+  %arith1 = extractvalue { i32, i1 } %arith1_pair, 0
+  %arith1_flag = extractvalue { i32, i1 } %arith1_pair, 1
+  br i1 %arith1_flag, label %arith_trap, label %arith1_ok
+arith1_ok:
+  %arith2_pair = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %arith1, i32 1)
+  %arith2 = extractvalue { i32, i1 } %arith2_pair, 0
+  %arith2_flag = extractvalue { i32, i1 } %arith2_pair, 1
+  br i1 %arith2_flag, label %arith_trap, label %arith2_ok
+arith2_ok:
+  ret i32 %arith2
+}
+declare { i32, i1 } @llvm.smul.with.overflow.i32(i32, i32)
+declare { i32, i1 } @llvm.sadd.with.overflow.i32(i32, i32)
+declare void @llvm.trap()
