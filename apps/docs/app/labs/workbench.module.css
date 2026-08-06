@@ -559,6 +559,39 @@
   color: var(--wb-ink-3);
 }
 
+/*
+ * A pane with no resolvable view: the chooser sits centered in the body.
+ *
+ * `margin: auto` on the chooser rather than `justify-content: center` on the body — a centered
+ * flex child that overflows a short pane clips its top edge unreachably, while auto margins
+ * collapse to zero and let the body scroll from the start of the list.
+ */
+.emptyPaneBody {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.emptyPaneChooser {
+  margin: auto;
+  padding: 12px;
+}
+
+.emptyPaneHint {
+  margin: 0 0 8px;
+  color: var(--wb-ink-3);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.emptyPaneList {
+  width: 214px;
+  border: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-header);
+}
+
 .pickerMenu {
   position: absolute;
   z-index: 20;

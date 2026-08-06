@@ -167,8 +167,10 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const [showTrivia, setShowTrivia] = useState(false)
-  const viewId = props.params.view
-  const definition = viewById(viewId)
+  // A layout saved before the redesign carries a `source`-component panel with no `view` param
+  // at all; its panel id still says what it was. Resolving it here keeps old layouts working.
+  const viewId = props.params.view ?? (props.api.id === 'source' ? 'source' : undefined)
+  const definition = viewId === undefined ? undefined : viewById(viewId)
 
   const onPick = useCallback(
     (next: string) => {
@@ -183,10 +185,36 @@ function ViewPane(props: IDockviewPanelProps<{ view: string }>) {
   if (state === undefined) return null
 
   if (definition === undefined) {
+    // A pane with nothing to render is an invitation, not an error: name every view it could
+    // become and let one click get there.
     return (
       <div className={shell.pane}>
         <div className={shell.paneBar}>
-          <span className={shell.paneMeta}>Unknown view: {viewId}</span>
+          <span className={shell.paneMeta}>empty pane</span>
+        </div>
+        <div className={shell.emptyPaneBody}>
+          <div className={shell.emptyPaneChooser}>
+            <p className={shell.emptyPaneHint}>
+              {viewId === undefined || viewId === ''
+                ? 'This pane has no content yet — pick a view:'
+                : `“${viewId}” is not a view this workbench knows — pick one:`}
+            </p>
+            <div className={shell.emptyPaneList} role="menu">
+              {views.map((view) => (
+                <button
+                  key={view.id}
+                  type="button"
+                  role="menuitem"
+                  className={shell.pickerOption}
+                  onClick={() => onPick(view.id)}
+                >
+                  <span className={shell.pickerTag}>{view.tag}</span>
+                  <span className={shell.pickerTitle}>{view.title}</span>
+                  <span className={shell.pickerPhase}>{view.phase}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     )
