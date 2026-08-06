@@ -34,6 +34,8 @@ const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x29 ||
   byte === 0x7b ||
   byte === 0x7d ||
+  byte === 0x5b ||
+  byte === 0x5d ||
   byte === 0x3a ||
   byte === 0x2c ||
   byte === 0x3d ||
@@ -163,6 +165,10 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'LeftBrace'
     case 0x7d:
       return 'RightBrace'
+    case 0x5b:
+      return 'LeftBracket'
+    case 0x5d:
+      return 'RightBracket'
     case 0x3a:
       return 'Colon'
     case 0x2c:

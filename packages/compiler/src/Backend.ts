@@ -140,7 +140,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     if (
       program.layout.entries.some(
         (entry) =>
-          entry.representation._tag !== 'Aggregate' && entry.representation.bits !== scalarBits,
+          (entry.representation._tag === 'SignedInteger' ||
+            entry.representation._tag === 'Boolean') &&
+          entry.representation.bits !== scalarBits,
       )
     ) {
       return yield* new BackendError({
@@ -324,6 +326,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     Object.freeze(operation.fields.flatMap((field) => [...readLocal(field.value)])),
                   )
                   break
+                case 'ConstructArray':
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze(operation.elements.flatMap((element) => [...readLocal(element)])),
+                  )
+                  break
                 case 'Project': {
                   const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
                   if (sourceType === undefined) {
@@ -335,6 +343,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const first = lane.path.at(0)
                     const selected = sourceValues.at(index)
                     return first !== undefined &&
+                      first._tag === 'FieldId' &&
                       selected !== undefined &&
                       first.ordinal === operation.field.ordinal &&
                       first.struct.sourceId === operation.field.struct.sourceId &&
@@ -343,6 +352,167 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       : []
                   })
                   locals.set(operation.destination.ordinal, Object.freeze(projected))
+                  break
+                }
+                case 'ReadPlace': {
+                  const sourceType = entry.fn.localTypes.at(operation.root.ordinal)
+                  if (sourceType === undefined) {
+                    throw new RangeError('Backend place read lost its root type')
+                  }
+                  const sourceLanes = lanesFor(sourceType)
+                  const sourceValues = readLocal(operation.root)
+                  const destinationLanes = lanesFor(operation.type)
+                  const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
+                    selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
+                      ? [
+                          Object.freeze({
+                            local: selector.index.local,
+                            length: selector.length,
+                            span: selector.provenance.span,
+                            ordinal,
+                          }),
+                        ]
+                      : [],
+                  )
+                  for (const [runtimeOrdinal, selector] of runtimeSelectors.entries()) {
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    const limit = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(selector.length),
+                    )
+                    const inBounds = yield* FunctionBody.integerCompare(
+                      body,
+                      'ult',
+                      readScalar(selector.local),
+                      limit,
+                      `index${checkOrdinal}_${runtimeOrdinal}_in_bounds`,
+                    )
+                    const instruction = yield* Value.instruction(body, inBounds)
+                    yield* locate(selector.span, instruction)
+                    const continueBlock = yield* LlvmBlock.make(
+                      body,
+                      `index${checkOrdinal}_${runtimeOrdinal}_ok`,
+                    )
+                    yield* FunctionBody.conditionalBranch(body, inBounds, continueBlock, trapBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+                  }
+
+                  const selectedValues: Array<Value.Input> = []
+                  for (const [destinationOrdinal, destinationLane] of destinationLanes.entries()) {
+                    const candidates = sourceLanes.flatMap((sourceLane, sourceOrdinal) => {
+                      if (
+                        sourceLane.path.length !==
+                        operation.selectors.length + destinationLane.path.length
+                      ) {
+                        return []
+                      }
+                      const runtimeElements: Array<{
+                        readonly local: Mir.LocalId
+                        readonly element: number
+                      }> = []
+                      for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
+                        const physical = sourceLane.path.at(selectorOrdinal)
+                        if (physical === undefined) return []
+                        if (selector._tag === 'FieldSelector') {
+                          if (
+                            physical._tag !== 'FieldId' ||
+                            physical.ordinal !== selector.field.ordinal ||
+                            physical.struct.sourceId !== selector.field.struct.sourceId ||
+                            physical.struct.ordinal !== selector.field.struct.ordinal
+                          ) {
+                            return []
+                          }
+                        } else {
+                          if (physical._tag !== 'ElementSelector') return []
+                          if (
+                            selector.index._tag === 'Proven' &&
+                            physical.index !== selector.index.value
+                          ) {
+                            return []
+                          }
+                          if (selector.index._tag === 'Runtime') {
+                            runtimeElements.push(
+                              Object.freeze({
+                                local: selector.index.local,
+                                element: physical.index,
+                              }),
+                            )
+                          }
+                        }
+                      }
+                      const suffix = sourceLane.path.slice(operation.selectors.length)
+                      const sameSuffix = suffix.every((physical, ordinal) => {
+                        const expected = destinationLane.path.at(ordinal)
+                        if (expected === undefined || physical._tag !== expected._tag) return false
+                        return physical._tag === 'ElementSelector'
+                          ? expected._tag === 'ElementSelector' && physical.index === expected.index
+                          : expected._tag === 'FieldId' &&
+                              physical.ordinal === expected.ordinal &&
+                              physical.struct.sourceId === expected.struct.sourceId &&
+                              physical.struct.ordinal === expected.struct.ordinal
+                      })
+                      const selected = sourceValues.at(sourceOrdinal)
+                      return sameSuffix && selected !== undefined
+                        ? [Object.freeze({ value: selected, runtimeElements })]
+                        : []
+                    })
+                    const first = candidates.at(0)
+                    if (
+                      first === undefined &&
+                      operation.selectors.some(
+                        (selector) => selector._tag === 'ElementSelector' && selector.length === 0,
+                      )
+                    ) {
+                      selectedValues.push(yield* Constant.integerSigned(builder, i32, 0n))
+                      continue
+                    }
+                    if (first === undefined) {
+                      throw new RangeError(
+                        `Backend could not realize place-read lane ${destinationOrdinal}`,
+                      )
+                    }
+                    let selected = first.value
+                    for (const [candidateOrdinal, candidate] of candidates.slice(1).entries()) {
+                      let condition: Value.Input | undefined
+                      for (const [elementOrdinal, element] of candidate.runtimeElements.entries()) {
+                        const expected = yield* Constant.integerSigned(
+                          builder,
+                          i32,
+                          BigInt(element.element),
+                        )
+                        const equal = yield* FunctionBody.integerCompare(
+                          body,
+                          'eq',
+                          readScalar(element.local),
+                          expected,
+                          `index${checkOrdinal}_${destinationOrdinal}_${candidateOrdinal}_${elementOrdinal}`,
+                        )
+                        condition =
+                          condition === undefined
+                            ? equal
+                            : yield* FunctionBody.binary(
+                                body,
+                                'and',
+                                condition,
+                                equal,
+                                `index${checkOrdinal}_${destinationOrdinal}_${candidateOrdinal}_${elementOrdinal}_all`,
+                              )
+                      }
+                      if (condition !== undefined) {
+                        selected = yield* FunctionBody.select(
+                          body,
+                          condition,
+                          candidate.value,
+                          selected,
+                          `index${checkOrdinal}_${destinationOrdinal}_${candidateOrdinal}_value`,
+                        )
+                      }
+                    }
+                    selectedValues.push(selected)
+                  }
+                  checkOrdinal += 1
+                  locals.set(operation.destination.ordinal, Object.freeze(selectedValues))
                   break
                 }
                 case 'Binary': {

@@ -15,7 +15,7 @@ import * as Type from './Type.js'
 /** The ownership category of one binding. Nominal structs are whole-value move-only owners. */
 export type OwnershipCategory =
   | { readonly _tag: 'Copyable' }
-  | { readonly _tag: 'MoveOnly'; readonly type: Type.Nominal }
+  | { readonly _tag: 'MoveOnly'; readonly type: DeclarationIndex.SemanticType }
 
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
@@ -28,6 +28,8 @@ export interface BindingFact {
   readonly site: BindingSite
   readonly name: string | undefined
   readonly category: OwnershipCategory
+  readonly type?: DeclarationIndex.SemanticType
+  readonly cleanup: CleanupPlan
   readonly liveFrom: SourceSpan.SourceSpan
   readonly liveTo: SourceSpan.SourceSpan
   readonly movedAt?: SourceSpan.SourceSpan
@@ -38,7 +40,26 @@ export interface Release {
   readonly _tag: 'Release'
   readonly binding: BindingFact
   readonly fields: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly cleanup: CleanupPlan
 }
+
+/** The symbolic recursive cleanup of one complete logical owner. */
+export type CleanupPlan =
+  | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
+  | {
+      readonly _tag: 'StructCleanup'
+      readonly type: Type.Nominal
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationIndex.FieldId
+        readonly cleanup: CleanupPlan
+      }>
+    }
+  | {
+      readonly _tag: 'ArrayCleanup'
+      readonly type: Type.FixedArray
+      readonly length: number
+      readonly element: CleanupPlan
+    }
 
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
@@ -77,7 +98,13 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
 const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
-  type !== undefined && Type.isNominal(type) ? Object.freeze({ _tag: 'MoveOnly', type }) : copyable
+  type === undefined || Type.isBuiltin(type)
+    ? copyable
+    : Type.isFixedArray(type)
+      ? categoryOf(type.element)._tag === 'Copyable'
+        ? copyable
+        : Object.freeze({ _tag: 'MoveOnly', type })
+      : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter' ? `p${site.parameter.ordinal}` : `b${site.binding.ordinal}`
@@ -87,6 +114,7 @@ interface MutableBinding {
   readonly name: string | undefined
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
+  readonly type?: DeclarationIndex.SemanticType
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
 }
@@ -152,7 +180,7 @@ const checkExpression = (
       return
     }
     case 'Move': {
-      if (expression.subject._tag === 'Project') {
+      if (expression.subject._tag === 'Project' || expression.subject._tag === 'IndexPlace') {
         checkExpression(state, live, expression.subject, false)
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
         return
@@ -172,8 +200,23 @@ const checkExpression = (
       }
       return
     }
+    case 'ArrayConstruct': {
+      for (const element of expression.elements) checkExpression(state, live, element, true)
+      return
+    }
     case 'Project': {
       checkExpression(state, live, expression.subject, false)
+      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
+      }
+      return
+    }
+    case 'IndexPlace': {
+      checkExpression(state, live, expression.subject, false)
+      checkExpression(state, live, expression.index, false)
+      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
+      }
       return
     }
     case 'BuiltinCall': {
@@ -226,6 +269,48 @@ const cleanupFields = (
   )
 }
 
+const cleanupPlan = (
+  index: DeclarationIndex.Index,
+  type: DeclarationIndex.SemanticType,
+  seen = new Set<string>(),
+): CleanupPlan => {
+  if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isFixedArray(type)) {
+    return Object.freeze({
+      _tag: 'ArrayCleanup',
+      type,
+      length: type.length,
+      element: cleanupPlan(index, type.element, seen),
+    })
+  }
+  const key = Type.key(type)
+  if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
+  const declaration = DeclarationIndex.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') {
+    return Object.freeze({ _tag: 'NoCleanup', type })
+  }
+  const nextSeen = new Set(seen).add(key)
+  return Object.freeze({
+    _tag: 'StructCleanup',
+    type,
+    fields: Object.freeze(
+      declaration.fields.map((field) =>
+        Object.freeze({
+          field: field.id,
+          cleanup:
+            field.declaredType._tag === 'Resolved'
+              ? cleanupPlan(index, field.declaredType.type, nextSeen)
+              : Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const }),
+        }),
+      ),
+    ),
+  })
+}
+
 const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): CheckedFunction => {
   const declaration = fn.declaration
   const state: CheckState = {
@@ -236,14 +321,15 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
 
   const initialLive = new Set<string>()
   for (const parameter of declaration.parameters) {
+    const type =
+      parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined
     const binding: MutableBinding = {
       site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
-      category: categoryOf(
-        parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined,
-      ),
+      category: categoryOf(type),
+      ...(type === undefined ? {} : { type }),
     }
     const key = siteKey(binding.site)
     state.bindings.set(key, binding)
@@ -268,14 +354,15 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
     for (const statement of statements) {
       if (statement._tag === 'Bind') {
         checkExpression(state, live, statement.initializer, true)
+        const type =
+          statement.initializer._tag === 'Unavailable' ? undefined : statement.initializer.type
         const binding: MutableBinding = {
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
           name: statement.name,
           liveFrom: statement.span,
           liveTo: enclosingSpan,
-          category: categoryOf(
-            statement.initializer._tag === 'Unavailable' ? undefined : statement.initializer.type,
-          ),
+          category: categoryOf(type),
+          ...(type === undefined ? {} : { type }),
         }
         const key = siteKey(binding.site)
         state.bindings.set(key, binding)
@@ -330,13 +417,16 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
     return Object.freeze({ returned: false, live })
   }
 
-  const result = walkStatements(fn.statements, declaration.syntax.span, initialLive, [[]])
+  const rootFrame = state.order
+    .filter((binding) => binding.category._tag === 'MoveOnly')
+    .map((binding) => siteKey(binding.site))
+  const result = walkStatements(fn.statements, declaration.syntax.span, initialLive, [rootFrame])
   if (!result.returned) {
     exits.push(
       Object.freeze({
         kind: 'Return' as const,
         span: fn.statements.at(-1)?.span ?? declaration.syntax.span,
-        sites: frameSitesInnerFirst([[]], result.live),
+        sites: frameSitesInnerFirst([rootFrame], result.live),
       }),
     )
   }
@@ -349,6 +439,11 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           site: binding.site,
           name: binding.name,
           category: binding.category,
+          ...(binding.type === undefined ? {} : { type: binding.type }),
+          cleanup:
+            binding.type === undefined
+              ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const })
+              : cleanupPlan(index, binding.type),
           liveFrom: binding.liveFrom,
           liveTo: binding.liveTo,
           ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
@@ -374,9 +469,10 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
                   _tag: 'Release' as const,
                   binding: fact,
                   fields:
-                    fact.category._tag === 'MoveOnly'
+                    fact.category._tag === 'MoveOnly' && Type.isNominal(fact.category.type)
                       ? cleanupFields(index, fact.category.type)
                       : Object.freeze([]),
+                  cleanup: fact.cleanup,
                 }),
               ]
             }),
@@ -454,6 +550,16 @@ const verdictText = (verdict: Verdict): string => {
 const siteText = (site: BindingSite): string =>
   site._tag === 'Parameter' ? `p${site.parameter.ordinal}` : `b${site.binding.ordinal}`
 
+const cleanupText = (cleanup: CleanupPlan): string => {
+  if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
+  if (cleanup._tag === 'ArrayCleanup') {
+    return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
+  }
+  return `struct:${Type.encode(cleanup.type)} fields=${cleanup.fields
+    .map((field) => `#${field.field.ordinal}(${cleanupText(field.cleanup)})`)
+    .join(',')}`
+}
+
 /**
  * Deterministic textual encoding of one module's ownership facts and cleanup plans for
  * debugging, inspection, and golden tests. No compatibility promise attaches to this format.
@@ -481,7 +587,7 @@ export const encode = (self: ModuleOwnership): string =>
               `  exit ${label} ${spanText(exit.span)}`,
               ...exit.releases.map(
                 (release) =>
-                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}`,
+                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
               ),
             ].join('\n')
       }),

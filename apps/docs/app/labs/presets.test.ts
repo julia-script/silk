@@ -60,6 +60,7 @@ describe('preset catalog', () => {
         'structs',
         'names',
         'operators',
+        'arrays',
         'ownership',
         'discovery',
         'backend',

@@ -44,5 +44,4 @@ export interface ExpectedDiagnostic {
 
 export const expectedRecoveryDiagnostics: ReadonlyArray<ExpectedDiagnostic> = Object.freeze([
   { code: 'LEX0001', message: 'Unsupported byte sequence', start: 0, end: 2 },
-  { code: 'LEX0001', message: 'Unsupported byte sequence', start: 3, end: 5 },
 ])

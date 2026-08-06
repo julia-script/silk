@@ -26,6 +26,12 @@ export type Representation =
       readonly fields: ReadonlyArray<Field>
       readonly tailPadding: number
     }
+  | {
+      readonly _tag: 'Repeated'
+      readonly element: DeclarationIndex.SemanticType
+      readonly length: number
+      readonly stride: number
+    }
 
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
@@ -44,12 +50,12 @@ export type UnavailableReason =
       readonly field?: DeclarationIndex.FieldId
       readonly detail: string
     }
-  | { readonly _tag: 'UnavailableDependency'; readonly dependency: Type.Nominal }
+  | { readonly _tag: 'UnavailableDependency'; readonly dependency: DeclarationIndex.SemanticType }
 
 /** One retained nominal layout failure that does not prevent unrelated layouts. */
 export interface UnavailableEntry {
   readonly _tag: 'UnavailableLayoutEntry'
-  readonly type: Type.Nominal
+  readonly type: DeclarationIndex.SemanticType
   readonly dependencies: ReadonlyArray<Type.Nominal>
   readonly reason: UnavailableReason
   readonly cause?: Diagnostic.Identity
@@ -75,14 +81,40 @@ export interface Plan {
 /** One compiler-owned scalar lane used to realize a logical value at a call boundary. */
 export interface CallingLane {
   readonly _tag: 'CallingLane'
-  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly path: ReadonlyArray<Selector>
   readonly type: Type.Builtin
 }
+
+export type Selector =
+  | DeclarationIndex.FieldId
+  | { readonly _tag: 'ElementSelector'; readonly index: number }
+
+export type CallingShapeNode =
+  | { readonly _tag: 'ScalarShape'; readonly type: Type.Builtin; readonly laneCount: 1 }
+  | {
+      readonly _tag: 'ProductShape'
+      readonly type: Type.Nominal
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationIndex.FieldId
+        readonly shape: CallingShapeNode
+      }>
+      readonly laneCount: number
+    }
+  | {
+      readonly _tag: 'RepeatedShape'
+      readonly type: Type.FixedArray
+      readonly length: number
+      readonly element: CallingShapeNode
+      readonly laneCount: number
+    }
 
 /** The deterministic backend-neutral calling shape of one reachable logical type. */
 export interface CallingShape {
   readonly _tag: 'CallingShape'
   readonly type: DeclarationIndex.SemanticType
+  readonly tree: CallingShapeNode
+  readonly laneCount: number
+  /** Materialized only when a consumer explicitly requests physical lanes. */
   readonly lanes: ReadonlyArray<CallingLane>
 }
 
@@ -129,6 +161,24 @@ const scalarEntry = (type: Type.Builtin): Entry => (type === 'Bool' ? bool() : i
 const alignUp = (offset: number, alignment: number): number =>
   Math.ceil(offset / alignment) * alignment
 
+const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined => {
+  const stride = alignUp(element.size, element.alignment)
+  const size = stride * type.length
+  if (!Number.isSafeInteger(stride) || !Number.isSafeInteger(size)) return undefined
+  return Object.freeze({
+    _tag: 'LayoutEntry',
+    type,
+    size,
+    alignment: element.alignment,
+    representation: Object.freeze({
+      _tag: 'Repeated',
+      element: type.element,
+      length: type.length,
+      stride,
+    }),
+  })
+}
+
 const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefined =>
   struct.canonical._tag === 'Canonical'
     ? Type.nominal(struct.canonical.id.module, struct.canonical.id.name)
@@ -137,19 +187,19 @@ const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefine
 const dependenciesOf = (struct: DeclarationIndex.StructFact): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
   for (const field of struct.fields) {
-    const type =
-      field.declaredType._tag === 'Resolved' && Type.isNominal(field.declaredType.type)
-        ? field.declaredType.type
-        : field.declaredType._tag === 'Unresolved'
-          ? field.declaredType.candidate
-          : undefined
-    if (type !== undefined) dependencies.set(Type.key(type), type)
+    const types =
+      field.declaredType._tag === 'Resolved'
+        ? Type.nominals(field.declaredType.type)
+        : field.declaredType._tag === 'Unresolved' && field.declaredType.candidate !== undefined
+          ? [field.declaredType.candidate]
+          : []
+    for (const type of types) dependencies.set(Type.key(type), type)
   }
   return Object.freeze([...dependencies.values()].sort(Type.compare))
 }
 
 const unavailable = (
-  type: Type.Nominal,
+  type: DeclarationIndex.SemanticType,
   dependencies: ReadonlyArray<Type.Nominal>,
   reason: UnavailableReason,
   cause?: Diagnostic.Identity,
@@ -177,7 +227,7 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
   const completed = new Map<string, CatalogEntry>()
   const visiting = new Set<string>()
 
-  const layout = (type: Type.Nominal): CatalogEntry => {
+  const layoutNominal = (type: Type.Nominal): CatalogEntry => {
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
@@ -248,20 +298,15 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
         break
       }
       const fieldType = field.declaredType.type
-      let fieldLayout: Entry
-      if (Type.isBuiltin(fieldType)) fieldLayout = scalarEntry(fieldType)
-      else {
-        const dependencyLayout = layout(fieldType)
-        if (dependencyLayout._tag === 'UnavailableLayoutEntry') {
-          failure = unavailable(
-            type,
-            dependencies,
-            { _tag: 'UnavailableDependency', dependency: fieldType },
-            dependencyLayout.cause,
-          )
-          break
-        }
-        fieldLayout = dependencyLayout
+      const fieldLayout = layoutType(fieldType)
+      if (fieldLayout._tag === 'UnavailableLayoutEntry') {
+        failure = unavailable(
+          type,
+          dependencies,
+          { _tag: 'UnavailableDependency', dependency: fieldType },
+          fieldLayout.cause,
+        )
+        break
       }
       const offset = alignUp(cursor, fieldLayout.alignment)
       fields.push(
@@ -300,10 +345,65 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
     return entry
   }
 
+  const layoutType = (type: DeclarationIndex.SemanticType): CatalogEntry => {
+    if (Type.isBuiltin(type)) return scalarEntry(type)
+    if (Type.isNominal(type)) return layoutNominal(type)
+    const key = Type.key(type)
+    const existing = completed.get(key)
+    if (existing !== undefined) return existing
+    const element = layoutType(type.element)
+    const dependencies = Object.freeze(Type.nominals(type.element))
+    if (element._tag === 'UnavailableLayoutEntry') {
+      const result = unavailable(
+        type,
+        dependencies,
+        { _tag: 'UnavailableDependency', dependency: type.element },
+        element.cause,
+      )
+      completed.set(key, result)
+      return result
+    }
+    const entry = repeatedEntry(type, element)
+    if (entry === undefined) {
+      const result = unavailable(type, dependencies, {
+        _tag: 'InvalidDeclaration',
+        detail: `array layout overflows for ${Type.encode(type)}`,
+      })
+      completed.set(key, result)
+      return result
+    }
+    completed.set(key, entry)
+    return entry
+  }
+
+  const referenced = new Map<string, DeclarationIndex.SemanticType>()
+  const addReferenced = (type: DeclarationIndex.SemanticType): void => {
+    referenced.set(Type.key(type), type)
+    if (Type.isFixedArray(type)) addReferenced(type.element)
+  }
+  for (const module of index.modules) {
+    for (const member of module.members) {
+      if (member._tag === 'FunctionDeclaration') {
+        for (const parameter of member.parameters) {
+          if (parameter.declaredType._tag === 'Resolved') addReferenced(parameter.declaredType.type)
+        }
+        if (member.returnType._tag === 'Resolved') addReferenced(member.returnType.type)
+      } else {
+        for (const field of member.fields) {
+          if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
+        }
+      }
+    }
+  }
+  for (const declaration of declarations) layoutNominal(declaration.type)
+  for (const type of referenced.values()) if (!Type.isBuiltin(type)) layoutType(type)
+
   return Object.freeze({
     _tag: 'LayoutCatalog',
     target,
-    entries: Object.freeze(declarations.map((declaration) => layout(declaration.type))),
+    entries: Object.freeze(
+      [...completed.values()].sort((left, right) => Type.compare(left.type, right.type)),
+    ),
   })
 }
 
@@ -315,8 +415,15 @@ const addExpressionTypes = (
   types.set(Type.key(expression.type), expression.type)
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject)
   if (expression._tag === 'Project') addExpressionTypes(types, expression.subject)
+  if (expression._tag === 'IndexPlace') {
+    addExpressionTypes(types, expression.subject)
+    addExpressionTypes(types, expression.index)
+  }
   if (expression._tag === 'Construct') {
     for (const field of expression.fields) addExpressionTypes(types, field.value)
+  }
+  if (expression._tag === 'ArrayConstruct') {
+    for (const element of expression.elements) addExpressionTypes(types, element)
   }
   if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
     for (const argument of expression.arguments) addExpressionTypes(types, argument)
@@ -358,18 +465,24 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationIndex.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance.function)
   const entries = new Map<string, Entry>()
+  const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
+    if (Type.isBuiltin(type)) return scalarEntry(type)
+    const candidate = catalogEntry(self, type)
+    if (candidate?._tag === 'LayoutEntry') return candidate
+    if (!Type.isFixedArray(type) || candidate?._tag === 'UnavailableLayoutEntry') return undefined
+    const element = resolve(type.element)
+    return element === undefined ? undefined : repeatedEntry(type, element)
+  }
   const add = (type: DeclarationIndex.SemanticType): void => {
     const key = Type.key(type)
     if (entries.has(key)) return
-    if (Type.isBuiltin(type)) {
-      entries.set(key, scalarEntry(type))
-      return
-    }
-    const candidate = catalogEntry(self, type)
-    if (candidate === undefined || candidate._tag === 'UnavailableLayoutEntry') return
+    const candidate = resolve(type)
+    if (candidate === undefined) return
     entries.set(key, candidate)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)
+    } else if (candidate.representation._tag === 'Repeated') {
+      add(candidate.representation.element)
     }
   }
   for (const type of reached.values()) add(type)
@@ -398,34 +511,85 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
   })
 }
 
-const lanesOf = (
+const shapeNode = (
   type: DeclarationIndex.SemanticType,
   entries: ReadonlyMap<string, Entry>,
-  path: ReadonlyArray<DeclarationIndex.FieldId> = Object.freeze([]),
-): ReadonlyArray<CallingLane> => {
+): CallingShapeNode => {
   if (Type.isBuiltin(type)) {
-    return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type })])
+    return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
   }
   const candidate = entries.get(Type.key(type))
-  if (candidate?.representation._tag !== 'Aggregate') return Object.freeze([])
-  return Object.freeze(
-    candidate.representation.fields.flatMap((field) =>
-      lanesOf(field.type, entries, Object.freeze([...path, field.id])),
-    ),
-  )
+  if (Type.isFixedArray(type)) {
+    const element = shapeNode(type.element, entries)
+    const laneCount = element.laneCount * type.length
+    if (!Number.isSafeInteger(laneCount)) {
+      throw new RangeError(`Calling shape lane count overflows for ${Type.encode(type)}`)
+    }
+    return Object.freeze({
+      _tag: 'RepeatedShape',
+      type,
+      length: type.length,
+      element,
+      laneCount,
+    })
+  }
+  const fields =
+    candidate?.representation._tag === 'Aggregate'
+      ? candidate.representation.fields.map((field) =>
+          Object.freeze({ field: field.id, shape: shapeNode(field.type, entries) }),
+        )
+      : []
+  return Object.freeze({
+    _tag: 'ProductShape',
+    type,
+    fields: Object.freeze(fields),
+    laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+  })
+}
+
+const materializeLanes = (
+  node: CallingShapeNode,
+  path: ReadonlyArray<Selector> = Object.freeze([]),
+): ReadonlyArray<CallingLane> => {
+  if (node._tag === 'ScalarShape') {
+    return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.type })])
+  }
+  if (node._tag === 'ProductShape') {
+    return Object.freeze(
+      node.fields.flatMap((field) =>
+        materializeLanes(field.shape, Object.freeze([...path, field.field])),
+      ),
+    )
+  }
+  const lanes: Array<CallingLane> = []
+  for (let index = 0; index < node.length; index += 1) {
+    const selector: Selector = Object.freeze({ _tag: 'ElementSelector', index })
+    lanes.push(...materializeLanes(node.element, Object.freeze([...path, selector])))
+  }
+  return Object.freeze(lanes)
+}
+
+const shapeOf = (
+  type: DeclarationIndex.SemanticType,
+  entries: ReadonlyMap<string, Entry>,
+): CallingShape => {
+  const tree = shapeNode(type, entries)
+  let materialized: ReadonlyArray<CallingLane> | undefined
+  return Object.freeze({
+    _tag: 'CallingShape' as const,
+    type,
+    tree,
+    laneCount: tree.laneCount,
+    get lanes(): ReadonlyArray<CallingLane> {
+      materialized ??= materializeLanes(tree)
+      return materialized
+    },
+  })
 }
 
 const callingShapes = (entries: ReadonlyArray<Entry>): ReadonlyArray<CallingShape> => {
   const byType = new Map(entries.map((candidate) => [Type.key(candidate.type), candidate]))
-  return Object.freeze(
-    entries.map((candidate) =>
-      Object.freeze({
-        _tag: 'CallingShape' as const,
-        type: candidate.type,
-        lanes: lanesOf(candidate.type, byType),
-      }),
-    ),
-  )
+  return Object.freeze(entries.map((candidate) => shapeOf(candidate.type, byType)))
 }
 
 /** Looks up one canonical runtime-plan entry. */
@@ -440,8 +604,10 @@ export const callingShape = (
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
 
 /** Looks up one available or unavailable nominal catalog entry. */
-export const catalogEntry = (self: Catalog, type: Type.Nominal): CatalogEntry | undefined =>
-  self.entries.find((candidate) => Type.equals(candidate.type, type))
+export const catalogEntry = (
+  self: Catalog,
+  type: DeclarationIndex.SemanticType,
+): CatalogEntry | undefined => self.entries.find((candidate) => Type.equals(candidate.type, type))
 
 const representationEquals = (left: Representation, right: Representation): boolean =>
   left._tag === right._tag &&
@@ -452,22 +618,27 @@ const representationEquals = (left: Representation, right: Representation): bool
         left.bits === right.bits &&
         left.falseValue === right.falseValue &&
         left.trueValue === right.trueValue
-      : right._tag === 'Aggregate' &&
-        left.tailPadding === right.tailPadding &&
-        left.fields.length === right.fields.length &&
-        left.fields.every((field, index) => {
-          const other = right.fields[index]
-          return (
-            other !== undefined &&
-            field.id.ordinal === other.id.ordinal &&
-            field.name === other.name &&
-            Type.equals(field.type, other.type) &&
-            field.offset === other.offset &&
-            field.size === other.size &&
-            field.alignment === other.alignment &&
-            field.padding === other.padding
-          )
-        }))
+      : left._tag === 'Repeated'
+        ? right._tag === 'Repeated' &&
+          Type.equals(left.element, right.element) &&
+          left.length === right.length &&
+          left.stride === right.stride
+        : right._tag === 'Aggregate' &&
+          left.tailPadding === right.tailPadding &&
+          left.fields.length === right.fields.length &&
+          left.fields.every((field, index) => {
+            const other = right.fields[index]
+            return (
+              other !== undefined &&
+              field.id.ordinal === other.id.ordinal &&
+              field.name === other.name &&
+              Type.equals(field.type, other.type) &&
+              field.offset === other.offset &&
+              field.size === other.size &&
+              field.alignment === other.alignment &&
+              field.padding === other.padding
+            )
+          }))
 
 const invalid = (
   rule: Violation['rule'],
@@ -490,6 +661,33 @@ const verifyEntry = (
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical scalar layout`,
+          ),
+        ])
+  }
+  if (Type.isFixedArray(candidate.type)) {
+    const element = available.get(Type.key(candidate.type.element))
+    if (element === undefined || candidate.representation._tag !== 'Repeated') {
+      return Object.freeze([
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has no repeated-element representation`,
+        ),
+      ])
+    }
+    const stride = alignUp(element.size, element.alignment)
+    const size = stride * candidate.type.length
+    return candidate.representation.length === candidate.type.length &&
+      Type.equals(candidate.representation.element, candidate.type.element) &&
+      candidate.representation.stride === stride &&
+      candidate.size === size &&
+      candidate.alignment === element.alignment
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `${Type.encode(candidate.type)} has non-canonical repeated layout facts`,
           ),
         ])
   }
@@ -619,6 +817,11 @@ const fieldIdEquals = (left: DeclarationIndex.FieldId, right: DeclarationIndex.F
   left.struct.sourceId === right.struct.sourceId &&
   left.struct.ordinal === right.struct.ordinal
 
+const selectorEquals = (left: Selector, right: Selector): boolean =>
+  left._tag === 'ElementSelector'
+    ? right._tag === 'ElementSelector' && left.index === right.index
+    : right._tag === 'FieldId' && fieldIdEquals(left, right)
+
 const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
   const expected = callingShapes(self.entries)
   const violations: Array<Violation> = []
@@ -628,6 +831,7 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
     const matches =
       actual !== undefined &&
       canonical !== undefined &&
+      actual.laneCount === canonical.laneCount &&
       actual.lanes.length === canonical.lanes.length &&
       actual.lanes.every((lane, laneIndex) => {
         const other = canonical.lanes.at(laneIndex)
@@ -635,9 +839,9 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
           other !== undefined &&
           lane.type === other.type &&
           lane.path.length === other.path.length &&
-          lane.path.every((field, fieldIndex) => {
-            const otherField = other.path.at(fieldIndex)
-            return otherField !== undefined && fieldIdEquals(field, otherField)
+          lane.path.every((selector, selectorIndex) => {
+            const otherSelector = other.path.at(selectorIndex)
+            return otherSelector !== undefined && selectorEquals(selector, otherSelector)
           })
         )
       })
@@ -675,7 +879,7 @@ export const verifyCatalog = (self: Catalog): ReadonlyArray<Violation> =>
 export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArray<Violation> =>
   Object.freeze(
     self.entries.flatMap((candidate) => {
-      if (Type.isBuiltin(candidate.type)) return []
+      if (Type.isBuiltin(candidate.type) || Type.isFixedArray(candidate.type)) return []
       const expected = catalogEntry(catalog, candidate.type)
       return expected?._tag === 'LayoutEntry' &&
         candidate.size === expected.size &&
@@ -697,7 +901,9 @@ const representationText = (representation: Representation): string =>
     ? `signed-i${representation.bits}`
     : representation._tag === 'Boolean'
       ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
-      : `aggregate tail-padding=${representation.tailPadding}`
+      : representation._tag === 'Repeated'
+        ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+        : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -706,7 +912,11 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
         (field) =>
           `  field ${field.id.ordinal} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
       )
-    : []),
+    : candidate.representation._tag === 'Repeated'
+      ? [
+          `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
+        ]
+      : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
@@ -716,16 +926,17 @@ export const encode = (self: Plan): string =>
     ...self.entries.flatMap(entryLines),
     ...self.callingShapes.map(
       (shape) =>
-        `calling ${Type.encode(shape.type)} lanes=${shape.lanes.length}${
-          shape.lanes.length === 0
+        `calling ${Type.encode(shape.type)} lanes=${shape.laneCount}${
+          shape.laneCount === 0
             ? ''
             : ` ${shape.lanes
                 .map(
                   (lane) =>
                     `${lane.type}[${lane.path
-                      .map(
-                        (field) =>
-                          `${field.struct.sourceId}#${field.struct.ordinal}.${field.ordinal}`,
+                      .map((selector) =>
+                        selector._tag === 'ElementSelector'
+                          ? `[${selector.index}]`
+                          : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )

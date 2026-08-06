@@ -497,6 +497,95 @@ return (40 + 2) * 1
 }`,
   ),
 
+  // ---- arrays ---------------------------------------------------------------------------
+  one('arrays', 'Array inferred', 'pub fn main() -> I32 { let values = [10, 42] return values[1] }'),
+  one(
+    'arrays',
+    'Array contextual',
+    `fn values() -> Array<I32, 2> { return [10, 42] }
+pub fn main() -> I32 { return values()[1] }`,
+  ),
+  one(
+    'arrays',
+    'Array empty',
+    `fn empty() -> Array<I32, 0> { return [] }
+fn consume(values: Array<I32, 0>) -> I32 { return 42 }
+pub fn main() -> I32 { return consume(empty()) }`,
+  ),
+  one(
+    'arrays',
+    'Array nested',
+    `fn choose(values: Array<Array<I32, 2>, 2>, outer: I32, inner: I32) -> I32 { return values[outer][inner] }
+pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
+  ),
+  one(
+    'arrays',
+    'Array struct elements',
+    `struct Pair { left: I32 right: I32 }
+pub fn main() -> I32 { let values = [Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }] return values[1].left }`,
+  ),
+  one(
+    'arrays',
+    'Array evaluation order',
+    `fn first() -> I32 { return 10 }
+fn second() -> I32 { return 42 }
+pub fn main() -> I32 { let values = [first(), second()] return values[1] }`,
+  ),
+  one(
+    'arrays',
+    'Array whole moved',
+    `struct Token { value: I32 }
+pub fn main() -> I32 { let values = [Token { value: 10 }, Token { value: 42 }] let moved = move values return moved[1].value }`,
+  ),
+  one(
+    'arrays',
+    'Array Copy read',
+    `fn choose(values: Array<I32, 2>, index: I32) -> I32 { let selected = values[index] return selected }
+pub fn main() -> I32 { return choose([10, 42], 1) }`,
+  ),
+  one(
+    'arrays',
+    'Array indexed field',
+    `struct Pair { left: I32 right: I32 }
+fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
+  ),
+  one(
+    'arrays',
+    'Array constant out of bounds',
+    'pub fn main() -> I32 { let values = [10, 42] return values[2] }',
+  ),
+  one(
+    'arrays',
+    'Array dynamic trap',
+    `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { return choose([10, 42], -1) }`,
+  ),
+  one(
+    'arrays',
+    'Array type mismatch',
+    'pub fn main() -> I32 { let values = [1, true] return 0 }',
+  ),
+  one(
+    'arrays',
+    'Array length mismatch',
+    `fn values() -> Array<I32, 3> { return [10, 42] }
+pub fn main() -> I32 { return 0 }`,
+  ),
+  one(
+    'arrays',
+    'Array partial move',
+    `struct Token { value: I32 }
+fn take(values: Array<Token, 2>) -> Token { return move values[0] }
+pub fn main() -> I32 { return 42 }`,
+  ),
+  one(
+    'arrays',
+    'Array unavailable layout',
+    `fn consume(values: Array<Array<Array<I32, 2147483647>, 2147483647>, 0>) -> I32 { return 42 }
+pub fn main() -> I32 { return consume([]) }`,
+  ),
+
   // ---- ownership ------------------------------------------------------------------------
   one(
     'ownership',

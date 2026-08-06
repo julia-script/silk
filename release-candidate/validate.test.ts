@@ -307,12 +307,13 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
       .sort()
-    const inspected = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '--eval',
-        `import * as api from '@silk-effect/compiler';
+    const inspectCompiler = () =>
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import * as api from '@silk-effect/compiler';
 import * as Effect from 'effect/Effect';
 import * as evaluationModule from '@silk-effect/compiler/BootstrapEvaluation';
 import * as parserModule from '@silk-effect/compiler/Parser';
@@ -402,6 +403,24 @@ const nestedAnalysis = semanticModule.elaborateModule(inputOf(nestedSnapshot));
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
 const nestedEvaluation = api.Analysis.evaluate(nestedSnapshot);
+const arrayText = 'struct Pair { left: I32 right: I32 }\\nfn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }\\npub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }';
+const arrayBytes = new TextEncoder().encode(arrayText);
+const nativeArraySnapshot = Effect.runSync(
+  api.Analysis.ofSource('memory/packed-array', arrayBytes, 'aarch64-apple-darwin'),
+);
+const wasmArraySnapshot = Effect.runSync(
+  api.Analysis.ofSource('memory/packed-array', arrayBytes, 'wasm32-unknown-unknown'),
+);
+const nativeArrayArtifact = Effect.runSync(
+  api.Analysis.codegen(nativeArraySnapshot, { mode: 'release' }),
+);
+const wasmArrayArtifact = Effect.runSync(
+  api.Analysis.codegen(wasmArraySnapshot, { mode: 'release' }),
+);
+const wasmArrayInstance = new WebAssembly.Instance(
+  new WebAssembly.Module(wasmArrayArtifact.bitcode.slice()),
+  {},
+);
 const names = analysis.functions.map((fact) =>
   fact.declaration.name._tag === 'Present' ? fact.declaration.name.spelling : null,
 );
@@ -511,16 +530,40 @@ console.log(
         nestedEvaluation._tag === 'Completed' ? nestedEvaluation.result : null,
       evaluationTrace: nestedEvaluation.trace.map((event) => event._tag),
     },
+    arrays: {
+      diagnostics: api.Analysis.diagnostics(nativeArraySnapshot),
+      types: api.Analysis.fixedArrayTypesOf(nativeArraySnapshot, 'memory/packed-array').map(api.Type.encode),
+      literals: api.Analysis.arrayLiteralsOf(nativeArraySnapshot, 'memory/packed-array').map((literal) => ({
+        state: literal.state._tag,
+        length: literal.length,
+        elements: literal.elements.map((element) => element.compatibility._tag),
+      })),
+      indexes: api.Analysis.indexProjectionsOf(nativeArraySnapshot, 'memory/packed-array').map((projection) => projection.bounds),
+      hir: api.Hir.encode(api.Analysis.rootAnalysis(nativeArraySnapshot).hir),
+      ownership: api.Ownership.encode(api.Analysis.ownershipOf(nativeArraySnapshot, 'memory/packed-array')),
+      layout: api.Layout.encode(api.Analysis.layoutOf(nativeArraySnapshot).value),
+      mir: api.Mir.encode(api.Analysis.loweredMir(nativeArraySnapshot)),
+      trace: api.Analysis.evaluate(nativeArraySnapshot).trace,
+      nativeSymbols: nativeArrayArtifact.symbols,
+      nativeIr: nativeArrayArtifact.ir,
+      nativeBitcode: Array.from(nativeArrayArtifact.bitcode),
+      wasmSymbols: wasmArrayArtifact.symbols,
+      wasmWat: wasmArrayArtifact.ir,
+      wasmBytes: Array.from(wasmArrayArtifact.bitcode),
+      wasmResult: wasmArrayInstance.exports.silk_main(),
+    },
     parserDiagnostics: parse.parserDiagnostics.map((diagnostic) => diagnostic.code),
   }),
 );`,
-      ],
-      {
-        cwd: consumerRoot,
-        encoding: 'utf8',
-        env: { ...process.env, PATH: dirname(process.execPath) },
-      },
-    )
+        ],
+        {
+          cwd: consumerRoot,
+          encoding: 'utf8',
+          env: { ...process.env, PATH: dirname(process.execPath) },
+        },
+      )
+    const inspected = inspectCompiler()
+    expect(inspectCompiler()).toBe(inspected)
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
       'Analysis',
@@ -575,8 +618,27 @@ console.log(
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.deep['./Operator']).toContain('infix')
     expect(api.deep['./Type']).toContain('nominal')
+    expect(api.deep['./Type']).toContain('fixedArray')
     expect(api.functionCount).toBe(2)
     expect(api.callCount).toBe(1)
+    expect(api.arrays.diagnostics).toEqual([])
+    expect(api.arrays.types).toEqual(['Array<memory/packed-array.Pair, 2>'])
+    expect(api.arrays.literals).toEqual([
+      {
+        state: 'Complete',
+        length: 2,
+        elements: ['Compatible', 'Compatible'],
+      },
+    ])
+    expect(api.arrays.indexes).toEqual([{ _tag: 'Runtime', length: 2 }])
+    expect(api.arrays.hir).toContain('construct-array')
+    expect(api.arrays.ownership).toContain('cleanup array:')
+    expect(api.arrays.layout).toContain('repr=repeated')
+    expect(api.arrays.mir).toContain('read-place')
+    expect(api.arrays.trace.map((event: { _tag: string }) => event._tag)).toContain('PlaceRead')
+    expect(api.arrays.nativeIr).toContain('icmp ult')
+    expect(api.arrays.wasmWat).toContain('i32.lt_u')
+    expect(api.arrays.wasmResult).toBe(42)
     expect(api.semantic).toEqual({
       names: ['identity', 'main'],
       ordinals: [0, 1],

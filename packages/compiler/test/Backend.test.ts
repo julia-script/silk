@@ -122,3 +122,19 @@ it.effect('emits comparisons as icmp with zero-extension and branches natively',
     assert.include(artifact.ir, 'br i1')
   }),
 )
+
+it.effect('realizes fixed arrays and checked mixed place reads from compiler-owned lanes', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair { left: I32 right: I32 }
+fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`
+    const first = yield* emit(source, { mode: 'release' })
+    const second = yield* emit(source, { mode: 'release' })
+
+    assert.include(first.ir, 'icmp ult')
+    assert.include(first.ir, 'select i1')
+    assert.include(first.ir, '@llvm.trap()')
+    assert.deepEqual(first.bitcode, second.bitcode)
+    assert.strictEqual(first.ir, second.ir)
+  }),
+)

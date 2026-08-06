@@ -42,6 +42,17 @@ export const seededWorkspaces: ReadonlyArray<Workspace> = [
     panes: { a1: 'source', a2: 'tokens', b1: 'tree', b2: 'hir', c1: 'mir', c2: 'backend' },
   },
   {
+    name: 'Arrays',
+    panes: {
+      a1: 'source',
+      a2: 'diagnostics',
+      b1: 'array-values',
+      b2: 'ownership',
+      c1: 'mir',
+      c2: 'evaluation',
+    },
+  },
+  {
     name: 'Everything',
     panes: {
       a1: 'source',

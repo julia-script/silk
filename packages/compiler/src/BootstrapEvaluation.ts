@@ -26,8 +26,14 @@ export interface AggregateValue {
   }>
 }
 
+export interface ArrayValue {
+  readonly _tag: 'ArrayValue'
+  readonly type: Type.FixedArray
+  readonly elements: ReadonlyArray<Value>
+}
+
 /** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value = I32Value | AggregateValue
+export type Value = I32Value | AggregateValue | ArrayValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -81,6 +87,31 @@ export interface ProjectTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface ArrayConstructTraceEvent {
+  readonly _tag: 'ArrayConstruct'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly type: Type.FixedArray
+  readonly elementCount: number
+  readonly span: SourceSpan.SourceSpan
+}
+
+export interface PlaceReadTraceEvent {
+  readonly _tag: 'PlaceRead'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly selectors: ReadonlyArray<
+    | { readonly _tag: 'Field'; readonly field: DeclarationIndex.FieldId }
+    | {
+        readonly _tag: 'Element'
+        readonly array: Type.FixedArray
+        readonly index: number
+        readonly bounds: 'Proven' | 'Checked'
+        readonly span: SourceSpan.SourceSpan
+      }
+  >
+  readonly value: Value
+  readonly span: SourceSpan.SourceSpan
+}
+
 export interface CleanupTraceEvent {
   readonly _tag: 'Cleanup'
   readonly function: DeclarationIndex.CanonicalId
@@ -95,6 +126,8 @@ export type TraceEvent =
   | ReturnTraceEvent
   | ConstructTraceEvent
   | ProjectTraceEvent
+  | ArrayConstructTraceEvent
+  | PlaceReadTraceEvent
   | CleanupTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
@@ -297,6 +330,24 @@ function executeFunction(
           )
           break
         }
+        case 'ConstructArray': {
+          const array: ArrayValue = Object.freeze({
+            _tag: 'ArrayValue',
+            type: operation.type.type,
+            elements: Object.freeze(operation.elements.map((element) => read(element).value)),
+          })
+          locals.set(operation.destination.ordinal, { value: array, fromCall: false })
+          trace.push(
+            Object.freeze({
+              _tag: 'ArrayConstruct',
+              function: fn.id,
+              type: array.type,
+              elementCount: array.elements.length,
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
         case 'Project': {
           const aggregate = read(operation.source).value
           if (aggregate._tag !== 'AggregateValue') {
@@ -318,6 +369,69 @@ function executeFunction(
               function: fn.id,
               type: aggregate.type,
               field: operation.field,
+              span: operation.provenance.span,
+            }),
+          )
+          break
+        }
+        case 'ReadPlace': {
+          let selected = read(operation.root).value
+          const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
+          for (const selector of operation.selectors) {
+            if (selector._tag === 'FieldSelector') {
+              if (selected._tag !== 'AggregateValue') {
+                throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
+              }
+              const field = selected.fields.find(
+                (candidate) =>
+                  candidate.field.ordinal === selector.field.ordinal &&
+                  candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+                  candidate.field.struct.ordinal === selector.field.struct.ordinal,
+              )
+              if (field === undefined) {
+                throw new RangeError('MIR verifier allowed a missing field selector')
+              }
+              selected = field.value
+              selectors.push(Object.freeze({ _tag: 'Field', field: selector.field }))
+              continue
+            }
+            if (selected._tag !== 'ArrayValue') {
+              throw new RangeError('MIR verifier allowed an element selector on a non-array value')
+            }
+            const index =
+              selector.index._tag === 'Proven'
+                ? selector.index.value
+                : readI32(selector.index.local).value
+            if (index < 0 || index >= selector.length) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: `array index ${index} is outside length ${selector.length} in ${fn.id.module}.${fn.id.name}`,
+                span: selector.provenance.span,
+              })
+            }
+            const element = selected.elements.at(index)
+            if (element === undefined) {
+              throw new RangeError('MIR verifier allowed an incomplete array value')
+            }
+            selectors.push(
+              Object.freeze({
+                _tag: 'Element',
+                array: selected.type,
+                index,
+                bounds: selector.index._tag === 'Proven' ? 'Proven' : 'Checked',
+                span: selector.provenance.span,
+              }),
+            )
+            selected = element
+          }
+          locals.set(operation.destination.ordinal, { value: selected, fromCall: false })
+          trace.push(
+            Object.freeze({
+              _tag: 'PlaceRead',
+              function: fn.id,
+              selectors: Object.freeze(selectors),
+              value: selected,
               span: operation.provenance.span,
             }),
           )

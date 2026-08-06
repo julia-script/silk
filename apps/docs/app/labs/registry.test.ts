@@ -66,6 +66,33 @@ const projectStructValues = (source: string): ViewResult => {
   })
 }
 
+const projectArrayValues = (source: string): ViewResult => {
+  const sourceId = 'memory/docs/unified-array-values'
+  const snapshot = Snapshot.ofSource(
+    sourceId,
+    new TextEncoder().encode(source),
+    'wasm32-unknown-unknown',
+  )
+  const evaluation = Analysis.evaluate(snapshot)
+  expect(evaluation._tag).toBe('Completed')
+  const view = viewById('array-values')
+  expect(view).toBeDefined()
+  if (view === undefined) throw new Error('missing array-values view')
+  return view.project({
+    snapshot,
+    modules: { [sourceId]: source },
+    root: sourceId,
+    mode: 'release',
+    profile: 'release',
+    cursor: undefined,
+    onSelectSpan: () => undefined,
+    evaluation,
+    onEvaluate: () => undefined,
+    filter: '',
+    showTrivia: false,
+  })
+}
+
 describe('view registry', () => {
   it('resolves every view by its own id', () => {
     for (const view of views) {
@@ -127,6 +154,27 @@ pub fn main() -> I32 { let pair = make() return pair.right }`)
     expect(rendered).toContain('construct')
     expect(rendered).toContain('project')
     expect(result.meta).toContain('1 lit')
+  })
+})
+
+describe('array values view', () => {
+  it('links canonical literals, checks, layouts, lanes, and evaluation events', () => {
+    const result = projectArrayValues(`struct Pair { left: I32 right: I32 }
+fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`)
+
+    const rendered = text(result)
+    expect(rendered).toContain('canonical array types')
+    expect(rendered).toContain('Array<memory/docs/unified-array-values.Pair, 2>')
+    expect(rendered).toContain('literal elements')
+    expect(rendered).toContain('runtime check < 2')
+    expect(rendered).toContain('stride 8')
+    expect(rendered).toContain('[1].#0')
+    expect(rendered).toContain('construct Array<')
+    expect(rendered).toContain('read Array<')
+    expect(result.rows.some((row) => row.span !== undefined && row.onActivate !== undefined)).toBe(
+      true,
+    )
   })
 })
 

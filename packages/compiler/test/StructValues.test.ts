@@ -104,14 +104,18 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     assert.notStrictEqual(pair, undefined)
     const shape = pair === undefined ? undefined : Layout.callingShape(layout.value, pair.type)
     assert.deepEqual(
-      shape?.lanes.map((lane) => lane.path.map((field) => field.ordinal)),
+      shape?.lanes.map((lane) =>
+        lane.path.map((selector) =>
+          selector._tag === 'ElementSelector' ? `[${selector.index}]` : selector.ordinal,
+        ),
+      ),
       [[0], [1]],
     )
 
     const mir = Analysis.loweredMir(self)
     assert.deepEqual(Mir.verify(mir), [])
     assert.include(Mir.encode(mir), 'construct struct-values/main.Pair')
-    assert.include(Mir.encode(mir), 'project')
+    assert.include(Mir.encode(mir), 'read-place')
 
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
@@ -123,7 +127,7 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     )
     assert.include(
       outcome.trace.map((event) => event._tag),
-      'Project',
+      'PlaceRead',
     )
   }),
 )

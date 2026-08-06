@@ -61,6 +61,22 @@ export interface TypePathFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** The normalized or unavailable decimal length retained by fixed-array type syntax. */
+export type ArrayLengthFact =
+  | {
+      readonly _tag: 'Available'
+      readonly value: number
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | {
+      readonly _tag: 'OutOfRange'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly cause: Diagnostic.Identity
+    }
+  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+
 /** The resolved, unresolved, or syntax-unavailable declared type. */
 export type DeclaredTypeFact =
   | {
@@ -80,7 +96,19 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
       readonly candidate?: Type.Nominal
     }
-  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+  | {
+      readonly _tag: 'FixedArray'
+      readonly element: DeclaredTypeFact
+      readonly length: ArrayLengthFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly syntax: SyntaxTree.Element
+      readonly cause?: Diagnostic.Identity
+    }
 
 export type ReturnTypeFact = DeclaredTypeFact
 
@@ -230,6 +258,16 @@ const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTr
   return child
 }
 
+const declaredTypeNode = (parent: SyntaxTree.Node): SyntaxTree.Node => {
+  const child = parent.children.find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'TypePath' || element.kind === 'FixedArrayType'),
+  )
+  if (child === undefined) throw new RangeError(`Header collection expected a declared type`)
+  return child
+}
+
 const presentName = (source: SourceFile.SourceFile, node: SyntaxTree.Node): DeclaredName => {
   const token = SyntaxTree.directToken(node, 'Identifier')
   return token === undefined
@@ -245,6 +283,79 @@ export const analyzeDeclaredType = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
 ): TypeResolution => {
+  if (syntax.kind === 'FixedArrayType') {
+    const arrayName = SyntaxTree.directToken(syntax, 'Identifier')
+    const elementSyntax = syntax.children.find(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) &&
+        (element.kind === 'TypePath' || element.kind === 'FixedArrayType'),
+    )
+    const lengthToken = SyntaxTree.directToken(syntax, 'DecimalInteger')
+    if (arrayName === undefined || elementSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          syntax: SyntaxTree.unavailableChild(syntax, 'Identifier'),
+        }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const element = analyzeDeclaredType(source, elementSyntax)
+    let length: ArrayLengthFact
+    const diagnostics: Array<Diagnostic.Diagnostic> = [...element.diagnostics]
+    if (lengthToken === undefined) {
+      length = Object.freeze({
+        _tag: 'Unavailable',
+        syntax: SyntaxTree.unavailableChild(syntax, 'DecimalInteger'),
+      })
+    } else {
+      const lengthSpelling = spelling(source, lengthToken)
+      const value = Number(lengthSpelling)
+      if (!Number.isSafeInteger(value) || value > 2147483647) {
+        const diagnostic = Diagnostic.integerOutOfRange(lengthSpelling, lengthToken.span)
+        diagnostics.push(diagnostic)
+        length = Object.freeze({
+          _tag: 'OutOfRange',
+          spelling: lengthSpelling,
+          token: lengthToken,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      } else {
+        length = Object.freeze({
+          _tag: 'Available',
+          value,
+          spelling: lengthSpelling,
+          token: lengthToken,
+        })
+      }
+    }
+    if (element.fact._tag === 'Resolved' && length._tag === 'Available') {
+      const type = Type.fixedArray(element.fact.type, length.value)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token: arrayName,
+          syntax,
+        }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'FixedArray',
+        element: element.fact,
+        length,
+        spelling: `Array<${
+          element.fact._tag === 'Resolved' ? Type.encode(element.fact.type) : 'unavailable'
+        }, ${length._tag === 'Available' ? length.value : 'unavailable'}>`,
+        token: arrayName,
+        syntax,
+      }),
+      diagnostics: Object.freeze(diagnostics),
+    })
+  }
   const tokens = syntax.children.filter(
     (element): element is Token.Token =>
       SyntaxTree.isToken(element) && element.kind === 'Identifier',
@@ -320,7 +431,7 @@ const analyzeParameter = (
           syntax: SyntaxTree.unavailableElement(nameElements, node),
         })
       : Object.freeze({ _tag: 'Present', spelling: spelling(source, nameToken), token: nameToken })
-  const type = analyzeDeclaredType(source, childNode(node, 'TypePath'))
+  const type = analyzeDeclaredType(source, declaredTypeNode(node))
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'ParameterDeclaration',
@@ -371,7 +482,7 @@ const collectFields = (
     (fieldNode, ordinal): FieldFact => {
       const id: FieldId = Object.freeze({ _tag: 'FieldId', struct: structId, ordinal })
       const name = presentName(source, fieldNode)
-      const type = analyzeDeclaredType(source, childNode(fieldNode, 'TypePath'))
+      const type = analyzeDeclaredType(source, declaredTypeNode(fieldNode))
       diagnostics.push(...type.diagnostics)
       let state: FieldState
       if (name._tag !== 'Present') state = Object.freeze({ _tag: 'Unidentified' })
@@ -472,10 +583,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
       (parameter, parameterOrdinal) => analyzeParameter(source, parameter, id, parameterOrdinal),
     )
-    const returnType = analyzeDeclaredType(
-      source,
-      childNode(childNode(node, 'ReturnType'), 'TypePath'),
-    )
+    const returnType = analyzeDeclaredType(source, declaredTypeNode(childNode(node, 'ReturnType')))
     const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
@@ -526,7 +634,58 @@ const resolveDeclaredType = (
 ): TypeResolution =>
   fact._tag === 'Unresolved'
     ? resolver(module, fact.path)
-    : Object.freeze({ fact, diagnostics: Object.freeze([]) })
+    : fact._tag !== 'FixedArray'
+      ? Object.freeze({ fact, diagnostics: Object.freeze([]) })
+      : (() => {
+          const element = resolveDeclaredType(module, fact.element, resolver)
+          if (fact.length._tag !== 'Available') {
+            return Object.freeze({
+              fact: Object.freeze({
+                _tag: 'Unavailable' as const,
+                syntax: fact.syntax,
+                ...(fact.length._tag === 'OutOfRange' ? { cause: fact.length.cause } : {}),
+              }),
+              diagnostics: element.diagnostics,
+            })
+          }
+          if (element.fact._tag === 'Resolved') {
+            const type = Type.fixedArray(element.fact.type, fact.length.value)
+            return Object.freeze({
+              fact: Object.freeze({
+                _tag: 'Resolved' as const,
+                type,
+                spelling: Type.encode(type),
+                token: fact.token,
+                syntax: fact.syntax,
+                ...(element.fact.exposureCause === undefined
+                  ? {}
+                  : { exposureCause: element.fact.exposureCause }),
+              }),
+              diagnostics: element.diagnostics,
+            })
+          }
+          if (element.fact._tag === 'Unresolved') {
+            return Object.freeze({
+              fact: Object.freeze({
+                ...element.fact,
+                spelling: fact.spelling,
+                token: fact.token,
+                syntax: fact.syntax,
+              }),
+              diagnostics: element.diagnostics,
+            })
+          }
+          return Object.freeze({
+            fact: Object.freeze({
+              _tag: 'Unavailable' as const,
+              syntax: fact.syntax,
+              ...(element.fact._tag === 'Unavailable' && element.fact.cause !== undefined
+                ? { cause: element.fact.cause }
+                : {}),
+            }),
+            diagnostics: element.diagnostics,
+          })
+        })()
 
 const canonicalKey = (id: CanonicalId): string => `${id.module}.${id.name}`
 
@@ -545,10 +704,14 @@ const attachExposure = (
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): DeclaredTypeFact => {
-  if (fact._tag !== 'Resolved' || !Type.isNominal(fact.type)) return fact
-  const target = memberByNominal(modules, fact.type)
+  if (fact._tag !== 'Resolved') return fact
+  const nominal = Type.nominals(fact.type).find(
+    (candidate) => memberByNominal(modules, candidate)?.visibility === 'Private',
+  )
+  if (nominal === undefined) return fact
+  const target = memberByNominal(modules, nominal)
   if (target?.visibility !== 'Private') return fact
-  const diagnostic = Diagnostic.privateTypeExposure(Type.encode(fact.type), fact.token.span)
+  const diagnostic = Diagnostic.privateTypeExposure(Type.encode(nominal), fact.token.span)
   diagnostics.push(diagnostic)
   return Object.freeze({ ...fact, exposureCause: Diagnostic.identity(diagnostic) })
 }
@@ -587,8 +750,8 @@ const stronglyConnected = (
     const struct = byKey.get(key)
     const neighbors = (struct?.fields ?? [])
       .flatMap((field) =>
-        field.declaredType._tag === 'Resolved' && Type.isNominal(field.declaredType.type)
-          ? [`${field.declaredType.type.module}.${field.declaredType.type.name}`]
+        field.declaredType._tag === 'Resolved'
+          ? Type.nominals(field.declaredType.type).map((type) => `${type.module}.${type.name}`)
           : [],
       )
       .filter((neighbor) => byKey.has(neighbor))
@@ -717,8 +880,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       first.fields.some(
         (field) =>
           field.declaredType._tag === 'Resolved' &&
-          Type.isNominal(field.declaredType.type) &&
-          `${field.declaredType.type.module}.${field.declaredType.type.name}` === keys[0],
+          Type.nominals(field.declaredType.type).some(
+            (type) => `${type.module}.${type.name}` === keys[0],
+          ),
       )
     if (keys.length < 2 && !selfEdge) continue
     const diagnostic = Diagnostic.inlineRecursiveStruct(
@@ -735,8 +899,10 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       if (member._tag !== 'StructDeclaration') return member
       const dependencyMap = new Map<string, Type.Nominal>()
       for (const field of member.fields) {
-        if (field.declaredType._tag === 'Resolved' && Type.isNominal(field.declaredType.type)) {
-          dependencyMap.set(Type.key(field.declaredType.type), field.declaredType.type)
+        if (field.declaredType._tag === 'Resolved') {
+          for (const type of Type.nominals(field.declaredType.type)) {
+            dependencyMap.set(Type.key(type), type)
+          }
         }
       }
       const dependencies = [...dependencyMap.values()].sort(Type.compare)

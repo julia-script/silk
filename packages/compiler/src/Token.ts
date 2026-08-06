@@ -23,6 +23,8 @@ export type TokenKind =
   | 'RightParenthesis'
   | 'LeftBrace'
   | 'RightBrace'
+  | 'LeftBracket'
+  | 'RightBracket'
   | 'Colon'
   | 'Comma'
   | 'Equals'

@@ -44,6 +44,10 @@ export type BuiltinOperation =
   | 'GreaterOrEqual'
   | 'Not'
 
+export type BoundsMode =
+  | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }
+  | { readonly _tag: 'Runtime'; readonly length: number }
+
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
   | {
@@ -89,11 +93,27 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ArrayConstruct'
+      readonly elements: ReadonlyArray<Expression>
+      readonly type: Type.FixedArray
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'Project'
       readonly subject: Expression
       readonly nominal: Type.Nominal
       readonly field: DeclarationIndex.FieldId
       readonly access: 'CopyRead' | 'ConsumeRequested'
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'IndexPlace'
+      readonly subject: Expression
+      readonly index: Expression
+      readonly array: Type.FixedArray
+      readonly access: 'CopyRead' | 'ConsumeRequested'
+      readonly bounds: BoundsMode
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -180,9 +200,12 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return true
       case 'Move':
       case 'Project':
+      case 'IndexPlace':
         return walk(expression.subject)
       case 'Construct':
         return expression.fields.some((field) => walk(field.value))
+      case 'ArrayConstruct':
+        return expression.elements.some(walk)
       case 'Call':
       case 'BuiltinCall':
         return expression.arguments.some(walk)
@@ -205,10 +228,18 @@ export const firstUnavailable = (
         return expression
       case 'Move':
       case 'Project':
+      case 'IndexPlace':
         return walk(expression.subject)
       case 'Construct': {
         for (const field of expression.fields) {
           const found = walk(field.value)
+          if (found !== undefined) return found
+        }
+        return undefined
+      }
+      case 'ArrayConstruct': {
+        for (const element of expression.elements) {
+          const found = walk(element)
           if (found !== undefined) return found
         }
         return undefined
@@ -312,10 +343,28 @@ const encodeExpression = (expression: Expression, depth: number): string => {
             `${indent}  field #${field.ordinal}\n${encodeExpression(value, depth + 2)}`,
         ),
       ].join('\n')
+    case 'ArrayConstruct':
+      return [
+        `${indent}construct-array ${Type.encode(expression.type)} elements=${expression.elements.length} ${spanText(expression.span)}`,
+        ...expression.elements.map(
+          (element, index) =>
+            `${indent}  element #${index}\n${encodeExpression(element, depth + 2)}`,
+        ),
+      ].join('\n')
     case 'Project':
       return [
         `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'IndexPlace':
+      return [
+        `${indent}index ${expression.access} ${Type.encode(expression.array)} bounds=${
+          expression.bounds._tag === 'Runtime'
+            ? `runtime:${expression.bounds.length}`
+            : `proven:${expression.bounds.index}/${expression.bounds.length}`
+        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.subject, depth + 1),
+        encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'Call':
       return [

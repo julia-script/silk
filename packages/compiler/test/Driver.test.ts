@@ -131,6 +131,42 @@ it.effect('reports every phase in order with counts and totals', () =>
   }),
 )
 
+it.effect('reports array layouts and keeps array failures in their owning phase', () =>
+  Effect.gen(function* () {
+    const compiled = yield* compileSource(
+      'array-report',
+      'pub fn main() -> I32 { let values = [10, 42] return values[1] }',
+    )
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const layout = compiled.report.find((entry) => entry.phase === 'target-layout')
+    assert.isAtLeast(layout?.outputs ?? 0, 2)
+
+    const mismatch = yield* compileSource(
+      'array-mismatch',
+      'pub fn main() -> Array<I32, 2> { return [1] }',
+    )
+    assert.strictEqual(mismatch._tag, 'Rejected')
+    assert.strictEqual(
+      mismatch.report.some((entry) => entry.phase === 'target-layout'),
+      false,
+    )
+
+    const unavailable = yield* compileSource(
+      'array-unavailable-layout',
+      `fn consume(values: Array<Array<Array<I32, 2147483647>, 2147483647>, 0>) -> I32 { return 42 }
+pub fn main() -> I32 { return consume([]) }`,
+    )
+    assert.strictEqual(unavailable._tag, 'BackendFailed')
+    if (unavailable._tag !== 'BackendFailed') return
+    assert.strictEqual(unavailable.error.reason._tag, 'InvalidMir')
+    assert.strictEqual(
+      unavailable.report.some((entry) => entry.phase === 'object'),
+      false,
+    )
+  }),
+)
+
 it.effect('routes emission through an injected backend service', () =>
   Effect.gen(function* () {
     let emissions = 0

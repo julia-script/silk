@@ -19,7 +19,7 @@ import * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as Target from './Target.js'
 import type * as Token from './Token.js'
-import type * as Type from './Type.js'
+import * as Type from './Type.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
@@ -206,6 +206,10 @@ const nestedExpressionFacts = (
       case 'Move':
       case 'FieldProjection':
         return [expression.subject]
+      case 'IndexProjection':
+        return [expression.subject, expression.index]
+      case 'ArrayLiteral':
+        return expression.elements.map((element) => element.expression)
       case 'StructLiteral':
         return expression.initializers.map((initializer) => initializer.expression)
       case 'Grouped':
@@ -277,6 +281,60 @@ export const fieldProjectionsOf = (
     ),
   )
 
+/** Returns every retained array literal with its ordered elements and completeness state. */
+export const arrayLiteralsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.ArrayLiteralExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.ArrayLiteralExpressionFact =>
+        expression._tag === 'ArrayLiteral',
+    ),
+  )
+
+/** Returns every retained indexed-place step with its canonical bounds mode. */
+export const indexProjectionsOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Elaboration.IndexProjectionExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.IndexProjectionExpressionFact =>
+        expression._tag === 'IndexProjection',
+    ),
+  )
+
+/** Returns canonical fixed-array types used by one module's contracts and expressions. */
+export const fixedArrayTypesOf = (
+  self: Snapshot,
+  module: string,
+): ReadonlyArray<Type.FixedArray> => {
+  const found = new Map<string, Type.FixedArray>()
+  const add = (type: DeclarationIndex.SemanticType): void => {
+    if (!Type.isFixedArray(type)) return
+    found.set(Type.key(type), type)
+    add(type.element)
+  }
+  const headers = self.index.modules.find((candidate) => candidate.module === module)
+  for (const member of headers?.members ?? []) {
+    if (member._tag === 'FunctionDeclaration') {
+      for (const parameter of member.parameters) {
+        if (parameter.declaredType._tag === 'Resolved') add(parameter.declaredType.type)
+      }
+      if (member.returnType._tag === 'Resolved') add(member.returnType.type)
+    } else {
+      for (const field of member.fields) {
+        if (field.declaredType._tag === 'Resolved') add(field.declaredType.type)
+      }
+    }
+  }
+  for (const expression of expressionsOf(self, module)) {
+    if (expression.type._tag === 'Available') add(expression.type.type)
+  }
+  return Object.freeze([...found.values()])
+}
+
 /** Returns one module's HIR, or `undefined` for an unknown identity. */
 export const hirOf = (self: Snapshot, module: string): Hir.Module | undefined =>
   self.results.get(module)?.hir
@@ -307,6 +365,22 @@ export const nominalLayout = (
 
 /** Returns the snapshot's available or explicitly unavailable layout plan. */
 export const layoutOf = (self: Snapshot): Targeted<Layout.Plan> => self.layout
+
+/** Returns every reachable repeated layout without asking tooling to reconstruct arrays. */
+export const repeatedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
+  self.layout._tag === 'Available'
+    ? Object.freeze(
+        self.layout.value.entries.filter((entry) => entry.representation._tag === 'Repeated'),
+      )
+    : Object.freeze([])
+
+/** Returns every reachable array calling shape and its canonical physical paths. */
+export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
+  self.layout._tag === 'Available'
+    ? Object.freeze(
+        self.layout.value.callingShapes.filter((shape) => Type.isFixedArray(shape.type)),
+      )
+    : Object.freeze([])
 
 /** Looks up one compiler-owned aggregate calling shape from the completed runtime plan. */
 export const callingShapeOf = (self: Snapshot, type: Type.Type): Layout.CallingShape | undefined =>
@@ -433,3 +507,20 @@ export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (self: Snapshot): BootstrapEvaluation.Outcome =>
   BootstrapEvaluation.evaluate(self.instances, loweredMir(self))
+
+/** Returns the compact array-specific events from an explicit evaluation outcome. */
+export const arrayTraceEventsOf = (
+  outcome: BootstrapEvaluation.Outcome,
+): ReadonlyArray<
+  BootstrapEvaluation.ArrayConstructTraceEvent | BootstrapEvaluation.PlaceReadTraceEvent
+> =>
+  Object.freeze(
+    outcome.trace.filter(
+      (
+        event,
+      ): event is
+        | BootstrapEvaluation.ArrayConstructTraceEvent
+        | BootstrapEvaluation.PlaceReadTraceEvent =>
+        event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
+    ),
+  )

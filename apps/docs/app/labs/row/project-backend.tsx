@@ -24,7 +24,11 @@ import type {
 import type { RowModel, Span } from './row'
 
 const typeText = (type: Type.Type): string =>
-  typeof type === 'string' ? type : `${type.module}.${type.name}`
+  typeof type === 'string'
+    ? type
+    : type._tag === 'NominalType'
+      ? `${type.module}.${type.name}`
+      : `Array<${typeText(type.element)}, ${type.length}>`
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,
@@ -230,6 +234,19 @@ const bindingSiteText = (fact: Ownership.BindingFact): string =>
     ? `parameter #${fact.site.parameter.ordinal}`
     : `let b${fact.site.binding.ordinal}`
 
+const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
+  switch (cleanup._tag) {
+    case 'NoCleanup':
+      return 'no cleanup'
+    case 'StructCleanup':
+      return `${typeText(cleanup.type)} ${cleanup.fields
+        .map(({ field }) => `#${field.ordinal}`)
+        .join(' → ')}`
+    case 'ArrayCleanup':
+      return `${typeText(cleanup.type)} elements in reverse order · ${cleanupText(cleanup.element)}`
+  }
+}
+
 export const ownershipRows = (
   facts: Ownership.ModuleOwnership,
   onPick: (span: Span) => void,
@@ -275,7 +292,12 @@ export const ownershipRows = (
         detail:
           exit.releases.length === 0
             ? 'no releases'
-            : exit.releases.map((release) => release.binding.name ?? '∅').join(', '),
+            : exit.releases
+                .map(
+                  (release) =>
+                    `${release.binding.name ?? '∅'} (${cleanupText(release.cleanup)})`,
+                )
+                .join(', '),
         span: exitSpan,
         onActivate: () => onPick(exitSpan),
       })
@@ -358,7 +380,9 @@ export const layoutRows = (
         detail: `${entry.size} bytes · align ${entry.alignment} · ${
           entry.representation._tag === 'Aggregate'
             ? 'aggregate'
-            : `i${entry.representation.bits}`
+            : entry.representation._tag === 'Repeated'
+              ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
+              : `i${entry.representation.bits}`
         }`,
       })
     }
@@ -408,8 +432,24 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
         .join(', ')} }`
+    case 'ConstructArray':
+      return `${localText(operation.destination)} = array [${operation.elements
+        .map(localText)
+        .join(', ')}]`
     case 'Project':
       return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal}`
+    case 'ReadPlace':
+      return `${localText(operation.destination)} = read ${localText(operation.root)}${operation.selectors
+        .map((selector) =>
+          selector._tag === 'FieldSelector'
+            ? `.#${selector.field.ordinal}`
+            : `[${
+                selector.index._tag === 'Proven'
+                  ? selector.index.value
+                  : localText(selector.index.local)
+              }/${selector.length}]`,
+        )
+        .join('')}`
     case 'Drop':
       return `drop ${localText(operation.local)}`
   }
@@ -517,7 +557,9 @@ export const symbolRows = (
 const valueText = (value: BootstrapEvaluation.Value): string =>
   value._tag === 'I32Value'
     ? String(value.value)
-    : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+    : value._tag === 'ArrayValue'
+      ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
+      : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -533,8 +575,20 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `construct ${typeText(event.type)} · ${event.fieldCount} field${
         event.fieldCount === 1 ? '' : 's'
       }`
+    case 'ArrayConstruct':
+      return `construct ${typeText(event.type)} · ${event.elementCount} element${
+        event.elementCount === 1 ? '' : 's'
+      }`
     case 'Project':
       return `project ${typeText(event.type)}.#${event.field.ordinal}`
+    case 'PlaceRead':
+      return `read ${event.selectors
+        .map((selector) =>
+          selector._tag === 'Field'
+            ? `#${selector.field.ordinal}`
+            : `${typeText(selector.array)}[${selector.index}] ${selector.bounds.toLowerCase()}`,
+        )
+        .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':
       return `cleanup _${event.local}`
   }
@@ -551,7 +605,9 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'Return':
       return 1
     case 'Construct':
+    case 'ArrayConstruct':
     case 'Project':
+    case 'PlaceRead':
     case 'Cleanup':
       return 2
   }
@@ -715,9 +771,7 @@ export const structValueRows = (
       label: typeText(shape.type),
       detail:
         shape.lanes
-          .map(
-            (lane) => `${lane.type}:${lane.path.map((field) => `#${field.ordinal}`).join('.')}`,
-          )
+          .map((lane) => `${lane.type}:${selectorPathText(lane.path)}`)
           .join(', ') || 'zero runtime lanes',
     })
   }
@@ -749,6 +803,162 @@ export const structValueRows = (
           : event._tag === 'Project'
             ? `${typeText(event.type)}.#${event.field.ordinal}`
             : `local _${event.local}`,
+      span,
+      onActivate: () => onPick(span),
+    })
+  }
+
+  return rows
+}
+
+const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
+  path
+    .map((selector) =>
+      selector._tag === 'ElementSelector' ? `[${selector.index}]` : `#${selector.ordinal}`,
+    )
+    .join('.')
+
+/** Canonical array facts from syntax through evaluation and backend-neutral ABI paths. */
+export const arrayValueRows = (
+  types: ReadonlyArray<Type.FixedArray>,
+  literals: ReadonlyArray<Elaboration.ArrayLiteralExpressionFact>,
+  projections: ReadonlyArray<Elaboration.IndexProjectionExpressionFact>,
+  layouts: ReadonlyArray<Layout.Entry>,
+  shapes: ReadonlyArray<Layout.CallingShape>,
+  evaluation: BootstrapEvaluation.Outcome | undefined,
+  onPick: (span: Span) => void,
+): ReadonlyArray<RowModel> => {
+  const rows: Array<RowModel> = [
+    {
+      key: 'array-types',
+      label: 'canonical array types',
+      detail: types.length === 0 ? 'none' : `${types.length}`,
+      head: true,
+    },
+    ...types.map(
+      (type, ordinal): RowModel => ({
+        key: `array-type-${ordinal}`,
+        depth: 1,
+        dot: 'symbol',
+        label: typeText(type),
+        detail: `length ${type.length} · element ${typeText(type.element)}`,
+        tone: 'symbol',
+      }),
+    ),
+    {
+      key: 'array-literals',
+      label: 'literal elements',
+      detail: literals.length === 0 ? 'none' : `${literals.length}`,
+      head: true,
+    },
+  ]
+
+  for (const [literalOrdinal, literal] of literals.entries()) {
+    const span = asSpan(literal.syntax.span)
+    const key = `array-literal-${literalOrdinal}`
+    rows.push({
+      key,
+      depth: 1,
+      dot: literal.state._tag === 'Complete' ? 'ok' : 'warning',
+      label:
+        literal.state._tag === 'Complete'
+          ? typeText(literal.state.type)
+          : literal.expected === undefined
+            ? 'unavailable array'
+            : typeText(literal.expected),
+      detail: `${literal.length} element${literal.length === 1 ? '' : 's'} · ${literal.state._tag}`,
+      span,
+      ...(literal.state._tag === 'Complete' ? {} : { tone: 'warning' as const }),
+      onActivate: () => onPick(span),
+    })
+    for (const element of literal.elements) {
+      const elementSpan = asSpan(element.syntax.span)
+      rows.push({
+        key: `${key}-element-${element.ordinal}`,
+        depth: 2,
+        label: `[${element.ordinal}]`,
+        detail: element.compatibility._tag,
+        span: elementSpan,
+        ...(element.compatibility._tag === 'Compatible'
+          ? {}
+          : { dot: 'warning' as const, tone: 'warning' as const }),
+        onActivate: () => onPick(elementSpan),
+      })
+    }
+  }
+
+  rows.push({
+    key: 'array-indexes',
+    label: 'checked place chains',
+    detail: projections.length === 0 ? 'none' : `${projections.length}`,
+    head: true,
+  })
+  for (const [ordinal, projection] of projections.entries()) {
+    const span = asSpan(projection.syntax.span)
+    rows.push({
+      key: `array-index-${ordinal}`,
+      depth: 1,
+      dot: projection.bounds._tag === 'Invalid' ? 'warning' : 'ok',
+      label: projection.array === undefined ? '?[index]' : `${typeText(projection.array)}[index]`,
+      detail: `${projection.access} · ${
+        projection.bounds._tag === 'Proven'
+          ? `proven ${projection.bounds.index}/${projection.bounds.length}`
+          : projection.bounds._tag === 'Runtime'
+            ? `runtime check < ${projection.bounds.length}`
+            : projection.bounds._tag === 'Invalid'
+              ? `invalid ${projection.bounds.index}/${projection.bounds.length}`
+              : 'bounds unavailable'
+      }`,
+      span,
+      ...(projection.bounds._tag === 'Invalid' ? { tone: 'warning' as const } : {}),
+      onActivate: () => onPick(span),
+    })
+  }
+
+  rows.push({
+    key: 'array-layouts',
+    label: 'repeated layouts + calling paths',
+    detail: `${layouts.length} layout${layouts.length === 1 ? '' : 's'} · ${shapes.length} shape${shapes.length === 1 ? '' : 's'}`,
+    head: true,
+  })
+  for (const entry of layouts) {
+    if (entry.representation._tag !== 'Repeated') continue
+    rows.push({
+      key: `array-layout-${typeText(entry.type)}`,
+      depth: 1,
+      label: typeText(entry.type),
+      detail: `${entry.size} B · align ${entry.alignment} · stride ${entry.representation.stride}`,
+    })
+  }
+  for (const shape of shapes) {
+    rows.push({
+      key: `array-shape-${typeText(shape.type)}`,
+      depth: 1,
+      label: `${typeText(shape.type)} lanes`,
+      detail:
+        shape.lanes.map((lane) => `${lane.type}:${selectorPathText(lane.path)}`).join(', ') ||
+        'zero runtime lanes',
+    })
+  }
+
+  const events =
+    evaluation?.trace.filter(
+      (event) => event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
+    ) ?? []
+  rows.push({
+    key: 'array-events',
+    label: 'evaluation events',
+    detail: evaluation === undefined ? 'run evaluation to inspect values and checks' : `${events.length}`,
+    head: true,
+  })
+  for (const [ordinal, event] of events.entries()) {
+    const span = asSpan(event.span)
+    rows.push({
+      key: `array-event-${ordinal}`,
+      depth: 1,
+      dot: 'ok',
+      label: traceLabel(event),
+      detail: event._tag,
       span,
       onActivate: () => onPick(span),
     })

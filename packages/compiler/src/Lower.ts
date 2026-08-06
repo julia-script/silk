@@ -4,7 +4,7 @@ import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
-import type * as Type from './Type.js'
+import * as Type from './Type.js'
 
 /**
  * Lowering: reachable instances become one MIR program module. Statement sequences linearize
@@ -21,7 +21,9 @@ const mirType = (type: Type.Type): Mir.Type | undefined =>
     ? type === 'Bool'
       ? bool
       : i32
-    : Object.freeze({ _tag: 'Nominal', type })
+    : Type.isNominal(type)
+      ? Object.freeze({ _tag: 'Nominal', type })
+      : Object.freeze({ _tag: 'FixedArray', type })
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
@@ -75,10 +77,89 @@ interface LoweredExpression {
   readonly result: Mir.LocalId
 }
 
-const lowerExpression = (
+interface LoweredPlace {
+  readonly root: Mir.LocalId
+  readonly selectors: ReadonlyArray<Mir.PlaceSelector>
+}
+
+const lowerPlacePath = (
   fn: FunctionLowering,
   expression: Hir.Expression,
+): LoweredPlace | undefined => {
+  if (expression._tag === 'Project') {
+    const subject = lowerPlacePath(fn, expression.subject)
+    if (subject === undefined) return undefined
+    return Object.freeze({
+      root: subject.root,
+      selectors: Object.freeze([
+        ...subject.selectors,
+        Object.freeze({
+          _tag: 'FieldSelector' as const,
+          field: expression.field,
+          provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      ]),
+    })
+  }
+  if (expression._tag === 'IndexPlace') {
+    const subject = lowerPlacePath(fn, expression.subject)
+    if (subject === undefined) return undefined
+    const index:
+      | Extract<Mir.PlaceSelector, { readonly _tag: 'ElementSelector' }>['index']
+      | undefined =
+      expression.bounds._tag === 'Proven'
+        ? Object.freeze({ _tag: 'Proven', value: expression.bounds.index })
+        : (() => {
+            const lowered = lowerExpression(fn, expression.index)
+            return lowered === undefined
+              ? undefined
+              : Object.freeze({ _tag: 'Runtime' as const, local: lowered.result })
+          })()
+    if (index === undefined) return undefined
+    return Object.freeze({
+      root: subject.root,
+      selectors: Object.freeze([
+        ...subject.selectors,
+        Object.freeze({
+          _tag: 'ElementSelector' as const,
+          length: expression.array.length,
+          index,
+          provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      ]),
+    })
+  }
+  const root = lowerExpression(fn, expression)
+  return root === undefined
+    ? undefined
+    : Object.freeze({ root: root.result, selectors: Object.freeze([]) })
+}
+
+const lowerPlace = (
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'Project' | 'IndexPlace' }>,
 ): LoweredExpression | undefined => {
+  const place = lowerPlacePath(fn, expression)
+  const type = mirType(expression.type)
+  if (place === undefined || type === undefined) return undefined
+  const destination = fn.alloc(type)
+  fn.emit(
+    Object.freeze({
+      _tag: 'ReadPlace',
+      destination,
+      root: place.root,
+      selectors: place.selectors,
+      type,
+      provenance: Object.freeze({ span: expression.span, generated: false }),
+    }),
+  )
+  return Object.freeze({ result: destination })
+}
+
+function lowerExpression(
+  fn: FunctionLowering,
+  expression: Hir.Expression,
+): LoweredExpression | undefined {
   switch (expression._tag) {
     case 'IntegerLiteral': {
       const destination = fn.alloc(i32)
@@ -146,22 +227,32 @@ const lowerExpression = (
       )
       return { result: destination }
     }
-    case 'Project': {
-      const subject = lowerExpression(fn, expression.subject)
+    case 'ArrayConstruct': {
       const type = mirType(expression.type)
-      if (subject === undefined || type === undefined) return undefined
+      if (type?._tag !== 'FixedArray') return undefined
+      const elements: Array<Mir.LocalId> = []
+      for (const element of expression.elements) {
+        const lowered = lowerExpression(fn, element)
+        if (lowered === undefined) return undefined
+        elements.push(lowered.result)
+      }
       const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({
-          _tag: 'Project',
+          _tag: 'ConstructArray',
           destination,
-          source: subject.result,
-          field: expression.field,
           type,
+          elements: Object.freeze(elements),
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
       return { result: destination }
+    }
+    case 'Project': {
+      return lowerPlace(fn, expression)
+    }
+    case 'IndexPlace': {
+      return lowerPlace(fn, expression)
     }
     case 'Call': {
       const argumentLocals: Array<Mir.LocalId> = []
