@@ -14,3 +14,5 @@ apps/docs/content/*-api/
 /apps/docs/.next/
 /apps/docs/next-env.d.ts
 /apps/docs/tsconfig.tsbuildinfo
+
+.scratch
