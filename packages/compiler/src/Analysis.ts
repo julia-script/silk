@@ -32,7 +32,16 @@ import * as WasmBackend from './WasmBackend.js'
 /** An available phase artifact or the target failure that prevented its construction. */
 export type Targeted<A> =
   | { readonly _tag: 'Available'; readonly value: A }
-  | { readonly _tag: 'Unavailable'; readonly error: Target.TargetError }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly error: Target.TargetError | AnalysisUnavailable
+    }
+
+/** A valid target phase intentionally withheld because source specialization is invalid. */
+export class AnalysisUnavailable extends Data.TaggedError('AnalysisUnavailable')<{
+  readonly operation: 'Analysis.make'
+  readonly message: string
+}> {}
 
 /** One immutable analysis snapshot of one compilation request. */
 export interface Snapshot {
@@ -58,6 +67,23 @@ export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
   readonly resolutionFailures: ReadonlyArray<SourceResolver.SourceResolverError>
 }> {}
 
+const hasInvalidGenericBody = (
+  index: DeclarationIndex.Index,
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+): boolean =>
+  index.modules.some((module) =>
+    module.members.some(
+      (member) =>
+        member.typeParameters.length > 0 &&
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.span.sourceId === member.syntax.span.sourceId &&
+            diagnostic.span.start >= member.syntax.span.start &&
+            diagnostic.span.end <= member.syntax.span.end,
+        ),
+    ),
+  )
+
 /** Builds the snapshot of one compilation request. */
 export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
@@ -81,12 +107,41 @@ export const make = Effect.fn('Analysis.make')(function* (
   const ownership = new Map(
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
-  const instances = Instances.discover(request.root.id, results)
+  const frontendDiagnostics = Diagnostic.merge(
+    ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
+    ...closure.modules.map((module) => module.syntax.parserDiagnostics),
+    closure.diagnostics,
+    resolution.diagnostics,
+    ...[...results.values()].map((result) => result.diagnostics),
+    ...[...ownership.values()].map((facts) => facts.diagnostics),
+  )
+  const frontendSpecializationInvalid =
+    Diagnostic.hasGenericSpecializationErrors(frontendDiagnostics) ||
+    hasInvalidGenericBody(index, frontendDiagnostics)
+  const instances = frontendSpecializationInvalid
+    ? Instances.invalid(request.root.id)
+    : Instances.discover(request.root.id, results)
+  const diagnostics = Diagnostic.merge(
+    frontendDiagnostics,
+    Instances.violationDiagnostics(instances),
+  )
   const target = Target.select(request.target)
+  const specializationError =
+    frontendSpecializationInvalid || Diagnostic.hasGenericSpecializationErrors(diagnostics)
+      ? new AnalysisUnavailable({
+          operation: 'Analysis.make',
+          message: 'Target-dependent phases are unavailable for invalid source specialization',
+        })
+      : undefined
   const layoutCatalog: Targeted<Layout.Catalog> =
-    target._tag === 'Resolved'
-      ? Object.freeze({ _tag: 'Available', value: Layout.catalog(target.target, index) })
-      : Object.freeze({ _tag: 'Unavailable', error: target.error })
+    specializationError !== undefined
+      ? Object.freeze({ _tag: 'Unavailable', error: specializationError })
+      : target._tag === 'Resolved'
+        ? Object.freeze({
+            _tag: 'Available',
+            value: Layout.catalog(target.target, index, instances),
+          })
+        : Object.freeze({ _tag: 'Unavailable', error: target.error })
   const layout: Targeted<Layout.Plan> =
     layoutCatalog._tag === 'Available'
       ? Object.freeze({ _tag: 'Available', value: Layout.plan(layoutCatalog.value, instances) })
@@ -98,14 +153,6 @@ export const make = Effect.fn('Analysis.make')(function* (
           value: Lower.lowerProgram(instances, ownership, layout.value),
         })
       : layout
-  const diagnostics = Diagnostic.merge(
-    ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
-    ...closure.modules.map((module) => module.syntax.parserDiagnostics),
-    closure.diagnostics,
-    resolution.diagnostics,
-    ...[...results.values()].map((result) => result.diagnostics),
-    ...[...ownership.values()].map((facts) => facts.diagnostics),
-  )
   return Object.freeze({
     _tag: 'AnalysisSnapshot',
     closure,
@@ -473,6 +520,76 @@ export const cleanupExitsOf = (self: Snapshot, module: string): ReadonlyArray<Ow
 /** Returns the snapshot's instance discovery: entry state and ordered instances. */
 export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
 
+/** Returns declarations that own canonical type parameters in module/source order. */
+export const genericDeclarationsOf = (self: Snapshot): ReadonlyArray<DeclarationIndex.MemberFact> =>
+  Object.freeze(
+    self.index.modules.flatMap((module) =>
+      module.members.filter((member) => member.typeParameters.length > 0),
+    ),
+  )
+
+/** Returns every typed generic call in deterministic HIR preorder. */
+export const genericCallsOf = (
+  self: Snapshot,
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Call' }>> =>
+  Object.freeze(
+    [...self.results.values()].flatMap((result) =>
+      result.hir.functions.flatMap((fn) =>
+        fn.statements
+          .flatMap(Hir.statementExpressions)
+          .flatMap(Hir.expressionTree)
+          .flatMap((expression) =>
+            expression._tag === 'Call' && expression.typeArguments.length > 0 ? [expression] : [],
+          ),
+      ),
+    ),
+  )
+
+export interface CallInstanceLink {
+  readonly call: Extract<Hir.Expression, { readonly _tag: 'Call' }>
+  readonly caller: Instances.Instance
+  readonly target: Instances.Instance
+}
+
+/** Resolves one source HIR call in every reached caller specialization. */
+export const instancesOfCall = (
+  self: Snapshot,
+  call: Extract<Hir.Expression, { readonly _tag: 'Call' }>,
+): ReadonlyArray<CallInstanceLink> =>
+  Object.freeze(
+    self.instances.instances.flatMap((caller): ReadonlyArray<CallInstanceLink> => {
+      const ownsCall = caller.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .some((expression) => expression === call)
+      if (!ownsCall) return []
+      const arguments_ = call.typeArguments.map((argument) =>
+        Type.substitute(argument, caller.substitution),
+      )
+      const target = self.instances.instances.find(
+        (candidate) =>
+          candidate.key.declaration.module === call.target.module &&
+          candidate.key.declaration.name === call.target.name &&
+          candidate.key.typeArguments.length === arguments_.length &&
+          candidate.key.typeArguments.every((argument, index) => {
+            const callArgument = arguments_.at(index)
+            return callArgument !== undefined && Type.equals(argument, callArgument)
+          }),
+      )
+      return target === undefined ? [] : [Object.freeze({ call, caller, target })]
+    }),
+  )
+
+/** Returns concrete reached applications while excluding open generic declarations. */
+export const appliedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
+  self.layout._tag === 'Available'
+    ? Object.freeze(
+        self.layout.value.entries.filter(
+          (entry) => Type.isNominal(entry.type) && entry.type.arguments.length > 0,
+        ),
+      )
+    : Object.freeze([])
+
 /** Returns the snapshot's resolved or unavailable target selection. */
 export const targetOf = (self: Snapshot): Target.Selection => self.target
 
@@ -688,7 +805,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
   backend?: Backend.Backend,
 ): Effect.fn.Return<
   Backend.Artifact,
-  Backend.BackendError | Target.TargetError | CodegenUnavailable
+  Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
 > {
   if (Diagnostic.hasErrors(self.diagnostics) || self.closure.resolutionFailures.length > 0) {
     return yield* new CodegenUnavailable({
@@ -736,7 +853,7 @@ export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
   request: Backend.CodegenRequest,
 ): Effect.fn.Return<
   Backend.Artifact,
-  Backend.BackendError | Target.TargetError | CodegenUnavailable
+  Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
 > {
   return yield* codegen(self, request, WasmBackend.WasmBackend)
 })

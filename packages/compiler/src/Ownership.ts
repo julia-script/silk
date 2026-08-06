@@ -49,6 +49,7 @@ export interface Release {
 /** The symbolic recursive cleanup of one complete logical owner. */
 export type CleanupPlan =
   | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
+  | { readonly _tag: 'ParameterCleanup'; readonly type: Type.Parameter }
   | {
       readonly _tag: 'StructCleanup'
       readonly type: Type.Nominal
@@ -497,6 +498,7 @@ const cleanupPlan = (
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
@@ -530,6 +532,11 @@ const cleanupPlan = (
   if (declaration?._tag !== 'StructDeclaration') {
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
   const nextSeen = new Set(seen).add(key)
   return Object.freeze({
     _tag: 'StructCleanup',
@@ -540,7 +547,7 @@ const cleanupPlan = (
           field: field.id,
           cleanup:
             field.declaredType._tag === 'Resolved'
-              ? cleanupPlan(index, field.declaredType.type, nextSeen)
+              ? cleanupPlan(index, Type.substitute(field.declaredType.type, substitution), nextSeen)
               : Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const }),
         }),
       ),
@@ -562,14 +569,77 @@ const cleanupTypeAtPath = (
       name: current.name,
     })
     if (declaration?._tag !== 'StructDeclaration') return undefined
+    const substitution = Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      current.arguments,
+    )
+    if (substitution === undefined) return undefined
     const field = declaration.fields.find(
       (candidate) =>
         candidate.id.struct.ordinal === fieldId.struct.ordinal &&
         candidate.id.ordinal === fieldId.ordinal,
     )
-    current = field?.declaredType._tag === 'Resolved' ? field.declaredType.type : undefined
+    current =
+      field?.declaredType._tag === 'Resolved'
+        ? Type.substitute(field.declaredType.type, substitution)
+        : undefined
   }
   return current
+}
+
+/** Substitutes one checked symbolic cleanup proof into a concrete instance. */
+export const specializeCleanup = (
+  cleanup: CleanupPlan,
+  substitution: ReadonlyMap<string, Type.Type>,
+  resolveConcrete?: (type: Type.Type) => CleanupPlan,
+): CleanupPlan => {
+  const type = Type.substitute(cleanup.type, substitution)
+  switch (cleanup._tag) {
+    case 'NoCleanup':
+      return Object.freeze({ _tag: 'NoCleanup', type })
+    case 'ParameterCleanup':
+      return Type.isParameter(type)
+        ? Object.freeze({ _tag: 'ParameterCleanup', type })
+        : (resolveConcrete?.(type) ?? Object.freeze({ _tag: 'NoCleanup', type }))
+    case 'StructCleanup':
+      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'StructCleanup',
+        type,
+        fields: Object.freeze(
+          cleanup.fields.map((field) =>
+            Object.freeze({
+              field: field.field,
+              cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
+            }),
+          ),
+        ),
+      })
+    case 'ArrayCleanup':
+      if (!Type.isFixedArray(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'ArrayCleanup',
+        type,
+        length: type.length,
+        element: specializeCleanup(cleanup.element, substitution, resolveConcrete),
+      })
+    case 'UnionCleanup':
+      if (!Type.isUnion(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'UnionCleanup',
+        type,
+        cases: Object.freeze(
+          cleanup.cases.map((entry, ordinal) => {
+            const member = type.members.at(ordinal)
+            return Object.freeze({
+              member: member ?? entry.member,
+              ordinal: entry.ordinal,
+              cleanup: specializeCleanup(entry.cleanup, substitution, resolveConcrete),
+            })
+          }),
+        ),
+      })
+  }
 }
 
 const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): CheckedFunction => {
@@ -979,6 +1049,7 @@ const siteText = (site: BindingSite): string =>
 
 const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
+  if (cleanup._tag === 'ParameterCleanup') return `parameter:${Type.key(cleanup.type)}`
   if (cleanup._tag === 'ArrayCleanup') {
     return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
   }

@@ -77,6 +77,7 @@ describe('preset catalog', () => {
     expect(groups).toEqual(
       new Set([
         'syntax',
+        'generics',
         'acceptance',
         'modules',
         'headers',

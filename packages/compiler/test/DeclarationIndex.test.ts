@@ -243,15 +243,15 @@ it.effect('resolves forward nominal fields into a canonical acyclic dependency s
 
     assert.strictEqual(span?.dependency._tag, 'Available')
     assert.deepEqual(span?.dependency.types, [
-      { _tag: 'NominalType', module: 'geometry', name: 'Position' },
+      { _tag: 'NominalType', module: 'geometry', name: 'Position', arguments: [] },
     ])
     assert.deepEqual(
       span?.fields.map((field) =>
         field.declaredType._tag === 'Resolved' ? field.declaredType.type : field.declaredType._tag,
       ),
       [
-        { _tag: 'NominalType', module: 'geometry', name: 'Position' },
-        { _tag: 'NominalType', module: 'geometry', name: 'Position' },
+        { _tag: 'NominalType', module: 'geometry', name: 'Position', arguments: [] },
+        { _tag: 'NominalType', module: 'geometry', name: 'Position', arguments: [] },
       ],
     )
   }),

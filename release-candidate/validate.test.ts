@@ -526,7 +526,7 @@ console.log(
       cycleReason: cycleEvaluation._tag === 'Blocked' ? cycleEvaluation.reason._tag : null,
       cycleNames:
         cycleEvaluation._tag === 'Blocked' && cycleEvaluation.reason._tag === 'RecursiveCycle'
-          ? cycleEvaluation.reason.cycle.map((id) => id.name)
+          ? cycleEvaluation.reason.cycle.map((instance) => instance.declaration.name)
           : [],
       cycleTrace: cycleEvaluation.trace.map((event) => event._tag),
     },
@@ -707,7 +707,13 @@ console.log(
       argumentExpressionTags: ['Integer'],
       argumentOrdinals: [0],
       mappingOrdinals: [[0, 0]],
-      callContract: { _tag: 'Compatible', expectedCount: 1, actualCount: 1 },
+      callContract: {
+        _tag: 'Compatible',
+        expectedCount: 1,
+        actualCount: 1,
+        typeArguments: [],
+        substitution: {},
+      },
       callType: { _tag: 'Available', type: 'I32' },
       callTargetOrdinal: 0,
       callCompatibility: 'Compatible',

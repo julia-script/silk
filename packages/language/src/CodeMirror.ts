@@ -6,7 +6,9 @@ import { Decoration, EditorView } from '@codemirror/view'
 import type { Tag } from '@lezer/highlight'
 import { tags } from '@lezer/highlight'
 import * as Lexer from '@silk-effect/compiler/Lexer'
+import * as Parser from '@silk-effect/compiler/Parser'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import type * as Token from '@silk-effect/compiler/Token'
 
 /** A style bucket: the stable class suffix and the highlight tags themes color it with. */
@@ -20,6 +22,7 @@ const boolean_: Category = { name: 'boolean', tags: [tags.bool] }
 const operator: Category = { name: 'operator', tags: [tags.operator] }
 const punctuation: Category = { name: 'punctuation', tags: [tags.punctuation] }
 const builtinType: Category = { name: 'type', tags: [tags.typeName] }
+const typePunctuation: Category = { name: 'type-punctuation', tags: [tags.punctuation] }
 
 /** Exhaustive over `TokenKind`, so a lexer token change fails this package's typecheck. */
 const categories: Record<Token.TokenKind, Category | undefined> = {
@@ -79,7 +82,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
 }
 
 const tagsByCategory = new Map(
-  [...Object.values(categories), builtinType].flatMap((category) =>
+  [...Object.values(categories), builtinType, typePunctuation].flatMap((category) =>
     category === undefined ? [] : [[category.name, category.tags] as const],
   ),
 )
@@ -115,17 +118,37 @@ const byteToCharMap = (doc: string, byteLength: number): Uint32Array => {
  */
 export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
   const bytes = encoder.encode(doc)
-  const result = Lexer.lex(SourceFile.make('editor', bytes))
+  const lexical = Lexer.lex(SourceFile.make('editor', bytes))
+  const syntax = Parser.parse(lexical)
+  const genericAngles = new Set<string>()
+  const collect = (node: SyntaxTree.Node): void => {
+    if (
+      node.kind === 'TypeParameterList' ||
+      node.kind === 'TypeArgumentList' ||
+      node.kind === 'CallTypeArgumentList'
+    ) {
+      for (const token of SyntaxTree.tokens(node)) {
+        if (token.kind === 'Less' || token.kind === 'Greater') {
+          genericAngles.add(`${token.span.start}:${token.span.end}`)
+        }
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) collect(child)
+  }
+  collect(syntax.root)
   const map = bytes.length === doc.length ? undefined : byteToCharMap(doc, bytes.length)
   const ranges: Array<HighlightRange> = []
-  for (const token of result.tokens) {
+  for (const token of lexical.tokens) {
     const from = map === undefined ? token.span.start : (map[token.span.start] ?? 0)
     const to = map === undefined ? token.span.end : (map[token.span.end] ?? 0)
     const text = doc.slice(from, to)
     const category =
-      token.kind === 'Identifier' && (text === 'I32' || text === 'Bool' || text === 'Never')
-        ? builtinType
-        : categories[token.kind]
+      (token.kind === 'Less' || token.kind === 'Greater') &&
+      genericAngles.has(`${token.span.start}:${token.span.end}`)
+        ? typePunctuation
+        : token.kind === 'Identifier' && (text === 'I32' || text === 'Bool' || text === 'Never')
+          ? builtinType
+          : categories[token.kind]
     if (category === undefined) continue
     if (to > from) ranges.push({ from, to, category: category.name })
   }

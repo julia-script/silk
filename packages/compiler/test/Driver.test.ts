@@ -11,7 +11,7 @@ import * as Driver from '../src/Driver.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import { corpus } from './support/corpus.js'
+import { corpus, invalidGenericCorpus } from './support/corpus.js'
 
 const clang = '/usr/bin/clang'
 const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
@@ -275,6 +275,25 @@ it.effect('names the failing native stage with command provenance', () =>
     if (outcome._tag !== 'Failed') return
     assert.strictEqual(outcome.stage, 'object')
     assert.strictEqual(outcome.failure.planned.command, '/nonexistent/clang')
+  }),
+)
+
+it.effect('rejects invalid generic specialization before layout and MIR', () =>
+  Effect.gen(function* () {
+    for (const program of invalidGenericCorpus) {
+      const outcome = yield* compileSource(program.name, program.source)
+      assert.strictEqual(outcome._tag, 'Rejected', program.name)
+      if (outcome._tag !== 'Rejected') continue
+      const codes = outcome.diagnostics.map((diagnostic) => diagnostic.code)
+      for (const code of program.codes) assert.include(codes, code, program.name)
+      const phases = outcome.report.map((entry) => entry.phase)
+      assert.notInclude(phases, 'target-layout', program.name)
+      assert.notInclude(phases, 'mir-lowering', program.name)
+      assert.notInclude(phases, 'backend', program.name)
+      if (!program.codes.includes('SEM0053')) {
+        assert.notInclude(phases, 'instance-discovery', program.name)
+      }
+    }
   }),
 )
 

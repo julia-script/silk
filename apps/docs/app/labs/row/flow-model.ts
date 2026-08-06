@@ -4,7 +4,11 @@ const typeText = (type: Type.Type): string =>
   typeof type === 'string'
     ? type
     : type._tag === 'NominalType'
-      ? `${type.module}.${type.name}`
+      ? `${type.module}.${type.name}${
+          type.arguments.length === 0 ? '' : `<${type.arguments.map(typeText).join(', ')}>`
+        }`
+      : type._tag === 'TypeParameter'
+        ? type.name
       : type._tag === 'FixedArrayType'
         ? `Array<${typeText(type.element)}, ${type.length}>`
         : type.members.map(typeText).join(' | ')
@@ -642,7 +646,7 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
     case 'InvalidMir':
       return `InvalidMir: ${reason.violations.length} violations`
     case 'RecursiveCycle':
-      return `RecursiveCycle: ${reason.cycle.map((id) => id.name).join(' → ')}`
+      return `RecursiveCycle: ${reason.cycle.map((instance) => instance.declaration.name).join(' → ')}`
     case 'Trap':
       return `Trap: ${reason.reason}`
     case 'UnavailableEntry':

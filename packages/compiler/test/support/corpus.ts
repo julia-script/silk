@@ -53,6 +53,27 @@ pub fn main() -> I32 { return choose(identity(1), identity(2)) }`,
     expected: { _tag: 'Completes', result: 2 },
   },
   {
+    name: 'generic-specializations',
+    source: `struct Pair { left: I32 right: I32 }
+struct Box<T> { value: T }
+fn identity<T>(value: T) -> T { return move value }
+pub fn main() -> I32 {
+  let scalar = Box<I32> { value: identity(0) }
+  let pair = Box<Pair> { value: identity<Pair>(Pair { left: 40, right: 2 }) }
+  return scalar.value + pair.value.left + pair.value.right
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'same-specialization-recursion',
+    source: `fn recurse<T>(value: T) -> I32 {
+  if false { return recurse<T>(move value) }
+  return 42
+}
+pub fn main() -> I32 { return recurse<I32>(1) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'forward-call',
     source: `pub fn main() -> I32 { return answer() }
 pub fn answer() -> I32 { return 42 }`,
@@ -376,9 +397,36 @@ pub fn main() -> I32 {
     expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },
   },
   {
+    name: 'generic-entry',
+    source: 'pub fn main<T>() -> I32 { return 42 }',
+    expected: { _tag: 'UnavailableEntry', reason: 'GenericEntry' },
+  },
+  {
     name: 'parameterized-entry',
     source: 'pub fn main(value: I32) -> I32 { return value }',
     expected: { _tag: 'UnavailableEntry', reason: 'ParameterizedEntry' },
+  },
+]
+
+/** Invalid generic programs that must stop before target layout and MIR. */
+export const invalidGenericCorpus: ReadonlyArray<InvalidCorpusProgram> = [
+  {
+    name: 'generic-explicit-arity',
+    source:
+      'fn identity<T>(value: T) -> T { return move value }\npub fn main() -> I32 { return identity<I32, Bool>(42) }',
+    codes: ['SEM0051'],
+  },
+  {
+    name: 'generic-conflicting-inference',
+    source:
+      'fn same<T>(left: T, right: T) -> T { return move left }\npub fn main() -> I32 { return same(1, true) }',
+    codes: ['SEM0052'],
+  },
+  {
+    name: 'generic-polymorphic-recursion',
+    source: `fn expand<T>(value: T) -> I32 { return expand<[T; 1]>([move value]) }
+pub fn main() -> I32 { return expand<I32>(1) }`,
+    codes: ['SEM0053'],
   },
 ]
 

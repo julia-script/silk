@@ -758,10 +758,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     }
 
     const resolve = (operation: Mir.Operation & { readonly _tag: 'Call' }): FuncActor.Func => {
-      const target = declared.find(
-        (candidate) =>
-          candidate.fn.id.module === operation.target.module &&
-          candidate.fn.id.name === operation.target.name,
+      const target = declared.find((candidate) =>
+        Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
       )
       if (target === undefined) {
         throw new RangeError(`Backend cannot resolve call target ${operation.target.name}`)
@@ -788,7 +786,11 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
 
     return {
       symbols: declared.map((entry) =>
-        Object.freeze({ declaration: entry.fn.id, symbol: entry.symbol }),
+        Object.freeze({
+          declaration: entry.fn.id,
+          instance: entry.fn.instance,
+          symbol: entry.symbol,
+        }),
       ),
       ir: yield* WatText.render(builder),
       bitcode: yield* Binary.encode(builder),
@@ -814,6 +816,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
                 _tag: 'BackendControlProvenance' as const,
                 backend: 'WebAssembly' as const,
                 function: fn.id,
+                instance: fn.instance,
                 region: region.id,
                 construct: 'WasmIf' as const,
                 targets: Object.freeze([
@@ -831,6 +834,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
                 _tag: 'BackendControlProvenance' as const,
                 backend: 'WebAssembly' as const,
                 function: fn.id,
+                instance: fn.instance,
                 region: region.id,
                 construct: 'WasmLoop' as const,
                 targets: Object.freeze([region.condition, region.body, region.following]),
@@ -866,6 +870,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
               _tag: 'BackendControlProvenance' as const,
               backend: 'WebAssembly' as const,
               function: fn.id,
+              instance: fn.instance,
               region: region.id,
               construct,
               targets: target === undefined ? Object.freeze([]) : Object.freeze([target]),

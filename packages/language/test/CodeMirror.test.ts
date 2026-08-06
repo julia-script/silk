@@ -60,6 +60,25 @@ it('highlights bracketed fixed-array punctuation', () => {
   assert.deepStrictEqual(spellings('[I32; 4]', 'punctuation'), ['[', ';', ']'])
 })
 
+it('distinguishes generic angles from comparison operators', () => {
+  const doc =
+    'fn keep<T>(value: Box<T>, a: I32, b: I32) -> Box<T> { if a < b { return keep<I32>(value) } return value }'
+  assert.deepStrictEqual(spellings(doc, 'type-punctuation'), [
+    '<',
+    '>',
+    '<',
+    '>',
+    '<',
+    '>',
+    '<',
+    '>',
+  ])
+  assert.deepStrictEqual(
+    spellings(doc, 'operator').filter((spelling) => spelling === '<'),
+    ['<'],
+  )
+})
+
 it('classifies Never and executable scalar names as builtin types', () => {
   assert.deepStrictEqual(spellings('Never | I32 | Bool', 'type'), ['Never', 'I32', 'Bool'])
 })

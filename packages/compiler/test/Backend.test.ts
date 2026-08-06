@@ -26,7 +26,10 @@ it.effect('emits one artifact per program with deterministic symbols', () =>
     assert.strictEqual(artifact.module, 'golden/program')
     assert.deepEqual(
       artifact.symbols.map((entry) => entry.symbol),
-      ['silk_main', 'silk_1_identity'],
+      [
+        'silk_main',
+        'silk_golden_program_identity__14_676f6c64656e2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a493332_18_726573756c743a6275696c74696e3a493332',
+      ],
     )
     assert.strictEqual(artifact.symbols.at(0)?.declaration.name, 'main')
   }),

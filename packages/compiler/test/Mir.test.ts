@@ -54,7 +54,7 @@ it('reports broken graphs deterministically as data', () => {
   const violations = Mir.verify(broken)
   assert.deepEqual(
     violations.map((violation) => violation.rule),
-    ['MissingEntryRegion', 'UnknownRegionTarget', 'UndeclaredLocal'],
+    ['MissingEntryRegion', 'InvalidInstance', 'UnknownRegionTarget', 'UndeclaredLocal'],
   )
   assert.deepEqual(Mir.verify(broken), violations)
 })

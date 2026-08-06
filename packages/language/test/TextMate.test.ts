@@ -87,5 +87,15 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt(match, '..'), 'punctuation.definition.pattern.rest.silk')
   assert.include(scopesAt(match, 'Token'), 'entity.name.type.pattern.silk')
   assert.include(scopesAt(match, '_'), 'variable.language.wildcard.silk')
+  const generic = 'fn keep<T>(value: Box<T>) -> Box<T> { return keep<I32>(value) }'
+  assert.include(scopesAt(generic, '<'), 'punctuation.definition.type-arguments.begin.silk')
+  assert.include(scopesAt(generic, '>'), 'punctuation.definition.type-arguments.end.silk')
+  const nested = 'fn keep<value>(input: Box<Box<I32>>) -> Box<Box<I32>> { return input }'
+  assert.include(scopesAt(nested, '<'), 'punctuation.definition.type-arguments.begin.silk')
+  assert.include(scopesAt(nested, '>'), 'punctuation.definition.type-arguments.end.silk')
+  assert.notInclude(
+    scopesAt('pub fn main() -> I32 { if left > (right) { return 1 } return 0 }', '>'),
+    'punctuation.definition.type-arguments.end.silk',
+  )
   highlighter.dispose()
 })

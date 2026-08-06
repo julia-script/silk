@@ -32,7 +32,7 @@ it.effect('reproduces every pinned corpus outcome', () =>
           assert.strictEqual(outcome._tag, 'Blocked', program.name)
           if (outcome._tag === 'Blocked' && outcome.reason._tag === 'RecursiveCycle') {
             assert.deepEqual(
-              outcome.reason.cycle.map((id) => id.name),
+              outcome.reason.cycle.map((instance) => instance.declaration.name),
               program.expected.cycle,
               program.name,
             )

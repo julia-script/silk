@@ -47,6 +47,7 @@ export type Value = I32Value | AggregateValue | ArrayValue | UnionValue
 export interface EntryTraceEvent {
   readonly _tag: 'Entry'
   readonly function: DeclarationIndex.CanonicalId
+  readonly instance: Instances.InstanceKey
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -55,6 +56,8 @@ export interface CallTraceEvent {
   readonly _tag: 'Call'
   readonly caller: DeclarationIndex.CanonicalId
   readonly target: DeclarationIndex.CanonicalId
+  readonly callerInstance: Instances.InstanceKey
+  readonly targetInstance: Instances.InstanceKey
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -62,6 +65,7 @@ export interface CallTraceEvent {
 export interface BindingTraceEvent {
   readonly _tag: 'Binding'
   readonly target: DeclarationIndex.CanonicalId
+  readonly targetInstance: Instances.InstanceKey
   readonly callSpan: SourceSpan.SourceSpan
   readonly argumentOrdinal: number
   readonly parameterOrdinal: number
@@ -74,6 +78,7 @@ export interface BindingTraceEvent {
 export interface ReturnTraceEvent {
   readonly _tag: 'Return'
   readonly function: DeclarationIndex.CanonicalId
+  readonly instance: Instances.InstanceKey
   readonly value: Value
   readonly span: SourceSpan.SourceSpan
 }
@@ -197,7 +202,13 @@ export type BlockedReason =
     }
   | {
       readonly _tag: 'UnavailableEntry'
-      readonly reason: 'MissingEntry' | 'AmbiguousEntry' | 'ParameterizedEntry' | 'UntypedEntry'
+      readonly reason:
+        | 'MissingEntry'
+        | 'AmbiguousEntry'
+        | 'GenericEntry'
+        | 'ParameterizedEntry'
+        | 'UntypedEntry'
+        | 'InvalidSource'
     }
   | {
       readonly _tag: 'Trap'
@@ -212,7 +223,7 @@ export type BlockedReason =
     }
   | {
       readonly _tag: 'RecursiveCycle'
-      readonly cycle: ReadonlyArray<DeclarationIndex.CanonicalId>
+      readonly cycle: ReadonlyArray<Instances.InstanceKey>
       readonly closingCallSpan: SourceSpan.SourceSpan
     }
 
@@ -244,13 +255,21 @@ const value = (input: number): I32Value => Object.freeze({ _tag: 'I32Value', val
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
 
-const sameId = (left: DeclarationIndex.CanonicalId, right: DeclarationIndex.CanonicalId): boolean =>
-  left.module === right.module && left.name === right.name
+const sameInstance = (left: Instances.InstanceKey, right: Instances.InstanceKey): boolean =>
+  left.declaration.module === right.declaration.module &&
+  left.declaration.name === right.declaration.name &&
+  left.typeArguments.length === right.typeArguments.length &&
+  left.typeArguments.every((argument, ordinal) => {
+    const candidate = right.typeArguments.at(ordinal)
+    return candidate !== undefined && Type.equals(argument, candidate)
+  })
 
 const functionFor = (
   program: Mir.Module,
   id: DeclarationIndex.CanonicalId,
-): Mir.MirFunction | undefined => program.functions.find((fn) => sameId(fn.id, id))
+  typeArguments: ReadonlyArray<Type.Type>,
+): Mir.MirFunction | undefined =>
+  program.functions.find((fn) => Mir.matchesInstance(fn, id, typeArguments))
 
 interface LocalState {
   readonly value: Value
@@ -261,7 +280,7 @@ function executeFunction(
   program: Mir.Module,
   fn: Mir.MirFunction,
   argumentValues: ReadonlyArray<Value>,
-  active: ReadonlyArray<DeclarationIndex.CanonicalId>,
+  active: ReadonlyArray<Instances.InstanceKey>,
   trace: Array<TraceEvent>,
 ): Step {
   const locals = new Map<number, LocalState>()
@@ -297,7 +316,9 @@ function executeFunction(
     cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
     owner: Value,
   ): ReadonlyArray<Type.Nominal> => {
-    if (cleanup._tag === 'NoCleanup') return Object.freeze([])
+    if (cleanup._tag === 'NoCleanup' || cleanup._tag === 'ParameterCleanup') {
+      return Object.freeze([])
+    }
     if (cleanup._tag === 'UnionCleanup') {
       if (owner._tag !== 'UnionValue') return Object.freeze([])
       const active = cleanup.cases.find((candidate) => Type.equals(candidate.member, owner.member))
@@ -943,7 +964,7 @@ function executeFunction(
             break
           }
           case 'Call': {
-            const target = functionFor(program, operation.target)
+            const target = functionFor(program, operation.target, operation.typeArguments)
             if (target === undefined) {
               return blockedStep({
                 _tag: 'MissingFunction',
@@ -956,14 +977,18 @@ function executeFunction(
                 _tag: 'Call',
                 caller: fn.id,
                 target: operation.target,
+                callerInstance: fn.instance,
+                targetInstance: target.instance,
                 span: operation.provenance.span,
               }),
             )
-            const cycleStart = active.findIndex((candidate) => sameId(candidate, operation.target))
+            const cycleStart = active.findIndex((candidate) =>
+              sameInstance(candidate, target.instance),
+            )
             if (cycleStart >= 0) {
               return blockedStep({
                 _tag: 'RecursiveCycle',
-                cycle: Object.freeze([...active.slice(cycleStart), operation.target]),
+                cycle: Object.freeze([...active.slice(cycleStart), target.instance]),
                 closingCallSpan: operation.provenance.span,
               })
             }
@@ -973,6 +998,7 @@ function executeFunction(
                 Object.freeze({
                   _tag: 'Binding',
                   target: operation.target,
+                  targetInstance: target.instance,
                   callSpan: operation.provenance.span,
                   argumentOrdinal: ordinal,
                   parameterOrdinal: ordinal,
@@ -986,7 +1012,7 @@ function executeFunction(
               program,
               target,
               argumentStates.map((state) => state.value),
-              Object.freeze([...active, operation.target]),
+              Object.freeze([...active, target.instance]),
               trace,
             )
             if (result._tag === 'Blocked') return result
@@ -1008,6 +1034,7 @@ function executeFunction(
           Object.freeze({
             _tag: 'Return',
             function: fn.id,
+            instance: fn.instance,
             value: result.value,
             span: outcome.provenance.span,
           }),
@@ -1114,7 +1141,7 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
   }
 
   const entry = discovery.entry.key.declaration
-  const fn = functionFor(program, entry)
+  const fn = functionFor(program, entry, discovery.entry.key.typeArguments)
   if (fn === undefined) {
     return Object.freeze({
       _tag: 'Blocked',
@@ -1133,10 +1160,11 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
     Object.freeze({
       _tag: 'Entry',
       function: entry,
+      instance: fn.instance,
       span: argumentSpanFallback(fn),
     }),
   )
-  const result = executeFunction(program, fn, [], Object.freeze([entry]), trace)
+  const result = executeFunction(program, fn, [], Object.freeze([fn.instance]), trace)
   if (result._tag === 'Blocked') {
     return Object.freeze({
       _tag: 'Blocked',

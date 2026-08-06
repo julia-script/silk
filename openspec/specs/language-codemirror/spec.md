@@ -69,3 +69,13 @@ context is available without reimplementing matching semantics.
 
 - **WHEN** the editor contains a shared match with a nominal guarded arm and `_` fallback
 - **THEN** every keyword, operator, punctuation, type, binding, and literal receives the compiler-consistent highlight range
+
+### Requirement: CodeMirror distinguishes generic angles contextually
+
+CodeMirror highlighting SHALL classify type parameters and generic applications consistently with
+the accepted syntax while retaining ordinary comparison and reserved-template highlighting in
+their respective contexts.
+
+#### Scenario: Highlight generic call and comparison
+- **WHEN** one source contains `identity<I32>(value)` and `left < right`
+- **THEN** the generic arguments and comparison operator receive their respective canonical styles

@@ -189,7 +189,13 @@ const hirTypeText = (type: Type.Type): string =>
   typeof type === 'string'
     ? type
     : type._tag === 'NominalType'
-      ? `${type.module}.${type.name}`
+      ? `${type.module}.${type.name}${
+          type.arguments.length === 0
+            ? ''
+            : `<${type.arguments.map(hirTypeText).join(', ')}>`
+        }`
+      : type._tag === 'TypeParameter'
+        ? type.name
       : type._tag === 'FixedArrayType'
         ? `Array<${hirTypeText(type.element)}, ${type.length}>`
         : type.members.map(hirTypeText).join(' | ')
@@ -220,7 +226,11 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
     case 'IndexPlace':
       return `index ${hirTypeText(expression.array)} · ${expression.bounds._tag.toLowerCase()}`
     case 'Call':
-      return `call ${expression.target.name}`
+      return `call ${expression.target.name}${
+        expression.typeArguments.length === 0
+          ? ''
+          : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
+      }`
     case 'BuiltinCall':
       return `builtin I32.${expression.operation}`
     default:

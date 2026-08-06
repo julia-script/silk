@@ -49,11 +49,13 @@ pub fn main() -> I32 { return 42 }`),
     const parameterized = Analysis.instancesOf(
       yield* snapshot('pub fn main(value: I32) -> I32 { return value }'),
     )
+    const generic = Analysis.instancesOf(yield* snapshot('pub fn main<T>() -> I32 { return 42 }'))
     assert.deepEqual(
       reachable.instances.map((instance) => instance.key.declaration.name),
       ['main'],
     )
     assert.deepEqual(missing.entry, { _tag: 'Unavailable', reason: 'MissingEntry' })
+    assert.deepEqual(generic.entry, { _tag: 'Unavailable', reason: 'GenericEntry' })
     assert.deepEqual(parameterized.entry, { _tag: 'Unavailable', reason: 'ParameterizedEntry' })
   }),
 )

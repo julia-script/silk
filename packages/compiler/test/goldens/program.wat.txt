@@ -25,5 +25,5 @@
     unreachable
   )
   (export "silk_main" (func 0))
-  (export "silk_1_identity" (func 1))
+  (export "silk_wasm_program_identity__12_7761736d2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a493332_18_726573756c743a6275696c74696e3a493332" (func 1))
 )

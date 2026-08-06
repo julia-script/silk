@@ -217,6 +217,7 @@ export type Expression =
   | {
       readonly _tag: 'Call'
       readonly target: DeclarationIndex.CanonicalId
+      readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
@@ -686,7 +687,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'Call':
       return [
-        `${indent}call ${expression.target.module}.${expression.target.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}call ${expression.target.module}.${expression.target.name}${
+          expression.typeArguments.length === 0
+            ? ''
+            : `<${expression.typeArguments.map(Type.encode).join(', ')}>`
+        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall':
@@ -760,7 +765,11 @@ export const encode = (self: Module): string =>
   [
     `hir-module ${self.module}`,
     ...self.functions.flatMap((fn) => [
-      `fn ${identityLabel(fn.declaration)} ${contractText(fn.contract)} entry=r${fn.entryRegion.ordinal} regions=${fn.regionOrder.map((region) => `r${region.ordinal}`).join(',')}`,
+      `fn ${identityLabel(fn.declaration)}${
+        fn.declaration.typeParameters.length === 0
+          ? ''
+          : `<${fn.declaration.typeParameters.map((parameter) => Type.key(parameter.type)).join(',')}>`
+      } ${contractText(fn.contract)} entry=r${fn.entryRegion.ordinal} regions=${fn.regionOrder.map((region) => `r${region.ordinal}`).join(',')}`,
       ...fn.statements.map((statement) => encodeStatement(statement, 1)),
     ]),
     '',

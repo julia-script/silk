@@ -28,7 +28,11 @@ const typeText = (type: Type.Type): string =>
   typeof type === 'string'
     ? type
     : type._tag === 'NominalType'
-      ? `${type.module}.${type.name}`
+      ? `${type.module}.${type.name}${
+          type.arguments.length === 0 ? '' : `<${type.arguments.map(typeText).join(', ')}>`
+        }`
+      : type._tag === 'TypeParameter'
+        ? type.name
       : type._tag === 'FixedArrayType'
         ? `Array<${typeText(type.element)}, ${type.length}>`
         : type.members.map(typeText).join(' | ')
@@ -102,9 +106,13 @@ const declaredTypeText = (fact: DeclarationIndex.DeclaredTypeFact): string =>
       : 'unavailable'
 
 const memberSignature = (member: DeclarationIndex.MemberFact): string => {
+  const parameters =
+    member.typeParameters.length === 0
+      ? ''
+      : `<${member.typeParameters.map((parameter) => typeText(parameter.type)).join(', ')}>`
   if (member._tag === 'StructDeclaration')
-    return `struct · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
-  const parameters = member.parameters
+    return `struct${parameters} · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
+  const values = member.parameters
     .map(
       (parameter) =>
         `${parameter.name._tag === 'Present' ? parameter.name.spelling : '∅'}: ${declaredTypeText(
@@ -112,7 +120,7 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
         )}`,
     )
     .join(', ')
-  return `${member.visibility === 'Public' ? 'pub ' : ''}fn · (${parameters}) -> ${declaredTypeText(
+  return `${member.visibility === 'Public' ? 'pub ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
     member.returnType,
   )}`
 }
@@ -241,6 +249,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
   switch (cleanup._tag) {
     case 'NoCleanup':
       return 'no cleanup'
+    case 'ParameterCleanup':
+      return `${typeText(cleanup.type)} · symbolic cleanup`
     case 'StructCleanup':
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
@@ -381,8 +391,27 @@ export const instanceRows = (
       key: `inst-${ordinal}`,
       depth: 1,
       dot: 'symbol',
-      label: `${instance.key.declaration.module}.${instance.key.declaration.name}`,
-      detail: 'instantiated once',
+      label: `${instance.key.declaration.module}.${instance.key.declaration.name}${
+        instance.key.typeArguments.length === 0
+          ? ''
+          : `<${instance.key.typeArguments.map(typeText).join(', ')}>`
+      }`,
+      detail: `${instance.substitution.size} substitution${instance.substitution.size === 1 ? '' : 's'} · instantiated once`,
+      span,
+      onActivate: () => onPick(span),
+    })
+  }
+
+  for (const [ordinal, violation] of discovery.violations.entries()) {
+    const caller = discovery.instances.find((instance) => instance.key === violation.caller)
+    const span = asSpan(caller?.function.declaration.syntax.span ?? { start: 0, end: 0 })
+    rows.push({
+      key: `inst-violation-${ordinal}`,
+      depth: 1,
+      dot: 'warning',
+      tone: 'warning',
+      label: 'polymorphic recursion',
+      detail: `${violation.target.declaration.name}<${violation.target.typeArguments.map(typeText).join(', ')}> changes an ancestor specialization`,
       span,
       onActivate: () => onPick(span),
     })
@@ -558,11 +587,17 @@ export const mirRows = (
   const rows: Array<RowModel> = []
 
   for (const fn of module.functions) {
+    // Monomorphized instances share fn.id.name — type arguments make the identity unique.
+    const instance =
+      fn.instance.typeArguments.length === 0
+        ? ''
+        : `<${fn.instance.typeArguments.map(typeText).join(', ')}>`
+    const fnKey = `mir-${fn.id.name}${instance}`
     const operationCount = Mir.operations(fn).length
     rows.push({
-      key: `mir-${fn.id.name}`,
+      key: fnKey,
       dot: 'symbol',
-      label: fn.id.name,
+      label: `${fn.id.name}${instance}`,
       detail: `fn · entry r${fn.entry.ordinal} · ${fn.regions.length} region${fn.regions.length === 1 ? '' : 's'} · ${operationCount} op${operationCount === 1 ? '' : 's'}`,
       head: true,
       tone: 'symbol',
@@ -570,7 +605,7 @@ export const mirRows = (
 
     for (const region of Mir.topologicalRegions(fn)) {
       rows.push({
-        key: `mir-${fn.id.name}-r${region.id.ordinal}`,
+        key: `${fnKey}-r${region.id.ordinal}`,
         depth: 1,
         label: `r${region.id.ordinal} · ${region._tag.replace('Region', '').toLowerCase()}`,
         detail: regionDetail(region),
@@ -579,7 +614,7 @@ export const mirRows = (
       for (const [ordinal, operation] of regionOperations(region).entries()) {
         const span = asSpan(operation.provenance.span)
         rows.push({
-          key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}`,
+          key: `${fnKey}-r${region.id.ordinal}-${ordinal}`,
           depth: 2,
           label: operationLabel(operation),
           detail: operation.provenance.generated ? 'generated' : operation._tag.toLowerCase(),
@@ -589,7 +624,7 @@ export const mirRows = (
         if (operation._tag === 'Match') {
           for (const decision of operation.decisions) {
             rows.push({
-              key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}-decision-${typeText(decision.member)}`,
+              key: `${fnKey}-r${region.id.ordinal}-${ordinal}-decision-${typeText(decision.member)}`,
               depth: 3,
               label: `decision ${typeText(decision.member)}`,
               detail: decision.candidates.map((candidate) => `arm #${candidate.ordinal}`).join(' → '),
@@ -598,7 +633,7 @@ export const mirRows = (
           for (const arm of operation.arms) {
             const armSpan = asSpan(arm.provenance.span)
             rows.push({
-              key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}`,
+              key: `${fnKey}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}`,
               depth: 3,
               label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
               detail: `${arm.guard === undefined ? 'selected' : `guard ${localText(arm.guard.result)}`} · result ${localText(arm.selected.result)} → ${localText(operation.destination)} · cleanup ${arm.selected.cleanup.length}`,
@@ -608,7 +643,7 @@ export const mirRows = (
             for (const binding of arm.bindings) {
               const bindingSpan = asSpan(binding.provenance.span)
               rows.push({
-                key: `mir-${fn.id.name}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}-binding${binding.id.ordinal}`,
+                key: `${fnKey}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}-binding${binding.id.ordinal}`,
                 depth: 4,
                 label: `${localText(binding.destination)} = payload ${binding.path.map((field) => `#${field.ordinal}`).join('.')}`,
                 detail: `${binding.access.toLowerCase()} · ${typeText(Mir.semanticType(binding.type))}`,
@@ -623,7 +658,7 @@ export const mirRows = (
       if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
         const span = asSpan(region.outcome.provenance.span)
         rows.push({
-          key: `mir-${fn.id.name}-r${region.id.ordinal}-outcome`,
+          key: `${fnKey}-r${region.id.ordinal}-outcome`,
           depth: 2,
           label: outcomeLabel(region.outcome),
           detail: 'outcome',
@@ -633,7 +668,7 @@ export const mirRows = (
       } else {
         const span = asSpan(region.provenance.span)
         rows.push({
-          key: `mir-${fn.id.name}-r${region.id.ordinal}-control`,
+          key: `${fnKey}-r${region.id.ordinal}-control`,
           depth: 2,
           label:
             region._tag === 'ConditionalRegion'
@@ -827,7 +862,7 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
     case 'MissingFunction':
       return `missing function · ${reason.target.module}.${reason.target.name}`
     case 'RecursiveCycle':
-      return `recursive cycle · ${reason.cycle.map((id) => id.name).join(' → ')}`
+      return `recursive cycle · ${reason.cycle.map((instance) => instance.declaration.name).join(' → ')}`
   }
 }
 

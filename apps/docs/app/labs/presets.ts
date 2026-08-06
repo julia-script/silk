@@ -30,6 +30,17 @@ const mainFn = 'pub fn main() -> I32 { return 42 }'
 const identity = 'pub fn identity(value: I32) -> I32 { return value }'
 
 export const presets: ReadonlyArray<Preset> = [
+  one(
+    'generics',
+    'Inferred and explicit specializations',
+    `struct Box<T> { value: T }
+fn identity<T>(value: T) -> T { return move value }
+pub fn main() -> I32 {
+  let flag = identity(true)
+  let box = Box<I32> { value: identity<I32>(42) }
+  return box.value
+}`,
+  ),
   // ---- first composed acceptance slice -------------------------------------------------
   {
     label: 'Algorithmic coverage fold',

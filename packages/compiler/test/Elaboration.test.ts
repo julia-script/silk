@@ -295,6 +295,8 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     _tag: 'Compatible',
     expectedCount: 1,
     actualCount: 1,
+    typeArguments: [],
+    substitution: new Map(),
   })
   assert.deepEqual(
     twoCall.arguments.map((argument) => argument.id.ordinal),
@@ -311,6 +313,8 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     _tag: 'Compatible',
     expectedCount: 2,
     actualCount: 2,
+    typeArguments: [],
+    substitution: new Map(),
   })
   assert.strictEqual(Object.isFrozen(oneCall.arguments), true)
   assert.strictEqual(Object.isFrozen(firstArgument), true)

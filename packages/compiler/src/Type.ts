@@ -9,6 +9,18 @@ export interface Nominal {
   readonly _tag: 'NominalType'
   readonly module: string
   readonly name: string
+  readonly arguments: ReadonlyArray<Type>
+}
+
+/** One declaration-owned generic type parameter. Names are provenance, not identity. */
+export interface Parameter {
+  readonly _tag: 'TypeParameter'
+  readonly owner: {
+    readonly module: string
+    readonly name: string
+  }
+  readonly ordinal: number
+  readonly name: string
 }
 
 /** One canonical inline fixed array whose length participates in structural identity. */
@@ -27,7 +39,7 @@ export interface StructuralUnion {
 }
 
 /** The closed semantic type vocabulary accepted by declaration analysis. */
-export type Type = Builtin | Never | Nominal | FixedArray | StructuralUnion
+export type Type = Builtin | Never | Nominal | Parameter | FixedArray | StructuralUnion
 
 /** The typed result of attempting to normalize structural-union inputs. */
 export type UnionNormalization =
@@ -35,8 +47,30 @@ export type UnionNormalization =
   | { readonly _tag: 'InvalidMembers'; readonly members: ReadonlyArray<Type> }
 
 /** Constructs one immutable canonical nominal type. */
-export const nominal = (module: string, name: string): Nominal =>
-  Object.freeze({ _tag: 'NominalType', module, name })
+export const nominal = (
+  module: string,
+  name: string,
+  arguments_: ReadonlyArray<Type> = [],
+): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module,
+    name,
+    arguments: Object.freeze(Array.from(arguments_)),
+  })
+
+/** Constructs one declaration-owned generic type parameter. */
+export const parameter = (
+  owner: { readonly module: string; readonly name: string },
+  ordinal: number,
+  name: string,
+): Parameter =>
+  Object.freeze({
+    _tag: 'TypeParameter',
+    owner: Object.freeze({ module: owner.module, name: owner.name }),
+    ordinal,
+    name,
+  })
 
 /** Constructs one immutable canonical fixed-array type. */
 export const fixedArray = (element: Type, length: number): FixedArray =>
@@ -89,6 +123,10 @@ export const isNever = (self: Type): self is Never => self === 'Never'
 export const isNominal = (self: Type): self is Nominal =>
   typeof self !== 'string' && self._tag === 'NominalType'
 
+/** Tests whether a semantic type is a declaration-owned generic parameter. */
+export const isParameter = (self: Type): self is Parameter =>
+  typeof self !== 'string' && self._tag === 'TypeParameter'
+
 /** Tests whether a semantic type is a structural fixed array. */
 export const isFixedArray = (self: Type): self is FixedArray =>
   typeof self !== 'string' && self._tag === 'FixedArrayType'
@@ -101,7 +139,9 @@ export const isUnion = (self: Type): self is StructuralUnion =>
 export const key = (self: Type): string => {
   if (isBuiltin(self)) return `builtin:${self}`
   if (isNever(self)) return 'union:'
-  if (isNominal(self)) return `nominal:${self.module}.${self.name}`
+  if (isNominal(self))
+    return `nominal:${self.module}.${self.name}<${self.arguments.map(key).join(',')}>`
+  if (isParameter(self)) return `parameter:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   return `union:${self.members.map(key).join('|')}`
 }
@@ -115,7 +155,12 @@ export const compare = (left: Type, right: Type): number => compareText(key(left
 /** Encodes one type for deterministic compiler facts and diagnostics. */
 export const encode = (self: Type): string => {
   if (typeof self === 'string') return self
-  if (isNominal(self)) return `${self.module}.${self.name}`
+  if (isNominal(self)) {
+    const arguments_ =
+      self.arguments.length === 0 ? '' : `<${self.arguments.map(encode).join(', ')}>`
+    return `${self.module}.${self.name}${arguments_}`
+  }
+  if (isParameter(self)) return self.name
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
   return self.members.map(encode).join(' | ')
 }
@@ -123,9 +168,92 @@ export const encode = (self: Type): string => {
 /** Returns every canonical nominal nested in a type, in deterministic preorder. */
 export const nominals = (self: Type): ReadonlyArray<Nominal> =>
   isNominal(self)
-    ? Object.freeze([self])
+    ? Object.freeze([self, ...self.arguments.flatMap(nominals)])
     : isFixedArray(self)
       ? nominals(self.element)
       : isUnion(self)
-        ? self.members
+        ? Object.freeze(self.members.flatMap(nominals))
         : []
+
+/** Returns every declaration-owned parameter nested in a type, without duplicates. */
+export const parameters = (self: Type): ReadonlyArray<Parameter> => {
+  const found = new Map<string, Parameter>()
+  const visit = (type: Type): void => {
+    if (isParameter(type)) {
+      found.set(key(type), type)
+      return
+    }
+    if (isNominal(type)) {
+      for (const argument of type.arguments) visit(argument)
+      return
+    }
+    if (isFixedArray(type)) visit(type.element)
+    else if (isUnion(type)) for (const member of type.members) visit(member)
+  }
+  visit(self)
+  return Object.freeze([...found.values()].sort(compare))
+}
+
+/** Tests whether a type contains no open generic parameters. */
+export const isConcrete = (self: Type): boolean => parameters(self).length === 0
+
+/** Replaces declaration-owned parameters recursively through one canonical type. */
+export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>): Type => {
+  if (isParameter(self)) return substitution.get(key(self)) ?? self
+  if (isNominal(self))
+    return nominal(
+      self.module,
+      self.name,
+      self.arguments.map((argument) => substitute(argument, substitution)),
+    )
+  if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
+  if (isUnion(self)) {
+    const normalized = union(self.members.map((member) => substitute(member, substitution)))
+    return normalized._tag === 'Normalized' ? normalized.type : self
+  }
+  return self
+}
+
+/** Adds structural constraints from one declared type pattern to one supplied concrete type. */
+export const infer = (pattern: Type, actual: Type, inferred: Map<string, Type>): boolean => {
+  if (isParameter(pattern)) {
+    const identity = key(pattern)
+    const existing = inferred.get(identity)
+    if (existing === undefined) {
+      inferred.set(identity, actual)
+      return true
+    }
+    return equals(existing, actual)
+  }
+  if (isNominal(pattern) && isNominal(actual)) {
+    if (
+      pattern.module !== actual.module ||
+      pattern.name !== actual.name ||
+      pattern.arguments.length !== actual.arguments.length
+    )
+      return false
+    return pattern.arguments.every((argument, index) => {
+      const supplied = actual.arguments.at(index)
+      return supplied !== undefined && infer(argument, supplied, inferred)
+    })
+  }
+  if (isFixedArray(pattern) && isFixedArray(actual)) {
+    return pattern.length === actual.length && infer(pattern.element, actual.element, inferred)
+  }
+  return equals(pattern, actual)
+}
+
+/** Builds a substitution from ordered parameters and arguments when their arities match. */
+export const substitution = (
+  declared: ReadonlyArray<Parameter>,
+  arguments_: ReadonlyArray<Type>,
+): ReadonlyMap<string, Type> | undefined => {
+  if (declared.length !== arguments_.length) return undefined
+  const result = new Map<string, Type>()
+  for (const [index, parameter_] of declared.entries()) {
+    const argument = arguments_.at(index)
+    if (argument === undefined) return undefined
+    result.set(key(parameter_), argument)
+  }
+  return result
+}

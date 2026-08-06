@@ -221,6 +221,7 @@ it.effect(
         _tag: 'NominalType',
         module: 'model/Tree',
         name: 'Node',
+        arguments: [],
       })
       assert.strictEqual(
         Analysis.nominalLayout(self, Type.nominal('model/Tree', 'Node'))?._tag,

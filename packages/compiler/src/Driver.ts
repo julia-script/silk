@@ -203,13 +203,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     (result) => [...result.values()].reduce((sum, module) => sum + module.functions.length, 0),
     (result) => [...result.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
   )
-  const discovery = phase(
-    'instance-discovery',
-    results.size,
-    () => Instances.discover(request.compilation.root.id, results),
-    (result) => result.instances.length,
-  )
-  const diagnostics = Diagnostic.merge(
+  const frontendDiagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
@@ -224,11 +218,31 @@ export const compile = Effect.fn('Driver.compile')(function* (
       message: `Source resolution failed for ${closure.resolutionFailures.length} imported module${closure.resolutionFailures.length === 1 ? '' : 's'}`,
       failures: closure.resolutionFailures,
       sources: closure.sources,
-      diagnostics,
+      diagnostics: frontendDiagnostics,
       report: Object.freeze([...report]),
     })
   }
 
+  if (Diagnostic.hasErrors(frontendDiagnostics)) {
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: closure.sources,
+      diagnostics: frontendDiagnostics,
+      report: Object.freeze([...report]),
+    })
+  }
+
+  const discovery = phase(
+    'instance-discovery',
+    results.size,
+    () => Instances.discover(request.compilation.root.id, results),
+    (result) => result.instances.length,
+    (result) => result.violations.length,
+  )
+  const diagnostics = Diagnostic.merge(
+    frontendDiagnostics,
+    Instances.violationDiagnostics(discovery),
+  )
   if (Diagnostic.hasErrors(diagnostics)) {
     return Object.freeze({
       _tag: 'Rejected',
@@ -263,7 +277,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           }),
         })
       }
-      const catalog = Layout.catalog(selection.target, index)
+      const catalog = Layout.catalog(selection.target, index, discovery)
       return Object.freeze({
         _tag: 'Available' as const,
         target: selection.target,

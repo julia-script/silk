@@ -78,7 +78,15 @@ early as possible and then develop the language using itself.
 
 ## Designed for humans and AI
 
+We welcome AI. Indeed, most lines of code in this compiler will very likely be written by one — a fact we mention calmly, in the spirit of someone noting that most of the lifting at a construction site is done by the crane.
+
+AI spam is a real problem, and I genuinely respect the decision some maintainers have made to ban AI contributions from their repositories entirely. It is a defensible position, arrived at by reasonable people who have seen things no code reviewer should have to see. In my view, though, denying AI contributions because the technology led to spam is rather like requiring everyone to file their taxes by hand, in ink, because Best Buy can't control itself — a policy that punishes the tool for the enthusiasm of its least careful operators.
+
+
 The language should be intentionally friendly to AI-assisted development.
+
+What is friendlier to something that has been trained on billions of lines of code if not these same languages?
+Nobody knows, I don't, but I can certainly speculate.
 
 That means limiting the number of ways to express the same idea. Developers should not have to
 supervise an AI's stylistic choices or repeatedly correct arbitrary variations in structure.

@@ -63,6 +63,14 @@ export const grammar: Grammar = {
     { name: 'entity.name.type.pattern.silk', match: '\\b[A-Z][A-Za-z0-9_]*(?=\\s*\\{)' },
     { name: 'variable.language.wildcard.silk', match: '\\b_\\b' },
     { name: 'constant.numeric.integer.silk', match: '\\b[0-9]+\\b' },
+    {
+      name: 'punctuation.definition.type-arguments.begin.silk',
+      match: '<(?=\\s*[A-Za-z_][A-Za-z0-9_]*(?:\\s*[,><]))',
+    },
+    {
+      name: 'punctuation.definition.type-arguments.end.silk',
+      match: '(?<=[A-Za-z0-9_>\\]\\)])>(?=\\s*(?:>|\\(|\\{|\\[|,|\\)|->))',
+    },
     { name: 'keyword.operator.silk', match: '=>|->|\\|>|\\||[=!<>]=|[-+*/%!<>=&]' },
     { name: 'punctuation.definition.pattern.rest.silk', match: '\\.\\.' },
     { name: 'punctuation.silk', match: '[(){}\\[\\]:,.]' },

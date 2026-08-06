@@ -92,6 +92,12 @@ Frontend checking proceeds in this order:
    explicit success/failure outcomes, requirements become canonical hidden service slots, and
    source and semantic provenance remain attached to lowered operations.
 
+Monomorphization uses a concrete specialization view over the one checked HIR declaration body.
+The view substitutes contracts, expression and aggregate types, calls, ownership properties, and
+cleanup plans before layout consumption and MIR construction; it does not clone or re-elaborate
+the generic HIR body. No open type parameter, missing concrete layout, runtime type dictionary, or
+backend-owned specialization may cross the MIR boundary.
+
 MIR uses logical Silk types and operations together with the compiler's canonical target and layout
 table. The layout plan supplies target triple, pointer width, endianness, concrete sizes,
 alignments, field offsets, union discriminant and payload placement, scalar representations, and

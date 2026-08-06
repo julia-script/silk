@@ -63,6 +63,20 @@ it('normalizes structural unions as canonical nominal sets', () => {
   assert.strictEqual(Type.isUnion(first.type) ? Object.isFrozen(first.type.members) : false, true)
 })
 
+it('finds generic nominal dependencies nested inside union members', () => {
+  const hidden = Type.nominal('model/Private', 'Hidden')
+  const box = Type.nominal('model/Box', 'Box', [hidden])
+  const other = Type.nominal('model/Other', 'Other')
+  const union = Type.union([box, other])
+  assert.strictEqual(union._tag, 'Normalized')
+  if (union._tag !== 'Normalized') return
+  assert.deepEqual(Type.nominals(union.type).map(Type.encode), [
+    'model/Box.Box<model/Private.Hidden>',
+    'model/Private.Hidden',
+    'model/Other.Other',
+  ])
+})
+
 it('collapses empty and singleton unions and rejects non-nominal leaves', () => {
   const token = Type.nominal('model/Token', 'Token')
   const empty = Type.union(['Never'])

@@ -210,3 +210,24 @@ values.
 The data-slice planning session fixed the concrete import, nominal struct construction, and
 mode-aware match spellings above. File-derived module identities and semantic normalization remain
 owned by issues 04 and 02 respectively.
+
+## Amendment — 2026-08-06: bootstrap type generics
+
+The bootstrap generic spelling is now concrete. Structs and functions declare ordered type
+parameters with angles, applied types use the same angles in type position, and a call may supply a
+complete specialization between its qualified callee and argument list.
+
+```silk
+struct Box<T> { value: T }
+fn identity<T>(value: T) -> T { return move value }
+
+let inferred = identity(value)
+let explicit = identity<Token>(value)
+let qualified = Tree.parse<Token>(source)
+```
+
+Expression angles are specialization syntax only when they form a complete type-argument list and
+are immediately followed by the call postfix. Thus `left < right`, `left <= right`, and the
+reserved primary template start remain separate grammar cases. A call either supplies every type
+argument explicitly or supplies none and infers all of them from its value arguments; partial
+explicit argument lists and expected-result inference are not accepted.

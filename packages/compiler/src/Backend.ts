@@ -18,7 +18,7 @@ import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
-import type * as SilkType from './Type.js'
+import * as SilkType from './Type.js'
 
 /**
  * Code generation as a nominal `Backend` service: one operation consuming the whole
@@ -37,6 +37,7 @@ export interface CodegenRequest {
 /** One instance's deterministic native symbol. */
 export interface SymbolEntry {
   readonly declaration: DeclarationIndex.CanonicalId
+  readonly instance: Mir.MirFunction['instance']
   readonly symbol: string
 }
 
@@ -45,6 +46,7 @@ export interface ControlProvenance {
   readonly _tag: 'BackendControlProvenance'
   readonly backend: 'LLVM' | 'WebAssembly'
   readonly function: DeclarationIndex.CanonicalId
+  readonly instance: Mir.MirFunction['instance']
   readonly region: Mir.RegionId
   readonly construct:
     | 'LlvmJump'
@@ -123,9 +125,23 @@ export const emit = Effect.fn('Backend.emit')(function* (
 
 const sanitize = (name: string): string => name.replace(/[^A-Za-z0-9_]/g, '_')
 
-/** The entry instance is always `silk_main`; later instances key on their discovery ordinal. */
+const injectivePart = (value: string): string => {
+  const bytes = new TextEncoder().encode(value)
+  return `${bytes.length}_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+/** The entry is stable and every other symbol injectively encodes its canonical instance key. */
 export const symbolFor = (fn: Mir.MirFunction, ordinal: number): string =>
-  ordinal === 0 ? 'silk_main' : `silk_${ordinal}_${sanitize(fn.id.name)}`
+  ordinal === 0
+    ? 'silk_main'
+    : `silk_${sanitize(fn.id.module)}_${sanitize(fn.id.name)}__${[
+        fn.instance.declaration.module,
+        fn.instance.declaration.name,
+        ...fn.instance.typeArguments.map(SilkType.key),
+        ...fn.instance.contractRow,
+      ]
+        .map(injectivePart)
+        .join('_')}`
 
 interface LineTable {
   readonly lineStarts: ReadonlyArray<number>
@@ -554,6 +570,7 @@ const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenance> =>
             _tag: 'BackendControlProvenance',
             backend: 'LLVM',
             function: fn.id,
+            instance: fn.instance,
             region: block.origin,
             construct:
               terminator._tag === 'Jump'
@@ -1428,10 +1445,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 case 'Drop':
                   break
                 case 'Call': {
-                  const target = declared.find(
-                    (candidate) =>
-                      candidate.fn.id.module === operation.target.module &&
-                      candidate.fn.id.name === operation.target.name,
+                  const target = declared.find((candidate) =>
+                    Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
                   )
                   if (target === undefined) {
                     throw new RangeError(
@@ -1564,7 +1579,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
 
     return {
       symbols: declared.map((entry) =>
-        Object.freeze({ declaration: entry.fn.id, symbol: entry.symbol }),
+        Object.freeze({
+          declaration: entry.fn.id,
+          instance: entry.fn.instance,
+          symbol: entry.symbol,
+        }),
       ),
       ir: yield* IrText.render(builder),
       bitcode: yield* Bitcode.encode(builder),

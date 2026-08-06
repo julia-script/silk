@@ -282,6 +282,7 @@ const printStructDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const fields = directNodes(node).filter((child) => child.kind === 'StructField')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
   const head = FormatDocument.concat(
     ...(publicKeyword === undefined
@@ -293,6 +294,7 @@ const printStructDeclaration = (
       publicKeyword === undefined ? prefix : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
   )
   const open = tokenOf(node, 'LeftBrace')
   const close = tokenOf(node, 'RightBrace')
@@ -321,6 +323,7 @@ const printFunctionDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   return FormatDocument.concat(
     ...(publicKeyword === undefined
       ? []
@@ -331,6 +334,7 @@ const printFunctionDeclaration = (
       publicKeyword === undefined ? prefix : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
     printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
     printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
@@ -386,6 +390,26 @@ const printNode = (
     case 'ImportPath':
     case 'TypePath':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'TypeParameterList':
+    case 'TypeArgumentList':
+    case 'CallTypeArgumentList':
+      return printDelimited(
+        context,
+        tokenOf(node, 'Less'),
+        directNodes(node),
+        commaTokens(node),
+        tokenOf(node, 'Greater'),
+        prefix,
+      )
+    case 'TypeParameter':
+      return printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank)
+    case 'AppliedType': {
+      const nodes = directNodes(node)
+      return FormatDocument.concat(
+        printNode(context, nodes[0] ?? nodeOf(node, 'TypePath'), prefix, preserveBlank),
+        printNode(context, nodes[1] ?? nodeOf(node, 'TypeArgumentList')),
+      )
+    }
     case 'ImportAlias':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'AsKeyword'), prefix, preserveBlank),
@@ -729,6 +753,9 @@ const printNode = (
         ...(dot === undefined || second === undefined
           ? []
           : [printToken(context, dot), printToken(context, second)]),
+        ...(directNodes(node).find((child) => child.kind === 'CallTypeArgumentList') === undefined
+          ? []
+          : [printNode(context, nodeOf(node, 'CallTypeArgumentList'))]),
         printNode(context, nodeOf(node, 'ArgumentList')),
       )
     }

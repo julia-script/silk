@@ -103,6 +103,10 @@ export const missingPatternFieldCode = 'SEM0046' as const
 export const duplicatePatternFieldCode = 'SEM0047' as const
 export const patternBindingConflictCode = 'SEM0048' as const
 export const incompatibleMatchResultsCode = 'SEM0049' as const
+export const duplicateTypeParameterCode = 'SEM0050' as const
+export const typeArgumentArityCode = 'SEM0051' as const
+export const typeArgumentInferenceCode = 'SEM0052' as const
+export const polymorphicRecursionCode = 'SEM0053' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -173,6 +177,10 @@ export type Code =
   | typeof duplicatePatternFieldCode
   | typeof patternBindingConflictCode
   | typeof incompatibleMatchResultsCode
+  | typeof duplicateTypeParameterCode
+  | typeof typeArgumentArityCode
+  | typeof typeArgumentInferenceCode
+  | typeof polymorphicRecursionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -333,6 +341,23 @@ export type Reason =
     }
   | { readonly _tag: 'IncompatibleMatchResults'; readonly types: ReadonlyArray<string> }
   | {
+      readonly _tag: 'DuplicateTypeParameter'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'TypeArgumentArity'
+      readonly target: string
+      readonly expected: number
+      readonly actual: number
+    }
+  | { readonly _tag: 'TypeArgumentInference'; readonly target: string }
+  | {
+      readonly _tag: 'PolymorphicRecursion'
+      readonly caller: string
+      readonly target: string
+    }
+  | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
       readonly moveSpan: SourceSpan.SourceSpan
@@ -390,6 +415,16 @@ export interface Diagnostic {
 /** Tests whether a diagnostic collection contains an emission-blocking error. */
 export const hasErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+
+/** Tests whether target-dependent specialization must stop for a generic source error. */
+export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
+  diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === duplicateTypeParameterCode ||
+      diagnostic.code === typeArgumentArityCode ||
+      diagnostic.code === typeArgumentInferenceCode ||
+      diagnostic.code === polymorphicRecursionCode,
+  )
 
 /** Derives the identity of one diagnostic given its ordinal among equals. */
 export const identity = (self: Diagnostic, ordinal = 0): Identity =>
@@ -1215,6 +1250,66 @@ export const incompatibleMatchResults = (
       _tag: 'IncompatibleMatchResults',
       types: Object.freeze([...types]),
     }),
+    span,
+  })
+
+export const duplicateTypeParameter = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateTypeParameterCode,
+    severity: 'error',
+    message: `Duplicate type parameter ${spelling}`,
+    reason: Object.freeze({ _tag: 'DuplicateTypeParameter', spelling, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+export const typeArgumentArity = (
+  target: string,
+  expected: number,
+  actual: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: typeArgumentArityCode,
+    severity: 'error',
+    message: `${target} expects ${expected} type argument${expected === 1 ? '' : 's'}, received ${actual}`,
+    reason: Object.freeze({ _tag: 'TypeArgumentArity', target, expected, actual }),
+    span,
+  })
+
+export const typeArgumentInference = (target: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: typeArgumentInferenceCode,
+    severity: 'error',
+    message: `Cannot infer all type arguments for ${target} from supplied values`,
+    reason: Object.freeze({ _tag: 'TypeArgumentInference', target }),
+    span,
+  })
+
+export const polymorphicRecursion = (
+  caller: string,
+  target: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: polymorphicRecursionCode,
+    severity: 'error',
+    message: `Recursive specialization changes type arguments from ${caller} to ${target}`,
+    reason: Object.freeze({ _tag: 'PolymorphicRecursion', caller, target }),
     span,
   })
 

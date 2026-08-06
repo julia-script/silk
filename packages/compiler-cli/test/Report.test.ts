@@ -101,6 +101,12 @@ it('names the executable, target, and symbol count on success', () => {
     symbols: [
       {
         declaration: { _tag: 'CanonicalDeclarationId', module: 'main', name: 'main' },
+        instance: {
+          _tag: 'InstanceKey',
+          declaration: { _tag: 'CanonicalDeclarationId', module: 'main', name: 'main' },
+          typeArguments: [],
+          contractRow: [],
+        },
         symbol: 'silk_main',
       },
     ],

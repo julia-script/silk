@@ -134,10 +134,14 @@ const entryReason = (reason: Extract<Driver.NoEntry, { _tag: 'NoEntry' }>['reaso
       return 'the root module declares no `main`'
     case 'AmbiguousEntry':
       return 'the root module declares more than one `main`'
+    case 'GenericEntry':
+      return '`main` must not declare type parameters'
     case 'ParameterizedEntry':
       return '`main` must take no parameters'
     case 'UntypedEntry':
       return '`main` must declare a resolved return type'
+    case 'InvalidSource':
+      return 'source diagnostics prevented entry discovery'
   }
 }
 

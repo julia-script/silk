@@ -1,6 +1,6 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
-import type * as Hir from './Hir.js'
+import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
@@ -254,12 +254,15 @@ const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefine
     ? Type.nominal(struct.canonical.id.module, struct.canonical.id.name)
     : undefined
 
-const dependenciesOf = (struct: DeclarationIndex.StructFact): ReadonlyArray<Type.Nominal> => {
+const dependenciesOf = (
+  struct: DeclarationIndex.StructFact,
+  substitution: ReadonlyMap<string, Type.Type> = new Map(),
+): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
   for (const field of struct.fields) {
     const types =
       field.declaredType._tag === 'Resolved'
-        ? Type.nominals(field.declaredType.type)
+        ? Type.nominals(Type.substitute(field.declaredType.type, substitution))
         : field.declaredType._tag === 'Unresolved' && field.declaredType.candidate !== undefined
           ? [field.declaredType.candidate]
           : []
@@ -283,7 +286,11 @@ const unavailable = (
   })
 
 /** Computes every canonical nominal layout before runtime reachability or backend work. */
-export const catalog = (target: Target.Target, index: DeclarationIndex.Index): Catalog => {
+export const catalog = (
+  target: Target.Target,
+  index: DeclarationIndex.Index,
+  discovery?: Instances.Discovery,
+): Catalog => {
   const declarations = index.modules
     .flatMap((module) => module.structs)
     .flatMap((struct) => {
@@ -292,7 +299,10 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
     })
     .sort((left, right) => Type.compare(left.type, right.type))
   const byType = new Map(
-    declarations.map((declaration) => [Type.key(declaration.type), declaration]),
+    declarations.map((declaration) => [
+      `${declaration.type.module}\u0000${declaration.type.name}`,
+      declaration,
+    ]),
   )
   const completed = new Map<string, CatalogEntry>()
   const visiting = new Set<string>()
@@ -301,14 +311,22 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
-    const declaration = byType.get(key)
+    const declaration = byType.get(`${type.module}\u0000${type.name}`)
     if (declaration === undefined) {
       return unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
         detail: `missing canonical declaration for ${Type.encode(type)}`,
       })
     }
-    const dependencies = dependenciesOf(declaration.struct)
+    const parameters = declaration.struct.typeParameters.map((parameter) => parameter.type)
+    const substitution = Type.substitution(parameters, type.arguments)
+    if (substitution === undefined) {
+      return unavailable(type, Object.freeze([]), {
+        _tag: 'InvalidDeclaration',
+        detail: `${Type.encode(type)} has ${type.arguments.length} type arguments; expected ${parameters.length}`,
+      })
+    }
+    const dependencies = dependenciesOf(declaration.struct, substitution)
     if (visiting.has(key)) {
       const result = unavailable(type, dependencies, {
         _tag: 'InvalidDeclaration',
@@ -367,7 +385,7 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
         )
         break
       }
-      const fieldType = field.declaredType.type
+      const fieldType = Type.substitute(field.declaredType.type, substitution)
       const fieldLayout = layoutType(fieldType)
       if (fieldLayout._tag === 'UnavailableLayoutEntry') {
         failure = unavailable(
@@ -384,7 +402,7 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
           _tag: 'LayoutField',
           id: field.id,
           name: field.name.spelling,
-          type: field.declaredType.type,
+          type: fieldType,
           offset,
           size: fieldLayout.size,
           alignment: fieldLayout.alignment,
@@ -421,6 +439,12 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
       return unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
         detail: 'Never is uninhabited and has no runtime layout',
+      })
+    }
+    if (Type.isParameter(type)) {
+      return unavailable(type, Object.freeze([]), {
+        _tag: 'InvalidDeclaration',
+        detail: `open generic parameter ${Type.encode(type)} has no target layout`,
       })
     }
     if (Type.isNominal(type)) return layoutNominal(type)
@@ -474,6 +498,7 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
 
   const referenced = new Map<string, DeclarationIndex.SemanticType>()
   const addReferenced = (type: DeclarationIndex.SemanticType): void => {
+    if (!Type.isConcrete(type)) return
     referenced.set(Type.key(type), type)
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
@@ -492,7 +517,29 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
       }
     }
   }
-  for (const declaration of declarations) layoutNominal(declaration.type)
+  for (const declaration of declarations) {
+    if (declaration.struct.typeParameters.length === 0) layoutNominal(declaration.type)
+  }
+  for (const instance of discovery?.instances ?? []) {
+    const substitution = instance.substitution
+    if (instance.function.contract._tag === 'Contract') {
+      for (const parameter of instance.function.contract.parameters) {
+        addReferenced(Type.substitute(parameter, substitution))
+      }
+      addReferenced(Type.substitute(instance.function.contract.result, substitution))
+    }
+    const addSpecializedExpression = (expression: Hir.Expression): void => {
+      if (expression._tag === 'Unavailable') return
+      addReferenced(Type.substitute(expression.type, substitution))
+      for (const child of Hir.expressionTree(expression).slice(1)) {
+        if (child._tag !== 'Unavailable') addReferenced(Type.substitute(child.type, substitution))
+      }
+    }
+    for (const statement of instance.function.statements) {
+      for (const expression of Hir.statementExpressions(statement))
+        addSpecializedExpression(expression)
+    }
+  }
   for (const type of referenced.values()) {
     if (!Type.isBuiltin(type) && !Type.isNever(type)) layoutType(type)
   }
@@ -509,34 +556,39 @@ export const catalog = (target: Target.Target, index: DeclarationIndex.Index): C
 const addExpressionTypes = (
   types: Map<string, DeclarationIndex.SemanticType>,
   expression: Hir.Expression,
+  substitution: ReadonlyMap<string, Type.Type> = new Map(),
 ): void => {
   if (expression._tag === 'Unavailable') return
-  types.set(Type.key(expression.type), expression.type)
-  if (expression._tag === 'Move') addExpressionTypes(types, expression.subject)
-  if (expression._tag === 'UnionConvert') addExpressionTypes(types, expression.source)
-  if (expression._tag === 'Project') addExpressionTypes(types, expression.subject)
+  const specialized = Type.substitute(expression.type, substitution)
+  types.set(Type.key(specialized), specialized)
+  if (expression._tag === 'Move') addExpressionTypes(types, expression.subject, substitution)
+  if (expression._tag === 'UnionConvert') addExpressionTypes(types, expression.source, substitution)
+  if (expression._tag === 'Project') addExpressionTypes(types, expression.subject, substitution)
   if (expression._tag === 'IndexPlace') {
-    addExpressionTypes(types, expression.subject)
-    addExpressionTypes(types, expression.index)
+    addExpressionTypes(types, expression.subject, substitution)
+    addExpressionTypes(types, expression.index, substitution)
   }
   if (expression._tag === 'Construct') {
-    for (const field of expression.fields) addExpressionTypes(types, field.value)
+    for (const field of expression.fields) addExpressionTypes(types, field.value, substitution)
   }
   if (expression._tag === 'ArrayConstruct') {
-    for (const element of expression.elements) addExpressionTypes(types, element)
+    for (const element of expression.elements) addExpressionTypes(types, element, substitution)
   }
   if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
-    for (const argument of expression.arguments) addExpressionTypes(types, argument)
+    for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
   }
   if (expression._tag === 'Match') {
-    addExpressionTypes(types, expression.scrutinee)
-    for (const member of expression.members) types.set(Type.key(member), member)
+    addExpressionTypes(types, expression.scrutinee, substitution)
+    for (const member of expression.members) {
+      const type = Type.substitute(member, substitution)
+      types.set(Type.key(type), type)
+    }
     for (const arm of expression.arms) {
       if (!arm.reachable) continue
       if (arm.member !== undefined) types.set(Type.key(arm.member), arm.member)
       for (const binding of arm.bindings) types.set(Type.key(binding.type), binding.type)
-      if (arm.guard !== undefined) addExpressionTypes(types, arm.guard)
-      addExpressionTypes(types, arm.result)
+      if (arm.guard !== undefined) addExpressionTypes(types, arm.guard, substitution)
+      addExpressionTypes(types, arm.result, substitution)
     }
   }
 }
@@ -544,47 +596,52 @@ const addExpressionTypes = (
 const addStatementTypes = (
   types: Map<string, DeclarationIndex.SemanticType>,
   statements: ReadonlyArray<Hir.Statement>,
+  substitution: ReadonlyMap<string, Type.Type> = new Map(),
 ): void => {
   for (const statement of statements) {
-    if (statement._tag === 'Bind') addExpressionTypes(types, statement.initializer)
-    if (statement._tag === 'Return') addExpressionTypes(types, statement.expression)
+    if (statement._tag === 'Bind') addExpressionTypes(types, statement.initializer, substitution)
+    if (statement._tag === 'Return') addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'If') {
-      addExpressionTypes(types, statement.condition)
-      addStatementTypes(types, statement.taken)
-      addStatementTypes(types, statement.otherwise)
+      addExpressionTypes(types, statement.condition, substitution)
+      addStatementTypes(types, statement.taken, substitution)
+      addStatementTypes(types, statement.otherwise, substitution)
     }
     if (statement._tag === 'Write') {
-      addExpressionTypes(types, statement.value)
+      addExpressionTypes(types, statement.value, substitution)
       for (const selector of statement.place.selectors) {
-        if (selector._tag === 'Index') addExpressionTypes(types, selector.index)
+        if (selector._tag === 'Index') addExpressionTypes(types, selector.index, substitution)
       }
     }
     if (statement._tag === 'While') {
-      addExpressionTypes(types, statement.condition)
-      addStatementTypes(types, statement.body)
+      addExpressionTypes(types, statement.condition, substitution)
+      addStatementTypes(types, statement.body, substitution)
     }
   }
 }
 
 const addFunctionTypes = (
   types: Map<string, DeclarationIndex.SemanticType>,
-  fn: Hir.HirFunction,
+  instance: Instances.Instance,
 ): void => {
+  const fn = instance.function
+  const substitution = instance.substitution
   for (const parameter of fn.declaration.parameters) {
     if (parameter.declaredType._tag === 'Resolved') {
-      types.set(Type.key(parameter.declaredType.type), parameter.declaredType.type)
+      const type = Type.substitute(parameter.declaredType.type, substitution)
+      types.set(Type.key(type), type)
     }
   }
   if (fn.declaration.returnType._tag === 'Resolved') {
-    types.set(Type.key(fn.declaration.returnType.type), fn.declaration.returnType.type)
+    const type = Type.substitute(fn.declaration.returnType.type, substitution)
+    types.set(Type.key(type), type)
   }
-  addStatementTypes(types, fn.statements)
+  addStatementTypes(types, fn.statements, substitution)
 }
 
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationIndex.SemanticType>()
-  for (const instance of discovery.instances) addFunctionTypes(reached, instance.function)
+  for (const instance of discovery.instances) addFunctionTypes(reached, instance)
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(type)
@@ -644,6 +701,9 @@ const shapeNode = (
   }
   if (Type.isNever(type)) {
     return Object.freeze({ _tag: 'EmptyShape', type, laneCount: 0 })
+  }
+  if (Type.isParameter(type)) {
+    throw new RangeError(`open generic parameter ${Type.encode(type)} has no calling shape`)
   }
   const candidate = entries.get(Type.key(type))
   if (Type.isFixedArray(type)) {

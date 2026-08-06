@@ -105,11 +105,11 @@ control remains a DAG until each backend converts it to its required target form
   backing resource deterministically. Its canonical target-aware representation remains available
   before backend selection, and evaluator, native, WebAssembly, and `/labs` agree on behavior and
   lifecycle.
-- **Working hypothesis:** The smallest coherent slice likely combines a non-owning view over
-  runtime-sized contiguous values with one owned growable sequence and scoped allocation. Element
-  abstraction, ownership transfer, failure behavior, and target layout must be shaped together;
-  the exact syntax, generic surface, allocator interface, and delivery sequence remain discovery
-  questions rather than commitments.
+- **Working hypothesis:** The reviewed delivery chain is lexical runtime slices; scoped allocation
+  with typed slots and restricted drop hooks; a Silk-written `Vector<T>` plus scanner acceptance;
+  then bulk byte-memory primitives. Monomorphized type generics are the enabling compiler layer,
+  while the compiler exposes only unsafe allocation and memory primitives—not collection behavior.
+  Target-aware layout remains compiler-owned before evaluator, LLVM, or WebAssembly lowering.
 - **Appetite:** First map the boundary against one real pass and existing Wayfinder decisions, then
   propose only the minimum evidence-producing change or dependency chain. Do not start a broad
   collections library or general runtime.

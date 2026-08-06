@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import type * as Ownership from './Ownership.js'
@@ -121,6 +122,7 @@ export type Operation =
       readonly _tag: 'Call'
       readonly destination: LocalId
       readonly target: DeclarationIndex.CanonicalId
+      readonly typeArguments: ReadonlyArray<SilkType.Type>
       readonly arguments: ReadonlyArray<LocalId>
       readonly type: Type
       readonly provenance: Provenance
@@ -290,6 +292,7 @@ export type Region = OperationRegion | CleanupRegion | ConditionalRegion | LoopR
 export interface MirFunction {
   readonly _tag: 'MirFunction'
   readonly id: DeclarationIndex.CanonicalId
+  readonly instance: Instances.InstanceKey
   readonly parameterCount: number
   readonly localTypes: ReadonlyArray<Type>
   readonly result: Type
@@ -303,6 +306,20 @@ export interface Module {
   readonly layout: Layout.Plan
   readonly functions: ReadonlyArray<MirFunction>
 }
+
+/** Tests whether a MIR function realizes one concrete call target. */
+export const matchesInstance = (
+  fn: MirFunction,
+  declaration: DeclarationIndex.CanonicalId,
+  typeArguments: ReadonlyArray<SilkType.Type>,
+): boolean =>
+  fn.id.module === declaration.module &&
+  fn.id.name === declaration.name &&
+  fn.instance.typeArguments.length === typeArguments.length &&
+  fn.instance.typeArguments.every((argument, index) => {
+    const expected = typeArguments.at(index)
+    return expected !== undefined && SilkType.equals(argument, expected)
+  })
 
 export interface ControlEdge {
   readonly _tag: 'ControlEdge'
@@ -371,6 +388,7 @@ export interface Violation {
   readonly _tag: 'Violation'
   readonly rule:
     | 'InvalidLayout'
+    | 'InvalidInstance'
     | 'MissingTypeLayout'
     | 'MissingEntryRegion'
     | 'DuplicateRegionIdentity'
@@ -581,6 +599,64 @@ const sameMembers = (
 const targetText = (target: DeclarationIndex.CanonicalId): string =>
   `${target.module}.${target.name}`
 
+const instanceText = (self: Instances.InstanceKey): string =>
+  `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
+    .map(SilkType.key)
+    .join('\u0000')}\u0000${self.contractRow.join('\u0000')}`
+
+const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Type> => {
+  switch (cleanup._tag) {
+    case 'NoCleanup':
+    case 'ParameterCleanup':
+      return [cleanup.type]
+    case 'StructCleanup':
+      return [cleanup.type, ...cleanup.fields.flatMap((field) => cleanupTypes(field.cleanup))]
+    case 'ArrayCleanup':
+      return [cleanup.type, ...cleanupTypes(cleanup.element)]
+    case 'UnionCleanup':
+      return [cleanup.type, ...cleanup.cases.flatMap((entry) => cleanupTypes(entry.cleanup))]
+  }
+}
+
+const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.SemanticType> => {
+  switch (operation._tag) {
+    case 'Literal':
+    case 'Binary':
+    case 'Project':
+    case 'ReadPlace':
+    case 'CheckPlace':
+      return [semanticType(operation.type)]
+    case 'Call':
+      return [semanticType(operation.type), ...operation.typeArguments]
+    case 'Construct':
+    case 'ConstructArray':
+      return [semanticType(operation.type)]
+    case 'ConvertUnion':
+      return [semanticType(operation.sourceType), semanticType(operation.targetType)]
+    case 'WritePlace':
+      return [semanticType(operation.rootType), semanticType(operation.type)]
+    case 'Match':
+      return [
+        semanticType(operation.scrutineeType),
+        semanticType(operation.type),
+        ...operation.members,
+        ...operation.arms.flatMap((arm) => [
+          ...(arm.member === undefined ? [] : [arm.member]),
+          ...arm.before,
+          ...arm.after,
+          ...arm.bindings.map((binding) => semanticType(binding.type)),
+          ...(arm.guard?.operations.flatMap(operationTypes) ?? []),
+          ...arm.selected.operations.flatMap(operationTypes),
+          ...arm.selected.cleanup.flatMap((entry) => cleanupTypes(entry.cleanup)),
+        ]),
+      ]
+    case 'Move':
+      return []
+    case 'Drop':
+      return cleanupTypes(operation.cleanup)
+  }
+}
+
 export const verify = (self: Module): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = Layout.verify(self.layout).map((violation) =>
     Object.freeze({
@@ -589,7 +665,33 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       detail: `${violation.rule}: ${violation.detail}`,
     }),
   )
+  const instanceKeys = new Set<string>()
   for (const fn of self.functions) {
+    const currentInstance = instanceText(fn.instance)
+    const concreteTypes = [
+      ...fn.instance.typeArguments,
+      ...fn.localTypes.map(semanticType),
+      semanticType(fn.result),
+      ...fn.regions.flatMap(operationsOf).flatMap(operationTree).flatMap(operationTypes),
+    ]
+    if (
+      fn.instance.declaration.module !== fn.id.module ||
+      fn.instance.declaration.name !== fn.id.name ||
+      concreteTypes.some((type) => !SilkType.isConcrete(type)) ||
+      instanceKeys.has(currentInstance)
+    ) {
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidInstance',
+          function: fn.id,
+          detail: instanceKeys.has(currentInstance)
+            ? 'function repeats an existing concrete instance key'
+            : 'function instance identity is inconsistent or retains an open type parameter',
+        }),
+      )
+    }
+    instanceKeys.add(currentInstance)
     const missingTypes = new Set(
       [...fn.localTypes, fn.result]
         .map(semanticType)
@@ -1104,10 +1206,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           }
         }
         if (operation._tag === 'Call') {
-          const target = self.functions.find(
-            (candidate) =>
-              candidate.id.module === operation.target.module &&
-              candidate.id.name === operation.target.name,
+          const target = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.target, operation.typeArguments),
           )
           const valid =
             target !== undefined &&
@@ -1166,7 +1266,11 @@ const operationText = (operation: Operation): string => {
     case 'ConvertUnion':
       return `${localText(operation.destination)} = union-${operation.conversion.toLowerCase()} ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.targetType)} access=${operation.access} mapping=${operation.mappings.map((mapping) => `${SilkType.encode(mapping.source)}#${mapping.sourceOrdinal}->${SilkType.encode(mapping.target)}#${mapping.targetOrdinal}`).join(',')} ${provenanceText(operation.provenance)}`
     case 'Call':
-      return `${localText(operation.destination)} = call ${targetText(operation.target)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = call ${targetText(operation.target)}${
+        operation.typeArguments.length === 0
+          ? ''
+          : `<${operation.typeArguments.map(SilkType.encode).join(', ')}>`
+      }(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
@@ -1267,7 +1371,11 @@ export const encode = (self: Module): string =>
     `mir-module ${self.module}`,
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
-      `fn ${targetText(fn.id)} params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)} entry=${regionText(fn.entry)}`,
+      `fn ${targetText(fn.id)}${
+        fn.instance.typeArguments.length === 0
+          ? ''
+          : `<${fn.instance.typeArguments.map(SilkType.encode).join(', ')}>`
+      } params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)} entry=${regionText(fn.entry)}`,
       ...topologicalRegions(fn).flatMap(regionLines),
     ]),
     '',
@@ -1288,6 +1396,13 @@ const i32: Type = Object.freeze({ _tag: 'I32' })
 const bool: Type = Object.freeze({ _tag: 'Bool' })
 const canonical = (module: string, name: string): DeclarationIndex.CanonicalId =>
   Object.freeze({ _tag: 'CanonicalDeclarationId', module, name })
+const instance = (declaration: DeclarationIndex.CanonicalId): Instances.InstanceKey =>
+  Object.freeze({
+    _tag: 'InstanceKey',
+    declaration,
+    typeArguments: Object.freeze([]),
+    contractRow: Object.freeze([]),
+  })
 
 export const samples = (): ReadonlyArray<Module> => {
   const source = SourceFile.make(
@@ -1304,6 +1419,7 @@ export const samples = (): ReadonlyArray<Module> => {
       Object.freeze({
         _tag: 'MirFunction' as const,
         id: canonical(source.id, 'answer'),
+        instance: instance(canonical(source.id, 'answer')),
         parameterCount: 0,
         localTypes: Object.freeze([i32]),
         result: i32,
@@ -1339,6 +1455,7 @@ export const samples = (): ReadonlyArray<Module> => {
       Object.freeze({
         _tag: 'MirFunction' as const,
         id: canonical(source.id, 'choose'),
+        instance: instance(canonical(source.id, 'choose')),
         parameterCount: 1,
         localTypes: Object.freeze([bool, i32]),
         result: i32,

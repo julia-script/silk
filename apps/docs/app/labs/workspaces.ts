@@ -53,6 +53,17 @@ export const seededWorkspaces: ReadonlyArray<Workspace> = [
     },
   },
   {
+    name: 'Generics',
+    panes: {
+      a1: 'source',
+      a2: 'diagnostics',
+      b1: 'hir',
+      b2: 'instances',
+      c1: 'layout',
+      c2: 'mir',
+    },
+  },
+  {
     name: 'Everything',
     panes: {
       a1: 'source',

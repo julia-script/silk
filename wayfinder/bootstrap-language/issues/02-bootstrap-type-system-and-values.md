@@ -71,7 +71,9 @@ higher-order functions can preserve callback contracts without erasure; those pa
 inferred at calls, may appear only in contract positions, and are concretized during finite
 monomorphization. `[T; N]` is the sole bootstrap type form with a natural-number parameter;
 arbitrary const generics, higher-kinded types, and general row-level programming are deferred. Call
-arguments may determine generic arguments, but expected return types or later uses may not. Each
+arguments may determine all generic arguments, but expected return types or later uses may not. A
+call supplies either the complete ordered type-argument list or no explicit type arguments; mixed
+explicit/inferred argument lists are not part of the bootstrap language. Each
 generic body is checked once against explicit interface constraints, compiler properties, optional
 finite type-set constraints such as `T in U32 | U64`, and any declared contract-row parameters;
 concrete instantiation does not enable duck typing or compile-time type branching. Copyability and

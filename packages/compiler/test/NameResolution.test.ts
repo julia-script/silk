@@ -193,14 +193,15 @@ it.effect('resolves local, selected, and qualified nominal types in declaration 
         field.declaredType._tag === 'Resolved' ? field.declaredType.type : field.declaredType._tag,
       ),
       [
-        { _tag: 'NominalType', module: 'syntax/Tree', name: 'Node' },
-        { _tag: 'NominalType', module: 'syntax/Tree', name: 'Node' },
+        { _tag: 'NominalType', module: 'syntax/Tree', name: 'Node', arguments: [] },
+        { _tag: 'NominalType', module: 'syntax/Tree', name: 'Node', arguments: [] },
       ],
     )
     assert.deepEqual(identityParameter?._tag === 'Resolved' ? identityParameter.type : undefined, {
       _tag: 'NominalType',
       module: 'app/Main',
       name: 'Local',
+      arguments: [],
     })
     assert.deepEqual(Analysis.diagnostics(self), [])
   }),
@@ -257,6 +258,7 @@ it.effect('keeps type-kind and imported visibility failures explicit without fal
         _tag: 'NominalType',
         module: 'types/Secret',
         name: 'Secret',
+        arguments: [],
       },
     )
   }),

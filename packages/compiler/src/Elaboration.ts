@@ -429,6 +429,7 @@ export type ExpressionFact =
   | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
+      readonly typeArguments: ReadonlyArray<TypeArgumentFact>
       readonly arguments: ReadonlyArray<ArgumentFact>
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
       readonly contract: CallContractFact
@@ -460,6 +461,15 @@ export interface ArgumentMappingFact {
   readonly parameter: ParameterFact
 }
 
+/** One source-owned explicit call type argument, resolved canonically when available. */
+export interface TypeArgumentFact {
+  readonly _tag: 'TypeArgument'
+  readonly ordinal: number
+  readonly syntax: SyntaxTree.Node
+  readonly declared: DeclaredTypeFact
+  readonly type?: SemanticType
+}
+
 /** Why a call contract cannot be established. */
 export type UnavailableCallContractReason =
   | { readonly _tag: 'UnavailableCallSyntax'; readonly syntax: SyntaxTree.Node }
@@ -478,6 +488,8 @@ export type CallContractFact =
       readonly _tag: 'Compatible'
       readonly expectedCount: number
       readonly actualCount: number
+      readonly typeArguments: ReadonlyArray<SemanticType>
+      readonly substitution: ReadonlyMap<string, SemanticType>
     }
   | {
       readonly _tag: 'ArityMismatch'
@@ -946,76 +958,48 @@ interface StructTargetResult {
 
 const resolveStructTarget = (
   source: SourceFile.SourceFile,
-  path: SyntaxTree.Node,
+  syntax: SyntaxTree.Node,
   resolution: ResolutionContext,
+  caller?: DeclarationFact,
 ): StructTargetResult => {
-  const analyzed = DeclarationIndex.analyzeDeclaredType(source, path)
-  if (analyzed.fact._tag === 'Unavailable') {
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable' }),
-      diagnostics: analyzed.diagnostics,
+  const environment = new Map(
+    (caller?.typeParameters ?? []).flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
+  )
+  const analyzed = DeclarationIndex.analyzeDeclaredType(source, syntax, environment)
+  const nameResolution: NameResolution.Resolution = Object.freeze({
+    _tag: 'NameResolution',
+    modules: Object.freeze([resolution.scope]),
+    diagnostics: Object.freeze([]),
+  })
+  const resolved = DeclarationIndex.resolveTypeFact(
+    resolution.index,
+    source.id,
+    analyzed.fact,
+    (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
+  )
+  if (resolved.fact._tag === 'Resolved' && Type.isNominal(resolved.fact.type)) {
+    const declaration = DeclarationIndex.byCanonical(resolution.index, {
+      _tag: 'CanonicalDeclarationId',
+      module: resolved.fact.type.module,
+      name: resolved.fact.type.name,
     })
+    if (declaration?._tag === 'StructDeclaration') {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Resolved', struct: declaration, type: resolved.fact.type }),
+        diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
+      })
+    }
   }
-  const pathFact = analyzed.fact._tag === 'Unresolved' ? analyzed.fact.path : undefined
-  if (pathFact === undefined) {
-    const diagnostic = Diagnostic.expectedType(analyzed.fact.spelling, analyzed.fact.token.span)
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) }),
-      diagnostics: Object.freeze([diagnostic]),
-    })
-  }
-  const first = pathFact.segments.at(0)
-  const second = pathFact.segments.at(1)
-  if (first === undefined) {
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable' }),
-      diagnostics: Object.freeze([]),
-    })
-  }
-  const lookup =
-    second === undefined
-      ? NameResolution.lookup(resolution.scope, resolution.index, first.spelling)
-      : NameResolution.lookupQualified(
-          resolution.scope,
-          resolution.index,
-          first.spelling,
-          second.spelling,
-          second.token,
-        )
-  if (
-    lookup._tag === 'Resolved' &&
-    lookup.declaration._tag === 'StructDeclaration' &&
-    lookup.declaration.canonical._tag === 'Canonical'
-  ) {
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Resolved',
-        struct: lookup.declaration,
-        type: Type.nominal(
-          lookup.declaration.canonical.id.module,
-          lookup.declaration.canonical.id.name,
-        ),
-      }),
-      diagnostics: Object.freeze([]),
-    })
-  }
-  if (lookup._tag === 'Unavailable' || lookup._tag === 'Inaccessible') {
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Unavailable',
-        ...(lookup.cause === undefined ? {} : { cause: lookup.cause }),
-      }),
-      diagnostics: Object.freeze([]),
-    })
-  }
-  const useToken = second?.token ?? first.token
-  const diagnostic =
-    lookup._tag === 'Resolved' || lookup._tag === 'Intrinsic' || lookup._tag === 'Namespace'
-      ? Diagnostic.expectedType(pathFact.spelling, useToken.span)
-      : Diagnostic.unknownType(pathFact.spelling, useToken.span)
+  const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
+  const diagnostic = Diagnostic.expectedType(
+    resolved.fact._tag === 'Resolved' ? Type.encode(resolved.fact.type) : 'unavailable struct',
+    token?.span ?? syntax.span,
+  )
   return Object.freeze({
     fact: Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) }),
-    diagnostics: Object.freeze([diagnostic]),
+    diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics, [diagnostic]),
   })
 }
 
@@ -1046,6 +1030,7 @@ const analyzePattern = (
   access: Match.Access,
   scope: Scope,
   resolution: ResolutionContext,
+  declaration: DeclarationFact,
   counters: PatternCounters,
   prefix: ReadonlyArray<DeclarationIndex.FieldId> = Object.freeze([]),
   localNames = new Map<string, SourceSpan.SourceSpan>(),
@@ -1069,10 +1054,18 @@ const analyzePattern = (
     })
   }
 
-  const target = resolveStructTarget(source, childNode(node, 'TypePath'), resolution)
+  const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+  const target = resolveStructTarget(source, targetSyntax, resolution, declaration)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
   const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
+  const structSubstitution =
+    struct === undefined || nominal === undefined
+      ? new Map<string, SemanticType>()
+      : (Type.substitution(
+          struct.typeParameters.map((parameter) => parameter.type),
+          nominal.arguments,
+        ) ?? new Map())
   const label = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
   const seen = new Map<string, PatternFieldFact>()
   const bindings: Array<PatternBindingFact> = []
@@ -1128,6 +1121,7 @@ const analyzePattern = (
         access,
         scope,
         resolution,
+        declaration,
         counters,
         resolvedField === undefined ? prefix : Object.freeze([...prefix, resolvedField.id]),
         localNames,
@@ -1136,7 +1130,7 @@ const analyzePattern = (
       nested = nestedResult.fact
       const expected =
         resolvedField?.declaredType._tag === 'Resolved'
-          ? resolvedField.declaredType.type
+          ? Type.substitute(resolvedField.declaredType.type, structSubstitution)
           : undefined
       if (
         expected !== undefined &&
@@ -1158,7 +1152,9 @@ const analyzePattern = (
       const declaredName = patternDeclaredName(source, fieldNode, bindingToken)
       const bindingType =
         resolvedField.declaredType._tag === 'Resolved'
-          ? availableExpressionType(resolvedField.declaredType.type)
+          ? availableExpressionType(
+              Type.substitute(resolvedField.declaredType.type, structSubstitution),
+            )
           : unavailableExpressionType
       binding = Object.freeze({
         _tag: 'PatternBinding',
@@ -1300,11 +1296,20 @@ const analyzeMatch = (
       SyntaxTree.directNode(armNode, 'NominalPattern') ??
       SyntaxTree.directNode(armNode, 'UniversalPattern')
     if (patternNode === undefined) throw new RangeError('Match arm requires a pattern')
-    const pattern = analyzePattern(source, patternNode, armId, access, scope, resolution, {
-      pattern: 0,
-      binding: 0,
-      invalid: false,
-    })
+    const pattern = analyzePattern(
+      source,
+      patternNode,
+      armId,
+      access,
+      scope,
+      resolution,
+      declaration,
+      {
+        pattern: 0,
+        binding: 0,
+        invalid: false,
+      },
+    )
     diagnostics.push(...pattern.diagnostics)
     return Object.freeze({ armNode, armId, pattern: pattern.fact })
   })
@@ -1451,11 +1456,19 @@ const analyzeStructLiteral = (
   scope: Scope,
   resolution: ResolutionContext,
 ): ExpressionResult => {
-  const target = resolveStructTarget(source, childNode(node, 'TypePath'), resolution)
+  const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+  const target = resolveStructTarget(source, targetSyntax, resolution, declaration)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
   const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
   const nominalLabel = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
+  const structSubstitution =
+    struct === undefined || nominal === undefined
+      ? new Map<string, SemanticType>()
+      : (Type.substitution(
+          struct.typeParameters.map((parameter) => parameter.type),
+          nominal.arguments,
+        ) ?? new Map())
   const authorized = nominal !== undefined && nominal.module === source.id
   if (nominal !== undefined && !authorized) {
     diagnostics.push(Diagnostic.externalRawStructLiteral(Type.encode(nominal), node.span))
@@ -1472,7 +1485,7 @@ const analyzeStructLiteral = (
           : DeclarationIndex.lookupField(struct.fields, name)
       const expected =
         fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
-          ? fieldLookup.field.declaredType.type
+          ? Type.substitute(fieldLookup.field.declaredType.type, structSubstitution)
           : undefined
       const expressionNode = initializer.children.find(isExpressionNode)
       if (expressionNode === undefined) {
@@ -1513,17 +1526,20 @@ const analyzeStructLiteral = (
         } else if (
           fieldLookup.field.declaredType._tag === 'Resolved' &&
           expression.type !== undefined &&
-          !typesCompatible(expression.type, fieldLookup.field.declaredType.type)
+          !typesCompatible(
+            expression.type,
+            Type.substitute(fieldLookup.field.declaredType.type, structSubstitution),
+          )
         ) {
+          const expectedType = Type.substitute(
+            fieldLookup.field.declaredType.type,
+            structSubstitution,
+          )
           const diagnostic =
-            unionConversionDiagnostic(
-              expression.type,
-              fieldLookup.field.declaredType.type,
-              expressionNode.span,
-            ) ??
+            unionConversionDiagnostic(expression.type, expectedType, expressionNode.span) ??
             Diagnostic.structFieldTypeMismatch(
               name,
-              Type.encode(fieldLookup.field.declaredType.type),
+              Type.encode(expectedType),
               Type.encode(expression.type),
               expressionNode.span,
             )
@@ -1842,7 +1858,14 @@ const analyzeProjection = (
       state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
     } else if (lookup.field.declaredType._tag === 'Resolved') {
       state = Object.freeze({ _tag: 'Resolved', field: lookup.field })
-      type = lookup.field.declaredType.type
+      const substitution =
+        struct === undefined
+          ? new Map<string, SemanticType>()
+          : (Type.substitution(
+              struct.typeParameters.map((parameter) => parameter.type),
+              nominal.arguments,
+            ) ?? new Map())
+      type = Type.substitute(lookup.field.declaredType.type, substitution)
     }
   }
   const typeFact = type === undefined ? unavailableExpressionType : availableExpressionType(type)
@@ -1900,6 +1923,7 @@ function analyzeArguments(
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  callTypeArguments?: CallTypeArgumentsResult,
 ): ArgumentsResult {
   const argumentList = childNode(call, 'ArgumentList')
   const identifiers = call.children.filter(
@@ -1934,9 +1958,20 @@ function analyzeArguments(
       target = member._tag === 'Resolved' ? member.declaration : undefined
     }
   }
+  const declaredTypeParameters =
+    target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
+  const explicitTypes = callTypeArguments?.types
+  const substitution =
+    callTypeArguments?.explicit === true &&
+    explicitTypes !== undefined &&
+    explicitTypes.length === declaredTypeParameters.length
+      ? Type.substitution(declaredTypeParameters, explicitTypes)
+      : undefined
   const expectedTypes = Object.freeze(
     (target?.parameters ?? []).map((parameter) =>
-      parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined,
+      parameter.declaredType._tag === 'Resolved'
+        ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
+        : undefined,
     ),
   )
   return analyzeArgumentNodes(
@@ -1957,6 +1992,81 @@ interface CallContractResult {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+interface CallTypeArgumentsResult {
+  readonly explicit: boolean
+  readonly facts: ReadonlyArray<TypeArgumentFact>
+  readonly types?: ReadonlyArray<SemanticType>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+const analyzeCallTypeArguments = (
+  source: SourceFile.SourceFile,
+  call: SyntaxTree.Node,
+  caller: DeclarationFact,
+  resolution: ResolutionContext,
+): CallTypeArgumentsResult => {
+  const list = SyntaxTree.directNode(call, 'CallTypeArgumentList')
+  if (list === undefined) {
+    return Object.freeze({
+      explicit: false,
+      facts: Object.freeze([]),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const environment = new Map(
+    caller.typeParameters.flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
+  )
+  const nameResolution: NameResolution.Resolution = Object.freeze({
+    _tag: 'NameResolution',
+    modules: Object.freeze([resolution.scope]),
+    diagnostics: Object.freeze([]),
+  })
+  const nodes = list.children.filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'TypePath' ||
+        element.kind === 'AppliedType' ||
+        element.kind === 'FixedArrayType' ||
+        element.kind === 'ParenthesizedType' ||
+        element.kind === 'UnionType'),
+  )
+  const analyzed = nodes.map((node, ordinal) => {
+    const raw = DeclarationIndex.analyzeDeclaredType(source, node, environment)
+    const resolved = DeclarationIndex.resolveTypeFact(
+      resolution.index,
+      source.id,
+      raw.fact,
+      (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
+    )
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'TypeArgument' as const,
+        ordinal,
+        syntax: node,
+        declared: resolved.fact,
+        ...(resolved.fact._tag === 'Resolved' ? { type: resolved.fact.type } : {}),
+      }),
+      diagnostics: Diagnostic.merge(raw.diagnostics, resolved.diagnostics),
+    })
+  })
+  const facts = Object.freeze(analyzed.map((entry) => entry.fact))
+  const available = facts.map((fact) => fact.type)
+  return Object.freeze({
+    explicit: true,
+    facts,
+    ...(available.every((type) => type !== undefined)
+      ? {
+          types: Object.freeze(
+            available.filter((type): type is SemanticType => type !== undefined),
+          ),
+        }
+      : {}),
+    diagnostics: Diagnostic.merge(...analyzed.map((entry) => entry.diagnostics)),
+  })
+}
+
 const hasAvailableCallSyntax = (call: SyntaxTree.Node): boolean => {
   const argumentList = childNode(call, 'ArgumentList')
   const callHeadAvailable = call.children.every(
@@ -1974,6 +2084,7 @@ const analyzeCallContract = (
   reference: CallReferenceFact,
   argumentsList: ReadonlyArray<ArgumentFact>,
   syntaxAvailable = hasAvailableCallSyntax(call),
+  callTypeArguments?: CallTypeArgumentsResult,
 ): CallContractResult => {
   if (!syntaxAvailable) {
     return Object.freeze({
@@ -2047,7 +2158,13 @@ const analyzeCallContract = (
     }
     return Object.freeze({
       mappings: Object.freeze([]),
-      fact: Object.freeze({ _tag: 'Compatible', expectedCount, actualCount }),
+      fact: Object.freeze({
+        _tag: 'Compatible',
+        expectedCount,
+        actualCount,
+        typeArguments: Object.freeze([]),
+        substitution: new Map(),
+      }),
       diagnostics: Object.freeze([]),
     })
   }
@@ -2093,20 +2210,99 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([]),
     })
   }
+  const declaredTypeParameters = reference.declaration.typeParameters.map(
+    (parameter) => parameter.type,
+  )
+  let substitution: ReadonlyMap<string, SemanticType>
+  let typeArguments: ReadonlyArray<SemanticType>
+  if (callTypeArguments?.explicit === true) {
+    if (callTypeArguments.facts.length !== declaredTypeParameters.length) {
+      const diagnostic = Diagnostic.typeArgumentArity(
+        reference.spelling,
+        declaredTypeParameters.length,
+        callTypeArguments.facts.length,
+        call.span,
+      )
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([diagnostic]),
+      })
+    }
+    if (callTypeArguments.types === undefined) {
+      const unavailable = callTypeArguments.facts.find((fact) => fact.type === undefined)
+      const cause =
+        unavailable !== undefined && 'cause' in unavailable.declared
+          ? unavailable.declared.cause
+          : undefined
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          ...(cause === undefined ? {} : { cause }),
+        }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    typeArguments = Object.freeze(Array.from(callTypeArguments.types))
+    const explicitSubstitution = Type.substitution(declaredTypeParameters, typeArguments)
+    if (explicitSubstitution === undefined) {
+      throw new RangeError('validated call type arguments lost their declaration arity')
+    }
+    substitution = explicitSubstitution
+  } else if (declaredTypeParameters.length === 0) {
+    typeArguments = Object.freeze([])
+    substitution = new Map()
+  } else {
+    const inferred = new Map<string, SemanticType>()
+    const compatible = mappings.every(
+      (mapping) =>
+        mapping.argument.type._tag === 'Available' &&
+        mapping.parameter.declaredType._tag === 'Resolved' &&
+        Type.infer(mapping.parameter.declaredType.type, mapping.argument.type.type, inferred),
+    )
+    typeArguments = Object.freeze(
+      declaredTypeParameters.flatMap((parameter) => {
+        const inferredType = inferred.get(Type.key(parameter))
+        return inferredType === undefined ? [] : [inferredType]
+      }),
+    )
+    if (!compatible || typeArguments.length !== declaredTypeParameters.length) {
+      const diagnostic = Diagnostic.typeArgumentInference(reference.spelling, call.span)
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([diagnostic]),
+      })
+    }
+    substitution = inferred
+  }
   for (const mapping of mappings) {
     if (
-      mapping.argument.type._tag === 'Available' &&
-      mapping.parameter.declaredType._tag === 'Resolved' &&
-      !typesCompatible(mapping.argument.type.type, mapping.parameter.declaredType.type)
+      mapping.argument.type._tag !== 'Available' ||
+      mapping.parameter.declaredType._tag !== 'Resolved'
     ) {
+      continue
+    }
+    const expected = Type.substitute(mapping.parameter.declaredType.type, substitution)
+    if (!typesCompatible(mapping.argument.type.type, expected)) {
       const mismatch =
         unionConversionDiagnostic(
           mapping.argument.type.type,
-          mapping.parameter.declaredType.type,
+          expected,
           mapping.argument.syntax.span,
         ) ??
         Diagnostic.argumentTypeMismatch(
-          Type.encode(mapping.parameter.declaredType.type),
+          Type.encode(expected),
           Type.encode(mapping.argument.type.type),
           mapping.argument.syntax.span,
         )
@@ -2117,7 +2313,7 @@ const analyzeCallContract = (
           reason: Object.freeze({
             _tag: 'ArgumentTypeMismatch',
             argument: mapping.argument,
-            expected: mapping.parameter.declaredType.type,
+            expected,
           }),
           cause: Diagnostic.identity(mismatch),
         }),
@@ -2140,7 +2336,13 @@ const analyzeCallContract = (
 
   return Object.freeze({
     mappings,
-    fact: Object.freeze({ _tag: 'Compatible', expectedCount, actualCount }),
+    fact: Object.freeze({
+      _tag: 'Compatible',
+      expectedCount,
+      actualCount,
+      typeArguments,
+      substitution,
+    }),
     diagnostics: Object.freeze([]),
   })
 }
@@ -2197,6 +2399,7 @@ function analyzeBuiltinCall(
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
   argumentsResult: ArgumentsResult,
+  typeArguments: CallTypeArgumentsResult,
 ): ExpressionResult {
   const identifiers = call.children.filter(
     (element): element is Token.Token =>
@@ -2213,6 +2416,7 @@ function analyzeBuiltinCall(
           _tag: 'Unavailable',
           syntax: unavailableSyntax(call, 'Identifier'),
         }),
+        typeArguments: typeArguments.facts,
         arguments: argumentsResult.facts,
         mappings: Object.freeze([]),
         contract: Object.freeze({
@@ -2222,7 +2426,7 @@ function analyzeBuiltinCall(
         type: unavailableExpressionType,
         syntax: call,
       }),
-      diagnostics: argumentsResult.diagnostics,
+      diagnostics: Object.freeze([...argumentsResult.diagnostics, ...typeArguments.diagnostics]),
       type: undefined,
     })
   }
@@ -2257,8 +2461,18 @@ function analyzeBuiltinCall(
             : { cause: Diagnostic.identity(missingDiagnostic) }),
         })
   const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
+  const specializationDiagnostic = typeArguments.explicit
+    ? Diagnostic.typeArgumentArity(
+        `${actorSpelling}.${operationSpelling}`,
+        0,
+        typeArguments.types?.length ?? 0,
+        call.span,
+      )
+    : undefined
   const expressionType =
-    hasAvailableCallSyntax(call) && reference._tag === 'ResolvedBuiltin'
+    hasAvailableCallSyntax(call) &&
+    reference._tag === 'ResolvedBuiltin' &&
+    specializationDiagnostic === undefined
       ? availableExpressionType(reference.result)
       : unavailableExpressionType
 
@@ -2266,6 +2480,7 @@ function analyzeBuiltinCall(
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      typeArguments: typeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
       contract: callContract.fact,
@@ -2274,7 +2489,9 @@ function analyzeBuiltinCall(
     }),
     diagnostics: Object.freeze([
       ...(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
+      ...(specializationDiagnostic === undefined ? [] : [specializationDiagnostic]),
       ...argumentsResult.diagnostics,
+      ...typeArguments.diagnostics,
       ...callContract.diagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
@@ -2723,6 +2940,7 @@ function analyzeExpression(
 
   if (node.kind !== 'CallExpression') return undefined
 
+  const callTypeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
   const argumentsResult = analyzeArguments(
     source,
     node,
@@ -2730,6 +2948,7 @@ function analyzeExpression(
     declaration,
     scope,
     resolution,
+    callTypeArguments,
   )
 
   const dotToken = directToken(node, 'Dot')
@@ -2741,12 +2960,12 @@ function analyzeExpression(
     const qualifierToken = identifiers.at(0)
     const memberToken = identifiers.at(1)
     if (qualifierToken === undefined || memberToken === undefined)
-      return analyzeBuiltinCall(source, node, argumentsResult)
+      return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments)
     const qualifier = spelling(source, qualifierToken)
     const member = spelling(source, memberToken)
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag === 'Intrinsic')
-      return analyzeBuiltinCall(source, node, argumentsResult)
+      return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments)
     if (qualifierLookup._tag === 'Namespace') {
       const memberLookup = DeclarationIndex.lookup(resolution.index, qualifierLookup.module, member)
       const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
@@ -2774,7 +2993,7 @@ function analyzeExpression(
               token: memberToken,
               ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
             })
-      return finishDeclarationCall(node, reference, argumentsResult, diagnostic)
+      return finishDeclarationCall(node, reference, argumentsResult, callTypeArguments, diagnostic)
     }
     const diagnostic =
       qualifierLookup._tag === 'Missing' || qualifierLookup._tag === 'Resolved'
@@ -2796,7 +3015,7 @@ function analyzeExpression(
           ? {}
           : { cause: inheritedCause }),
     })
-    return finishDeclarationCall(node, reference, argumentsResult, diagnostic)
+    return finishDeclarationCall(node, reference, argumentsResult, callTypeArguments, diagnostic)
   }
 
   const token = directToken(node, 'Identifier')
@@ -2808,6 +3027,7 @@ function analyzeExpression(
           _tag: 'Unavailable',
           syntax: unavailableSyntax(node, 'Identifier'),
         }),
+        typeArguments: callTypeArguments.facts,
         arguments: argumentsResult.facts,
         mappings: Object.freeze([]),
         contract: Object.freeze({
@@ -2887,18 +3107,29 @@ function analyzeExpression(
                 ? { cause: resolvedLookup.cause }
                 : {}),
           })
-  const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
+  const callContract = analyzeCallContract(
+    node,
+    reference,
+    argumentsResult.facts,
+    hasAvailableCallSyntax(node),
+    callTypeArguments,
+  )
   const syntaxAvailable = hasAvailableCallSyntax(node)
   const expressionType =
     syntaxAvailable &&
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved'
-      ? availableExpressionType(reference.declaration.returnType.type)
+      ? availableExpressionType(
+          callContract.fact._tag === 'Compatible'
+            ? Type.substitute(reference.declaration.returnType.type, callContract.fact.substitution)
+            : reference.declaration.returnType.type,
+        )
       : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      typeArguments: callTypeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
       contract: callContract.fact,
@@ -2908,6 +3139,7 @@ function analyzeExpression(
     diagnostics: Object.freeze([
       ...(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
       ...argumentsResult.diagnostics,
+      ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
@@ -2918,19 +3150,31 @@ const finishDeclarationCall = (
   node: SyntaxTree.Node,
   reference: CallReferenceFact,
   argumentsResult: ArgumentsResult,
+  callTypeArguments: CallTypeArgumentsResult,
   diagnostic: Diagnostic.Diagnostic | undefined,
 ): ExpressionResult => {
-  const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
+  const callContract = analyzeCallContract(
+    node,
+    reference,
+    argumentsResult.facts,
+    hasAvailableCallSyntax(node),
+    callTypeArguments,
+  )
   const expressionType =
     hasAvailableCallSyntax(node) &&
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved'
-      ? availableExpressionType(reference.declaration.returnType.type)
+      ? availableExpressionType(
+          callContract.fact._tag === 'Compatible'
+            ? Type.substitute(reference.declaration.returnType.type, callContract.fact.substitution)
+            : reference.declaration.returnType.type,
+        )
       : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      typeArguments: callTypeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
       contract: callContract.fact,
@@ -2940,6 +3184,7 @@ const finishDeclarationCall = (
     diagnostics: Object.freeze([
       ...(diagnostic === undefined ? [] : [diagnostic]),
       ...argumentsResult.diagnostics,
+      ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
@@ -3532,6 +3777,11 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
           : {}),
       })
     }
+    const substitution =
+      Type.substitution(
+        fact.target.struct.typeParameters.map((parameter) => parameter.type),
+        fact.target.type.arguments,
+      ) ?? new Map()
     return Object.freeze({
       _tag: 'Construct',
       nominal: fact.target.type,
@@ -3546,7 +3796,7 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
             field.declaredType._tag === 'Resolved'
               ? hirExpectedExpression(
                   initializer.expression,
-                  field.declaredType.type,
+                  Type.substitute(field.declaredType.type, substitution),
                   'StructField',
                   field.syntax.span,
                 )
@@ -3655,16 +3905,18 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     fact.type._tag === 'Available'
   ) {
     const target = fact.reference.declaration
+    const substitution = fact.contract.substitution
     return Object.freeze({
       _tag: 'Call',
       target: fact.reference.declaration.canonical.id,
+      typeArguments: fact.contract.typeArguments,
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) => {
           const parameter = target.parameters.at(ordinal)
           return parameter?.declaredType._tag === 'Resolved'
             ? hirExpectedExpression(
                 argument.expression,
-                parameter.declaredType.type,
+                Type.substitute(parameter.declaredType.type, substitution),
                 'Argument',
                 parameter.syntax.span,
               )

@@ -3,7 +3,7 @@ import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import type * as Mir from './Mir.js'
-import type * as Ownership from './Ownership.js'
+import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -15,18 +15,26 @@ import * as Type from './Type.js'
 const i32: Mir.Type = Object.freeze({ _tag: 'I32' })
 const bool: Mir.Type = Object.freeze({ _tag: 'Bool' })
 
-const mirType = (type: Type.Type): Mir.Type | undefined =>
-  typeof type === 'string'
-    ? type === 'Never'
+const mirType = (
+  type: Type.Type,
+  substitution: ReadonlyMap<string, Type.Type> = new Map(),
+): Mir.Type | undefined => {
+  const specialized = Type.substitute(type, substitution)
+  if (!Type.isConcrete(specialized)) return undefined
+  return typeof specialized === 'string'
+    ? specialized === 'Never'
       ? undefined
-      : type === 'Bool'
+      : specialized === 'Bool'
         ? bool
         : i32
-    : Type.isNominal(type)
-      ? Object.freeze({ _tag: 'Nominal', type })
-      : Type.isFixedArray(type)
-        ? Object.freeze({ _tag: 'FixedArray', type })
-        : Object.freeze({ _tag: 'Union', type })
+    : Type.isNominal(specialized)
+      ? Object.freeze({ _tag: 'Nominal', type: specialized })
+      : Type.isFixedArray(specialized)
+        ? Object.freeze({ _tag: 'FixedArray', type: specialized })
+        : Type.isUnion(specialized)
+          ? Object.freeze({ _tag: 'Union', type: specialized })
+          : undefined
+}
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
@@ -45,6 +53,7 @@ class FunctionLowering {
     readonly layout: Layout.Plan,
     parameterTypes: ReadonlyArray<Mir.Type>,
     readonly ownership: Ownership.FunctionOwnership | undefined,
+    readonly substitution: ReadonlyMap<string, Type.Type>,
   ) {
     this.localTypes.push(...parameterTypes)
   }
@@ -76,6 +85,14 @@ class FunctionLowering {
 
   emit(operation: Mir.Operation): void {
     this.operations.push(operation)
+  }
+
+  type(type: Type.Type): Mir.Type | undefined {
+    return mirType(type, this.substitution)
+  }
+
+  semantic(type: Type.Type): Type.Type {
+    return Type.substitute(type, this.substitution)
   }
 }
 
@@ -146,7 +163,7 @@ const lowerPlace = (
   expression: Extract<Hir.Expression, { readonly _tag: 'Project' | 'IndexPlace' }>,
 ): LoweredExpression | undefined => {
   const place = lowerPlacePath(fn, expression)
-  const type = mirType(expression.type)
+  const type = fn.type(expression.type)
   if (place === undefined || type === undefined) return undefined
   const destination = fn.alloc(type)
   fn.emit(
@@ -209,10 +226,10 @@ function lowerExpression(
       return lowerExpression(fn, expression.subject)
     case 'UnionConvert': {
       const source = lowerExpression(fn, expression.source)
-      const sourceType = mirType(expression.sourceType)
-      const targetType = mirType(expression.target)
-      const sourceShape = Layout.callingShape(fn.layout, expression.sourceType)
-      const targetShape = Layout.callingShape(fn.layout, expression.target)
+      const sourceType = fn.type(expression.sourceType)
+      const targetType = fn.type(expression.target)
+      const sourceShape = Layout.callingShape(fn.layout, fn.semantic(expression.sourceType))
+      const targetShape = Layout.callingShape(fn.layout, fn.semantic(expression.target))
       if (
         source === undefined ||
         sourceShape === undefined ||
@@ -243,10 +260,10 @@ function lowerExpression(
     case 'Match': {
       if (expression.scrutinee._tag === 'Unavailable') return undefined
       const scrutinee = lowerExpression(fn, expression.scrutinee)
-      const scrutineeType = mirType(expression.scrutinee.type)
-      const resultType = mirType(expression.type)
-      const scrutineeShape = Layout.callingShape(fn.layout, expression.scrutinee.type)
-      const resultShape = Layout.callingShape(fn.layout, expression.type)
+      const scrutineeType = fn.type(expression.scrutinee.type)
+      const resultType = fn.type(expression.type)
+      const scrutineeShape = Layout.callingShape(fn.layout, fn.semantic(expression.scrutinee.type))
+      const resultShape = Layout.callingShape(fn.layout, fn.semantic(expression.type))
       if (
         scrutinee === undefined ||
         (scrutineeType?._tag !== 'Nominal' && scrutineeType?._tag !== 'Union') ||
@@ -261,12 +278,33 @@ function lowerExpression(
           candidate.id.span.start === expression.id.span.start &&
           candidate.id.span.end === expression.id.span.end,
       )
+      const specializeMember = (member: Type.Nominal): Type.Nominal | undefined => {
+        const specialized = fn.semantic(member)
+        return Type.isNominal(specialized) ? specialized : undefined
+      }
+      const members = expression.members.flatMap((member) => {
+        const specialized = specializeMember(member)
+        return specialized === undefined ? [] : [specialized]
+      })
+      if (members.length !== expression.members.length) return undefined
       const arms: Array<Mir.MatchArm> = []
       for (const arm of expression.arms) {
         if (!arm.reachable) continue
+        const member = arm.member === undefined ? undefined : specializeMember(arm.member)
+        if (arm.member !== undefined && member === undefined) return undefined
+        const before = arm.before.flatMap((candidate) => {
+          const specialized = specializeMember(candidate)
+          return specialized === undefined ? [] : [specialized]
+        })
+        const after = arm.after.flatMap((candidate) => {
+          const specialized = specializeMember(candidate)
+          return specialized === undefined ? [] : [specialized]
+        })
+        if (before.length !== arm.before.length || after.length !== arm.after.length)
+          return undefined
         const bindings: Array<Mir.MatchBinding> = []
         for (const binding of arm.bindings) {
-          const type = mirType(binding.type)
+          const type = fn.type(binding.type)
           if (type === undefined) return undefined
           const destination = fn.alloc(type)
           fn.patternLocals.set(patternKey(binding.id), destination)
@@ -302,17 +340,24 @@ function lowerExpression(
         arms.push(
           Object.freeze({
             id: arm.id,
-            ...(arm.member === undefined ? {} : { member: arm.member }),
+            ...(member === undefined ? {} : { member }),
             universal: arm.universal,
-            before: arm.before,
-            after: arm.after,
+            before: Object.freeze(before),
+            after: Object.freeze(after),
             bindings: Object.freeze(bindings),
             ...(guard === undefined ? {} : { guard }),
             selected: Object.freeze({
               access: expression.access,
               operations: selectedOperations,
               result: selectedResult.result,
-              cleanup: Object.freeze([...(ownedArm?.cleanup ?? [])]),
+              cleanup: Object.freeze(
+                (ownedArm?.cleanup ?? []).map((release) =>
+                  Object.freeze({
+                    path: release.path,
+                    cleanup: specializedCleanup(fn, release.cleanup),
+                  }),
+                ),
+              ),
               endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
             }),
             provenance: authored(arm.span),
@@ -321,7 +366,7 @@ function lowerExpression(
         for (const binding of arm.bindings) fn.patternLocals.delete(patternKey(binding.id))
       }
       const destination = fn.alloc(resultType)
-      const decisions = expression.members.map((member) =>
+      const decisions = members.map((member) =>
         Object.freeze({
           member,
           candidates: Object.freeze(
@@ -343,7 +388,7 @@ function lowerExpression(
           scrutineeType,
           scrutineeShape,
           access: expression.access,
-          members: expression.members,
+          members: Object.freeze(members),
           decisions: Object.freeze(decisions),
           arms: Object.freeze(arms),
           type: resultType,
@@ -354,7 +399,7 @@ function lowerExpression(
       return Object.freeze({ result: destination })
     }
     case 'Construct': {
-      const type = mirType(expression.type)
+      const type = fn.type(expression.type)
       if (type?._tag !== 'Nominal') return undefined
       const canonicalFields = new Map(
         expression.fields.map((field) => [field.field.ordinal, field] as const),
@@ -385,7 +430,7 @@ function lowerExpression(
       return { result: destination }
     }
     case 'ArrayConstruct': {
-      const type = mirType(expression.type)
+      const type = fn.type(expression.type)
       if (type?._tag !== 'FixedArray') return undefined
       const elements: Array<Mir.LocalId> = []
       for (const element of expression.elements) {
@@ -418,7 +463,7 @@ function lowerExpression(
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
-      const type = mirType(expression.type)
+      const type = fn.type(expression.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.emit(
@@ -426,6 +471,9 @@ function lowerExpression(
           _tag: 'Call',
           destination,
           target: expression.target,
+          typeArguments: Object.freeze(
+            expression.typeArguments.map((argument) => fn.semantic(argument)),
+          ),
           arguments: Object.freeze(argumentLocals),
           type,
           provenance: Object.freeze({ span: expression.span, generated: false }),
@@ -470,7 +518,7 @@ function lowerExpression(
       }
       const [left, right] = argumentLocals
       if (left === undefined || right === undefined) return undefined
-      const type = mirType(expression.type)
+      const type = fn.type(expression.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.emit(
@@ -523,6 +571,57 @@ const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex =>
   return { returns, armEnds, loopFallthroughs, transfers }
 }
 
+const concreteCleanup = (
+  fn: FunctionLowering,
+  type: Type.Type,
+  seen = new Set<string>(),
+): Ownership.CleanupPlan => {
+  if (Type.isBuiltin(type) || Type.isNever(type) || Type.isParameter(type)) {
+    return Object.freeze({ _tag: 'NoCleanup', type })
+  }
+  if (Type.isFixedArray(type)) {
+    return Object.freeze({
+      _tag: 'ArrayCleanup',
+      type,
+      length: type.length,
+      element: concreteCleanup(fn, type.element, seen),
+    })
+  }
+  if (Type.isUnion(type)) {
+    return Object.freeze({
+      _tag: 'UnionCleanup',
+      type,
+      cases: Object.freeze(
+        type.members.map((member, ordinal) =>
+          Object.freeze({ member, ordinal, cleanup: concreteCleanup(fn, member, seen) }),
+        ),
+      ),
+    })
+  }
+  const key = Type.key(type)
+  if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
+  const entry = Layout.entry(fn.layout, type)
+  if (entry?.representation._tag !== 'Aggregate') {
+    return Object.freeze({ _tag: 'NoCleanup', type })
+  }
+  const next = new Set(seen).add(key)
+  return Object.freeze({
+    _tag: 'StructCleanup',
+    type,
+    fields: Object.freeze(
+      entry.representation.fields.map((field) =>
+        Object.freeze({ field: field.id, cleanup: concreteCleanup(fn, field.type, next) }),
+      ),
+    ),
+  })
+}
+
+const specializedCleanup = (
+  fn: FunctionLowering,
+  cleanup: Ownership.CleanupPlan,
+): Ownership.CleanupPlan =>
+  Ownership.specializeCleanup(cleanup, fn.substitution, (type) => concreteCleanup(fn, type))
+
 const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined): void => {
   for (const release of exit?.releases ?? []) {
     const site = release.binding.site
@@ -535,7 +634,7 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
       Object.freeze({
         _tag: 'Drop',
         local: dropped,
-        cleanup: release.cleanup,
+        cleanup: specializedCleanup(fn, release.cleanup),
         provenance: Object.freeze({ span: release.binding.liveFrom, generated: true }),
       }),
     )
@@ -687,7 +786,7 @@ const lowerSequence = (
   if (statement._tag === 'Write') {
     const root = fn.bindingLocals.get(statement.place.root.ordinal)
     const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
-    const type = mirType(statement.place.type)
+    const type = fn.type(statement.place.type)
     const [written, operations] = fn.capture(() => {
       if (root === undefined || rootType === undefined || type === undefined) return false
       const selectors = lowerWriteSelectors(fn, statement.place.selectors)
@@ -712,7 +811,7 @@ const lowerSequence = (
           rootType,
           type,
           mutable: true,
-          replacement: copyType(statement.place.type) ? 'Copy' : 'Owned',
+          replacement: copyType(fn.semantic(statement.place.type)) ? 'Copy' : 'Owned',
           commit: 'AfterCleanup',
           provenance: authored(statement.span),
         }),
@@ -965,6 +1064,7 @@ const trapFunction = (
   return Object.freeze({
     _tag: 'MirFunction',
     id: instance.key.declaration,
+    instance: instance.key,
     parameterCount,
     localTypes: Object.freeze(Array.from({ length: parameterCount }, () => i32)),
     result: i32,
@@ -1011,16 +1111,17 @@ const lowerInstance = (
   const parameterTypes =
     contract._tag === 'Contract'
       ? contract.parameters.flatMap((type) => {
-          const lowered = mirType(type)
+          const lowered = mirType(type, instance.substitution)
           return lowered === undefined ? [] : [lowered]
         })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
-  const resultType = contract._tag === 'Contract' ? mirType(contract.result) : i32
+  const resultType =
+    contract._tag === 'Contract' ? mirType(contract.result, instance.substitution) : i32
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
   }
 
-  const lowering = new FunctionLowering(layout, parameterTypes, plan)
+  const lowering = new FunctionLowering(layout, parameterTypes, plan, instance.substitution)
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
     reason: 'body fell through without return',
@@ -1036,6 +1137,7 @@ const lowerInstance = (
   return Object.freeze({
     _tag: 'MirFunction',
     id: instance.key.declaration,
+    instance: instance.key,
     parameterCount: fn.declaration.parameterCount,
     localTypes: Object.freeze([...lowering.localTypes]),
     result: resultType,
