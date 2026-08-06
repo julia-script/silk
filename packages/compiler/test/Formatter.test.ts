@@ -143,6 +143,33 @@ it.effect('rejects lexical and parser damage without producing formatted bytes',
   }),
 )
 
+it.effect('formats fixed-array source types with canonical bracketed layout', () =>
+  Effect.gen(function* () {
+    const source = 'struct Arrays { values: [ [ I32 ;4 ] ;3 ] }'
+    const first = yield* Formatter.format(parse('memory://fixed-array-format.silk', source))
+    const canonical = 'struct Arrays {\n  values: [[I32; 4]; 3]\n}\n'
+
+    assert.strictEqual(formattedText(first), canonical)
+    const second = yield* Formatter.format(
+      parse('memory://fixed-array-format.silk', formattedText(first)),
+    )
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('refuses to repair a missing fixed-array semicolon', () =>
+  Effect.gen(function* () {
+    const attempted = yield* Effect.result(
+      Formatter.format(
+        parse('memory://fixed-array-damage.silk', 'struct Broken { value: [I32 4] }'),
+      ),
+    )
+
+    assert.strictEqual(Result.isFailure(attempted), true)
+  }),
+)
+
 it.effect('formats syntactically complete source without semantic analysis', () =>
   Effect.gen(function* () {
     const document = yield* Formatter.format(
@@ -314,7 +341,7 @@ it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
     const source = `import Core.Math as Math { add as plus, subtract }
 pub struct Pair {
-  pub left: Array<I32, 2>
+  pub left: [I32; 2]
   right: Bool
   choice: Alpha | (Beta | Alpha)
 }

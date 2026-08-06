@@ -502,20 +502,20 @@ return (40 + 2) * 1
   one(
     'arrays',
     'Array contextual',
-    `fn values() -> Array<I32, 2> { return [10, 42] }
+    `fn values() -> [I32; 2] { return [10, 42] }
 pub fn main() -> I32 { return values()[1] }`,
   ),
   one(
     'arrays',
     'Array empty',
-    `fn empty() -> Array<I32, 0> { return [] }
-fn consume(values: Array<I32, 0>) -> I32 { return 42 }
+    `fn empty() -> [I32; 0] { return [] }
+fn consume(values: [I32; 0]) -> I32 { return 42 }
 pub fn main() -> I32 { return consume(empty()) }`,
   ),
   one(
     'arrays',
     'Array nested',
-    `fn choose(values: Array<Array<I32, 2>, 2>, outer: I32, inner: I32) -> I32 { return values[outer][inner] }
+    `fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 { return values[outer][inner] }
 pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
   ),
   one(
@@ -540,14 +540,14 @@ pub fn main() -> I32 { let values = [Token { value: 10 }, Token { value: 42 }] l
   one(
     'arrays',
     'Array Copy read',
-    `fn choose(values: Array<I32, 2>, index: I32) -> I32 { let selected = values[index] return selected }
+    `fn choose(values: [I32; 2], index: I32) -> I32 { let selected = values[index] return selected }
 pub fn main() -> I32 { return choose([10, 42], 1) }`,
   ),
   one(
     'arrays',
     'Array indexed field',
     `struct Pair { left: I32 right: I32 }
-fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
   ),
   one(
@@ -558,7 +558,7 @@ pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
   one(
     'arrays',
     'Array dynamic trap',
-    `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+    `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], -1) }`,
   ),
   one(
@@ -569,20 +569,20 @@ pub fn main() -> I32 { return choose([10, 42], -1) }`,
   one(
     'arrays',
     'Array length mismatch',
-    `fn values() -> Array<I32, 3> { return [10, 42] }
+    `fn values() -> [I32; 3] { return [10, 42] }
 pub fn main() -> I32 { return 0 }`,
   ),
   one(
     'arrays',
     'Array partial move',
     `struct Token { value: I32 }
-fn take(values: Array<Token, 2>) -> Token { return move values[0] }
+fn take(values: [Token; 2]) -> Token { return move values[0] }
 pub fn main() -> I32 { return 42 }`,
   ),
   one(
     'arrays',
     'Array unavailable layout',
-    `fn consume(values: Array<Array<Array<I32, 2147483647>, 2147483647>, 0>) -> I32 { return 42 }
+    `fn consume(values: [[[I32; 2147483647]; 2147483647]; 0]) -> I32 { return 42 }
 pub fn main() -> I32 { return consume([]) }`,
   ),
 
@@ -841,7 +841,7 @@ pub fn main() -> I32 { return widen(A {}) }`,
     'Union array containment',
     `struct A {}
 struct B {}
-fn accept(values: Array<A | B, 2>) -> I32 { return 42 }
+fn accept(values: [A | B; 2]) -> I32 { return 42 }
 pub fn main() -> I32 { return accept([A {}, B {}]) }`,
   ),
   one(

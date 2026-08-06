@@ -3,6 +3,7 @@ import * as Diagnostic from './Diagnostic.js'
 import type * as Lexer from './Lexer.js'
 import * as Operator from './Operator.js'
 import * as SourceFile from './SourceFile.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -174,6 +175,13 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LeftParenthesis',
   'LeftBracket',
   'MatchKeyword',
+  'Less',
+])
+
+const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Identifier',
+  'LeftParenthesis',
+  'LeftBracket',
 ])
 
 const significantKindAfter = (
@@ -191,6 +199,18 @@ const significantKindAfter = (
     remaining -= 1
   }
   return undefined
+}
+
+const reservedTemplateStart = (state: State): boolean => {
+  let index = state.index
+  let token = state.lexical.tokens.at(index)
+  while (token !== undefined && isTrivia(token.kind)) {
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
+  if (token?.kind !== 'Less') return false
+  const following = state.lexical.tokens.at(index + 1)
+  return following?.kind === 'Identifier' || following?.kind === 'Greater'
 }
 
 const parseIntegerLiteralExpression = (initial: State): NodeResult => {
@@ -246,7 +266,9 @@ const primaryKind = (
   | 'ArrayLiteral'
   | 'Match'
   | 'Grouped'
-  | 'Prefix' => {
+  | 'Prefix'
+  | 'ReservedTemplate' => {
+  if (reservedTemplateStart(state)) return 'ReservedTemplate'
   let index = state.index
   let token = state.lexical.tokens.at(index)
 
@@ -541,6 +563,16 @@ function parseArrayLiteralExpression(
   })
 }
 
+const significantToken = (state: State): Token.Token | undefined => {
+  let index = state.index
+  let token = state.lexical.tokens.at(index)
+  while (token !== undefined && isTrivia(token.kind)) {
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
+  return token
+}
+
 const isUniversalPatternStart = (state: State): boolean => {
   const token = significantToken(state)
   return (
@@ -709,6 +741,74 @@ function parseMatchExpression(initial: State, reservedForEnclosingCalls: number)
   })
 }
 
+const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Comma',
+  'RightParenthesis',
+  'RightBracket',
+  'RightBrace',
+  'LetKeyword',
+  'IfKeyword',
+  'WhileKeyword',
+  'BreakKeyword',
+  'ContinueKeyword',
+  'ReturnKeyword',
+  'ElseKeyword',
+  'PubKeyword',
+  'StructKeyword',
+  'FnKeyword',
+  'ImportKeyword',
+  'EndOfFile',
+])
+
+const parseReservedTemplateExpression = (initial: State): NodeResult => {
+  const leading = consumeTrivia(initial)
+  let state = leading.state
+  let elements: ReadonlyArray<SyntaxTree.Element> = leading.elements
+  let token = currentToken(state)
+  const start = token?.span.start ?? insertionOffset(state)
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenthesisDepth = 0
+
+  while (token !== undefined) {
+    const nested = braceDepth > 0 || bracketDepth > 0 || parenthesisDepth > 0
+    if (elements.length > leading.elements.length && !nested) {
+      if (reservedTemplateBoundaries.includes(token.kind)) break
+    }
+
+    elements = Object.freeze([...elements, token])
+    state = advance(state)
+
+    if (token.kind === 'LeftBrace') braceDepth += 1
+    else if (token.kind === 'RightBrace' && braceDepth > 0) braceDepth -= 1
+    else if (token.kind === 'LeftBracket') bracketDepth += 1
+    else if (token.kind === 'RightBracket' && bracketDepth > 0) bracketDepth -= 1
+    else if (token.kind === 'LeftParenthesis') parenthesisDepth += 1
+    else if (token.kind === 'RightParenthesis' && parenthesisDepth > 0) parenthesisDepth -= 1
+
+    if (
+      token.kind === 'Greater' &&
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      parenthesisDepth === 0
+    ) {
+      break
+    }
+    token = currentToken(state)
+  }
+
+  const node = syntaxNode(state, 'Error', elements)
+  const end = elements.filter(SyntaxTree.isToken).at(-1)?.span.end ?? start
+  const span = Option.getOrThrowWith(
+    SourceSpan.make(state.lexical.source, start, end),
+    () => new RangeError(`Parser produced an invalid reserved template span [${start}, ${end})`),
+  )
+  return Object.freeze({
+    state: addDiagnostic(state, Diagnostic.reservedTemplateSyntax(span)),
+    node,
+  })
+}
+
 function parsePrimaryExpression(
   initial: State,
   reservedForEnclosingCalls: number,
@@ -716,6 +816,7 @@ function parsePrimaryExpression(
   allowStructLiteral: boolean,
 ): NodeResult {
   const kind = primaryKind(initial, recoveryKind, allowStructLiteral)
+  if (kind === 'ReservedTemplate') return parseReservedTemplateExpression(initial)
   if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls)
   if (kind === 'StructLiteral')
     return parseStructLiteralExpression(initial, reservedForEnclosingCalls)
@@ -1130,22 +1231,6 @@ const parseTypePath = (
   return Object.freeze({ state, node: syntaxNode(state, 'TypePath', children) })
 }
 
-const significantToken = (state: State): Token.Token | undefined => {
-  let index = state.index
-  let token = state.lexical.tokens.at(index)
-  while (token !== undefined && isTrivia(token.kind)) {
-    index += 1
-    token = state.lexical.tokens.at(index)
-  }
-  return token
-}
-
-const isArrayConstructor = (state: State): boolean => {
-  const token = significantToken(state)
-  if (token?.kind !== 'Identifier' || significantKindAfter(state, 1) !== 'Less') return false
-  return Option.contains(SourceFile.spelling(state.lexical.source, token.span), 'Array')
-}
-
 const parseTypePrimary = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
@@ -1153,7 +1238,7 @@ const parseTypePrimary = (
 ): NodeResult => {
   if (nextSignificantKind(initial) === 'LeftParenthesis') {
     const left = expect(initial, 'LeftParenthesis', [
-      'Identifier',
+      ...typeStarts,
       'RightParenthesis',
       ...following,
     ])
@@ -1168,22 +1253,25 @@ const parseTypePrimary = (
       ]),
     })
   }
-  if (!isArrayConstructor(initial)) return parseTypePath(initial, following, preserveFieldStart)
-  const arrayName = expect(initial, 'Identifier', ['Less', ...following])
-  const less = expect(arrayName.state, 'Less', ['Identifier', 'LeftParenthesis', ...following])
-  const element = parseType(less.state, ['Comma', 'Greater', ...following])
-  const comma = expect(element.state, 'Comma', ['DecimalInteger', 'Greater', ...following])
-  const length = expect(comma.state, 'DecimalInteger', ['Greater', ...following])
-  const greater = expect(length.state, 'Greater', following)
+  if (nextSignificantKind(initial) !== 'LeftBracket')
+    return parseTypePath(initial, following, preserveFieldStart)
+  const left = expect(initial, 'LeftBracket', [...typeStarts, ...following])
+  const element = parseType(left.state, ['Semicolon', 'RightBracket', ...following])
+  const semicolon = expect(element.state, 'Semicolon', [
+    'DecimalInteger',
+    'RightBracket',
+    ...following,
+  ])
+  const length = expect(semicolon.state, 'DecimalInteger', ['RightBracket', ...following])
+  const right = expect(length.state, 'RightBracket', following)
   return Object.freeze({
-    state: greater.state,
-    node: syntaxNode(greater.state, 'FixedArrayType', [
-      ...arrayName.elements,
-      ...less.elements,
+    state: right.state,
+    node: syntaxNode(right.state, 'FixedArrayType', [
+      ...left.elements,
       element.node,
-      ...comma.elements,
+      ...semicolon.elements,
       ...length.elements,
-      ...greater.elements,
+      ...right.elements,
     ]),
   })
 }
@@ -1197,7 +1285,7 @@ function parseType(
   let state = first.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([first.node])
   while (nextSignificantKind(state) === 'Pipe') {
-    const pipe = expect(state, 'Pipe', ['Identifier', 'LeftParenthesis', ...following])
+    const pipe = expect(state, 'Pipe', [...typeStarts, ...following])
     const member = parseTypePrimary(pipe.state, ['Pipe', ...following], preserveFieldStart)
     children = Object.freeze([...children, ...pipe.elements, member.node])
     state = member.state
@@ -1208,7 +1296,7 @@ function parseType(
 }
 
 const parseReturnType = (initial: State): NodeResult => {
-  const arrow = expect(initial, 'Arrow', ['Identifier', 'LeftParenthesis', 'LeftBrace'])
+  const arrow = expect(initial, 'Arrow', [...typeStarts, 'LeftBrace'])
   const type = parseType(arrow.state, ['LeftBrace'])
   return Object.freeze({
     state: type.state,
@@ -1237,13 +1325,7 @@ const parseParameterList = (initial: State): NodeResult => {
     kind !== 'EndOfFile'
   ) {
     const name = expect(state, 'Identifier', ['Colon', 'Comma', 'RightParenthesis', 'Arrow'])
-    const colon = expect(name.state, 'Colon', [
-      'Identifier',
-      'LeftParenthesis',
-      'Comma',
-      'RightParenthesis',
-      'Arrow',
-    ])
+    const colon = expect(name.state, 'Colon', [...typeStarts, 'Comma', 'RightParenthesis', 'Arrow'])
     const type = parseType(colon.state, ['Comma', 'RightParenthesis', 'Arrow'])
     const parameter = syntaxNode(type.state, 'ParameterDeclaration', [
       ...name.elements,
@@ -1415,12 +1497,7 @@ const parseStructField = (initial: State): NodeResult => {
     ? expect(initial, 'PubKeyword', ['Identifier', 'RightBrace', ...topLevelFollowing])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
   const name = expect(pubKeyword.state, 'Identifier', ['Colon', 'RightBrace', ...topLevelFollowing])
-  const colon = expect(name.state, 'Colon', [
-    'Identifier',
-    'LeftParenthesis',
-    'RightBrace',
-    ...topLevelFollowing,
-  ])
+  const colon = expect(name.state, 'Colon', [...typeStarts, 'RightBrace', ...topLevelFollowing])
   const type = parseType(colon.state, ['PubKeyword', 'RightBrace', ...topLevelFollowing], true)
   return Object.freeze({
     state: type.state,

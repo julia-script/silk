@@ -394,14 +394,14 @@ export const analyzeDeclaredType = (
     })
   }
   if (syntax.kind === 'FixedArrayType') {
-    const arrayName = SyntaxTree.directToken(syntax, 'Identifier')
+    const arrayToken = SyntaxTree.directToken(syntax, 'LeftBracket')
     const elementSyntax = syntax.children.find(isDeclaredTypeNode)
     const lengthToken = SyntaxTree.directToken(syntax, 'DecimalInteger')
-    if (arrayName === undefined || elementSyntax === undefined) {
+    if (arrayToken === undefined || elementSyntax === undefined) {
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Unavailable',
-          syntax: SyntaxTree.unavailableChild(syntax, 'Identifier'),
+          syntax: SyntaxTree.unavailableChild(syntax, 'LeftBracket'),
         }),
         diagnostics: Object.freeze([]),
       })
@@ -442,7 +442,7 @@ export const analyzeDeclaredType = (
           _tag: 'Resolved',
           type,
           spelling: Type.encode(type),
-          token: arrayName,
+          token: arrayToken,
           syntax,
         }),
         diagnostics: Object.freeze(diagnostics),
@@ -456,7 +456,7 @@ export const analyzeDeclaredType = (
         spelling: `Array<${
           element.fact._tag === 'Resolved' ? Type.encode(element.fact.type) : 'unavailable'
         }, ${length._tag === 'Available' ? length.value : 'unavailable'}>`,
-        token: arrayName,
+        token: arrayToken,
         syntax,
       }),
       diagnostics: Object.freeze(diagnostics),

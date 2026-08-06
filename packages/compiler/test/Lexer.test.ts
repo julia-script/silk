@@ -199,6 +199,26 @@ it('recognizes typed parameter and argument punctuation with exact spans', () =>
   assert.deepEqual(result.diagnostics, [])
 })
 
+it('lexes the fixed-array semicolon as punctuation with its exact span', () => {
+  const source = SourceFile.make('memory://fixed-array.silk', ascii('[I32; 4]'))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'LeftBracket', start: 0, end: 1, slice: '[' },
+      { kind: 'Identifier', start: 1, end: 4, slice: 'I32' },
+      { kind: 'Semicolon', start: 4, end: 5, slice: ';' },
+      { kind: 'DecimalInteger', start: 6, end: 7, slice: '4' },
+      { kind: 'RightBracket', start: 7, end: 8, slice: ']' },
+      { kind: 'EndOfFile', start: 8, end: 8, slice: '' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
 it('keeps comments as trivia and leaves line endings for whitespace tokens', () => {
   const withNewline = Lexer.lex(
     SourceFile.make('memory://comment-newline.silk', ascii('// note\r\nfn')),

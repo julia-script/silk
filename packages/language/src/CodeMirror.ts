@@ -52,6 +52,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   LeftBracket: punctuation,
   RightBracket: punctuation,
   Colon: punctuation,
+  Semicolon: punctuation,
   Comma: punctuation,
   Dot: punctuation,
   Equals: operator,

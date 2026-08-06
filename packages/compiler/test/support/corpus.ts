@@ -217,21 +217,21 @@ pub fn main() -> I32 { return check(I32.greaterOrEqual(3, 3)) }`,
   },
   {
     name: 'array-contextual-empty',
-    source: `fn empty() -> Array<I32, 0> { return [] }
-fn consume(values: Array<I32, 0>) -> I32 { return 42 }
+    source: `fn empty() -> [I32; 0] { return [] }
+fn consume(values: [I32; 0]) -> I32 { return 42 }
 pub fn main() -> I32 { return consume(empty()) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'array-nested',
-    source: `fn choose(values: Array<Array<I32, 2>, 2>, outer: I32, inner: I32) -> I32 { return values[outer][inner] }
+    source: `fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 { return values[outer][inner] }
 pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'array-indexed-struct-field',
     source: `struct Pair { left: I32 right: I32 }
-fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -247,19 +247,19 @@ pub fn main() -> I32 {
   },
   {
     name: 'array-negative-index-trap',
-    source: `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+    source: `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], -1) }`,
     expected: { _tag: 'Trap' },
   },
   {
     name: 'array-upper-index-trap',
-    source: `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+    source: `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], 2) }`,
     expected: { _tag: 'Trap' },
   },
   {
     name: 'array-zero-index-trap',
-    source: `fn choose(values: Array<I32, 0>, index: I32) -> I32 { return values[index] }
+    source: `fn choose(values: [I32; 0], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([], 0) }`,
     expected: { _tag: 'Trap' },
   },

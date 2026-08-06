@@ -141,7 +141,7 @@ pub fn main() -> I32 { return inspect(Left { value: 42 }) }`
 
 it.effect('answers immutable fixed-array facts across semantics, layout, MIR, and evaluation', () =>
   Effect.gen(function* () {
-    const source = `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+    const source = `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], 1) }`
     const self = yield* Analysis.ofSource(
       'memory/array-facade',

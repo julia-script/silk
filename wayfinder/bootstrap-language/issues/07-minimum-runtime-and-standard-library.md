@@ -65,7 +65,7 @@ operation followed by the infallible automatic fallback. Bootstrap therefore nee
 capturing closure facility merely to implement finalization.
 
 The core owned indirection and sequence surface consists of the already settled `Box<T>`, intrinsic
-`Array<T, N>`, lexical `Slice<T>`, and one dynamic `Vector<T>`. `Vector` owns growable contiguous
+`[T; N]`, lexical `Slice<T>`, and one dynamic `Vector<T>`. `Vector` owns growable contiguous
 storage with length and capacity, exposes shared or exclusive slices, and supports the ordinary
 exclusive-borrowing append, insert, remove, pop, reserve, and truncate operations. Stacks use a
 vector directly; compiler-specific queues pair one with a head index. Bootstrap has no linked list,

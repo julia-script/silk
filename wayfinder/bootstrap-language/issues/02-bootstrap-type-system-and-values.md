@@ -69,7 +69,7 @@ Ordinary user-defined generics accept type parameters only and are monomorphized
 contracts additionally admit narrowly scoped failure-row and requirement-row parameters so
 higher-order functions can preserve callback contracts without erasure; those parameters are
 inferred at calls, may appear only in contract positions, and are concretized during finite
-monomorphization. `Array<T, N>` is the sole bootstrap intrinsic with a natural-number parameter;
+monomorphization. `[T; N]` is the sole bootstrap type form with a natural-number parameter;
 arbitrary const generics, higher-kinded types, and general row-level programming are deferred. Call
 arguments may determine generic arguments, but expected return types or later uses may not. Each
 generic body is checked once against explicit interface constraints, compiler properties, optional
@@ -97,7 +97,7 @@ recursive functions are legal but must declare their complete contracts, and the
 offers a code action to infer and insert those contracts for a recursive group. The same action can
 make any inferred function contract explicit.
 
-`Array<T, N>` is a non-allocating inline aggregate whose ownership, copyability, and cleanup derive
+`[T; N]` is a non-allocating inline aggregate whose ownership, copyability, and cleanup derive
 from `T`; its length is part of its type and it never decays to a pointer. A slice is a shared or
 exclusive lexical borrow of contiguous elements rather than an owned container. Compiler-recognized
 index and range place projections create element and slice borrows without permitting ordinary

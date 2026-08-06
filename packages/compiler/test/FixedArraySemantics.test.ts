@@ -30,9 +30,9 @@ const all = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.Expres
 it.effect('infers non-empty arrays and contextually types empty and nested literals', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`fn inferred() -> I32 { let values = [10, 20, 30] return 0 }
-fn empty() -> Array<I32, 0> { return [] }
-fn nested() -> Array<Array<I32, 0>, 2> { return [[], []] }
-fn take(values: Array<I32, 0>) -> I32 { return 7 }
+fn empty() -> [I32; 0] { return [] }
+fn nested() -> [[I32; 0]; 2] { return [[], []] }
+fn take(values: [I32; 0]) -> I32 { return 7 }
 pub fn main() -> I32 { return take([]) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -67,7 +67,7 @@ it.effect('retains every element while diagnosing empty context and exact mismat
   Effect.gen(function* () {
     const self = yield* snapshot(`fn empty() -> I32 { let values = [] return 0 }
 fn types() -> I32 { let values = [1, true, 3] return 0 }
-fn length() -> Array<I32, 3> { return [1, 2] }
+fn length() -> [I32; 3] { return [1, 2] }
 pub fn main() -> I32 { return 0 }`)
 
     assert.deepEqual(
@@ -90,8 +90,8 @@ pub fn main() -> I32 { return 0 }`)
 it.effect('classifies constant and dynamic checked index places', () =>
   Effect.gen(function* () {
     const valid =
-      yield* snapshot(`fn dynamic(values: Array<I32, 3>, index: I32) -> I32 { return values[index] }
-fn constant(values: Array<I32, 3>) -> I32 { return values[1] }
+      yield* snapshot(`fn dynamic(values: [I32; 3], index: I32) -> I32 { return values[index] }
+fn constant(values: [I32; 3]) -> I32 { return values[1] }
 pub fn main() -> I32 { return constant([4, 5, 6]) }`)
     assert.deepEqual(Analysis.diagnostics(valid), [])
     const facts = Analysis.rootAnalysis(valid).functions.flatMap((fn) =>
@@ -107,9 +107,9 @@ pub fn main() -> I32 { return constant([4, 5, 6]) }`)
     const hir = Analysis.hirOf(valid, 'fixed-arrays/main')?.functions.at(0)
     assert.strictEqual(hir === undefined ? undefined : Hir.returned(hir)._tag, 'IndexPlace')
 
-    const invalid = yield* snapshot(`fn low(values: Array<I32, 3>) -> I32 { return values[-1] }
-fn high(values: Array<I32, 3>) -> I32 { return values[3] }
-fn wrong(values: Array<I32, 3>) -> I32 { return values[true] }
+    const invalid = yield* snapshot(`fn low(values: [I32; 3]) -> I32 { return values[-1] }
+fn high(values: [I32; 3]) -> I32 { return values[3] }
+fn wrong(values: [I32; 3]) -> I32 { return values[true] }
 pub fn main() -> I32 { return 0 }`)
     assert.deepEqual(
       Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
@@ -121,15 +121,15 @@ pub fn main() -> I32 { return 0 }`)
 it.effect('derives Copy, whole-move, partial-move, and cleanup behavior from elements', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Token { kind: I32 }
-fn copy(values: Array<I32, 2>) -> I32 { let again = values return values[0] }
-fn readThenMove(tokens: Array<Token, 2>, index: I32) -> I32 {
+fn copy(values: [I32; 2]) -> I32 { let again = values return values[0] }
+fn readThenMove(tokens: [Token; 2], index: I32) -> I32 {
   let kind = tokens[index].kind
   let next = move tokens
   return kind
 }
-fn partial(tokens: Array<Token, 2>, index: I32) -> Token { return move tokens[index] }
-fn zero(tokens: Array<Token, 0>) -> I32 { let next = move tokens return 0 }
-fn cleanup(tokens: Array<Token, 3>) -> I32 { return 0 }
+fn partial(tokens: [Token; 2], index: I32) -> Token { return move tokens[index] }
+fn zero(tokens: [Token; 0]) -> I32 { let next = move tokens return 0 }
+fn cleanup(tokens: [Token; 3]) -> I32 { return 0 }
 pub fn main() -> I32 { return 0 }`)
 
     assert.deepEqual(

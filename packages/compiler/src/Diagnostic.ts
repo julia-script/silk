@@ -21,6 +21,9 @@ export const missingTokenCode = 'PAR0001' as const
 /** Stable code for one maximal region of unexpected concrete tokens. */
 export const unexpectedTokensCode = 'PAR0002' as const
 
+/** Stable code for a primary-expression template start reserved for future support. */
+export const reservedTemplateSyntaxCode = 'PAR0003' as const
+
 /** Stable code for an import naming a module absent from the supplied sources. */
 export const unknownModuleCode = 'MOD0001' as const
 
@@ -117,6 +120,7 @@ export type Code =
   | typeof unsupportedBytesCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
+  | typeof reservedTemplateSyntaxCode
   | typeof unknownModuleCode
   | typeof selfImportCode
   | typeof duplicateImportCode
@@ -198,6 +202,7 @@ export type Reason =
   | { readonly _tag: 'UnsupportedBytes' }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | { readonly _tag: 'UnexpectedTokens' }
+  | { readonly _tag: 'ReservedTemplateSyntax' }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'DuplicateImport'; readonly module: string }
@@ -484,6 +489,18 @@ export const unexpectedTokens = (span: SourceSpan.SourceSpan): Diagnostic =>
     severity: 'error',
     message: 'Unexpected token sequence',
     reason: Object.freeze({ _tag: 'UnexpectedTokens' }),
+    span,
+  })
+
+/** Creates the diagnostic for a future template expression start in primary position. */
+export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'parser',
+    code: reservedTemplateSyntaxCode,
+    severity: 'error',
+    message: 'Template syntax is reserved but not implemented',
+    reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' }),
     span,
   })
 

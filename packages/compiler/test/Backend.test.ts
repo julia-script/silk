@@ -150,7 +150,7 @@ it.effect('privately flattens structured match regions with deterministic member
 it.effect('realizes fixed arrays and checked mixed place reads from compiler-owned lanes', () =>
   Effect.gen(function* () {
     const source = `struct Pair { left: I32 right: I32 }
-fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`
     const first = yield* emit(source, { mode: 'release' })
     const second = yield* emit(source, { mode: 'release' })

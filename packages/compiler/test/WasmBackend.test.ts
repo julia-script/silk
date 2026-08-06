@@ -366,33 +366,33 @@ pub fn main() -> I32 { return choose(1, 42) }`,
   ['inferred fixed array', 'pub fn main() -> I32 { let values = [10, 42] return values[1] }'],
   [
     'dynamic fixed array index',
-    `fn choose(values: Array<I32, 3>, index: I32) -> I32 { return values[index] }
+    `fn choose(values: [I32; 3], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42, 90], 1) }`,
   ],
   [
     'nested fixed array index',
-    `fn choose(values: Array<Array<I32, 2>, 2>, outer: I32, inner: I32) -> I32 { return values[outer][inner] }
+    `fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 { return values[outer][inner] }
 pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
   ],
   [
     'indexed struct array field',
     `struct Pair { left: I32 right: I32 }
-fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
   ],
   [
     'negative array index traps',
-    `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+    `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], -1) }`,
   ],
   [
     'upper array index traps',
-    `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+    `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], 2) }`,
   ],
   [
     'zero-length array index traps',
-    `fn choose(values: Array<I32, 0>, index: I32) -> I32 { return values[index] }
+    `fn choose(values: [I32; 0], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([], 0) }`,
   ],
   ['division by zero traps', 'pub fn main() -> I32 { return I32.divide(1, 0) }'],

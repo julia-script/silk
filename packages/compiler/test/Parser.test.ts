@@ -1252,6 +1252,62 @@ it('parses arithmetic and equality by the closed precedence table', () => {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('reserves template element and fragment starts without consuming following syntax', () => {
+  const source =
+    'pub fn element() -> I32 { return <Button /> return 1 }\n' +
+    'pub fn fragment() -> I32 { return <> return 2 }\n' +
+    'pub fn after() -> I32 { return 3 }'
+  const result = parseText('memory/reserved-template-starts', source)
+  const declarations = directFunctionDeclarations(result.root)
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      reason: diagnostic.reason,
+    })),
+    [
+      { code: 'PAR0003', reason: { _tag: 'ReservedTemplateSyntax' } },
+      { code: 'PAR0003', reason: { _tag: 'ReservedTemplateSyntax' } },
+    ],
+  )
+  assert.strictEqual(declarations.length, 3)
+  assert.deepEqual(
+    declarations.map((declaration) => directTokenText(result, declaration, 'Identifier')),
+    ['element', 'fragment', 'after'],
+  )
+  assert.deepEqual(missingLeaves(declarations.at(-1) ?? result.root), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('preserves every relational operator after an existing left operand', () => {
+  const source =
+    'fn less() -> Bool { return 1 < 2 }\n' +
+    'fn lessEqual() -> Bool { return 1 <= 2 }\n' +
+    'fn greater() -> Bool { return 2 > 1 }\n' +
+    'fn greaterEqual() -> Bool { return 2 >= 1 }'
+  const result = parseText('memory/relational-reservation-boundary', source)
+  const expressions = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'InfixExpression',
+  )
+  const relationalKinds: ReadonlyArray<Token.TokenKind> = [
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+  ]
+
+  assert.deepEqual(
+    expressions.flatMap((expression) =>
+      relationalKinds.filter((kind) => SyntaxTree.directToken(expression, kind) !== undefined),
+    ),
+    ['Less', 'LessEqual', 'Greater', 'GreaterEqual'],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
 it('parses grouping and right-associative prefix expressions losslessly', () => {
   const source = 'pub fn main(value: I32) -> I32 { return -(-(value + 1)) }'
   const result = parseText('memory/operator-prefix', source)

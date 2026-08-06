@@ -12,7 +12,7 @@ const snapshot = (source: string) => Analysis.ofSource('fixed-array-mir/main', a
 it.effect('lowers construction and a mixed indexed-field chain to one checked place read', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Pair { left: I32 right: I32 }
-fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 {
   let values = [Pair { left: 10, right: 11 }, Pair { left: 20, right: 21 }]
   return choose(move values, 1)
@@ -57,11 +57,10 @@ pub fn main() -> I32 {
 
 it.effect('preserves complete nested arrays through calls and returns', () =>
   Effect.gen(function* () {
-    const self =
-      yield* snapshot(`fn identity(values: Array<Array<I32, 2>, 2>) -> Array<Array<I32, 2>, 2> {
+    const self = yield* snapshot(`fn identity(values: [[I32; 2]; 2]) -> [[I32; 2]; 2] {
   return values
 }
-fn choose(values: Array<Array<I32, 2>, 2>, outer: I32, inner: I32) -> I32 {
+fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 {
   return values[outer][inner]
 }
 pub fn main() -> I32 { return choose(identity([[1, 2], [3, 4]]), 1, 0) }`)
@@ -87,13 +86,13 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const negative =
-        yield* snapshot(`fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+        yield* snapshot(`fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 20], -1) }`)
       const upper =
-        yield* snapshot(`fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+        yield* snapshot(`fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 20], 2) }`)
       const empty =
-        yield* snapshot(`fn choose(values: Array<I32, 0>, index: I32) -> I32 { return values[index] }
+        yield* snapshot(`fn choose(values: [I32; 0], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([], 0) }`)
 
       for (const [self, index, length] of [

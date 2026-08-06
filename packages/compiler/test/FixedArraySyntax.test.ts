@@ -23,14 +23,24 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
 
 it('parses recursive array types, complete literals, and mixed postfix chains losslessly', () => {
   const source = `struct Cell { value: I32 }
-fn read(matrix: Array<Array<Cell, 4>, 3>, row: I32, column: I32) -> I32 {
+fn read(matrix: [[Cell; 4]; 3], row: I32, column: I32) -> I32 {
   let values = [[Cell { value: 1 }],]
   return matrix[row][column].value
 }`
   const syntax = parse(source)
   const kinds = descendants(syntax.root).map((node) => node.kind)
+  const fixedArrays = descendants(syntax.root).filter((node) => node.kind === 'FixedArrayType')
 
-  assert.strictEqual(kinds.filter((kind) => kind === 'FixedArrayType').length, 2)
+  assert.strictEqual(fixedArrays.length, 2)
+  assert.strictEqual(
+    fixedArrays.every(
+      (node) =>
+        SyntaxTree.directToken(node, 'LeftBracket') !== undefined &&
+        SyntaxTree.directToken(node, 'Semicolon') !== undefined &&
+        SyntaxTree.directToken(node, 'RightBracket') !== undefined,
+    ),
+    true,
+  )
   assert.strictEqual(kinds.filter((kind) => kind === 'ArrayLiteralExpression').length, 2)
   assert.strictEqual(kinds.filter((kind) => kind === 'IndexProjectionExpression').length, 2)
   assert.include(kinds, 'FieldProjectionExpression')
@@ -47,8 +57,8 @@ fn read(matrix: Array<Array<Cell, 4>, 3>, row: I32, column: I32) -> I32 {
 
 it('contains missing array length and closing-bracket recovery', () => {
   const syntax = parse(
-    `struct Broken { values: Array<I32, > }
-pub fn main(values: Array<I32, 2>, index: I32) -> I32 { return values[index }`,
+    `struct Broken { values: [I32; ] }
+pub fn main(values: [I32; 2], index: I32) -> I32 { return values[index }`,
   )
   const missing = descendants(syntax.root)
     .flatMap((node) => node.children)
@@ -66,13 +76,59 @@ pub fn main(values: Array<I32, 2>, index: I32) -> I32 { return values[index }`,
   )
 })
 
+it('parses simple and zero-length fixed-array types', () => {
+  const syntax = parse('struct Arrays { values: [I32; 2] empty: [I32; 0] }')
+  const fixedArrays = descendants(syntax.root).filter((node) => node.kind === 'FixedArrayType')
+
+  assert.strictEqual(fixedArrays.length, 2)
+  assert.deepEqual(
+    fixedArrays.map((node) => {
+      const token = SyntaxTree.directToken(node, 'DecimalInteger')
+      if (token === undefined) return undefined
+      return String.fromCharCode(...Option.getOrThrow(SourceFile.slice(syntax.source, token.span)))
+    }),
+    ['2', '0'],
+  )
+  assert.deepEqual(syntax.parserDiagnostics, [])
+})
+
+it('recovers missing fixed-array separators and closing brackets locally', () => {
+  const missingSeparator = parse('struct Broken { values: [I32 2] }')
+  const missingBracket = parse('struct Broken { values: [I32; 2 }')
+
+  assert.include(
+    descendants(missingSeparator.root)
+      .flatMap((node) => node.children)
+      .filter(SyntaxTree.isMissingToken)
+      .map((token) => token.expected),
+    'Semicolon',
+  )
+  assert.include(
+    descendants(missingBracket.root)
+      .flatMap((node) => node.children)
+      .filter(SyntaxTree.isMissingToken)
+      .map((token) => token.expected),
+    'RightBracket',
+  )
+})
+
+it('rejects the former angle-bracketed array source spelling', () => {
+  const syntax = parse('struct Old { values: Array<I32, 4> }')
+
+  assert.strictEqual(
+    descendants(syntax.root).some((node) => node.kind === 'FixedArrayType'),
+    false,
+  )
+  assert.isAbove(syntax.parserDiagnostics.length, 0)
+})
+
 it.effect('resolves a namespace-qualified array element to canonical identity', () =>
   Effect.gen(function* () {
     const root = SourceFile.make(
       'app/Main',
       ascii(
         `import model.Token as Model { Token }
-pub fn keep(values: Array<Model.Token, 8>) -> Array<Model.Token, 8> { return values }
+pub fn keep(values: [Model.Token; 8]) -> [Model.Token; 8] { return values }
 pub fn main() -> I32 { return 0 }`,
       ),
     )

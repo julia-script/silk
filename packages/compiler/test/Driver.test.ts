@@ -144,7 +144,7 @@ it.effect('reports array layouts and keeps array failures in their owning phase'
 
     const mismatch = yield* compileSource(
       'array-mismatch',
-      'pub fn main() -> Array<I32, 2> { return [1] }',
+      'pub fn main() -> [I32; 2] { return [1] }',
     )
     assert.strictEqual(mismatch._tag, 'Rejected')
     assert.strictEqual(
@@ -154,7 +154,7 @@ it.effect('reports array layouts and keeps array failures in their owning phase'
 
     const unavailable = yield* compileSource(
       'array-unavailable-layout',
-      `fn consume(values: Array<Array<Array<I32, 2147483647>, 2147483647>, 0>) -> I32 { return 42 }
+      `fn consume(values: [[[I32; 2147483647]; 2147483647]; 0]) -> I32 { return 42 }
 pub fn main() -> I32 { return consume([]) }`,
     )
     assert.strictEqual(unavailable._tag, 'BackendFailed')

@@ -31,6 +31,7 @@ export type TokenKind =
   | 'LeftBracket'
   | 'RightBracket'
   | 'Colon'
+  | 'Semicolon'
   | 'Comma'
   | 'Equals'
   | 'EqualEqual'

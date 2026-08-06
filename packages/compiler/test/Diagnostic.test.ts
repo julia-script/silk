@@ -68,6 +68,25 @@ it('orders same-span same-phase diagnostics by stable code', () => {
   )
 })
 
+it('describes reserved template syntax with a stable parser diagnostic', () => {
+  const diagnostic = Diagnostic.reservedTemplateSyntax(spanAt(8, 18))
+
+  assert.deepEqual(
+    {
+      phase: diagnostic.phase,
+      code: diagnostic.code,
+      message: diagnostic.message,
+      reason: diagnostic.reason,
+    },
+    {
+      phase: 'parser',
+      code: 'PAR0003',
+      message: 'Template syntax is reserved but not implemented',
+      reason: { _tag: 'ReservedTemplateSyntax' },
+    },
+  )
+})
+
 it('assigns identity ordinals among equal phase, code, and span', () => {
   const span = spanAt(0, 1)
   const equal = Diagnostic.unknownFunction('twice', span)

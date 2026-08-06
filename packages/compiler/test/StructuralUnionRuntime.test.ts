@@ -157,7 +157,7 @@ it.effect('transports unions through returns, arrays, structs, and replacement',
 struct B { value: I32 }
 struct Box { value: A | B }
 fn make() -> A | B { return A {} }
-fn accept(values: Array<A | B, 2>) -> I32 { return 42 }
+fn accept(values: [A | B; 2]) -> I32 { return 42 }
 pub fn main() -> I32 {
   let mut box = Box { value: make() }
   box.value = B { value: 7 }

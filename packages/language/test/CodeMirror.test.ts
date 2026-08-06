@@ -56,6 +56,10 @@ it('highlights the complete match surface through compiler tokens', () => {
   assert.include(spellings(doc, 'identifier'), '_')
 })
 
+it('highlights bracketed fixed-array punctuation', () => {
+  assert.deepStrictEqual(spellings('[I32; 4]', 'punctuation'), ['[', ';', ']'])
+})
+
 it('classifies Never and executable scalar names as builtin types', () => {
   assert.deepStrictEqual(spellings('Never | I32 | Bool', 'type'), ['Never', 'I32', 'Bool'])
 })

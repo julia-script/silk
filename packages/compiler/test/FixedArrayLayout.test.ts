@@ -13,8 +13,8 @@ const snapshot = (source: string) =>
 it.effect('plans repeated layouts and canonical mixed selectors once before MIR', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Pair { left: I32 right: Bool }
-struct Bucket { pairs: Array<Pair, 2> tail: I32 }
-fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+struct Bucket { pairs: [Pair; 2] tail: I32 }
+fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 {
   let values = [Pair { left: 1, right: true }, Pair { left: 2, right: false }]
   return choose(values, 1)
@@ -60,7 +60,7 @@ pub fn main() -> I32 {
 it.effect('retains zero-length identity, element alignment, and zero lanes', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Token { kind: I32 }
-fn empty() -> Array<Token, 0> { return [] }
+fn empty() -> [Token; 0] { return [] }
 pub fn main() -> I32 { let values = empty() return 0 }`)
     const selected = Analysis.layoutOf(self)
     assert.strictEqual(selected._tag, 'Available')
@@ -80,8 +80,8 @@ pub fn main() -> I32 { let values = empty() return 0 }`)
 
 it.effect('keeps unused arrays out of the runtime plan and retains overflow as catalog data', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Huge { values: Array<Array<I32, 2147483647>, 2147483647> }
-fn unused(values: Array<Bool, 8>) -> Array<Bool, 8> { return values }
+    const self = yield* snapshot(`struct Huge { values: [[I32; 2147483647]; 2147483647] }
+fn unused(values: [Bool; 8]) -> [Bool; 8] { return values }
 pub fn main() -> I32 { return 0 }`)
     const catalog = Analysis.layoutCatalogOf(self)
     const plan = Analysis.layoutOf(self)

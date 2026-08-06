@@ -406,7 +406,7 @@ const nestedAnalysis = semanticModule.elaborateModule(inputOf(nestedSnapshot));
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
 const nestedEvaluation = api.Analysis.evaluate(nestedSnapshot);
-const arrayText = 'struct Pair { left: I32 right: I32 }\\nfn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }\\npub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }';
+const arrayText = 'struct Pair { left: I32 right: I32 }\\nfn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }\\npub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }';
 const arrayBytes = new TextEncoder().encode(arrayText);
 const nativeArraySnapshot = Effect.runSync(
   api.Analysis.ofSource('memory/packed-array', arrayBytes, 'aarch64-apple-darwin'),

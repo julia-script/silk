@@ -431,12 +431,11 @@ const printNode = (
     }
     case 'FixedArrayType':
       return FormatDocument.concat(
-        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
-        printToken(context, tokenOf(node, 'Less')),
+        printToken(context, tokenOf(node, 'LeftBracket'), prefix, preserveBlank),
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
-        printToken(context, tokenOf(node, 'Comma')),
+        printToken(context, tokenOf(node, 'Semicolon')),
         printToken(context, tokenOf(node, 'DecimalInteger'), FormatDocument.text(' ')),
-        printToken(context, tokenOf(node, 'Greater')),
+        printToken(context, tokenOf(node, 'RightBracket')),
       )
     case 'ParenthesizedType':
       return FormatDocument.concat(
