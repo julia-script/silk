@@ -242,6 +242,11 @@ const emitOperation = (
         operation.fields.flatMap((field) => [...slots(field.value)]),
         slots(operation.destination),
       )
+    case 'ConstructArray':
+      return copy(
+        operation.elements.flatMap((element) => [...slots(element)]),
+        slots(operation.destination),
+      )
     case 'Project': {
       const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
       const sourceSlots = slots(operation.source)
@@ -249,6 +254,7 @@ const emitOperation = (
         const field = lane.path.at(0)
         const source = sourceSlots.at(index)
         return field !== undefined &&
+          field._tag === 'FieldId' &&
           source !== undefined &&
           field.ordinal === operation.field.ordinal &&
           field.struct.sourceId === operation.field.struct.sourceId &&
@@ -257,6 +263,102 @@ const emitOperation = (
           : []
       })
       return copy(projected, slots(operation.destination))
+    }
+    case 'ReadPlace': {
+      const sourceLanes = layout.lanes.at(operation.root.ordinal) ?? []
+      const sourceSlots = slots(operation.root)
+      const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
+      const destinationSlots = slots(operation.destination)
+      const instructions: Array<Instr.Instr> = []
+      for (const selector of operation.selectors) {
+        if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
+        instructions.push(
+          Instr.localGet(scalar(selector.index.local)),
+          Instr.i32Const(selector.length),
+          Instr.op('i32.lt_u'),
+          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+        )
+      }
+      for (const [destinationOrdinal, destinationLane] of destinationLanes.entries()) {
+        const candidates = sourceLanes.flatMap((sourceLane, sourceOrdinal) => {
+          if (sourceLane.path.length !== operation.selectors.length + destinationLane.path.length) {
+            return []
+          }
+          const conditions: Array<{ readonly local: Mir.LocalId; readonly element: number }> = []
+          for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
+            const physical = sourceLane.path.at(selectorOrdinal)
+            if (physical === undefined) return []
+            if (selector._tag === 'FieldSelector') {
+              if (
+                physical._tag !== 'FieldId' ||
+                physical.ordinal !== selector.field.ordinal ||
+                physical.struct.sourceId !== selector.field.struct.sourceId ||
+                physical.struct.ordinal !== selector.field.struct.ordinal
+              ) {
+                return []
+              }
+            } else {
+              if (physical._tag !== 'ElementSelector') return []
+              if (selector.index._tag === 'Proven' && physical.index !== selector.index.value) {
+                return []
+              }
+              if (selector.index._tag === 'Runtime') {
+                conditions.push(
+                  Object.freeze({ local: selector.index.local, element: physical.index }),
+                )
+              }
+            }
+          }
+          const suffix = sourceLane.path.slice(operation.selectors.length)
+          const sameSuffix = suffix.every((physical, ordinal) => {
+            const expected = destinationLane.path.at(ordinal)
+            if (expected === undefined || physical._tag !== expected._tag) return false
+            return physical._tag === 'ElementSelector'
+              ? expected._tag === 'ElementSelector' && physical.index === expected.index
+              : expected._tag === 'FieldId' &&
+                  physical.ordinal === expected.ordinal &&
+                  physical.struct.sourceId === expected.struct.sourceId &&
+                  physical.struct.ordinal === expected.struct.ordinal
+          })
+          const source = sourceSlots.at(sourceOrdinal)
+          return sameSuffix && source !== undefined ? [Object.freeze({ source, conditions })] : []
+        })
+        const first = candidates.at(0)
+        const destination = destinationSlots.at(destinationOrdinal)
+        if (
+          first === undefined &&
+          destination !== undefined &&
+          operation.selectors.some(
+            (selector) => selector._tag === 'ElementSelector' && selector.length === 0,
+          )
+        ) {
+          instructions.push(Instr.i32Const(0), Instr.localSet(destination))
+          continue
+        }
+        if (first === undefined || destination === undefined) {
+          throw new RangeError(
+            `Wasm backend could not realize place-read lane ${destinationOrdinal}`,
+          )
+        }
+        let selection: ReadonlyArray<Instr.Instr> = [Instr.localGet(first.source)]
+        for (const candidate of candidates.slice(1)) {
+          const condition = candidate.conditions.flatMap((element, ordinal) => [
+            Instr.localGet(scalar(element.local)),
+            Instr.i32Const(element.element),
+            Instr.op('i32.eq'),
+            ...(ordinal === 0 ? [] : [Instr.op('i32.and')]),
+          ])
+          if (condition.length === 0) continue
+          selection = [
+            Instr.localGet(candidate.source),
+            ...selection,
+            ...condition,
+            Instr.op('select'),
+          ]
+        }
+        instructions.push(...selection, Instr.localSet(destination))
+      }
+      return instructions
     }
     case 'Drop':
       // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
@@ -466,7 +568,10 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     // WebAssembly realizes both canonical scalar entries as its four-byte i32 value type.
     if (
       program.layout.entries.some(
-        (entry) => entry.representation._tag !== 'Aggregate' && entry.representation.bits !== 32,
+        (entry) =>
+          (entry.representation._tag === 'SignedInteger' ||
+            entry.representation._tag === 'Boolean') &&
+          entry.representation.bits !== 32,
       )
     ) {
       return yield* new Backend.BackendError({

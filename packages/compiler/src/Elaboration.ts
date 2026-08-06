@@ -212,6 +212,66 @@ export interface FieldProjectionExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One source-ordered array element with contextual compatibility retained independently. */
+export interface ArrayElementFact {
+  readonly _tag: 'ArrayElement'
+  readonly ordinal: number
+  readonly expression: ExpressionFact
+  readonly expected?: SemanticType
+  readonly compatibility:
+    | { readonly _tag: 'Compatible' }
+    | {
+        readonly _tag: 'TypeMismatch'
+        readonly expected: SemanticType
+        readonly actual: SemanticType
+      }
+    | { readonly _tag: 'Unavailable' }
+  readonly syntax: SyntaxTree.Node
+}
+
+export type ArrayLiteralState =
+  | { readonly _tag: 'Complete'; readonly type: Type.FixedArray }
+  | { readonly _tag: 'MissingContext' }
+  | { readonly _tag: 'LengthMismatch'; readonly expected: number; readonly actual: number }
+  | { readonly _tag: 'IncompatibleElements' }
+  | { readonly _tag: 'Unavailable' }
+
+/** One complete-or-unavailable fixed-array literal and every retained element fact. */
+export interface ArrayLiteralExpressionFact {
+  readonly _tag: 'ArrayLiteral'
+  readonly elements: ReadonlyArray<ArrayElementFact>
+  readonly expected?: Type.FixedArray
+  readonly elementType?: SemanticType
+  readonly length: number
+  readonly state: ArrayLiteralState
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+export type BoundsFact =
+  | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }
+  | {
+      readonly _tag: 'Invalid'
+      readonly index: number
+      readonly length: number
+      readonly cause: Diagnostic.Identity
+    }
+  | { readonly _tag: 'Runtime'; readonly length: number }
+  | { readonly _tag: 'Unavailable' }
+
+/** One typed checked array-place projection. */
+export interface IndexProjectionExpressionFact {
+  readonly _tag: 'IndexProjection'
+  readonly subject: ExpressionFact
+  readonly index: ExpressionFact
+  readonly array?: Type.FixedArray
+  readonly elementType?: SemanticType
+  readonly access: 'CopyRead' | 'ConsumeRequested'
+  readonly bounds: BoundsFact
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One `true`/`false` literal expression fact. */
 export interface BooleanExpressionFact {
   readonly _tag: 'Boolean'
@@ -273,7 +333,9 @@ export type ExpressionFact =
   | IdentifierExpressionFact
   | MoveExpressionFact
   | StructLiteralExpressionFact
+  | ArrayLiteralExpressionFact
   | FieldProjectionExpressionFact
+  | IndexProjectionExpressionFact
   | GroupedExpressionFact
   | OperatorExpressionFact
   | PipelineExpressionFact
@@ -411,7 +473,9 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IdentifierExpression',
   'MoveExpression',
   'StructLiteralExpression',
+  'ArrayLiteralExpression',
   'FieldProjectionExpression',
+  'IndexProjectionExpression',
   'CallExpression',
   'GroupedExpression',
   'PrefixExpression',
@@ -427,7 +491,9 @@ const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is Syntax
   (element.kind === 'CallExpression' ||
     element.kind === 'MoveExpression' ||
     element.kind === 'StructLiteralExpression' ||
+    element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
+    element.kind === 'IndexProjectionExpression' ||
     element.kind === 'GroupedExpression' ||
     element.kind === 'PrefixExpression' ||
     element.kind === 'InfixExpression' ||
@@ -814,6 +880,14 @@ const analyzeStructLiteral = (
     (initializer): StructInitializerFact => {
       const nameToken = directToken(initializer, 'Identifier')
       const name = nameToken === undefined ? undefined : spelling(source, nameToken)
+      const fieldLookup =
+        struct === undefined || name === undefined
+          ? undefined
+          : DeclarationIndex.lookupField(struct.fields, name)
+      const expected =
+        fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
+          ? fieldLookup.field.declaredType.type
+          : undefined
       const expressionNode = initializer.children.find(isExpressionNode)
       if (expressionNode === undefined) {
         throw new RangeError('Struct initializer requires an expression node')
@@ -825,16 +899,13 @@ const analyzeStructLiteral = (
         declaration,
         scope,
         resolution,
+        expected,
       )
       if (expression === undefined) {
         throw new RangeError(`Cannot analyze struct initializer ${expressionNode.kind}`)
       }
       diagnostics.push(...expression.diagnostics)
       let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
-      const fieldLookup =
-        struct === undefined || name === undefined
-          ? undefined
-          : DeclarationIndex.lookupField(struct.fields, name)
       if (name !== undefined && nameToken !== undefined && struct !== undefined) {
         const previous = seen.get(name)
         if (fieldLookup?._tag !== 'Resolved') {
@@ -934,6 +1005,192 @@ const analyzeStructLiteral = (
   })
 }
 
+const analyzeArrayLiteral = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  expected?: SemanticType,
+): ExpressionResult => {
+  const expectedArray = expected !== undefined && Type.isFixedArray(expected) ? expected : undefined
+  const elementNodes = node.children.filter(isExpressionNode)
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  let elementType = expectedArray?.element
+  const elements = elementNodes.map((elementNode, ordinal): ArrayElementFact => {
+    const element = analyzeExpression(
+      source,
+      elementNode,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      elementType,
+    )
+    if (element === undefined)
+      throw new RangeError(`Cannot analyze array element ${elementNode.kind}`)
+    diagnostics.push(...element.diagnostics)
+    if (elementType === undefined && element.type !== undefined) elementType = element.type
+    let compatibility: ArrayElementFact['compatibility']
+    if (element.type === undefined || elementType === undefined) {
+      compatibility = Object.freeze({ _tag: 'Unavailable' })
+    } else if (!Type.equals(elementType, element.type)) {
+      const diagnostic = Diagnostic.arrayElementTypeMismatch(
+        Type.encode(elementType),
+        Type.encode(element.type),
+        ordinal,
+        elementNode.span,
+      )
+      diagnostics.push(diagnostic)
+      compatibility = Object.freeze({
+        _tag: 'TypeMismatch',
+        expected: elementType,
+        actual: element.type,
+      })
+    } else {
+      compatibility = Object.freeze({ _tag: 'Compatible' })
+    }
+    return Object.freeze({
+      _tag: 'ArrayElement',
+      ordinal,
+      expression: element.fact,
+      ...(elementType === undefined ? {} : { expected: elementType }),
+      compatibility,
+      syntax: elementNode,
+    })
+  })
+
+  const actualLength = elements.length
+  let state: ArrayLiteralState
+  if (elementType === undefined && actualLength === 0) {
+    const diagnostic = Diagnostic.emptyArrayNeedsContext(node.span)
+    diagnostics.push(diagnostic)
+    state = Object.freeze({ _tag: 'MissingContext' })
+  } else if (expectedArray !== undefined && expectedArray.length !== actualLength) {
+    const diagnostic = Diagnostic.arrayLengthMismatch(expectedArray.length, actualLength, node.span)
+    diagnostics.push(diagnostic)
+    state = Object.freeze({
+      _tag: 'LengthMismatch',
+      expected: expectedArray.length,
+      actual: actualLength,
+    })
+  } else if (elements.some((element) => element.compatibility._tag === 'TypeMismatch')) {
+    state = Object.freeze({ _tag: 'IncompatibleElements' })
+  } else if (
+    elementType === undefined ||
+    elements.some((element) => element.compatibility._tag === 'Unavailable') ||
+    !SyntaxTree.isAvailableSyntax(node)
+  ) {
+    state = Object.freeze({ _tag: 'Unavailable' })
+  } else {
+    state = Object.freeze({
+      _tag: 'Complete',
+      type: expectedArray ?? Type.fixedArray(elementType, actualLength),
+    })
+  }
+  const type =
+    state._tag === 'Complete' ? availableExpressionType(state.type) : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'ArrayLiteral',
+      elements: Object.freeze(elements),
+      ...(expectedArray === undefined ? {} : { expected: expectedArray }),
+      ...(elementType === undefined ? {} : { elementType }),
+      length: actualLength,
+      state,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
+const analyzeIndexProjection = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const expressions = node.children.filter(isExpressionNode)
+  const subjectNode = expressions.at(0)
+  const indexNode = expressions.at(1)
+  if (subjectNode === undefined || indexNode === undefined) {
+    throw new RangeError('Index projection requires subject and index expressions')
+  }
+  const subject = analyzeExpression(
+    source,
+    subjectNode,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+  )
+  const index = analyzeExpression(
+    source,
+    indexNode,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    'I32',
+  )
+  if (subject === undefined || index === undefined) {
+    throw new RangeError('Cannot analyze index projection operands')
+  }
+  const diagnostics: Array<Diagnostic.Diagnostic> = [...subject.diagnostics, ...index.diagnostics]
+  const array =
+    subject.type !== undefined && Type.isFixedArray(subject.type) ? subject.type : undefined
+  if (subject.type !== undefined && array === undefined) {
+    diagnostics.push(Diagnostic.indexOnNonArray(Type.encode(subject.type), subjectNode.span))
+  }
+  if (index.type !== undefined && index.type !== 'I32') {
+    diagnostics.push(Diagnostic.indexNotI32(Type.encode(index.type), indexNode.span))
+  }
+  let bounds: BoundsFact = Object.freeze({ _tag: 'Unavailable' })
+  if (array !== undefined && index.type === 'I32') {
+    const literal =
+      index.fact._tag === 'Integer' && index.fact.integer._tag === 'Available'
+        ? index.fact.integer.value
+        : undefined
+    if (literal === undefined) bounds = Object.freeze({ _tag: 'Runtime', length: array.length })
+    else if (literal < 0 || literal >= array.length) {
+      const diagnostic = Diagnostic.indexOutOfBounds(literal, array.length, indexNode.span)
+      diagnostics.push(diagnostic)
+      bounds = Object.freeze({
+        _tag: 'Invalid',
+        index: literal,
+        length: array.length,
+        cause: Diagnostic.identity(diagnostic),
+      })
+    } else bounds = Object.freeze({ _tag: 'Proven', index: literal, length: array.length })
+  }
+  const available =
+    array !== undefined &&
+    index.type === 'I32' &&
+    bounds._tag !== 'Invalid' &&
+    bounds._tag !== 'Unavailable' &&
+    SyntaxTree.isAvailableSyntax(node)
+  const type = available ? availableExpressionType(array.element) : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'IndexProjection',
+      subject: subject.fact,
+      index: index.fact,
+      ...(array === undefined ? {} : { array, elementType: array.element }),
+      access: 'CopyRead',
+      bounds,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
 const analyzeProjection = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -1018,9 +1275,18 @@ const analyzeArgumentNodes = (
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  expectedTypes: ReadonlyArray<SemanticType | undefined> = Object.freeze([]),
 ): ArgumentsResult => {
-  const analyzed = nodes.flatMap((element): ReadonlyArray<ExpressionResult> => {
-    const result = analyzeExpression(source, element, declarations, declaration, scope, resolution)
+  const analyzed = nodes.flatMap((element, ordinal): ReadonlyArray<ExpressionResult> => {
+    const result = analyzeExpression(
+      source,
+      element,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expectedTypes.at(ordinal),
+    )
     return result === undefined ? [] : [result]
   })
   const facts = analyzed.map((result, ordinal) =>
@@ -1042,6 +1308,43 @@ function analyzeArguments(
   resolution: ResolutionContext,
 ): ArgumentsResult {
   const argumentList = childNode(call, 'ArgumentList')
+  const identifiers = call.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const first = identifiers.at(0)
+  const second = identifiers.at(1)
+  let target: DeclarationFact | undefined
+  if (first !== undefined && second === undefined) {
+    const name = spelling(source, first)
+    const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
+    const local = lookupDeclaration(declarations, name)
+    target =
+      resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration'
+        ? resolved.declaration
+        : local._tag === 'Resolved'
+          ? local.declaration
+          : undefined
+  } else if (first !== undefined && second !== undefined) {
+    const qualifier = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    if (qualifier._tag === 'Namespace') {
+      const member = DeclarationIndex.lookup(
+        resolution.index,
+        qualifier.module,
+        spelling(source, second),
+      )
+      target = member._tag === 'Resolved' ? member.declaration : undefined
+    }
+  }
+  const expectedTypes = Object.freeze(
+    (target?.parameters ?? []).map((parameter) =>
+      parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined,
+    ),
+  )
   return analyzeArgumentNodes(
     source,
     call,
@@ -1050,6 +1353,7 @@ function analyzeArguments(
     declaration,
     scope,
     resolution,
+    expectedTypes,
   )
 }
 
@@ -1495,12 +1799,13 @@ const analyzeGroupedExpression = (
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  expected?: SemanticType,
 ): ExpressionResult => {
   const child = node.children.find(isExpressionNode)
   const expression =
     child === undefined
       ? undefined
-      : analyzeExpression(source, child, declarations, declaration, scope, resolution)
+      : analyzeExpression(source, child, declarations, declaration, scope, resolution, expected)
   if (expression === undefined) {
     return Object.freeze({
       fact: Object.freeze({
@@ -1727,6 +2032,7 @@ function analyzeExpression(
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  expected?: SemanticType,
 ): ExpressionResult | undefined {
   if (node.kind === 'BooleanLiteralExpression') {
     const token = directToken(node, 'TrueKeyword') ?? directToken(node, 'FalseKeyword')
@@ -1777,12 +2083,28 @@ function analyzeExpression(
     return analyzeStructLiteral(source, node, declarations, declaration, scope, resolution)
   }
 
+  if (node.kind === 'ArrayLiteralExpression') {
+    return analyzeArrayLiteral(source, node, declarations, declaration, scope, resolution, expected)
+  }
+
   if (node.kind === 'FieldProjectionExpression') {
     return analyzeProjection(source, node, declarations, declaration, scope, resolution)
   }
 
+  if (node.kind === 'IndexProjectionExpression') {
+    return analyzeIndexProjection(source, node, declarations, declaration, scope, resolution)
+  }
+
   if (node.kind === 'GroupedExpression') {
-    return analyzeGroupedExpression(source, node, declarations, declaration, scope, resolution)
+    return analyzeGroupedExpression(
+      source,
+      node,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expected,
+    )
   }
 
   if (node.kind === 'PrefixExpression' || node.kind === 'InfixExpression') {
@@ -2189,6 +2511,9 @@ const analyzeStatements = (
         context.declaration,
         scope,
         context.resolution,
+        context.declaration.returnType._tag === 'Resolved'
+          ? context.declaration.returnType.type
+          : undefined,
       )
       if (expression === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
@@ -2319,7 +2644,7 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     return Object.freeze({
       _tag: 'Move',
       subject:
-        subject._tag === 'Project'
+        subject._tag === 'Project' || subject._tag === 'IndexPlace'
           ? Object.freeze({ ...subject, access: 'ConsumeRequested' as const })
           : subject,
       type: fact.type.type,
@@ -2357,6 +2682,17 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
       span: fact.syntax.span,
     })
   }
+  if (fact._tag === 'ArrayLiteral') {
+    if (fact.state._tag !== 'Complete' || fact.type._tag !== 'Available') {
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    }
+    return Object.freeze({
+      _tag: 'ArrayConstruct',
+      elements: Object.freeze(fact.elements.map((element) => hirExpression(element.expression))),
+      type: fact.state.type,
+      span: fact.syntax.span,
+    })
+  }
   if (fact._tag === 'FieldProjection') {
     if (
       fact.nominal === undefined ||
@@ -2377,6 +2713,34 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
       nominal: fact.nominal,
       field: fact.state.field.id,
       access: 'CopyRead',
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'IndexProjection') {
+    if (
+      fact.array === undefined ||
+      fact.type._tag !== 'Available' ||
+      (fact.bounds._tag !== 'Proven' && fact.bounds._tag !== 'Runtime')
+    ) {
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: fact.syntax.span,
+        ...(fact.bounds._tag === 'Invalid' ? { cause: fact.bounds.cause } : {}),
+      })
+    }
+    const subject = hirExpression(fact.subject)
+    const index = hirExpression(fact.index)
+    if (subject._tag === 'Unavailable' || index._tag === 'Unavailable') {
+      return subject._tag === 'Unavailable' ? subject : index
+    }
+    return Object.freeze({
+      _tag: 'IndexPlace',
+      subject,
+      index,
+      array: fact.array,
+      access: fact.access,
+      bounds: fact.bounds,
       type: fact.type.type,
       span: fact.syntax.span,
     })

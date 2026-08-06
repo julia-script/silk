@@ -18,12 +18,16 @@ export type Type =
   | { readonly _tag: 'I32' }
   | { readonly _tag: 'Bool' }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
+  | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
 
 /** Converts a MIR logical type to the shared semantic type vocabulary. */
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
-  self._tag === 'Nominal' ? self.type : self._tag
+  self._tag === 'Nominal' || self._tag === 'FixedArray' ? self.type : self._tag
 
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
+
+const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
+  SilkType.isBuiltin(type) || (SilkType.isFixedArray(type) && isCopyType(type.element))
 
 /** One ordinal-indexed virtual register local to a function. */
 export interface LocalId {
@@ -56,6 +60,21 @@ export type BinaryOperator =
   | 'LessOrEqual'
   | 'GreaterThan'
   | 'GreaterOrEqual'
+
+export type PlaceSelector =
+  | {
+      readonly _tag: 'FieldSelector'
+      readonly field: DeclarationIndex.FieldId
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ElementSelector'
+      readonly length: number
+      readonly index:
+        | { readonly _tag: 'Proven'; readonly value: number }
+        | { readonly _tag: 'Runtime'; readonly local: LocalId }
+      readonly provenance: Provenance
+    }
 
 /** One MIR operation. */
 export type Operation =
@@ -105,10 +124,25 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'ConstructArray'
+      readonly destination: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'FixedArray' }>
+      readonly elements: ReadonlyArray<LocalId>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Project'
       readonly destination: LocalId
       readonly source: LocalId
       readonly field: DeclarationIndex.FieldId
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ReadPlace'
+      readonly destination: LocalId
+      readonly root: LocalId
+      readonly selectors: ReadonlyArray<PlaceSelector>
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -185,8 +219,22 @@ const localUses = (block: Block): ReadonlyArray<LocalId> => [
     if (operation._tag === 'Construct') {
       return [operation.destination, ...operation.fields.map((field) => field.value)]
     }
+    if (operation._tag === 'ConstructArray') {
+      return [operation.destination, ...operation.elements]
+    }
     if (operation._tag === 'Project') {
       return [operation.destination, operation.source]
+    }
+    if (operation._tag === 'ReadPlace') {
+      return [
+        operation.destination,
+        operation.root,
+        ...operation.selectors.flatMap((selector) =>
+          selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
+            ? [selector.index.local]
+            : [],
+        ),
+      ]
     }
     return [operation.local]
   }),
@@ -297,6 +345,32 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
+        if (operation._tag === 'ConstructArray') {
+          const semantic = operation.type.type
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const valid =
+            operation.elements.length === semantic.length &&
+            destination !== undefined &&
+            SilkType.equals(semanticType(destination), semantic) &&
+            operation.elements.every((element) => {
+              const elementType = fn.localTypes.at(element.ordinal)
+              return (
+                elementType !== undefined &&
+                SilkType.equals(semanticType(elementType), semantic.element)
+              )
+            })
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                block: block.id,
+                detail: `construction of ${typeText(operation.type)} does not match its canonical element count or type`,
+              }),
+            )
+          }
+        }
         if (operation._tag === 'Project') {
           const sourceType = fn.localTypes.at(operation.source.ordinal)
           const sourceLayout =
@@ -315,6 +389,70 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 block: block.id,
                 detail: `projection field #${operation.field.ordinal} does not match its source type`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ReadPlace') {
+          const root = fn.localTypes.at(operation.root.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          let current = root === undefined ? undefined : semanticType(root)
+          let valid = root !== undefined && destination !== undefined
+          for (const selector of operation.selectors) {
+            if (selector._tag === 'FieldSelector') {
+              const sourceLayout =
+                current !== undefined && SilkType.isNominal(current)
+                  ? Layout.entry(self.layout, current)
+                  : undefined
+              const field =
+                sourceLayout?.representation._tag === 'Aggregate'
+                  ? sourceLayout.representation.fields.find(
+                      (candidate) =>
+                        candidate.id.ordinal === selector.field.ordinal &&
+                        candidate.id.struct.sourceId === selector.field.struct.sourceId &&
+                        candidate.id.struct.ordinal === selector.field.struct.ordinal,
+                    )
+                  : undefined
+              if (field === undefined) {
+                valid = false
+                current = undefined
+              } else current = field.type
+              continue
+            }
+            if (
+              current === undefined ||
+              !SilkType.isFixedArray(current) ||
+              current.length !== selector.length
+            ) {
+              valid = false
+              current = undefined
+              continue
+            }
+            if (selector.index._tag === 'Proven') {
+              if (selector.index.value < 0 || selector.index.value >= selector.length) valid = false
+            } else {
+              const indexType = fn.localTypes.at(selector.index.local.ordinal)
+              if (indexType?._tag !== 'I32') valid = false
+            }
+            current = current.element
+          }
+          if (
+            current === undefined ||
+            !isCopyType(current) ||
+            !SilkType.equals(current, semanticType(operation.type)) ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type))
+          ) {
+            valid = false
+          }
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                block: block.id,
+                detail: `checked place read does not match its root, selectors, or destination`,
               }),
             )
           }
@@ -378,8 +516,22 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = call ${targetText(operation.target)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
+    case 'ConstructArray':
+      return `${localText(operation.destination)} = construct-array ${typeText(operation.type)} [${operation.elements.map(localText).join(', ')}] ${provenanceText(operation.provenance)}`
     case 'Project':
       return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ReadPlace':
+      return `${localText(operation.destination)} = read-place ${localText(operation.root)}${operation.selectors
+        .map((selector) =>
+          selector._tag === 'FieldSelector'
+            ? `.#${selector.field.ordinal}`
+            : `[${
+                selector.index._tag === 'Proven'
+                  ? selector.index.value
+                  : localText(selector.index.local)
+              }/${selector.length}]`,
+        )
+        .join('')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Drop':
       return `drop ${localText(operation.local)} ${provenanceText(operation.provenance)}`
   }

@@ -29,3 +29,17 @@ it('orders built-in and nominal types by canonical keys', () => {
   assert.strictEqual(Type.isBuiltin('I32'), true)
   assert.strictEqual(Type.isNominal(values[0] ?? 'I32'), true)
 })
+
+it('keeps fixed-array element type and length in recursive structural identity', () => {
+  const three = Type.fixedArray('I32', 3)
+  const repeated = Type.fixedArray('I32', 3)
+  const four = Type.fixedArray('I32', 4)
+  const nested = Type.fixedArray(Type.fixedArray(Type.nominal('model/Token', 'Token'), 0), 2)
+
+  assert.strictEqual(Type.equals(three, repeated), true)
+  assert.strictEqual(Type.equals(three, four), false)
+  assert.strictEqual(Type.isFixedArray(three), true)
+  assert.strictEqual(Type.encode(nested), 'Array<Array<model/Token.Token, 0>, 2>')
+  assert.deepEqual(Type.nominals(nested).map(Type.encode), ['model/Token.Token'])
+  assert.strictEqual(Object.isFrozen(three), true)
+})

@@ -205,6 +205,59 @@ pub fn main() -> I32 { return check(I32.greaterOrEqual(3, 3)) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'array-inferred',
+    source: 'pub fn main() -> I32 { let values = [10, 42] return values[1] }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'array-contextual-empty',
+    source: `fn empty() -> Array<I32, 0> { return [] }
+fn consume(values: Array<I32, 0>) -> I32 { return 42 }
+pub fn main() -> I32 { return consume(empty()) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'array-nested',
+    source: `fn choose(values: Array<Array<I32, 2>, 2>, outer: I32, inner: I32) -> I32 { return values[outer][inner] }
+pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'array-indexed-struct-field',
+    source: `struct Pair { left: I32 right: I32 }
+fn choose(values: Array<Pair, 2>, index: I32) -> I32 { return values[index].left }
+pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'array-whole-move',
+    source: `struct Token { value: I32 }
+pub fn main() -> I32 {
+  let tokens = [Token { value: 10 }, Token { value: 42 }]
+  let moved = move tokens
+  return moved[1].value
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'array-negative-index-trap',
+    source: `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { return choose([10, 42], -1) }`,
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'array-upper-index-trap',
+    source: `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { return choose([10, 42], 2) }`,
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'array-zero-index-trap',
+    source: `fn choose(values: Array<I32, 0>, index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { return choose([], 0) }`,
+    expected: { _tag: 'Trap' },
+  },
+  {
     name: 'missing-entry',
     source: 'pub fn answer() -> I32 { return 42 }',
     expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },

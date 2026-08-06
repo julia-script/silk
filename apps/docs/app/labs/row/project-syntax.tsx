@@ -9,7 +9,7 @@
  */
 
 import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
-import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
+import type { Elaboration, Hir, SyntaxFile, Type } from '@silk-effect/compiler'
 import type { FlowModel } from './flow-model'
 import type { RowModel, RowTone, Span } from './row'
 
@@ -185,8 +185,12 @@ const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
   }
 }
 
-const hirTypeText = (type: string | { readonly module: string; readonly name: string }): string =>
-  typeof type === 'string' ? type : `${type.module}.${type.name}`
+const hirTypeText = (type: Type.Type): string =>
+  typeof type === 'string'
+    ? type
+    : type._tag === 'NominalType'
+      ? `${type.module}.${type.name}`
+      : `Array<${hirTypeText(type.element)}, ${type.length}>`
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -201,8 +205,12 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return 'move'
     case 'Construct':
       return `construct ${hirTypeText(expression.nominal)}`
+    case 'ArrayConstruct':
+      return `array ${hirTypeText(expression.type)} · ${expression.elements.length} elements`
     case 'Project':
       return `project ${hirTypeText(expression.nominal)}.#${expression.field.ordinal}`
+    case 'IndexPlace':
+      return `index ${hirTypeText(expression.array)} · ${expression.bounds._tag.toLowerCase()}`
     case 'Call':
       return `call ${expression.target.name}`
     case 'BuiltinCall':
@@ -238,11 +246,20 @@ export const hirRows = (
     if (node._tag === 'Move' || node._tag === 'Project') {
       expression(node.subject, depth + 1, `${path}.s`)
     }
+    if (node._tag === 'IndexPlace') {
+      expression(node.subject, depth + 1, `${path}.s`)
+      expression(node.index, depth + 1, `${path}.i`)
+    }
     if (node._tag === 'Construct') {
       // Canonical storage order, one child per field — the reordering from source order is the
       // struct-values pane's story; here the construct is just a typed expression tree.
       node.fields.forEach(({ field, value }) =>
         expression(value, depth + 1, `${path}.f${field.ordinal}`),
+      )
+    }
+    if (node._tag === 'ArrayConstruct') {
+      node.elements.forEach((element, index) =>
+        expression(element, depth + 1, `${path}.e${index}`),
       )
     }
   }

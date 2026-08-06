@@ -79,6 +79,12 @@ export const structFieldTypeMismatchCode = 'SEM0025' as const
 export const projectionOnNonStructCode = 'SEM0026' as const
 export const unknownProjectedFieldCode = 'SEM0027' as const
 export const inaccessibleProjectedFieldCode = 'SEM0028' as const
+export const emptyArrayNeedsContextCode = 'SEM0029' as const
+export const arrayElementTypeMismatchCode = 'SEM0030' as const
+export const arrayLengthMismatchCode = 'SEM0031' as const
+export const indexOnNonArrayCode = 'SEM0032' as const
+export const indexNotI32Code = 'SEM0033' as const
+export const indexOutOfBoundsCode = 'SEM0034' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -121,6 +127,12 @@ export type Code =
   | typeof projectionOnNonStructCode
   | typeof unknownProjectedFieldCode
   | typeof inaccessibleProjectedFieldCode
+  | typeof emptyArrayNeedsContextCode
+  | typeof arrayElementTypeMismatchCode
+  | typeof arrayLengthMismatchCode
+  | typeof indexOnNonArrayCode
+  | typeof indexNotI32Code
+  | typeof indexOutOfBoundsCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -222,6 +234,21 @@ export type Reason =
   | { readonly _tag: 'ProjectionOnNonStruct'; readonly actual: string }
   | { readonly _tag: 'UnknownProjectedField'; readonly type: string; readonly field: string }
   | { readonly _tag: 'InaccessibleProjectedField'; readonly type: string; readonly field: string }
+  | { readonly _tag: 'EmptyArrayNeedsContext' }
+  | {
+      readonly _tag: 'ArrayElementTypeMismatch'
+      readonly expected: string
+      readonly actual: string
+      readonly index: number
+    }
+  | {
+      readonly _tag: 'ArrayLengthMismatch'
+      readonly expected: number
+      readonly actual: number
+    }
+  | { readonly _tag: 'IndexOnNonArray'; readonly actual: string }
+  | { readonly _tag: 'IndexNotI32'; readonly actual: string }
+  | { readonly _tag: 'IndexOutOfBounds'; readonly index: number; readonly length: number }
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
@@ -634,6 +661,85 @@ export const inaccessibleProjectedField = (
     severity: 'error',
     message: `${type}.${field} is private`,
     reason: Object.freeze({ _tag: 'InaccessibleProjectedField', type, field }),
+    span,
+  })
+
+export const emptyArrayNeedsContext = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: emptyArrayNeedsContextCode,
+    severity: 'error',
+    message: 'An empty array literal needs an expected Array type',
+    reason: Object.freeze({ _tag: 'EmptyArrayNeedsContext' }),
+    span,
+  })
+
+export const arrayElementTypeMismatch = (
+  expected: string,
+  actual: string,
+  index: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: arrayElementTypeMismatchCode,
+    severity: 'error',
+    message: `Array element ${index} expects ${expected} but received ${actual}`,
+    reason: Object.freeze({ _tag: 'ArrayElementTypeMismatch', expected, actual, index }),
+    span,
+  })
+
+export const arrayLengthMismatch = (
+  expected: number,
+  actual: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: arrayLengthMismatchCode,
+    severity: 'error',
+    message: `Array literal expects ${expected} elements but received ${actual}`,
+    reason: Object.freeze({ _tag: 'ArrayLengthMismatch', expected, actual }),
+    span,
+  })
+
+export const indexOnNonArray = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: indexOnNonArrayCode,
+    severity: 'error',
+    message: `Cannot index ${actual}`,
+    reason: Object.freeze({ _tag: 'IndexOnNonArray', actual }),
+    span,
+  })
+
+export const indexNotI32 = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: indexNotI32Code,
+    severity: 'error',
+    message: `Array index must be I32, found ${actual}`,
+    reason: Object.freeze({ _tag: 'IndexNotI32', actual }),
+    span,
+  })
+
+export const indexOutOfBounds = (
+  index: number,
+  length: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: indexOutOfBoundsCode,
+    severity: 'error',
+    message: `Array index ${index} is outside length ${length}`,
+    reason: Object.freeze({ _tag: 'IndexOutOfBounds', index, length }),
     span,
   })
 

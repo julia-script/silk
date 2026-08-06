@@ -97,6 +97,42 @@ it.effect('evaluates and answers ownership through the single-source convenience
   }),
 )
 
+it.effect('answers immutable fixed-array facts across semantics, layout, MIR, and evaluation', () =>
+  Effect.gen(function* () {
+    const source = `fn choose(values: Array<I32, 2>, index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { return choose([10, 42], 1) }`
+    const self = yield* Analysis.ofSource(
+      'memory/array-facade',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    const types = Analysis.fixedArrayTypesOf(self, 'memory/array-facade')
+    const literals = Analysis.arrayLiteralsOf(self, 'memory/array-facade')
+    const indexes = Analysis.indexProjectionsOf(self, 'memory/array-facade')
+    const layouts = Analysis.repeatedLayoutsOf(self)
+    const shapes = Analysis.arrayCallingShapesOf(self)
+    const outcome = Analysis.evaluate(self)
+    const events = Analysis.arrayTraceEventsOf(outcome)
+
+    assert.deepEqual(types.map(Type.encode), ['Array<I32, 2>'])
+    assert.strictEqual(literals.at(0)?.state._tag, 'Complete')
+    assert.strictEqual(literals.at(0)?.elements.length, 2)
+    assert.strictEqual(indexes.at(0)?.bounds._tag, 'Runtime')
+    assert.strictEqual(layouts.at(0)?.representation._tag, 'Repeated')
+    assert.deepEqual(
+      shapes.at(0)?.lanes.map((lane) => lane.path.at(0)?._tag),
+      ['ElementSelector', 'ElementSelector'],
+    )
+    assert.deepEqual(
+      events.map((event) => event._tag),
+      ['ArrayConstruct', 'PlaceRead'],
+    )
+    assert.strictEqual(Object.isFrozen(types), true)
+    assert.strictEqual(Object.isFrozen(literals), true)
+    assert.strictEqual(Object.isFrozen(events), true)
+  }),
+)
+
 it.effect(
   'answers nominal declaration, field, dependency, and layout facts through the facade',
   () =>

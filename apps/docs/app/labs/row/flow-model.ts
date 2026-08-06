@@ -1,7 +1,11 @@
 import type { BootstrapEvaluation, Elaboration, SourceSpan, Type } from '@silk-effect/compiler'
 
 const typeText = (type: Type.Type): string =>
-  typeof type === 'string' ? type : `${type.module}.${type.name}`
+  typeof type === 'string'
+    ? type
+    : type._tag === 'NominalType'
+      ? `${type.module}.${type.name}`
+      : `Array<${typeText(type.element)}, ${type.length}>`
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -152,6 +156,9 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
       : 'unavailable struct literal'
   if (expression._tag === 'FieldProjection')
     return `${argumentLabel({ ...argument, expression: expression.subject })}.${expression.fieldName ?? '?'}`
+  if (expression._tag === 'ArrayLiteral') return `[${expression.elements.length} elements]`
+  if (expression._tag === 'IndexProjection')
+    return `${argumentLabel({ ...argument, expression: expression.subject })}[index]`
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'

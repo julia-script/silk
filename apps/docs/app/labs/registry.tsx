@@ -16,6 +16,7 @@ import { Analysis, BackendRegistry, ToolchainPlan } from '@silk-effect/compiler'
 import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-effect/compiler'
 import { backendEmission, execute, toolchainCommands } from './panels'
 import {
+  arrayValueRows,
   backendTextRows,
   closureRows,
   evaluationRows,
@@ -55,6 +56,7 @@ export type ViewId =
   | 'resolution'
   | 'hir'
   | 'struct-values'
+  | 'array-values'
   | 'ownership'
   | 'instances'
   | 'layout'
@@ -300,6 +302,30 @@ export const views: ReadonlyArray<ViewDefinition> = [
           onSelectSpan(span),
         ),
         meta: `${literals.length} lit · ${projections.length} proj`,
+      }
+    },
+  },
+  {
+    id: 'array-values',
+    title: 'Array values',
+    phase: 'elaboration + layout + evaluation',
+    tag: 'ARR',
+    group: 'semantics',
+    project: ({ snapshot, root, evaluation, onSelectSpan }) => {
+      const types = Analysis.fixedArrayTypesOf(snapshot, root)
+      const literals = Analysis.arrayLiteralsOf(snapshot, root)
+      const projections = Analysis.indexProjectionsOf(snapshot, root)
+      return {
+        rows: arrayValueRows(
+          types,
+          literals,
+          projections,
+          Analysis.repeatedLayoutsOf(snapshot),
+          Analysis.arrayCallingShapesOf(snapshot),
+          evaluation,
+          (span) => onSelectSpan(span),
+        ),
+        meta: `${literals.length} lit · ${projections.length} index`,
       }
     },
   },
@@ -586,7 +612,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
           phase: 'target layout',
           outputs:
             layout._tag === 'Available'
-              ? `${layout.value.target.id} · ${layout.value.entries.length} scalar entries`
+              ? `${layout.value.target.id} · ${layout.value.entries.length} runtime entries`
               : layout.error.message,
           diagnostics: 0,
         },
