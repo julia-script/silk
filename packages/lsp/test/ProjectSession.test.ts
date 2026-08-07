@@ -45,9 +45,15 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
         publishedVersions.push(session.document.version)
       }),
     })
-    const first = yield* Effect.fork(project.open(document('file:///workspace/Main.silk', 1)))
+    const first = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Main.silk', 1)),
+      { startImmediately: true },
+    )
     yield* Effect.yieldNow
-    const second = yield* Effect.fork(project.open(document('file:///workspace/Main.silk', 2)))
+    const second = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Main.silk', 2)),
+      { startImmediately: true },
+    )
     yield* Effect.yieldNow
     yield* TestClock.adjust(10)
     yield* Fiber.join(first)
@@ -86,10 +92,16 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
         publishedVersions.push(session.document.version)
       }),
     })
-    const first = yield* Effect.fork(project.open(document('file:///workspace/Main.silk', 1)))
+    const first = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Main.silk', 1)),
+      { startImmediately: true },
+    )
     yield* TestClock.adjust(10)
     yield* Deferred.await(started)
-    const second = yield* Effect.fork(project.open(document('file:///workspace/Main.silk', 2)))
+    const second = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Main.silk', 2)),
+      { startImmediately: true },
+    )
     yield* Effect.yieldNow
     yield* Deferred.succeed(release, undefined)
     yield* TestClock.adjust(10)
@@ -111,23 +123,29 @@ it.effect('settles superseded and closed exact-version waiters without a session
       analyze: analyzed,
       publish: Effect.fnUntraced(function* () {}),
     })
-    const firstOpen = yield* Effect.fork(
+    const firstOpen = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 1)),
+      { startImmediately: true },
     )
     yield* Effect.yieldNow
-    const firstWaiter = yield* Effect.fork(
+    const firstWaiter = yield* Effect.forkChild(
       project.acquire('file:///workspace/Main.silk', 1),
+      { startImmediately: true },
     )
-    const secondOpen = yield* Effect.fork(
+    const secondOpen = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 2)),
+      { startImmediately: true },
     )
     yield* Effect.yieldNow
     assert.isTrue(Option.isNone(yield* Fiber.join(firstWaiter)))
 
-    const secondWaiter = yield* Effect.fork(
+    const secondWaiter = yield* Effect.forkChild(
       project.acquire('file:///workspace/Main.silk', 2),
+      { startImmediately: true },
     )
-    const close = yield* Effect.fork(project.close('file:///workspace/Main.silk'))
+    const close = yield* Effect.forkChild(project.close('file:///workspace/Main.silk'), {
+      startImmediately: true,
+    })
     yield* Effect.yieldNow
     assert.isTrue(Option.isNone(yield* Fiber.join(secondWaiter)))
     yield* TestClock.adjust(10)
@@ -161,8 +179,12 @@ it.effect('allows independent projects to analyze concurrently', () =>
       })
     const left = makeProject('left')
     const right = makeProject('right')
-    const leftFiber = yield* Effect.fork(left.open(document('file:///left/Main.silk', 1)))
-    const rightFiber = yield* Effect.fork(right.open(document('file:///right/Main.silk', 1)))
+    const leftFiber = yield* Effect.forkChild(left.open(document('file:///left/Main.silk', 1)), {
+      startImmediately: true,
+    })
+    const rightFiber = yield* Effect.forkChild(right.open(document('file:///right/Main.silk', 1)), {
+      startImmediately: true,
+    })
     yield* TestClock.adjust(10)
     yield* Deferred.await(started)
     yield* Deferred.succeed(release, undefined)
