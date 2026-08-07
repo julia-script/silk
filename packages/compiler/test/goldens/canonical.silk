@@ -65,5 +65,6 @@ fn borrow(values: [I32; 2], output: [I32; 2]) -> I32 {
 }
 
 pub fn main() -> I32 {
-  return helper(-1, 2) |> Core.finish()
+  return helper(-1, 2)
+    |> Core.finish()
 }

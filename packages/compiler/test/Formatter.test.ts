@@ -116,13 +116,15 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
 it.effect('formats a generic flow catch pipeline canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =
-      'pub fn main()->I32 { let recipe=risky()|>Flow.catch<Problem>(recover) return 0 }'
+      'pub fn main()->I32 { let recipe=risky()|>Core.prepare()|>Flow.catch<Problem>(recover) return 0 }'
     const first = yield* Formatter.format(parse('memory://flow-catch-pipeline.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
       `pub fn main() -> I32 {
-  let recipe = risky() |> Flow.catch<Problem>(recover)
+  let recipe = risky()
+    |> Core.prepare()
+    |> Flow.catch<Problem>(recover)
   return 0
 }
 `,
