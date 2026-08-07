@@ -3,24 +3,21 @@ import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import type * as FileSystem from 'effect/FileSystem'
 import * as ManagedRuntime from 'effect/ManagedRuntime'
-import type * as Path from 'effect/Path'
+import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
 import {
   createConnection,
+  DidChangeWatchedFilesNotification,
   ProposedFeatures,
   TextDocumentSyncKind,
   TextDocuments,
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import * as Document from './Document.js'
+import * as ProjectSession from './ProjectSession.js'
 import * as Workspace from './Workspace.js'
 
 const encoder = new TextEncoder()
-
-/** One analyzed state of an open document, replaced wholesale on every change. */
-interface Session {
-  readonly document: Document.Document
-  readonly snapshot: Analysis.Snapshot
-}
 
 /**
  * The external protocol boundary. `vscode-languageserver` is callback-driven, so this module
@@ -30,104 +27,242 @@ interface Session {
 export const start = (): void => {
   const connection = createConnection(ProposedFeatures.all, process.stdin, process.stdout)
   const documents = new TextDocuments(TextDocument)
-  const sessions = new Map<string, Session>()
-  const generations = new Map<string, number>()
+  const projects = new Map<
+    string,
+    ProjectSession.ProjectSession<FileSystem.FileSystem | Path.Path>
+  >()
+  const projectByUri = new Map<string, string>()
+  const inFlight = new Set<Promise<unknown>>()
+  let supportsDynamicWatchers = false
+  let watcherRegistration: { readonly dispose: () => void } | undefined
 
   // Platform services are built once for the server's lifetime, not per request.
   const runtime = ManagedRuntime.make(NodeServices.layer)
-  const run = <A>(effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>): Promise<A> =>
-    runtime.runPromise(effect)
+  const run = <A>(effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>): Promise<A> => {
+    const promise = runtime.runPromise(effect)
+    inFlight.add(promise)
+    promise.finally(() => inFlight.delete(promise)).catch(() => undefined)
+    return promise
+  }
 
-  connection.onInitialize(() => ({
-    capabilities: {
-      positionEncoding: 'utf-16',
-      textDocumentSync: TextDocumentSyncKind.Incremental,
-      hoverProvider: true,
-      documentSymbolProvider: true,
-      documentFormattingProvider: true,
-    },
-  }))
+  connection.onInitialize((parameters) => {
+    supportsDynamicWatchers =
+      parameters.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true
+    return {
+      capabilities: {
+        positionEncoding: 'utf-16',
+        textDocumentSync: TextDocumentSyncKind.Incremental,
+        hoverProvider: true,
+        definitionProvider: true,
+        documentSymbolProvider: true,
+        documentFormattingProvider: true,
+      },
+    }
+  })
 
-  const refresh = (text: TextDocument): Promise<void> => {
-    const generation = (generations.get(text.uri) ?? 0) + 1
-    generations.set(text.uri, generation)
-    return run(
-      Effect.gen(function* () {
-        const document = yield* Workspace.open({
-          uri: text.uri,
-          bytes: encoder.encode(text.getText()),
-        })
-        // Overlays read the live document manager, so siblings always see the latest keystroke
-        // regardless of which refresh promise settles first.
-        const siblings: Array<Document.Document> = []
-        for (const open of documents.all()) {
-          if (open.uri === text.uri) continue
-          siblings.push(
-            yield* Workspace.open({ uri: open.uri, bytes: encoder.encode(open.getText()) }),
-          )
-        }
-        const snapshot = yield* Workspace.analyze(document, siblings)
+  connection.onInitialized(() => {
+    if (!supportsDynamicWatchers) return
+    connection.client
+      .register(DidChangeWatchedFilesNotification.type, {
+        watchers: [{ globPattern: '**/*.silk' }, { globPattern: '**/silk.toml' }],
+      })
+      .then((registration) => {
+        watcherRegistration = registration
+      })
+      .catch((error) => {
+        connection.console.error(`silk-lsp failed to register file watchers: ${String(error)}`)
+      })
+  })
+
+  const publishProject = (
+    workspace: string,
+    sourceRoot: string,
+  ): ProjectSession.ProjectSession<FileSystem.FileSystem | Path.Path> => {
+    const project = ProjectSession.make({
+      workspace,
+      sourceRoot,
+      analyze: Effect.fnUntraced(function* (document, openDocuments) {
+        const snapshot = yield* Workspace.analyze(document, openDocuments)
         const moduleUris = new Map<string, string>()
         for (const module of Analysis.modules(snapshot)) {
-          const uri = yield* Workspace.uriOf(document.sourceRoot, module.name, siblings)
+          const uri = yield* Workspace.uriOf(document.sourceRoot, module.name, openDocuments)
           if (uri !== undefined) moduleUris.set(module.name, uri)
         }
-        if (generations.get(text.uri) !== generation) return
-        sessions.set(text.uri, { document, snapshot })
+        return Object.freeze({ document, snapshot, moduleUris })
+      }),
+      publish: Effect.fnUntraced(function* (session) {
         yield* Effect.promise(() =>
           connection.sendDiagnostics({
-            uri: text.uri,
+            uri: session.document.uri,
+            version: session.document.version,
             diagnostics: [
-              ...Document.diagnostics(document, snapshot, (module) => moduleUris.get(module)),
+              ...Document.diagnostics(
+                session.document,
+                session.snapshot,
+                (module) => session.moduleUris.get(module),
+              ),
             ],
           }),
         )
       }),
-    )
+    })
+    projects.set(workspace, project)
+    return project
   }
 
-  /**
-   * A change anywhere refreshes every open document, changed one first: sibling documents see
-   * the edit through the overlay resolver, so their diagnostics would go stale otherwise.
-   */
-  const refreshAll = (changed?: TextDocument): void => {
-    const others = documents.all().filter((open) => open.uri !== changed?.uri)
-    for (const text of changed === undefined ? others : [changed, ...others]) {
-      refresh(text).catch((error) => {
-        connection.console.error(`silk-lsp failed to analyze ${text.uri}: ${String(error)}`)
-      })
+  const projectFor = (workspace: string, sourceRoot: string) =>
+    projects.get(workspace) ?? publishProject(workspace, sourceRoot)
+
+  const synchronize = Effect.fnUntraced(function* (text: TextDocument) {
+    const document = yield* Workspace.open({
+      uri: text.uri,
+      version: text.version,
+      bytes: encoder.encode(text.getText()),
+    })
+    const previousWorkspace = projectByUri.get(text.uri)
+    if (previousWorkspace !== undefined && previousWorkspace !== document.workspace) {
+      const previous = projects.get(previousWorkspace)
+      if (previous !== undefined) {
+        yield* previous.close(text.uri)
+        if (previous.documents().length === 0) {
+          yield* previous.shutdown()
+          projects.delete(previousWorkspace)
+        }
+      }
     }
-  }
+    projectByUri.set(text.uri, document.workspace)
+    yield* projectFor(document.workspace, document.sourceRoot).open(document)
+  })
 
   documents.onDidChangeContent(({ document }) => {
-    refreshAll(document)
+    run(synchronize(document)).catch((error) => {
+      connection.console.error(`silk-lsp failed to analyze ${document.uri}: ${String(error)}`)
+    })
   })
 
   documents.onDidClose(({ document }) => {
-    sessions.delete(document.uri)
-    generations.delete(document.uri)
+    const workspace = projectByUri.get(document.uri)
+    projectByUri.delete(document.uri)
+    if (workspace !== undefined) {
+      const project = projects.get(workspace)
+      if (project !== undefined)
+        run(
+          Effect.gen(function* () {
+            yield* project.close(document.uri)
+            if (project.documents().length === 0) {
+              yield* project.shutdown()
+              projects.delete(workspace)
+            }
+          }),
+        ).catch((error) => {
+          connection.console.error(`silk-lsp failed to close ${document.uri}: ${String(error)}`)
+        })
+    }
     void connection.sendDiagnostics({ uri: document.uri, diagnostics: [] })
-    // Remaining documents now resolve the closed module from disk instead of the overlay.
-    refreshAll()
   })
 
-  connection.onHover((parameters) => {
-    const session = sessions.get(parameters.textDocument.uri)
-    if (session === undefined) return null
-    return Document.hover(session.document, session.snapshot, parameters.position) ?? null
+  const acquire = (uri: string) => {
+    const text = documents.get(uri)
+    const workspace = projectByUri.get(uri)
+    const project = workspace === undefined ? undefined : projects.get(workspace)
+    return text === undefined || project === undefined
+      ? Promise.resolve(Option.none<ProjectSession.AnalyzedDocument>())
+      : run(project.acquire(uri, text.version))
+  }
+
+  connection.onHover(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return null
+    return Document.hover(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+    ) ?? null
   })
 
-  connection.onDocumentSymbol((parameters) => {
-    const session = sessions.get(parameters.textDocument.uri)
-    return session === undefined ? [] : [...Document.symbols(session.document, session.snapshot)]
-  })
-
-  connection.onDocumentFormatting((parameters) => {
-    const session = sessions.get(parameters.textDocument.uri)
-    if (session === undefined) return []
-    return run(
-      Effect.map(Document.format(session.document, session.snapshot), (edits) => [...edits]),
+  connection.onDefinition(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return null
+    return (
+      Document.definition(
+        session.value.document,
+        session.value.snapshot,
+        parameters.position,
+        (module) => session.value.moduleUris.get(module),
+      ) ?? null
     )
+  })
+
+  connection.onDocumentSymbol(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return []
+    return [...Document.symbols(session.value.document, session.value.snapshot)]
+  })
+
+  connection.onDocumentFormatting(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return []
+    return run(
+      Effect.map(
+        Document.format(session.value.document, session.value.snapshot),
+        (edits) => [...edits],
+      ),
+    )
+  })
+
+  connection.onDidChangeWatchedFiles(({ changes }) => {
+    run(
+      Effect.gen(function* () {
+        const path = yield* Path.Path
+        for (const change of changes) {
+          const parsed = yield* Effect.try({
+            try: () => new URL(change.uri),
+            catch: (cause) => cause,
+          }).pipe(Effect.option)
+          if (Option.isNone(parsed) || parsed.value.protocol !== 'file:') continue
+          const changedPath = yield* path.fromFileUrl(parsed.value).pipe(Effect.option)
+          if (Option.isNone(changedPath)) continue
+          const isManifest = path.basename(changedPath.value) === 'silk.toml'
+          if (isManifest) {
+            const directory = path.dirname(changedPath.value)
+            for (const text of documents.all()) {
+              const documentPath = yield* Effect.try({
+                try: () => new URL(text.uri),
+                catch: (cause) => cause,
+              }).pipe(
+                Effect.flatMap((url) => path.fromFileUrl(url)),
+                Effect.option,
+              )
+              if (Option.isNone(documentPath)) continue
+              const relative = path.relative(directory, documentPath.value)
+              if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
+              yield* synchronize(text)
+            }
+            continue
+          }
+          if (!changedPath.value.endsWith('.silk')) continue
+          for (const project of projects.values()) {
+            const relative = path.relative(project.sourceRoot, changedPath.value)
+            if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
+            yield* project.invalidate()
+          }
+        }
+      }),
+    ).catch((error) => {
+      connection.console.error(`silk-lsp failed to process watched files: ${String(error)}`)
+    })
+  })
+
+  connection.onShutdown(async () => {
+    watcherRegistration?.dispose()
+    watcherRegistration = undefined
+    await Promise.all(
+      [...projects.values()].map((project) => runtime.runPromise(project.shutdown())),
+    )
+    await Promise.all([...inFlight])
+    projects.clear()
+    projectByUri.clear()
+    await runtime.dispose()
   })
 
   documents.listen(connection)

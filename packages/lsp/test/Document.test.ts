@@ -17,6 +17,8 @@ const open = (
     const snapshot = yield* Analysis.ofSource('main', bytes)
     const document = Document.make({
       uri: 'file:///project/main.silk',
+      version: 1,
+      workspace: 'project:/project/silk.toml',
       module: 'main',
       sourceRoot: '/project',
       bytes,

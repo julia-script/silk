@@ -28,6 +28,7 @@ it.effect('derives module identities from the discovered project source root', (
     const root = project()
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Util.silk')).href,
+      version: 1,
       bytes: encoder.encode('pub fn answer() -> I32 { return 7 }'),
     })
     assert.strictEqual(document.module, 'Util')
@@ -39,6 +40,7 @@ it.effect('falls back to the document directory without a manifest', () =>
   Effect.gen(function* () {
     const document = yield* Workspace.open({
       uri: 'file:///definitely/missing/standalone.silk',
+      version: 1,
       bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
     })
     assert.strictEqual(document.module, 'standalone')
@@ -70,6 +72,7 @@ it.effect('analyzes imports against sibling files on disk', () =>
     const source = 'import Util\npub fn main() -> I32 { return Util.answer() }'
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
       bytes: encoder.encode(source),
     })
     const snapshot = yield* Workspace.analyze(document, [])
