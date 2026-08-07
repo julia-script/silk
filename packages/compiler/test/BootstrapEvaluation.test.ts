@@ -58,7 +58,7 @@ it.effect('traces the identity program in order with bound and returned values',
     const outcome = yield* evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`)
 
-    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
       ['Entry', 'RegionEntry', 'Call', 'Binding', 'RegionEntry', 'Return', 'Return'],
@@ -71,6 +71,53 @@ pub fn main() -> I32 { return identity(42) }`)
     assert.strictEqual(binding.value.value, 42)
     assert.strictEqual(binding.parameterOrdinal, 0)
     assert.strictEqual(binding.fromCall, false)
+  }),
+)
+
+it.effect('constructs flow calls lazily and executes them only at run', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`flow fn delayed(value: I32) -> I32 { return value + 1 }
+pub fn main() -> I32 {
+  let recipe = delayed(41)
+  return run recipe
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.deepEqual(
+      outcome.trace.map((event) => event._tag),
+      [
+        'Entry',
+        'RegionEntry',
+        'RegionEntry',
+        'Call',
+        'Binding',
+        'RegionEntry',
+        'FlowSuccess',
+        'Return',
+        'Return',
+      ],
+    )
+  }),
+)
+
+it.effect('catches one exact owned flow failure without using traps', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`struct Problem { code: I32 }
+flow fn risky(value: I32) -> I32 ! Problem {
+  if value == 0 { fail move Problem { code: 41 } }
+  return value
+}
+flow fn recover(problem: Problem) -> I32 { return problem.code + 1 }
+pub fn main() -> I32 {
+  let recipe = Flow.catch<Problem>(risky(0), recover)
+  return run recipe
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
+    assert.isTrue(outcome.trace.some((event) => event._tag === 'FlowFailure'))
+    assert.isTrue(outcome.trace.some((event) => event._tag === 'FlowSuccess'))
   }),
 )
 

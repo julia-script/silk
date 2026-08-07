@@ -432,3 +432,15 @@ to `I32` or use signed Wasm instructions for unsigned operations.
 
 - **WHEN** a native function returns a `Usize` value above `2^32 - 1`
 - **THEN** its signature and return operation preserve the selected 64-bit lane without truncation
+
+### Requirement: Backends realize explicit typed outcomes without unwinding
+
+Native LLVM and direct WebAssembly SHALL realize the selected tagged success/failure shape through
+ordinary returns, calls, tests, and branches. They MUST NOT use C++ exceptions, platform unwinding,
+`setjmp`, `longjmp`, host exception objects, or backend-selected discriminants. Success, recovery,
+propagation, cleanup, and traps SHALL agree with evaluation.
+
+#### Scenario: Execute the same recovered failure
+
+- **WHEN** a canonical flow fixture selects its failure path and catches the exact member
+- **THEN** native, Wasm, and evaluation produce the same result and cleanup order

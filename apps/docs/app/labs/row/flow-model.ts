@@ -13,7 +13,13 @@ const typeText = (type: Type.Type): string =>
         ? `Array<${typeText(type.element)}, ${type.length}>`
       : type._tag === 'SliceType'
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-        : type.members.map(typeText).join(' | ')
+        : type._tag === 'FlowType'
+          ? `Flow<${typeText(type.success)}${
+              type.failures.length === 0
+                ? ''
+                : ` ! ${type.failures.map(typeText).join(' | ')}`
+            }> ${type.access.toLowerCase()}`
+          : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -173,6 +179,10 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   if (expression._tag === 'Borrow') {
     return `${expression.access === 'Exclusive' ? '&mut ' : '&'}${argumentLabel({ ...argument, expression: expression.subject })}`
   }
+  if (expression._tag === 'Run') return 'run result'
+  if (expression._tag === 'FlowCatch')
+    return `catch ${expression.handled === undefined ? 'unavailable failure' : typeText(expression.handled)}`
+  if (expression._tag !== 'Integer') return 'unavailable expression'
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'

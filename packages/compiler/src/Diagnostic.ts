@@ -117,6 +117,17 @@ export const invalidSliceReborrowCode = 'SEM0058' as const
 export const implicitSliceDecayCode = 'SEM0059' as const
 /** Stable code for a negative decimal literal contextualized as unsigned `Usize`. */
 export const usizeNegativeCode = 'SEM0060' as const
+/** Stable code for a non-concrete or non-nominal member of a flow failure row. */
+export const invalidFailureTypeCode = 'SEM0061' as const
+/** Stable code for a failure row attached to an ordinary function. */
+export const failureRowOnOrdinaryCode = 'SEM0062' as const
+export const failOutsideFlowCode = 'SEM0063' as const
+export const undeclaredFailureCode = 'SEM0064' as const
+export const runNonFlowCode = 'SEM0065' as const
+export const unhandledFlowFailuresCode = 'SEM0066' as const
+export const invalidFlowHandlerCode = 'SEM0067' as const
+export const mutableFlowRecipeCode = 'SEM0068' as const
+export const flowRecipeEscapeCode = 'SEM0069' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -204,6 +215,15 @@ export type Code =
   | typeof invalidSliceReborrowCode
   | typeof implicitSliceDecayCode
   | typeof usizeNegativeCode
+  | typeof invalidFailureTypeCode
+  | typeof failureRowOnOrdinaryCode
+  | typeof failOutsideFlowCode
+  | typeof undeclaredFailureCode
+  | typeof runNonFlowCode
+  | typeof unhandledFlowFailuresCode
+  | typeof invalidFlowHandlerCode
+  | typeof mutableFlowRecipeCode
+  | typeof flowRecipeEscapeCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -249,6 +269,15 @@ export type Reason =
       readonly minimum: -2147483648
     }
   | { readonly _tag: 'UsizeNegative'; readonly spelling: string }
+  | { readonly _tag: 'InvalidFailureType'; readonly type: string }
+  | { readonly _tag: 'FailureRowOnOrdinary' }
+  | { readonly _tag: 'FailOutsideFlow' }
+  | { readonly _tag: 'UndeclaredFailure'; readonly type: string }
+  | { readonly _tag: 'RunNonFlow'; readonly type: string }
+  | { readonly _tag: 'UnhandledFlowFailures'; readonly failures: ReadonlyArray<string> }
+  | { readonly _tag: 'InvalidFlowHandler'; readonly detail: string }
+  | { readonly _tag: 'MutableFlowRecipe' }
+  | { readonly _tag: 'FlowRecipeEscape' }
   | {
       readonly _tag: 'UsizeTargetOutOfRange'
       readonly spelling: string
@@ -978,6 +1007,110 @@ export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Di
     severity: 'error',
     message: 'Usize literals cannot be negative',
     reason: Object.freeze({ _tag: 'UsizeNegative', spelling }),
+    span,
+  })
+
+/** Creates the diagnostic for a failure-row member that cannot be an owned nominal error. */
+export const invalidFailureType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidFailureTypeCode,
+    severity: 'error',
+    message: `Flow failure ${type} must be one concrete nominal type`,
+    reason: Object.freeze({ _tag: 'InvalidFailureType', type }),
+    span,
+  })
+
+/** Creates the diagnostic for spelling a failure row on a direct ordinary function. */
+export const failureRowOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: failureRowOnOrdinaryCode,
+    severity: 'error',
+    message: 'Only flow functions may declare a failure row',
+    reason: Object.freeze({ _tag: 'FailureRowOnOrdinary' }),
+    span,
+  })
+
+export const failOutsideFlow = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: failOutsideFlowCode,
+    severity: 'error',
+    message: 'Only flow functions may originate a typed failure',
+    reason: Object.freeze({ _tag: 'FailOutsideFlow' }),
+    span,
+  })
+
+export const undeclaredFailure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: undeclaredFailureCode,
+    severity: 'error',
+    message: `Failure ${type} is not declared by this flow function`,
+    reason: Object.freeze({ _tag: 'UndeclaredFailure', type }),
+    span,
+  })
+
+export const runNonFlow = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: runNonFlowCode,
+    severity: 'error',
+    message: `Cannot run non-flow value ${type}`,
+    reason: Object.freeze({ _tag: 'RunNonFlow', type }),
+    span,
+  })
+
+export const unhandledFlowFailures = (
+  failures: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unhandledFlowFailuresCode,
+    severity: 'error',
+    message: `Run leaves unhandled failures: ${failures.join(' | ')}`,
+    reason: Object.freeze({ _tag: 'UnhandledFlowFailures', failures: Object.freeze(failures) }),
+    span,
+  })
+
+export const invalidFlowHandler = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidFlowHandlerCode,
+    severity: 'error',
+    message: `Invalid Flow.catch handler: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidFlowHandler', detail }),
+    span,
+  })
+
+export const mutableFlowRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: mutableFlowRecipeCode,
+    severity: 'error',
+    message: 'Flow recipe bindings are immutable',
+    reason: Object.freeze({ _tag: 'MutableFlowRecipe' }),
+    span,
+  })
+
+export const flowRecipeEscape = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: flowRecipeEscapeCode,
+    severity: 'error',
+    message: 'Flow recipes cannot escape their declaring function in this bootstrap slice',
+    reason: Object.freeze({ _tag: 'FlowRecipeEscape' }),
     span,
   })
 

@@ -323,20 +323,33 @@ const printFunctionDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const flowKeyword = directTokens(node).find((token) => token.kind === 'FlowKeyword')
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
+  const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   return FormatDocument.concat(
     ...(publicKeyword === undefined
       ? []
       : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    ...(flowKeyword === undefined
+      ? []
+      : [
+          printToken(
+            context,
+            flowKeyword,
+            publicKeyword === undefined ? prefix : FormatDocument.empty,
+          ),
+          FormatDocument.text(' '),
+        ]),
     printToken(
       context,
       tokenOf(node, 'FnKeyword'),
-      publicKeyword === undefined ? prefix : FormatDocument.empty,
+      publicKeyword === undefined && flowKeyword === undefined ? prefix : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
     printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
+    ...(failureRow === undefined ? [] : [printNode(context, failureRow, FormatDocument.hardLine)]),
     printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
   )
 }
@@ -526,6 +539,15 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    case 'FailureRow':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Bang'), prefix, preserveBlank),
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'TypePath'),
+          FormatDocument.text(' '),
+        ),
+      )
     case 'Block':
       return printBlock(context, node, prefix)
     case 'BindingStatement': {
@@ -600,6 +622,16 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    case 'FailStatement':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'FailKeyword'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'MoveKeyword'), FormatDocument.text(' ')),
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+          FormatDocument.text(' '),
+        ),
+      )
     case 'IntegerLiteralExpression':
     case 'BooleanLiteralExpression':
     case 'IdentifierExpression':
@@ -607,6 +639,15 @@ const printNode = (
     case 'MoveExpression':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'MoveKeyword'), prefix, preserveBlank),
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+          FormatDocument.text(' '),
+        ),
+      )
+    case 'RunExpression':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'RunKeyword'), prefix, preserveBlank),
         printNode(
           context,
           directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
@@ -819,11 +860,13 @@ const printNode = (
       const identifiers = directTokens(node).filter((token) => token.kind === 'Identifier')
       const qualifier = identifiers[0] ?? tokenOf(node, 'Identifier')
       const member = identifiers[1] ?? tokenOf(node, 'Identifier', 1)
+      const typeArguments = directNodes(node).find((child) => child.kind === 'CallTypeArgumentList')
       const argumentsList = directNodes(node).find((child) => child.kind === 'ArgumentList')
       return FormatDocument.concat(
         printToken(context, qualifier, prefix, preserveBlank),
         printToken(context, tokenOf(node, 'Dot')),
         printToken(context, member),
+        ...(typeArguments === undefined ? [] : [printNode(context, typeArguments)]),
         ...(argumentsList === undefined ? [] : [printNode(context, argumentsList)]),
       )
     }

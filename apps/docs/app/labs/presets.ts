@@ -159,6 +159,46 @@ pub fn main() -> I32 {
 }
 `,
   ),
+  one(
+    'flows',
+    'Typed flow recovery',
+    `struct Problem { code: I32 }
+
+flow fn risky<T>(value: T, selector: I32) -> T ! Problem {
+  if selector == 0 { fail move Problem { code: 41 } }
+  return move value
+}
+
+flow fn relay(value: I32) -> I32 ! Problem {
+  let pending = risky<I32>(value, value)
+  return run pending
+}
+
+flow fn recover(problem: Problem) -> I32 {
+  return problem.code |> I32.add(1)
+}
+
+pub fn main() -> I32 {
+  let recipe = relay(0)
+    |> Flow.catch<Problem>(recover)
+  return run recipe
+}
+`,
+  ),
+  one(
+    'flows',
+    'Unhandled flow residual',
+    `struct Problem { code: I32 }
+
+flow fn risky() -> I32 ! Problem {
+  fail move Problem { code: 41 }
+}
+
+pub fn main() -> I32 {
+  return run risky()
+}
+`,
+  ),
 
   // ---- syntax ---------------------------------------------------------------------------
   one('syntax', 'Literal result', 'pub fn main() -> I32 { return 42 }'),

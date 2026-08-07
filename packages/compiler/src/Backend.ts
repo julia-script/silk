@@ -222,6 +222,10 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'SliceLength':
     case 'ConvertUnion':
     case 'Call':
+    case 'PackFlowOutcome':
+    case 'UnpackFlowSuccess':
+    case 'CatchFlow':
+    case 'RunFlow':
     case 'Construct':
     case 'ConstructArray':
     case 'Project':
@@ -238,14 +242,16 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
 }
 
 const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
-  (operation._tag === 'ReadPlace' ||
+  operation._tag === 'CatchFlow' ||
+  operation._tag === 'RunFlow' ||
+  ((operation._tag === 'ReadPlace' ||
     operation._tag === 'CheckPlace' ||
     operation._tag === 'WritePlace') &&
-  operation.selectors.some(
-    (selector) =>
-      selector._tag === 'SliceElementSelector' ||
-      (selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'),
-  )
+    operation.selectors.some(
+      (selector) =>
+        selector._tag === 'SliceElementSelector' ||
+        (selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'),
+    ))
 
 const expandMatches = (
   fn: Mir.MirFunction,
@@ -877,6 +883,25 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               laneType(target),
               name,
             )
+          })
+
+          const callValues = Effect.fnUntraced(function* (
+            target: (typeof declared)[number],
+            arguments_: ReadonlyArray<Value.Input>,
+            name: string,
+          ) {
+            const result = yield* FunctionBody.callDirect(body, target.handle, arguments_, name)
+            for (const root of [...addressRoots].sort((left, right) => left - right)) {
+              yield* reloadAddressRoot(root)
+            }
+            if (target.resultLaneCount === 0) return Object.freeze([])
+            if (result === undefined) throw new RangeError('Backend call produced no value')
+            if (target.resultLaneCount === 1) return Object.freeze([result])
+            const values: Array<Value.Input> = []
+            for (let lane = 0; lane < target.resultLaneCount; lane += 1) {
+              values.push(yield* FunctionBody.extractValue(body, result, [lane], `${name}_${lane}`))
+            }
+            return Object.freeze(values)
           })
 
           const storeMutable = Effect.fnUntraced(function* (
@@ -1906,6 +1931,225 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 }
                 case 'Drop':
                   break
+                case 'PackFlowOutcome': {
+                  const source = [...readLocal(operation.source)]
+                  const lanes = lanesFor(operation.type)
+                  const values: Array<Value.Input> = [
+                    yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
+                    ...source,
+                  ]
+                  while (values.length < lanes.length) {
+                    const lane = lanes.at(values.length)
+                    if (lane === undefined) break
+                    values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
+                  break
+                }
+                case 'UnpackFlowSuccess': {
+                  const count = lanesFor(operation.type).length
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze(readLocal(operation.source).slice(1, 1 + count)),
+                  )
+                  break
+                }
+                case 'RunFlow': {
+                  const target = declared.find((candidate) =>
+                    Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
+                  )
+                  if (target === undefined)
+                    throw new RangeError('Backend cannot resolve propagated flow target')
+                  const outcomeValues = yield* callValues(
+                    target,
+                    operation.arguments.flatMap((argument) => [...readLocal(argument)]),
+                    `flow_run${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.outcome.ordinal, outcomeValues)
+                  const tag = outcomeValues.at(0)
+                  if (tag === undefined) throw new RangeError('Flow outcome lost its tag')
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const succeeded = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    tag,
+                    zero,
+                    `flow_run_success${operation.destination.ordinal}`,
+                  )
+                  const successBlock = yield* LlvmBlock.make(
+                    body,
+                    `flow_run${operation.destination.ordinal}_success`,
+                  )
+                  const failureBlock = yield* LlvmBlock.make(
+                    body,
+                    `flow_run${operation.destination.ordinal}_failure`,
+                  )
+                  const followingBlock = yield* LlvmBlock.make(
+                    body,
+                    `flow_run${operation.destination.ordinal}_following`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
+                  const resultLaneCount = lanesFor(operation.type).length
+                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+                  )
+                  yield* FunctionBody.branch(body, followingBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+                  let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
+                  for (const [ordinal, mapping] of operation.tagMappings.entries()) {
+                    const source = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(mapping.source),
+                    )
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      tag,
+                      source,
+                      `flow_tag${operation.destination.ordinal}_${ordinal}`,
+                    )
+                    mappedTag = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                      mappedTag,
+                      `flow_mapped_tag${operation.destination.ordinal}_${ordinal}`,
+                    )
+                  }
+                  const propagationLanes = lanesFor(operation.propagationType)
+                  const returned: Array<Value.Input> = [mappedTag, ...outcomeValues.slice(1)]
+                  while (returned.length < operation.propagationLaneCount) {
+                    const lane = propagationLanes.at(returned.length)
+                    if (lane === undefined) break
+                    returned.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                  }
+                  if (returned.length === 1) {
+                    const single = returned.at(0)
+                    if (single === undefined) throw new RangeError('Flow propagation lost its tag')
+                    yield* FunctionBody.returnValue(body, single)
+                  } else {
+                    yield* FunctionBody.returnValue(
+                      body,
+                      yield* FunctionBody.buildAggregate(
+                        body,
+                        entry.resultType,
+                        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+                        'propagated_flow',
+                      ),
+                    )
+                  }
+                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  const storage = mutableStorage.get(operation.destination.ordinal)
+                  if (storage === undefined)
+                    throw new RangeError('Flow run destination is not materialized')
+                  const loaded: Array<Value.Input> = []
+                  for (const [lane, pointer] of storage.entries()) {
+                    const callingLane = lanesFor(operation.type).at(lane)
+                    if (callingLane === undefined)
+                      throw new RangeError('Flow run destination lost a lane')
+                    loaded.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(callingLane),
+                        pointer,
+                        `flow_run${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
+                case 'CatchFlow': {
+                  const protectedTarget = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.protectedTarget,
+                      operation.protectedTypeArguments,
+                    ),
+                  )
+                  const handlerTarget = declared.find(
+                    (candidate) =>
+                      candidate.fn.id.module === operation.handlerTarget.module &&
+                      candidate.fn.id.name === operation.handlerTarget.name &&
+                      candidate.fn.instance.typeArguments.length === 0,
+                  )
+                  if (protectedTarget === undefined || handlerTarget === undefined)
+                    throw new RangeError('Backend cannot resolve flow catch target')
+                  const protectedValues = yield* callValues(
+                    protectedTarget,
+                    operation.protectedArguments.flatMap((argument) => [...readLocal(argument)]),
+                    `flow_protected${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.protectedOutcome.ordinal, protectedValues)
+                  const tag = protectedValues.at(0)
+                  if (tag === undefined) throw new RangeError('Flow outcome lost its tag')
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const succeeded = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    tag,
+                    zero,
+                    `flow_success${operation.destination.ordinal}`,
+                  )
+                  const successBlock = yield* LlvmBlock.make(
+                    body,
+                    `flow${operation.destination.ordinal}_success`,
+                  )
+                  const failureBlock = yield* LlvmBlock.make(
+                    body,
+                    `flow${operation.destination.ordinal}_failure`,
+                  )
+                  const followingBlock = yield* LlvmBlock.make(
+                    body,
+                    `flow${operation.destination.ordinal}_following`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
+                  const resultLaneCount = lanesFor(operation.type).length
+                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze(protectedValues.slice(1, 1 + resultLaneCount)),
+                  )
+                  yield* FunctionBody.branch(body, followingBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+                  const handlerParameterCount = handlerTarget.fn.localTypes
+                    .slice(0, handlerTarget.fn.parameterCount)
+                    .reduce((total, type) => total + lanesFor(type).length, 0)
+                  const handlerValues = yield* callValues(
+                    handlerTarget,
+                    Object.freeze(protectedValues.slice(1, 1 + handlerParameterCount)),
+                    `flow_handler${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.handlerOutcome.ordinal, handlerValues)
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze(handlerValues.slice(1, 1 + resultLaneCount)),
+                  )
+                  yield* FunctionBody.branch(body, followingBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  const storage = mutableStorage.get(operation.destination.ordinal)
+                  if (storage === undefined)
+                    throw new RangeError('Flow catch destination is not materialized')
+                  const loaded: Array<Value.Input> = []
+                  for (const [lane, pointer] of storage.entries()) {
+                    const callingLane = lanesFor(operation.type).at(lane)
+                    if (callingLane === undefined)
+                      throw new RangeError('Flow catch destination lost a lane')
+                    loaded.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(callingLane),
+                        pointer,
+                        `flow${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
                 case 'Call': {
                   const target = declared.find((candidate) =>
                     Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),

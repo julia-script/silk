@@ -317,3 +317,36 @@ it('erases builtin pipelines into ordinary builtin HIR calls', () => {
   assert.strictEqual(returned.operation, 'Add')
   assert.strictEqual(returned.arguments.length, 2)
 })
+
+it('retains lazy flow recipes, exact catches, runs, and owned failures in HIR', () => {
+  const result = elaborate(
+    'hir://flow.silk',
+    `struct Problem { code: I32 }
+flow fn risky() -> I32 ! Problem { fail move Problem { code: 41 } }
+flow fn recover(problem: Problem) -> I32 { return problem.code + 1 }
+pub fn main() -> I32 {
+  let recipe = Flow.catch<Problem>(risky(), recover)
+  return run recipe
+}`,
+  )
+  const risky = result.hir.functions.at(0)
+  const main = result.hir.functions.at(2)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(risky?.contract._tag, 'Contract')
+  if (risky?.contract._tag === 'Contract') {
+    assert.strictEqual(risky.contract.functionKind, 'Flow')
+    assert.deepEqual(
+      risky.contract.failures?.map((failure) => failure.name),
+      ['Problem'],
+    )
+  }
+  assert.strictEqual(risky?.statements.at(0)?._tag, 'Fail')
+  assert.strictEqual(main?.statements.at(0)?._tag, 'Bind')
+  const binding = main?.statements.at(0)
+  assert.strictEqual(binding?._tag === 'Bind' ? binding.initializer._tag : undefined, 'FlowCatch')
+  if (binding?._tag === 'Bind' && binding.initializer._tag === 'FlowCatch')
+    assert.strictEqual(binding.initializer.protected._tag, 'FlowConstruct')
+  assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Run')
+  assert.deepEqual(Hir.verify(result.hir), [])
+})

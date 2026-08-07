@@ -214,3 +214,77 @@ pub fn main() -> I32 { let value = 1 if I32.equals(1, 1) { return identity(move 
   assert.strictEqual(main?.verdict._tag, 'Satisfied')
   assert.deepEqual(facts.diagnostics, [])
 })
+
+it('consumes a take recipe on its first run and rejects a repeated run', () => {
+  const facts = check(
+    'ownership://take-flow.silk',
+    `struct Payload { value: I32 }
+flow fn inspect(payload: Payload) -> I32 { return payload.value }
+pub fn main() -> I32 {
+  let payload = Payload { value: 21 }
+  let recipe = inspect(move payload)
+  let first = run recipe
+  return first + run recipe
+}`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
+})
+
+it('allows a shared copy-only recipe to run repeatedly', () => {
+  const facts = check(
+    'ownership://shared-flow.silk',
+    `flow fn inspect(value: I32) -> I32 { return value }
+pub fn main() -> I32 {
+  let recipe = inspect(21)
+  return run recipe + run recipe
+}`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
+})
+
+it('keeps a borrowed flow capture loan live until its last run', () => {
+  const facts = check(
+    'ownership://borrowed-flow.silk',
+    `flow fn inspect(values: &[I32]) -> I32 { return values[0] }
+pub fn main() -> I32 {
+  let mut values = [1]
+  let recipe = inspect(&values)
+  values[0] = 2
+  return run recipe
+}`,
+  )
+  const main = facts.functions.at(1)
+  const loan = main?.loans.at(0)
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0011'],
+  )
+  assert.strictEqual(main?.verdict._tag, 'Violation')
+  assert.notStrictEqual(loan, undefined)
+  assert.ok((loan?.endSpan.start ?? 0) > (loan?.startSpan.start ?? 0))
+})
+
+it('allows an owner to change after the borrowed recipe has finished its last run', () => {
+  const facts = check(
+    'ownership://finished-borrowed-flow.silk',
+    `flow fn inspect(values: &[I32]) -> I32 { return values[0] }
+pub fn main() -> I32 {
+  let mut values = [1]
+  let recipe = inspect(&values)
+  let seen = run recipe
+  values[0] = 2
+  return seen + values[0]
+}`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
+})

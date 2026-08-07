@@ -14,8 +14,10 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 /** A normalized function contract: ordered parameter types and the result type. */
 export interface Contract {
   readonly _tag: 'Contract'
+  readonly functionKind?: 'Ordinary' | 'Flow'
   readonly parameters: ReadonlyArray<DeclarationIndex.SemanticType>
   readonly result: DeclarationIndex.SemanticType
+  readonly failures?: ReadonlyArray<Type.Nominal>
 }
 
 /** The normalized or explicitly unavailable contract of one declaration. */
@@ -287,6 +289,30 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'FlowConstruct'
+      readonly target: DeclarationIndex.CanonicalId
+      readonly typeArguments: ReadonlyArray<Type.Type>
+      readonly arguments: ReadonlyArray<Expression>
+      readonly loanEnds: ReadonlyArray<BorrowId>
+      readonly type: Type.Flow
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Run'
+      readonly subject: Expression
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'FlowCatch'
+      readonly protected: Expression
+      readonly handled: Type.Nominal
+      readonly handler: DeclarationIndex.CanonicalId
+      readonly handlerFailures: ReadonlyArray<Type.Nominal>
+      readonly type: Type.Flow
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'BuiltinCall'
       readonly operation: BuiltinOperation
       readonly arguments: ReadonlyArray<Expression>
@@ -357,6 +383,13 @@ export type Statement =
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
     }
+  | {
+      readonly _tag: 'Fail'
+      readonly expression: Expression
+      readonly failure: Type.Nominal
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
 
 /** One elaborated function: its header, normalized contract, and desugared body statements. */
 export interface HirFunction {
@@ -393,6 +426,8 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
       ]
     case 'Return':
       return [statement.expression]
+    case 'Fail':
+      return [statement.expression]
     case 'Break':
     case 'Continue':
       return []
@@ -425,8 +460,13 @@ const expressionChildren = (expression: Expression): ReadonlyArray<Expression> =
       case 'ArrayConstruct':
         return expression.elements
       case 'Call':
+      case 'FlowConstruct':
       case 'BuiltinCall':
         return expression.arguments
+      case 'Run':
+        return [expression.subject]
+      case 'FlowCatch':
+        return [expression.protected]
       case 'Match':
         return [
           expression.scrutinee,
@@ -468,8 +508,13 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'ArrayConstruct':
         return expression.elements.some(walk)
       case 'Call':
+      case 'FlowConstruct':
       case 'BuiltinCall':
         return expression.arguments.some(walk)
+      case 'Run':
+        return walk(expression.subject)
+      case 'FlowCatch':
+        return walk(expression.protected)
       case 'Match':
         return (
           walk(expression.scrutinee) ||
@@ -520,6 +565,7 @@ export const firstUnavailable = (
         return undefined
       }
       case 'Call':
+      case 'FlowConstruct':
       case 'BuiltinCall': {
         for (const argument of expression.arguments) {
           const found = walk(argument)
@@ -527,6 +573,10 @@ export const firstUnavailable = (
         }
         return undefined
       }
+      case 'Run':
+        return walk(expression.subject)
+      case 'FlowCatch':
+        return walk(expression.protected)
       case 'Match': {
         const scrutinee = walk(expression.scrutinee)
         if (scrutinee !== undefined) return scrutinee
@@ -751,6 +801,12 @@ export const contractOf = (declaration: DeclarationIndex.DeclarationFact): Contr
   }
   return Object.freeze({
     _tag: 'Contract',
+    ...(declaration.functionKind === 'Flow'
+      ? {
+          functionKind: 'Flow' as const,
+          failures: declaration.failureRow.failures,
+        }
+      : {}),
     parameters: Object.freeze(parameters),
     result: declaration.returnType.type,
   })
@@ -791,6 +847,16 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return [
         `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'Run':
+      return [
+        `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'FlowCatch':
+      return [
+        `${indent}flow-catch ${Type.encode(expression.handled)} handler=${expression.handler.module}.${expression.handler.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.protected, depth + 1),
       ].join('\n')
     case 'UnionConvert':
       return [
@@ -863,8 +929,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'Call':
+    case 'FlowConstruct':
       return [
-        `${indent}call ${expression.target.module}.${expression.target.name}${
+        `${indent}${expression._tag === 'FlowConstruct' ? 'flow-' : ''}call ${expression.target.module}.${expression.target.name}${
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encode).join(', ')}>`
@@ -935,6 +1002,11 @@ const encodeStatement = (statement: Statement, depth: number): string => {
     case 'Return':
       return [
         `${indent}return r${statement.region.ordinal} ${spanText(statement.span)}`,
+        encodeExpression(statement.expression, depth + 1),
+      ].join('\n')
+    case 'Fail':
+      return [
+        `${indent}fail ${Type.encode(statement.failure)} r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
   }

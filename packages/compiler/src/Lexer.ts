@@ -83,6 +83,9 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
 
 const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
   ['as', 'AsKeyword'],
+  ['run', 'RunKeyword'],
+  ['fail', 'FailKeyword'],
+  ['flow', 'FlowKeyword'],
   ['if', 'IfKeyword'],
   ['else', 'ElseKeyword'],
   ['mut', 'MutKeyword'],

@@ -118,6 +118,53 @@ const diagnosticView = (result: SyntaxFile.SyntaxFile) =>
     reason: diagnostic.reason,
   }))
 
+it('parses flow declarations, failure rows, delayed run, and consuming fail losslessly', () => {
+  const result = parseText(
+    'memory://flow.silk',
+    `struct Problem { code: I32 }
+flow fn work(problem: Problem) -> I32 ! Problem | Problem {
+  if true { fail move problem }
+  return 42
+}
+fn main() -> I32 { let pending = work(Problem { code: 1 }) return run pending }`,
+  )
+  const flow = directFunctionDeclarations(result.root).at(0)
+  assert.strictEqual(
+    SyntaxTree.directToken(flow ?? result.root, 'FlowKeyword')?.kind,
+    'FlowKeyword',
+  )
+  assert.strictEqual(SyntaxTree.directNode(flow ?? result.root, 'FailureRow')?.kind, 'FailureRow')
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'FailStatement',
+  )
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'RunExpression',
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
+it('recovers a missing failure-row member without consuming the flow body or next function', () => {
+  const result = parseText(
+    'memory://damaged-flow.silk',
+    'flow fn work() -> I32 ! { return 1 } fn after() -> I32 { return 2 }',
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
+  const first = directFunctionDeclarations(result.root).at(0)
+  const row = first === undefined ? undefined : SyntaxTree.directNode(first, 'FailureRow')
+  assert.strictEqual(row?.kind, 'FailureRow')
+  assert.include(
+    missingLeaves(result.root).map((token) => token.expected),
+    'Identifier',
+  )
+})
+
 it('parses the accepted function into the exact first concrete node shape', () => {
   const lexical = Lexer.lex(SourceFile.make('fixture://accepted.silk', ascii(acceptedSource)))
   const result = Parser.parse(lexical)
@@ -1334,7 +1381,8 @@ it('parses grouping and right-associative prefix expressions losslessly', () => 
 it('parses qualified pipelines left-to-right with optional argument lists', () => {
   const source =
     'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }\n' +
-    'pub fn flag() -> Bool { return true |> Bool.not }'
+    'pub fn flag() -> Bool { return true |> Bool.not }\n' +
+    'pub fn recover() -> I32 { return risky() |> Flow.catch<Problem>(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1345,11 +1393,15 @@ it('parses qualified pipelines left-to-right with optional argument lists', () =
       SyntaxTree.isNode(element) && element.kind === 'PipelineTarget',
   )
 
-  assert.strictEqual(pipelines.length, 3)
-  assert.strictEqual(targets.length, 3)
+  assert.strictEqual(pipelines.length, 4)
+  assert.strictEqual(targets.length, 4)
   assert.deepEqual(
     targets.map((target) => SyntaxTree.directNodes(target, 'ArgumentList').length),
-    [1, 1, 0],
+    [1, 1, 0, 1],
+  )
+  assert.deepEqual(
+    targets.map((target) => SyntaxTree.directNodes(target, 'CallTypeArgumentList').length),
+    [0, 0, 0, 1],
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)

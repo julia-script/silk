@@ -11,10 +11,12 @@ import * as WatText from '@silk-effect/wasm/WatText'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Target from './Target.js'
+import type * as SilkType from './Type.js'
 
 /**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
@@ -334,7 +336,10 @@ const layoutOf = (
 const emitOperation = (
   operation: Mir.Operation,
   layout: Layout,
-  resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
+  resolve: (
+    target: DeclarationIndex.CanonicalId,
+    typeArguments: ReadonlyArray<SilkType.Type>,
+  ) => FuncActor.Func,
   memory: MemoryContext | undefined,
 ): ReadonlyArray<Instr.Instr> => {
   const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
@@ -869,12 +874,107 @@ const emitOperation = (
     case 'Drop':
       // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
       return []
+    case 'PackFlowOutcome': {
+      const source = slots(operation.source)
+      const destination = slots(operation.destination)
+      const tag = destination.at(0)
+      if (tag === undefined) throw new RangeError('Wasm flow outcome lost its tag lane')
+      return [
+        Instr.i32Const(operation.tag),
+        Instr.localSet(tag),
+        ...destination.slice(1).flatMap((target, index) => {
+          const value = source.at(index)
+          return value === undefined
+            ? [Instr.i32Const(0), Instr.localSet(target)]
+            : [Instr.localGet(value), Instr.localSet(target)]
+        }),
+      ]
+    }
+    case 'UnpackFlowSuccess':
+      return copy(
+        slots(operation.source).slice(1, 1 + slots(operation.destination).length),
+        slots(operation.destination),
+      )
+    case 'CatchFlow': {
+      const protectedSlots = slots(operation.protectedOutcome)
+      const handlerSlots = slots(operation.handlerOutcome)
+      const destinationSlots = slots(operation.destination)
+      const tag = protectedSlots.at(0)
+      if (tag === undefined) throw new RangeError('Wasm flow catch lost its tag lane')
+      const success = copy(protectedSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
+      const failure = [
+        Instr.localGet(tag),
+        Instr.i32Const(operation.handledTag),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+        ...protectedSlots
+          .slice(1, 1 + operation.handledLaneCount)
+          .map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.handlerTarget, Object.freeze([]))),
+        ...[...handlerSlots].reverse().map((slot) => Instr.localSet(slot)),
+        ...copy(handlerSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
+      ]
+      return [
+        ...operation.protectedArguments.flatMap((argument) =>
+          slots(argument).map((slot) => Instr.localGet(slot)),
+        ),
+        Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
+        ...[...protectedSlots].reverse().map((slot) => Instr.localSet(slot)),
+        Instr.localGet(tag),
+        Instr.op('i32.eqz'),
+        Instr.ifElse(Instr.emptyBlockType, success, failure),
+      ]
+    }
+    case 'RunFlow': {
+      const outcomeSlots = slots(operation.outcome)
+      const destinationSlots = slots(operation.destination)
+      const tag = outcomeSlots.at(0)
+      if (tag === undefined) throw new RangeError('Wasm propagated flow lost its tag lane')
+      const mapTag = [
+        Instr.i32Const(-1),
+        Instr.localSet(layout.scratch),
+        ...operation.tagMappings.flatMap((mapping) => [
+          Instr.localGet(tag),
+          Instr.i32Const(mapping.source),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+            [],
+          ),
+        ]),
+      ]
+      const propagationPayloadCount = operation.propagationLaneCount - 1
+      const failure = [
+        ...mapTag,
+        Instr.localGet(layout.scratch),
+        ...Array.from({ length: propagationPayloadCount }, (_, index) => {
+          const source = outcomeSlots.at(index + 1)
+          return source === undefined ? Instr.i32Const(0) : Instr.localGet(source)
+        }),
+        Instr.op('return'),
+      ]
+      return [
+        ...operation.arguments.flatMap((argument) =>
+          slots(argument).map((slot) => Instr.localGet(slot)),
+        ),
+        Instr.call(resolve(operation.target, operation.typeArguments)),
+        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+        Instr.localGet(tag),
+        Instr.op('i32.eqz'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
+          failure,
+        ),
+      ]
+    }
     case 'Call':
       return [
         ...operation.arguments.flatMap((argument) =>
           slots(argument).map((slot) => Instr.localGet(slot)),
         ),
-        Instr.call(resolve(operation)),
+        Instr.call(resolve(operation.target, operation.typeArguments)),
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
         ...[
           ...new Set(
@@ -945,7 +1045,10 @@ const branchDepth = (
 const emitBody = (
   fn: Mir.MirFunction,
   layout: Layout,
-  resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
+  resolve: (
+    target: DeclarationIndex.CanonicalId,
+    typeArguments: ReadonlyArray<SilkType.Type>,
+  ) => FuncActor.Func,
   memory: MemoryContext | undefined,
 ): ReadonlyArray<Instr.Instr> => {
   const regions = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
@@ -1177,12 +1280,15 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       })
     }
 
-    const resolve = (operation: Mir.Operation & { readonly _tag: 'Call' }): FuncActor.Func => {
+    const resolve = (
+      targetId: DeclarationIndex.CanonicalId,
+      typeArguments: ReadonlyArray<SilkType.Type>,
+    ): FuncActor.Func => {
       const target = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
+        Mir.matchesInstance(candidate.fn, targetId, typeArguments),
       )
       if (target === undefined) {
-        throw new RangeError(`Backend cannot resolve call target ${operation.target.name}`)
+        throw new RangeError(`Backend cannot resolve call target ${targetId.name}`)
       }
       return target.handle
     }

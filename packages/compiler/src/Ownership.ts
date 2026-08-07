@@ -46,7 +46,7 @@ export interface Release {
   readonly cleanup: CleanupPlan
 }
 
-/** A deterministic compiler-only identity for one call-scoped slice loan. */
+/** A deterministic compiler-only identity for one direct-call or delayed-flow slice loan. */
 export type BorrowId = Hir.BorrowId
 
 export interface LoanFact {
@@ -184,7 +184,9 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
         ? categoryOf(type.element)._tag === 'Copyable'
           ? copyable
           : Object.freeze({ _tag: 'MoveOnly', type })
-        : Object.freeze({ _tag: 'MoveOnly', type })
+        : Type.isFlow(type) && type.access === 'Shared'
+          ? copyable
+          : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
@@ -383,6 +385,25 @@ const checkExpression = (
         checkExpression(state, live, argument, true, guard, escaping)
       return
     }
+    case 'FlowConstruct': {
+      for (const argument of expression.arguments)
+        checkExpression(state, live, argument, true, guard, escaping)
+      return
+    }
+    case 'FlowCatch':
+      checkExpression(state, live, expression.protected, false, guard, escaping)
+      return
+    case 'Run': {
+      if (
+        expression.subject._tag === 'BindingReference' &&
+        Type.isFlow(expression.subject.type) &&
+        expression.subject.type.access === 'Take'
+      ) {
+        const site = useSite(expression.subject)
+        if (site !== undefined) checkUse(state, live, site, expression.span, true)
+      } else checkExpression(state, live, expression.subject, false, guard, escaping)
+      return
+    }
     case 'Match': {
       const scrutineeSite = useSite(expression.scrutinee)
       const scrutineeType =
@@ -553,6 +574,105 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     return undefined
   }
 
+  const runEnds = new Map<
+    number,
+    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+  >()
+  const scanRunEnds = (expression: Elaboration.ExpressionFact, region: Hir.RegionId): void => {
+    switch (expression._tag) {
+      case 'Run': {
+        const site = directSite(expression.subject)?.site
+        if (site?._tag === 'Let') {
+          const previous = runEnds.get(site.binding.ordinal)
+          if (previous === undefined || previous.span.end < expression.syntax.span.end) {
+            runEnds.set(site.binding.ordinal, { region, span: expression.syntax.span })
+          }
+        }
+        scanRunEnds(expression.subject, region)
+        return
+      }
+      case 'Move':
+        scanRunEnds(expression.subject, region)
+        return
+      case 'Grouped':
+        scanRunEnds(expression.expression, region)
+        return
+      case 'Borrow':
+      case 'FieldProjection':
+        scanRunEnds(expression.subject, region)
+        return
+      case 'IndexProjection':
+        scanRunEnds(expression.subject, region)
+        scanRunEnds(expression.index, region)
+        return
+      case 'StructLiteral':
+        for (const initializer of expression.initializers)
+          scanRunEnds(initializer.expression, region)
+        return
+      case 'ArrayLiteral':
+        for (const element of expression.elements) scanRunEnds(element.expression, region)
+        return
+      case 'Match':
+        scanRunEnds(expression.scrutinee, region)
+        for (const arm of expression.arms) {
+          if (arm.guard !== undefined) scanRunEnds(arm.guard, region)
+          scanRunEnds(arm.result, region)
+        }
+        return
+      case 'Operator':
+      case 'Pipeline':
+      case 'Call':
+        for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
+        return
+      case 'FlowCatch':
+        scanRunEnds(expression.protected, region)
+        return
+      case 'Integer':
+      case 'Boolean':
+      case 'Identifier':
+        return
+    }
+  }
+  const scanStatementRunEnds = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {
+    for (const statement of facts) {
+      switch (statement._tag) {
+        case 'BindStatement':
+          scanRunEnds(statement.binding.initializer, statement.region)
+          break
+        case 'IfStatement':
+          scanRunEnds(statement.condition, statement.region)
+          scanStatementRunEnds(statement.taken)
+          scanStatementRunEnds(statement.otherwise)
+          break
+        case 'WriteStatement':
+          scanRunEnds(statement.destination, statement.region)
+          scanRunEnds(statement.value, statement.region)
+          break
+        case 'WhileStatement':
+          scanRunEnds(statement.condition, statement.region)
+          scanStatementRunEnds(statement.body)
+          break
+        case 'ReturnStatement':
+        case 'FailStatement':
+          scanRunEnds(statement.expression, statement.region)
+          break
+        case 'BreakStatement':
+        case 'ContinueStatement':
+          break
+      }
+    }
+  }
+  scanStatementRunEnds(fn.statements)
+
+  const delayedLoansAt = (span: SourceSpan.SourceSpan): ReadonlyArray<LoanFact> =>
+    loans.filter(
+      (loan) =>
+        loan.startSpan.sourceId === span.sourceId &&
+        loan.startSpan.end <= span.start &&
+        span.end <= loan.endSpan.end &&
+        loan.endSpan.end > loan.startSpan.end,
+    )
+
   const checkDirectAccess = (
     expression: Elaboration.ExpressionFact,
     active: ReadonlyArray<LoanFact>,
@@ -586,21 +706,26 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     region: Hir.RegionId,
     active: ReadonlyArray<LoanFact>,
     access: 'Read' | 'Write' | 'Move' = 'Read',
+    delayedEnd?: { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan },
   ): void => {
     switch (expression._tag) {
       case 'Integer':
       case 'Boolean':
         return
       case 'Identifier':
-        checkDirectAccess(expression, active, access)
+        checkDirectAccess(
+          expression,
+          [...active, ...delayedLoansAt(expression.syntax.span)],
+          access,
+        )
         return
       case 'Borrow':
         return
       case 'Move':
-        inspect(expression.subject, region, active, 'Move')
+        inspect(expression.subject, region, active, 'Move', delayedEnd)
         return
       case 'Grouped':
-        inspect(expression.expression, region, active, access)
+        inspect(expression.expression, region, active, access, delayedEnd)
         return
       case 'FieldProjection':
         inspect(expression.subject, region, active, access)
@@ -637,7 +762,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         }
         return
       case 'Call': {
-        const callActive: Array<LoanFact> = [...active]
+        const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
           const candidate = argument.expression
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
@@ -675,15 +800,21 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
               ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
               : { suspendsParent: false }),
             startRegion: region,
-            endRegion: region,
+            endRegion: delayedEnd?.region ?? region,
             startSpan: candidate.syntax.span,
-            endSpan: expression.syntax.span,
+            endSpan: delayedEnd?.span ?? expression.syntax.span,
           })
           loans.push(loan)
           callActive.push(loan)
         }
         return
       }
+      case 'Run':
+        inspect(expression.subject, region, active, 'Read')
+        return
+      case 'FlowCatch':
+        inspect(expression.protected, region, active, 'Read', delayedEnd)
+        return
     }
   }
 
@@ -691,7 +822,19 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     for (const statement of facts) {
       switch (statement._tag) {
         case 'BindStatement':
-          inspect(statement.binding.initializer, statement.region, [])
+          inspect(
+            statement.binding.initializer,
+            statement.region,
+            [],
+            'Read',
+            statement.binding.initializer.type._tag === 'Available' &&
+              Type.isFlow(statement.binding.initializer.type.type)
+              ? (runEnds.get(statement.binding.id.ordinal) ?? {
+                  region: statement.region,
+                  span: fn.declaration.syntax.span,
+                })
+              : undefined,
+          )
           break
         case 'IfStatement':
           inspect(statement.condition, statement.region, [])
@@ -708,6 +851,9 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           break
         case 'ReturnStatement':
           inspect(statement.expression, statement.region, [], naturalAccess(statement.expression))
+          break
+        case 'FailStatement':
+          inspect(statement.expression, statement.region, [], 'Move')
           break
         case 'BreakStatement':
         case 'ContinueStatement':
@@ -770,6 +916,7 @@ const cleanupPlan = (
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
   if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isFlow(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',

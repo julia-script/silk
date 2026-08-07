@@ -55,8 +55,22 @@ export interface UnionValue {
   readonly payload: AggregateValue
 }
 
+export interface FlowOutcomeValue {
+  readonly _tag: 'FlowOutcomeValue'
+  readonly type: Type.Flow
+  readonly tag: number
+  readonly payload: Value
+}
+
 /** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value = I32Value | UsizeValue | AggregateValue | ArrayValue | SliceValue | UnionValue
+export type Value =
+  | I32Value
+  | UsizeValue
+  | AggregateValue
+  | ArrayValue
+  | SliceValue
+  | UnionValue
+  | FlowOutcomeValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -195,6 +209,13 @@ export interface ControlTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface FlowTraceEvent {
+  readonly _tag: 'FlowSuccess' | 'FlowFailure'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly tag: number
+  readonly span: SourceSpan.SourceSpan
+}
+
 export type TraceEvent =
   | EntryTraceEvent
   | CallTraceEvent
@@ -208,6 +229,7 @@ export type TraceEvent =
   | CleanupTraceEvent
   | MatchTraceEvent
   | ControlTraceEvent
+  | FlowTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -1145,6 +1167,223 @@ function executeFunction(
               }),
             )
             break
+          }
+          case 'PackFlowOutcome': {
+            const payload = read(operation.source).value
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'FlowOutcomeValue',
+                type: operation.type.type,
+                tag: operation.tag,
+                payload,
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: operation.tag === 0 ? 'FlowSuccess' : 'FlowFailure',
+                function: fn.id,
+                tag: operation.tag,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'UnpackFlowSuccess': {
+            const outcome = read(operation.source)
+            if (outcome.value._tag !== 'FlowOutcomeValue' || outcome.value.tag !== 0) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'attempted to unpack a failed flow outcome as success',
+                span: operation.provenance.span,
+              })
+            }
+            write(operation.destination, { value: outcome.value.payload, fromCall: true })
+            break
+          }
+          case 'CatchFlow': {
+            const protectedTarget = functionFor(
+              program,
+              operation.protectedTarget,
+              operation.protectedTypeArguments,
+            )
+            if (protectedTarget === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.protectedTarget,
+                span: operation.provenance.span,
+              })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                caller: fn.id,
+                target: operation.protectedTarget,
+                callerInstance: fn.instance,
+                targetInstance: protectedTarget.instance,
+                span: operation.provenance.span,
+              }),
+            )
+            const protectedArguments = operation.protectedArguments.map((argument) =>
+              read(argument),
+            )
+            protectedArguments.forEach((argument, ordinal) => {
+              trace.push(
+                Object.freeze({
+                  _tag: 'Binding',
+                  target: operation.protectedTarget,
+                  targetInstance: protectedTarget.instance,
+                  callSpan: operation.provenance.span,
+                  argumentOrdinal: ordinal,
+                  parameterOrdinal: ordinal,
+                  value: argument.value,
+                  fromCall: argument.fromCall,
+                  span: operation.provenance.span,
+                }),
+              )
+            })
+            const protectedResult = executeFunction(
+              program,
+              protectedTarget,
+              protectedArguments.map((argument) => argument.value),
+              Object.freeze([...active, protectedTarget.instance]),
+              trace,
+              state,
+            )
+            if (protectedResult._tag === 'Blocked') return protectedResult
+            if (protectedResult.value._tag !== 'FlowOutcomeValue')
+              throw new RangeError('MIR flow catch target returned a non-outcome value')
+            write(operation.protectedOutcome, { value: protectedResult.value, fromCall: true })
+            if (protectedResult.value.tag === 0) {
+              write(operation.destination, {
+                value: protectedResult.value.payload,
+                fromCall: true,
+              })
+              break
+            }
+            if (protectedResult.value.tag !== operation.handledTag)
+              throw new RangeError('MIR flow catch reached an unmatched failure tag')
+            const handlerTarget = functionFor(program, operation.handlerTarget, Object.freeze([]))
+            if (handlerTarget === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.handlerTarget,
+                span: operation.provenance.span,
+              })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                caller: fn.id,
+                target: operation.handlerTarget,
+                callerInstance: fn.instance,
+                targetInstance: handlerTarget.instance,
+                span: operation.provenance.span,
+              }),
+              Object.freeze({
+                _tag: 'Binding',
+                target: operation.handlerTarget,
+                targetInstance: handlerTarget.instance,
+                callSpan: operation.provenance.span,
+                argumentOrdinal: 0,
+                parameterOrdinal: 0,
+                value: protectedResult.value.payload,
+                fromCall: true,
+                span: operation.provenance.span,
+              }),
+            )
+            const handlerResult = executeFunction(
+              program,
+              handlerTarget,
+              [protectedResult.value.payload],
+              Object.freeze([...active, handlerTarget.instance]),
+              trace,
+              state,
+            )
+            if (handlerResult._tag === 'Blocked') return handlerResult
+            if (handlerResult.value._tag !== 'FlowOutcomeValue' || handlerResult.value.tag !== 0)
+              throw new RangeError('MIR catch handler did not return an infallible flow outcome')
+            write(operation.handlerOutcome, { value: handlerResult.value, fromCall: true })
+            write(operation.destination, { value: handlerResult.value.payload, fromCall: true })
+            break
+          }
+          case 'RunFlow': {
+            const target = functionFor(program, operation.target, operation.typeArguments)
+            if (target === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.target,
+                span: operation.provenance.span,
+              })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                caller: fn.id,
+                target: operation.target,
+                callerInstance: fn.instance,
+                targetInstance: target.instance,
+                span: operation.provenance.span,
+              }),
+            )
+            const arguments_ = operation.arguments.map((argument) => read(argument))
+            arguments_.forEach((argument, ordinal) => {
+              trace.push(
+                Object.freeze({
+                  _tag: 'Binding',
+                  target: operation.target,
+                  targetInstance: target.instance,
+                  callSpan: operation.provenance.span,
+                  argumentOrdinal: ordinal,
+                  parameterOrdinal: ordinal,
+                  value: argument.value,
+                  fromCall: argument.fromCall,
+                  span: operation.provenance.span,
+                }),
+              )
+            })
+            const result = executeFunction(
+              program,
+              target,
+              arguments_.map((argument) => argument.value),
+              Object.freeze([...active, target.instance]),
+              trace,
+              state,
+            )
+            if (result._tag === 'Blocked') return result
+            if (result.value._tag !== 'FlowOutcomeValue')
+              throw new RangeError('MIR propagated flow returned a non-outcome value')
+            const flowOutcome = result.value
+            write(operation.outcome, { value: flowOutcome, fromCall: true })
+            if (flowOutcome.tag === 0) {
+              write(operation.destination, { value: flowOutcome.payload, fromCall: true })
+              break
+            }
+            const mapping = operation.tagMappings.find(
+              (candidate) => candidate.source === flowOutcome.tag,
+            )
+            if (mapping === undefined)
+              throw new RangeError('MIR propagated flow has no canonical failure-tag mapping')
+            const propagated: FlowOutcomeValue = Object.freeze({
+              _tag: 'FlowOutcomeValue',
+              type: operation.propagationType.type,
+              tag: mapping.target,
+              payload: flowOutcome.payload,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'FlowFailure',
+                function: fn.id,
+                tag: mapping.target,
+                span: operation.provenance.span,
+              }),
+              Object.freeze({
+                _tag: 'Return',
+                function: fn.id,
+                instance: fn.instance,
+                value: propagated,
+                span: operation.provenance.span,
+              }),
+            )
+            return Object.freeze({ _tag: 'Value', value: propagated })
           }
           case 'Call': {
             const target = functionFor(program, operation.target, operation.typeArguments)

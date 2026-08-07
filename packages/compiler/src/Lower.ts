@@ -38,7 +38,9 @@ const mirType = (
           ? Object.freeze({ _tag: 'Slice', type: specialized })
           : Type.isUnion(specialized)
             ? Object.freeze({ _tag: 'Union', type: specialized })
-            : undefined
+            : Type.isFlow(specialized)
+              ? Object.freeze({ _tag: 'FlowOutcome', type: specialized })
+              : undefined
 }
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
@@ -53,6 +55,7 @@ class FunctionLowering {
   readonly regions: Array<Mir.Region | undefined> = []
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()
+  readonly flowRecipes = new Map<number, Hir.Expression>()
   readonly patternLocals = new Map<string, Mir.LocalId>()
   readonly loanLocals = new Map<string, Mir.LocalId>()
   private operations: Array<Mir.Operation> = []
@@ -62,6 +65,7 @@ class FunctionLowering {
     parameterTypes: ReadonlyArray<Mir.Type>,
     readonly ownership: Ownership.FunctionOwnership | undefined,
     readonly substitution: ReadonlyMap<string, Type.Type>,
+    readonly flowOutcome: Type.Flow | undefined,
   ) {
     this.localTypes.push(...parameterTypes)
   }
@@ -254,6 +258,142 @@ function lowerExpression(
     }
     case 'Move':
       return lowerExpression(fn, expression.subject)
+    case 'FlowConstruct':
+      return undefined
+    case 'Run': {
+      const recipe =
+        expression.subject._tag === 'BindingReference'
+          ? fn.flowRecipes.get(expression.subject.binding.ordinal)
+          : expression.subject
+      if (recipe?._tag === 'FlowCatch') {
+        if (
+          recipe.type.failures.length !== 0 ||
+          recipe.handlerFailures.length !== 0 ||
+          recipe.protected._tag !== 'FlowConstruct'
+        )
+          return undefined
+        const protectedRecipe = recipe.protected
+        const arguments_: Array<Mir.LocalId> = []
+        for (const argument of protectedRecipe.arguments) {
+          const lowered = lowerExpression(fn, argument)
+          if (lowered === undefined) return undefined
+          arguments_.push(lowered.result)
+        }
+        const protectedType = fn.type(protectedRecipe.type)
+        const handlerType = fn.type(Type.flow(recipe.type.success, recipe.handlerFailures))
+        const successType = fn.type(expression.type)
+        const handledTag = protectedRecipe.type.failures.findIndex((failure) =>
+          Type.equals(failure, recipe.handled),
+        )
+        const handledShape = Layout.callingShape(fn.layout, fn.semantic(recipe.handled))
+        if (
+          protectedType?._tag !== 'FlowOutcome' ||
+          handlerType?._tag !== 'FlowOutcome' ||
+          successType === undefined ||
+          successType._tag === 'FlowOutcome' ||
+          handledTag < 0 ||
+          handledShape === undefined
+        )
+          return undefined
+        const protectedOutcome = fn.alloc(protectedType)
+        const handlerOutcome = fn.alloc(handlerType)
+        const destination = fn.alloc(successType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'CatchFlow',
+            destination,
+            protectedOutcome,
+            handlerOutcome,
+            protectedTarget: protectedRecipe.target,
+            protectedTypeArguments: Object.freeze(
+              protectedRecipe.typeArguments.map((argument) => fn.semantic(argument)),
+            ),
+            protectedArguments: Object.freeze(arguments_),
+            protectedType,
+            handledTag: handledTag + 1,
+            handledLaneCount: handledShape.laneCount,
+            handlerTarget: recipe.handler,
+            handlerType,
+            type: successType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
+      if (recipe?._tag !== 'FlowConstruct') return undefined
+      const arguments_: Array<Mir.LocalId> = []
+      for (const argument of recipe.arguments) {
+        const lowered = lowerExpression(fn, argument)
+        if (lowered === undefined) return undefined
+        arguments_.push(lowered.result)
+      }
+      const outcomeType = fn.type(recipe.type)
+      const successType = fn.type(expression.type)
+      if (
+        outcomeType?._tag !== 'FlowOutcome' ||
+        successType === undefined ||
+        successType._tag === 'FlowOutcome'
+      )
+        return undefined
+      const outcome = fn.alloc(outcomeType)
+      const destination = fn.alloc(successType)
+      if (recipe.type.failures.length > 0) {
+        const propagationType = fn.flowOutcome === undefined ? undefined : fn.type(fn.flowOutcome)
+        const propagationShape =
+          fn.flowOutcome === undefined ? undefined : Layout.callingShape(fn.layout, fn.flowOutcome)
+        if (propagationType?._tag !== 'FlowOutcome' || propagationShape === undefined)
+          return undefined
+        const tagMappings = recipe.type.failures.flatMap((failure, source) => {
+          const target = propagationType.type.failures.findIndex((candidate) =>
+            Type.equals(candidate, failure),
+          )
+          return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
+        })
+        if (tagMappings.length !== recipe.type.failures.length) return undefined
+        fn.emit(
+          Object.freeze({
+            _tag: 'RunFlow',
+            destination,
+            outcome,
+            target: recipe.target,
+            typeArguments: Object.freeze(
+              recipe.typeArguments.map((argument) => fn.semantic(argument)),
+            ),
+            arguments: Object.freeze(arguments_),
+            outcomeType,
+            propagationType,
+            tagMappings: Object.freeze(tagMappings),
+            propagationLaneCount: propagationShape.laneCount,
+            type: successType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
+      fn.emit(
+        Object.freeze({
+          _tag: 'Call',
+          destination: outcome,
+          target: recipe.target,
+          typeArguments: Object.freeze(
+            recipe.typeArguments.map((argument) => fn.semantic(argument)),
+          ),
+          arguments: Object.freeze(arguments_),
+          type: outcomeType,
+          provenance: authored(expression.span),
+        }),
+      )
+      fn.emit(
+        Object.freeze({
+          _tag: 'UnpackFlowSuccess',
+          destination,
+          source: outcome,
+          type: successType,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
     case 'UnionConvert': {
       const source = lowerExpression(fn, expression.source)
       const sourceType = fn.type(expression.sourceType)
@@ -675,6 +815,7 @@ const concreteCleanup = (
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
   if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isFlow(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
@@ -874,6 +1015,29 @@ const lowerSequence = (
   }
 
   if (statement._tag === 'Bind') {
+    if (
+      statement.initializer._tag === 'FlowConstruct' ||
+      statement.initializer._tag === 'FlowCatch'
+    ) {
+      fn.flowRecipes.set(statement.binding.ordinal, statement.initializer)
+      const following = fn.reserve()
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations: Object.freeze([]),
+          outcome: Object.freeze({
+            _tag: 'Forward',
+            target: following,
+            provenance: generated(statement.span),
+          }),
+        }),
+      )
+      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+        ? undefined
+        : id
+    }
     const [initializer, operations] = fn.capture(() => {
       const lowered = lowerExpression(fn, statement.initializer)
       if (lowered === undefined) return undefined
@@ -1138,11 +1302,106 @@ const lowerSequence = (
     return id
   }
 
-  const [returned, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
-  if (returned === undefined) return undefined
+  if (statement._tag === 'Fail') {
+    const [failedValue, operations] = fn.capture(() => {
+      const failed = lowerExpression(fn, statement.expression)
+      const outcomeType = fn.flowOutcome === undefined ? undefined : fn.type(fn.flowOutcome)
+      const specializedFailure = fn.semantic(statement.failure)
+      if (
+        failed === undefined ||
+        outcomeType?._tag !== 'FlowOutcome' ||
+        !Type.isNominal(specializedFailure)
+      )
+        return undefined
+      const tag = outcomeType.type.failures.findIndex((failure) =>
+        Type.equals(failure, specializedFailure),
+      )
+      if (tag < 0) return undefined
+      const destination = fn.alloc(outcomeType)
+      fn.emit(
+        Object.freeze({
+          _tag: 'PackFlowOutcome',
+          destination,
+          source: failed.result,
+          tag: tag + 1,
+          type: outcomeType,
+          provenance: authored(statement.span),
+        }),
+      )
+      return destination
+    })
+    if (failedValue === undefined) return undefined
+    const failureOutcome: Mir.Outcome = Object.freeze({
+      _tag: 'Return',
+      value: failedValue,
+      provenance: authored(statement.span),
+    })
+    const [, releases] = fn.capture(() =>
+      emitReleases(fn, exits.returns.get(spanKey(statement.span))),
+    )
+    if (releases.length === 0) {
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations,
+          outcome: failureOutcome,
+        }),
+      )
+    } else {
+      const cleanup = fn.reserve()
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations,
+          outcome: Object.freeze({
+            _tag: 'Forward',
+            target: cleanup,
+            provenance: generated(statement.span),
+          }),
+        }),
+      )
+      fn.publish(
+        Object.freeze({
+          _tag: 'CleanupRegion',
+          id: cleanup,
+          ...ownerFields(ownerLoop),
+          releases: Object.freeze(
+            releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+          ),
+          outcome: failureOutcome,
+        }),
+      )
+    }
+    return id
+  }
+
+  const [returnedValue, operations] = fn.capture(() => {
+    const returned = lowerExpression(fn, statement.expression)
+    if (returned === undefined) return undefined
+    if (fn.flowOutcome === undefined) return returned.result
+    const outcomeType = fn.type(fn.flowOutcome)
+    if (outcomeType?._tag !== 'FlowOutcome') return undefined
+    const destination = fn.alloc(outcomeType)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PackFlowOutcome',
+        destination,
+        source: returned.result,
+        tag: 0,
+        type: outcomeType,
+        provenance: authored(statement.span),
+      }),
+    )
+    return destination
+  })
+  if (returnedValue === undefined) return undefined
   const returnOutcome: Mir.Outcome = Object.freeze({
     _tag: 'Return',
-    value: returned.result,
+    value: returnedValue,
     provenance: authored(statement.span),
   })
   const [, releases] = fn.capture(() =>
@@ -1248,13 +1507,31 @@ const lowerInstance = (
           return lowered === undefined ? [] : [lowered]
         })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
+  const flowOutcome =
+    contract._tag === 'Contract' && contract.functionKind === 'Flow'
+      ? Type.flow(
+          Type.substitute(contract.result, instance.substitution),
+          (contract.failures ?? []).flatMap((failure) => {
+            const specialized = Type.substitute(failure, instance.substitution)
+            return Type.isNominal(specialized) ? [specialized] : []
+          }),
+        )
+      : undefined
   const resultType =
-    contract._tag === 'Contract' ? mirType(contract.result, instance.substitution) : i32
+    contract._tag === 'Contract'
+      ? mirType(flowOutcome ?? contract.result, instance.substitution)
+      : i32
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
   }
 
-  const lowering = new FunctionLowering(layout, parameterTypes, plan, instance.substitution)
+  const lowering = new FunctionLowering(
+    layout,
+    parameterTypes,
+    plan,
+    instance.substitution,
+    flowOutcome,
+  )
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
     reason: 'body fell through without return',

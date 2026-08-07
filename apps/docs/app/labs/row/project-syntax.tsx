@@ -171,7 +171,11 @@ const hirSpan = (span: { readonly start: number; readonly end: number }): Span =
 /** Contract types are `Type.Type`, so a struct parameter or result is an object, not a string. */
 export const hirContract = (contract: Hir.ContractFact): string =>
   contract._tag === 'Contract'
-    ? `(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}`
+    ? `${contract.functionKind === 'Flow' ? 'flow ' : ''}(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}${
+        contract.functionKind === 'Flow'
+          ? ` ! ${contract.failures?.map(hirTypeText).join(' | ') || 'empty'}`
+          : ''
+      }`
     : 'contract unavailable'
 
 const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
@@ -200,7 +204,13 @@ const hirTypeText = (type: Type.Type): string =>
         ? `Array<${hirTypeText(type.element)}, ${type.length}>`
       : type._tag === 'SliceType'
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
-        : type.members.map(hirTypeText).join(' | ')
+        : type._tag === 'FlowType'
+          ? `Flow<${hirTypeText(type.success)}${
+              type.failures.length === 0
+                ? ''
+                : ` ! ${type.failures.map(hirTypeText).join(' | ')}`
+            }> ${type.access.toLowerCase()}`
+          : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -239,6 +249,16 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
           ? ''
           : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
       } · loan ends ${expression.loanEnds.map((loan) => `#${loan.ordinal}`).join(', ') || 'none'}`
+    case 'FlowConstruct':
+      return `flow recipe ${expression.target.name}${
+        expression.typeArguments.length === 0
+          ? ''
+          : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
+      } · ${expression.type.access.toLowerCase()}`
+    case 'Run':
+      return 'run recipe'
+    case 'FlowCatch':
+      return `catch ${hirTypeText(expression.handled)} with ${expression.handler.name}`
     case 'BuiltinCall':
       return `builtin I32.${expression.operation}`
     default:
@@ -264,14 +284,15 @@ export const hirRows = (
       ...(node._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
       onActivate: () => onPick(span),
     })
-    if (node._tag === 'Call' || node._tag === 'BuiltinCall') {
+    if (node._tag === 'Call' || node._tag === 'FlowConstruct' || node._tag === 'BuiltinCall') {
       node.arguments.forEach((argument, index) =>
         expression(argument, depth + 1, `${path}.${index}`),
       )
     }
-    if (node._tag === 'Move' || node._tag === 'Project') {
+    if (node._tag === 'Move' || node._tag === 'Project' || node._tag === 'Run') {
       expression(node.subject, depth + 1, `${path}.s`)
     }
+    if (node._tag === 'FlowCatch') expression(node.protected, depth + 1, `${path}.p`)
     if (node._tag === 'SliceLength') expression(node.slice, depth + 1, `${path}.s`)
     if (node._tag === 'SliceIndexPlace') {
       expression(node.slice, depth + 1, `${path}.s`)
@@ -384,6 +405,19 @@ export const hirRows = (
         span,
         onActivate: () => onPick(span),
       })
+      return
+    }
+    if (node._tag === 'Fail') {
+      rows.push({
+        key: `${path}-fail-${span.start}`,
+        depth,
+        label: `fail ${hirTypeText(node.failure)}`,
+        detail: `r${node.region.ordinal}`,
+        span,
+        tone: 'warning',
+        onActivate: () => onPick(span),
+      })
+      expression(node.expression, depth + 1, `${path}.f`)
       return
     }
     if (node._tag === 'UnavailableStatement') {

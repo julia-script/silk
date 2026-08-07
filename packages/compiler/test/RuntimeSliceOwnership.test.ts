@@ -116,7 +116,7 @@ pub fn main() -> I32 { return 0 }`)
 it.effect('ends loop-body loans before continue and return cleanup boundaries', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`fn read(values: &[I32]) -> I32 { return 1 }
-fn flow() -> I32 {
+fn flowTest() -> I32 {
   let values = [1, 2]
   while false {
     let seen = read(&values)

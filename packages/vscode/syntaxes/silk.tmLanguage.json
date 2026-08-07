@@ -13,7 +13,7 @@
     },
     {
       "name": "keyword.other.silk",
-      "match": "\\b(?:pub|struct|fn|return|import|as|let|mut|move|match|if|else|while|break|continue)\\b"
+      "match": "\\b(?:pub|struct|fn|flow|run|fail|return|import|as|let|mut|move|match|if|else|while|break|continue)\\b"
     },
     {
       "name": "constant.language.boolean.silk",

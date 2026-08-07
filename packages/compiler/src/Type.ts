@@ -37,6 +37,14 @@ export interface Slice {
   readonly element: Type
 }
 
+/** A compiler-private lazy flow contract. Flow values never cross the executable ABI. */
+export interface Flow {
+  readonly _tag: 'FlowType'
+  readonly success: Type
+  readonly failures: ReadonlyArray<Nominal>
+  readonly access: 'Shared' | 'Exclusive' | 'Take'
+}
+
 /** One normalized structural union with at least two canonical nominal members. */
 const structuralUnionBrand: unique symbol = Symbol('StructuralUnion')
 export interface StructuralUnion {
@@ -46,7 +54,15 @@ export interface StructuralUnion {
 }
 
 /** The closed semantic type vocabulary accepted by declaration analysis. */
-export type Type = Builtin | Never | Nominal | Parameter | FixedArray | Slice | StructuralUnion
+export type Type =
+  | Builtin
+  | Never
+  | Nominal
+  | Parameter
+  | FixedArray
+  | Slice
+  | Flow
+  | StructuralUnion
 
 /** The typed result of attempting to normalize structural-union inputs. */
 export type UnionNormalization =
@@ -86,6 +102,21 @@ export const fixedArray = (element: Type, length: number): FixedArray =>
 /** Constructs one canonical lexical slice type. */
 export const slice = (access: Slice['access'], element: Type): Slice =>
   Object.freeze({ _tag: 'SliceType', access, element })
+
+/** Constructs one normalized compiler-private lazy flow contract. */
+export const flow = (
+  success: Type,
+  failures: ReadonlyArray<Nominal>,
+  access: Flow['access'] = 'Shared',
+): Flow => {
+  const normalized = new Map(failures.map((failure) => [key(failure), failure] as const))
+  return Object.freeze({
+    _tag: 'FlowType',
+    success,
+    failures: Object.freeze([...normalized.values()].sort(compare)),
+    access,
+  })
+}
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
@@ -147,6 +178,10 @@ export const isFixedArray = (self: Type): self is FixedArray =>
 export const isSlice = (self: Type): self is Slice =>
   typeof self !== 'string' && self._tag === 'SliceType'
 
+/** Tests whether a semantic type is a compiler-private lazy flow contract. */
+export const isFlow = (self: Type): self is Flow =>
+  typeof self !== 'string' && self._tag === 'FlowType'
+
 /** Tests whether a semantic type is a normalized multi-member structural union. */
 export const isUnion = (self: Type): self is StructuralUnion =>
   typeof self !== 'string' && self._tag === 'StructuralUnionType'
@@ -160,6 +195,8 @@ export const key = (self: Type): string => {
   if (isParameter(self)) return `parameter:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
+  if (isFlow(self))
+    return `flow:${self.access}<${key(self.success)}!${self.failures.map(key).join('|')}>`
   return `union:${self.members.map(key).join('|')}`
 }
 
@@ -181,6 +218,10 @@ export const encode = (self: Type): string => {
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
   if (isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
+  if (isFlow(self)) {
+    const row = self.failures.length === 0 ? '' : ` ! ${self.failures.map(encode).join(' | ')}`
+    return `Flow<${encode(self.success)}${row}>`
+  }
   return self.members.map(encode).join(' | ')
 }
 
@@ -192,9 +233,11 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
       ? nominals(self.element)
       : isSlice(self)
         ? nominals(self.element)
-        : isUnion(self)
-          ? Object.freeze(self.members.flatMap(nominals))
-          : []
+        : isFlow(self)
+          ? Object.freeze([...nominals(self.success), ...self.failures.flatMap(nominals)])
+          : isUnion(self)
+            ? Object.freeze(self.members.flatMap(nominals))
+            : []
 
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
@@ -209,7 +252,10 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
       return
     }
     if (isFixedArray(type) || isSlice(type)) visit(type.element)
-    else if (isUnion(type)) for (const member of type.members) visit(member)
+    else if (isFlow(type)) {
+      visit(type.success)
+      for (const failure of type.failures) visit(failure)
+    } else if (isUnion(type)) for (const member of type.members) visit(member)
   }
   visit(self)
   return Object.freeze([...found.values()].sort(compare))
@@ -223,6 +269,7 @@ export const containsBorrow = (self: Type): boolean => {
   if (isSlice(self)) return true
   if (isNominal(self)) return self.arguments.some(containsBorrow)
   if (isFixedArray(self)) return containsBorrow(self.element)
+  if (isFlow(self)) return containsBorrow(self.success) || self.failures.some(containsBorrow)
   if (isUnion(self)) return self.members.some(containsBorrow)
   return false
 }
@@ -238,6 +285,15 @@ export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>):
     )
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
   if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
+  if (isFlow(self)) {
+    const success = substitute(self.success, substitution)
+    const failures = self.failures.map((failure) => substitute(failure, substitution))
+    return flow(
+      success,
+      failures.filter((failure): failure is Nominal => isNominal(failure)),
+      self.access,
+    )
+  }
   if (isUnion(self)) {
     const normalized = union(self.members.map((member) => substitute(member, substitution)))
     return normalized._tag === 'Normalized' ? normalized.type : self
@@ -273,6 +329,17 @@ export const infer = (pattern: Type, actual: Type, inferred: Map<string, Type>):
   }
   if (isSlice(pattern) && isSlice(actual)) {
     return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
+  }
+  if (isFlow(pattern) && isFlow(actual)) {
+    return (
+      pattern.access === actual.access &&
+      pattern.failures.length === actual.failures.length &&
+      infer(pattern.success, actual.success, inferred) &&
+      pattern.failures.every((failure, index) => {
+        const supplied = actual.failures.at(index)
+        return supplied !== undefined && infer(failure, supplied, inferred)
+      })
+    )
   }
   return equals(pattern, actual)
 }

@@ -191,6 +191,19 @@ export type CallingShapeNode =
       }>
       readonly laneCount: number
     }
+  | {
+      readonly _tag: 'OutcomeShape'
+      readonly type: Type.Flow
+      readonly success: CallingShapeNode
+      readonly failures: ReadonlyArray<{
+        readonly type: Type.Nominal
+        readonly tag: number
+        readonly shape: CallingShapeNode
+      }>
+      readonly payloadLaneCount: number
+      readonly payloadTypes: ReadonlyArray<Type.Builtin>
+      readonly laneCount: number
+    }
 
 /** The deterministic backend-neutral calling shape of one reachable logical type. */
 export interface CallingShape {
@@ -584,6 +597,14 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
+    if (Type.isFlow(type)) {
+      const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'compiler-private flow values have no target layout',
+      })
+      completed.set(key, result)
+      return result
+    }
     const element = layoutType(type.element)
     const dependencies = Object.freeze(Type.nominals(type.element))
     if (element._tag === 'UnavailableLayoutEntry') {
@@ -616,6 +637,10 @@ export const catalog = (
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isSlice(type)) addReferenced(type.element)
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
+    if (Type.isFlow(type)) {
+      addReferenced(type.success)
+      for (const failure of type.failures) addReferenced(failure)
+    }
   }
   for (const module of index.modules) {
     for (const member of module.members) {
@@ -757,6 +782,14 @@ const addFunctionTypes = (
   if (fn.declaration.returnType._tag === 'Resolved') {
     const type = Type.substitute(fn.declaration.returnType.type, substitution)
     types.set(Type.key(type), type)
+    if (fn.declaration.functionKind === 'Flow') {
+      const failures = fn.declaration.failureRow.failures.flatMap((failure) => {
+        const specialized = Type.substitute(failure, substitution)
+        return Type.isNominal(specialized) ? [specialized] : []
+      })
+      const outcome = Type.flow(type, failures)
+      types.set(Type.key(outcome), outcome)
+    }
   }
   addStatementTypes(types, fn.statements, substitution)
 }
@@ -844,6 +877,11 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   }
   const add = (type: DeclarationIndex.SemanticType): void => {
     const key = Type.key(type)
+    if (Type.isFlow(type)) {
+      add(type.success)
+      for (const failure of type.failures) add(failure)
+      return
+    }
     if (entries.has(key)) return
     const candidate = resolve(type)
     if (candidate === undefined) return
@@ -863,11 +901,17 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
   const literals = usizeLiteralVerdicts(self.target, discovery)
+  const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
+  for (const type of reached.values()) {
+    if (Type.isConcrete(type) && (Type.isFlow(type) || Type.isNever(type)))
+      shaped.set(Type.key(type), type)
+  }
+  const shapeTypes = Object.freeze([...shaped.values()].sort(Type.compare))
   return Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
     entries: orderedEntries,
-    callingShapes: callingShapes(self.target, orderedEntries),
+    callingShapes: callingShapes(self.target, orderedEntries, shapeTypes),
     literalVerdicts: literals.verdicts,
     diagnostics: literals.diagnostics,
   })
@@ -970,6 +1014,39 @@ const shapeNode = (
       laneCount: 1 + payloadLaneCount,
     })
   }
+  if (Type.isFlow(type)) {
+    const success = shapeNode(target, type.success, entries)
+    const failures = type.failures.map((failure, index) =>
+      Object.freeze({
+        type: failure,
+        tag: index + 1,
+        shape: shapeNode(target, failure, entries),
+      }),
+    )
+    const variants = [success, ...failures.map((failure) => failure.shape)]
+    const payloadLaneCount = variants.reduce(
+      (maximum, variant) => Math.max(maximum, variant.laneCount),
+      0,
+    )
+    const payloadTypes = Object.freeze(
+      Array.from(
+        { length: payloadLaneCount },
+        (_, slot): Type.Builtin =>
+          variants.some((variant) => materializeLanes(variant).at(slot)?.type === 'Usize')
+            ? 'Usize'
+            : 'I32',
+      ),
+    )
+    return Object.freeze({
+      _tag: 'OutcomeShape',
+      type,
+      success,
+      failures: Object.freeze(failures),
+      payloadLaneCount,
+      payloadTypes,
+      laneCount: 1 + payloadLaneCount,
+    })
+  }
   const fields =
     candidate?.representation._tag === 'Aggregate'
       ? candidate.representation.fields.map((field) =>
@@ -1032,6 +1109,25 @@ const materializeLanes = (
       ),
     ])
   }
+  if (node._tag === 'OutcomeShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        type: 'I32' as const,
+      }),
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
+        Object.freeze({
+          _tag: 'CallingLane' as const,
+          path: Object.freeze([
+            ...path,
+            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+          ]),
+          type: node.payloadTypes.at(slot) ?? ('I32' as const),
+        }),
+      ),
+    ])
+  }
   const lanes: Array<CallingLane> = []
   for (let index = 0; index < node.length; index += 1) {
     const selector: Selector = Object.freeze({ _tag: 'ElementSelector', index })
@@ -1062,9 +1158,10 @@ const shapeOf = (
 const callingShapes = (
   target: Target.Target,
   entries: ReadonlyArray<Entry>,
+  types: ReadonlyArray<DeclarationIndex.SemanticType> = entries.map((entry) => entry.type),
 ): ReadonlyArray<CallingShape> => {
   const byType = new Map(entries.map((candidate) => [Type.key(candidate.type), candidate]))
-  return Object.freeze(entries.map((candidate) => shapeOf(target, candidate.type, byType)))
+  return Object.freeze(types.map((type) => shapeOf(target, type, byType)))
 }
 
 /** Looks up one canonical runtime-plan entry. */
@@ -1569,7 +1666,7 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
       )
     }
   }
-  if (self.callingShapes.length !== self.entries.length) {
+  if (self.callingShapes.length < self.entries.length) {
     violations.push(
       Object.freeze({
         _tag: 'LayoutViolation',

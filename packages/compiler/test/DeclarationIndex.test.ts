@@ -106,6 +106,88 @@ it.effect('resolves header signatures and diagnoses unknown types at exact spans
   }),
 )
 
+it.effect('normalizes flow failure rows while retaining source members', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'struct First {}\nstruct Second {}\n' +
+          'flow fn work() -> I32 ! Second | First | Second { return 1 }\n' +
+          'fn plain() -> I32 { return 0 }',
+      ],
+    ])
+    const flow = index.modules.at(0)?.declarations.at(0)
+    const plain = index.modules.at(0)?.declarations.at(1)
+
+    assert.strictEqual(flow?.functionKind, 'Flow')
+    assert.strictEqual(flow?.failureRow.members.length, 3)
+    assert.deepEqual(
+      flow?.failureRow.failures.map((failure) => `${failure.module}.${failure.name}`),
+      ['root.First', 'root.Second'],
+    )
+    assert.strictEqual(flow?.failureRow.available, true)
+    assert.strictEqual(plain?.functionKind, 'Ordinary')
+    assert.deepEqual(plain?.failureRow.failures, [])
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('resolves imported failure members and preserves invalid row facts', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'import errors.Error\n' +
+          'flow fn imported() -> I32 ! Error.Error { return 1 }\n' +
+          'flow fn generic<T>() -> I32 ! T { return 1 }\n' +
+          'flow fn scalar() -> I32 ! I32 { return 1 }\n' +
+          'flow fn missing() -> I32 ! Mystery { return 1 }',
+      ],
+      ['errors/Error', 'pub struct Error {}'],
+    ])
+    const declarations =
+      index.modules.find((module) => module.module === 'root')?.declarations ?? []
+
+    assert.deepEqual(
+      declarations.map((declaration) => ({
+        available: declaration.failureRow.available,
+        failures: declaration.failureRow.failures.map(
+          (failure) => `${failure.module}.${failure.name}`,
+        ),
+      })),
+      [
+        { available: true, failures: ['errors/Error.Error'] },
+        { available: false, failures: [] },
+        { available: false, failures: [] },
+        { available: false, failures: [] },
+      ],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0061', 'SEM0061', 'SEM0001'],
+    )
+  }),
+)
+
+it.effect('rejects failure rows on ordinary functions without losing the row', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'struct Problem {}\nfn bad() -> I32 ! Problem { return 0 }'],
+    ])
+    const declaration = index.modules.at(0)?.declarations.at(0)
+
+    assert.strictEqual(declaration?.functionKind, 'Ordinary')
+    assert.deepEqual(
+      declaration?.failureRow.failures.map((failure) => failure.name),
+      ['Problem'],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0062'],
+    )
+  }),
+)
+
 it.effect('orders modules canonically and answers per-module lookups', () =>
   Effect.gen(function* () {
     const index = yield* collect('zeta', [

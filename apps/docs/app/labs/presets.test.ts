@@ -19,6 +19,8 @@ const snapshotOf = (preset: (typeof presets)[number], target?: string): Analysis
 
 const acceptancePreset = presets.find((preset) => preset.label === 'Algorithmic coverage fold')
 const exclusiveSlicePreset = presets.find((preset) => preset.label === 'Exclusive runtime slice')
+const typedFlowPreset = presets.find((preset) => preset.label === 'Typed flow recovery')
+const residualFlowPreset = presets.find((preset) => preset.label === 'Unhandled flow residual')
 
 const acceptanceContext = (
   preset: (typeof presets)[number],
@@ -91,6 +93,7 @@ describe('preset catalog', () => {
         'control',
         'discovery',
         'backend',
+        'flows',
       ]),
     )
   })
@@ -144,6 +147,38 @@ describe('preset catalog', () => {
     expect(viewById('layout')).toBeDefined()
     expect(viewById('evaluation')).toBeDefined()
     expect(viewById('backend')).toBeDefined()
+  })
+
+  it('exposes typed flow recovery through the unified inspector', () => {
+    expect(typedFlowPreset).toBeDefined()
+    if (typedFlowPreset === undefined) return
+    const native = snapshotOf(typedFlowPreset, 'aarch64-apple-darwin')
+    const wasm = snapshotOf(typedFlowPreset, 'wasm32-unknown-unknown')
+    expect(Analysis.diagnostics(native)).toEqual([])
+    expect(Analysis.hirOf(native, typedFlowPreset.root)).toBeDefined()
+    expect(Analysis.layoutOf(native)._tag).toBe('Available')
+    expect(Analysis.mirOf(wasm)._tag).toBe('Available')
+    const evaluation = Analysis.evaluate(native)
+    expect(evaluation._tag).toBe('Completed')
+    if (evaluation._tag === 'Completed') {
+      expect(evaluation.result.value).toBe(42)
+      expect(evaluation.trace.some((event) => event._tag === 'FlowFailure')).toBe(true)
+      expect(evaluation.trace.some((event) => event._tag === 'FlowSuccess')).toBe(true)
+    }
+    for (const id of ['hir', 'ownership', 'layout', 'mir', 'evaluation', 'backend']) {
+      expect(viewById(id)?.id, id).toBe(id)
+    }
+  })
+
+  it('keeps an unhandled flow residual visibly stopped in the unified inspector', () => {
+    expect(residualFlowPreset).toBeDefined()
+    if (residualFlowPreset === undefined) return
+    const snapshot = snapshotOf(residualFlowPreset, 'aarch64-apple-darwin')
+
+    expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toContain(
+      'SEM0066',
+    )
+    expect(Analysis.evaluate(snapshot)._tag).toBe('Blocked')
   })
 
   it('coordinates every acceptance phase through existing panes', () => {

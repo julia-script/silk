@@ -8,6 +8,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import type * as Token from '../src/Token.js'
+import * as Type from '../src/Type.js'
 import {
   acceptedSource,
   ambiguousCallSource,
@@ -68,6 +69,94 @@ const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
 
 const analyzeText = (id: string, source: string): Elaboration.Result =>
   elaborate(parseText(id, source))
+
+it('diagnoses invalid flow origins, runs, mutability, and escape explicitly', () => {
+  const ordinaryFail = analyzeText(
+    'flow://ordinary-fail',
+    'struct Problem {}\nfn bad() -> I32 { fail move Problem {} }',
+  )
+  const undeclared = analyzeText(
+    'flow://undeclared',
+    'struct Problem {}\nflow fn bad() -> I32 { fail move Problem {} }',
+  )
+  const nonFlow = analyzeText('flow://non-flow', 'fn bad() -> I32 { return run 1 }')
+  const unhandled = analyzeText(
+    'flow://unhandled',
+    `struct Problem {}
+flow fn risky() -> I32 ! Problem { fail move Problem {} }
+fn bad() -> I32 { return run risky() }`,
+  )
+  const recipeRules = analyzeText(
+    'flow://recipe-rules',
+    `flow fn work() -> I32 { return 1 }
+flow fn bad() -> I32 {
+  let mut recipe = work()
+  return recipe
+}`,
+  )
+
+  assert.include(
+    ordinaryFail.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0063',
+  )
+  assert.include(
+    undeclared.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0064',
+  )
+  assert.include(
+    nonFlow.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0065',
+  )
+  assert.include(
+    unhandled.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0066',
+  )
+  assert.deepEqual(
+    recipeRules.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0068', 'SEM0069'],
+  )
+})
+
+it('subtracts the caught failure and unions the handler row canonically', () => {
+  const result = analyzeText(
+    'flow://catch-algebra',
+    `struct First {}
+struct Second {}
+struct HandlerProblem {}
+flow fn risky() -> I32 ! Second | First { fail move First {} }
+flow fn recover(problem: First) -> I32 ! HandlerProblem { fail move HandlerProblem {} }
+flow fn outer() -> I32 ! HandlerProblem | Second {
+  let recipe = risky() |> Flow.catch<First>(recover)
+  return run recipe
+}`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  const outer = result.functions.at(2)
+  const recipe = outer?.bindings.at(0)?.inferredType
+  assert.strictEqual(recipe?._tag, 'Available')
+  if (recipe?._tag !== 'Available' || !Type.isFlow(recipe.type)) return
+  assert.deepEqual(recipe.type.failures.map(Type.encode), [
+    'flow://catch-algebra.HandlerProblem',
+    'flow://catch-algebra.Second',
+  ])
+})
+
+it('rejects dynamically shaped or type-incompatible catch handlers', () => {
+  const result = analyzeText(
+    'flow://bad-handler',
+    `struct Problem {}
+struct Other {}
+flow fn risky() -> I32 ! Problem { fail move Problem {} }
+flow fn wrong(problem: Other) -> Bool { return true }
+fn main() -> I32 {
+  let recipe = Flow.catch<Problem>(risky(), wrong)
+  return 0
+}`,
+  )
+
+  assert.isAbove(result.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0067').length, 0)
+})
 
 const functionAt = (result: Elaboration.Result, index: number): Elaboration.FunctionFact =>
   result.functions.at(index) ?? raise(`expected function fact at index ${index}`)

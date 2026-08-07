@@ -38,8 +38,8 @@ those general foundations would necessarily hard-code allocator behavior into th
 
 Implementation order is:
 
-1. `add-usize-scalar`
-2. `add-flow-functions-and-typed-failures`
+1. ✅ `add-usize-scalar` — archived 2026-08-07
+2. ✅ `add-flow-functions-and-typed-failures` — implemented; archive after final verification
 3. `add-capability-requirements-roles-and-provision`
 4. `add-named-scope-wrappers-and-cleanup`
 5. `add-scoped-allocation-primitives`

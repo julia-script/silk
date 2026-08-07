@@ -2,7 +2,7 @@
 
 > Direction, not commitment — Now is committed; Next is planned; Later is exploration.
 > Only Now items may be promised to anyone. This document changes as we learn.
-> Last reviewed: 2026-08-06 · Review cadence: after each OpenSpec archive, or monthly when no
+> Last reviewed: 2026-08-07 · Review cadence: after each OpenSpec archive, or monthly when no
 > change ships · Scope: whole project
 
 ## Vision
@@ -27,6 +27,29 @@ determinism-gated compiler architecture. Owned growable output is the next missi
 - **Later** — problem worth solving, no solution chosen. Options, not a queue.
 
 ## Now
+
+### Validate the language's defining effect execution model
+
+- **Problem:** The first executable typed-flow baseline proves lazy calls, failure propagation,
+  recovery, ownership, cleanup, and backend parity, but it also commits several Wayfinder-era
+  surface decisions before they have survived enough real programs: `flow fn` versus a first-class
+  lazy `effect {}` scope, `Flow` versus `Effect`, and unconditional `fail move` even for Copy or
+  freshly constructed payloads. These choices define the language more than the allocation API that
+  currently depends on them.
+- **Outcome & done-when:** A broad, executable example corpus covers pure construction, eager setup
+  around lazy work, generic success, one and several failures, exact and residual recovery, borrowed
+  and moved captures, an effect discarded without running, repeated execution, loops, scoped
+  allocation, and cleanup. A reviewed OpenSpec then chooses the eager-to-lazy boundary, source type
+  and block syntax, representation constraints, terminology, and ordinary ownership rule for
+  failure transfer without weakening the proven compiler/backend contract.
+- **Status:** in discovery — the implemented `add-flow-functions-and-typed-failures` change is an
+  evidence-producing baseline, not a syntax freeze. Capability roles, scopes, and allocation remain
+  behind this review.
+- **Appetite:** one focused design cycle and adversarial review before the next execution-substrate
+  proposal; prefer changing the unreleased surface now over preserving a doubtful abstraction.
+- **Links:** change: `add-flow-functions-and-typed-failures` ·
+  [effect model decision](../wayfinder/bootstrap-language/issues/03-effect-system-and-typed-failures.md) ·
+  [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
 
 ### Widen the language, slice 1: bindings, arithmetic, branching
 
@@ -116,11 +139,12 @@ control remains a DAG until each backend converts it to its required target form
   change runs through syntax, semantic facts, ownership, HIR/MIR, target layout, evaluator, native,
   Wasm, determinism, and unified inspection before the next begins.
 - **Sequence:**
-  1. `add-usize-scalar`
-  2. `add-flow-functions-and-typed-failures`
-  3. `add-capability-requirements-roles-and-provision`
-  4. `add-named-scope-wrappers-and-cleanup`
-  5. `add-scoped-allocation-primitives`
+  1. ✅ `add-usize-scalar` — archived 2026-08-07
+  2. ✅ `add-flow-functions-and-typed-failures` — archived 2026-08-07 as the executable baseline
+  3. Review and settle the effect execution model and source surface
+  4. `add-capability-requirements-roles-and-provision`
+  5. `add-named-scope-wrappers-and-cleanup`
+  6. `add-scoped-allocation-primitives`
 - **Evidence for the split:** Adversarial minimality, ownership, and backend review found that doing
   allocation first would either hard-code the allocator into the compiler or silently implement all
   four foundations inside one oversized memory ticket. The same review replaced impossible static
@@ -190,6 +214,11 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Open questions
 
+- Is the primitive lazy boundary an `effect {}` expression with `effect fn` sugar, a distinct
+  function kind, or another form that keeps eager construction and lazy imperative execution
+  explicit?
+- Should the defining computation type be named `Effect` rather than `Flow`, and should `fail`
+  follow ordinary Copy-versus-move rules instead of requiring `move` for every payload?
 - What executable name and public analysis facade should eventually accompany
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
@@ -201,6 +230,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-07: Shipped and archived the first executable typed-flow baseline, then promoted a full
+  effect-model review ahead of capability roles, scopes, and allocation. The baseline proves lazy
+  construction, typed failure outcomes, exact recovery, cleanup, compiler-owned target layout,
+  structured DAG lowering, evaluator/native/Wasm parity, determinism, and unified Labs inspection;
+  its `flow fn`, `Flow`, and `fail move` spellings remain deliberately open to replacement after a
+  broad scenario corpus and adversarial review.
 - 2026-08-06: The composed remaining-member acceptance fold established the first algorithmic
   baseline across module resolution, all compiler representations, logical evaluation, native LLVM,
   direct WebAssembly, fresh-process determinism, and the unified `/labs` workbench. The program

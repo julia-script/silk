@@ -158,6 +158,15 @@ export interface UnionSourceFact {
 
 export type ReturnTypeFact = DeclaredTypeFact
 
+/** A source-retained and canonically normalized flow failure row. */
+export interface FailureRowFact {
+  readonly _tag: 'FailureRow'
+  readonly members: ReadonlyArray<DeclaredTypeFact>
+  readonly failures: ReadonlyArray<Type.Nominal>
+  readonly syntax?: SyntaxTree.Node
+  readonly available: boolean
+}
+
 /** One ordered parameter declaration with exact concrete provenance. */
 export interface ParameterFact {
   readonly _tag: 'ParameterDeclaration'
@@ -173,11 +182,13 @@ export interface DeclarationFact {
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
+  readonly functionKind: 'Ordinary' | 'Flow'
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly name: DeclaredName
   readonly returnType: ReturnTypeFact
+  readonly failureRow: FailureRowFact
   readonly syntax: SyntaxTree.Node
 }
 
@@ -813,6 +824,44 @@ const collectTypeParameters = (
   })
 }
 
+const failureMembers = (fact: DeclaredTypeFact): ReadonlyArray<DeclaredTypeFact> => {
+  if (fact._tag === 'Resolved' && fact.unionSource !== undefined) return fact.unionSource.members
+  if (fact._tag === 'Union') return fact.members
+  return Object.freeze([fact])
+}
+
+const collectFailureRow = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): {
+  readonly fact: FailureRowFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const syntax = SyntaxTree.directNode(node, 'FailureRow')
+  if (syntax === undefined)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'FailureRow',
+        members: Object.freeze([]),
+        failures: Object.freeze([]),
+        available: true,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  const analyzed = analyzeDeclaredType(source, declaredTypeNode(syntax), typeParameters)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'FailureRow',
+      members: Object.freeze(failureMembers(analyzed.fact)),
+      failures: Object.freeze([]),
+      syntax,
+      available: false,
+    }),
+    diagnostics: analyzed.diagnostics,
+  })
+}
+
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const nodes = syntax.root.children.filter(
@@ -884,22 +933,30 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       declaredTypeNode(childNode(node, 'ReturnType')),
       typeParameters.environment,
     )
+    const functionKind =
+      SyntaxTree.directToken(node, 'FlowKeyword') === undefined ? 'Ordinary' : 'Flow'
+    const failureRow = collectFailureRow(source, node, typeParameters.environment)
     const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
       ...duplicateParameterDiagnostics(facts),
       ...returnType.diagnostics,
+      ...failureRow.diagnostics,
     )
+    if (functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
+      diagnostics.push(Diagnostic.failureRowOnOrdinary(failureRow.fact.syntax.span))
     return Object.freeze({
       _tag: 'FunctionDeclaration',
       id,
       canonical,
       visibility,
+      functionKind,
       typeParameters: typeParameters.facts,
       parameterCount: facts.length,
       parameters: facts,
       name,
       returnType: returnType.fact,
+      failureRow: failureRow.fact,
       syntax: node,
     })
   })
@@ -1167,6 +1224,50 @@ export const resolveTypeFact = (
   resolver: TypeResolver,
 ): TypeResolution => resolveDeclaredType(module, fact, resolver, index.modules)
 
+const resolveFailureRow = (
+  module: string,
+  row: FailureRowFact,
+  resolver: TypeResolver,
+  modules: ReadonlyArray<ModuleHeaders>,
+): {
+  readonly fact: FailureRowFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const members = row.members.map((member) => {
+    const resolved = resolveDeclaredType(module, member, resolver, modules)
+    diagnostics.push(...resolved.diagnostics)
+    return resolved.fact
+  })
+  const failures = new Map<string, Type.Nominal>()
+  let available = true
+  for (const member of members) {
+    if (
+      member._tag !== 'Resolved' ||
+      !Type.isNominal(member.type) ||
+      !Type.isConcrete(member.type)
+    ) {
+      available = false
+      if (member._tag === 'Resolved')
+        diagnostics.push(
+          Diagnostic.invalidFailureType(Type.encode(member.type), member.syntax.span),
+        )
+      continue
+    }
+    failures.set(Type.key(member.type), member.type)
+  }
+  return Object.freeze({
+    fact: Object.freeze({
+      ...row,
+      members: Object.freeze(members),
+      failures: Object.freeze([...failures.values()].sort(Type.compare)),
+      available,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 const attachExposure = (
   fact: DeclaredTypeFact,
   modules: ReadonlyArray<ModuleHeaders>,
@@ -1273,10 +1374,18 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         })
         const result = resolveDeclaredType(module.module, member.returnType, resolver, self.modules)
         diagnostics.push(...result.diagnostics)
+        const failureRow = resolveFailureRow(
+          module.module,
+          member.failureRow,
+          resolver,
+          self.modules,
+        )
+        diagnostics.push(...failureRow.diagnostics)
         return Object.freeze({
           ...member,
           parameters: Object.freeze(parameters),
           returnType: result.fact,
+          failureRow: failureRow.fact,
         })
       }
       const fields = member.fields.map((field) => {
@@ -1350,6 +1459,14 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           ...member,
           parameters: Object.freeze(parameters),
           returnType: attachExposure(member.returnType, modules, diagnostics),
+          failureRow: Object.freeze({
+            ...member.failureRow,
+            members: Object.freeze(
+              member.failureRow.members.map((failure) =>
+                attachExposure(failure, modules, diagnostics),
+              ),
+            ),
+          }),
         })
       }
       const fields = member.fields.map((field) =>

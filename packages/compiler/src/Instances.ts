@@ -111,6 +111,9 @@ const keyOf = (
           ? Object.freeze([
               ...contract.parameters.map((type) => Type.key(Type.substitute(type, substitution))),
               `result:${Type.key(Type.substitute(contract.result, substitution))}`,
+              ...(contract.failures ?? []).map(
+                (failure) => `failure:${Type.key(Type.substitute(failure, substitution))}`,
+              ),
             ])
           : Object.freeze([]),
     })
@@ -136,6 +139,8 @@ const resolveEntry = (root: Elaboration.Result): Entry => {
     return Object.freeze({ _tag: 'Unavailable', reason: 'ParameterizedEntry' })
   }
   if (
+    declaration.functionKind !== 'Ordinary' ||
+    declaration.failureRow.failures.length !== 0 ||
     declaration.returnType._tag !== 'Resolved' ||
     declaration.returnType.type !== 'I32' ||
     declaration.canonical._tag !== 'Canonical'
@@ -154,6 +159,12 @@ interface CallTarget {
 }
 
 const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
+  if (expression._tag === 'Run') return callTargets(expression.subject)
+  if (expression._tag === 'FlowCatch')
+    return [
+      ...callTargets(expression.protected),
+      Object.freeze({ declaration: expression.handler, typeArguments: Object.freeze([]) }),
+    ]
   if (expression._tag === 'Move') return callTargets(expression.subject)
   if (expression._tag === 'UnionConvert') return callTargets(expression.source)
   if (expression._tag === 'Project') return callTargets(expression.subject)
@@ -183,7 +194,7 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
       ),
     ]
   }
-  if (expression._tag !== 'Call') return []
+  if (expression._tag !== 'Call' && expression._tag !== 'FlowConstruct') return []
   return [
     Object.freeze({ declaration: expression.target, typeArguments: expression.typeArguments }),
     ...expression.arguments.flatMap((argument) => callTargets(argument)),

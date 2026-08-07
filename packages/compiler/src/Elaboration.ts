@@ -467,6 +467,20 @@ export type ExpressionFact =
   | OperatorExpressionFact
   | PipelineExpressionFact
   | {
+      readonly _tag: 'Run'
+      readonly subject: ExpressionFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'FlowCatch'
+      readonly protected: ExpressionFact
+      readonly handled?: Type.Nominal
+      readonly handler?: DeclarationFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
       readonly typeArguments: ReadonlyArray<TypeArgumentFact>
@@ -601,6 +615,13 @@ export type StatementFact =
       readonly region: Hir.RegionId
       readonly syntax: SyntaxTree.Node
     }
+  | {
+      readonly _tag: 'FailStatement'
+      readonly expression: ExpressionFact
+      readonly failure?: Type.Nominal
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
 
 /** One function's declaration, statements, bindings, and compatibility facts. */
 export interface FunctionFact {
@@ -687,6 +708,7 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'PrefixExpression',
   'InfixExpression',
   'PipelineExpression',
+  'RunExpression',
 ])
 
 const isExpressionNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
@@ -706,6 +728,7 @@ const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is Syntax
     element.kind === 'PrefixExpression' ||
     element.kind === 'InfixExpression' ||
     element.kind === 'PipelineExpression' ||
+    element.kind === 'RunExpression' ||
     SyntaxTree.isAvailableSyntax(element))
 
 const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
@@ -3259,6 +3282,149 @@ const analyzePipelineExpression = (
   })
 }
 
+const flowCaptureAccess = (arguments_: ReadonlyArray<ArgumentFact>): Type.Flow['access'] => {
+  const accessOf = (expression: ExpressionFact): Type.Flow['access'] => {
+    if (expression._tag === 'Move') return 'Take'
+    if (expression._tag === 'Borrow')
+      return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
+    if (expression._tag === 'Grouped') return accessOf(expression.expression)
+    return 'Shared'
+  }
+  const accesses = arguments_.map((argument) => accessOf(argument.expression))
+  return accesses.includes('Take')
+    ? 'Take'
+    : accesses.includes('Exclusive')
+      ? 'Exclusive'
+      : 'Shared'
+}
+
+const isFlowCatchTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
+  const identifiers = node.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const qualifier = identifiers.at(0)
+  const member = identifiers.at(1)
+  return (
+    directToken(node, 'Dot') !== undefined &&
+    qualifier !== undefined &&
+    member !== undefined &&
+    spelling(source, qualifier) === 'Flow' &&
+    spelling(source, member) === 'catch'
+  )
+}
+
+const analyzeFlowCatch = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const pipelined = node.kind === 'PipelineExpression'
+  const target = pipelined ? (SyntaxTree.directNode(node, 'PipelineTarget') ?? node) : node
+  const typeArguments = analyzeCallTypeArguments(source, target, declaration, resolution)
+  const handledCandidate = typeArguments.types?.at(0)
+  const handled =
+    typeArguments.types?.length === 1 &&
+    handledCandidate !== undefined &&
+    Type.isNominal(handledCandidate) &&
+    Type.isConcrete(handledCandidate)
+      ? handledCandidate
+      : undefined
+  const list = SyntaxTree.directNode(target, 'ArgumentList')
+  const arguments_ =
+    list?.children.filter((element): element is SyntaxTree.Node =>
+      isRecursiveArgumentNode(element),
+    ) ?? []
+  const protectedNode = pipelined ? node.children.find(isExpressionNode) : arguments_.at(0)
+  const handlerNode = arguments_.at(pipelined ? 0 : 1)
+  const protectedResult =
+    protectedNode === undefined
+      ? undefined
+      : analyzeExpression(source, protectedNode, declarations, declaration, scope, resolution)
+  const handlerToken =
+    handlerNode?.kind === 'IdentifierExpression'
+      ? directToken(handlerNode, 'Identifier')
+      : undefined
+  const handlerLookup =
+    handlerToken === undefined
+      ? undefined
+      : NameResolution.lookup(resolution.scope, resolution.index, spelling(source, handlerToken))
+  const handler =
+    handlerLookup?._tag === 'Resolved' && handlerLookup.declaration._tag === 'FunctionDeclaration'
+      ? handlerLookup.declaration
+      : undefined
+  const flow =
+    protectedResult?.type !== undefined && Type.isFlow(protectedResult.type)
+      ? protectedResult.type
+      : undefined
+  const diagnostics: Array<Diagnostic.Diagnostic> = [
+    ...typeArguments.diagnostics,
+    ...(protectedResult?.diagnostics ?? []),
+  ]
+  let valid = true
+  const reject = (detail: string, span: SourceSpan.SourceSpan = node.span): void => {
+    diagnostics.push(Diagnostic.invalidFlowHandler(detail, span))
+    valid = false
+  }
+  if (typeArguments.types?.length !== 1 || handled === undefined)
+    reject('catch requires one concrete nominal type argument')
+  if (arguments_.length !== (pipelined ? 1 : 2))
+    reject('catch requires a protected flow and one handler function')
+  if (flow === undefined) reject('the protected argument is not a flow', protectedNode?.span)
+  if (
+    handler === undefined ||
+    handler.functionKind !== 'Flow' ||
+    handler.canonical._tag !== 'Canonical'
+  )
+    reject('the handler must name one statically known flow function', handlerNode?.span)
+  if (handler?.parameters.length !== 1) reject('the handler must accept exactly one failure')
+  const handlerParameter = handler?.parameters.at(0)?.declaredType
+  if (
+    handled !== undefined &&
+    (handlerParameter?._tag !== 'Resolved' || !Type.equals(handlerParameter.type, handled))
+  )
+    reject('the handler parameter must exactly match the caught failure')
+  if (
+    flow !== undefined &&
+    handled !== undefined &&
+    !flow.failures.some((failure) => Type.equals(failure, handled))
+  )
+    reject('the caught failure is absent from the protected row')
+  if (
+    flow !== undefined &&
+    handler?.returnType._tag === 'Resolved' &&
+    !Type.equals(flow.success, handler.returnType.type)
+  )
+    reject('the handler success type must match the protected flow')
+  const residual =
+    flow === undefined || handled === undefined
+      ? []
+      : flow.failures.filter((failure) => !Type.equals(failure, handled))
+  const failures = [
+    ...residual,
+    ...(handler?.functionKind === 'Flow' ? handler.failureRow.failures : []),
+  ]
+  const resultType =
+    valid && flow !== undefined
+      ? availableExpressionType(Type.flow(flow.success, failures, flow.access))
+      : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'FlowCatch',
+      protected: protectedResult?.fact ?? unavailableExpression(node),
+      ...(handled === undefined ? {} : { handled }),
+      ...(handler === undefined ? {} : { handler }),
+      type: resultType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: resultType._tag === 'Available' ? resultType.type : undefined,
+  })
+}
+
 function analyzeExpression(
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -3303,6 +3469,34 @@ function analyzeExpression(
 
   if (node.kind === 'IdentifierExpression') {
     return analyzeIdentifier(source, node, scope)
+  }
+
+  if (node.kind === 'RunExpression') {
+    const subjectNode = node.children.find(isExpressionNode)
+    const subject =
+      subjectNode === undefined
+        ? undefined
+        : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
+    if (subject === undefined) throw new RangeError('Run expression requires one flow subject')
+    const flow = subject.type !== undefined && Type.isFlow(subject.type) ? subject.type : undefined
+    const type =
+      flow !== undefined ? availableExpressionType(flow.success) : unavailableExpressionType
+    const allowed =
+      declaration.functionKind === 'Flow' ? declaration.failureRow.failures : Object.freeze([])
+    const unhandled =
+      flow?.failures.filter(
+        (failure) => !allowed.some((candidate) => Type.equals(candidate, failure)),
+      ) ?? []
+    const diagnostics = [...subject.diagnostics]
+    if (flow === undefined && subject.type !== undefined)
+      diagnostics.push(Diagnostic.runNonFlow(Type.encode(subject.type), node.span))
+    if (unhandled.length > 0)
+      diagnostics.push(Diagnostic.unhandledFlowFailures(unhandled.map(Type.encode), node.span))
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Run', subject: subject.fact, type, syntax: node }),
+      diagnostics: Object.freeze(diagnostics),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
   }
 
   if (node.kind === 'MoveExpression') {
@@ -3372,10 +3566,16 @@ function analyzeExpression(
   }
 
   if (node.kind === 'PipelineExpression') {
+    const target = SyntaxTree.directNode(node, 'PipelineTarget')
+    if (target !== undefined && isFlowCatchTarget(source, target))
+      return analyzeFlowCatch(source, node, declarations, declaration, scope, resolution)
     return analyzePipelineExpression(source, node, declarations, declaration, scope, resolution)
   }
 
   if (node.kind !== 'CallExpression') return undefined
+
+  if (isFlowCatchTarget(source, node))
+    return analyzeFlowCatch(source, node, declarations, declaration, scope, resolution)
 
   const callTypeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
   const argumentsResult = analyzeArguments(
@@ -3557,9 +3757,22 @@ function analyzeExpression(
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved'
       ? availableExpressionType(
-          callContract.fact._tag === 'Compatible'
-            ? Type.substitute(reference.declaration.returnType.type, callContract.fact.substitution)
-            : reference.declaration.returnType.type,
+          (() => {
+            const substitution =
+              callContract.fact._tag === 'Compatible'
+                ? callContract.fact.substitution
+                : new Map<string, SemanticType>()
+            const success = Type.substitute(reference.declaration.returnType.type, substitution)
+            if (reference.declaration.functionKind !== 'Flow') return success
+            return Type.flow(
+              success,
+              reference.declaration.failureRow.failures.flatMap((failure) => {
+                const specialized = Type.substitute(failure, substitution)
+                return Type.isNominal(specialized) ? [specialized] : []
+              }),
+              flowCaptureAccess(argumentsResult.facts),
+            )
+          })(),
         )
       : unavailableExpressionType
   return Object.freeze({
@@ -3602,9 +3815,22 @@ const finishDeclarationCall = (
     reference._tag === 'Resolved' &&
     reference.declaration.returnType._tag === 'Resolved'
       ? availableExpressionType(
-          callContract.fact._tag === 'Compatible'
-            ? Type.substitute(reference.declaration.returnType.type, callContract.fact.substitution)
-            : reference.declaration.returnType.type,
+          (() => {
+            const substitution =
+              callContract.fact._tag === 'Compatible'
+                ? callContract.fact.substitution
+                : new Map<string, SemanticType>()
+            const success = Type.substitute(reference.declaration.returnType.type, substitution)
+            if (reference.declaration.functionKind !== 'Flow') return success
+            return Type.flow(
+              success,
+              reference.declaration.failureRow.failures.flatMap((failure) => {
+                const specialized = Type.substitute(failure, substitution)
+                return Type.isNominal(specialized) ? [specialized] : []
+              }),
+              flowCaptureAccess(argumentsResult.facts),
+            )
+          })(),
         )
       : unavailableExpressionType
   return Object.freeze({
@@ -3746,6 +3972,13 @@ const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
       }
       context.diagnostics.push(...initializer.diagnostics)
+
+      if (
+        SyntaxTree.directToken(element, 'MutKeyword') !== undefined &&
+        initializer.type !== undefined &&
+        Type.isFlow(initializer.type)
+      )
+        context.diagnostics.push(Diagnostic.mutableFlowRecipe(element.span))
 
       const name = bindingName(context.source, element)
       const binding: BindingDeclarationFact = Object.freeze({
@@ -3997,6 +4230,8 @@ const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
       }
       context.diagnostics.push(...expression.diagnostics)
+      if (expression.type !== undefined && Type.isFlow(expression.type))
+        context.diagnostics.push(Diagnostic.flowRecipeEscape(expressionNode.span))
       if (
         context.declaration.returnType._tag === 'Resolved' &&
         expression.type !== undefined &&
@@ -4013,6 +4248,51 @@ const analyzeStatements = (
         Object.freeze({
           _tag: 'ReturnStatement',
           expression: expression.fact,
+          region,
+          syntax: element,
+        }),
+      )
+      break
+    }
+
+    if (element.kind === 'FailStatement') {
+      const region = nextRegion()
+      const expressionNode = statementExpressionNode(element)
+      const expression = analyzeExpression(
+        context.source,
+        expressionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+      )
+      if (expression === undefined)
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+      context.diagnostics.push(...expression.diagnostics)
+      const failure =
+        expression.type !== undefined && Type.isNominal(expression.type)
+          ? expression.type
+          : undefined
+      if (context.declaration.functionKind !== 'Flow')
+        context.diagnostics.push(Diagnostic.failOutsideFlow(element.span))
+      if (expression.type !== undefined && failure === undefined)
+        context.diagnostics.push(
+          Diagnostic.invalidFailureType(Type.encode(expression.type), expressionNode.span),
+        )
+      if (
+        failure !== undefined &&
+        !context.declaration.failureRow.failures.some((candidate) =>
+          Type.equals(candidate, failure),
+        )
+      )
+        context.diagnostics.push(
+          Diagnostic.undeclaredFailure(Type.encode(failure), expressionNode.span),
+        )
+      facts.push(
+        Object.freeze({
+          _tag: 'FailStatement',
+          expression: expression.fact,
+          ...(failure === undefined ? {} : { failure }),
           region,
           syntax: element,
         }),
@@ -4053,13 +4333,21 @@ const analyzeFunctionBody = (
       (statement): statement is Extract<StatementFact, { _tag: 'ReturnStatement' }> =>
         statement._tag === 'ReturnStatement',
     )
-  if (trailing === undefined) {
-    throw new RangeError('Semantic analysis expected a trailing return statement')
-  }
-  const expression = trailing.expression
+  const terminal =
+    trailing ??
+    [...statements]
+      .reverse()
+      .find(
+        (statement): statement is Extract<StatementFact, { _tag: 'FailStatement' }> =>
+          statement._tag === 'FailStatement',
+      )
+  if (terminal === undefined)
+    throw new RangeError('Semantic analysis expected a terminal statement')
+  const expression = terminal.expression
   const expressionType = expression.type._tag === 'Available' ? expression.type.type : undefined
 
   const returnCompatibility =
+    terminal._tag === 'ReturnStatement' &&
     declaration.returnType._tag === 'Resolved' &&
     expressionType !== undefined &&
     typesCompatible(expressionType, declaration.returnType.type)
@@ -4155,6 +4443,37 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         subject._tag === 'Project' || subject._tag === 'IndexPlace'
           ? Object.freeze({ ...subject, access: 'ConsumeRequested' as const })
           : subject,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'Run') {
+    const subject = hirExpression(fact.subject)
+    if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available')
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'Run',
+      subject,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'FlowCatch') {
+    const protected_ = hirExpression(fact.protected)
+    if (
+      protected_._tag === 'Unavailable' ||
+      fact.handled === undefined ||
+      fact.handler?.canonical._tag !== 'Canonical' ||
+      fact.type._tag !== 'Available' ||
+      !Type.isFlow(fact.type.type)
+    )
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'FlowCatch',
+      protected: protected_,
+      handled: fact.handled,
+      handler: fact.handler.canonical.id,
+      handlerFailures: fact.handler.failureRow.failures,
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -4424,8 +4743,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
   ) {
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
-    return Object.freeze({
-      _tag: 'Call',
+    const call = {
       target: fact.reference.declaration.canonical.id,
       typeArguments: fact.contract.typeArguments,
       arguments: Object.freeze(
@@ -4470,7 +4788,10 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       ),
       type: fact.type.type,
       span: fact.syntax.span,
-    })
+    }
+    return Type.isFlow(fact.type.type)
+      ? Object.freeze({ ...call, _tag: 'FlowConstruct' as const, type: fact.type.type })
+      : Object.freeze({ ...call, _tag: 'Call' as const })
   }
   const cause =
     fact.reference._tag === 'Missing' || fact.reference._tag === 'Ambiguous'
@@ -4772,6 +5093,21 @@ export const elaborateModule = (input: Input): Result => {
             region: statement.region,
             span: statement.expression.syntax.span,
           })
+        if (statement._tag === 'FailStatement') {
+          if (statement.failure === undefined)
+            return Object.freeze({
+              _tag: 'UnavailableStatement' as const,
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          return Object.freeze({
+            _tag: 'Fail' as const,
+            expression: hirExpression(statement.expression),
+            failure: statement.failure,
+            region: statement.region,
+            span: statement.syntax.span,
+          })
+        }
         throw new RangeError('Unknown statement fact')
       }),
     )

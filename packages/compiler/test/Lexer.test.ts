@@ -78,6 +78,43 @@ it('recognizes struct only as a complete keyword', () => {
   )
 })
 
+it('recognizes the flow execution and failure keywords without prefix capture', () => {
+  const result = Lexer.lex(
+    SourceFile.make(
+      'memory://flow-keywords.silk',
+      ascii('flow fn work() -> I32 ! Error { fail move error } run work() flower runner failed'),
+    ),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'FlowKeyword',
+      'FnKeyword',
+      'Identifier',
+      'LeftParenthesis',
+      'RightParenthesis',
+      'Arrow',
+      'Identifier',
+      'Bang',
+      'Identifier',
+      'LeftBrace',
+      'FailKeyword',
+      'MoveKeyword',
+      'Identifier',
+      'RightBrace',
+      'RunKeyword',
+      'Identifier',
+      'LeftParenthesis',
+      'RightParenthesis',
+      'Identifier',
+      'Identifier',
+      'Identifier',
+      'EndOfFile',
+    ],
+  )
+})
+
 it('lexes binding statements with let, move, and equals tokens', () => {
   const source = SourceFile.make('memory://bindings.silk', ascii('let answer = move value'))
   const result = Lexer.lex(source)

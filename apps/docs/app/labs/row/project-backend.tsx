@@ -37,7 +37,13 @@ const typeText = (type: Type.Type): string =>
         ? `Array<${typeText(type.element)}, ${type.length}>`
       : type._tag === 'SliceType'
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-        : type.members.map(typeText).join(' | ')
+        : type._tag === 'FlowType'
+          ? `Flow<${typeText(type.success)}${
+              type.failures.length === 0
+                ? ''
+                : ` ! ${type.failures.map(typeText).join(' | ')}`
+            }> ${type.access.toLowerCase()}`
+          : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,
@@ -122,9 +128,13 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
         )}`,
     )
     .join(', ')
-  return `${member.visibility === 'Public' ? 'pub ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
+  const failures =
+    member.functionKind === 'Flow'
+      ? ` ! ${member.failureRow.failures.map(typeText).join(' | ') || 'empty'}`
+      : ''
+  return `${member.visibility === 'Public' ? 'pub ' : ''}${member.functionKind === 'Flow' ? 'flow ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
     member.returnType,
-  )}`
+  )}${failures}`
 }
 
 const memberName = (member: DeclarationIndex.MemberFact): string =>
@@ -590,6 +600,14 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = call ${operation.target.name}(${operation.arguments
         .map(localText)
         .join(', ')})`
+    case 'PackFlowOutcome':
+      return `${localText(operation.destination)} = flow outcome tag ${operation.tag} payload ${localText(operation.source)}`
+    case 'UnpackFlowSuccess':
+      return `${localText(operation.destination)} = flow success ${localText(operation.source)}`
+    case 'CatchFlow':
+      return `${localText(operation.destination)} = catch tag ${operation.handledTag} from ${operation.protectedTarget.name} with ${operation.handlerTarget.name}`
+    case 'RunFlow':
+      return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
@@ -823,7 +841,9 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
         ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
       : value._tag === 'UnionValue'
         ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
-        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+        : value._tag === 'FlowOutcomeValue'
+          ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
+          : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -887,6 +907,10 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `exit loop${event.loop ?? '?'}`
     case 'Transfer':
       return `transfer in r${event.region}${event.loop === undefined ? '' : ` · loop${event.loop}`}`
+    case 'FlowSuccess':
+      return `flow success · tag ${event.tag}`
+    case 'FlowFailure':
+      return `flow failure · tag ${event.tag}`
   }
 }
 
@@ -920,6 +944,8 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'Repeat':
     case 'Exit':
     case 'Transfer':
+    case 'FlowSuccess':
+    case 'FlowFailure':
       return 2
   }
 }

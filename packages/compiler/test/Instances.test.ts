@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -204,5 +205,33 @@ it.effect('lowers branch diamonds identically across runs', () =>
     assert.deepEqual(Mir.verify(first), [])
     assert.strictEqual(Mir.encode(first), golden('branch-program.mir.txt'))
     assert.strictEqual(Mir.encode(first), Mir.encode(second))
+  }),
+)
+
+it.effect('discovers one concrete generic flow body without specializing runtime outcomes', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`flow fn delayed<T>(value: T) -> T { return move value }
+pub fn main() -> I32 {
+  let recipe = delayed<I32>(42)
+  return run recipe
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    const instances = Analysis.instancesOf(result).instances
+    assert.deepEqual(
+      instances.map((instance) => ({
+        name: instance.key.declaration.name,
+        arguments: instance.key.typeArguments.map(Type.encode),
+      })),
+      [
+        { name: 'main', arguments: [] },
+        { name: 'delayed', arguments: ['I32'] },
+      ],
+    )
+    const delayed = Analysis.loweredMir(result).functions.find((fn) => fn.id.name === 'delayed')
+    assert.strictEqual(delayed?.result._tag, 'FlowOutcome')
+    const outcome = Analysis.evaluate(result)
+    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
   }),
 )

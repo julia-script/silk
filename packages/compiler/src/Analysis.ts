@@ -274,6 +274,10 @@ const nestedExpressionFacts = (
         return expression.initializers.map((initializer) => initializer.expression)
       case 'Grouped':
         return [expression.expression]
+      case 'Run':
+        return [expression.subject]
+      case 'FlowCatch':
+        return [expression.protected]
       case 'Operator':
       case 'Call':
         return expression.arguments.map((argument) => argument.expression)
@@ -304,6 +308,8 @@ const statementExpressionFacts = (
     case 'BindStatement':
       return nestedExpressionFacts(statement.binding.initializer)
     case 'ReturnStatement':
+      return nestedExpressionFacts(statement.expression)
+    case 'FailStatement':
       return nestedExpressionFacts(statement.expression)
     case 'IfStatement':
       return Object.freeze([

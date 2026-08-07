@@ -351,3 +351,15 @@ than choosing or narrowing them independently.
 
 - **WHEN** a reachable program contains no `Usize`
 - **THEN** layout planning does not eagerly add a `Usize` entry or perturb its existing encoding
+
+### Requirement: Typed outcomes have one compiler-owned target shape
+
+For every reachable flow contract, target planning SHALL publish a deterministic private outcome
+shape containing a discriminant and payload storage sufficient for the success value or any failure
+member. Canonical nominal identity SHALL determine failure tags. Evaluator and backends MUST consume
+that shape without independently choosing tags, lanes, or padding.
+
+#### Scenario: Plan mixed success and failure payloads
+
+- **WHEN** a flow returns `Usize` and may fail with differently shaped nominal errors
+- **THEN** the selected target plan fixes one tag and payload-lane mapping before MIR lowering
