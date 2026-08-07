@@ -74,6 +74,10 @@
       "types": "./dist/Instr.d.ts",
       "import": "./dist/Instr.js"
     },
+    "./Interp": {
+      "types": "./dist/Interp.d.ts",
+      "import": "./dist/Interp.js"
+    },
     "./Limits": {
       "types": "./dist/Limits.d.ts",
       "import": "./dist/Limits.js"

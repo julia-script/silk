@@ -77,6 +77,34 @@ bodies are validated when they are defined — value-stack typing, control frame
 and polymorphic typing after unreachable code — and module-level constraints are checked at
 emission, so an emitted module is guaranteed valid.
 
+## Direct interpretation and debugging
+
+`Interp` executes a builder's committed module state directly — no binary encoding, no
+`WebAssembly.instantiate` — with an explicit call stack, which lets execution pause between any
+two instructions. That makes it usable as the engine of a debugger: step, step over, step out,
+breakpoints on `Instr` values, and inspection of frames, locals, value stacks, globals, and
+memory.
+
+```typescript
+import * as Effect from 'effect/Effect'
+import * as Interp from '@silk-effect/wasm/Interp'
+
+const debugged = Effect.gen(function* () {
+  const instance = yield* Interp.instantiate(builder)
+  const results = yield* Interp.invoke(instance, 'add', [2, 40]) // [42]
+
+  const session = yield* Interp.debug(instance, 'add', [2, 40])
+  Interp.step(session)
+  Interp.locals(session) // [{ index: 0, value: 2 }, { index: 1, value: 40 }]
+  return Interp.resume(session) // { _tag: 'Done', results: [42] }
+})
+```
+
+The interpreter covers the full scalar instruction set — numeric, control flow, calls including
+tail calls and `call_indirect`, memory, tables, segments, and untyped/function references — and
+is differentially tested against native WebAssembly over every scalar operator. SIMD, atomics
+(except `atomic.fence`), GC, and exception handling trap as unsupported.
+
 ## Feature baseline
 
 The complete Chrome-unflagged surface: WebAssembly core 2.0 (multi-value, bulk memory,
@@ -93,8 +121,9 @@ reference locals (which the specification permits with initialization tracking) 
 
 ## Scope and compatibility
 
-The package builds WebAssembly module state and emits `.wat` text or `.wasm` bytes. It does not
-provide a runtime, interpreter, optimizer, parser for either format, or filesystem integration.
+The package builds WebAssembly module state, emits `.wat` text or `.wasm` bytes, and interprets
+committed modules directly. It does not provide an optimizer, a parser for either format, or
+filesystem integration.
 
 Verification is anchored to a pinned `wasm-tools` release: committed fixtures must be
 byte-identical, every fixture binary must validate, and each fixture's rendered text must
