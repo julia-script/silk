@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Match from './Match.js'
@@ -21,10 +22,14 @@ export type Type =
   | { readonly _tag: 'Bool' }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
+  | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
 
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
-  self._tag === 'Nominal' || self._tag === 'FixedArray' || self._tag === 'Union'
+  self._tag === 'Nominal' ||
+  self._tag === 'FixedArray' ||
+  self._tag === 'Slice' ||
+  self._tag === 'Union'
     ? self.type
     : self._tag
 
@@ -79,6 +84,12 @@ export type PlaceSelector =
         | { readonly _tag: 'Runtime'; readonly local: LocalId }
       readonly provenance: Provenance
     }
+  | {
+      readonly _tag: 'SliceElementSelector'
+      readonly index: LocalId
+      readonly access: SilkType.Slice['access']
+      readonly provenance: Provenance
+    }
 
 export type Operation =
   | {
@@ -101,6 +112,31 @@ export type Operation =
       readonly _tag: 'Move'
       readonly destination: LocalId
       readonly source: LocalId
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'BeginLoan'
+      readonly borrow: Hir.BorrowId
+      readonly destination: LocalId
+      readonly root: LocalId
+      readonly sourceType: Extract<Type, { readonly _tag: 'FixedArray' | 'Slice' }>
+      readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly access: SilkType.Slice['access']
+      readonly reborrow: boolean
+      readonly suspendsParent: boolean
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'EndLoan'
+      readonly borrow: Hir.BorrowId
+      readonly slice: LocalId
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'SliceLength'
+      readonly destination: LocalId
+      readonly slice: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'I32' }>
       readonly provenance: Provenance
     }
   | {
@@ -400,6 +436,8 @@ export interface Violation {
     | 'InvalidAggregateOperation'
     | 'InvalidCallShape'
     | 'InvalidWrite'
+    | 'InvalidLoan'
+    | 'InvalidSliceOperation'
     | 'InvalidMatchLayout'
     | 'InvalidMatchDecision'
     | 'InvalidMatchBinding'
@@ -473,6 +511,12 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.left, operation.right]
     case 'Move':
       return [operation.destination, operation.source]
+    case 'BeginLoan':
+      return [operation.destination, operation.root]
+    case 'EndLoan':
+      return [operation.slice]
+    case 'SliceLength':
+      return [operation.destination, operation.slice]
     case 'ConvertUnion':
       return [operation.destination, operation.source]
     case 'Call':
@@ -517,7 +561,9 @@ const selectorLocals = (selectors: ReadonlyArray<PlaceSelector>): ReadonlyArray<
   selectors.flatMap((selector) =>
     selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
       ? [selector.index.local]
-      : [],
+      : selector._tag === 'SliceElementSelector'
+        ? [selector.index]
+        : [],
   )
 
 const placeType = (
@@ -544,6 +590,18 @@ const placeType = (
             )
           : undefined
       current = field?.type
+      continue
+    }
+    if (selector._tag === 'SliceElementSelector') {
+      if (
+        current === undefined ||
+        !SilkType.isSlice(current) ||
+        current.access !== selector.access ||
+        fn.localTypes.at(selector.index.ordinal)?._tag !== 'I32'
+      ) {
+        return undefined
+      }
+      current = current.element
       continue
     }
     if (
@@ -599,6 +657,9 @@ const sameMembers = (
 const targetText = (target: DeclarationIndex.CanonicalId): string =>
   `${target.module}.${target.name}`
 
+const borrowKey = (borrow: Hir.BorrowId): string =>
+  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
+
 const instanceText = (self: Instances.InstanceKey): string =>
   `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
     .map(SilkType.key)
@@ -626,6 +687,12 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ReadPlace':
     case 'CheckPlace':
       return [semanticType(operation.type)]
+    case 'BeginLoan':
+      return [semanticType(operation.sourceType), semanticType(operation.type)]
+    case 'SliceLength':
+      return [semanticType(operation.type)]
+    case 'EndLoan':
+      return []
     case 'Call':
       return [semanticType(operation.type), ...operation.typeArguments]
     case 'Construct':
@@ -655,6 +722,193 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'Drop':
       return cleanupTypes(operation.cleanup)
   }
+}
+
+interface ActiveLoan {
+  readonly operation: Extract<Operation, { readonly _tag: 'BeginLoan' }>
+  readonly root: LocalId
+  readonly parent?: string
+}
+
+const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
+  switch (operation._tag) {
+    case 'Binary':
+      return [operation.left, operation.right]
+    case 'Move':
+      return [operation.source]
+    case 'ConvertUnion':
+      return [operation.source]
+    case 'Call':
+      return operation.arguments
+    case 'Construct':
+      return operation.fields.map((field) => field.value)
+    case 'ConstructArray':
+      return operation.elements
+    case 'Project':
+      return [operation.source]
+    case 'ReadPlace':
+    case 'CheckPlace':
+    case 'WritePlace':
+      return [operation.root]
+    case 'Drop':
+      return [operation.local]
+    case 'Match':
+      return [operation.scrutinee]
+    case 'Literal':
+    case 'BeginLoan':
+    case 'EndLoan':
+    case 'SliceLength':
+      return []
+  }
+}
+
+const loanViolations = (
+  fn: MirFunction,
+  region: Region,
+  roots: ReadonlyArray<Operation>,
+): ReadonlyArray<Violation> => {
+  const violations: Array<Violation> = []
+  const invalid = (detail: string): void => {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidLoan',
+        function: fn.id,
+        region: region.id,
+        detail,
+      }),
+    )
+  }
+  const process = (
+    sequence: ReadonlyArray<Operation>,
+    inherited: ReadonlyMap<string, ActiveLoan>,
+  ): void => {
+    const active = new Map(inherited)
+    const inheritedKeys = new Set(inherited.keys())
+    const completed = new Set<string>()
+    const calls = new Set<string>()
+    for (const operation of sequence) {
+      if (operation._tag === 'BeginLoan') {
+        const key = borrowKey(operation.borrow)
+        const source = fn.localTypes.at(operation.root.ordinal)
+        const destination = fn.localTypes.at(operation.destination.ordinal)
+        const sourceSemantic = semanticType(operation.sourceType)
+        const slice = operation.type.type
+        const sourceElement =
+          operation.sourceType._tag === 'FixedArray'
+            ? operation.sourceType.type.element
+            : operation.sourceType.type.element
+        const parent = [...active.entries()].find(
+          ([, loan]) => loan.operation.destination.ordinal === operation.root.ordinal,
+        )
+        const reborrowValid =
+          operation.sourceType._tag === 'Slice'
+            ? operation.reborrow &&
+              operation.suspendsParent === (operation.sourceType.type.access === 'Exclusive')
+            : !operation.reborrow && !operation.suspendsParent
+        const parentValid =
+          parent === undefined ||
+          (operation.sourceType._tag === 'Slice' &&
+            parent[1].operation.access === operation.sourceType.type.access &&
+            operation.suspendsParent === (parent[1].operation.access === 'Exclusive'))
+        if (
+          active.has(key) ||
+          completed.has(key) ||
+          source === undefined ||
+          destination === undefined ||
+          !SilkType.equals(semanticType(source), sourceSemantic) ||
+          destination._tag !== 'Slice' ||
+          !SilkType.equals(destination.type, slice) ||
+          slice.access !== operation.access ||
+          !SilkType.equals(slice.element, sourceElement) ||
+          (operation.sourceType._tag === 'Slice' &&
+            operation.sourceType.type.access === 'Shared' &&
+            operation.access === 'Exclusive') ||
+          !reborrowValid ||
+          !parentValid
+        ) {
+          invalid(`loan ${key} has inconsistent root, slice type, access, or reborrow facts`)
+        }
+        const root = parent?.[1].root ?? operation.root
+        const conflicts = [...active.entries()].some(([candidateKey, candidate]) => {
+          if (candidate.root.ordinal !== root.ordinal) return false
+          if (parent?.[0] === candidateKey && operation.suspendsParent) return false
+          return candidate.operation.access === 'Exclusive' || operation.access === 'Exclusive'
+        })
+        if (conflicts) invalid(`loan ${key} conflicts with an active loan of %${root.ordinal}`)
+        active.set(
+          key,
+          Object.freeze({
+            operation,
+            root,
+            ...(parent === undefined ? {} : { parent: parent[0] }),
+          }),
+        )
+        continue
+      }
+      if (operation._tag === 'Call') {
+        calls.add(`${operation.provenance.span.start}:${operation.provenance.span.end}`)
+      }
+      if (operation._tag === 'EndLoan') {
+        const key = borrowKey(operation.borrow)
+        const loan = active.get(key)
+        const call = `${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`
+        const liveChild = [...active.values()].some((candidate) => candidate.parent === key)
+        if (
+          loan === undefined ||
+          completed.has(key) ||
+          loan?.operation.destination.ordinal !== operation.slice.ordinal ||
+          !calls.has(call) ||
+          liveChild
+        ) {
+          invalid(`loan ${key} has a missing, duplicate, premature, or mismatched ending`)
+        } else {
+          active.delete(key)
+          completed.add(key)
+        }
+        continue
+      }
+
+      for (const local of accessedOwnerLocals(operation)) {
+        const loan = [...active.values()].find(
+          (candidate) => candidate.root.ordinal === local.ordinal,
+        )
+        if (loan !== undefined) {
+          invalid(
+            `${operation._tag} accesses owner %${local.ordinal} while loan ${borrowKey(loan.operation.borrow)} is live`,
+          )
+        }
+        const suspended = [...active.values()].find(
+          (candidate) =>
+            candidate.parent !== undefined &&
+            active.get(candidate.parent)?.operation.destination.ordinal === local.ordinal,
+        )
+        if (suspended !== undefined) {
+          invalid(`${operation._tag} accesses a suspended parent slice %${local.ordinal}`)
+        }
+      }
+      if (operation._tag === 'SliceLength') {
+        const suspended = [...active.values()].some(
+          (candidate) =>
+            candidate.parent !== undefined &&
+            active.get(candidate.parent)?.operation.destination.ordinal === operation.slice.ordinal,
+        )
+        if (suspended)
+          invalid(`SliceLength accesses suspended parent slice %${operation.slice.ordinal}`)
+      }
+      if (operation._tag === 'Match') {
+        for (const arm of operation.arms) {
+          if (arm.guard !== undefined) process(arm.guard.operations, active)
+          process(arm.selected.operations, active)
+        }
+      }
+    }
+    for (const [key] of active) {
+      if (!inheritedKeys.has(key)) invalid(`loan ${key} has no ending in its operation sequence`)
+    }
+  }
+  process(roots, new Map())
+  return Object.freeze(violations)
 }
 
 export const verify = (self: Module): ReadonlyArray<Violation> => {
@@ -777,6 +1031,30 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     for (const region of fn.regions) {
       if (region._tag === 'LoopRegion') loops.set(region.loop.ordinal, region)
     }
+    const allOperations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
+    const loanBeginnings = new Map<string, number>()
+    const loanEndings = new Map<string, number>()
+    for (const operation of allOperations) {
+      if (operation._tag === 'BeginLoan') {
+        const key = borrowKey(operation.borrow)
+        loanBeginnings.set(key, (loanBeginnings.get(key) ?? 0) + 1)
+      } else if (operation._tag === 'EndLoan') {
+        const key = borrowKey(operation.borrow)
+        loanEndings.set(key, (loanEndings.get(key) ?? 0) + 1)
+      }
+    }
+    for (const key of new Set([...loanBeginnings.keys(), ...loanEndings.keys()])) {
+      if (loanBeginnings.get(key) !== 1 || loanEndings.get(key) !== 1) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLoan',
+            function: fn.id,
+            detail: `loan ${key} must have exactly one beginning and one ending`,
+          }),
+        )
+      }
+    }
     const isAncestor = (owner: LoopId | undefined, target: LoopId): boolean => {
       let current = owner
       const seen = new Set<number>()
@@ -788,6 +1066,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       return false
     }
     for (const region of fn.regions) {
+      violations.push(...loanViolations(fn, region, operationsOf(region)))
       if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal)) {
         violations.push(
           Object.freeze({
@@ -842,6 +1121,21 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
       const operations = operationsOf(region).flatMap(operationTree)
       for (const [index, operation] of operations.entries()) {
+        if (operation._tag === 'SliceLength') {
+          const slice = fn.localTypes.at(operation.slice.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (slice?._tag !== 'Slice' || destination?._tag !== 'I32') {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidSliceOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'slice length requires one logical slice local and one I32 destination',
+              }),
+            )
+          }
+        }
         if (operation._tag === 'Match') {
           const source = fn.localTypes.at(operation.scrutinee.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -1156,6 +1450,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'ReadPlace' || operation._tag === 'CheckPlace') {
           const selected = placeType(fn, self.layout, operation.root, operation.selectors)
+          const sliceSelector = operation.selectors.find(
+            (selector) => selector._tag === 'SliceElementSelector',
+          )
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
@@ -1164,7 +1461,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
+                rule:
+                  sliceSelector === undefined
+                    ? 'InvalidAggregateOperation'
+                    : 'InvalidSliceOperation',
                 function: fn.id,
                 region: region.id,
                 detail: `${operation._tag} does not match its root, selectors, or type`,
@@ -1176,6 +1476,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const selected = placeType(fn, self.layout, operation.root, operation.selectors)
           const source = fn.localTypes.at(operation.source.ordinal)
           const root = fn.localTypes.at(operation.root.ordinal)
+          const sliceSelector = operation.selectors.find(
+            (selector) => selector._tag === 'SliceElementSelector',
+          )
           const checked = operations
             .slice(0, index)
             .some(
@@ -1191,7 +1494,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !checked ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
             !SilkType.equals(semanticType(source), selected) ||
-            !SilkType.equals(semanticType(root), semanticType(operation.rootType))
+            !SilkType.equals(semanticType(root), semanticType(operation.rootType)) ||
+            (sliceSelector !== undefined && sliceSelector.access !== 'Exclusive')
           ) {
             violations.push(
               Object.freeze({
@@ -1251,7 +1555,9 @@ const selectorText = (selectors: ReadonlyArray<PlaceSelector>): string =>
     .map((selector) =>
       selector._tag === 'FieldSelector'
         ? `.#${selector.field.ordinal}`
-        : `[${selector.index._tag === 'Proven' ? selector.index.value : localText(selector.index.local)}/${selector.length}]`,
+        : selector._tag === 'SliceElementSelector'
+          ? `[${localText(selector.index)}/slice:${selector.access.toLowerCase()}]`
+          : `[${selector.index._tag === 'Proven' ? selector.index.value : localText(selector.index.local)}/${selector.length}]`,
     )
     .join('')
 
@@ -1263,6 +1569,12 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
+    case 'BeginLoan':
+      return `${localText(operation.destination)} = begin-loan l${operation.borrow.ordinal} ${operation.access.toLowerCase()} ${localText(operation.root)} source=${typeText(operation.sourceType)} : ${typeText(operation.type)} reborrow=${operation.reborrow} suspended=${operation.suspendsParent} ${provenanceText(operation.provenance)}`
+    case 'EndLoan':
+      return `end-loan l${operation.borrow.ordinal} ${localText(operation.slice)} ${provenanceText(operation.provenance)}`
+    case 'SliceLength':
+      return `${localText(operation.destination)} = slice-length ${localText(operation.slice)} : I32 ${provenanceText(operation.provenance)}`
     case 'ConvertUnion':
       return `${localText(operation.destination)} = union-${operation.conversion.toLowerCase()} ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.targetType)} access=${operation.access} mapping=${operation.mappings.map((mapping) => `${SilkType.encode(mapping.source)}#${mapping.sourceOrdinal}->${SilkType.encode(mapping.target)}#${mapping.targetOrdinal}`).join(',')} ${provenanceText(operation.provenance)}`
     case 'Call':

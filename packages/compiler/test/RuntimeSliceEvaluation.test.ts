@@ -1,0 +1,132 @@
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const snapshot = (name: string, source: string) =>
+  Analysis.ofSource(`runtime-slice-evaluation/${name}`, ascii(source))
+
+it.effect('shares authoritative array cells across calls and compatible reborrows', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      'mutation',
+      `fn inner(values: &mut [I32], index: I32) -> I32 {
+  values[index] = 42
+  return values.length
+}
+fn outer(values: &mut [I32], index: I32) -> I32 {
+  return inner(&mut values, index)
+}
+pub fn main() -> I32 {
+  let mut values = [1, 2, 3]
+  let length = outer(&mut values, 1)
+  return values[1] + length
+}`,
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 45)
+    const sliceBinding = outcome.trace.find(
+      (event) => event._tag === 'Binding' && event.value._tag === 'SliceValue',
+    )
+    assert.strictEqual(sliceBinding?._tag, 'Binding')
+    if (sliceBinding?._tag === 'Binding' && sliceBinding.value._tag === 'SliceValue') {
+      assert.deepEqual(
+        {
+          frame: sliceBinding.value.frame,
+          cell: sliceBinding.value.cell,
+          base: sliceBinding.value.base,
+          length: sliceBinding.value.length,
+        },
+        { frame: 0, cell: 4, base: 0, length: 3 },
+      )
+    }
+  }),
+)
+
+it.effect('uses runtime lengths for different source arrays and zero-sized elements', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      'lengths',
+      `struct Empty {}
+fn length<T>(values: &[T]) -> I32 { return values.length }
+fn three() -> I32 { let values = [1, 2, 3] return length(&values) }
+fn six() -> I32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }
+fn emptySize() -> I32 { let values = [Empty {}, Empty {}] return length(&values) }
+pub fn main() -> I32 { return three() + six() + emptySize() }`,
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 11)
+  }),
+)
+
+it.effect('traps negative and equal-length slice indexes at the selector', () =>
+  Effect.gen(function* () {
+    const negative = yield* snapshot(
+      'negative',
+      `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { let values = [10, 20] return choose(&values, -1) }`,
+    )
+    const upper = yield* snapshot(
+      'upper',
+      `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
+pub fn main() -> I32 { let values = [10, 20] return choose(&values, 2) }`,
+    )
+
+    for (const self of [negative, upper]) {
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      const outcome = Analysis.evaluate(self)
+      assert.strictEqual(outcome._tag, 'Blocked')
+      if (outcome._tag === 'Blocked') {
+        assert.strictEqual(outcome.reason._tag, 'Trap')
+        if (outcome.reason._tag === 'Trap') assert.include(outcome.reason.reason, 'slice index')
+      }
+    }
+  }),
+)
+
+it.effect('checks before the RHS and cleans a displaced move-only value before commit', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      'replacement',
+      `struct Token { value: I32 }
+fn replace(values: &mut [Token], index: I32) -> I32 {
+  values[index] = Token { value: 42 }
+  return values[index].value
+}
+pub fn main() -> I32 {
+  let mut values = [Token { value: 1 }, Token { value: 2 }]
+  return replace(&mut values, 0)
+}`,
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    const relevant = outcome.trace
+      .filter(
+        (event) =>
+          event._tag === 'WriteCheck' ||
+          event._tag === 'Construct' ||
+          event._tag === 'ReplacementCleanup' ||
+          event._tag === 'Replacement',
+      )
+      .map((event) => event._tag)
+    assert.deepEqual(relevant.slice(-4), [
+      'WriteCheck',
+      'Construct',
+      'ReplacementCleanup',
+      'Replacement',
+    ])
+  }),
+)

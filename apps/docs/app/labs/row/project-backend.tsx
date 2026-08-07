@@ -35,6 +35,8 @@ const typeText = (type: Type.Type): string =>
         ? type.name
       : type._tag === 'FixedArrayType'
         ? `Array<${typeText(type.element)}, ${type.length}>`
+      : type._tag === 'SliceType'
+        ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
         : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
@@ -245,6 +247,13 @@ const bindingSiteText = (fact: Ownership.BindingFact): string =>
     ? `parameter #${fact.site.parameter.ordinal}`
     : `let b${fact.site.binding.ordinal}`
 
+const loanSiteText = (site: Ownership.BindingSite): string =>
+  site._tag === 'Parameter'
+    ? `parameter #${site.parameter.ordinal}`
+    : site._tag === 'Let'
+      ? `let b${site.binding.ordinal}`
+      : `pattern b${site.binding.ordinal}`
+
 const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
   switch (cleanup._tag) {
     case 'NoCleanup':
@@ -304,7 +313,11 @@ export const ownershipRows = (
         key: `own-${fn.declaration.id.ordinal}-exit${ordinal}`,
         depth: 1,
         label: `exit ${exit.kind.toLowerCase()}`,
-        detail:
+        detail: `${
+          exit.loanEnds.length === 0
+            ? 'no loan endings'
+            : `end ${exit.loanEnds.map((loan) => `#${loan.ordinal}`).join(', ')}`
+        } · ${
           exit.releases.length === 0
             ? 'no releases'
             : exit.releases
@@ -312,9 +325,36 @@ export const ownershipRows = (
                   (release) =>
                     `${release.binding.name ?? '∅'} (${cleanupText(release.cleanup)})`,
                 )
-                .join(', '),
+                .join(', ')
+        }`,
         span: exitSpan,
         onActivate: () => onPick(exitSpan),
+      })
+    }
+
+    for (const loan of fn.loans) {
+      const loanSpan = asSpan(loan.startSpan)
+      rows.push({
+        key: `own-${fn.declaration.id.ordinal}-loan-${loan.id.callSpan.start}-${loan.id.ordinal}`,
+        depth: 1,
+        dot: 'symbol',
+        tone: 'symbol',
+        label: `loan #${loan.id.ordinal} · ${loan.access.toLowerCase()}`,
+        detail: `${loanSiteText(loan.root)} · ${loan.origin}${loan.parent === undefined ? '' : ` · parent ${loanSiteText(loan.parent)} suspended`} · r${loan.startRegion.ordinal} → r${loan.endRegion.ordinal}`,
+        span: loanSpan,
+        onActivate: () => onPick(loanSpan),
+      })
+    }
+
+    for (const replacement of fn.borrowedReplacements) {
+      const replacementSpan = asSpan(replacement.span)
+      rows.push({
+        key: `own-${fn.declaration.id.ordinal}-borrowed-replacement-${replacement.span.start}`,
+        depth: 1,
+        label: `replace through parameter #${replacement.root.ordinal}`,
+        detail: `${typeText(replacement.type)} · ${cleanupText(replacement.displacedCleanup)} · r${replacement.region.ordinal}`,
+        span: replacementSpan,
+        onActivate: () => onPick(replacementSpan),
       })
     }
 
@@ -456,6 +496,8 @@ export const layoutRows = (
             ? 'aggregate'
             : entry.representation._tag === 'Repeated'
               ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
+              : entry.representation._tag === 'Slice'
+                ? `address i${entry.representation.address.bits} + length I32 · stride ${entry.representation.stride}`
               : entry.representation._tag === 'Union'
                 ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
                 : `i${entry.representation.bits}`
@@ -495,7 +537,9 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
     .map((selector) =>
       selector._tag === 'FieldSelector'
         ? `.#${selector.field.ordinal}`
-        : `[${
+        : selector._tag === 'SliceElementSelector'
+          ? `[${localText(selector.index)} · ${selector.access.toLowerCase()} slice]`
+          : `[${
             selector.index._tag === 'Proven'
               ? selector.index.value
               : localText(selector.index.local)
@@ -513,6 +557,12 @@ const operationLabel = (operation: Mir.Operation): string => {
       )}, ${localText(operation.right)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)}`
+    case 'BeginLoan':
+      return `${localText(operation.destination)} = ${operation.reborrow ? 'reborrow' : 'borrow'} ${operation.access.toLowerCase()} ${localText(operation.root)} · loan #${operation.borrow.ordinal}`
+    case 'EndLoan':
+      return `end loan #${operation.borrow.ordinal} ${localText(operation.slice)}`
+    case 'SliceLength':
+      return `${localText(operation.destination)} = length ${localText(operation.slice)}`
     case 'ConvertUnion':
       return `${localText(operation.destination)} = ${operation.conversion.toLowerCase()} ${localText(operation.source)} → ${typeText(operation.targetType.type)}`
     case 'Call':
@@ -746,6 +796,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
     ? String(value.value)
     : value._tag === 'ArrayValue'
       ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
+      : value._tag === 'SliceValue'
+        ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
       : value._tag === 'UnionValue'
         ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
         : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
@@ -1056,7 +1108,11 @@ const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
           ? `#${selector.ordinal}`
           : selector._tag === 'UnionTagSelector'
             ? 'tag'
-            : `payload[${selector.slot}]`,
+            : selector._tag === 'UnionPayloadSelector'
+              ? `payload[${selector.slot}]`
+              : selector._tag === 'SliceAddressSelector'
+                ? 'address'
+                : 'length',
     )
     .join('.')
 

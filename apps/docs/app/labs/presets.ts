@@ -50,7 +50,14 @@ pub fn main() -> I32 {
       'app/Main': `import compiler.Coverage
 
 pub fn main() -> I32 {
-  return Coverage.fold([1, 2, 1, 3, 2, 1])
+  let short = [1, 2, 3]
+  let long = [1, 2, 1, 3, 2, 1]
+  let shortScore = Coverage.fold(&short)
+  let longScore = Coverage.fold(&long)
+  if shortScore != 40 {
+    return 0
+  }
+  return longScore
 }\n`,
       'compiler/Member': `pub struct First {}
 pub struct Second {}
@@ -75,7 +82,7 @@ struct FoldState {
   seenThird: Bool
 }
 
-pub fn fold(codes: [I32; 6]) -> I32 {
+pub fn fold(codes: &[I32]) -> I32 {
   let mut state = FoldState {
     remaining: 3,
     score: 10,
@@ -85,7 +92,7 @@ pub fn fold(codes: [I32; 6]) -> I32 {
   }
   let mut index = 0
 
-  while index < 6 {
+  while index < codes.length {
     let candidate = decode(codes[index])
     let member = match move candidate {
       First {} if index == 2 => 0
@@ -132,6 +139,26 @@ pub fn fold(codes: [I32; 6]) -> I32 {
 }\n`,
     },
   },
+  one(
+    'acceptance',
+    'Exclusive runtime slice',
+    `struct Token { value: I32 }
+
+fn replace(values: &mut [Token], index: I32) -> I32 {
+  values[index] = Token { value: 42 }
+  return values.length
+}
+
+pub fn main() -> I32 {
+  let mut values = [Token { value: 1 }, Token { value: 2 }]
+  let length = replace(&mut values, 0)
+  if length != 2 {
+    return 0
+  }
+  return values[0].value
+}
+`,
+  ),
 
   // ---- syntax ---------------------------------------------------------------------------
   one('syntax', 'Literal result', 'pub fn main() -> I32 { return 42 }'),

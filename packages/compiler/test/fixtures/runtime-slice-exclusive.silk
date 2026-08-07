@@ -1,0 +1,15 @@
+struct Token { value: I32 }
+
+fn replace(values: &mut [Token], index: I32) -> I32 {
+  values[index] = Token { value: 42 }
+  return values.length
+}
+
+pub fn main() -> I32 {
+  let mut values = [Token { value: 1 }, Token { value: 2 }]
+  let length = replace(&mut values, 0)
+  if length != 2 {
+    return 0
+  }
+  return values[0].value
+}

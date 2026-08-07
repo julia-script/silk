@@ -18,6 +18,7 @@ const snapshotOf = (preset: (typeof presets)[number], target?: string): Analysis
   })
 
 const acceptancePreset = presets.find((preset) => preset.label === 'Algorithmic coverage fold')
+const exclusiveSlicePreset = presets.find((preset) => preset.label === 'Exclusive runtime slice')
 
 const acceptanceContext = (
   preset: (typeof presets)[number],
@@ -119,6 +120,30 @@ describe('preset catalog', () => {
       )
       expect(acceptancePreset.modules[name], name).toBe(fixture)
     }
+  })
+
+  it('keeps the exclusive slice preset byte-identical and visible through coordinated panes', () => {
+    expect(exclusiveSlicePreset).toBeDefined()
+    if (exclusiveSlicePreset === undefined) return
+    const fixture = readFileSync(
+      new URL(
+        '../../../../packages/compiler/test/fixtures/runtime-slice-exclusive.silk',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+    expect(exclusiveSlicePreset.modules.main).toBe(fixture)
+    const native = snapshotOf(exclusiveSlicePreset, 'aarch64-apple-darwin')
+    const wasm = snapshotOf(exclusiveSlicePreset, 'wasm32-unknown-unknown')
+    expect(Analysis.diagnostics(native)).toEqual([])
+    expect(Analysis.evaluate(native)._tag).toBe('Completed')
+    expect(Analysis.layoutOf(native)._tag).toBe('Available')
+    expect(Analysis.mirOf(wasm)._tag).toBe('Available')
+    expect(viewById('hir')).toBeDefined()
+    expect(viewById('ownership')).toBeDefined()
+    expect(viewById('layout')).toBeDefined()
+    expect(viewById('evaluation')).toBeDefined()
+    expect(viewById('backend')).toBeDefined()
   })
 
   it('coordinates every acceptance phase through existing panes', () => {

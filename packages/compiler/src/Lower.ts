@@ -12,8 +12,8 @@ import * as Type from './Type.js'
  * loop region plus lexical repeat/exit outcomes; backend-private CFGs are derived later.
  */
 
-const i32: Mir.Type = Object.freeze({ _tag: 'I32' })
-const bool: Mir.Type = Object.freeze({ _tag: 'Bool' })
+const i32: Extract<Mir.Type, { readonly _tag: 'I32' }> = Object.freeze({ _tag: 'I32' })
+const bool: Extract<Mir.Type, { readonly _tag: 'Bool' }> = Object.freeze({ _tag: 'Bool' })
 
 const mirType = (
   type: Type.Type,
@@ -31,9 +31,11 @@ const mirType = (
       ? Object.freeze({ _tag: 'Nominal', type: specialized })
       : Type.isFixedArray(specialized)
         ? Object.freeze({ _tag: 'FixedArray', type: specialized })
-        : Type.isUnion(specialized)
-          ? Object.freeze({ _tag: 'Union', type: specialized })
-          : undefined
+        : Type.isSlice(specialized)
+          ? Object.freeze({ _tag: 'Slice', type: specialized })
+          : Type.isUnion(specialized)
+            ? Object.freeze({ _tag: 'Union', type: specialized })
+            : undefined
 }
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
@@ -41,12 +43,15 @@ const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', o
 const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
 const patternKey = (binding: Match.BindingId): string =>
   `${spanKey(binding.arm.match.span)}:${binding.arm.ordinal}:${binding.ordinal}`
+const borrowKey = (borrow: Hir.BorrowId): string =>
+  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
 class FunctionLowering {
   readonly regions: Array<Mir.Region | undefined> = []
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()
   readonly patternLocals = new Map<string, Mir.LocalId>()
+  readonly loanLocals = new Map<string, Mir.LocalId>()
   private operations: Array<Mir.Operation> = []
 
   constructor(
@@ -152,6 +157,23 @@ const lowerPlacePath = (
       ]),
     })
   }
+  if (expression._tag === 'SliceIndexPlace') {
+    const subject = lowerPlacePath(fn, expression.slice)
+    const index = lowerExpression(fn, expression.index)
+    if (subject === undefined || index === undefined) return undefined
+    return Object.freeze({
+      root: subject.root,
+      selectors: Object.freeze([
+        ...subject.selectors,
+        Object.freeze({
+          _tag: 'SliceElementSelector',
+          index: index.result,
+          access: expression.access,
+          provenance: authored(expression.span),
+        }),
+      ]),
+    })
+  }
   const root = lowerExpression(fn, expression)
   return root === undefined
     ? undefined
@@ -160,7 +182,10 @@ const lowerPlacePath = (
 
 const lowerPlace = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Project' | 'IndexPlace' }>,
+  expression: Extract<
+    Hir.Expression,
+    { readonly _tag: 'Project' | 'IndexPlace' | 'SliceIndexPlace' }
+  >,
 ): LoweredExpression | undefined => {
   const place = lowerPlacePath(fn, expression)
   const type = fn.type(expression.type)
@@ -456,6 +481,58 @@ function lowerExpression(
     case 'IndexPlace': {
       return lowerPlace(fn, expression)
     }
+    case 'SliceBorrow': {
+      const root =
+        expression.root._tag === 'BindingSliceRoot'
+          ? fn.bindingLocals.get(expression.root.binding.ordinal)
+          : local(expression.root.parameter.ordinal)
+      const sourceType = fn.type(expression.source)
+      const type = fn.type(expression.type)
+      if (
+        root === undefined ||
+        (sourceType?._tag !== 'FixedArray' && sourceType?._tag !== 'Slice') ||
+        type?._tag !== 'Slice'
+      ) {
+        return undefined
+      }
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'BeginLoan',
+          borrow: expression.borrow,
+          destination,
+          root,
+          sourceType,
+          type,
+          access: expression.access,
+          reborrow: expression.reborrow,
+          suspendsParent: expression.suspendsParent,
+          provenance: authored(expression.span),
+        }),
+      )
+      fn.loanLocals.set(borrowKey(expression.borrow), destination)
+      return Object.freeze({ result: destination })
+    }
+    case 'SliceLength': {
+      const slice = lowerExpression(fn, expression.slice)
+      if (slice === undefined || fn.localTypes.at(slice.result.ordinal)?._tag !== 'Slice') {
+        return undefined
+      }
+      const destination = fn.alloc(i32)
+      fn.emit(
+        Object.freeze({
+          _tag: 'SliceLength',
+          destination,
+          slice: slice.result,
+          type: i32,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'SliceIndexPlace': {
+      return lowerPlace(fn, expression)
+    }
     case 'Call': {
       const argumentLocals: Array<Mir.LocalId> = []
       for (const argument of expression.arguments) {
@@ -479,6 +556,19 @@ function lowerExpression(
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
+      for (const borrow of expression.loanEnds) {
+        const slice = fn.loanLocals.get(borrowKey(borrow))
+        if (slice === undefined) return undefined
+        fn.emit(
+          Object.freeze({
+            _tag: 'EndLoan',
+            borrow,
+            slice,
+            provenance: generated(expression.span),
+          }),
+        )
+        fn.loanLocals.delete(borrowKey(borrow))
+      }
       return { result: destination }
     }
     case 'BuiltinCall': {
@@ -579,6 +669,7 @@ const concreteCleanup = (
   if (Type.isBuiltin(type) || Type.isNever(type) || Type.isParameter(type)) {
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
+  if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
@@ -691,6 +782,36 @@ const lowerWriteSelectors = (
   return Object.freeze(lowered)
 }
 
+const lowerBorrowedWriteSelectors = (
+  fn: FunctionLowering,
+  selectors: ReadonlyArray<Hir.BorrowedWriteSelector>,
+): ReadonlyArray<Mir.PlaceSelector> | undefined => {
+  const lowered: Array<Mir.PlaceSelector> = []
+  for (const selector of selectors) {
+    if (selector._tag === 'Field') {
+      lowered.push(
+        Object.freeze({
+          _tag: 'FieldSelector',
+          field: selector.field,
+          provenance: authored(selector.span),
+        }),
+      )
+      continue
+    }
+    const index = lowerExpression(fn, selector.index)
+    if (index === undefined) return undefined
+    lowered.push(
+      Object.freeze({
+        _tag: 'SliceElementSelector',
+        index: index.result,
+        access: selector.slice.access,
+        provenance: authored(selector.span),
+      }),
+    )
+  }
+  return Object.freeze(lowered)
+}
+
 const lowerSequence = (
   fn: FunctionLowering,
   statements: ReadonlyArray<Hir.Statement>,
@@ -784,12 +905,19 @@ const lowerSequence = (
   }
 
   if (statement._tag === 'Write') {
-    const root = fn.bindingLocals.get(statement.place.root.ordinal)
+    const place = statement.place
+    const root =
+      place._tag === 'BorrowedWritePlace'
+        ? local(place.root.ordinal)
+        : fn.bindingLocals.get(place.root.ordinal)
     const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
-    const type = fn.type(statement.place.type)
+    const type = fn.type(place.type)
     const [written, operations] = fn.capture(() => {
       if (root === undefined || rootType === undefined || type === undefined) return false
-      const selectors = lowerWriteSelectors(fn, statement.place.selectors)
+      const selectors =
+        place._tag === 'BorrowedWritePlace'
+          ? lowerBorrowedWriteSelectors(fn, place.selectors)
+          : lowerWriteSelectors(fn, place.selectors)
       if (selectors === undefined) return false
       fn.emit(
         Object.freeze({
@@ -797,7 +925,7 @@ const lowerSequence = (
           root,
           selectors,
           type,
-          provenance: authored(statement.place.span),
+          provenance: authored(place.span),
         }),
       )
       const value = lowerExpression(fn, statement.value)

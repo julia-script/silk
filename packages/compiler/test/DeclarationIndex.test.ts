@@ -256,3 +256,36 @@ it.effect('resolves forward nominal fields into a canonical acyclic dependency s
     )
   }),
 )
+
+it.effect('resolves direct generic slice parameters and rejects borrowed storage types', () =>
+  Effect.gen(function* () {
+    const source =
+      'fn scan<T>(shared: &[T], exclusive: &mut [T]) -> I32 { return 0 }\n' +
+      'fn badParameter(values: [&[I32]; 1]) -> I32 { return 0 }\n' +
+      'fn badReturn() -> &[I32] { return 0 }\n' +
+      'struct BadField { values: &[I32] }'
+    const index = yield* collect('slices', [['slices', source]])
+    const scan = index.modules.at(0)?.declarations.at(0)
+
+    assert.deepEqual(
+      scan?.parameters.map((parameter) =>
+        parameter.declaredType._tag === 'Resolved'
+          ? parameter.declaredType.spelling
+          : parameter.declaredType._tag,
+      ),
+      ['&[T]', '&mut [T]'],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        position:
+          diagnostic.reason._tag === 'SliceTypePosition' ? diagnostic.reason.position : undefined,
+      })),
+      [
+        { code: 'SEM0054', position: 'parameter' },
+        { code: 'SEM0054', position: 'return' },
+        { code: 'SEM0054', position: 'field' },
+      ],
+    )
+  }),
+)

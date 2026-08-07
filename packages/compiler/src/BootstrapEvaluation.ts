@@ -33,6 +33,15 @@ export interface ArrayValue {
   readonly elements: ReadonlyArray<Value>
 }
 
+/** A logical borrowed view. Permission and loan identity remain compiler facts, not values. */
+export interface SliceValue {
+  readonly _tag: 'SliceValue'
+  readonly frame: number
+  readonly cell: number
+  readonly base: number
+  readonly length: number
+}
+
 export interface UnionValue {
   readonly _tag: 'UnionValue'
   readonly type: Type.StructuralUnion
@@ -41,7 +50,7 @@ export interface UnionValue {
 }
 
 /** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value = I32Value | AggregateValue | ArrayValue | UnionValue
+export type Value = I32Value | AggregateValue | ArrayValue | SliceValue | UnionValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -276,20 +285,43 @@ interface LocalState {
   readonly fromCall: boolean
 }
 
+interface EvaluationState {
+  nextFrame: number
+  readonly cells: Map<string, LocalState>
+}
+
+const cellKey = (frame: number, cell: number): string => `${frame}:${cell}`
+
 function executeFunction(
   program: Mir.Module,
   fn: Mir.MirFunction,
   argumentValues: ReadonlyArray<Value>,
   active: ReadonlyArray<Instances.InstanceKey>,
   trace: Array<TraceEvent>,
+  state: EvaluationState,
 ): Step {
+  const frame = state.nextFrame
+  state.nextFrame += 1
   const locals = new Map<number, LocalState>()
   argumentValues.forEach((argument, ordinal) => {
     locals.set(ordinal, { value: argument, fromCall: false })
   })
 
   const read = (local: Mir.LocalId): LocalState =>
+    state.cells.get(cellKey(frame, local.ordinal)) ??
     locals.get(local.ordinal) ?? { value: value(0), fromCall: false }
+
+  const write = (local: Mir.LocalId, next: LocalState): void => {
+    locals.set(local.ordinal, next)
+    const key = cellKey(frame, local.ordinal)
+    if (state.cells.has(key)) state.cells.set(key, next)
+  }
+
+  const cell = (slice: SliceValue): LocalState => {
+    const found = state.cells.get(cellKey(slice.frame, slice.cell))
+    if (found === undefined) throw new RangeError('MIR slice references a missing evaluator cell')
+    return found
+  }
 
   const readI32 = (local: Mir.LocalId): I32Value => {
     const found = read(local).value
@@ -397,6 +429,34 @@ function executeFunction(
         indexes.push(selector.field.ordinal)
         continue
       }
+      if (selector._tag === 'SliceElementSelector') {
+        if (selected._tag !== 'SliceValue') {
+          throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
+        }
+        const index = readI32(selector.index).value
+        if (index < 0 || index >= selected.length) {
+          return {
+            _tag: 'Blocked',
+            step: blockedStep({
+              _tag: 'Trap',
+              function: fn.id,
+              reason: `slice index ${index} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
+              span: selector.provenance.span,
+            }),
+          }
+        }
+        const backing = cell(selected).value
+        if (backing._tag !== 'ArrayValue') {
+          throw new RangeError('MIR slice cell does not contain an array value')
+        }
+        const element = backing.elements.at(selected.base + index)
+        if (element === undefined) {
+          throw new RangeError('MIR slice range exceeds its backing cell')
+        }
+        indexes.push(index)
+        selected = element
+        continue
+      }
       if (selected._tag !== 'ArrayValue') {
         throw new RangeError('MIR verifier allowed an element selector on a non-array value')
       }
@@ -451,6 +511,30 @@ function executeFunction(
           ),
         ),
       })
+    }
+    if (selector._tag === 'SliceElementSelector') {
+      if (current._tag !== 'SliceValue') throw new RangeError('Invalid slice replacement')
+      const backing = cell(current)
+      if (backing.value._tag !== 'ArrayValue') {
+        throw new RangeError('Invalid slice backing cell replacement')
+      }
+      const absolute = current.base + ordinal
+      const updated: ArrayValue = Object.freeze({
+        _tag: 'ArrayValue',
+        type: backing.value.type,
+        elements: Object.freeze(
+          backing.value.elements.map((element, index) =>
+            index === absolute
+              ? replacePlace(element, selectors, indexes, replacement, depth + 1)
+              : element,
+          ),
+        ),
+      })
+      state.cells.set(cellKey(current.frame, current.cell), {
+        value: updated,
+        fromCall: backing.fromCall,
+      })
+      return current
     }
     if (current._tag !== 'ArrayValue') throw new RangeError('Invalid array replacement')
     return Object.freeze({
@@ -570,7 +654,7 @@ function executeFunction(
               )
               for (const binding of arm.bindings) {
                 const bound = selectFieldPath(payload, binding.path)
-                locals.set(binding.destination.ordinal, { value: bound, fromCall: false })
+                write(binding.destination, { value: bound, fromCall: false })
                 trace.push(
                   Object.freeze({
                     _tag: 'MatchCandidate',
@@ -622,7 +706,7 @@ function executeFunction(
                 )
               }
               const result = read(arm.selected.result)
-              locals.set(operation.destination.ordinal, result)
+              write(operation.destination, result)
               if (arm.selected.endBorrow) {
                 trace.push(
                   Object.freeze({
@@ -650,14 +734,49 @@ function executeFunction(
             break
           }
           case 'Literal':
-            locals.set(operation.destination.ordinal, {
+            write(operation.destination, {
               value: value(operation.value),
               fromCall: false,
             })
             break
           case 'Move':
-            locals.set(operation.destination.ordinal, read(operation.source))
+            write(operation.destination, read(operation.source))
             break
+          case 'BeginLoan': {
+            const source = read(operation.root)
+            const slice =
+              operation.sourceType._tag === 'Slice'
+                ? source.value
+                : (() => {
+                    if (source.value._tag !== 'ArrayValue') {
+                      throw new RangeError('MIR verifier allowed borrowing a non-array value')
+                    }
+                    const key = cellKey(frame, operation.root.ordinal)
+                    if (!state.cells.has(key)) state.cells.set(key, source)
+                    return Object.freeze({
+                      _tag: 'SliceValue' as const,
+                      frame,
+                      cell: operation.root.ordinal,
+                      base: 0,
+                      length: operation.sourceType.type.length,
+                    })
+                  })()
+            if (slice._tag !== 'SliceValue') {
+              throw new RangeError('MIR verifier allowed reborrowing a non-slice value')
+            }
+            write(operation.destination, { value: slice, fromCall: source.fromCall })
+            break
+          }
+          case 'EndLoan':
+            break
+          case 'SliceLength': {
+            const slice = read(operation.slice).value
+            if (slice._tag !== 'SliceValue') {
+              throw new RangeError('MIR verifier allowed slice length on a non-slice value')
+            }
+            write(operation.destination, { value: value(slice.length), fromCall: false })
+            break
+          }
           case 'ConvertUnion': {
             const source = read(operation.source).value
             const mapping =
@@ -683,7 +802,7 @@ function executeFunction(
               member: mapping.target,
               payload,
             })
-            locals.set(operation.destination.ordinal, { value: converted, fromCall: false })
+            write(operation.destination, { value: converted, fromCall: false })
             trace.push(
               Object.freeze({
                 _tag: 'UnionConversion',
@@ -720,7 +839,7 @@ function executeFunction(
                         : operation.operator === 'GreaterThan'
                           ? left > right
                           : left >= right
-              locals.set(operation.destination.ordinal, {
+              write(operation.destination, {
                 value: value(holds ? 1 : 0),
                 fromCall: false,
               })
@@ -755,7 +874,7 @@ function executeFunction(
                 span: operation.provenance.span,
               })
             }
-            locals.set(operation.destination.ordinal, {
+            write(operation.destination, {
               value: value(Number(exact)),
               fromCall: false,
             })
@@ -771,7 +890,7 @@ function executeFunction(
                 ),
               ),
             })
-            locals.set(operation.destination.ordinal, { value: aggregate, fromCall: false })
+            write(operation.destination, { value: aggregate, fromCall: false })
             trace.push(
               Object.freeze({
                 _tag: 'Construct',
@@ -789,7 +908,7 @@ function executeFunction(
               type: operation.type.type,
               elements: Object.freeze(operation.elements.map((element) => read(element).value)),
             })
-            locals.set(operation.destination.ordinal, { value: array, fromCall: false })
+            write(operation.destination, { value: array, fromCall: false })
             trace.push(
               Object.freeze({
                 _tag: 'ArrayConstruct',
@@ -815,7 +934,7 @@ function executeFunction(
             if (selected === undefined) {
               throw new RangeError('MIR verifier allowed projection of a missing aggregate field')
             }
-            locals.set(operation.destination.ordinal, { value: selected.value, fromCall: false })
+            write(operation.destination, { value: selected.value, fromCall: false })
             trace.push(
               Object.freeze({
                 _tag: 'Project',
@@ -850,6 +969,39 @@ function executeFunction(
                 selectors.push(Object.freeze({ _tag: 'Field', field: selector.field }))
                 continue
               }
+              if (selector._tag === 'SliceElementSelector') {
+                if (selected._tag !== 'SliceValue') {
+                  throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
+                }
+                const index = readI32(selector.index).value
+                if (index < 0 || index >= selected.length) {
+                  return blockedStep({
+                    _tag: 'Trap',
+                    function: fn.id,
+                    reason: `slice index ${index} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
+                    span: selector.provenance.span,
+                  })
+                }
+                const backing = cell(selected).value
+                if (backing._tag !== 'ArrayValue') {
+                  throw new RangeError('MIR slice cell does not contain an array value')
+                }
+                const element = backing.elements.at(selected.base + index)
+                if (element === undefined) {
+                  throw new RangeError('MIR slice range exceeds its backing cell')
+                }
+                selectors.push(
+                  Object.freeze({
+                    _tag: 'Element',
+                    array: backing.type,
+                    index,
+                    bounds: 'Checked',
+                    span: selector.provenance.span,
+                  }),
+                )
+                selected = element
+                continue
+              }
               if (selected._tag !== 'ArrayValue') {
                 throw new RangeError(
                   'MIR verifier allowed an element selector on a non-array value',
@@ -882,7 +1034,7 @@ function executeFunction(
               )
               selected = element
             }
-            locals.set(operation.destination.ordinal, { value: selected, fromCall: false })
+            write(operation.destination, { value: selected, fromCall: false })
             trace.push(
               Object.freeze({
                 _tag: 'PlaceRead',
@@ -933,7 +1085,7 @@ function executeFunction(
                 }),
               )
             }
-            locals.set(operation.root.ordinal, {
+            write(operation.root, {
               value: replacePlace(root.value, operation.selectors, indexes, replacement.value),
               fromCall: replacement.fromCall,
             })
@@ -1014,9 +1166,10 @@ function executeFunction(
               argumentStates.map((state) => state.value),
               Object.freeze([...active, target.instance]),
               trace,
+              state,
             )
             if (result._tag === 'Blocked') return result
-            locals.set(operation.destination.ordinal, { value: result.value, fromCall: true })
+            write(operation.destination, { value: result.value, fromCall: true })
             break
           }
         }
@@ -1164,7 +1317,10 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
       span: argumentSpanFallback(fn),
     }),
   )
-  const result = executeFunction(program, fn, [], Object.freeze([fn.instance]), trace)
+  const result = executeFunction(program, fn, [], Object.freeze([fn.instance]), trace, {
+    nextFrame: 0,
+    cells: new Map(),
+  })
   if (result._tag === 'Blocked') {
     return Object.freeze({
       _tag: 'Blocked',

@@ -17,7 +17,8 @@ self-hosting core.
 consume source-dependent input and produce source-dependent output. The accepted algorithmic
 baseline already composes target-aware layouts, cross-module declarations, operators, nominal
 structs and values, fixed-size arrays, mutation, structured loops, normalized structural unions,
-and exhaustive matching through the inspectable, determinism-gated compiler architecture.
+exhaustive matching, and lexical runtime-sized borrowed input through the inspectable,
+determinism-gated compiler architecture. Owned growable output is the next missing boundary.
 
 ## Column rules
 
@@ -87,32 +88,39 @@ control remains a DAG until each backend converts it to its required target form
   [pipeline decision](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
   [syntax decision](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
 
+### Borrow compiler input whose size is known only at runtime
+
+**Status: complete (2026-08-06).** `add-lexical-runtime-slices` shipped the first memory boundary.
+
+- **Outcome:** Explicit call-scoped `&[T]` and `&mut [T]` consume fixed arrays of different lengths
+  through one monomorphized contract. Root-attached loans remain compiler facts; evaluator cells,
+  aligned LLVM storage, and private Wasm shadow frames realize the same target-aware address-plus-
+  length layout. Shared traversal and exclusive move-only replacement agree across all three
+  engines and the unified `/labs` inspector.
+- **Deliberate boundary:** No allocator, owned dynamic sequence, raw pointer source API, implicit
+  array decay, escaping or stored slice, range, subslice, or iterator behavior was admitted.
+- **Evidence:** The coverage fold returns `40` and `42` from three- and six-element arrays through
+  one slice-taking instance and symbol; the exclusive fixture observes caller-visible replacement
+  with exactly-once displaced cleanup.
+
 ## Next
 
-### Handle compiler data whose size is known only at runtime
+### Allocate owned compiler output in a deterministic scope
 
-- **Problem:** The composed remaining-member fold runs through logical, native, and WebAssembly
-  execution only because its six inputs and three output states are baked into `Array<T, N>` types.
-  A real lexer or compiler pass cannot know source length, token count, declaration count, or
-  diagnostic count in its source contract, so it cannot yet express its ordinary input and output
-  boundary in Silk.
-- **Evidence:** `accept-algorithmic-language-slice` composes the complete first language slice and
-  returns `42` across all three engines. Generalizing that same program from a literal candidate
-  list to source-dependent candidates is the first point where the language stops: fixed arrays
-  require cardinality in the type and cannot grow a result set.
-- **Outcome & done-when:** One compiler-shaped pass can borrow or otherwise traverse input whose
-  length is known only at runtime, construct an owned runtime-sized result, and release every
-  backing resource deterministically. Its canonical target-aware representation remains available
-  before backend selection, and evaluator, native, WebAssembly, and `/labs` agree on behavior and
-  lifecycle.
-- **Working hypothesis:** The reviewed delivery chain is lexical runtime slices; scoped allocation
-  with typed slots and restricted drop hooks; a Silk-written `Vector<T>` plus scanner acceptance;
-  then bulk byte-memory primitives. Monomorphized type generics are the enabling compiler layer,
-  while the compiler exposes only unsafe allocation and memory primitives—not collection behavior.
-  Target-aware layout remains compiler-owned before evaluator, LLVM, or WebAssembly lowering.
-- **Appetite:** First map the boundary against one real pass and existing Wayfinder decisions, then
-  propose only the minimum evidence-producing change or dependency chain. Do not start a broad
-  collections library or general runtime.
+- **Problem:** Slices now borrow source-dependent input, but a lexer still cannot own a token list
+  whose length emerges at runtime. Safe values must stay fully initialized, cleanup must be
+  deterministic on every structured outcome, and allocation must not become hidden compiler magic.
+- **Outcome & done-when:** Add the smallest explicit unsafe allocation boundary: validated
+  target-aware `Layout`, an affine owned allocation carrying its originating reclaim capability,
+  named destination scopes, typed initialized slots, `MaybeUninitialized<T>` only inside unsafe
+  construction, typed `OutOfMemory`, and restricted infallible drop hooks. Evaluator, LLVM, Wasm,
+  ownership, MIR, and `/labs` must agree on acquisition and exactly-once cleanup.
+- **Boundary:** No safe raw allocation, ambient/default-static allocator, user-callable `free`,
+  primitive resize, zero-fill promise, collection behavior, or general capturing finalizer. The
+  allocator is an explicit requirement; a future Silk-written `Vector<T>` consumes these primitives
+  rather than being compiler-known.
+- **Sequence after this change:** implement `Vector<T>` in Silk, prove a scanner with borrowed bytes
+  and owned tokens, then admit only the bulk byte-memory primitives that workload demonstrates.
 - **Links:** [ownership and scoped allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
   [types and values](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
   [compiler pipeline](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·

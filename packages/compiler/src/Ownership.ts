@@ -46,6 +46,32 @@ export interface Release {
   readonly cleanup: CleanupPlan
 }
 
+/** A deterministic compiler-only identity for one call-scoped slice loan. */
+export type BorrowId = Hir.BorrowId
+
+export interface LoanFact {
+  readonly _tag: 'Loan'
+  readonly id: BorrowId
+  readonly root: BindingSite
+  readonly access: Type.Slice['access']
+  readonly origin: 'FixedArrayBorrow' | 'SliceReborrow'
+  readonly parent?: BindingSite
+  readonly suspendsParent: boolean
+  readonly startRegion: Hir.RegionId
+  readonly endRegion: Hir.RegionId
+  readonly startSpan: SourceSpan.SourceSpan
+  readonly endSpan: SourceSpan.SourceSpan
+}
+
+export interface BorrowedReplacementFact {
+  readonly _tag: 'BorrowedReplacement'
+  readonly root: DeclarationIndex.ParameterId
+  readonly region: Hir.RegionId
+  readonly type: DeclarationIndex.SemanticType
+  readonly displacedCleanup: CleanupPlan
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** The symbolic recursive cleanup of one complete logical owner. */
 export type CleanupPlan =
   | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
@@ -79,8 +105,10 @@ export interface ExitPlan {
   readonly _tag: 'Exit'
   readonly kind: 'Return' | 'ArmEnd' | 'LoopFallthrough' | 'Break' | 'Continue'
   readonly span: SourceSpan.SourceSpan
+  readonly region?: Hir.RegionId
   readonly arm?: 'Taken' | 'Otherwise'
   readonly target?: Hir.LoopId
+  readonly loanEnds: ReadonlyArray<BorrowId>
   readonly releases: ReadonlyArray<Release>
 }
 
@@ -110,6 +138,8 @@ export interface FunctionOwnership {
   readonly exits: ReadonlyArray<ExitPlan>
   readonly fixedPoints: ReadonlyArray<LoopFixedPoint>
   readonly matches: ReadonlyArray<MatchOwnership>
+  readonly loans: ReadonlyArray<LoanFact>
+  readonly borrowedReplacements: ReadonlyArray<BorrowedReplacementFact>
   readonly verdict: Verdict
 }
 
@@ -146,11 +176,15 @@ const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
   type === undefined || Type.isBuiltin(type) || Type.isNever(type)
     ? copyable
-    : Type.isFixedArray(type)
-      ? categoryOf(type.element)._tag === 'Copyable'
+    : Type.isSlice(type)
+      ? type.access === 'Shared'
         ? copyable
         : Object.freeze({ _tag: 'MoveOnly', type })
-      : Object.freeze({ _tag: 'MoveOnly', type })
+      : Type.isFixedArray(type)
+        ? categoryOf(type.element)._tag === 'Copyable'
+          ? copyable
+          : Object.freeze({ _tag: 'MoveOnly', type })
+        : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
@@ -320,6 +354,25 @@ const checkExpression = (
       }
       return
     }
+    case 'SliceBorrow': {
+      const site: BindingSite =
+        expression.root._tag === 'BindingSliceRoot'
+          ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
+          : Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
+      checkUse(state, live, site, expression.span, false)
+      return
+    }
+    case 'SliceLength':
+      checkExpression(state, live, expression.slice, false, guard, escaping)
+      return
+    case 'SliceIndexPlace': {
+      checkExpression(state, live, expression.slice, false, guard, escaping)
+      checkExpression(state, live, expression.index, false, guard, escaping)
+      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+        state.diagnostics.push(Diagnostic.borrowedMove(expression.span))
+      }
+      return
+    }
     case 'BuiltinCall': {
       for (const argument of expression.arguments)
         checkExpression(state, live, argument, false, guard, escaping)
@@ -453,6 +506,222 @@ const checkExpression = (
   }
 }
 
+interface LoanAnalysis {
+  readonly loans: ReadonlyArray<LoanFact>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite =>
+  root._tag === 'BindingRoot'
+    ? Object.freeze({ _tag: 'Let', binding: root.binding.id })
+    : Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
+
+const sameSite = (left: BindingSite, right: BindingSite): boolean =>
+  siteKey(left) === siteKey(right)
+
+const borrowedPlaceAccess = (
+  expression: Elaboration.ExpressionFact,
+): Type.Slice['access'] | undefined => {
+  if (expression._tag === 'Grouped') return borrowedPlaceAccess(expression.expression)
+  if (expression._tag === 'IndexProjection' || expression._tag === 'FieldProjection') {
+    return expression.borrowAccess
+  }
+  return undefined
+}
+
+const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
+  const loans: Array<LoanFact> = []
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+
+  const directSite = (
+    expression: Elaboration.ExpressionFact,
+  ): { readonly site: BindingSite; readonly spelling: string } | undefined => {
+    if (expression._tag === 'Grouped') return directSite(expression.expression)
+    if (expression._tag !== 'Identifier') return undefined
+    if (expression.reference._tag === 'ResolvedBinding') {
+      return Object.freeze({
+        site: Object.freeze({ _tag: 'Let', binding: expression.reference.binding.id }),
+        spelling: expression.reference.spelling,
+      })
+    }
+    if (expression.reference._tag === 'Resolved') {
+      return Object.freeze({
+        site: Object.freeze({ _tag: 'Parameter', parameter: expression.reference.parameter.id }),
+        spelling: expression.reference.spelling,
+      })
+    }
+    return undefined
+  }
+
+  const checkDirectAccess = (
+    expression: Elaboration.ExpressionFact,
+    active: ReadonlyArray<LoanFact>,
+    access: 'Read' | 'Write' | 'Move',
+  ): void => {
+    const direct = directSite(expression)
+    if (direct === undefined) return
+    const conflict = active.find(
+      (loan) =>
+        sameSite(loan.root, direct.site) && (access !== 'Read' || loan.access === 'Exclusive'),
+    )
+    if (conflict !== undefined) {
+      diagnostics.push(
+        Diagnostic.ownerAccessDuringLoan(
+          direct.spelling,
+          access,
+          conflict.startSpan,
+          expression.syntax.span,
+        ),
+      )
+    }
+  }
+
+  const naturalAccess = (expression: Elaboration.ExpressionFact): 'Read' | 'Move' =>
+    expression.type._tag === 'Available' && categoryOf(expression.type.type)._tag === 'MoveOnly'
+      ? 'Move'
+      : 'Read'
+
+  const inspect = (
+    expression: Elaboration.ExpressionFact,
+    region: Hir.RegionId,
+    active: ReadonlyArray<LoanFact>,
+    access: 'Read' | 'Write' | 'Move' = 'Read',
+  ): void => {
+    switch (expression._tag) {
+      case 'Integer':
+      case 'Boolean':
+        return
+      case 'Identifier':
+        checkDirectAccess(expression, active, access)
+        return
+      case 'Borrow':
+        return
+      case 'Move':
+        inspect(expression.subject, region, active, 'Move')
+        return
+      case 'Grouped':
+        inspect(expression.expression, region, active, access)
+        return
+      case 'FieldProjection':
+        inspect(expression.subject, region, active, access)
+        return
+      case 'IndexProjection':
+        inspect(expression.subject, region, active, access)
+        inspect(expression.index, region, active, 'Read')
+        return
+      case 'StructLiteral':
+        for (const initializer of expression.initializers) {
+          inspect(initializer.expression, region, active, naturalAccess(initializer.expression))
+        }
+        return
+      case 'ArrayLiteral':
+        for (const element of expression.elements) {
+          inspect(element.expression, region, active, naturalAccess(element.expression))
+        }
+        return
+      case 'Match':
+        inspect(expression.scrutinee, region, active, naturalAccess(expression.scrutinee))
+        for (const arm of expression.arms) {
+          if (arm.guard !== undefined) inspect(arm.guard, region, active, 'Read')
+          inspect(arm.result, region, active, access)
+        }
+        return
+      case 'Operator':
+        for (const argument of expression.arguments) {
+          inspect(argument.expression, region, active, 'Read')
+        }
+        return
+      case 'Pipeline':
+        for (const argument of expression.arguments) {
+          inspect(argument.expression, region, active, naturalAccess(argument.expression))
+        }
+        return
+      case 'Call': {
+        const callActive: Array<LoanFact> = [...active]
+        for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+          const candidate = argument.expression
+          if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
+            inspect(candidate, region, callActive, naturalAccess(candidate))
+            continue
+          }
+          const root = borrowSite(candidate.formation.root)
+          const conflict = callActive.find(
+            (loan) =>
+              sameSite(loan.root, root) &&
+              (loan.access === 'Exclusive' || candidate.access === 'Exclusive'),
+          )
+          if (conflict !== undefined) {
+            diagnostics.push(
+              Diagnostic.conflictingSliceLoan(
+                conflict.access,
+                candidate.access,
+                conflict.startSpan,
+                candidate.syntax.span,
+              ),
+            )
+          }
+          const loan: LoanFact = Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal: argumentOrdinal,
+            }),
+            root,
+            access: candidate.access,
+            origin: candidate.formation._tag,
+            ...(candidate.formation._tag === 'SliceReborrow'
+              ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
+              : { suspendsParent: false }),
+            startRegion: region,
+            endRegion: region,
+            startSpan: candidate.syntax.span,
+            endSpan: expression.syntax.span,
+          })
+          loans.push(loan)
+          callActive.push(loan)
+        }
+        return
+      }
+    }
+  }
+
+  const statements = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {
+    for (const statement of facts) {
+      switch (statement._tag) {
+        case 'BindStatement':
+          inspect(statement.binding.initializer, statement.region, [])
+          break
+        case 'IfStatement':
+          inspect(statement.condition, statement.region, [])
+          statements(statement.taken)
+          statements(statement.otherwise)
+          break
+        case 'WriteStatement':
+          inspect(statement.destination, statement.region, [], 'Write')
+          inspect(statement.value, statement.region, [], naturalAccess(statement.value))
+          break
+        case 'WhileStatement':
+          inspect(statement.condition, statement.region, [])
+          statements(statement.body)
+          break
+        case 'ReturnStatement':
+          inspect(statement.expression, statement.region, [], naturalAccess(statement.expression))
+          break
+        case 'BreakStatement':
+        case 'ContinueStatement':
+          break
+      }
+    }
+  }
+  statements(fn.statements)
+  return Object.freeze({
+    loans: Object.freeze(loans),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 interface CheckedFunction {
   readonly ownership: FunctionOwnership
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -461,6 +730,7 @@ interface CheckedFunction {
 interface ExitDescriptor {
   readonly kind: ExitPlan['kind']
   readonly span: SourceSpan.SourceSpan
+  readonly region?: Hir.RegionId
   readonly arm?: 'Taken' | 'Otherwise'
   readonly target?: Hir.LoopId
   readonly sites: ReadonlyArray<string>
@@ -499,6 +769,7 @@ const cleanupPlan = (
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
+  if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
@@ -642,13 +913,64 @@ export const specializeCleanup = (
   }
 }
 
-const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): CheckedFunction => {
+const borrowedReplacements = (
+  fn: Elaboration.FunctionFact,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<BorrowedReplacementFact> => {
+  const replacements: Array<BorrowedReplacementFact> = []
+  const walk = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
+    for (const statement of statements) {
+      if (statement._tag === 'IfStatement') {
+        walk(statement.taken)
+        walk(statement.otherwise)
+        continue
+      }
+      if (statement._tag === 'WhileStatement') {
+        walk(statement.body)
+        continue
+      }
+      if (
+        statement._tag !== 'WriteStatement' ||
+        statement.root?._tag !== 'ParameterDeclaration' ||
+        statement.destination.type._tag !== 'Available' ||
+        borrowedPlaceAccess(statement.destination) !== 'Exclusive' ||
+        !statement.compatible
+      ) {
+        continue
+      }
+      replacements.push(
+        Object.freeze({
+          _tag: 'BorrowedReplacement',
+          root: statement.root.id,
+          region: statement.region,
+          type: statement.destination.type.type,
+          displacedCleanup: cleanupPlan(index, statement.destination.type.type),
+          span: statement.syntax.span,
+        }),
+      )
+    }
+  }
+  walk(fn.statements)
+  return Object.freeze(replacements)
+}
+
+const checkFunction = (
+  fn: Hir.HirFunction,
+  index: DeclarationIndex.Index,
+  semantic?: Elaboration.FunctionFact,
+): CheckedFunction => {
   const declaration = fn.declaration
+  const loanAnalysis =
+    semantic === undefined
+      ? Object.freeze({ loans: Object.freeze([]), diagnostics: Object.freeze([]) })
+      : analyzeLoans(semantic)
+  const replacements =
+    semantic === undefined ? Object.freeze([]) : borrowedReplacements(semantic, index)
   const state: CheckState = {
     index,
     bindings: new Map(),
     order: [],
-    diagnostics: [],
+    diagnostics: [...loanAnalysis.diagnostics],
     matches: [],
   }
 
@@ -748,6 +1070,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
               Object.freeze({
                 kind: 'ArmEnd' as const,
                 span: statement.span,
+                region: statement.region,
                 arm,
                 sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
               }),
@@ -768,12 +1091,14 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
       }
       if (statement._tag === 'Write') {
         for (const selector of statement.place.selectors) {
-          if (selector._tag === 'Index') checkExpression(state, live, selector.index, false)
+          if (selector._tag === 'Index' || selector._tag === 'SliceIndex') {
+            checkExpression(state, live, selector.index, false)
+          }
         }
-        const rootSite: BindingSite = Object.freeze({
-          _tag: 'Let',
-          binding: statement.place.root,
-        })
+        const rootSite: BindingSite =
+          statement.place._tag === 'WritePlace'
+            ? Object.freeze({ _tag: 'Let', binding: statement.place.root })
+            : Object.freeze({ _tag: 'Parameter', parameter: statement.place.root })
         const rootKey = siteKey(rootSite)
         const root = state.bindings.get(rootKey)
         const wasLive = live.has(rootKey)
@@ -785,7 +1110,10 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           state.diagnostics.push(
             Diagnostic.overlappingAssignment(root?.name ?? '?', statement.span),
           )
-        } else if (statement.place.selectors.length === 0) {
+        } else if (
+          statement.place._tag === 'WritePlace' &&
+          statement.place.selectors.length === 0
+        ) {
           live.add(rootKey)
         }
         continue
@@ -812,6 +1140,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
             Object.freeze({
               kind: 'LoopFallthrough' as const,
               span: statement.span,
+              region: statement.region,
               target: statement.loop,
               sites: Object.freeze(
                 [...loopFrame].reverse().filter((site) => loopResult.live.has(site)),
@@ -857,6 +1186,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           Object.freeze({
             kind: statement._tag,
             span: statement.span,
+            region: statement.region,
             target: statement.target,
             sites,
           }),
@@ -878,6 +1208,7 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
         Object.freeze({
           kind: 'Return' as const,
           span: statement.span,
+          region: statement.region,
           sites: frameSitesInnerFirst(frames, live),
         }),
       )
@@ -929,8 +1260,17 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
           _tag: 'Exit' as const,
           kind: exit.kind,
           span: exit.span,
+          ...(exit.region === undefined ? {} : { region: exit.region }),
           ...(exit.arm === undefined ? {} : { arm: exit.arm }),
           ...(exit.target === undefined ? {} : { target: exit.target }),
+          loanEnds: Object.freeze(
+            loanAnalysis.loans
+              .filter(
+                (loan) =>
+                  exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal,
+              )
+              .map((loan) => loan.id),
+          ),
           releases: Object.freeze(
             exit.sites.flatMap((site): ReadonlyArray<Release> => {
               const fact = bindingBySite.get(site)
@@ -997,6 +1337,8 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
         }),
       ),
       matches: Object.freeze(state.matches),
+      loans: loanAnalysis.loans,
+      borrowedReplacements: replacements,
       verdict,
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
@@ -1005,7 +1347,9 @@ const checkFunction = (fn: Hir.HirFunction, index: DeclarationIndex.Index): Chec
 
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (result: Elaboration.Result): ModuleOwnership => {
-  const checked = result.hir.functions.map((fn) => checkFunction(fn, result.index))
+  const checked = result.hir.functions.map((fn, ordinal) =>
+    checkFunction(fn, result.index, result.functions.at(ordinal)),
+  )
   return Object.freeze({
     _tag: 'OwnershipFacts',
     module: result.syntax.source.id,
@@ -1082,6 +1426,14 @@ export const encode = (self: ModuleOwnership): string =>
             : `move-only ${Type.encode(binding.category.type)}`
         return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
       }),
+      ...fn.loans.map(
+        (loan) =>
+          `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${loan.origin === 'SliceReborrow' ? `reborrow parent=${loan.parent === undefined ? '?' : siteText(loan.parent)} suspended=${loan.suspendsParent}` : 'array'} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`,
+      ),
+      ...fn.borrowedReplacements.map(
+        (replacement) =>
+          `  borrowed-replace p${replacement.root.ordinal} region=${replacement.region.ordinal} type=${Type.encode(replacement.type)} cleanup=${cleanupText(replacement.displacedCleanup)} ${spanText(replacement.span)}`,
+      ),
       ...fn.exits.map((exit) => {
         const label = (() => {
           switch (exit.kind) {
@@ -1097,10 +1449,11 @@ export const encode = (self: ModuleOwnership): string =>
               return `continue loop${exit.target?.ordinal ?? '?'}`
           }
         })()
+        const loanEnds = exit.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'
         return exit.releases.length === 0
-          ? `  exit ${label} ${spanText(exit.span)} releases none`
+          ? `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds} releases none`
           : [
-              `  exit ${label} ${spanText(exit.span)}`,
+              `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds}`,
               ...exit.releases.map(
                 (release) =>
                   `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,

@@ -1,3 +1,4 @@
+import * as Alignment from '@silk-effect/llvm/Alignment'
 import * as Bitcode from '@silk-effect/llvm/Bitcode'
 import * as LlvmBlock from '@silk-effect/llvm/Block'
 import * as Builder from '@silk-effect/llvm/Builder'
@@ -217,6 +218,8 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'Literal':
     case 'Binary':
     case 'Move':
+    case 'BeginLoan':
+    case 'SliceLength':
     case 'ConvertUnion':
     case 'Call':
     case 'Construct':
@@ -228,6 +231,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
       return operation.binding.destination
     case 'CheckPlace':
     case 'WritePlace':
+    case 'EndLoan':
     case 'Drop':
       return undefined
   }
@@ -238,7 +242,9 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
     operation._tag === 'CheckPlace' ||
     operation._tag === 'WritePlace') &&
   operation.selectors.some(
-    (selector) => selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime',
+    (selector) =>
+      selector._tag === 'SliceElementSelector' ||
+      (selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'),
   )
 
 const expandMatches = (
@@ -633,6 +639,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       strip: request.mode !== 'debug',
     })
     const i32 = yield* LlvmType.integer(builder, scalarBits)
+    const hasAddressLane = program.layout.callingShapes.some((shape) =>
+      shape.lanes.some((lane) => typeof lane.type !== 'string'),
+    )
+    const i8 = hasAddressLane ? yield* LlvmType.integer(builder, 8) : i32
+    const pointer = hasAddressLane ? yield* LlvmType.pointer(builder) : i32
     let voidType: LlvmType.Type | undefined
     const lanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> => {
       const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
@@ -641,6 +652,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       }
       return shape.lanes
     }
+    const laneType = (lane: Layout.CallingLane): LlvmType.Type =>
+      typeof lane.type === 'string' ? i32 : pointer
     let overflowSignature:
       | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
       | undefined
@@ -663,17 +676,14 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       } else if (resultLaneCount === 1) {
         resultType = i32
       } else {
-        resultType = yield* LlvmType.structure(
-          builder,
-          Array.from({ length: resultLaneCount }, () => i32),
-        )
+        resultType = yield* LlvmType.structure(builder, lanesFor(fn.result).map(laneType))
       }
       const parameters =
         fn.regions.length === 0
           ? []
           : fn.localTypes
               .slice(0, fn.parameterCount)
-              .flatMap((type) => Array.from({ length: lanesFor(type).length }, () => i32))
+              .flatMap((type) => lanesFor(type).map(laneType))
       const signature = yield* LlvmType.functionType(builder, resultType, parameters)
       declared.push({
         fn,
@@ -754,22 +764,55 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           const mutableRoots = new Set([
             ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
-                operation._tag === 'WritePlace' ? [operation.root.ordinal] : [],
+                operation._tag === 'WritePlace' &&
+                entry.fn.localTypes.at(operation.root.ordinal)?._tag !== 'Slice'
+                  ? [operation.root.ordinal]
+                  : [],
               ),
             ),
             ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
             ...continuationLocals,
           ])
+          const addressRoots = new Set(
+            entry.linear.flatMap((block) =>
+              block.operations.flatMap((operation) =>
+                operation._tag === 'BeginLoan' && operation.sourceType._tag === 'FixedArray'
+                  ? [operation.root.ordinal]
+                  : [],
+              ),
+            ),
+          )
           const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
           for (const root of [...mutableRoots].sort((left, right) => left - right)) {
             const logicalType = entry.fn.localTypes.at(root)
             if (logicalType === undefined)
               throw new RangeError(`Backend lost mutable root %${root}`)
             const storage: Array<Value.Input> = []
-            for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {
-              storage.push(yield* FunctionBody.alloca(body, i32, `mut${root}_${lane}`))
+            for (const [lane, callingLane] of lanesFor(logicalType).entries()) {
+              storage.push(
+                yield* FunctionBody.alloca(body, laneType(callingLane), `mut${root}_${lane}`),
+              )
             }
             mutableStorage.set(root, Object.freeze(storage))
+          }
+          const addressStorage = new Map<number, Value.Input>()
+          for (const root of [...addressRoots].sort((left, right) => left - right)) {
+            const logicalType = entry.fn.localTypes.at(root)
+            const layout =
+              logicalType === undefined
+                ? undefined
+                : Layout.entry(program.layout, Mir.semanticType(logicalType))
+            if (logicalType?._tag !== 'FixedArray' || layout === undefined) {
+              throw new RangeError(`Backend lost address-taken fixed array %${root}`)
+            }
+            const count = yield* Constant.integerUnsigned(builder, i32, BigInt(layout.size))
+            addressStorage.set(
+              root,
+              yield* FunctionBody.alloca(body, i8, `addr${root}`, {
+                count,
+                alignment: yield* Alignment.fromByteUnits(layout.alignment),
+              }),
+            )
           }
           let physicalParameter = 0
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
@@ -836,6 +879,81 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
           })
 
+          const materializedAddressRoots = new Set<number>()
+          const bytePointer = Effect.fnUntraced(function* (
+            base: Value.Input,
+            offset: Value.Input,
+            name: string,
+          ) {
+            return yield* FunctionBody.getElementPtr(body, i8, base, [offset], name)
+          })
+          const constantBytePointer = Effect.fnUntraced(function* (
+            base: Value.Input,
+            offset: number,
+            name: string,
+          ) {
+            return yield* bytePointer(
+              base,
+              yield* Constant.integerUnsigned(builder, i32, BigInt(offset)),
+              name,
+            )
+          })
+          const materializeAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
+            const base = addressStorage.get(root.ordinal)
+            const logicalType = entry.fn.localTypes.at(root.ordinal)
+            if (base === undefined || logicalType === undefined) {
+              throw new RangeError(`Backend lost address storage for %${root.ordinal}`)
+            }
+            const values = readLocal(root)
+            for (const [ordinal, lane] of lanesFor(logicalType).entries()) {
+              const offset = Layout.laneOffset(
+                program.layout,
+                Mir.semanticType(logicalType),
+                lane.path,
+              )
+              const stored = values.at(ordinal)
+              if (offset === undefined || stored === undefined) {
+                throw new RangeError(
+                  `Backend lost address lane ${ordinal} ${JSON.stringify(lane.path)} for %${root.ordinal} (${SilkType.encode(Mir.semanticType(logicalType))})`,
+                )
+              }
+              yield* FunctionBody.store(
+                body,
+                stored,
+                yield* constantBytePointer(base, offset, `addr${root.ordinal}_${ordinal}`),
+              )
+            }
+            materializedAddressRoots.add(root.ordinal)
+          })
+          const reloadAddressRoot = Effect.fnUntraced(function* (root: number) {
+            if (!materializedAddressRoots.has(root)) return
+            const base = addressStorage.get(root)
+            const logicalType = entry.fn.localTypes.at(root)
+            if (base === undefined || logicalType === undefined) {
+              throw new RangeError(`Backend lost address storage for %${root}`)
+            }
+            const values: Array<Value.Input> = []
+            for (const [ordinal, lane] of lanesFor(logicalType).entries()) {
+              const offset = Layout.laneOffset(
+                program.layout,
+                Mir.semanticType(logicalType),
+                lane.path,
+              )
+              if (offset === undefined) throw new RangeError(`Backend lost address lane ${ordinal}`)
+              values.push(
+                yield* FunctionBody.load(
+                  body,
+                  laneType(lane),
+                  yield* constantBytePointer(base, offset, `reload${root}_${ordinal}_ptr`),
+                  `reload${root}_${ordinal}`,
+                ),
+              )
+            }
+            const frozen = Object.freeze(values)
+            locals.set(root, frozen)
+            yield* storeMutable(Object.freeze({ _tag: 'Local', ordinal: root }), frozen)
+          })
+
           for (const [blockOrdinal, block] of entry.linear.entries()) {
             const blockHandle = blocks.get(block.id.ordinal)
             if (blockHandle === undefined) continue
@@ -845,9 +963,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 const storage = mutableStorage.get(root)
                 if (storage === undefined) continue
                 const loaded: Array<Value.Input> = []
+                const logicalType = entry.fn.localTypes.at(root)
+                if (logicalType === undefined) throw new RangeError('Mutable root lost its type')
                 for (const [lane, pointer] of storage.entries()) {
+                  const callingLane = lanesFor(logicalType).at(lane)
+                  if (callingLane === undefined) throw new RangeError('Mutable root lost a lane')
                   loaded.push(
-                    yield* FunctionBody.load(body, i32, pointer, `mut${root}_${lane}_load`),
+                    yield* FunctionBody.load(
+                      body,
+                      laneType(callingLane),
+                      pointer,
+                      `mut${root}_${lane}_load`,
+                    ),
                   )
                 }
                 locals.set(root, Object.freeze(loaded))
@@ -886,6 +1013,35 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
+                case 'BeginLoan': {
+                  if (operation.sourceType._tag === 'Slice') {
+                    locals.set(operation.destination.ordinal, readLocal(operation.root))
+                    break
+                  }
+                  yield* materializeAddressRoot(operation.root)
+                  const base = addressStorage.get(operation.root.ordinal)
+                  if (base === undefined) throw new RangeError('LLVM slice formation lost its root')
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([
+                      base,
+                      yield* Constant.integerSigned(
+                        builder,
+                        i32,
+                        BigInt(operation.sourceType.type.length),
+                      ),
+                    ]),
+                  )
+                  break
+                }
+                case 'EndLoan':
+                  break
+                case 'SliceLength': {
+                  const length = readLocal(operation.slice).at(1)
+                  if (length === undefined) throw new RangeError('LLVM slice lost its length lane')
+                  locals.set(operation.destination.ordinal, Object.freeze([length]))
+                  break
+                }
                 case 'ConvertUnion': {
                   const source = readLocal(operation.source)
                   const targetWidth = operation.targetShape.laneCount
@@ -993,6 +1149,103 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const sourceType = entry.fn.localTypes.at(operation.root.ordinal)
                   if (sourceType === undefined) {
                     throw new RangeError('Backend place read lost its root type')
+                  }
+                  if (sourceType._tag === 'Slice') {
+                    const [selector, ...suffixSelectors] = operation.selectors
+                    if (selector?._tag !== 'SliceElementSelector') {
+                      throw new RangeError('LLVM slice read lost its runtime element selector')
+                    }
+                    const [base, length] = readLocal(operation.root)
+                    if (base === undefined || length === undefined) {
+                      throw new RangeError('LLVM slice read lost its address or length lane')
+                    }
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    const index = readScalar(selector.index)
+                    const inBounds = yield* FunctionBody.integerCompare(
+                      body,
+                      'ult',
+                      index,
+                      length,
+                      `slice${checkOrdinal}_in_bounds`,
+                    )
+                    yield* locate(
+                      selector.provenance.span,
+                      yield* Value.instruction(body, inBounds),
+                    )
+                    const continueBlock = yield* LlvmBlock.make(body, `slice${checkOrdinal}_ok`)
+                    yield* FunctionBody.conditionalBranch(body, inBounds, continueBlock, trapBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+                    const sliceLayout = Layout.entry(program.layout, sourceType.type)
+                    if (sliceLayout?.representation._tag !== 'Slice') {
+                      throw new RangeError('LLVM slice read lost its compiler layout')
+                    }
+                    const stride = yield* Constant.integerUnsigned(
+                      builder,
+                      i32,
+                      BigInt(sliceLayout.representation.stride),
+                    )
+                    const elementOffset = yield* FunctionBody.binary(
+                      body,
+                      'mul',
+                      index,
+                      stride,
+                      `slice${checkOrdinal}_element_offset`,
+                    )
+                    const staticSelectors: Array<Layout.Selector> = []
+                    for (const candidate of suffixSelectors) {
+                      if (candidate._tag === 'FieldSelector') {
+                        staticSelectors.push(candidate.field)
+                      } else if (
+                        candidate._tag === 'ElementSelector' &&
+                        candidate.index._tag === 'Proven'
+                      ) {
+                        staticSelectors.push(
+                          Object.freeze({
+                            _tag: 'ElementSelector',
+                            index: candidate.index.value,
+                          }),
+                        )
+                      } else {
+                        throw new RangeError('LLVM nested runtime slice place is not canonical')
+                      }
+                    }
+                    const selectedValues: Array<Value.Input> = []
+                    for (const [laneOrdinal, lane] of lanesFor(operation.type).entries()) {
+                      const staticOffset = Layout.laneOffset(
+                        program.layout,
+                        sourceType.type.element,
+                        Object.freeze([...staticSelectors, ...lane.path]),
+                      )
+                      if (staticOffset === undefined) {
+                        throw new RangeError(`LLVM slice read lost lane ${laneOrdinal}`)
+                      }
+                      const offset =
+                        staticOffset === 0
+                          ? elementOffset
+                          : yield* FunctionBody.binary(
+                              body,
+                              'add',
+                              elementOffset,
+                              yield* Constant.integerUnsigned(builder, i32, BigInt(staticOffset)),
+                              `slice${checkOrdinal}_${laneOrdinal}_offset`,
+                            )
+                      const address = yield* bytePointer(
+                        base,
+                        offset,
+                        `slice${checkOrdinal}_${laneOrdinal}_ptr`,
+                      )
+                      selectedValues.push(
+                        yield* FunctionBody.load(
+                          body,
+                          laneType(lane),
+                          address,
+                          `slice${checkOrdinal}_${laneOrdinal}`,
+                        ),
+                      )
+                    }
+                    locals.set(operation.destination.ordinal, Object.freeze(selectedValues))
+                    checkOrdinal += 1
+                    break
                   }
                   const sourceLanes = lanesFor(sourceType)
                   const sourceValues = readLocal(operation.root)
@@ -1145,6 +1398,34 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
                 case 'CheckPlace': {
+                  const rootType = entry.fn.localTypes.at(operation.root.ordinal)
+                  if (rootType?._tag === 'Slice') {
+                    const selector = operation.selectors.at(0)
+                    const length = readLocal(operation.root).at(1)
+                    if (selector?._tag !== 'SliceElementSelector' || length === undefined) {
+                      throw new RangeError('LLVM slice write check lost its canonical lanes')
+                    }
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    const inBounds = yield* FunctionBody.integerCompare(
+                      body,
+                      'ult',
+                      readScalar(selector.index),
+                      length,
+                      `write_slice${checkOrdinal}_in_bounds`,
+                    )
+                    yield* locate(
+                      selector.provenance.span,
+                      yield* Value.instruction(body, inBounds),
+                    )
+                    const continueBlock = yield* LlvmBlock.make(
+                      body,
+                      `write_slice${checkOrdinal}_ok`,
+                    )
+                    yield* FunctionBody.conditionalBranch(body, inBounds, continueBlock, trapBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+                    checkOrdinal += 1
+                    break
+                  }
                   const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
                     selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
                       ? [
@@ -1184,6 +1465,80 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
                 case 'WritePlace': {
+                  if (operation.rootType._tag === 'Slice') {
+                    const [selector, ...suffixSelectors] = operation.selectors
+                    const [base] = readLocal(operation.root)
+                    if (selector?._tag !== 'SliceElementSelector' || base === undefined) {
+                      throw new RangeError('LLVM slice write lost its canonical address lane')
+                    }
+                    const sliceLayout = Layout.entry(program.layout, operation.rootType.type)
+                    if (sliceLayout?.representation._tag !== 'Slice') {
+                      throw new RangeError('LLVM slice write lost its compiler layout')
+                    }
+                    const stride = yield* Constant.integerUnsigned(
+                      builder,
+                      i32,
+                      BigInt(sliceLayout.representation.stride),
+                    )
+                    const elementOffset = yield* FunctionBody.binary(
+                      body,
+                      'mul',
+                      readScalar(selector.index),
+                      stride,
+                      `write_slice${checkOrdinal}_element_offset`,
+                    )
+                    const staticSelectors: Array<Layout.Selector> = []
+                    for (const candidate of suffixSelectors) {
+                      if (candidate._tag === 'FieldSelector') {
+                        staticSelectors.push(candidate.field)
+                      } else if (
+                        candidate._tag === 'ElementSelector' &&
+                        candidate.index._tag === 'Proven'
+                      ) {
+                        staticSelectors.push(
+                          Object.freeze({
+                            _tag: 'ElementSelector',
+                            index: candidate.index.value,
+                          }),
+                        )
+                      } else {
+                        throw new RangeError('LLVM nested runtime slice write is not canonical')
+                      }
+                    }
+                    const sourceValues = readLocal(operation.source)
+                    for (const [laneOrdinal, lane] of lanesFor(operation.type).entries()) {
+                      const staticOffset = Layout.laneOffset(
+                        program.layout,
+                        operation.rootType.type.element,
+                        Object.freeze([...staticSelectors, ...lane.path]),
+                      )
+                      const stored = sourceValues.at(laneOrdinal)
+                      if (staticOffset === undefined || stored === undefined) {
+                        throw new RangeError(`LLVM slice write lost lane ${laneOrdinal}`)
+                      }
+                      const offset =
+                        staticOffset === 0
+                          ? elementOffset
+                          : yield* FunctionBody.binary(
+                              body,
+                              'add',
+                              elementOffset,
+                              yield* Constant.integerUnsigned(builder, i32, BigInt(staticOffset)),
+                              `write_slice${checkOrdinal}_${laneOrdinal}_offset`,
+                            )
+                      yield* FunctionBody.store(
+                        body,
+                        stored,
+                        yield* bytePointer(
+                          base,
+                          offset,
+                          `write_slice${checkOrdinal}_${laneOrdinal}_ptr`,
+                        ),
+                      )
+                    }
+                    checkOrdinal += 1
+                    break
+                  }
                   const rootLanes = lanesFor(operation.rootType)
                   const rootValues = readLocal(operation.root)
                   const sourceLanes = lanesFor(operation.type)
@@ -1218,6 +1573,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                           matches = false
                           break
                         }
+                      } else if (selector._tag === 'SliceElementSelector') {
+                        matches = false
+                        break
                       } else if (physical._tag !== 'ElementSelector') {
                         matches = false
                         break
@@ -1459,6 +1817,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     operation.arguments.flatMap((argument) => [...readLocal(argument)]),
                     `t${operation.destination.ordinal}`,
                   )
+                  for (const root of [...addressRoots].sort((left, right) => left - right)) {
+                    yield* reloadAddressRoot(root)
+                  }
                   if (target.resultLaneCount === 0) {
                     locals.set(operation.destination.ordinal, Object.freeze([]))
                     break

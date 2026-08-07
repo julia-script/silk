@@ -198,6 +198,8 @@ const hirTypeText = (type: Type.Type): string =>
         ? type.name
       : type._tag === 'FixedArrayType'
         ? `Array<${hirTypeText(type.element)}, ${type.length}>`
+      : type._tag === 'SliceType'
+        ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
         : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
@@ -225,12 +227,18 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `project ${hirTypeText(expression.nominal)}.#${expression.field.ordinal}`
     case 'IndexPlace':
       return `index ${hirTypeText(expression.array)} · ${expression.bounds._tag.toLowerCase()}`
+    case 'SliceBorrow':
+      return `${expression.reborrow ? 'reborrow' : 'borrow'} ${expression.access.toLowerCase()} · loan #${expression.borrow.ordinal}`
+    case 'SliceLength':
+      return 'slice length'
+    case 'SliceIndexPlace':
+      return `slice index ${expression.access.toLowerCase()}`
     case 'Call':
       return `call ${expression.target.name}${
         expression.typeArguments.length === 0
           ? ''
           : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
-      }`
+      } · loan ends ${expression.loanEnds.map((loan) => `#${loan.ordinal}`).join(', ') || 'none'}`
     case 'BuiltinCall':
       return `builtin I32.${expression.operation}`
     default:
@@ -263,6 +271,11 @@ export const hirRows = (
     }
     if (node._tag === 'Move' || node._tag === 'Project') {
       expression(node.subject, depth + 1, `${path}.s`)
+    }
+    if (node._tag === 'SliceLength') expression(node.slice, depth + 1, `${path}.s`)
+    if (node._tag === 'SliceIndexPlace') {
+      expression(node.slice, depth + 1, `${path}.s`)
+      expression(node.index, depth + 1, `${path}.i`)
     }
     if (node._tag === 'UnionConvert') {
       expression(node.source, depth + 1, `${path}.u`)

@@ -2,7 +2,9 @@ import * as Binary from '@silk-effect/wasm/Binary'
 import * as Builder from '@silk-effect/wasm/Builder'
 import * as ExportActor from '@silk-effect/wasm/Export'
 import * as FuncActor from '@silk-effect/wasm/Func'
+import * as Global from '@silk-effect/wasm/Global'
 import * as Instr from '@silk-effect/wasm/Instr'
+import * as Memory from '@silk-effect/wasm/Memory'
 import * as WasmType from '@silk-effect/wasm/Type'
 import * as ValType from '@silk-effect/wasm/ValType'
 import * as WatText from '@silk-effect/wasm/WatText'
@@ -32,6 +34,56 @@ import * as Target from './Target.js'
 
 /** The wasm value type every MIR `I32` and `Bool` local lowers to. */
 const i32 = ValType.i32
+
+const alignUp = (value: number, alignment: number): number =>
+  Math.ceil(value / alignment) * alignment
+
+interface FrameRoot {
+  readonly local: number
+  readonly offset: number
+  readonly type: Extract<Mir.Type, { readonly _tag: 'FixedArray' }>
+}
+
+interface FramePlan {
+  readonly roots: ReadonlyMap<number, FrameRoot>
+  readonly sliceRoots: ReadonlyMap<number, number>
+  readonly size: number
+  readonly alignment: number
+}
+
+const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
+  const formations = Mir.operations(fn).filter(
+    (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
+      operation._tag === 'BeginLoan',
+  )
+  const rootOrdinals = new Set(
+    formations.flatMap((operation) =>
+      operation.sourceType._tag === 'FixedArray' ? [operation.root.ordinal] : [],
+    ),
+  )
+  const roots = new Map<number, FrameRoot>()
+  let cursor = 0
+  let alignment = 1
+  for (const local of [...rootOrdinals].sort((left, right) => left - right)) {
+    const type = fn.localTypes.at(local)
+    const entry = type === undefined ? undefined : LayoutPlan.entry(plan, Mir.semanticType(type))
+    if (type?._tag !== 'FixedArray' || entry === undefined) {
+      throw new RangeError(`Wasm frame lost address-taken root %${local}`)
+    }
+    cursor = alignUp(cursor, entry.alignment)
+    roots.set(local, Object.freeze({ local, offset: cursor, type }))
+    cursor += entry.size
+    alignment = Math.max(alignment, entry.alignment)
+  }
+  return Object.freeze({
+    roots,
+    sliceRoots: new Map(
+      formations.map((operation) => [operation.destination.ordinal, operation.root.ordinal]),
+    ),
+    size: alignUp(cursor, alignment),
+    alignment,
+  })
+}
 
 /** Non-trapping comparisons map straight onto wasm's `i32` relational operators. */
 const comparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
@@ -155,15 +207,31 @@ const checkedArithmetic = (
 interface Layout {
   /** Holds a checked arithmetic operation's wrapped result while it is being verified. */
   readonly scratch: number
+  readonly frameBase?: number
+  readonly frameEnd?: number
+  readonly framePages?: number
   /** Every local the definition must declare beyond the function's parameters. */
   readonly declared: ReadonlyArray<FuncActor.Local>
   /** Physical wasm locals realizing each logical MIR local's compiler-selected lanes. */
   readonly slots: ReadonlyArray<ReadonlyArray<number>>
   readonly lanes: ReadonlyArray<ReadonlyArray<LayoutPlan.CallingLane>>
+  readonly types: ReadonlyArray<Mir.Type>
+}
+
+interface MemoryContext {
+  readonly memory: Memory.Memory
+  readonly stackPointer: Global.Global
+  readonly frame: FramePlan
+  readonly plan: LayoutPlan.Plan
 }
 
 /** Local names reach the `name` custom section, so release builds declare them unnamed. */
-const layoutOf = (fn: Mir.MirFunction, plan: LayoutPlan.Plan, debug: boolean): Layout => {
+const layoutOf = (
+  fn: Mir.MirFunction,
+  plan: LayoutPlan.Plan,
+  frame: FramePlan,
+  debug: boolean,
+): Layout => {
   const named = (type: ValType.ValType, name: string): FuncActor.Local =>
     debug ? { type, name } : { type }
   const lanes = fn.localTypes.map((type) => {
@@ -185,6 +253,12 @@ const layoutOf = (fn: Mir.MirFunction, plan: LayoutPlan.Plan, debug: boolean): L
   }
   const scratch = physical
   declared.push(named(i32, 'scratch'))
+  const frameBase = frame.roots.size === 0 ? undefined : physical + 1
+  const frameEnd = frame.roots.size === 0 ? undefined : physical + 2
+  const framePages = frame.roots.size === 0 ? undefined : physical + 3
+  if (frameBase !== undefined && frameEnd !== undefined && framePages !== undefined) {
+    declared.push(named(i32, 'frame_base'), named(i32, 'frame_end'), named(i32, 'frame_pages'))
+  }
   if (parameterLaneCount !== (slots.at(fn.parameterCount)?.at(0) ?? parameterLaneCount)) {
     throw new RangeError('Wasm physical parameter layout is not contiguous')
   }
@@ -193,6 +267,10 @@ const layoutOf = (fn: Mir.MirFunction, plan: LayoutPlan.Plan, debug: boolean): L
     declared: Object.freeze(declared),
     slots: Object.freeze(slots),
     lanes: Object.freeze(lanes),
+    types: fn.localTypes,
+    ...(frameBase === undefined ? {} : { frameBase }),
+    ...(frameEnd === undefined ? {} : { frameEnd }),
+    ...(framePages === undefined ? {} : { framePages }),
   }
 }
 
@@ -201,6 +279,7 @@ const emitOperation = (
   operation: Mir.Operation,
   layout: Layout,
   resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
+  memory: MemoryContext | undefined,
 ): ReadonlyArray<Instr.Instr> => {
   const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
   const scalar = (local: Mir.LocalId): number => {
@@ -220,10 +299,52 @@ const emitOperation = (
       return target === undefined ? [] : [Instr.localGet(value), Instr.localSet(target)]
     })
   }
+  const frameAddress = (offset: number): ReadonlyArray<Instr.Instr> => {
+    if (layout.frameBase === undefined) throw new RangeError('Wasm frame has no base local')
+    return [Instr.localGet(layout.frameBase), Instr.i32Const(offset), Instr.op('i32.add')]
+  }
+  const materializeRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
+    if (memory === undefined) throw new RangeError('Wasm slice has no private memory')
+    const planned = memory.frame.roots.get(root.ordinal)
+    if (planned === undefined) throw new RangeError(`Wasm frame lost root %${root.ordinal}`)
+    const rootSlots = slots(root)
+    const rootLanes = layout.lanes.at(root.ordinal) ?? []
+    return rootLanes.flatMap((lane, ordinal) => {
+      const offset = LayoutPlan.laneOffset(memory.plan, planned.type.type, lane.path)
+      const source = rootSlots.at(ordinal)
+      if (offset === undefined || source === undefined) {
+        throw new RangeError(`Wasm frame lost lane ${ordinal} of %${root.ordinal}`)
+      }
+      return [
+        ...frameAddress(planned.offset + offset),
+        Instr.localGet(source),
+        Instr.memoryAccess('i32.store', memory.memory),
+      ]
+    })
+  }
+  const reloadRoot = (root: number): ReadonlyArray<Instr.Instr> => {
+    if (memory === undefined) return []
+    const planned = memory.frame.roots.get(root)
+    const rootLanes = layout.lanes.at(root) ?? []
+    const rootSlots = layout.slots.at(root) ?? []
+    if (planned === undefined) return []
+    return rootLanes.flatMap((lane, ordinal) => {
+      const offset = LayoutPlan.laneOffset(memory.plan, planned.type.type, lane.path)
+      const destination = rootSlots.at(ordinal)
+      if (offset === undefined || destination === undefined) {
+        throw new RangeError(`Wasm frame lost reload lane ${ordinal} of %${root}`)
+      }
+      return [
+        ...frameAddress(planned.offset + offset),
+        Instr.memoryAccess('i32.load', memory.memory),
+        Instr.localSet(destination),
+      ]
+    })
+  }
   switch (operation._tag) {
     case 'Match': {
       const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
-        operations.flatMap((nested) => emitOperation(nested, layout, resolve))
+        operations.flatMap((nested) => emitOperation(nested, layout, resolve, memory))
       const emitCandidates = (
         member: (typeof operation.members)[number],
         candidates: ReadonlyArray<Match.ArmId>,
@@ -286,6 +407,31 @@ const emitOperation = (
       return [Instr.i32Const(operation.value), Instr.localSet(scalar(operation.destination))]
     case 'Move':
       return copy(slots(operation.source), slots(operation.destination))
+    case 'BeginLoan':
+      if (operation.sourceType._tag === 'Slice') {
+        return copy(slots(operation.root), slots(operation.destination))
+      } else {
+        const planned = memory?.frame.roots.get(operation.root.ordinal)
+        const [address, length] = slots(operation.destination)
+        if (planned === undefined || address === undefined || length === undefined) {
+          throw new RangeError('Wasm slice formation lost its frame root or lanes')
+        }
+        return [
+          ...materializeRoot(operation.root),
+          ...frameAddress(planned.offset),
+          Instr.localSet(address),
+          Instr.i32Const(operation.sourceType.type.length),
+          Instr.localSet(length),
+        ]
+      }
+    case 'EndLoan':
+      return []
+    case 'SliceLength': {
+      const length = slots(operation.slice).at(1)
+      return length === undefined
+        ? [Instr.op('unreachable')]
+        : [Instr.localGet(length), Instr.localSet(scalar(operation.destination))]
+    }
     case 'ConvertUnion': {
       const source = slots(operation.source)
       const destination = slots(operation.destination)
@@ -361,6 +507,65 @@ const emitOperation = (
       return copy(projected, slots(operation.destination))
     }
     case 'ReadPlace': {
+      const rootType = layout.types.at(operation.root.ordinal)
+      if (rootType?._tag === 'Slice') {
+        if (memory === undefined) throw new RangeError('Wasm slice read has no private memory')
+        const [selector, ...suffixSelectors] = operation.selectors
+        const [base, length] = slots(operation.root)
+        if (
+          selector?._tag !== 'SliceElementSelector' ||
+          base === undefined ||
+          length === undefined
+        ) {
+          throw new RangeError('Wasm slice read lost its canonical lanes')
+        }
+        const sliceLayout = LayoutPlan.entry(memory.plan, rootType.type)
+        if (sliceLayout?.representation._tag !== 'Slice') {
+          throw new RangeError('Wasm slice read lost its compiler layout')
+        }
+        const staticSelectors: Array<LayoutPlan.Selector> = []
+        for (const candidate of suffixSelectors) {
+          if (candidate._tag === 'FieldSelector') {
+            staticSelectors.push(candidate.field)
+          } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
+            staticSelectors.push(
+              Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
+            )
+          } else {
+            throw new RangeError('Wasm nested runtime slice place is not canonical')
+          }
+        }
+        const instructions: Array<Instr.Instr> = [
+          Instr.localGet(scalar(selector.index)),
+          Instr.localGet(length),
+          Instr.op('i32.lt_u'),
+          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+        ]
+        const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
+        const destinationSlots = slots(operation.destination)
+        for (const [ordinal, lane] of destinationLanes.entries()) {
+          const staticOffset = LayoutPlan.laneOffset(
+            memory.plan,
+            rootType.type.element,
+            Object.freeze([...staticSelectors, ...lane.path]),
+          )
+          const destination = destinationSlots.at(ordinal)
+          if (staticOffset === undefined || destination === undefined) {
+            throw new RangeError(`Wasm slice read lost lane ${ordinal}`)
+          }
+          instructions.push(
+            Instr.localGet(base),
+            Instr.localGet(scalar(selector.index)),
+            Instr.i32Const(sliceLayout.representation.stride),
+            Instr.op('i32.mul'),
+            Instr.op('i32.add'),
+            ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+            Instr.memoryAccess('i32.load', memory.memory),
+            Instr.localSet(destination),
+          )
+        }
+        return instructions
+      }
       const sourceLanes = layout.lanes.at(operation.root.ordinal) ?? []
       const sourceSlots = slots(operation.root)
       const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
@@ -451,6 +656,19 @@ const emitOperation = (
       return instructions
     }
     case 'CheckPlace': {
+      if (layout.types.at(operation.root.ordinal)?._tag === 'Slice') {
+        const selector = operation.selectors.at(0)
+        const length = slots(operation.root).at(1)
+        if (selector?._tag !== 'SliceElementSelector' || length === undefined) {
+          throw new RangeError('Wasm slice write check lost its canonical lanes')
+        }
+        return [
+          Instr.localGet(scalar(selector.index)),
+          Instr.localGet(length),
+          Instr.op('i32.lt_u'),
+          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+        ]
+      }
       const instructions: Array<Instr.Instr> = []
       for (const selector of operation.selectors) {
         if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
@@ -464,6 +682,55 @@ const emitOperation = (
       return instructions
     }
     case 'WritePlace': {
+      if (operation.rootType._tag === 'Slice') {
+        if (memory === undefined) throw new RangeError('Wasm slice write has no private memory')
+        const [selector, ...suffixSelectors] = operation.selectors
+        const base = slots(operation.root).at(0)
+        if (selector?._tag !== 'SliceElementSelector' || base === undefined) {
+          throw new RangeError('Wasm slice write lost its canonical address lane')
+        }
+        const sliceLayout = LayoutPlan.entry(memory.plan, operation.rootType.type)
+        if (sliceLayout?.representation._tag !== 'Slice') {
+          throw new RangeError('Wasm slice write lost its compiler layout')
+        }
+        const sliceType = operation.rootType.type
+        const sliceRepresentation = sliceLayout.representation
+        const staticSelectors: Array<LayoutPlan.Selector> = []
+        for (const candidate of suffixSelectors) {
+          if (candidate._tag === 'FieldSelector') {
+            staticSelectors.push(candidate.field)
+          } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
+            staticSelectors.push(
+              Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
+            )
+          } else {
+            throw new RangeError('Wasm nested runtime slice write is not canonical')
+          }
+        }
+        const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+        const sourceSlots = slots(operation.source)
+        return sourceLanes.flatMap((lane, ordinal) => {
+          const staticOffset = LayoutPlan.laneOffset(
+            memory.plan,
+            sliceType.element,
+            Object.freeze([...staticSelectors, ...lane.path]),
+          )
+          const source = sourceSlots.at(ordinal)
+          if (staticOffset === undefined || source === undefined) {
+            throw new RangeError(`Wasm slice write lost lane ${ordinal}`)
+          }
+          return [
+            Instr.localGet(base),
+            Instr.localGet(scalar(selector.index)),
+            Instr.i32Const(sliceRepresentation.stride),
+            Instr.op('i32.mul'),
+            Instr.op('i32.add'),
+            ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+            Instr.localGet(source),
+            Instr.memoryAccess('i32.store', memory.memory),
+          ]
+        })
+      }
       if (operation.selectors.length === 0) {
         return copy(slots(operation.source), slots(operation.root))
       }
@@ -491,6 +758,9 @@ const emitOperation = (
               matches = false
               break
             }
+          } else if (selector._tag === 'SliceElementSelector') {
+            matches = false
+            break
           } else if (physical._tag !== 'ElementSelector') {
             matches = false
             break
@@ -543,6 +813,16 @@ const emitOperation = (
         ),
         Instr.call(resolve(operation)),
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+        ...[
+          ...new Set(
+            operation.arguments.flatMap((argument) => {
+              const root = memory?.frame.sliceRoots.get(argument.ordinal)
+              return root !== undefined && memory?.frame.roots.has(root) ? [root] : []
+            }),
+          ),
+        ]
+          .sort((left, right) => left - right)
+          .flatMap(reloadRoot),
       ]
     case 'Binary': {
       const comparison = comparisons[operation.operator]
@@ -601,6 +881,7 @@ const emitBody = (
   fn: Mir.MirFunction,
   layout: Layout,
   resolve: (target: Mir.Operation & { readonly _tag: 'Call' }) => FuncActor.Func,
+  memory: MemoryContext | undefined,
 ): ReadonlyArray<Instr.Instr> => {
   const regions = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
   const scalar = (local: Mir.LocalId): number => {
@@ -610,6 +891,61 @@ const emitBody = (
       throw new RangeError(`Wasm backend expected scalar local %${local.ordinal}`)
     }
     return first
+  }
+  const restoreFrame = (): ReadonlyArray<Instr.Instr> =>
+    memory === undefined || memory.frame.roots.size === 0 || layout.frameBase === undefined
+      ? []
+      : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
+  const reserveFrame = (): ReadonlyArray<Instr.Instr> => {
+    if (
+      memory === undefined ||
+      memory.frame.roots.size === 0 ||
+      layout.frameBase === undefined ||
+      layout.frameEnd === undefined ||
+      layout.framePages === undefined
+    ) {
+      return []
+    }
+    if (memory.frame.size === 0) {
+      return [Instr.globalGet(memory.stackPointer), Instr.localSet(layout.frameBase)]
+    }
+    return [
+      Instr.globalGet(memory.stackPointer),
+      Instr.localSet(layout.frameBase),
+      Instr.localGet(layout.frameBase),
+      Instr.i32Const(memory.frame.size),
+      Instr.op('i32.add'),
+      Instr.localTee(layout.frameEnd),
+      Instr.localGet(layout.frameBase),
+      Instr.op('i32.lt_u'),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      Instr.localGet(layout.frameEnd),
+      Instr.i32Const(1),
+      Instr.op('i32.sub'),
+      Instr.i32Const(16),
+      Instr.op('i32.shr_u'),
+      Instr.i32Const(1),
+      Instr.op('i32.add'),
+      Instr.localSet(layout.framePages),
+      Instr.localGet(layout.framePages),
+      Instr.memorySize(memory.memory),
+      Instr.op('i32.gt_u'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [
+          Instr.localGet(layout.framePages),
+          Instr.memorySize(memory.memory),
+          Instr.op('i32.sub'),
+          Instr.memoryGrow(memory.memory),
+          Instr.i32Const(-1),
+          Instr.op('i32.eq'),
+          Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ],
+        [],
+      ),
+      Instr.localGet(layout.frameEnd),
+      Instr.globalSet(memory.stackPointer),
+    ]
   }
 
   const emitOutcome = (
@@ -624,6 +960,7 @@ const emitBody = (
           : emitRegion(outcome.target, labels, stop)
       case 'Return':
         return [
+          ...restoreFrame(),
           ...(layout.slots.at(outcome.value.ordinal) ?? []).map((slot) => Instr.localGet(slot)),
           Instr.op('return'),
         ]
@@ -650,7 +987,7 @@ const emitBody = (
     if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
       const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
       return [
-        ...operations.flatMap((operation) => emitOperation(operation, layout, resolve)),
+        ...operations.flatMap((operation) => emitOperation(operation, layout, resolve, memory)),
         ...emitOutcome(region.outcome, labels, stop),
       ]
     }
@@ -676,7 +1013,9 @@ const emitBody = (
       ...labels,
     ])
     const loopBody = [
-      ...condition.operations.flatMap((operation) => emitOperation(operation, layout, resolve)),
+      ...condition.operations.flatMap((operation) =>
+        emitOperation(operation, layout, resolve, memory),
+      ),
       Instr.localGet(scalar(region.conditionValue)),
       Instr.op('i32.eqz'),
       Instr.brIf(branchDepth(loopLabels, 'Exit', region.loop.ordinal)),
@@ -688,7 +1027,7 @@ const emitBody = (
     ]
   }
 
-  return [...emitRegion(fn.entry, Object.freeze([])), Instr.op('unreachable')]
+  return [...reserveFrame(), ...emitRegion(fn.entry, Object.freeze([])), Instr.op('unreachable')]
 }
 
 const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
@@ -724,6 +1063,22 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     // what the LLVM backend's `strip` flag does with its own metadata.
     const debug = request.mode === 'debug'
     const builder = yield* Builder.make(debug ? { moduleName: program.module } : {})
+    const frames = new Map(
+      program.functions.map((fn) => [fn, framePlan(fn, program.layout)] as const),
+    )
+    const needsMemory = [...frames.values()].some((frame) => frame.roots.size > 0)
+    const privateMemory = needsMemory
+      ? yield* Memory.make(builder, { min: 1, max: 65536 }, debug ? { name: 'silk_memory' } : {})
+      : undefined
+    const stackPointer = needsMemory
+      ? yield* Global.make(
+          builder,
+          i32,
+          true,
+          [Instr.i32Const(16)],
+          debug ? { name: 'silk_stack_pointer' } : {},
+        )
+      : undefined
 
     // Declare every function first so calls resolve regardless of definition order, mirroring the
     // LLVM backend's declare-then-define pass structure.
@@ -768,14 +1123,25 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     }
 
     for (const entry of declared) {
-      const layout = layoutOf(entry.fn, program.layout, debug)
+      const frame = frames.get(entry.fn)
+      if (frame === undefined) throw new RangeError('Wasm declaration lost its frame plan')
+      const layout = layoutOf(entry.fn, program.layout, frame, debug)
+      const memory: MemoryContext | undefined =
+        privateMemory === undefined || stackPointer === undefined
+          ? undefined
+          : Object.freeze({
+              memory: privateMemory,
+              stackPointer,
+              frame,
+              plan: program.layout,
+            })
       // A body-less function is a declaration the frontend could not resolve; the LLVM backend
       // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a
       // trapping stub with the same observable behaviour.
       const body =
         entry.fn.regions.length === 0
           ? [Instr.op('unreachable')]
-          : emitBody(entry.fn, layout, resolve)
+          : emitBody(entry.fn, layout, resolve, memory)
       yield* FuncActor.define(builder, entry.handle, {
         locals: entry.fn.regions.length === 0 ? [] : layout.declared,
         body,

@@ -65,6 +65,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'BindingStatement',
   'Block',
   'BooleanLiteralExpression',
+  'BorrowExpression',
   'BreakStatement',
   'CallExpression',
   'ConditionalStatement',
@@ -97,6 +98,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ReturnStatement',
   'ReturnType',
   'RestPattern',
+  'SliceType',
   'SourceFile',
   'StructDeclaration',
   'StructField',
@@ -359,6 +361,13 @@ fn helper(value: I32, other: I32) -> I32 {
 }
 fn inspect(event: Token | End) -> I32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
+}
+fn scan(values: &[I32], output: &mut [I32]) -> I32 {
+  return helper(values.length, output[0])
+}
+fn borrow(values: [I32; 2], output: [I32; 2]) -> I32 {
+  let mut target = move output
+  return scan(&values, &mut target)
 }
 pub fn main() -> I32 { return helper(-1, 2) |> Core.finish() }
 `

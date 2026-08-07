@@ -30,6 +30,13 @@ export interface FixedArray {
   readonly length: number
 }
 
+/** A lexical runtime-length view whose access permission is checked statically. */
+export interface Slice {
+  readonly _tag: 'SliceType'
+  readonly access: 'Shared' | 'Exclusive'
+  readonly element: Type
+}
+
 /** One normalized structural union with at least two canonical nominal members. */
 const structuralUnionBrand: unique symbol = Symbol('StructuralUnion')
 export interface StructuralUnion {
@@ -39,7 +46,7 @@ export interface StructuralUnion {
 }
 
 /** The closed semantic type vocabulary accepted by declaration analysis. */
-export type Type = Builtin | Never | Nominal | Parameter | FixedArray | StructuralUnion
+export type Type = Builtin | Never | Nominal | Parameter | FixedArray | Slice | StructuralUnion
 
 /** The typed result of attempting to normalize structural-union inputs. */
 export type UnionNormalization =
@@ -75,6 +82,10 @@ export const parameter = (
 /** Constructs one immutable canonical fixed-array type. */
 export const fixedArray = (element: Type, length: number): FixedArray =>
   Object.freeze({ _tag: 'FixedArrayType', element, length })
+
+/** Constructs one canonical lexical slice type. */
+export const slice = (access: Slice['access'], element: Type): Slice =>
+  Object.freeze({ _tag: 'SliceType', access, element })
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
@@ -131,6 +142,10 @@ export const isParameter = (self: Type): self is Parameter =>
 export const isFixedArray = (self: Type): self is FixedArray =>
   typeof self !== 'string' && self._tag === 'FixedArrayType'
 
+/** Tests whether a semantic type is a lexical runtime slice. */
+export const isSlice = (self: Type): self is Slice =>
+  typeof self !== 'string' && self._tag === 'SliceType'
+
 /** Tests whether a semantic type is a normalized multi-member structural union. */
 export const isUnion = (self: Type): self is StructuralUnion =>
   typeof self !== 'string' && self._tag === 'StructuralUnionType'
@@ -143,6 +158,7 @@ export const key = (self: Type): string => {
     return `nominal:${self.module}.${self.name}<${self.arguments.map(key).join(',')}>`
   if (isParameter(self)) return `parameter:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
+  if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
   return `union:${self.members.map(key).join('|')}`
 }
 
@@ -162,6 +178,8 @@ export const encode = (self: Type): string => {
   }
   if (isParameter(self)) return self.name
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
+  if (isSlice(self))
+    return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
   return self.members.map(encode).join(' | ')
 }
 
@@ -171,9 +189,11 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
     ? Object.freeze([self, ...self.arguments.flatMap(nominals)])
     : isFixedArray(self)
       ? nominals(self.element)
-      : isUnion(self)
-        ? Object.freeze(self.members.flatMap(nominals))
-        : []
+      : isSlice(self)
+        ? nominals(self.element)
+        : isUnion(self)
+          ? Object.freeze(self.members.flatMap(nominals))
+          : []
 
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
@@ -187,7 +207,7 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
       for (const argument of type.arguments) visit(argument)
       return
     }
-    if (isFixedArray(type)) visit(type.element)
+    if (isFixedArray(type) || isSlice(type)) visit(type.element)
     else if (isUnion(type)) for (const member of type.members) visit(member)
   }
   visit(self)
@@ -196,6 +216,15 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
 
 /** Tests whether a type contains no open generic parameters. */
 export const isConcrete = (self: Type): boolean => parameters(self).length === 0
+
+/** Tests whether a type contains a lexical borrow at any depth. */
+export const containsBorrow = (self: Type): boolean => {
+  if (isSlice(self)) return true
+  if (isNominal(self)) return self.arguments.some(containsBorrow)
+  if (isFixedArray(self)) return containsBorrow(self.element)
+  if (isUnion(self)) return self.members.some(containsBorrow)
+  return false
+}
 
 /** Replaces declaration-owned parameters recursively through one canonical type. */
 export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>): Type => {
@@ -207,6 +236,7 @@ export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>):
       self.arguments.map((argument) => substitute(argument, substitution)),
     )
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
+  if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
   if (isUnion(self)) {
     const normalized = union(self.members.map((member) => substitute(member, substitution)))
     return normalized._tag === 'Normalized' ? normalized.type : self
@@ -239,6 +269,9 @@ export const infer = (pattern: Type, actual: Type, inferred: Map<string, Type>):
   }
   if (isFixedArray(pattern) && isFixedArray(actual)) {
     return pattern.length === actual.length && infer(pattern.element, actual.element, inferred)
+  }
+  if (isSlice(pattern) && isSlice(actual)) {
+    return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
   }
   return equals(pattern, actual)
 }

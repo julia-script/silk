@@ -107,6 +107,13 @@ export const duplicateTypeParameterCode = 'SEM0050' as const
 export const typeArgumentArityCode = 'SEM0051' as const
 export const typeArgumentInferenceCode = 'SEM0052' as const
 export const polymorphicRecursionCode = 'SEM0053' as const
+/** Stable code for a borrowed slice type outside a direct ordinary-function parameter. */
+export const sliceTypePositionCode = 'SEM0054' as const
+export const invalidBorrowPositionCode = 'SEM0055' as const
+export const invalidBorrowOperandCode = 'SEM0056' as const
+export const exclusiveBorrowRequiresMutableCode = 'SEM0057' as const
+export const invalidSliceReborrowCode = 'SEM0058' as const
+export const implicitSliceDecayCode = 'SEM0059' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -118,6 +125,9 @@ export const matchBorrowEscapeCode = 'OWN0006' as const
 export const exclusiveMatchRequiresMutableCode = 'OWN0007' as const
 export const guardConsumesPatternCode = 'OWN0008' as const
 export const invalidMatchScrutineePlaceCode = 'OWN0009' as const
+export const conflictingSliceLoanCode = 'OWN0010' as const
+export const ownerAccessDuringLoanCode = 'OWN0011' as const
+export const borrowedMoveCode = 'OWN0012' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
@@ -181,6 +191,12 @@ export type Code =
   | typeof typeArgumentArityCode
   | typeof typeArgumentInferenceCode
   | typeof polymorphicRecursionCode
+  | typeof sliceTypePositionCode
+  | typeof invalidBorrowPositionCode
+  | typeof invalidBorrowOperandCode
+  | typeof exclusiveBorrowRequiresMutableCode
+  | typeof invalidSliceReborrowCode
+  | typeof implicitSliceDecayCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -190,6 +206,9 @@ export type Code =
   | typeof exclusiveMatchRequiresMutableCode
   | typeof guardConsumesPatternCode
   | typeof invalidMatchScrutineePlaceCode
+  | typeof conflictingSliceLoanCode
+  | typeof ownerAccessDuringLoanCode
+  | typeof borrowedMoveCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
 export interface DeclarationEntity {
@@ -358,6 +377,19 @@ export type Reason =
       readonly target: string
     }
   | {
+      readonly _tag: 'SliceTypePosition'
+      readonly position: 'parameter' | 'return' | 'field' | 'type argument'
+    }
+  | { readonly _tag: 'InvalidBorrowPosition' }
+  | { readonly _tag: 'InvalidBorrowOperand' }
+  | { readonly _tag: 'ExclusiveBorrowRequiresMutable'; readonly spelling: string }
+  | {
+      readonly _tag: 'InvalidSliceReborrow'
+      readonly parent: 'Shared' | 'Exclusive'
+      readonly requested: 'Shared' | 'Exclusive'
+    }
+  | { readonly _tag: 'ImplicitSliceDecay'; readonly expected: string }
+  | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
       readonly moveSpan: SourceSpan.SourceSpan
@@ -370,6 +402,19 @@ export type Reason =
   | { readonly _tag: 'ExclusiveMatchRequiresMutable'; readonly spelling: string }
   | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
   | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' }
+  | {
+      readonly _tag: 'ConflictingSliceLoan'
+      readonly existing: 'Shared' | 'Exclusive'
+      readonly requested: 'Shared' | 'Exclusive'
+      readonly loanSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'OwnerAccessDuringLoan'
+      readonly spelling: string
+      readonly access: 'Read' | 'Write' | 'Move'
+      readonly loanSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'BorrowedMove' }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
@@ -1313,6 +1358,85 @@ export const polymorphicRecursion = (
     span,
   })
 
+export const sliceTypePosition = (
+  position: 'parameter' | 'return' | 'field' | 'type argument',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: sliceTypePositionCode,
+    severity: 'error',
+    message:
+      position === 'parameter'
+        ? 'A slice must be the complete type of an ordinary function parameter'
+        : `A slice cannot appear in a ${position} type`,
+    reason: Object.freeze({ _tag: 'SliceTypePosition', position }),
+    span,
+  })
+
+export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidBorrowPositionCode,
+    severity: 'error',
+    message: 'A slice borrow is only valid as an immediate ordinary-call argument',
+    reason: Object.freeze({ _tag: 'InvalidBorrowPosition' }),
+    span,
+  })
+
+export const invalidBorrowOperand = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidBorrowOperandCode,
+    severity: 'error',
+    message: 'A slice borrow requires a direct stable array binding or slice parameter',
+    reason: Object.freeze({ _tag: 'InvalidBorrowOperand' }),
+    span,
+  })
+
+export const exclusiveBorrowRequiresMutable = (
+  spelling: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: exclusiveBorrowRequiresMutableCode,
+    severity: 'error',
+    message: `Exclusive borrowing requires mutable binding ${spelling}`,
+    reason: Object.freeze({ _tag: 'ExclusiveBorrowRequiresMutable', spelling }),
+    span,
+  })
+
+export const invalidSliceReborrow = (
+  parent: 'Shared' | 'Exclusive',
+  requested: 'Shared' | 'Exclusive',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidSliceReborrowCode,
+    severity: 'error',
+    message: 'A shared slice cannot be reborrowed exclusively',
+    reason: Object.freeze({ _tag: 'InvalidSliceReborrow', parent, requested }),
+    span,
+  })
+
+export const implicitSliceDecay = (expected: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: implicitSliceDecayCode,
+    severity: 'error',
+    message: `Passing an array as ${expected} requires an explicit borrow`,
+    reason: Object.freeze({ _tag: 'ImplicitSliceDecay', expected }),
+    span,
+  })
+
 /** Creates the diagnostic for a call argument whose type mismatches its parameter. */
 export const argumentTypeMismatch = (
   expected: string,
@@ -1437,6 +1561,55 @@ export const invalidMatchScrutineePlace = (
     severity: 'error',
     message: `${access} match requires a complete binding place`,
     reason: Object.freeze({ _tag: 'InvalidMatchScrutineePlace', access }),
+    span,
+  })
+
+export const conflictingSliceLoan = (
+  existing: 'Shared' | 'Exclusive',
+  requested: 'Shared' | 'Exclusive',
+  loanSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: conflictingSliceLoanCode,
+    severity: 'error',
+    message: `${requested} slice loan conflicts with an active ${existing.toLowerCase()} loan`,
+    reason: Object.freeze({ _tag: 'ConflictingSliceLoan', existing, requested, loanSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'active loan begins here', span: loanSpan }),
+    ]),
+  })
+
+export const ownerAccessDuringLoan = (
+  spelling: string,
+  access: 'Read' | 'Write' | 'Move',
+  loanSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: ownerAccessDuringLoanCode,
+    severity: 'error',
+    message: `${access.toLowerCase()} access to ${spelling} conflicts with an active slice loan`,
+    reason: Object.freeze({ _tag: 'OwnerAccessDuringLoan', spelling, access, loanSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'active loan begins here', span: loanSpan }),
+    ]),
+  })
+
+export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: borrowedMoveCode,
+    severity: 'error',
+    message: 'A non-Copy value cannot be moved out through a borrowed slice place',
+    reason: Object.freeze({ _tag: 'BorrowedMove' }),
     span,
   })
 

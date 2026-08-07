@@ -350,13 +350,21 @@ export const views: ReadonlyArray<ViewDefinition> = [
         }
       }
       const matches = Analysis.ownershipMatchesOf(snapshot, snapshot.closure.rootModule)
+      const loans = facts.functions.reduce((total, fn) => total + fn.loans.length, 0)
       return {
         rows: ownershipRows(facts, (span) => onSelectSpan(span)),
         facts:
-          matches.length === 0
+          matches.length === 0 && loans === 0
             ? undefined
-            : [{ text: `${matches.length} match lifetime`, tone: 'symbol' }],
-        meta: `${facts.functions.length} fn${matches.length === 0 ? '' : ` · ${matches.length} match`}`,
+            : [
+                ...(matches.length === 0
+                  ? []
+                  : [{ text: `${matches.length} match lifetime`, tone: 'symbol' as const }]),
+                ...(loans === 0
+                  ? []
+                  : [{ text: `${loans} lexical loan`, tone: 'symbol' as const }]),
+              ],
+        meta: `${facts.functions.length} fn${matches.length === 0 ? '' : ` · ${matches.length} match`}${loans === 0 ? '' : ` · ${loans} loan`}`,
       }
     },
   },
@@ -385,6 +393,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const plan = Analysis.layoutOf(snapshot)
       const target = Analysis.targetOf(snapshot)
       const unions = Analysis.unionLayoutsOf(snapshot)
+      const slices =
+        plan._tag === 'Available'
+          ? plan.value.entries.filter((entry) => entry.representation._tag === 'Slice')
+          : []
       const rows = layoutRows(
         catalog._tag === 'Available' ? catalog.value : undefined,
         plan._tag === 'Available' ? plan.value : undefined,
@@ -401,6 +413,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
               ...(unions.length === 0
                 ? []
                 : [{ text: `${unions.length} sum layout`, tone: 'symbol' as const }]),
+              ...(slices.length === 0
+                ? []
+                : [{ text: `${slices.length} slice layout`, tone: 'symbol' as const }]),
             ]
           : [{ text: 'target unavailable', tone: 'warning' }]
       return { rows, facts, meta: plan._tag === 'Available' ? `${plan.value.entries.length}` : '—' }

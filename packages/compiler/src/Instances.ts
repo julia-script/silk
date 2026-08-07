@@ -160,6 +160,10 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   if (expression._tag === 'IndexPlace') {
     return [...callTargets(expression.subject), ...callTargets(expression.index)]
   }
+  if (expression._tag === 'SliceLength') return callTargets(expression.slice)
+  if (expression._tag === 'SliceIndexPlace') {
+    return [...callTargets(expression.slice), ...callTargets(expression.index)]
+  }
   if (expression._tag === 'Construct') {
     return expression.fields.flatMap((field) => callTargets(field.value))
   }

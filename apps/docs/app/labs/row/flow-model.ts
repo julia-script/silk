@@ -11,6 +11,8 @@ const typeText = (type: Type.Type): string =>
         ? type.name
       : type._tag === 'FixedArrayType'
         ? `Array<${typeText(type.element)}, ${type.length}>`
+      : type._tag === 'SliceType'
+        ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
         : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
@@ -135,6 +137,8 @@ const directReference = (
       return directReference(expression.subject)
     case 'Grouped':
       return directReference(expression.expression)
+    case 'Borrow':
+      return directReference(expression.subject)
     default:
       return undefined
   }
@@ -166,6 +170,9 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   if (expression._tag === 'IndexProjection')
     return `${argumentLabel({ ...argument, expression: expression.subject })}[index]`
   if (expression._tag === 'Match') return 'match result'
+  if (expression._tag === 'Borrow') {
+    return `${expression.access === 'Exclusive' ? '&mut ' : '&'}${argumentLabel({ ...argument, expression: expression.subject })}`
+  }
   if (expression.integer._tag === 'Available') return String(expression.integer.value)
   if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
   return 'unavailable integer'

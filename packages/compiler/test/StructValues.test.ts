@@ -112,7 +112,11 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
               ? selector.ordinal
               : selector._tag === 'UnionTagSelector'
                 ? 'tag'
-                : `payload:${selector.slot}`,
+                : selector._tag === 'UnionPayloadSelector'
+                  ? `payload:${selector.slot}`
+                  : selector._tag === 'SliceAddressSelector'
+                    ? 'address'
+                    : 'length',
         ),
       ),
       [[0], [1]],

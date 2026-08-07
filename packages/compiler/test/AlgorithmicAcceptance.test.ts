@@ -60,6 +60,20 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
     assert.strictEqual(outcome.result.value, 42)
+    assert.deepEqual(
+      outcome.trace.flatMap((event) =>
+        event._tag === 'Return' && event.function.name === 'fold' && event.value._tag === 'I32Value'
+          ? [event.value.value]
+          : [],
+      ),
+      [40, 42],
+    )
+    assert.strictEqual(
+      Analysis.instancesOf(self).instances.filter(
+        (instance) => instance.key.declaration.name === 'fold',
+      ).length,
+      1,
+    )
     assert.isTrue(
       outcome.trace.some((event) => event._tag === 'MatchSelected' && event.arm === 0),
       'expected the guarded First arm to be selected once',
@@ -74,6 +88,9 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
     if (logical._tag !== 'Completed') return
 
     const wasm = yield* Analysis.codegenWasm(yield* snapshot('wasm32-unknown-unknown'), {
+      mode: 'release',
+    })
+    const nativeArtifact = yield* Analysis.codegen(yield* snapshot('aarch64-apple-darwin'), {
       mode: 'release',
     })
     const wasmInstance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
@@ -107,5 +124,10 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
     assert.strictEqual(logical.result.value, 42)
     assert.strictEqual(wasmMain(), logical.result.value)
     assert.strictEqual(nativeRun.status, logical.result.value, nativeRun.stderr)
+    assert.strictEqual(
+      nativeArtifact.symbols.filter((entry) => entry.declaration.name === 'fold').length,
+      1,
+    )
+    assert.strictEqual(wasm.symbols.filter((entry) => entry.declaration.name === 'fold').length, 1)
   }),
 )

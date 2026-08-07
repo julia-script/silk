@@ -116,6 +116,15 @@ export type DeclaredTypeFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      readonly _tag: 'Slice'
+      readonly access: Type.Slice['access']
+      readonly element: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Applied'
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
@@ -302,6 +311,7 @@ const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.
   (element.kind === 'TypePath' ||
     element.kind === 'AppliedType' ||
     element.kind === 'FixedArrayType' ||
+    element.kind === 'SliceType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
 
@@ -414,6 +424,46 @@ export const analyzeDeclaredType = (
         ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
       }),
       diagnostics: Object.freeze(diagnostics),
+    })
+  }
+  if (syntax.kind === 'SliceType') {
+    const token = SyntaxTree.directToken(syntax, 'Ampersand')
+    const elementSyntax = syntax.children.find(isDeclaredTypeNode)
+    if (token === undefined || elementSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const access: Type.Slice['access'] =
+      SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
+    const element = analyzeDeclaredType(source, elementSyntax, typeParameters)
+    if (element.fact._tag === 'Resolved') {
+      const type = Type.slice(access, element.fact.type)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token,
+          syntax,
+        }),
+        diagnostics: element.diagnostics,
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Slice',
+        access,
+        element: element.fact,
+        spelling: `${access === 'Exclusive' ? '&mut' : '&'}[unavailable]`,
+        token,
+        syntax,
+        ...('cause' in element.fact && element.fact.cause !== undefined
+          ? { cause: element.fact.cause }
+          : {}),
+      }),
+      diagnostics: element.diagnostics,
     })
   }
   if (syntax.kind === 'FixedArrayType') {
@@ -1013,6 +1063,34 @@ const resolveDeclaredType = (
       diagnostics: Object.freeze(diagnostics),
     })
   }
+  if (fact._tag === 'Slice') {
+    const element = resolveDeclaredType(module, fact.element, resolver, modules)
+    if (element.fact._tag === 'Resolved') {
+      const type = Type.slice(fact.access, element.fact.type)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token: fact.token,
+          syntax: fact.syntax,
+          ...(element.fact.exposureCause === undefined
+            ? {}
+            : { exposureCause: element.fact.exposureCause }),
+        }),
+        diagnostics: element.diagnostics,
+      })
+    }
+    const cause = 'cause' in element.fact ? element.fact.cause : undefined
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        element: element.fact,
+        ...(cause === undefined ? {} : { cause }),
+      }),
+      diagnostics: element.diagnostics,
+    })
+  }
   if (fact._tag !== 'FixedArray') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
   return (() => {
     const element = resolveDeclaredType(module, fact.element, resolver, modules)
@@ -1223,6 +1301,37 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       ),
     })
   })
+
+  for (const module of modules) {
+    for (const member of module.members) {
+      if (member._tag === 'FunctionDeclaration') {
+        for (const parameter of member.parameters) {
+          if (
+            parameter.declaredType._tag === 'Resolved' &&
+            Type.containsBorrow(parameter.declaredType.type) &&
+            (!Type.isSlice(parameter.declaredType.type) ||
+              Type.containsBorrow(parameter.declaredType.type.element))
+          ) {
+            diagnostics.push(
+              Diagnostic.sliceTypePosition('parameter', parameter.declaredType.syntax.span),
+            )
+          }
+        }
+        if (member.returnType._tag === 'Resolved' && Type.containsBorrow(member.returnType.type)) {
+          diagnostics.push(Diagnostic.sliceTypePosition('return', member.returnType.syntax.span))
+        }
+        continue
+      }
+      for (const field of member.fields) {
+        if (
+          field.declaredType._tag === 'Resolved' &&
+          Type.containsBorrow(field.declaredType.type)
+        ) {
+          diagnostics.push(Diagnostic.sliceTypePosition('field', field.declaredType.syntax.span))
+        }
+      }
+    }
+  }
 
   modules = modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {

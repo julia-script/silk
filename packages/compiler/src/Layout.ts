@@ -33,6 +33,20 @@ export type Representation =
       readonly stride: number
     }
   | {
+      readonly _tag: 'Slice'
+      readonly element: DeclarationIndex.SemanticType
+      readonly address: {
+        readonly bits: 32 | 64
+        readonly offset: 0
+        readonly size: 4 | 8
+        readonly alignment: 4 | 8
+      }
+      readonly length: { readonly type: 'I32'; readonly offset: number; readonly size: 4 }
+      readonly addressPadding: number
+      readonly tailPadding: number
+      readonly stride: number
+    }
+  | {
       readonly _tag: 'Union'
       readonly tag: { readonly bits: 32; readonly size: 4 }
       readonly members: ReadonlyArray<{
@@ -97,14 +111,24 @@ export interface Plan {
 export interface CallingLane {
   readonly _tag: 'CallingLane'
   readonly path: ReadonlyArray<Selector>
-  readonly type: Type.Builtin
+  readonly type: CallingScalar
 }
+
+export interface AddressScalar {
+  readonly _tag: 'Address'
+  readonly element: DeclarationIndex.SemanticType
+  readonly bits: 32 | 64
+}
+
+export type CallingScalar = Type.Builtin | AddressScalar
 
 export type Selector =
   | DeclarationIndex.FieldId
   | { readonly _tag: 'ElementSelector'; readonly index: number }
   | { readonly _tag: 'UnionTagSelector' }
   | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
+  | { readonly _tag: 'SliceAddressSelector' }
+  | { readonly _tag: 'SliceLengthSelector' }
 
 export type CallingShapeNode =
   | { readonly _tag: 'EmptyShape'; readonly type: Type.Never; readonly laneCount: 0 }
@@ -124,6 +148,13 @@ export type CallingShapeNode =
       readonly length: number
       readonly element: CallingShapeNode
       readonly laneCount: number
+    }
+  | {
+      readonly _tag: 'SliceShape'
+      readonly type: Type.Slice
+      readonly address: { readonly type: AddressScalar; readonly lane: 0 }
+      readonly length: { readonly type: 'I32'; readonly lane: 1 }
+      readonly laneCount: 2
     }
   | {
       readonly _tag: 'SumShape'
@@ -207,6 +238,34 @@ const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined
       element: type.element,
       length: type.length,
       stride,
+    }),
+  })
+}
+
+const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): Entry => {
+  const addressBits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
+  const lengthOffset = alignUp(target.pointerSize, 4)
+  const alignment = Math.max(target.pointerAlignment, 4)
+  const contentSize = lengthOffset + 4
+  const size = alignUp(contentSize, alignment)
+  return Object.freeze({
+    _tag: 'LayoutEntry',
+    type,
+    size,
+    alignment,
+    representation: Object.freeze({
+      _tag: 'Slice',
+      element: type.element,
+      address: Object.freeze({
+        bits: addressBits,
+        offset: 0,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+      }),
+      length: Object.freeze({ type: 'I32', offset: lengthOffset, size: 4 }),
+      addressPadding: lengthOffset - target.pointerSize,
+      tailPadding: size - contentSize,
+      stride: alignUp(element.size, element.alignment),
     }),
   })
 }
@@ -448,6 +507,25 @@ export const catalog = (
       })
     }
     if (Type.isNominal(type)) return layoutNominal(type)
+    if (Type.isSlice(type)) {
+      const key = Type.key(type)
+      const existing = completed.get(key)
+      if (existing !== undefined) return existing
+      const element = layoutType(type.element)
+      if (element._tag === 'UnavailableLayoutEntry') {
+        const result = unavailable(
+          type,
+          Object.freeze(Type.nominals(type.element)),
+          { _tag: 'UnavailableDependency', dependency: type.element },
+          element.cause,
+        )
+        completed.set(key, result)
+        return result
+      }
+      const result = sliceEntry(target, type, element)
+      completed.set(key, result)
+      return result
+    }
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
@@ -501,6 +579,7 @@ export const catalog = (
     if (!Type.isConcrete(type)) return
     referenced.set(Type.key(type), type)
     if (Type.isFixedArray(type)) addReferenced(type.element)
+    if (Type.isSlice(type)) addReferenced(type.element)
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
   }
   for (const module of index.modules) {
@@ -568,6 +647,13 @@ const addExpressionTypes = (
     addExpressionTypes(types, expression.subject, substitution)
     addExpressionTypes(types, expression.index, substitution)
   }
+  if (expression._tag === 'SliceLength') {
+    addExpressionTypes(types, expression.slice, substitution)
+  }
+  if (expression._tag === 'SliceIndexPlace') {
+    addExpressionTypes(types, expression.slice, substitution)
+    addExpressionTypes(types, expression.index, substitution)
+  }
   if (expression._tag === 'Construct') {
     for (const field of expression.fields) addExpressionTypes(types, field.value, substitution)
   }
@@ -609,7 +695,9 @@ const addStatementTypes = (
     if (statement._tag === 'Write') {
       addExpressionTypes(types, statement.value, substitution)
       for (const selector of statement.place.selectors) {
-        if (selector._tag === 'Index') addExpressionTypes(types, selector.index, substitution)
+        if (selector._tag === 'Index' || selector._tag === 'SliceIndex') {
+          addExpressionTypes(types, selector.index, substitution)
+        }
       }
     }
     if (statement._tag === 'While') {
@@ -648,6 +736,11 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     if (Type.isNever(type)) return undefined
     const candidate = catalogEntry(self, type)
     if (candidate?._tag === 'LayoutEntry') return candidate
+    if (Type.isSlice(type)) {
+      if (candidate?._tag === 'UnavailableLayoutEntry') return undefined
+      const element = resolve(type.element)
+      return element === undefined ? undefined : sliceEntry(self.target, type, element)
+    }
     if (!Type.isFixedArray(type) || candidate?._tag === 'UnavailableLayoutEntry') return undefined
     const element = resolve(type.element)
     return element === undefined ? undefined : repeatedEntry(type, element)
@@ -662,6 +755,8 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       for (const field of candidate.representation.fields) add(field.type)
     } else if (candidate.representation._tag === 'Repeated') {
       add(candidate.representation.element)
+    } else if (candidate.representation._tag === 'Slice') {
+      add(candidate.representation.element)
     } else if (candidate.representation._tag === 'Union') {
       for (const member of candidate.representation.members) add(member.type)
     }
@@ -674,7 +769,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     _tag: 'LayoutPlan',
     target: self.target,
     entries: orderedEntries,
-    callingShapes: callingShapes(orderedEntries),
+    callingShapes: callingShapes(self.target, orderedEntries),
   })
 }
 
@@ -688,11 +783,12 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     _tag: 'LayoutPlan',
     target,
     entries: orderedEntries,
-    callingShapes: callingShapes(orderedEntries),
+    callingShapes: callingShapes(target, orderedEntries),
   })
 }
 
 const shapeNode = (
+  target: Target.Target,
   type: DeclarationIndex.SemanticType,
   entries: ReadonlyMap<string, Entry>,
 ): CallingShapeNode => {
@@ -705,9 +801,25 @@ const shapeNode = (
   if (Type.isParameter(type)) {
     throw new RangeError(`open generic parameter ${Type.encode(type)} has no calling shape`)
   }
+  if (Type.isSlice(type)) {
+    return Object.freeze({
+      _tag: 'SliceShape',
+      type,
+      address: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: type.element,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      length: Object.freeze({ type: 'I32', lane: 1 }),
+      laneCount: 2,
+    })
+  }
   const candidate = entries.get(Type.key(type))
   if (Type.isFixedArray(type)) {
-    const element = shapeNode(type.element, entries)
+    const element = shapeNode(target, type.element, entries)
     const laneCount = element.laneCount * type.length
     if (!Number.isSafeInteger(laneCount)) {
       throw new RangeError(`Calling shape lane count overflows for ${Type.encode(type)}`)
@@ -723,7 +835,7 @@ const shapeNode = (
   if (Type.isUnion(type)) {
     const members = Object.freeze(
       type.members.map((member, ordinal) => {
-        const shape = shapeNode(member, entries)
+        const shape = shapeNode(target, member, entries)
         return Object.freeze({
           member,
           ordinal,
@@ -749,7 +861,7 @@ const shapeNode = (
   const fields =
     candidate?.representation._tag === 'Aggregate'
       ? candidate.representation.fields.map((field) =>
-          Object.freeze({ field: field.id, shape: shapeNode(field.type, entries) }),
+          Object.freeze({ field: field.id, shape: shapeNode(target, field.type, entries) }),
         )
       : []
   return Object.freeze({
@@ -767,6 +879,20 @@ const materializeLanes = (
   if (node._tag === 'EmptyShape') return Object.freeze([])
   if (node._tag === 'ScalarShape') {
     return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.type })])
+  }
+  if (node._tag === 'SliceShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane',
+        path: Object.freeze([...path, Object.freeze({ _tag: 'SliceAddressSelector' })]),
+        type: node.address.type,
+      }),
+      Object.freeze({
+        _tag: 'CallingLane',
+        path: Object.freeze([...path, Object.freeze({ _tag: 'SliceLengthSelector' })]),
+        type: 'I32',
+      }),
+    ])
   }
   if (node._tag === 'ProductShape') {
     return Object.freeze(
@@ -803,10 +929,11 @@ const materializeLanes = (
 }
 
 const shapeOf = (
+  target: Target.Target,
   type: DeclarationIndex.SemanticType,
   entries: ReadonlyMap<string, Entry>,
 ): CallingShape => {
-  const tree = shapeNode(type, entries)
+  const tree = shapeNode(target, type, entries)
   let materialized: ReadonlyArray<CallingLane> | undefined
   return Object.freeze({
     _tag: 'CallingShape' as const,
@@ -820,9 +947,12 @@ const shapeOf = (
   })
 }
 
-const callingShapes = (entries: ReadonlyArray<Entry>): ReadonlyArray<CallingShape> => {
+const callingShapes = (
+  target: Target.Target,
+  entries: ReadonlyArray<Entry>,
+): ReadonlyArray<CallingShape> => {
   const byType = new Map(entries.map((candidate) => [Type.key(candidate.type), candidate]))
-  return Object.freeze(entries.map((candidate) => shapeOf(candidate.type, byType)))
+  return Object.freeze(entries.map((candidate) => shapeOf(target, candidate.type, byType)))
 }
 
 /** Looks up one canonical runtime-plan entry. */
@@ -913,6 +1043,20 @@ const representationEquals = (left: Representation, right: Representation): bool
       left.stride === right.stride
     )
   }
+  if (left._tag === 'Slice') {
+    return (
+      right._tag === 'Slice' &&
+      Type.equals(left.element, right.element) &&
+      left.address.bits === right.address.bits &&
+      left.address.offset === right.address.offset &&
+      left.address.size === right.address.size &&
+      left.address.alignment === right.address.alignment &&
+      left.length.offset === right.length.offset &&
+      left.addressPadding === right.addressPadding &&
+      left.tailPadding === right.tailPadding &&
+      left.stride === right.stride
+    )
+  }
   if (left._tag === 'Union') {
     return (
       right._tag === 'Union' &&
@@ -961,6 +1105,7 @@ const invalid = (
 ): Violation => Object.freeze({ _tag: 'LayoutViolation', rule, type, detail })
 
 const verifyEntry = (
+  target: Target.Target,
   candidate: Entry,
   available: ReadonlyMap<string, Entry>,
 ): ReadonlyArray<Violation> => {
@@ -979,7 +1124,9 @@ const verifyEntry = (
         ])
   }
   if (Type.isFixedArray(candidate.type)) {
-    const element = available.get(Type.key(candidate.type.element))
+    const element = Type.isBuiltin(candidate.type.element)
+      ? scalarEntry(candidate.type.element)
+      : available.get(Type.key(candidate.type.element))
     if (element === undefined || candidate.representation._tag !== 'Repeated') {
       return Object.freeze([
         invalid(
@@ -1002,6 +1149,32 @@ const verifyEntry = (
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has non-canonical repeated layout facts`,
+          ),
+        ])
+  }
+  if (Type.isSlice(candidate.type)) {
+    const element = Type.isBuiltin(candidate.type.element)
+      ? scalarEntry(candidate.type.element)
+      : available.get(Type.key(candidate.type.element))
+    if (element === undefined) {
+      return Object.freeze([
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has no element layout`,
+        ),
+      ])
+    }
+    const expected = sliceEntry(target, candidate.type, element)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `${Type.encode(candidate.type)} has non-canonical slice layout facts`,
           ),
         ])
   }
@@ -1151,7 +1324,9 @@ const commonViolations = (
         ),
       )
     }
-    if (candidate._tag === 'LayoutEntry') violations.push(...verifyEntry(candidate, available))
+    if (candidate._tag === 'LayoutEntry') {
+      violations.push(...verifyEntry(target, candidate, available))
+    }
     seen.add(key)
     previous = candidate.type
   }
@@ -1171,10 +1346,69 @@ export const selectorEquals = (left: Selector, right: Selector): boolean =>
       ? right._tag === 'UnionTagSelector'
       : left._tag === 'UnionPayloadSelector'
         ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
-        : right._tag === 'FieldId' && fieldIdEquals(left, right)
+        : left._tag === 'SliceAddressSelector'
+          ? right._tag === 'SliceAddressSelector'
+          : left._tag === 'SliceLengthSelector'
+            ? right._tag === 'SliceLengthSelector'
+            : right._tag === 'FieldId' && fieldIdEquals(left, right)
+
+/** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
+export const laneOffset = (
+  self: Plan,
+  root: DeclarationIndex.SemanticType,
+  path: ReadonlyArray<Selector>,
+): number | undefined => {
+  let current: DeclarationIndex.SemanticType = root
+  let offset = 0
+  for (const [ordinal, selector] of path.entries()) {
+    const candidate = entry(self, current)
+    if (candidate === undefined) return undefined
+    if (selector._tag === 'FieldId') {
+      if (candidate.representation._tag !== 'Aggregate') return undefined
+      const field = candidate.representation.fields.find((item) => fieldIdEquals(item.id, selector))
+      if (field === undefined) return undefined
+      offset += field.offset
+      current = field.type
+      continue
+    }
+    if (selector._tag === 'ElementSelector') {
+      if (candidate.representation._tag !== 'Repeated') return undefined
+      if (selector.index < 0 || selector.index >= candidate.representation.length) return undefined
+      offset += selector.index * candidate.representation.stride
+      current = candidate.representation.element
+      continue
+    }
+    if (selector._tag === 'UnionTagSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'Union'
+        ? offset
+        : undefined
+    }
+    if (selector._tag === 'UnionPayloadSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'Union'
+        ? offset + candidate.representation.payloadOffset + selector.slot * 4
+        : undefined
+    }
+    if (selector._tag === 'SliceAddressSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'Slice'
+        ? offset + candidate.representation.address.offset
+        : undefined
+    }
+    return ordinal === path.length - 1 && candidate.representation._tag === 'Slice'
+      ? offset + candidate.representation.length.offset
+      : undefined
+  }
+  return offset
+}
+
+const callingScalarEquals = (left: CallingScalar, right: CallingScalar): boolean =>
+  typeof left === 'string'
+    ? left === right
+    : typeof right !== 'string' &&
+      Type.equals(left.element, right.element) &&
+      left.bits === right.bits
 
 const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
-  const expected = callingShapes(self.entries)
+  const expected = callingShapes(self.target, self.entries)
   const violations: Array<Violation> = []
   for (const entry of self.entries) {
     const actual = callingShape(self, entry.type)
@@ -1188,7 +1422,7 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
         const other = canonical.lanes.at(laneIndex)
         return (
           other !== undefined &&
-          lane.type === other.type &&
+          callingScalarEquals(lane.type, other.type) &&
           lane.path.length === other.path.length &&
           lane.path.every((selector, selectorIndex) => {
             const otherSelector = other.path.at(selectorIndex)
@@ -1254,9 +1488,11 @@ const representationText = (representation: Representation): string =>
       ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
       : representation._tag === 'Repeated'
         ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-        : representation._tag === 'Union'
-          ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-          : `aggregate tail-padding=${representation.tailPadding}`
+        : representation._tag === 'Slice'
+          ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=I32@${representation.length.offset}/4 address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+          : representation._tag === 'Union'
+            ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+            : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -1269,15 +1505,23 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
       ? [
           `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
         ]
-      : candidate.representation._tag === 'Union'
-        ? candidate.representation.members.map(
-            (member) =>
-              `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-          )
-        : []),
+      : candidate.representation._tag === 'Slice'
+        ? [
+            `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+            `  length I32 offset=${candidate.representation.length.offset} size=4 stride=${candidate.representation.stride}`,
+          ]
+        : candidate.representation._tag === 'Union'
+          ? candidate.representation.members.map(
+              (member) =>
+                `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+            )
+          : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
+const callingScalarText = (scalar: CallingScalar): string =>
+  typeof scalar === 'string' ? scalar : `Address<${Type.encode(scalar.element)},i${scalar.bits}>`
+
 export const encode = (self: Plan): string =>
   [
     `target ${Target.encode(self.target)}`,
@@ -1290,7 +1534,7 @@ export const encode = (self: Plan): string =>
             : ` ${shape.lanes
                 .map(
                   (lane) =>
-                    `${lane.type}[${lane.path
+                    `${callingScalarText(lane.type)}[${lane.path
                       .map((selector) =>
                         selector._tag === 'ElementSelector'
                           ? `[${selector.index}]`
@@ -1298,7 +1542,11 @@ export const encode = (self: Plan): string =>
                             ? 'tag'
                             : selector._tag === 'UnionPayloadSelector'
                               ? `payload[${selector.slot}]`
-                              : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
+                              : selector._tag === 'SliceAddressSelector'
+                                ? 'address'
+                                : selector._tag === 'SliceLengthSelector'
+                                  ? 'length'
+                                  : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )

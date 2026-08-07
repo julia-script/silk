@@ -8,7 +8,7 @@ struct FoldState {
   seenThird: Bool
 }
 
-pub fn fold(codes: [I32; 6]) -> I32 {
+pub fn fold(codes: &[I32]) -> I32 {
   let mut state = FoldState {
     remaining: 3,
     score: 10,
@@ -18,7 +18,7 @@ pub fn fold(codes: [I32; 6]) -> I32 {
   }
   let mut index = 0
 
-  while index < 6 {
+  while index < codes.length {
     let candidate = decode(codes[index])
     let member = match move candidate {
       First {} if index == 2 => 0

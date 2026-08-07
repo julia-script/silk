@@ -163,6 +163,40 @@ export interface MoveExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+export type BorrowRootFact =
+  | {
+      readonly _tag: 'BindingRoot'
+      readonly binding: BindingDeclarationFact
+    }
+  | {
+      readonly _tag: 'ParameterRoot'
+      readonly parameter: ParameterFact
+    }
+
+export type BorrowFormationFact =
+  | {
+      readonly _tag: 'FixedArrayBorrow'
+      readonly root: BorrowRootFact
+      readonly array: Type.FixedArray
+    }
+  | {
+      readonly _tag: 'SliceReborrow'
+      readonly root: BorrowRootFact
+      readonly parent: Type.Slice
+      readonly suspendsParent: boolean
+    }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+
+/** One explicit whole-root slice borrow accepted only at an ordinary call boundary. */
+export interface BorrowExpressionFact {
+  readonly _tag: 'Borrow'
+  readonly access: Type.Slice['access']
+  readonly subject: ExpressionFact
+  readonly formation: BorrowFormationFact
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One flattened leaf binding introduced by a nominal pattern. */
 export interface PatternBindingFact {
   readonly _tag: 'PatternBinding'
@@ -286,12 +320,14 @@ export interface StructLiteralExpressionFact {
 
 export type ProjectionState =
   | { readonly _tag: 'Resolved'; readonly field: DeclarationIndex.FieldFact }
+  | { readonly _tag: 'SliceLength' }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
 export interface FieldProjectionExpressionFact {
   readonly _tag: 'FieldProjection'
   readonly subject: ExpressionFact
   readonly nominal?: Type.Nominal
+  readonly borrowAccess?: Type.Slice['access']
   readonly fieldName: string | undefined
   readonly state: ProjectionState
   readonly type: ExpressionTypeFact
@@ -343,6 +379,7 @@ export type BoundsFact =
       readonly cause: Diagnostic.Identity
     }
   | { readonly _tag: 'Runtime'; readonly length: number }
+  | { readonly _tag: 'RuntimeSlice' }
   | { readonly _tag: 'Unavailable' }
 
 /** One typed checked array-place projection. */
@@ -351,7 +388,9 @@ export interface IndexProjectionExpressionFact {
   readonly subject: ExpressionFact
   readonly index: ExpressionFact
   readonly array?: Type.FixedArray
+  readonly slice?: Type.Slice
   readonly elementType?: SemanticType
+  readonly borrowAccess?: Type.Slice['access']
   readonly access: 'CopyRead' | 'ConsumeRequested'
   readonly bounds: BoundsFact
   readonly type: ExpressionTypeFact
@@ -418,6 +457,7 @@ export type ExpressionFact =
   | BooleanExpressionFact
   | IdentifierExpressionFact
   | MoveExpressionFact
+  | BorrowExpressionFact
   | MatchExpressionFact
   | StructLiteralExpressionFact
   | ArrayLiteralExpressionFact
@@ -505,6 +545,8 @@ export type CallContractFact =
 /** Whether one returned expression is known to match its declared result type. */
 export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _tag: 'Unavailable' }
 
+export type AssignmentRootFact = BindingDeclarationFact | ParameterFact
+
 /** One public function declaration and its syntax-owned semantic facts. */
 export type DeclarationFact = DeclarationIndex.DeclarationFact
 
@@ -526,7 +568,7 @@ export type StatementFact =
   | {
       readonly _tag: 'WriteStatement'
       readonly destination: ExpressionFact
-      readonly root?: BindingDeclarationFact
+      readonly root?: AssignmentRootFact
       readonly value: ExpressionFact
       readonly compatible: boolean
       readonly region: Hir.RegionId
@@ -628,6 +670,7 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'BooleanLiteralExpression',
   'IdentifierExpression',
   'MoveExpression',
+  'BorrowExpression',
   'MatchExpression',
   'StructLiteralExpression',
   'ArrayLiteralExpression',
@@ -647,6 +690,7 @@ const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is Syntax
   isExpressionNode(element) &&
   (element.kind === 'CallExpression' ||
     element.kind === 'MoveExpression' ||
+    element.kind === 'BorrowExpression' ||
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
@@ -949,6 +993,148 @@ const analyzeMove = (
     diagnostics: subject.diagnostics,
     type: subject.type,
   })
+}
+
+const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
+  if (subject._tag !== 'Identifier') return undefined
+  if (subject.reference._tag === 'ResolvedBinding') {
+    return Object.freeze({ _tag: 'BindingRoot', binding: subject.reference.binding })
+  }
+  if (subject.reference._tag === 'Resolved') {
+    return Object.freeze({ _tag: 'ParameterRoot', parameter: subject.reference.parameter })
+  }
+  return undefined
+}
+
+const unavailableBorrow = (
+  node: SyntaxTree.Node,
+  access: Type.Slice['access'],
+  subject: ExpressionFact,
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+  cause?: Diagnostic.Diagnostic,
+): ExpressionResult =>
+  Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Borrow',
+      access,
+      subject,
+      formation: Object.freeze({
+        _tag: 'Unavailable',
+        ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
+      }),
+      type: unavailableExpressionType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([...diagnostics, ...(cause === undefined ? [] : [cause])]),
+    type: undefined,
+  })
+
+const analyzeBorrow = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  expected: SemanticType | undefined,
+  borrowAllowed: boolean,
+): ExpressionResult => {
+  const access: Type.Slice['access'] =
+    directToken(node, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
+  const subjectNode = node.children.find(isExpressionNode)
+  const subjectResult =
+    subjectNode === undefined
+      ? undefined
+      : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
+  const subject = subjectResult?.fact ?? unavailableExpression(node)
+  const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
+  if (!borrowAllowed || expected === undefined || !Type.isSlice(expected)) {
+    return unavailableBorrow(
+      node,
+      access,
+      subject,
+      diagnostics,
+      Diagnostic.invalidBorrowPosition(node.span),
+    )
+  }
+  const root = borrowRoot(subject)
+  const sourceType = subjectResult?.type
+  if (root === undefined || sourceType === undefined) {
+    return unavailableBorrow(
+      node,
+      access,
+      subject,
+      diagnostics,
+      Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
+    )
+  }
+  if (Type.isFixedArray(sourceType)) {
+    if (
+      access === 'Exclusive' &&
+      (root._tag !== 'BindingRoot' || root.binding.mutability !== 'Mutable')
+    ) {
+      const name =
+        subject._tag === 'Identifier' && 'spelling' in subject.reference
+          ? subject.reference.spelling
+          : '?'
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.exclusiveBorrowRequiresMutable(name, subjectNode?.span ?? node.span),
+      )
+    }
+    const type = Type.slice(access, sourceType.element)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Borrow',
+        access,
+        subject,
+        formation: Object.freeze({ _tag: 'FixedArrayBorrow', root, array: sourceType }),
+        type: availableExpressionType(type),
+        syntax: node,
+      }),
+      diagnostics,
+      type,
+    })
+  }
+  if (Type.isSlice(sourceType) && root._tag === 'ParameterRoot') {
+    if (sourceType.access === 'Shared' && access === 'Exclusive') {
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.invalidSliceReborrow(sourceType.access, access, node.span),
+      )
+    }
+    const type = Type.slice(access, sourceType.element)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Borrow',
+        access,
+        subject,
+        formation: Object.freeze({
+          _tag: 'SliceReborrow',
+          root,
+          parent: sourceType,
+          suspendsParent: sourceType.access === 'Exclusive',
+        }),
+        type: availableExpressionType(type),
+        syntax: node,
+      }),
+      diagnostics,
+      type,
+    })
+  }
+  return unavailableBorrow(
+    node,
+    access,
+    subject,
+    diagnostics,
+    Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
+  )
 }
 
 interface StructTargetResult {
@@ -1754,7 +1940,8 @@ const analyzeIndexProjection = (
   const diagnostics: Array<Diagnostic.Diagnostic> = [...subject.diagnostics, ...index.diagnostics]
   const array =
     subject.type !== undefined && Type.isFixedArray(subject.type) ? subject.type : undefined
-  if (subject.type !== undefined && array === undefined) {
+  const slice = subject.type !== undefined && Type.isSlice(subject.type) ? subject.type : undefined
+  if (subject.type !== undefined && array === undefined && slice === undefined) {
     diagnostics.push(Diagnostic.indexOnNonArray(Type.encode(subject.type), subjectNode.span))
   }
   if (index.type !== undefined && index.type !== 'I32') {
@@ -1777,20 +1964,29 @@ const analyzeIndexProjection = (
         cause: Diagnostic.identity(diagnostic),
       })
     } else bounds = Object.freeze({ _tag: 'Proven', index: literal, length: array.length })
+  } else if (slice !== undefined && index.type === 'I32') {
+    bounds = Object.freeze({ _tag: 'RuntimeSlice' })
   }
   const available =
-    array !== undefined &&
+    (array !== undefined || slice !== undefined) &&
     index.type === 'I32' &&
     bounds._tag !== 'Invalid' &&
     bounds._tag !== 'Unavailable' &&
     SyntaxTree.isAvailableSyntax(node)
-  const type = available ? availableExpressionType(array.element) : unavailableExpressionType
+  const element = array?.element ?? slice?.element
+  const type =
+    available && element !== undefined
+      ? availableExpressionType(element)
+      : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'IndexProjection',
       subject: subject.fact,
       index: index.fact,
       ...(array === undefined ? {} : { array, elementType: array.element }),
+      ...(slice === undefined
+        ? {}
+        : { slice, elementType: slice.element, borrowAccess: slice.access }),
       access: 'CopyRead',
       bounds,
       type,
@@ -1825,9 +2021,25 @@ const analyzeProjection = (
   const fieldName = fieldToken === undefined ? undefined : spelling(source, fieldToken)
   const nominal =
     subject.type !== undefined && Type.isNominal(subject.type) ? subject.type : undefined
+  const slice = subject.type !== undefined && Type.isSlice(subject.type) ? subject.type : undefined
+  const borrowAccess =
+    subject.fact._tag === 'IndexProjection' || subject.fact._tag === 'FieldProjection'
+      ? subject.fact.borrowAccess
+      : undefined
   let state: ProjectionState = Object.freeze({ _tag: 'Unavailable' })
   let type: SemanticType | undefined
-  if (subject.type !== undefined && nominal === undefined && fieldToken !== undefined) {
+  if (slice !== undefined && fieldName === 'length') {
+    state = Object.freeze({ _tag: 'SliceLength' })
+    type = 'I32'
+  } else if (slice !== undefined && fieldName !== undefined && fieldToken !== undefined) {
+    const diagnostic = Diagnostic.unknownProjectedField(
+      Type.encode(slice),
+      fieldName,
+      fieldToken.span,
+    )
+    diagnostics.push(diagnostic)
+    state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
+  } else if (subject.type !== undefined && nominal === undefined && fieldToken !== undefined) {
     const diagnostic = Diagnostic.projectionOnNonStruct(Type.encode(subject.type), fieldToken.span)
     diagnostics.push(diagnostic)
     state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
@@ -1874,6 +2086,7 @@ const analyzeProjection = (
       _tag: 'FieldProjection',
       subject: subject.fact,
       ...(nominal === undefined ? {} : { nominal }),
+      ...(borrowAccess === undefined ? {} : { borrowAccess }),
       fieldName,
       state,
       type: typeFact,
@@ -1903,6 +2116,7 @@ const analyzeArgumentNodes = (
       scope,
       resolution,
       expectedTypes.at(ordinal),
+      true,
     )
     return result === undefined ? [] : [result]
   })
@@ -2029,6 +2243,7 @@ const analyzeCallTypeArguments = (
       (element.kind === 'TypePath' ||
         element.kind === 'AppliedType' ||
         element.kind === 'FixedArrayType' ||
+        element.kind === 'SliceType' ||
         element.kind === 'ParenthesizedType' ||
         element.kind === 'UnionType'),
   )
@@ -2040,15 +2255,25 @@ const analyzeCallTypeArguments = (
       raw.fact,
       (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
     )
+    const invalidBorrow =
+      resolved.fact._tag === 'Resolved' && Type.containsBorrow(resolved.fact.type)
+        ? Diagnostic.sliceTypePosition('type argument', node.span)
+        : undefined
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'TypeArgument' as const,
         ordinal,
         syntax: node,
         declared: resolved.fact,
-        ...(resolved.fact._tag === 'Resolved' ? { type: resolved.fact.type } : {}),
+        ...(resolved.fact._tag === 'Resolved' && invalidBorrow === undefined
+          ? { type: resolved.fact.type }
+          : {}),
       }),
-      diagnostics: Diagnostic.merge(raw.diagnostics, resolved.diagnostics),
+      diagnostics: Diagnostic.merge(
+        raw.diagnostics,
+        resolved.diagnostics,
+        ...(invalidBorrow === undefined ? [] : [[invalidBorrow]]),
+      ),
     })
   })
   const facts = Object.freeze(analyzed.map((entry) => entry.fact))
@@ -2210,6 +2435,37 @@ const analyzeCallContract = (
       diagnostics: Object.freeze([]),
     })
   }
+  const implicitDecay = mappings.find(
+    (mapping) =>
+      mapping.argument.type._tag === 'Available' &&
+      Type.isFixedArray(mapping.argument.type.type) &&
+      mapping.parameter.declaredType._tag === 'Resolved' &&
+      Type.isSlice(mapping.parameter.declaredType.type),
+  )
+  if (
+    implicitDecay !== undefined &&
+    implicitDecay.parameter.declaredType._tag === 'Resolved' &&
+    Type.isSlice(implicitDecay.parameter.declaredType.type)
+  ) {
+    const expected = implicitDecay.parameter.declaredType.type
+    const diagnostic = Diagnostic.implicitSliceDecay(
+      Type.encode(expected),
+      implicitDecay.argument.syntax.span,
+    )
+    return Object.freeze({
+      mappings,
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({
+          _tag: 'ArgumentTypeMismatch',
+          argument: implicitDecay.argument,
+          expected,
+        }),
+        cause: Diagnostic.identity(diagnostic),
+      }),
+      diagnostics: Object.freeze([diagnostic]),
+    })
+  }
   const declaredTypeParameters = reference.declaration.typeParameters.map(
     (parameter) => parameter.type,
   )
@@ -2296,16 +2552,18 @@ const analyzeCallContract = (
     const expected = Type.substitute(mapping.parameter.declaredType.type, substitution)
     if (!typesCompatible(mapping.argument.type.type, expected)) {
       const mismatch =
-        unionConversionDiagnostic(
-          mapping.argument.type.type,
-          expected,
-          mapping.argument.syntax.span,
-        ) ??
-        Diagnostic.argumentTypeMismatch(
-          Type.encode(expected),
-          Type.encode(mapping.argument.type.type),
-          mapping.argument.syntax.span,
-        )
+        Type.isSlice(expected) && Type.isFixedArray(mapping.argument.type.type)
+          ? Diagnostic.implicitSliceDecay(Type.encode(expected), mapping.argument.syntax.span)
+          : (unionConversionDiagnostic(
+              mapping.argument.type.type,
+              expected,
+              mapping.argument.syntax.span,
+            ) ??
+            Diagnostic.argumentTypeMismatch(
+              Type.encode(expected),
+              Type.encode(mapping.argument.type.type),
+              mapping.argument.syntax.span,
+            ))
       return Object.freeze({
         mappings,
         fact: Object.freeze({
@@ -2852,6 +3110,7 @@ function analyzeExpression(
   scope: Scope,
   resolution: ResolutionContext,
   expected?: SemanticType,
+  borrowAllowed = false,
 ): ExpressionResult | undefined {
   if (node.kind === 'BooleanLiteralExpression') {
     const token = directToken(node, 'TrueKeyword') ?? directToken(node, 'FalseKeyword')
@@ -2896,6 +3155,19 @@ function analyzeExpression(
       diagnostics: move.diagnostics,
       type: move.type,
     })
+  }
+
+  if (node.kind === 'BorrowExpression') {
+    return analyzeBorrow(
+      source,
+      node,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expected,
+      borrowAllowed,
+    )
   }
 
   if (node.kind === 'MatchExpression') {
@@ -3278,9 +3550,11 @@ const analyzeStatements = (
     return region
   }
 
-  const assignmentRoot = (fact: ExpressionFact): BindingDeclarationFact | undefined => {
+  const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undefined => {
     if (fact._tag === 'Identifier') {
-      return fact.reference._tag === 'ResolvedBinding' ? fact.reference.binding : undefined
+      if (fact.reference._tag === 'ResolvedBinding') return fact.reference.binding
+      if (fact.reference._tag === 'Resolved') return fact.reference.parameter
+      return undefined
     }
     if (fact._tag === 'FieldProjection' || fact._tag === 'IndexProjection') {
       return assignmentRoot(fact.subject)
@@ -3427,13 +3701,22 @@ const analyzeStatements = (
       const root = assignmentRoot(destination.fact)
       if (root === undefined) {
         context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
-      } else if (root.mutability === 'Immutable') {
+      } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
             destinationNode.span,
           ),
         )
+      } else if (
+        root._tag === 'ParameterDeclaration' &&
+        (root.declaredType._tag !== 'Resolved' ||
+          !Type.isSlice(root.declaredType.type) ||
+          root.declaredType.type.access !== 'Exclusive' ||
+          (destination.fact._tag !== 'IndexProjection' &&
+            destination.fact._tag !== 'FieldProjection'))
+      ) {
+        context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
       }
       const compatible =
         destination.type !== undefined &&
@@ -3670,7 +3953,7 @@ const hirReference = (
   })
 }
 
-const hirExpression = (fact: ExpressionFact): Hir.Expression => {
+const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Expression => {
   if (fact._tag === 'Integer') {
     return fact.integer._tag === 'Available'
       ? Object.freeze({
@@ -3831,6 +4114,17 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
     })
   }
   if (fact._tag === 'FieldProjection') {
+    if (fact.state._tag === 'SliceLength' && fact.type._tag === 'Available') {
+      const slice = hirExpression(fact.subject)
+      return slice._tag === 'Unavailable'
+        ? slice
+        : Object.freeze({
+            _tag: 'SliceLength',
+            slice,
+            type: 'I32',
+            span: fact.syntax.span,
+          })
+    }
     if (
       fact.nominal === undefined ||
       fact.state._tag !== 'Resolved' ||
@@ -3850,11 +4144,32 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
       nominal: fact.nominal,
       field: fact.state.field.id,
       access: 'CopyRead',
+      ...(fact.borrowAccess === undefined ? {} : { borrowAccess: fact.borrowAccess }),
       type: fact.type.type,
       span: fact.syntax.span,
     })
   }
   if (fact._tag === 'IndexProjection') {
+    if (
+      fact.slice !== undefined &&
+      fact.type._tag === 'Available' &&
+      fact.bounds._tag === 'RuntimeSlice'
+    ) {
+      const slice = hirExpression(fact.subject)
+      const index = hirExpression(fact.index)
+      if (slice._tag === 'Unavailable' || index._tag === 'Unavailable') {
+        return slice._tag === 'Unavailable' ? slice : index
+      }
+      return Object.freeze({
+        _tag: 'SliceIndexPlace',
+        slice,
+        index,
+        access: fact.slice.access,
+        sourceType: fact.slice,
+        type: fact.type.type,
+        span: fact.syntax.span,
+      })
+    }
     if (
       fact.array === undefined ||
       fact.type._tag !== 'Available' ||
@@ -3878,6 +4193,44 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
       array: fact.array,
       access: fact.access,
       bounds: fact.bounds,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'Borrow') {
+    if (
+      borrow === undefined ||
+      fact.formation._tag === 'Unavailable' ||
+      fact.type._tag !== 'Available' ||
+      !Type.isSlice(fact.type.type)
+    ) {
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: fact.syntax.span,
+        ...(fact.formation._tag === 'Unavailable' && fact.formation.cause !== undefined
+          ? { cause: fact.formation.cause }
+          : {}),
+      })
+    }
+    const root: Hir.SliceRoot =
+      fact.formation.root._tag === 'BindingRoot'
+        ? Object.freeze({
+            _tag: 'BindingSliceRoot',
+            binding: fact.formation.root.binding.id,
+          })
+        : Object.freeze({
+            _tag: 'ParameterSliceRoot',
+            parameter: fact.formation.root.parameter.id,
+          })
+    return Object.freeze({
+      _tag: 'SliceBorrow',
+      borrow,
+      root,
+      source:
+        fact.formation._tag === 'FixedArrayBorrow' ? fact.formation.array : fact.formation.parent,
+      access: fact.access,
+      reborrow: fact.formation._tag === 'SliceReborrow',
+      suspendsParent: fact.formation._tag === 'SliceReborrow' && fact.formation.suspendsParent,
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -3913,15 +4266,42 @@ const hirExpression = (fact: ExpressionFact): Hir.Expression => {
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) => {
           const parameter = target.parameters.at(ordinal)
+          const borrowId: Hir.BorrowId | undefined =
+            argument.expression._tag === 'Borrow' &&
+            argument.expression.formation._tag !== 'Unavailable'
+              ? Object.freeze({
+                  _tag: 'BorrowId',
+                  function: argument.id.function,
+                  callSpan: argument.id.callSpan,
+                  ordinal,
+                })
+              : undefined
           return parameter?.declaredType._tag === 'Resolved'
             ? hirExpectedExpression(
                 argument.expression,
                 Type.substitute(parameter.declaredType.type, substitution),
                 'Argument',
                 parameter.syntax.span,
+                borrowId,
               )
-            : hirExpression(argument.expression)
+            : hirExpression(argument.expression, borrowId)
         }),
+      ),
+      loanEnds: Object.freeze(
+        fact.arguments.flatMap(
+          (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+            argument.expression._tag === 'Borrow' &&
+            argument.expression.formation._tag !== 'Unavailable'
+              ? [
+                  Object.freeze({
+                    _tag: 'BorrowId',
+                    function: argument.id.function,
+                    callSpan: argument.id.callSpan,
+                    ordinal,
+                  }),
+                ]
+              : [],
+        ),
       ),
       type: fact.type.type,
       span: fact.syntax.span,
@@ -3945,8 +4325,9 @@ const hirExpectedExpression = (
   target: SemanticType,
   context: Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
   expectedAt: SourceSpan.SourceSpan,
+  borrow?: Hir.BorrowId,
 ): Hir.Expression => {
-  const source = hirExpression(fact)
+  const source = hirExpression(fact, borrow)
   if (source._tag === 'Unavailable') return source
   const compatibility = TypeCompatibility.check(source.type, target)
   if (compatibility._tag === 'Exact') return source
@@ -4034,6 +4415,81 @@ const hirWritePlace = (
   })
 }
 
+const hirBorrowedWritePlace = (
+  fact: ExpressionFact,
+  root: ParameterFact,
+): Hir.BorrowedWritePlace | undefined => {
+  if (
+    root.declaredType._tag !== 'Resolved' ||
+    !Type.isSlice(root.declaredType.type) ||
+    root.declaredType.type.access !== 'Exclusive'
+  ) {
+    return undefined
+  }
+  const selectors: Array<Hir.BorrowedWriteSelector> = []
+  const walk = (current: ExpressionFact): boolean => {
+    if (current._tag === 'Grouped') return walk(current.expression)
+    if (current._tag === 'Identifier') {
+      return (
+        current.reference._tag === 'Resolved' &&
+        current.reference.parameter.id.ordinal === root.id.ordinal
+      )
+    }
+    if (current._tag === 'FieldProjection') {
+      if (
+        !walk(current.subject) ||
+        current.state._tag !== 'Resolved' ||
+        current.type._tag !== 'Available' ||
+        current.borrowAccess !== 'Exclusive'
+      ) {
+        return false
+      }
+      selectors.push(
+        Object.freeze({
+          _tag: 'Field',
+          field: current.state.field.id,
+          type: current.type.type,
+          span: current.syntax.span,
+        }),
+      )
+      return true
+    }
+    if (current._tag === 'IndexProjection') {
+      if (
+        !walk(current.subject) ||
+        current.slice === undefined ||
+        current.slice.access !== 'Exclusive' ||
+        current.type._tag !== 'Available' ||
+        current.bounds._tag !== 'RuntimeSlice'
+      ) {
+        return false
+      }
+      const index = hirExpression(current.index)
+      if (index._tag === 'Unavailable') return false
+      selectors.push(
+        Object.freeze({
+          _tag: 'SliceIndex',
+          index,
+          slice: current.slice,
+          type: current.type.type,
+          span: current.syntax.span,
+        }),
+      )
+      return true
+    }
+    return false
+  }
+  if (!walk(fact) || fact.type._tag !== 'Available') return undefined
+  return Object.freeze({
+    _tag: 'BorrowedWritePlace',
+    root: root.id,
+    slice: root.declaredType.type,
+    selectors: Object.freeze(selectors),
+    type: fact.type.type,
+    span: fact.syntax.span,
+  })
+}
+
 /** Elaborates every declaration body into immutable facts and the module's HIR. */
 export interface Input {
   readonly syntax: SyntaxFile.SyntaxFile
@@ -4086,12 +4542,14 @@ export const elaborateModule = (input: Input): Result => {
         }
         if (statement._tag === 'WriteStatement') {
           const place =
-            statement.root === undefined
-              ? undefined
-              : hirWritePlace(statement.destination, statement.root)
+            statement.root?._tag === 'BindingFact'
+              ? hirWritePlace(statement.destination, statement.root)
+              : statement.root?._tag === 'ParameterDeclaration'
+                ? hirBorrowedWritePlace(statement.destination, statement.root)
+                : undefined
           if (
             place === undefined ||
-            statement.root?.mutability !== 'Mutable' ||
+            (statement.root?._tag === 'BindingFact' && statement.root.mutability !== 'Mutable') ||
             !statement.compatible
           ) {
             return Object.freeze({

@@ -461,6 +461,16 @@ const printNode = (
         printToken(context, tokenOf(node, 'DecimalInteger'), FormatDocument.text(' ')),
         printToken(context, tokenOf(node, 'RightBracket')),
       )
+    case 'SliceType': {
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
+        ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
+        printToken(context, tokenOf(node, 'LeftBracket')),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        printToken(context, tokenOf(node, 'RightBracket')),
+      )
+    }
     case 'ParenthesizedType':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'LeftParenthesis'), prefix, preserveBlank),
@@ -603,6 +613,14 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    case 'BorrowExpression': {
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
+        ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression')),
+      )
+    }
     case 'MatchExpression': {
       const nodes = directNodes(node)
       const access = nodes[0] ?? nodeOf(node, 'MatchAccess')

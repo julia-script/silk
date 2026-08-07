@@ -43,7 +43,11 @@ pub fn main() -> I32 {
               ? `field:${selector.ordinal}`
               : selector._tag === 'UnionTagSelector'
                 ? 'union:tag'
-                : `union:payload:${selector.slot}`,
+                : selector._tag === 'UnionPayloadSelector'
+                  ? `union:payload:${selector.slot}`
+                  : selector._tag === 'SliceAddressSelector'
+                    ? 'slice:address'
+                    : 'slice:length',
         ),
       ),
       [

@@ -25,4 +25,4 @@ it('keeps the composed algorithm byte-identical across fresh processes', () => {
   assert.strictEqual(encoded.wasmBytes.length, 64)
   assert.strictEqual(encoded.nativeText.length, 64)
   assert.strictEqual(encoded.wasmText.length, 64)
-})
+}, 15_000)

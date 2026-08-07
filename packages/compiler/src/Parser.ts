@@ -176,12 +176,14 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LeftBracket',
   'MatchKeyword',
   'Less',
+  'Ampersand',
 ])
 
 const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Identifier',
   'LeftParenthesis',
   'LeftBracket',
+  'Ampersand',
 ])
 
 const significantKindAfter = (
@@ -256,7 +258,9 @@ const hasCompleteAppliedPostfix = (
       token.kind !== 'RightBracket' &&
       token.kind !== 'Semicolon' &&
       token.kind !== 'DecimalInteger' &&
-      token.kind !== 'Pipe'
+      token.kind !== 'Pipe' &&
+      token.kind !== 'Ampersand' &&
+      token.kind !== 'MutKeyword'
     )
       return false
     index += 1
@@ -312,6 +316,7 @@ const primaryKind = (
   | 'Boolean'
   | 'Identifier'
   | 'Move'
+  | 'Borrow'
   | 'Call'
   | 'StructLiteral'
   | 'ArrayLiteral'
@@ -330,6 +335,7 @@ const primaryKind = (
     if (token.kind === 'Bang') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
+    if (token.kind === 'Ampersand') return 'Borrow'
     if (token.kind === 'MatchKeyword') return 'Match'
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
     if (token.kind === 'Identifier') {
@@ -900,6 +906,29 @@ function parsePrimaryExpression(
       node: syntaxNode(projected.state, 'MoveExpression', [...keyword.elements, projected.node]),
     })
   }
+  if (kind === 'Borrow') {
+    const ampersand = expect(initial, 'Ampersand', ['MutKeyword', ...expressionStarts])
+    const mut =
+      nextSignificantKind(ampersand.state) === 'MutKeyword'
+        ? expect(ampersand.state, 'MutKeyword', expressionStarts)
+        : undefined
+    const operand = parseProjectionChain(
+      parsePrimaryExpression(
+        mut?.state ?? ampersand.state,
+        reservedForEnclosingCalls,
+        recoveryKind,
+        allowStructLiteral,
+      ),
+    )
+    return Object.freeze({
+      state: operand.state,
+      node: syntaxNode(operand.state, 'BorrowExpression', [
+        ...ampersand.elements,
+        ...(mut?.elements ?? []),
+        operand.node,
+      ]),
+    })
+  }
   if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   if (kind === 'Grouped') return parseGroupedExpression(initial, reservedForEnclosingCalls)
@@ -1369,6 +1398,30 @@ const parseTypePrimary = (
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
 ): NodeResult => {
+  if (nextSignificantKind(initial) === 'Ampersand') {
+    const ampersand = expect(initial, 'Ampersand', ['MutKeyword', 'LeftBracket', ...following])
+    const mut =
+      nextSignificantKind(ampersand.state) === 'MutKeyword'
+        ? expect(ampersand.state, 'MutKeyword', ['LeftBracket', ...following])
+        : undefined
+    const left = expect(mut?.state ?? ampersand.state, 'LeftBracket', [
+      ...typeStarts,
+      'RightBracket',
+      ...following,
+    ])
+    const element = parseType(left.state, ['RightBracket', ...following])
+    const right = expect(element.state, 'RightBracket', following)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'SliceType', [
+        ...ampersand.elements,
+        ...(mut?.elements ?? []),
+        ...left.elements,
+        element.node,
+        ...right.elements,
+      ]),
+    })
+  }
   if (nextSignificantKind(initial) === 'LeftParenthesis') {
     const left = expect(initial, 'LeftParenthesis', [
       ...typeStarts,

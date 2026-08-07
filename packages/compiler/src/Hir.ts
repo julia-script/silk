@@ -37,6 +37,14 @@ export interface RegionId {
   readonly ordinal: number
 }
 
+/** Compiler-only identity for one explicit call argument borrow. */
+export interface BorrowId {
+  readonly _tag: 'BorrowId'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly callSpan: SourceSpan.SourceSpan
+  readonly ordinal: number
+}
+
 /** A canonical lexical loop identity local to one function. */
 export interface LoopId {
   readonly _tag: 'HirLoop'
@@ -64,6 +72,13 @@ export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }
   | { readonly _tag: 'Runtime'; readonly length: number }
 
+export type SliceRoot =
+  | { readonly _tag: 'BindingSliceRoot'; readonly binding: BindingId }
+  | {
+      readonly _tag: 'ParameterSliceRoot'
+      readonly parameter: DeclarationIndex.ParameterId
+    }
+
 /** One selector in a writable place, retained in source evaluation order. */
 export type WriteSelector =
   | {
@@ -82,13 +97,34 @@ export type WriteSelector =
     }
 
 /** One complete typed replacement rooted in a mutable binding. */
-export interface WritePlace {
+export interface OwnedWritePlace {
   readonly _tag: 'WritePlace'
   readonly root: BindingId
   readonly selectors: ReadonlyArray<WriteSelector>
   readonly type: DeclarationIndex.SemanticType
   readonly span: SourceSpan.SourceSpan
 }
+
+export type BorrowedWriteSelector =
+  | {
+      readonly _tag: 'SliceIndex'
+      readonly index: Expression
+      readonly slice: Type.Slice
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | Extract<WriteSelector, { readonly _tag: 'Field' }>
+
+export interface BorrowedWritePlace {
+  readonly _tag: 'BorrowedWritePlace'
+  readonly root: DeclarationIndex.ParameterId
+  readonly slice: Type.Slice
+  readonly selectors: ReadonlyArray<BorrowedWriteSelector>
+  readonly type: DeclarationIndex.SemanticType
+  readonly span: SourceSpan.SourceSpan
+}
+
+export type WritePlace = OwnedWritePlace | BorrowedWritePlace
 
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
@@ -201,6 +237,7 @@ export type Expression =
       readonly nominal: Type.Nominal
       readonly field: DeclarationIndex.FieldId
       readonly access: 'CopyRead' | 'ConsumeRequested'
+      readonly borrowAccess?: Type.Slice['access']
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -215,10 +252,37 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'SliceBorrow'
+      readonly borrow: BorrowId
+      readonly root: SliceRoot
+      readonly source: Type.FixedArray | Type.Slice
+      readonly access: Type.Slice['access']
+      readonly reborrow: boolean
+      readonly suspendsParent: boolean
+      readonly type: Type.Slice
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'SliceLength'
+      readonly slice: Expression
+      readonly type: 'I32'
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'SliceIndexPlace'
+      readonly slice: Expression
+      readonly index: Expression
+      readonly access: Type.Slice['access']
+      readonly sourceType: Type.Slice
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'Call'
       readonly target: DeclarationIndex.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
+      readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -323,7 +387,7 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
     case 'Write':
       return [
         ...statement.place.selectors.flatMap((selector) =>
-          selector._tag === 'Index' ? [selector.index] : [],
+          selector._tag === 'Index' || selector._tag === 'SliceIndex' ? [selector.index] : [],
         ),
         statement.value,
       ]
@@ -352,6 +416,10 @@ const expressionChildren = (expression: Expression): ReadonlyArray<Expression> =
         return [expression._tag === 'UnionConvert' ? expression.source : expression.subject]
       case 'IndexPlace':
         return [expression.subject, expression.index]
+      case 'SliceLength':
+        return [expression.slice]
+      case 'SliceIndexPlace':
+        return [expression.slice, expression.index]
       case 'Construct':
         return expression.fields.map((field) => field.value)
       case 'ArrayConstruct':
@@ -391,6 +459,10 @@ export const hasUnavailable = (self: HirFunction): boolean => {
         return walk(expression.source)
       case 'IndexPlace':
         return walk(expression.subject) || walk(expression.index)
+      case 'SliceLength':
+        return walk(expression.slice)
+      case 'SliceIndexPlace':
+        return walk(expression.slice) || walk(expression.index)
       case 'Construct':
         return expression.fields.some((field) => walk(field.value))
       case 'ArrayConstruct':
@@ -429,6 +501,10 @@ export const firstUnavailable = (
         return walk(expression.source)
       case 'IndexPlace':
         return walk(expression.subject) ?? walk(expression.index)
+      case 'SliceLength':
+        return walk(expression.slice)
+      case 'SliceIndexPlace':
+        return walk(expression.slice) ?? walk(expression.index)
       case 'Construct': {
         for (const field of expression.fields) {
           const found = walk(field.value)
@@ -480,6 +556,10 @@ export type VerificationIssue =
   | { readonly _tag: 'InvalidMatchGuard'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidMatchResult'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidPatternBinding'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidSliceBorrow'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidSliceOperation'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidLoanEnd'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidBorrowedWrite'; readonly span: SourceSpan.SourceSpan }
 
 const sameMembers = (
   left: ReadonlyArray<Type.Nominal>,
@@ -492,12 +572,76 @@ const sameMembers = (
 export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
   const issues: Array<VerificationIssue> = []
   const active = new Set<Expression>()
+  const borrowKey = (borrow: BorrowId): string =>
+    `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
   const walk = (expression: Expression): void => {
     if (active.has(expression)) {
       issues.push(Object.freeze({ _tag: 'CyclicExpression', span: expression.span }))
       return
     }
     active.add(expression)
+    if (expression._tag === 'SliceBorrow') {
+      const element = Type.isFixedArray(expression.source)
+        ? expression.source.element
+        : expression.source.element
+      if (
+        !Type.equals(expression.type, Type.slice(expression.access, element)) ||
+        expression.reborrow !== Type.isSlice(expression.source) ||
+        (expression.reborrow && expression.root._tag !== 'ParameterSliceRoot') ||
+        (Type.isSlice(expression.source) &&
+          expression.source.access === 'Shared' &&
+          expression.access === 'Exclusive')
+      ) {
+        issues.push(Object.freeze({ _tag: 'InvalidSliceBorrow', span: expression.span }))
+      }
+    }
+    if (expression._tag === 'SliceLength') {
+      if (expression.slice._tag === 'Unavailable' || !Type.isSlice(expression.slice.type)) {
+        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+      }
+    }
+    if (expression._tag === 'SliceIndexPlace') {
+      if (
+        expression.slice._tag === 'Unavailable' ||
+        !Type.equals(expression.slice.type, expression.sourceType) ||
+        expression.index._tag === 'Unavailable' ||
+        !Type.equals(expression.index.type, 'I32') ||
+        expression.access !== expression.sourceType.access ||
+        !Type.equals(expression.type, expression.sourceType.element)
+      ) {
+        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+      }
+    }
+    if (expression._tag === 'Project' && expression.borrowAccess !== undefined) {
+      const inherited =
+        expression.subject._tag === 'SliceIndexPlace'
+          ? expression.subject.access
+          : expression.subject._tag === 'Project'
+            ? expression.subject.borrowAccess
+            : undefined
+      if (inherited !== expression.borrowAccess) {
+        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+      }
+    }
+    if (expression._tag === 'Call') {
+      const begins = expression.arguments
+        .flatMap(expressionTree)
+        .filter(
+          (candidate): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' }> =>
+            candidate._tag === 'SliceBorrow' &&
+            candidate.borrow.callSpan.start === expression.span.start &&
+            candidate.borrow.callSpan.end === expression.span.end,
+        )
+        .map((candidate) => borrowKey(candidate.borrow))
+      const ends = expression.loanEnds.map(borrowKey)
+      if (
+        begins.length !== ends.length ||
+        begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
+        new Set(ends).size !== ends.length
+      ) {
+        issues.push(Object.freeze({ _tag: 'InvalidLoanEnd', span: expression.span }))
+      }
+    }
     if (expression._tag === 'Match') {
       const coverage = Match.cover(
         expression.members,
@@ -550,6 +694,26 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     active.delete(expression)
   }
   for (const fn of self.functions) {
+    const statements = (body: ReadonlyArray<Statement>): void => {
+      for (const statement of body) {
+        if (statement._tag === 'Write' && statement.place._tag === 'BorrowedWritePlace') {
+          const [first, ...rest] = statement.place.selectors
+          if (
+            statement.place.slice.access !== 'Exclusive' ||
+            first?._tag !== 'SliceIndex' ||
+            !Type.equals(first.slice, statement.place.slice) ||
+            rest.some((selector) => selector._tag !== 'Field')
+          ) {
+            issues.push(Object.freeze({ _tag: 'InvalidBorrowedWrite', span: statement.place.span }))
+          }
+        }
+        if (statement._tag === 'If') {
+          statements(statement.taken)
+          statements(statement.otherwise)
+        } else if (statement._tag === 'While') statements(statement.body)
+      }
+    }
+    statements(fn.statements)
     for (const expression of fn.statements.flatMap(statementExpressions)) walk(expression)
   }
   return Object.freeze(issues)
@@ -685,13 +849,26 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.subject, depth + 1),
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
+    case 'SliceBorrow':
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : `p${expression.root.parameter.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+    case 'SliceLength':
+      return [
+        `${indent}slice-length : I32 ${spanText(expression.span)}`,
+        encodeExpression(expression.slice, depth + 1),
+      ].join('\n')
+    case 'SliceIndexPlace':
+      return [
+        `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.slice, depth + 1),
+        encodeExpression(expression.index, depth + 1),
+      ].join('\n')
     case 'Call':
       return [
         `${indent}call ${expression.target.module}.${expression.target.name}${
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encode).join(', ')}>`
-        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        } : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall':
@@ -716,11 +893,13 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'Write':
       return [
-        `${indent}write b${statement.place.root.ordinal}${statement.place.selectors
+        `${indent}write ${statement.place._tag === 'WritePlace' ? `b${statement.place.root.ordinal}` : `slice-p${statement.place.root.ordinal}`}${statement.place.selectors
           .map((selector) =>
             selector._tag === 'Field'
               ? `.#${selector.field.ordinal}`
-              : `[${selector.bounds._tag === 'Proven' ? selector.bounds.index : 'runtime'}/${selector.array.length}]`,
+              : selector._tag === 'SliceIndex'
+                ? '[runtime/slice]'
+                : `[${selector.bounds._tag === 'Proven' ? selector.bounds.index : 'runtime'}/${selector.array.length}]`,
           )
           .join(
             '',

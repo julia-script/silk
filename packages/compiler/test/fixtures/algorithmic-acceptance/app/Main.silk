@@ -1,5 +1,12 @@
 import compiler.Coverage
 
 pub fn main() -> I32 {
-  return Coverage.fold([1, 2, 1, 3, 2, 1])
+  let short = [1, 2, 3]
+  let long = [1, 2, 1, 3, 2, 1]
+  let shortScore = Coverage.fold(&short)
+  let longScore = Coverage.fold(&long)
+  if shortScore != 40 {
+    return 0
+  }
+  return longScore
 }
