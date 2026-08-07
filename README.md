@@ -9,6 +9,8 @@ Silk Effect is a strict TypeScript, ESM-only monorepo. It currently contains the
 - [`@silk-effect/language`](packages/language) — editor support: a lexer-driven CodeMirror 6
   extension and the Silk TextMate grammar (consumed by Shiki and the private
   [Cursor/VS Code extension](packages/vscode)).
+- [`@silk-effect/lsp`](packages/lsp) — a stdio Language Server Protocol server serving compiler
+  diagnostics, type hover, document symbols, and canonical formatting.
 
 ## Development
 

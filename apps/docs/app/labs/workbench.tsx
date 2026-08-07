@@ -102,7 +102,9 @@ function PhasePicker({
 function SourceBody() {
   const [modules, setModules] = useAtom(modulesAtom)
   const activeModule = useAtomValue(activeModuleAtom)
+  const snapshot = useAtomValue(snapshotAtom)
   const [cursor, setCursor] = useAtom(cursorAtom)
+  const formatRef = useRef<(() => boolean) | null>(null)
 
   const names = Object.keys(modules)
   const active = names.includes(activeModule) ? activeModule : (names[0] ?? '')
@@ -121,15 +123,26 @@ function SourceBody() {
     <>
       <SilkEditor
         value={text}
+        snapshot={snapshot}
+        module={active}
         cursor={cursor}
         onChange={onChange}
         onSelect={setCursor}
+        formatRef={formatRef}
         className={shell.editor}
       />
       <div className={shell.sourceFooter}>
         <span>{active}</span>
         <span>{text.length} B</span>
         <span className={shell.spacer} />
+        <button
+          type="button"
+          className={shell.footerAction}
+          title="Format (⌘S or ⇧⌥F)"
+          onClick={() => formatRef.current?.()}
+        >
+          format
+        </button>
         <span>{cursor === undefined ? 'no selection' : `sel [${cursor.start}, ${cursor.end})`}</span>
       </div>
     </>

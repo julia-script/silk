@@ -725,6 +725,19 @@
   font-size: 9.5px;
 }
 
+.footerAction {
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--wb-ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.footerAction:hover {
+  color: var(--wb-amber);
+}
+
 /* ── span bar + status bar ────────────────────────────────────────────────── */
 
 /*

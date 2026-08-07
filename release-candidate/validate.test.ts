@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -17,6 +17,7 @@ const packageRoot = resolve(workspaceRoot, 'packages/llvm')
 const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
 const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
+const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 
 test('the llvm release candidate is a self-contained ESM package', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-release-candidate-'))
@@ -1053,3 +1054,111 @@ test('the wasm release candidate is a self-contained ESM package', () => {
     rmSync(temporary, { recursive: true, force: true })
   }
 })
+
+test('the lsp release candidate installs and answers an initialize request', async () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-lsp-release-candidate-'))
+
+  try {
+    const archiveRoot = resolve(temporary, 'archives')
+    const unpackRoot = resolve(temporary, 'unpacked')
+    mkdirSync(archiveRoot)
+    mkdirSync(unpackRoot)
+
+    for (const root of [
+      lspPackageRoot,
+      compilerCliPackageRoot,
+      compilerPackageRoot,
+      packageRoot,
+      wasmPackageRoot,
+    ]) {
+      execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+        cwd: root,
+        stdio: 'pipe',
+      })
+    }
+
+    const archives = readdirSync(archiveRoot)
+    const archive = archives.find((file) => file.startsWith('silk-effect-lsp-'))
+    const cliArchive = archives.find((file) => file.startsWith('silk-effect-compiler-cli-'))
+    const compilerArchive = archives.find(
+      (file) => file.startsWith('silk-effect-compiler-') && !file.includes('-cli-'),
+    )
+    const llvmArchive = archives.find((file) => file.startsWith('silk-effect-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silk-effect-wasm-'))
+    expect(archive).toBeDefined()
+    execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
+
+    const packedRoot = resolve(unpackRoot, 'package')
+    const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
+    expect(manifest.name).toBe('@silk-effect/lsp')
+    expect(manifest.private).not.toBe(true)
+    expect(manifest.bin).toEqual({ 'silk-lsp': './dist/bin.js' })
+    expect(Object.keys(manifest.exports).sort()).toEqual([
+      '.',
+      './Document',
+      './LineIndex',
+      './Server',
+      './Workspace',
+    ])
+    expect(existsSync(resolve(packedRoot, 'dist/bin.js'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'test'))).toBe(false)
+
+    const consumerRoot = resolve(temporary, 'consumer')
+    mkdirSync(consumerRoot)
+    writeFileSync(
+      resolve(consumerRoot, 'package.json'),
+      JSON.stringify({
+        private: true,
+        type: 'module',
+        dependencies: {
+          '@silk-effect/lsp': `file:${resolve(archiveRoot, archive ?? '')}`,
+        },
+      }),
+    )
+    writeFileSync(
+      resolve(consumerRoot, 'pnpm-workspace.yaml'),
+      `overrides:\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+    )
+    execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
+
+    const executable = resolve(consumerRoot, 'node_modules/.bin/silk-lsp')
+    const initialize = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    const response = await new Promise<string>((resolvePromise, rejectPromise) => {
+      const server = spawn(executable, [], { cwd: consumerRoot })
+      let output = ''
+      const finish = (): void => {
+        server.kill()
+        resolvePromise(output)
+      }
+      const timer = setTimeout(() => {
+        server.kill()
+        rejectPromise(new Error(`silk-lsp answered nothing; saw: ${output}`))
+      }, 15_000)
+      server.stdout.on('data', (chunk: Buffer) => {
+        output += chunk.toString('utf8')
+        if (output.includes('"capabilities"')) {
+          clearTimeout(timer)
+          finish()
+        }
+      })
+      server.on('error', (error) => {
+        clearTimeout(timer)
+        rejectPromise(error)
+      })
+      server.stdin.write(`Content-Length: ${Buffer.byteLength(initialize)}\r\n\r\n${initialize}`)
+    })
+    expect(response).toContain('"hoverProvider":true')
+    expect(response).toContain('"documentFormattingProvider":true')
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+}, 60_000)
