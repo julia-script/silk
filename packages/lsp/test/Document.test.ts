@@ -1,8 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
-import * as Effect from 'effect/Effect'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as Effect from 'effect/Effect'
 import { SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 
@@ -145,9 +145,7 @@ it.effect('uses exact cross-module snapshot sources for qualified definition lin
     const lib = 'pub fn answer() -> I32 { return 42 }'
     const snapshot = yield* Analysis.make({
       root: SourceFile.make('root', encoder.encode(root)),
-    }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(lib)]]))),
-    )
+    }).pipe(Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(lib)]]))))
     const document = Document.make({
       uri: 'file:///project/root.silk',
       version: 1,

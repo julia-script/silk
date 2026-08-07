@@ -13,8 +13,8 @@ import {
   DiagnosticSeverity,
   type DocumentSymbol,
   type Hover,
-  type Diagnostic as LspDiagnostic,
   type LocationLink,
+  type Diagnostic as LspDiagnostic,
   type Position,
   SymbolKind,
   type TextEdit,
@@ -180,9 +180,7 @@ export const definition = (
       ? self.index
       : (() => {
           const source = Analysis.sources(snapshot).get(location.module)
-          return source === undefined
-            ? undefined
-            : LineIndex.make(SourceFile.toUint8Array(source))
+          return source === undefined ? undefined : LineIndex.make(SourceFile.toUint8Array(source))
         })()
   if (targetIndex === undefined) return undefined
   return {

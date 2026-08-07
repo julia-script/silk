@@ -1,9 +1,9 @@
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import type * as Analysis from '@silk-effect/compiler/Analysis'
 import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
-import * as Document from './Document.js'
+import type * as Document from './Document.js'
 
 /** One coherent document and analysis snapshot committed at a project revision. */
 export interface AnalyzedDocument {
@@ -44,10 +44,7 @@ export interface ProjectSession<R> {
   readonly open: (document: Document.Document) => Effect.Effect<void, never, R>
   readonly close: (uri: string) => Effect.Effect<void, never, R>
   readonly invalidate: (priority?: string) => Effect.Effect<void, never, R>
-  readonly acquire: (
-    uri: string,
-    version: number,
-  ) => Effect.Effect<Option.Option<AnalyzedDocument>>
+  readonly acquire: (uri: string, version: number) => Effect.Effect<Option.Option<AnalyzedDocument>>
   readonly shutdown: () => Effect.Effect<void>
 }
 

@@ -352,7 +352,10 @@ pub fn main() -> I32 { return identity(42) }`
       Analysis.semanticTargetAt(self, 'main', localReference + 'local'.length),
       undefined,
     )
-    assert.strictEqual(Analysis.semanticTargetAt(self, 'main', source.indexOf('return pair') - 1), undefined)
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'main', source.indexOf('return pair') - 1),
+      undefined,
+    )
   }),
 )
 
@@ -374,10 +377,7 @@ pub fn main() -> I32 { return answer() + tools.answer() }`
       assert.strictEqual(target?.resolution._tag, 'Available')
       if (target?.resolution._tag !== 'Available') continue
       assert.strictEqual(target.resolution.declaration.module, index === 0 ? 'lib' : 'other')
-      assert.strictEqual(
-        target.resolution.declaration.selectionSpan.start,
-        'pub fn '.length,
-      )
+      assert.strictEqual(target.resolution.declaration.selectionSpan.start, 'pub fn '.length)
     }
   }),
 )

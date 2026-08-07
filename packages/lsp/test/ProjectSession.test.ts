@@ -41,9 +41,9 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
         analyzedDocuments.push(`${self.module}@${self.version}`)
         return yield* analyzed(self)
       }),
-      publish: Effect.fnUntraced(function* (session) {
-        publishedVersions.push(session.document.version)
-      }),
+      publish: Effect.fnUntraced((session) =>
+        Effect.sync(() => publishedVersions.push(session.document.version)),
+      ),
     })
     const first = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 1)),
@@ -94,9 +94,9 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
         active -= 1
         return result
       }),
-      publish: Effect.fnUntraced(function* (session) {
-        publishedVersions.push(session.document.version)
-      }),
+      publish: Effect.fnUntraced((session) =>
+        Effect.sync(() => publishedVersions.push(session.document.version)),
+      ),
     })
     const first = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 1)),
@@ -127,17 +127,16 @@ it.effect('settles superseded and closed exact-version waiters without a session
       sourceRoot: '/workspace',
       debounce: 10,
       analyze: analyzed,
-      publish: Effect.fnUntraced(function* () {}),
+      publish: Effect.fnUntraced(() => Effect.succeed(undefined)),
     })
     const firstOpen = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 1)),
       { startImmediately: true },
     )
     yield* Effect.yieldNow
-    const firstWaiter = yield* Effect.forkChild(
-      project.acquire('file:///workspace/Main.silk', 1),
-      { startImmediately: true },
-    )
+    const firstWaiter = yield* Effect.forkChild(project.acquire('file:///workspace/Main.silk', 1), {
+      startImmediately: true,
+    })
     const secondOpen = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 2)),
       { startImmediately: true },
@@ -181,7 +180,7 @@ it.effect('allows independent projects to analyze concurrently', () =>
           active -= 1
           return result
         }),
-        publish: Effect.fnUntraced(function* () {}),
+        publish: Effect.fnUntraced(() => Effect.succeed(undefined)),
       })
     const left = makeProject('left')
     const right = makeProject('right')

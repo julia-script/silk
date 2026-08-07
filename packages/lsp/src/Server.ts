@@ -39,7 +39,9 @@ export const start = (): void => {
 
   // Platform services are built once for the server's lifetime, not per request.
   const runtime = ManagedRuntime.make(NodeServices.layer)
-  const run = <A>(effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>): Promise<A> => {
+  const run = <A>(
+    effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>,
+  ): Promise<A> => {
     const promise = runtime.runPromise(effect)
     inFlight.add(promise)
     promise.finally(() => inFlight.delete(promise)).catch(() => undefined)
@@ -97,10 +99,8 @@ export const start = (): void => {
             uri: session.document.uri,
             version: session.document.version,
             diagnostics: [
-              ...Document.diagnostics(
-                session.document,
-                session.snapshot,
-                (module) => session.moduleUris.get(module),
+              ...Document.diagnostics(session.document, session.snapshot, (module) =>
+                session.moduleUris.get(module),
               ),
             ],
           }),
@@ -187,11 +187,9 @@ export const start = (): void => {
   connection.onHover(async (parameters) => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return null
-    return Document.hover(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-    ) ?? null
+    return (
+      Document.hover(session.value.document, session.value.snapshot, parameters.position) ?? null
+    )
   })
 
   connection.onDefinition(async (parameters) => {
@@ -216,10 +214,9 @@ export const start = (): void => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return []
     return run(
-      Effect.map(
-        Document.format(session.value.document, session.value.snapshot),
-        (edits) => [...edits],
-      ),
+      Effect.map(Document.format(session.value.document, session.value.snapshot), (edits) => [
+        ...edits,
+      ]),
     )
   })
 

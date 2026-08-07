@@ -55,10 +55,7 @@ export interface Index {
 const identityOfDeclaration = (declaration: DeclarationIndex.MemberFact): Identity =>
   Object.freeze({
     _tag: 'DeclarationTarget',
-    id:
-      declaration.canonical._tag === 'Canonical'
-        ? declaration.canonical.id
-        : declaration.id,
+    id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
   })
 
 const locationOfDeclaration = (
@@ -103,10 +100,7 @@ const locationOfField = (field: DeclarationIndex.FieldFact): DeclarationLocation
       })
     : undefined
 
-const available = (
-  target: Identity,
-  declaration: DeclarationLocation | undefined,
-): Resolution =>
+const available = (target: Identity, declaration: DeclarationLocation | undefined): Resolution =>
   declaration === undefined
     ? Object.freeze({ _tag: 'Unavailable' })
     : Object.freeze({ _tag: 'Available', target, declaration })
@@ -143,7 +137,10 @@ const parameterResolution = (reference: Elaboration.ParameterReferenceFact): Res
 const callResolution = (reference: Elaboration.CallReferenceFact): Resolution => {
   switch (reference._tag) {
     case 'Resolved':
-      return available(identityOfDeclaration(reference.declaration), locationOfDeclaration(reference.declaration))
+      return available(
+        identityOfDeclaration(reference.declaration),
+        locationOfDeclaration(reference.declaration),
+      )
     case 'Missing':
       return Object.freeze({
         _tag: 'Missing',
@@ -385,20 +382,13 @@ export const make = (
           (right.target.origin.end - right.target.origin.start) ||
         left.ordinal - right.ordinal,
     )
-    modules.set(
-      module,
-      Object.freeze(pending.map((entry) => entry.target)),
-    )
+    modules.set(module, Object.freeze(pending.map((entry) => entry.target)))
   }
   return Object.freeze({ _tag: 'SemanticTargetIndex', modules })
 }
 
 /** Returns the deterministic smallest half-open target containing one byte offset. */
-export const at = (
-  self: Index,
-  module: string,
-  offset: number,
-): SemanticTarget | undefined => {
+export const at = (self: Index, module: string, offset: number): SemanticTarget | undefined => {
   const candidates = (self.modules.get(module) ?? []).filter(
     (candidate) => candidate.origin.start <= offset && offset < candidate.origin.end,
   )
