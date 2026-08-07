@@ -183,14 +183,13 @@ export const start = (): void => {
   connection.onDefinition(async (parameters) => {
     const session = await acquire(parameters.textDocument.uri)
     if (Option.isNone(session)) return null
-    return (
-      Document.definition(
-        session.value.document,
-        session.value.snapshot,
-        parameters.position,
-        (module) => session.value.moduleUris.get(module),
-      ) ?? null
+    const definition = Document.definition(
+      session.value.document,
+      session.value.snapshot,
+      parameters.position,
+      (module) => session.value.moduleUris.get(module),
     )
+    return definition === undefined ? null : [definition]
   })
 
   connection.onDocumentSymbol(async (parameters) => {
