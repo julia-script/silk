@@ -19,8 +19,8 @@ const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 
-const installConsumer = (cwd: string): void => {
-  const result = spawnSync('pnpm', ['install'], {
+const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
+  const result = spawnSync('pnpm', ['install', ...(ignoreWorkspace ? ['--ignore-workspace'] : [])], {
     cwd,
     encoding: 'utf8',
   })
@@ -121,10 +121,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/llvm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    installConsumer(consumerRoot, true)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -313,10 +310,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
     )
-    execFileSync('pnpm', ['install', '--offline'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    installConsumer(consumerRoot)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -997,10 +991,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    installConsumer(consumerRoot, true)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
