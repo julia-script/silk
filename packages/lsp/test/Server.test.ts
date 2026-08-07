@@ -208,6 +208,14 @@ it(
             {
               text: `// 🧭
 fn identity(value: I32) -> I32 { return value }
+fn shadow() -> I32 {
+  let value = 1
+  if true {
+    let value = 2
+    return value
+  }
+  return value
+}
 pub fn main() -> I32 { return identity(42) }`,
             },
           ],
@@ -224,7 +232,7 @@ pub fn main() -> I32 { return identity(42) }`,
         method: 'textDocument/definition',
         params: {
           textDocument: { uri },
-          position: { line: 2, character: 'pub fn main() -> I32 { return '.length },
+          position: { line: 10, character: 'pub fn main() -> I32 { return '.length },
         },
       })
       const definitions = (await client.waitFor((message) => response(message, 2))) as Array<{
@@ -234,6 +242,19 @@ pub fn main() -> I32 { return identity(42) }`,
       assert.strictEqual(definitions.length, 1)
       assert.strictEqual(definitions[0]?.targetUri, uri)
       assert.deepEqual(definitions[0]?.targetSelectionRange.start, { line: 1, character: 3 })
+
+      client.send({
+        id: 3,
+        method: 'textDocument/definition',
+        params: {
+          textDocument: { uri },
+          position: { line: 6, character: '    return '.length },
+        },
+      })
+      const shadowed = (await client.waitFor((message) => response(message, 3))) as Array<{
+        targetSelectionRange: { start: { line: number; character: number } }
+      }>
+      assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 5, character: 8 })
 
       client.send({
         method: 'textDocument/didClose',
