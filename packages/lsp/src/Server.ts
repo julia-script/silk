@@ -131,6 +131,11 @@ export const start = (): void => {
         }
       }
     }
+    const currentProject = projects.get(document.workspace)
+    if (currentProject !== undefined && currentProject.sourceRoot !== document.sourceRoot) {
+      yield* currentProject.shutdown()
+      projects.delete(document.workspace)
+    }
     projectByUri.set(text.uri, document.workspace)
     yield* projectFor(document.workspace, document.sourceRoot).open(document)
   })

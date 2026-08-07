@@ -385,6 +385,54 @@ it(
           ? report
           : undefined
       })
+
+      writeFileSync(utilPath, 'pub fn answer() -> I32 { return 10 }')
+      let nextMessage = client.messages.length
+      client.send({
+        method: 'workspace/didChangeWatchedFiles',
+        params: { changes: [{ uri: utilUri, type: 2 }] },
+      })
+      await client.waitFor((message) => {
+        if (client.messages.indexOf(message) < nextMessage) return undefined
+        const report = publishedDiagnosticReport(message, mainUri)
+        return report?.diagnostics.length === 0 ? report : undefined
+      })
+
+      const alternateRoot = join(root, 'alt')
+      mkdirSync(alternateRoot)
+      writeFileSync(join(alternateRoot, 'Entry.silk'), 'pub fn entry() -> I32 { return 0 }')
+      writeFileSync(join(alternateRoot, 'Util.silk'), 'pub fn other() -> I32 { return 11 }')
+      writeFileSync(
+        join(root, 'silk.toml'),
+        '[package]\nname = "navigation"\nroot = "alt/Entry.silk"\nsource-root = "alt"\n',
+      )
+      nextMessage = client.messages.length
+      client.send({
+        method: 'workspace/didChangeWatchedFiles',
+        params: { changes: [{ uri: pathToFileURL(join(root, 'silk.toml')).href, type: 2 }] },
+      })
+      await client.waitFor((message) => {
+        if (client.messages.indexOf(message) < nextMessage) return undefined
+        const report = publishedDiagnosticReport(message, mainUri)
+        return report?.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0014')
+          ? report
+          : undefined
+      })
+
+      const reportsBeforeUnrelated = client.messages.filter(
+        (message) => publishedDiagnosticReport(message, mainUri) !== undefined,
+      ).length
+      client.send({
+        method: 'workspace/didChangeWatchedFiles',
+        params: {
+          changes: [{ uri: pathToFileURL(join(tmpdir(), 'unrelated.silk')).href, type: 2 }],
+        },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const reportsAfterUnrelated = client.messages.filter(
+        (message) => publishedDiagnosticReport(message, mainUri) !== undefined,
+      ).length
+      assert.strictEqual(reportsAfterUnrelated, reportsBeforeUnrelated)
     } finally {
       await client.close()
     }
