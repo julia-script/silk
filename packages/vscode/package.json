@@ -17,6 +17,12 @@
     "onLanguage:silk"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "silk.restartLanguageServer",
+        "title": "Silk: Restart Language Server"
+      }
+    ],
     "languages": [
       {
         "id": "silk",

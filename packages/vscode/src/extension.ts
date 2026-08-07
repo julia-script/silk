@@ -3,12 +3,12 @@
  * documents and hands everything else to `vscode-languageclient`. All language behavior lives
  * in the server, so this file should never grow feature logic.
  */
-import type * as vscode from 'vscode'
+import * as vscode from 'vscode'
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node'
 
 let client: LanguageClient | undefined
 
-export function activate(_context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): void {
   const serverModule = require.resolve('@silk-effect/lsp/bin')
   client = new LanguageClient(
     'silk',
@@ -20,6 +20,10 @@ export function activate(_context: vscode.ExtensionContext): void {
     {
       documentSelector: [{ language: 'silk' }],
     },
+  )
+  // Respawns the server from the current dist, so a rebuilt server lands without a window reload.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('silk.restartLanguageServer', () => client?.restart()),
   )
   void client.start()
 }
