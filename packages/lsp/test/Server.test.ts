@@ -1,6 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assert, it } from '@effect/vitest'
 
 const binPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
@@ -81,6 +83,24 @@ const publishedDiagnostics = (
   return parameters.uri === uri ? parameters.diagnostics : undefined
 }
 
+const publishedDiagnosticReport = (
+  message: Record<string, unknown>,
+  uri: string,
+):
+  | {
+      readonly version?: number
+      readonly diagnostics: ReadonlyArray<Record<string, unknown>>
+    }
+  | undefined => {
+  if (message.method !== 'textDocument/publishDiagnostics') return undefined
+  const parameters = message.params as {
+    uri: string
+    version?: number
+    diagnostics: Array<Record<string, unknown>>
+  }
+  return parameters.uri === uri ? parameters : undefined
+}
+
 const didOpen = (client: Client, uri: string, text: string): void => {
   client.send({
     method: 'textDocument/didOpen',
@@ -101,6 +121,8 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
       capabilities: Record<string, unknown>
     }
     assert.strictEqual(initialized.capabilities.hoverProvider, true)
+    assert.strictEqual(initialized.capabilities.definitionProvider, true)
+    assert.strictEqual(initialized.capabilities.positionEncoding, 'utf-16')
     assert.strictEqual(initialized.capabilities.documentFormattingProvider, true)
     client.send({ method: 'initialized', params: {} })
 
@@ -148,6 +170,89 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
   }
 })
 
+it(
+  'serves exact-version definitions and suppresses superseded diagnostics',
+  { timeout: 30_000 },
+  async () => {
+    const client = connect()
+    try {
+      client.send({
+        id: 1,
+        method: 'initialize',
+        params: {
+          processId: null,
+          rootUri: null,
+          capabilities: {
+            workspace: { didChangeWatchedFiles: { dynamicRegistration: true } },
+          },
+        },
+      })
+      await client.waitFor((message) => response(message, 1))
+      client.send({ method: 'initialized', params: {} })
+      const registration = await client.waitFor((message) =>
+        message.method === 'client/registerCapability' && typeof message.id === 'number'
+          ? { id: message.id, params: message.params }
+          : undefined,
+      )
+      assert.include(JSON.stringify(registration.params), '**/*.silk')
+      assert.include(JSON.stringify(registration.params), '**/silk.toml')
+      client.send({ id: registration.id, result: null })
+
+      const uri = 'file:///silk-lsp-e2e/coherent.silk'
+      didOpen(client, uri, 'pub fn main() -> I32 { return missing() }')
+      client.send({
+        method: 'textDocument/didChange',
+        params: {
+          textDocument: { uri, version: 2 },
+          contentChanges: [
+            {
+              text: `fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return identity(42) }`,
+            },
+          ],
+        },
+      })
+      const report = await client.waitFor((message) => {
+        const candidate = publishedDiagnosticReport(message, uri)
+        return candidate?.version === 2 ? candidate : undefined
+      })
+      assert.deepEqual(report.diagnostics, [])
+
+      client.send({
+        id: 2,
+        method: 'textDocument/definition',
+        params: {
+          textDocument: { uri },
+          position: { line: 1, character: 'pub fn main() -> I32 { return '.length },
+        },
+      })
+      const definitions = (await client.waitFor((message) => response(message, 2))) as Array<{
+        targetUri: string
+        targetSelectionRange: { start: { line: number; character: number } }
+      }>
+      assert.strictEqual(definitions.length, 1)
+      assert.strictEqual(definitions[0]?.targetUri, uri)
+      assert.deepEqual(definitions[0]?.targetSelectionRange.start, { line: 0, character: 3 })
+
+      client.send({
+        method: 'textDocument/didClose',
+        params: { textDocument: { uri } },
+      })
+      const cleared = await client.waitFor((message) => {
+        const candidate = publishedDiagnosticReport(message, uri)
+        return candidate !== undefined &&
+          candidate.version === undefined &&
+          candidate.diagnostics.length === 0
+          ? candidate
+          : undefined
+      })
+      assert.deepEqual(cleared.diagnostics, [])
+    } finally {
+      await client.close()
+    }
+  },
+)
+
 it('refreshes sibling documents when an imported module changes', { timeout: 30_000 }, async () => {
   const client = connect()
   try {
@@ -191,3 +296,97 @@ it('refreshes sibling documents when an imported module changes', { timeout: 30_
     await client.close()
   }
 })
+
+it(
+  'navigates to closed and unsaved cross-file targets and invalidates disk dependencies',
+  { timeout: 30_000 },
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'silk-lsp-e2e-'))
+    const sourceRoot = join(root, 'src')
+    mkdirSync(sourceRoot)
+    writeFileSync(
+      join(root, 'silk.toml'),
+      '[package]\nname = "navigation"\nroot = "src/Main.silk"\n',
+    )
+    const mainPath = join(sourceRoot, 'Main.silk')
+    const utilPath = join(sourceRoot, 'Util.silk')
+    const mainText = 'import Util\npub fn main() -> I32 { return Util.answer() }'
+    writeFileSync(mainPath, mainText)
+    writeFileSync(utilPath, 'pub fn answer() -> I32 { return 7 }')
+    const mainUri = pathToFileURL(mainPath).href
+    const utilUri = pathToFileURL(utilPath).href
+    const client = connect()
+    try {
+      client.send({
+        id: 1,
+        method: 'initialize',
+        params: { processId: null, rootUri: pathToFileURL(root).href, capabilities: {} },
+      })
+      await client.waitFor((message) => response(message, 1))
+      client.send({ method: 'initialized', params: {} })
+      didOpen(client, mainUri, mainText)
+      await client.waitFor((message) => {
+        const report = publishedDiagnosticReport(message, mainUri)
+        return report?.version === 1 && report.diagnostics.length === 0 ? report : undefined
+      })
+
+      const requestDefinition = async (id: number) => {
+        client.send({
+          id,
+          method: 'textDocument/definition',
+          params: {
+            textDocument: { uri: mainUri },
+            position: { line: 1, character: mainText.split('\n')[1]?.indexOf('answer') ?? 0 },
+          },
+        })
+        return (await client.waitFor((message) => response(message, id))) as Array<{
+          targetUri: string
+          targetSelectionRange: { start: { line: number; character: number } }
+        }>
+      }
+
+      const closed = await requestDefinition(2)
+      assert.strictEqual(closed[0]?.targetUri, utilUri)
+      assert.strictEqual(closed[0]?.targetSelectionRange.start.line, 0)
+
+      didOpen(client, utilUri, '\npub fn answer() -> I32 { return 8 }')
+      await client.waitFor((message) => {
+        const report = publishedDiagnosticReport(message, mainUri)
+        return report?.diagnostics.length === 0 ? report : undefined
+      })
+      const unsaved = await requestDefinition(3)
+      assert.strictEqual(unsaved[0]?.targetUri, utilUri)
+      assert.strictEqual(unsaved[0]?.targetSelectionRange.start.line, 1)
+
+      writeFileSync(utilPath, 'pub fn other() -> I32 { return 9 }')
+      client.send({
+        method: 'workspace/didChangeWatchedFiles',
+        params: { changes: [{ uri: utilUri, type: 2 }] },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const staleDiskDiagnostics = client.messages.flatMap((message) => {
+        const report = publishedDiagnosticReport(message, mainUri)
+        return report === undefined ? [] : report.diagnostics
+      })
+      assert.isFalse(staleDiskDiagnostics.some((diagnostic) => diagnostic.code === 'SEM0004'))
+
+      client.send({
+        method: 'textDocument/didClose',
+        params: { textDocument: { uri: utilUri } },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      client.send({
+        method: 'workspace/didChangeWatchedFiles',
+        params: { changes: [{ uri: utilUri, type: 2 }] },
+      })
+      await client.waitFor((message) => {
+        const report = publishedDiagnosticReport(message, mainUri)
+        return report?.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0004')
+          ? report
+          : undefined
+      })
+    } finally {
+      await client.close()
+    }
+  },
+)
