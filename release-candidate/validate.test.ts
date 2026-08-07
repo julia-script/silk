@@ -19,15 +19,13 @@ const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 
-const installOffline = (cwd: string): void => {
-  const result = spawnSync('pnpm', ['install', '--offline'], {
+const installConsumer = (cwd: string): void => {
+  const result = spawnSync('pnpm', ['install'], {
     cwd,
     encoding: 'utf8',
   })
   if (result.status === 0) return
-  throw new Error(
-    `pnpm install --offline failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`,
-  )
+  throw new Error(`pnpm install failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`)
 }
 
 test('the llvm release candidate is a self-contained ESM package', () => {
@@ -872,7 +870,7 @@ test('the compiler CLI release candidate installs with its project-first command
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
-    installOffline(consumerRoot)
+    installConsumer(consumerRoot)
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk')
     const help = execFileSync(executable, ['--help'], { cwd: consumerRoot, encoding: 'utf8' })
@@ -1137,7 +1135,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
-    installOffline(consumerRoot)
+    installConsumer(consumerRoot)
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk-lsp')
     const initialize = JSON.stringify({
