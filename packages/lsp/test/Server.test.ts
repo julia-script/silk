@@ -225,7 +225,10 @@ pub fn main() -> I32 { return identity(42) }`,
         const candidate = publishedDiagnosticReport(message, uri)
         return candidate?.version === 2 ? candidate : undefined
       })
-      assert.deepEqual(report.diagnostics, [])
+      assert.deepEqual(
+        report.diagnostics.map((diagnostic) => diagnostic.code),
+        ['SEM0008'],
+      )
 
       client.send({
         id: 2,
