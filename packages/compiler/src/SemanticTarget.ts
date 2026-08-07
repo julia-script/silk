@@ -184,10 +184,7 @@ const push = (
 }
 
 const directIdentifier = (syntax: SyntaxTree.Node): Token.Token | undefined =>
-  syntax.children.find(
-    (element): element is Token.Token =>
-      SyntaxTree.isToken(element) && element.kind === 'Identifier',
-  )
+  SyntaxTree.tokens(syntax).find((token) => token.kind === 'Identifier')
 
 const lastIdentifier = (syntax: SyntaxTree.Node): Token.Token | undefined =>
   SyntaxTree.tokens(syntax)
