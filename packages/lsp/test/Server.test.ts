@@ -225,10 +225,7 @@ pub fn main() -> I32 { return identity(42) }`,
         const candidate = publishedDiagnosticReport(message, uri)
         return candidate?.version === 2 ? candidate : undefined
       })
-      assert.deepEqual(
-        report.diagnostics.map((diagnostic) => diagnostic.code),
-        ['SEM0008'],
-      )
+      assert.deepEqual(report.diagnostics, [])
 
       client.send({
         id: 2,
@@ -257,9 +254,7 @@ pub fn main() -> I32 { return identity(42) }`,
       const shadowed = (await client.waitFor((message) => response(message, 3))) as Array<{
         targetSelectionRange: { start: { line: number; character: number } }
       }>
-      // Rebinding is currently diagnosed and recovery selects the original declaration. The LSP
-      // follows that compiler identity rather than inventing legal shadowing semantics.
-      assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 3, character: 6 })
+      assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 5, character: 8 })
 
       client.send({
         method: 'textDocument/didClose',
