@@ -42,6 +42,6 @@
 ## 6. Verification and Release Validation
 
 - [x] 6.1 Run focused compiler and LSP tests and resolve all semantic query, scheduler, protocol, and lifecycle failures
-- [ ] 6.2 Run `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test` in repository verification order
+- [x] 6.2 Run `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test` in repository verification order
 - [ ] 6.3 Run `pnpm check` and report any failure with whether it predates this change
 - [ ] 6.4 Run `pnpm release:candidate` because published compiler and LSP package contents change
