@@ -206,7 +206,8 @@ it(
           textDocument: { uri, version: 2 },
           contentChanges: [
             {
-              text: `fn identity(value: I32) -> I32 { return value }
+              text: `// 🧭
+fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(42) }`,
             },
           ],
@@ -223,7 +224,7 @@ pub fn main() -> I32 { return identity(42) }`,
         method: 'textDocument/definition',
         params: {
           textDocument: { uri },
-          position: { line: 1, character: 'pub fn main() -> I32 { return '.length },
+          position: { line: 2, character: 'pub fn main() -> I32 { return '.length },
         },
       })
       const definitions = (await client.waitFor((message) => response(message, 2))) as Array<{
@@ -232,7 +233,7 @@ pub fn main() -> I32 { return identity(42) }`,
       }>
       assert.strictEqual(definitions.length, 1)
       assert.strictEqual(definitions[0]?.targetUri, uri)
-      assert.deepEqual(definitions[0]?.targetSelectionRange.start, { line: 0, character: 3 })
+      assert.deepEqual(definitions[0]?.targetSelectionRange.start, { line: 1, character: 3 })
 
       client.send({
         method: 'textDocument/didClose',
