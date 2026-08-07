@@ -1,10 +1,10 @@
 ## 1. Compiler Semantic Target Queries
 
-- [ ] 1.1 Add failing `@effect/vitest` coverage for local, parameter, imported, qualified, field, callable, unavailable, damaged, nested, and half-open position queries through `Analysis`
-- [ ] 1.2 Add the immutable semantic-target actor with tagged target identities, explicit recovery outcomes, origin spans, and declaration-name locations
-- [ ] 1.3 Collect deterministic per-module semantic target entries from existing recovered analysis facts and resolve their declaration locations without spelling-based lookup
-- [ ] 1.4 Store the semantic target index in `Analysis.Snapshot` and expose the position and declaration-location queries through the `Analysis` facade
-- [ ] 1.5 Verify repeated snapshots, source-order tie breaking, cross-module locations, and recovery isolation in compiler tests
+- [x] 1.1 Add failing `@effect/vitest` coverage for local, parameter, imported, qualified, field, callable, unavailable, damaged, nested, and half-open position queries through `Analysis`
+- [x] 1.2 Add the immutable semantic-target actor with tagged target identities, explicit recovery outcomes, origin spans, and declaration-name locations
+- [x] 1.3 Collect deterministic per-module semantic target entries from existing recovered analysis facts and resolve their declaration locations without spelling-based lookup
+- [x] 1.4 Store the semantic target index in `Analysis.Snapshot` and expose the position and declaration-location queries through the `Analysis` facade
+- [x] 1.5 Verify repeated snapshots, source-order tie breaking, cross-module locations, and recovery isolation in compiler tests
 
 ## 2. Project Identity and Session Scheduling
 
