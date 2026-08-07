@@ -1,0 +1,171 @@
+/*
+ * Interpreter-lab shell.
+ *
+ * The row grammar and its colors come from the shared labs theme; this file only lays out the
+ * bar, the listing column, and the inspector stack.
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--wb-bg-deep);
+  color: var(--wb-ink);
+  font-family: var(--wb-font);
+  font-size: 11px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  background: var(--wb-bg-bar);
+  border-bottom: 1px solid var(--wb-hairline-strong);
+}
+
+.title {
+  font-weight: 700;
+}
+
+.subtitle {
+  color: var(--wb-ink-4);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--wb-ink-3);
+}
+
+.select,
+.input {
+  height: 20px;
+  padding: 0 4px;
+  background: var(--wb-bg-pane);
+  border: 1px solid var(--wb-hairline-strong);
+  border-radius: 2px;
+  color: var(--wb-ink);
+  font: inherit;
+}
+
+.input {
+  width: 56px;
+}
+
+.button {
+  height: 20px;
+  padding: 0 8px;
+  background: var(--wb-bg-pane);
+  border: 1px solid var(--wb-hairline-strong);
+  border-radius: 2px;
+  color: var(--wb-ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--wb-hover);
+  color: var(--wb-ink);
+}
+
+.button:disabled {
+  color: var(--wb-ink-4);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background: var(--wb-hairline-strong);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--wb-strip-h);
+  padding: 0 10px;
+  background: var(--wb-bg-strip);
+  border-bottom: 1px solid var(--wb-hairline);
+  color: var(--wb-ink-3);
+}
+
+.status[data-tone='ok'] {
+  color: var(--wb-green-ink);
+}
+
+.status[data-tone='warn'] {
+  color: var(--wb-error-ink);
+}
+
+.status[data-tone='run'] {
+  color: var(--wb-violet);
+}
+
+.hint {
+  color: var(--wb-ink-4);
+}
+
+.main {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr);
+}
+
+.listing {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--wb-bg-pane);
+  border-right: 1px solid var(--wb-hairline-strong);
+}
+
+.inspectors {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  background: var(--wb-bg-deep);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 76px;
+  flex: 1;
+  border-bottom: 1px solid var(--wb-hairline);
+  background: var(--wb-bg-pane);
+}
+
+.paneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--wb-bar-h);
+  padding: 0 8px;
+  background: var(--wb-bg-header);
+  border-bottom: 1px solid var(--wb-hairline);
+  color: var(--wb-ink-2);
+  font-weight: 700;
+}
+
+.paneMeta {
+  color: var(--wb-ink-4);
+  font-weight: 400;
+}
+
+.empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--wb-ink-4);
+}
