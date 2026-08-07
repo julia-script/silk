@@ -1,7 +1,7 @@
 {
   "name": "silk-language",
   "displayName": "Silk Language",
-  "description": "Syntax highlighting for Silk Effect source files.",
+  "description": "Syntax highlighting and language server support for Silk Effect source files.",
   "version": "0.0.0",
   "private": true,
   "publisher": "silk-effect",
@@ -11,6 +11,10 @@
   },
   "categories": [
     "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:silk"
   ],
   "contributes": {
     "languages": [
@@ -32,5 +36,20 @@
         "path": "./syntaxes/silk.tmLanguage.json"
       }
     ]
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@silk-effect/lsp": "workspace:*",
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/vscode": "^1.90.0"
   }
 }

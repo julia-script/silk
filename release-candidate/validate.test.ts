@@ -1099,6 +1099,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
       './LineIndex',
       './Server',
       './Workspace',
+      './bin',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/bin.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)

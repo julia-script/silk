@@ -36,6 +36,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./bin": "./dist/bin.js",
     "./Document": {
       "types": "./dist/Document.d.ts",
       "import": "./dist/Document.js"
