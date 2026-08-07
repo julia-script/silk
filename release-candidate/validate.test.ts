@@ -20,10 +20,14 @@ const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 
 const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
-  const result = spawnSync('pnpm', ['install', ...(ignoreWorkspace ? ['--ignore-workspace'] : [])], {
-    cwd,
-    encoding: 'utf8',
-  })
+  const result = spawnSync(
+    'pnpm',
+    ['install', '--ignore-scripts', ...(ignoreWorkspace ? ['--ignore-workspace'] : [])],
+    {
+      cwd,
+      encoding: 'utf8',
+    },
+  )
   if (result.status === 0) return
   throw new Error(`pnpm install failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`)
 }
