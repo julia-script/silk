@@ -329,7 +329,7 @@ it.effect('answers local, parameter, callable, field, and half-open semantic tar
     const source = `struct Pair { left: I32 right: I32 }
 fn identity(value: I32) -> I32 {
   let local = value
-  let pair = Pair { left: local right: 0 }
+  let pair = Pair { left: local, right: 0 }
   return pair.left
 }
 pub fn main() -> I32 { return identity(42) }`
