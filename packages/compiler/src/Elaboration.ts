@@ -4774,6 +4774,21 @@ const bindingName = (
     : Object.freeze({ _tag: 'Present' as const, spelling: spelling(source, token), token })
 }
 
+const scopeSpanFor = (scope: Scope, spellingText: string): SourceSpan.SourceSpan | undefined => {
+  const binding = scope.bindings.findLast(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spellingText,
+  )
+  if (binding?.name._tag === 'Present') return binding.name.token.span
+  const patternBinding = scope.patternBindings.findLast(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spellingText,
+  )
+  if (patternBinding?.name._tag === 'Present') return patternBinding.name.token.span
+  const parameter = scope.parameters.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spellingText,
+  )
+  return parameter?.name._tag === 'Present' ? parameter.name.token.span : undefined
+}
+
 interface BodyContext {
   readonly source: SourceFile.SourceFile
   readonly declaration: DeclarationFact
