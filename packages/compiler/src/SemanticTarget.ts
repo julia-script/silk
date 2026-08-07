@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
@@ -194,6 +194,15 @@ const lastIdentifier = (syntax: SyntaxTree.Node): Token.Token | undefined =>
     .filter((token) => token.kind === 'Identifier')
     .at(-1)
 
+const identifierTokens = (syntax: SyntaxTree.Element): ReadonlyArray<Token.Token> =>
+  SyntaxTree.isToken(syntax)
+    ? syntax.kind === 'Identifier'
+      ? [syntax]
+      : []
+    : SyntaxTree.isNode(syntax)
+      ? SyntaxTree.tokens(syntax).filter((token) => token.kind === 'Identifier')
+      : []
+
 const collectExpression = (
   expression: Elaboration.ExpressionFact,
   pending: Array<PendingTarget>,
@@ -366,9 +375,7 @@ export const make = (
       if (imported._tag !== 'Available') continue
       for (const binding of imported.bindings) {
         if (binding._tag !== 'ImportedMember' && binding._tag !== 'Unavailable') continue
-        for (const token of SyntaxTree.tokens(binding.syntax).filter(
-          (candidate) => candidate.kind === 'Identifier',
-        )) {
+        for (const token of identifierTokens(binding.syntax)) {
           push(pending, token.span, importResolution(binding, index))
         }
       }
