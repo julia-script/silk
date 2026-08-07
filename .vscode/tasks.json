@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Silk: Run current file",
+      "detail": "Compile the active .silk file with build-exe (source root = its directory) and run it.",
+      "type": "shell",
+      "command": "out=$(mktemp -t silk-run) && node \"${workspaceFolder}/packages/compiler-cli/dist/bin.js\" build-exe \"${file}\" --source-root \"${fileDirname}\" --output \"$out\" && \"$out\"; echo \"exit: $?\"; rm -f \"$out\"",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
