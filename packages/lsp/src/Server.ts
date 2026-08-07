@@ -33,6 +33,7 @@ export const start = (): void => {
   >()
   const projectByUri = new Map<string, string>()
   const inFlight = new Set<Promise<unknown>>()
+  const documentUpdates = new Set<Promise<unknown>>()
   let supportsDynamicWatchers = false
   let watcherRegistration: { readonly dispose: () => void } | undefined
 
@@ -135,7 +136,10 @@ export const start = (): void => {
   })
 
   documents.onDidChangeContent(({ document }) => {
-    run(synchronize(document)).catch((error) => {
+    const update = run(synchronize(document))
+    documentUpdates.add(update)
+    update.finally(() => documentUpdates.delete(update)).catch(() => undefined)
+    update.catch((error) => {
       connection.console.error(`silk-lsp failed to analyze ${document.uri}: ${String(error)}`)
     })
   })
@@ -145,8 +149,8 @@ export const start = (): void => {
     projectByUri.delete(document.uri)
     if (workspace !== undefined) {
       const project = projects.get(workspace)
-      if (project !== undefined)
-        run(
+      if (project !== undefined) {
+        const update = run(
           Effect.gen(function* () {
             yield* project.close(document.uri)
             if (project.documents().length === 0) {
@@ -154,20 +158,25 @@ export const start = (): void => {
               projects.delete(workspace)
             }
           }),
-        ).catch((error) => {
+        )
+        documentUpdates.add(update)
+        update.finally(() => documentUpdates.delete(update)).catch(() => undefined)
+        update.catch((error) => {
           connection.console.error(`silk-lsp failed to close ${document.uri}: ${String(error)}`)
         })
+      }
     }
     void connection.sendDiagnostics({ uri: document.uri, diagnostics: [] })
   })
 
-  const acquire = (uri: string) => {
+  const acquire = async (uri: string) => {
+    await Promise.all([...documentUpdates])
     const text = documents.get(uri)
     const workspace = projectByUri.get(uri)
     const project = workspace === undefined ? undefined : projects.get(workspace)
     return text === undefined || project === undefined
-      ? Promise.resolve(Option.none<ProjectSession.AnalyzedDocument>())
-      : run(project.acquire(uri, text.version))
+      ? Option.none<ProjectSession.AnalyzedDocument>()
+      : await run(project.acquire(uri, text.version))
   }
 
   connection.onHover(async (parameters) => {
@@ -210,7 +219,7 @@ export const start = (): void => {
   })
 
   connection.onDidChangeWatchedFiles(({ changes }) => {
-    run(
+    const update = run(
       Effect.gen(function* () {
         const path = yield* Path.Path
         for (const change of changes) {
@@ -247,7 +256,10 @@ export const start = (): void => {
           }
         }
       }),
-    ).catch((error) => {
+    )
+    documentUpdates.add(update)
+    update.finally(() => documentUpdates.delete(update)).catch(() => undefined)
+    update.catch((error) => {
       connection.console.error(`silk-lsp failed to process watched files: ${String(error)}`)
     })
   })
