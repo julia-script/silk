@@ -658,7 +658,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
             layout._tag === 'Available'
               ? `${layout.value.target.id} · ${layout.value.entries.length} runtime entries`
               : layout.error.message,
-          diagnostics: 0,
+          diagnostics: countFor('layout'),
         },
         {
           phase: 'MIR lowering',

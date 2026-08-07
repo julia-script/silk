@@ -29,7 +29,7 @@ export interface InfixInfo {
 }
 
 /** A compiler-known actor selected by operator elaboration. */
-export type Actor = 'I32' | 'Bool'
+export type Actor = 'I32' | 'Usize' | 'Bool'
 
 /** The canonical actor operation represented by one surface operator. */
 export interface Target {
@@ -137,7 +137,10 @@ export const target = (self: Prefix | Infix, equalityActor: Actor = 'I32'): Targ
       operation: self === 'Equals' ? 'equals' : 'notEquals',
     })
   }
-  return fixedTargets[self]
+  const fixed = fixedTargets[self]
+  return equalityActor === 'Usize' && fixed.actor === 'I32' && self !== 'Negate'
+    ? Object.freeze({ actor: 'Usize', operation: fixed.operation })
+    : fixed
 }
 
 /** The binding power of prefix operators. */

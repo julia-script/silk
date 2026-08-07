@@ -91,7 +91,7 @@ export type IntegerExpressionFact =
   | {
       readonly _tag: 'Available'
       readonly type: SemanticType
-      readonly value: number
+      readonly value: number | bigint
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Node
     }
@@ -633,6 +633,10 @@ const availableI32ExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
   type: 'I32',
 })
+const availableUsizeExpressionType: ExpressionTypeFact = Object.freeze({
+  _tag: 'Available',
+  type: 'Usize',
+})
 const availableBoolExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
   type: 'Bool',
@@ -640,9 +644,11 @@ const availableBoolExpressionType: ExpressionTypeFact = Object.freeze({
 const availableExpressionType = (type: SemanticType): ExpressionTypeFact =>
   type === 'I32'
     ? availableI32ExpressionType
-    : type === 'Bool'
-      ? availableBoolExpressionType
-      : Object.freeze({ _tag: 'Available', type })
+    : type === 'Usize'
+      ? availableUsizeExpressionType
+      : type === 'Bool'
+        ? availableBoolExpressionType
+        : Object.freeze({ _tag: 'Available', type })
 const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
 
 const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
@@ -739,6 +745,12 @@ const signedI32Value = (bytes: Uint8Array, negative: boolean): Option.Option<num
   return Option.some(negative ? -value : value)
 }
 
+const unsignedMagnitude = (bytes: Uint8Array): bigint => {
+  let value = 0n
+  for (const byte of bytes) value = value * 10n + BigInt(byte - 0x30)
+  return value
+}
+
 interface IntegerResult {
   readonly fact: IntegerExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -781,7 +793,11 @@ const argumentFact = (
     syntax: expression.syntax,
   })
 
-const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): IntegerResult => {
+const analyzeInteger = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  expected?: SemanticType,
+): IntegerResult => {
   const token = directToken(node, 'DecimalInteger')
   if (token === undefined) {
     return Object.freeze({
@@ -806,6 +822,32 @@ const analyzeInteger = (source: SourceFile.SourceFile, node: SyntaxTree.Node): I
     SourceFile.slice(source, token.span),
     () => new RangeError(`Semantic integer span does not belong to source ${source.id}`),
   )
+  if (expected === 'Usize') {
+    const digits = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+    if (negative) {
+      const tokenSpelling = `-${digits}`
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'OutOfRange',
+          type: 'Usize',
+          spelling: tokenSpelling,
+          token,
+          syntax: node,
+        }),
+        diagnostics: Object.freeze([Diagnostic.usizeNegative(tokenSpelling, literalSpan)]),
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Available',
+        type: 'Usize',
+        value: unsignedMagnitude(bytes),
+        token,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
   const value = signedI32Value(bytes, negative)
   if (Option.isSome(value)) {
     return Object.freeze({
@@ -1951,7 +1993,9 @@ const analyzeIndexProjection = (
   if (array !== undefined && index.type === 'I32') {
     const literal =
       index.fact._tag === 'Integer' && index.fact.integer._tag === 'Available'
-        ? index.fact.integer.value
+        ? typeof index.fact.integer.value === 'number'
+          ? index.fact.integer.value
+          : undefined
         : undefined
     if (literal === undefined) bounds = Object.freeze({ _tag: 'Runtime', length: array.length })
     else if (literal < 0 || literal >= array.length) {
@@ -2147,6 +2191,7 @@ function analyzeArguments(
   const first = identifiers.at(0)
   const second = identifiers.at(1)
   let target: DeclarationFact | undefined
+  let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   if (first !== undefined && second === undefined) {
     const name = spelling(source, first)
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
@@ -2158,17 +2203,14 @@ function analyzeArguments(
           ? local.declaration
           : undefined
   } else if (first !== undefined && second !== undefined) {
-    const qualifier = NameResolution.lookup(
-      resolution.scope,
-      resolution.index,
-      spelling(source, first),
-    )
-    if (qualifier._tag === 'Namespace') {
-      const member = DeclarationIndex.lookup(
-        resolution.index,
-        qualifier.module,
-        spelling(source, second),
-      )
+    const qualifierSpelling = spelling(source, first)
+    const memberSpelling = spelling(source, second)
+    const qualifier = NameResolution.lookup(resolution.scope, resolution.index, qualifierSpelling)
+    if (qualifier._tag === 'Intrinsic') {
+      builtinParameters =
+        builtinActors[qualifierSpelling]?.[memberSpelling]?.parameters ?? Object.freeze([])
+    } else if (qualifier._tag === 'Namespace') {
+      const member = DeclarationIndex.lookup(resolution.index, qualifier.module, memberSpelling)
       target = member._tag === 'Resolved' ? member.declaration : undefined
     }
   }
@@ -2182,11 +2224,13 @@ function analyzeArguments(
       ? Type.substitution(declaredTypeParameters, explicitTypes)
       : undefined
   const expectedTypes = Object.freeze(
-    (target?.parameters ?? []).map((parameter) =>
-      parameter.declaredType._tag === 'Resolved'
-        ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
-        : undefined,
-    ),
+    builtinParameters.length > 0
+      ? builtinParameters
+      : (target?.parameters ?? []).map((parameter) =>
+          parameter.declaredType._tag === 'Resolved'
+            ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
+            : undefined,
+        ),
   )
   return analyzeArgumentNodes(
     source,
@@ -2642,6 +2686,63 @@ const builtinActors: Readonly<
     greaterThan: comparisonI32('GreaterThan'),
     greaterOrEqual: comparisonI32('GreaterOrEqual'),
   }),
+  Usize: Object.freeze({
+    add: Object.freeze({
+      operation: 'Add' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Usize' as const,
+    }),
+    subtract: Object.freeze({
+      operation: 'Subtract' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Usize' as const,
+    }),
+    multiply: Object.freeze({
+      operation: 'Multiply' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Usize' as const,
+    }),
+    divide: Object.freeze({
+      operation: 'Divide' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Usize' as const,
+    }),
+    remainder: Object.freeze({
+      operation: 'Remainder' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Usize' as const,
+    }),
+    equals: Object.freeze({
+      operation: 'Equals' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Bool' as const,
+    }),
+    notEquals: Object.freeze({
+      operation: 'NotEquals' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Bool' as const,
+    }),
+    lessThan: Object.freeze({
+      operation: 'LessThan' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Bool' as const,
+    }),
+    lessOrEqual: Object.freeze({
+      operation: 'LessOrEqual' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Bool' as const,
+    }),
+    greaterThan: Object.freeze({
+      operation: 'GreaterThan' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Bool' as const,
+    }),
+    greaterOrEqual: Object.freeze({
+      operation: 'GreaterOrEqual' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: 'Bool' as const,
+    }),
+  }),
   Bool: Object.freeze({
     equals: comparisonBool('Equals'),
     notEquals: comparisonBool('NotEquals'),
@@ -2919,6 +3020,7 @@ const analyzeOperatorExpression = (
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  expected?: SemanticType,
 ): ExpressionResult => {
   const operatorToken = node.children.find(
     (element): element is Token.Token =>
@@ -2933,14 +3035,20 @@ const analyzeOperatorExpression = (
       : node.kind === 'PrefixExpression'
         ? Operator.prefix(operatorToken.kind)
         : Operator.infix(operatorToken.kind)?.operator
-  const argumentsResult = analyzeArgumentNodes(
+  const operandNodes = node.children.filter(isExpressionNode)
+  const initialExpected =
+    expected === 'Usize' && node.kind === 'InfixExpression'
+      ? Object.freeze(operandNodes.map(() => 'Usize' as const))
+      : Object.freeze([])
+  let argumentsResult = analyzeArgumentNodes(
     source,
     node,
-    node.children.filter(isExpressionNode),
+    operandNodes,
     declarations,
     declaration,
     scope,
     resolution,
+    initialExpected,
   )
   if (operator === undefined || operatorToken === undefined) {
     const reference: CallReferenceFact = Object.freeze({
@@ -2967,8 +3075,30 @@ const analyzeOperatorExpression = (
   }
 
   const firstType = argumentsResult.facts.at(0)?.type
-  const equalityActor =
-    firstType?._tag === 'Available' && firstType.type === 'Bool' ? 'Bool' : 'I32'
+  if (
+    initialExpected.length === 0 &&
+    firstType?._tag === 'Available' &&
+    (firstType.type === 'Usize' || firstType.type === 'Bool') &&
+    operandNodes.length > 1
+  ) {
+    argumentsResult = analyzeArgumentNodes(
+      source,
+      node,
+      operandNodes,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      Object.freeze(operandNodes.map(() => firstType.type)),
+    )
+  }
+  const selectedFirstType = argumentsResult.facts.at(0)?.type
+  const equalityActor: Operator.Actor =
+    selectedFirstType?._tag === 'Available' && selectedFirstType.type === 'Bool'
+      ? 'Bool'
+      : selectedFirstType?._tag === 'Available' && selectedFirstType.type === 'Usize'
+        ? 'Usize'
+        : 'I32'
   const target = Operator.target(operator, equalityActor)
   const signature = builtinActors[target.actor]?.[target.operation]
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
@@ -3035,12 +3165,6 @@ const analyzePipelineExpression = (
           scope,
           resolution,
         )
-  const argumentsList = Object.freeze([
-    ...(input === undefined ? [] : [argumentFact(declaration, node.span, input.fact, 0)]),
-    ...explicit.facts.map((argument, index) =>
-      argumentFact(declaration, node.span, argument.expression, index + 1),
-    ),
-  ])
   const identifiers = target?.children.filter(
     (element): element is Token.Token =>
       SyntaxTree.isToken(element) && element.kind === 'Identifier',
@@ -3056,6 +3180,39 @@ const analyzePipelineExpression = (
           }),
         })
       : resolveQualifiedReference(source, qualifierToken, memberToken, resolution)
+  const contextualInput =
+    resolved.reference._tag === 'ResolvedBuiltin' && inputNode !== undefined
+      ? analyzeExpression(
+          source,
+          inputNode,
+          declarations,
+          declaration,
+          scope,
+          resolution,
+          resolved.reference.parameters.at(0),
+        )
+      : input
+  const contextualExplicit =
+    resolved.reference._tag === 'ResolvedBuiltin' && argumentList !== undefined
+      ? analyzeArgumentNodes(
+          source,
+          node,
+          argumentList.children.filter(isRecursiveArgumentNode),
+          declarations,
+          declaration,
+          scope,
+          resolution,
+          resolved.reference.parameters.slice(1),
+        )
+      : explicit
+  const argumentsList = Object.freeze([
+    ...(contextualInput === undefined
+      ? []
+      : [argumentFact(declaration, node.span, contextualInput.fact, 0)]),
+    ...contextualExplicit.facts.map((argument, index) =>
+      argumentFact(declaration, node.span, argument.expression, index + 1),
+    ),
+  ])
   const contract = analyzeCallContract(
     node,
     resolved.reference,
@@ -3074,7 +3231,7 @@ const analyzePipelineExpression = (
     fact: Object.freeze({
       _tag: 'Pipeline',
       input:
-        input?.fact ??
+        contextualInput?.fact ??
         Object.freeze({
           _tag: 'Integer',
           integer: Object.freeze({ _tag: 'Unavailable', syntax: node }),
@@ -3093,8 +3250,8 @@ const analyzePipelineExpression = (
       syntax: node,
     }),
     diagnostics: Object.freeze([
-      ...(input?.diagnostics ?? []),
-      ...explicit.diagnostics,
+      ...(contextualInput?.diagnostics ?? []),
+      ...contextualExplicit.diagnostics,
       ...(resolved.diagnostic === undefined ? [] : [resolved.diagnostic]),
       ...contract.diagnostics,
     ]),
@@ -3128,14 +3285,14 @@ function analyzeExpression(
   }
 
   if (node.kind === 'IntegerLiteralExpression') {
-    const integer = analyzeInteger(source, node)
+    const integer = analyzeInteger(source, node, expected)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Integer',
         integer: integer.fact,
         type:
           integer.fact._tag === 'Available'
-            ? availableI32ExpressionType
+            ? availableExpressionType(integer.fact.type)
             : unavailableExpressionType,
         syntax: node,
       }),
@@ -3203,7 +3360,15 @@ function analyzeExpression(
   }
 
   if (node.kind === 'PrefixExpression' || node.kind === 'InfixExpression') {
-    return analyzeOperatorExpression(source, node, declarations, declaration, scope, resolution)
+    return analyzeOperatorExpression(
+      source,
+      node,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expected,
+    )
   }
 
   if (node.kind === 'PipelineExpression') {

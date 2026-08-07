@@ -18,6 +18,12 @@ export interface I32Value {
   readonly value: number
 }
 
+/** An exact target-sized unsigned integer, independent of host number precision. */
+export interface UsizeValue {
+  readonly _tag: 'UsizeValue'
+  readonly value: bigint
+}
+
 export interface AggregateValue {
   readonly _tag: 'AggregateValue'
   readonly type: Type.Nominal
@@ -50,7 +56,7 @@ export interface UnionValue {
 }
 
 /** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value = I32Value | AggregateValue | ArrayValue | SliceValue | UnionValue
+export type Value = I32Value | UsizeValue | AggregateValue | ArrayValue | SliceValue | UnionValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -260,6 +266,8 @@ type Step =
   | { readonly _tag: 'Blocked'; readonly reason: BlockedReason }
 
 const value = (input: number): I32Value => Object.freeze({ _tag: 'I32Value', value: input })
+const usizeValue = (input: bigint): UsizeValue =>
+  Object.freeze({ _tag: 'UsizeValue', value: input })
 
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
@@ -327,6 +335,14 @@ function executeFunction(
     const found = read(local).value
     if (found._tag !== 'I32Value') {
       throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as a scalar`)
+    }
+    return found
+  }
+
+  const readInteger = (local: Mir.LocalId): I32Value | UsizeValue => {
+    const found = read(local).value
+    if (found._tag !== 'I32Value' && found._tag !== 'UsizeValue') {
+      throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as an integer`)
     }
     return found
   }
@@ -735,7 +751,10 @@ function executeFunction(
           }
           case 'Literal':
             write(operation.destination, {
-              value: value(operation.value),
+              value:
+                operation.type._tag === 'Usize'
+                  ? usizeValue(BigInt(operation.value))
+                  : value(Number(operation.value)),
               fromCall: false,
             })
             break
@@ -817,8 +836,14 @@ function executeFunction(
             break
           }
           case 'Binary': {
-            const left = BigInt(readI32(operation.left).value)
-            const right = BigInt(readI32(operation.right).value)
+            const leftValue = readInteger(operation.left)
+            const rightValue = readInteger(operation.right)
+            if (leftValue._tag !== rightValue._tag) {
+              throw new RangeError('MIR verifier allowed mixed integer operands')
+            }
+            const unsigned = leftValue._tag === 'UsizeValue'
+            const left = BigInt(leftValue.value)
+            const right = BigInt(rightValue.value)
             if (
               operation.operator === 'Equals' ||
               operation.operator === 'NotEquals' ||
@@ -866,16 +891,22 @@ function executeFunction(
                     : operation.operator === 'Divide'
                       ? left / right
                       : left % right
-            if (exact < -2147483648n || exact > 2147483647n) {
+            const maximum =
+              program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+            if (
+              (unsigned && exact < 0n) ||
+              (unsigned && exact > maximum) ||
+              (!unsigned && (exact < -2147483648n || exact > 2147483647n))
+            ) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
-                reason: 'arithmetic overflow',
+                reason: unsigned && exact < 0n ? 'arithmetic underflow' : 'arithmetic overflow',
                 span: operation.provenance.span,
               })
             }
             write(operation.destination, {
-              value: value(Number(exact)),
+              value: unsigned ? usizeValue(exact) : value(Number(exact)),
               fromCall: false,
             })
             break

@@ -2,7 +2,7 @@ import type * as SourceSpan from './SourceSpan.js'
 import type * as Token from './Token.js'
 
 /** The compiler phase that originated a diagnostic. */
-export type Phase = 'lexical' | 'parser' | 'module' | 'semantic' | 'ownership'
+export type Phase = 'lexical' | 'parser' | 'module' | 'semantic' | 'ownership' | 'layout'
 
 const phaseRank: Readonly<Record<Phase, number>> = Object.freeze({
   lexical: 0,
@@ -10,6 +10,7 @@ const phaseRank: Readonly<Record<Phase, number>> = Object.freeze({
   module: 2,
   semantic: 3,
   ownership: 4,
+  layout: 5,
 })
 
 /** Stable diagnostic code for a maximal unsupported byte region. */
@@ -114,6 +115,8 @@ export const invalidBorrowOperandCode = 'SEM0056' as const
 export const exclusiveBorrowRequiresMutableCode = 'SEM0057' as const
 export const invalidSliceReborrowCode = 'SEM0058' as const
 export const implicitSliceDecayCode = 'SEM0059' as const
+/** Stable code for a negative decimal literal contextualized as unsigned `Usize`. */
+export const usizeNegativeCode = 'SEM0060' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -128,6 +131,9 @@ export const invalidMatchScrutineePlaceCode = 'OWN0009' as const
 export const conflictingSliceLoanCode = 'OWN0010' as const
 export const ownerAccessDuringLoanCode = 'OWN0011' as const
 export const borrowedMoveCode = 'OWN0012' as const
+
+/** Stable code for an exact `Usize` magnitude outside the selected target word. */
+export const usizeTargetOutOfRangeCode = 'LAY0001' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
@@ -197,6 +203,7 @@ export type Code =
   | typeof exclusiveBorrowRequiresMutableCode
   | typeof invalidSliceReborrowCode
   | typeof implicitSliceDecayCode
+  | typeof usizeNegativeCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -209,6 +216,7 @@ export type Code =
   | typeof conflictingSliceLoanCode
   | typeof ownerAccessDuringLoanCode
   | typeof borrowedMoveCode
+  | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
 export interface DeclarationEntity {
@@ -239,6 +247,14 @@ export type Reason =
       readonly spelling: string
       readonly maximum: 2147483647
       readonly minimum: -2147483648
+    }
+  | { readonly _tag: 'UsizeNegative'; readonly spelling: string }
+  | {
+      readonly _tag: 'UsizeTargetOutOfRange'
+      readonly spelling: string
+      readonly target: string
+      readonly bits: 32 | 64
+      readonly maximum: string
     }
   | {
       readonly _tag: 'DuplicateDeclarationName'
@@ -952,6 +968,43 @@ export const integerOutOfRange = (spelling: string, span: SourceSpan.SourceSpan)
     }),
     span,
   })
+
+/** Creates the target-independent diagnostic for a negative `Usize` literal. */
+export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: usizeNegativeCode,
+    severity: 'error',
+    message: 'Usize literals cannot be negative',
+    reason: Object.freeze({ _tag: 'UsizeNegative', spelling }),
+    span,
+  })
+
+/** Creates the target-owned diagnostic for a `Usize` literal outside its selected word. */
+export const usizeTargetOutOfRange = (
+  spelling: string,
+  target: string,
+  bits: 32 | 64,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const maximum = bits === 32 ? '4294967295' : '18446744073709551615'
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'layout',
+    code: usizeTargetOutOfRangeCode,
+    severity: 'error',
+    message: `Usize literal ${spelling} exceeds the ${bits}-bit range for ${target}`,
+    reason: Object.freeze({
+      _tag: 'UsizeTargetOutOfRange',
+      spelling,
+      target,
+      bits,
+      maximum,
+    }),
+    span,
+  })
+}
 
 /** Creates the diagnostic for a qualified call naming an unknown built-in actor. */
 export const unknownActor = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>

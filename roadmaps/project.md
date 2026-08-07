@@ -105,20 +105,44 @@ control remains a DAG until each backend converts it to its required target form
 
 ## Next
 
+### Establish the execution substrate required by explicit allocation
+
+- **Problem:** The accepted allocation model is not an isolated memory primitive. `OutOfMemory`
+  requires executable flow failures; allocator access requires capability-role service slots and
+  origin-bound witness dispatch; named allocation lifetime requires `Scope.scoped`; and permanent
+  layout arithmetic requires `Usize`. None of those source-visible foundations is executable yet.
+- **Outcome & done-when:** Land the general language mechanisms without allocator-specific syntax,
+  ambient callbacks, backend-owned ABI choices, or temporary `I32` allocation arithmetic. Each
+  change runs through syntax, semantic facts, ownership, HIR/MIR, target layout, evaluator, native,
+  Wasm, determinism, and unified inspection before the next begins.
+- **Sequence:**
+  1. `add-usize-scalar`
+  2. `add-flow-functions-and-typed-failures`
+  3. `add-capability-requirements-roles-and-provision`
+  4. `add-named-scope-wrappers-and-cleanup`
+  5. `add-scoped-allocation-primitives`
+- **Evidence for the split:** Adversarial minimality, ownership, and backend review found that doing
+  allocation first would either hard-code the allocator into the compiler or silently implement all
+  four foundations inside one oversized memory ticket. The same review replaced impossible static
+  runtime-slot typestate with unsafe lexical `Slot<T>` places plus a restricted drop hook, allowing
+  `Vector<T>` to remain entirely Silk-written without a bitmap or compiler-known collection.
+
 ### Allocate owned compiler output in a deterministic scope
 
 - **Problem:** Slices now borrow source-dependent input, but a lexer still cannot own a token list
   whose length emerges at runtime. Safe values must stay fully initialized, cleanup must be
   deterministic on every structured outcome, and allocation must not become hidden compiler magic.
-- **Outcome & done-when:** Add the smallest explicit unsafe allocation boundary: validated
-  target-aware `Layout`, an affine owned allocation carrying its originating reclaim capability,
-  named destination scopes, typed initialized slots, `MaybeUninitialized<T>` only inside unsafe
-  construction, typed `OutOfMemory`, and restricted infallible drop hooks. Evaluator, LLVM, Wasm,
-  ownership, MIR, and `/labs` must agree on acquisition and exactly-once cleanup.
+- **Outcome & done-when:** After the four general prerequisites, add the smallest explicit unsafe
+  allocation boundary: validated target-aware `Layout` and `SlotLayout<T>`, an affine byte-owning
+  allocation carrying its originating reclaim capability, unsafe lexical `Slot<T>` places, named
+  destination scopes, typed `OutOfMemory`, and restricted infallible drop hooks. Evaluator, LLVM,
+  Wasm, ownership, MIR, and `/labs` must agree on acquisition and exactly-once cleanup.
 - **Boundary:** No safe raw allocation, ambient/default-static allocator, user-callable `free`,
-  primitive resize, zero-fill promise, collection behavior, or general capturing finalizer. The
-  allocator is an explicit requirement; a future Silk-written `Vector<T>` consumes these primitives
-  rather than being compiler-known.
+  primitive resize, zero-fill promise, collection behavior, runtime initialization bitmap, general
+  capturing finalizer, arena policy, or allocation-metrics surface. Runtime-indexed initializedness
+  and aliasing remain explicit unsafe invariants. The allocator is an explicit requirement; a future
+  Silk-written `Vector<T>` consumes these primitives and uses its restricted hook to drop its
+  initialized prefix before byte release rather than being compiler-known.
 - **Sequence after this change:** implement `Vector<T>` in Silk, prove a scanner with borrowed bytes
   and owned tokens, then admit only the bulk byte-memory primitives that workload demonstrates.
 - **Links:** [ownership and scoped allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·

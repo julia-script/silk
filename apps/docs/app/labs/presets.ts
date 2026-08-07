@@ -626,6 +626,15 @@ if false == true { return 0 }
 return (40 + 2) * 1
 }`,
   ),
+  one(
+    'backend',
+    'Target-sized Usize boundary',
+    `fn nativeBoundary() -> Usize { return 4294967296 }
+pub fn main() -> I32 {
+  if nativeBoundary() > 4294967295 { return 42 }
+  return 0
+}`,
+  ),
 
   // ---- arrays ---------------------------------------------------------------------------
   one('arrays', 'Array inferred', 'pub fn main() -> I32 { let values = [10, 42] return values[1] }'),

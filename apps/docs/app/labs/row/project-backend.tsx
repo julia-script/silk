@@ -504,6 +504,27 @@ export const layoutRows = (
         }`,
       })
     }
+    if (plan.literalVerdicts.length > 0) {
+      rows.push({
+        key: 'plan-usize-literals',
+        depth: 1,
+        label: 'Usize literal verdicts',
+        detail: `${plan.literalVerdicts.length} target-checked`,
+        head: true,
+      })
+      for (const [ordinal, verdict] of plan.literalVerdicts.entries()) {
+        const available = verdict._tag === 'AvailableUsizeLiteral'
+        rows.push({
+          key: `plan-usize-literal-${ordinal}`,
+          depth: 2,
+          dot: available ? 'symbol' : 'warning',
+          ...(available ? {} : { tone: 'warning' as const }),
+          label: verdict.value.toString(),
+          detail: `${verdict.bits}-bit · ${available ? 'available' : 'out of range'}`,
+          span: asSpan(verdict.span),
+        })
+      }
+    }
   }
 
   if (catalog !== undefined) {
@@ -794,6 +815,8 @@ export const symbolRows = (
 const valueText = (value: BootstrapEvaluation.Value): string =>
   value._tag === 'I32Value'
     ? String(value.value)
+    : value._tag === 'UsizeValue'
+      ? `${value.value.toString()}usize`
     : value._tag === 'ArrayValue'
       ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
       : value._tag === 'SliceValue'

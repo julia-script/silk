@@ -13,7 +13,7 @@ export type Binding =
       readonly spelling: string
       readonly declaration: DeclarationIndex.CanonicalId
     }
-  | { readonly _tag: 'IntrinsicActor'; readonly spelling: 'I32' | 'Bool' }
+  | { readonly _tag: 'IntrinsicActor'; readonly spelling: Type.Builtin }
   | {
       readonly _tag: 'ModuleNamespace'
       readonly spelling: string
@@ -73,7 +73,7 @@ export type Lookup =
       readonly spelling: string
       readonly declaration: DeclarationIndex.MemberFact
     }
-  | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: 'I32' | 'Bool' }
+  | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: Type.Builtin }
   | { readonly _tag: 'Namespace'; readonly spelling: string; readonly module: string }
   | { readonly _tag: 'Missing'; readonly spelling: string }
   | {
@@ -134,6 +134,7 @@ export const resolve = (
     const diagnostics: Array<Diagnostic.Diagnostic> = []
     const candidates: Array<Binding> = [
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'I32' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Usize' }),
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Bool' }),
     ]
     const headers = index.modules.find((value) => value.module === module.name)

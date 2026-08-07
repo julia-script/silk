@@ -13,6 +13,7 @@ import * as Type from './Type.js'
  */
 
 const i32: Extract<Mir.Type, { readonly _tag: 'I32' }> = Object.freeze({ _tag: 'I32' })
+const usize: Extract<Mir.Type, { readonly _tag: 'Usize' }> = Object.freeze({ _tag: 'Usize' })
 const bool: Extract<Mir.Type, { readonly _tag: 'Bool' }> = Object.freeze({ _tag: 'Bool' })
 
 const mirType = (
@@ -26,7 +27,9 @@ const mirType = (
       ? undefined
       : specialized === 'Bool'
         ? bool
-        : i32
+        : specialized === 'Usize'
+          ? usize
+          : i32
     : Type.isNominal(specialized)
       ? Object.freeze({ _tag: 'Nominal', type: specialized })
       : Type.isFixedArray(specialized)
@@ -210,12 +213,14 @@ function lowerExpression(
 ): LoweredExpression | undefined {
   switch (expression._tag) {
     case 'IntegerLiteral': {
-      const destination = fn.alloc(i32)
+      const type = fn.type(expression.type)
+      if (type === undefined || (type._tag !== 'I32' && type._tag !== 'Usize')) return undefined
+      const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({
           _tag: 'Literal',
           destination,
-          type: i32,
+          type,
           value: expression.value,
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),

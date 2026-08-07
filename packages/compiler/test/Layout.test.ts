@@ -241,6 +241,8 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       target: selected.value.target,
       entries: [malformed],
       callingShapes: [],
+      literalVerdicts: [],
+      diagnostics: [],
     }
 
     assert.include(

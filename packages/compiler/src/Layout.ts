@@ -1,7 +1,8 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Diagnostic from './Diagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
+import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -20,6 +21,7 @@ export interface Field {
 /** The initial closed representation vocabulary for concrete runtime types. */
 export type Representation =
   | { readonly _tag: 'SignedInteger'; readonly bits: 32 }
+  | { readonly _tag: 'UnsignedInteger'; readonly bits: 32 | 64 }
   | { readonly _tag: 'Boolean'; readonly bits: 32; readonly falseValue: 0; readonly trueValue: 1 }
   | {
       readonly _tag: 'Aggregate'
@@ -105,7 +107,25 @@ export interface Plan {
   readonly target: Target.Target
   readonly entries: ReadonlyArray<Entry>
   readonly callingShapes: ReadonlyArray<CallingShape>
+  readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
+
+/** A target-owned verdict for one reachable exact contextual `Usize` literal. */
+export type UsizeLiteralVerdict =
+  | {
+      readonly _tag: 'AvailableUsizeLiteral'
+      readonly value: bigint
+      readonly bits: 32 | 64
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'UnavailableUsizeLiteral'
+      readonly value: bigint
+      readonly bits: 32 | 64
+      readonly span: SourceSpan.SourceSpan
+      readonly cause: Diagnostic.Identity
+    }
 
 /** One compiler-owned scalar lane used to realize a logical value at a call boundary. */
 export interface CallingLane {
@@ -161,6 +181,7 @@ export type CallingShapeNode =
       readonly type: Type.StructuralUnion
       readonly tag: { readonly type: 'I32'; readonly lane: 0 }
       readonly payloadLaneCount: number
+      readonly payloadTypes: ReadonlyArray<Type.Builtin>
       readonly zeroFill: true
       readonly members: ReadonlyArray<{
         readonly member: Type.Nominal
@@ -191,6 +212,7 @@ export interface Violation {
     | 'InvalidScalar'
     | 'InvalidAggregate'
     | 'InvalidCallingShape'
+    | 'InvalidLiteralVerdict'
     | 'CatalogMismatch'
   readonly type?: DeclarationIndex.SemanticType
   readonly detail: string
@@ -219,7 +241,20 @@ const bool = (): Entry =>
     }),
   })
 
-const scalarEntry = (type: Type.Builtin): Entry => (type === 'Bool' ? bool() : i32())
+const usize = (target: Target.Target): Entry =>
+  Object.freeze({
+    _tag: 'LayoutEntry',
+    type: 'Usize',
+    size: target.pointerSize,
+    alignment: target.pointerAlignment,
+    representation: Object.freeze({
+      _tag: 'UnsignedInteger',
+      bits: target.pointerSize === 4 ? 32 : 64,
+    }),
+  })
+
+const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry =>
+  type === 'Bool' ? bool() : type === 'Usize' ? usize(target) : i32()
 
 const alignUp = (offset: number, alignment: number): number =>
   Math.ceil(offset / alignment) * alignment
@@ -493,7 +528,7 @@ export const catalog = (
   }
 
   const layoutType = (type: DeclarationIndex.SemanticType): CatalogEntry => {
-    if (Type.isBuiltin(type)) return scalarEntry(type)
+    if (Type.isBuiltin(type)) return scalarEntry(target, type)
     if (Type.isNever(type)) {
       return unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
@@ -726,13 +761,75 @@ const addFunctionTypes = (
   addStatementTypes(types, fn.statements, substitution)
 }
 
+const usizeLiteralVerdicts = (
+  target: Target.Target,
+  discovery: Instances.Discovery,
+): {
+  readonly verdicts: ReadonlyArray<UsizeLiteralVerdict>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const bits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
+  const maximum = bits === 32 ? 4294967295n : 18446744073709551615n
+  const verdicts: Array<UsizeLiteralVerdict> = []
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const seen = new Set<string>()
+  for (const instance of discovery.instances) {
+    const expressions = instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+    for (const expression of expressions) {
+      if (
+        expression._tag !== 'IntegerLiteral' ||
+        Type.substitute(expression.type, instance.substitution) !== 'Usize'
+      ) {
+        continue
+      }
+      const value = BigInt(expression.value)
+      const key = `${expression.span.sourceId}:${expression.span.start}:${expression.span.end}:${value}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      if (value <= maximum) {
+        verdicts.push(
+          Object.freeze({
+            _tag: 'AvailableUsizeLiteral',
+            value,
+            bits,
+            span: expression.span,
+          }),
+        )
+        continue
+      }
+      const diagnostic = Diagnostic.usizeTargetOutOfRange(
+        value.toString(),
+        target.id,
+        bits,
+        expression.span,
+      )
+      diagnostics.push(diagnostic)
+      verdicts.push(
+        Object.freeze({
+          _tag: 'UnavailableUsizeLiteral',
+          value,
+          bits,
+          span: expression.span,
+          cause: Diagnostic.identity(diagnostic),
+        }),
+      )
+    }
+  }
+  return Object.freeze({
+    verdicts: Object.freeze(verdicts),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationIndex.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
-    if (Type.isBuiltin(type)) return scalarEntry(type)
+    if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
     if (Type.isNever(type)) return undefined
     const candidate = catalogEntry(self, type)
     if (candidate?._tag === 'LayoutEntry') return candidate
@@ -765,17 +862,20 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
+  const literals = usizeLiteralVerdicts(self.target, discovery)
   return Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
     entries: orderedEntries,
     callingShapes: callingShapes(self.target, orderedEntries),
+    literalVerdicts: literals.verdicts,
+    diagnostics: literals.diagnostics,
   })
 }
 
 /** Constructs a scalar plan for hand-built MIR samples and focused tests. */
 export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>): Plan => {
-  const entries = new Map(types.map((type) => [Type.key(type), scalarEntry(type)]))
+  const entries = new Map(types.map((type) => [Type.key(type), scalarEntry(target, type)]))
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
@@ -784,6 +884,8 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     target,
     entries: orderedEntries,
     callingShapes: callingShapes(target, orderedEntries),
+    literalVerdicts: Object.freeze([]),
+    diagnostics: Object.freeze([]),
   })
 }
 
@@ -848,11 +950,21 @@ const shapeNode = (
       (maximum, member) => Math.max(maximum, member.shape.laneCount),
       0,
     )
+    const payloadTypes = Object.freeze(
+      Array.from(
+        { length: payloadLaneCount },
+        (_, slot): Type.Builtin =>
+          members.some((member) => materializeLanes(member.shape).at(slot)?.type === 'Usize')
+            ? 'Usize'
+            : 'I32',
+      ),
+    )
     return Object.freeze({
       _tag: 'SumShape',
       type,
       tag: Object.freeze({ type: 'I32', lane: 0 }),
       payloadLaneCount,
+      payloadTypes,
       zeroFill: true,
       members,
       laneCount: 1 + payloadLaneCount,
@@ -915,7 +1027,7 @@ const materializeLanes = (
             ...path,
             Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
           ]),
-          type: 'I32' as const,
+          type: node.payloadTypes.at(slot) ?? ('I32' as const),
         }),
       ),
     ])
@@ -1027,6 +1139,8 @@ const representationEquals = (left: Representation, right: Representation): bool
   if (left._tag !== right._tag) return false
   if (left._tag === 'SignedInteger')
     return right._tag === 'SignedInteger' && left.bits === right.bits
+  if (left._tag === 'UnsignedInteger')
+    return right._tag === 'UnsignedInteger' && left.bits === right.bits
   if (left._tag === 'Boolean') {
     return (
       right._tag === 'Boolean' &&
@@ -1110,7 +1224,7 @@ const verifyEntry = (
   available: ReadonlyMap<string, Entry>,
 ): ReadonlyArray<Violation> => {
   if (Type.isBuiltin(candidate.type)) {
-    const expected = scalarEntry(candidate.type)
+    const expected = scalarEntry(target, candidate.type)
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
@@ -1125,7 +1239,7 @@ const verifyEntry = (
   }
   if (Type.isFixedArray(candidate.type)) {
     const element = Type.isBuiltin(candidate.type.element)
-      ? scalarEntry(candidate.type.element)
+      ? scalarEntry(target, candidate.type.element)
       : available.get(Type.key(candidate.type.element))
     if (element === undefined || candidate.representation._tag !== 'Repeated') {
       return Object.freeze([
@@ -1154,7 +1268,7 @@ const verifyEntry = (
   }
   if (Type.isSlice(candidate.type)) {
     const element = Type.isBuiltin(candidate.type.element)
-      ? scalarEntry(candidate.type.element)
+      ? scalarEntry(target, candidate.type.element)
       : available.get(Type.key(candidate.type.element))
     if (element === undefined) {
       return Object.freeze([
@@ -1225,7 +1339,7 @@ const verifyEntry = (
   let previousOrdinal = -1
   for (const field of candidate.representation.fields) {
     const fieldLayout = Type.isBuiltin(field.type)
-      ? scalarEntry(field.type)
+      ? scalarEntry(target, field.type)
       : available.get(Type.key(field.type))
     if (field.id.ordinal <= previousOrdinal) {
       violations.push(
@@ -1384,9 +1498,24 @@ export const laneOffset = (
         : undefined
     }
     if (selector._tag === 'UnionPayloadSelector') {
-      return ordinal === path.length - 1 && candidate.representation._tag === 'Union'
-        ? offset + candidate.representation.payloadOffset + selector.slot * 4
-        : undefined
+      if (ordinal !== path.length - 1 || candidate.representation._tag !== 'Union') {
+        return undefined
+      }
+      const shape = callingShape(self, current)
+      if (shape?.tree._tag !== 'SumShape') return undefined
+      let payloadOffset = 0
+      for (let slot = 0; slot <= selector.slot; slot += 1) {
+        const type = shape.tree.payloadTypes.at(slot)
+        if (type === undefined) return undefined
+        const scalar = entry(self, type)
+        if (scalar === undefined) return undefined
+        payloadOffset = alignUp(payloadOffset, scalar.alignment)
+        if (slot === selector.slot) {
+          return offset + candidate.representation.payloadOffset + payloadOffset
+        }
+        payloadOffset += scalar.size
+      }
+      return undefined
     }
     if (selector._tag === 'SliceAddressSelector') {
       return ordinal === path.length - 1 && candidate.representation._tag === 'Slice'
@@ -1452,9 +1581,64 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
   return Object.freeze(violations)
 }
 
+const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
+  const bits: 32 | 64 = self.target.pointerSize === 4 ? 32 : 64
+  const maximum = bits === 32 ? 4294967295n : 18446744073709551615n
+  const violations: Array<Violation> = []
+  const unavailable = self.literalVerdicts.filter(
+    (verdict) => verdict._tag === 'UnavailableUsizeLiteral',
+  )
+  for (const verdict of self.literalVerdicts) {
+    const expectedTag =
+      verdict.value >= 0n && verdict.value <= maximum
+        ? 'AvailableUsizeLiteral'
+        : 'UnavailableUsizeLiteral'
+    if (verdict.bits !== bits || verdict._tag !== expectedTag) {
+      violations.push(
+        Object.freeze({
+          _tag: 'LayoutViolation',
+          rule: 'InvalidLiteralVerdict',
+          type: 'Usize',
+          detail: `${verdict.value.toString()} has a non-canonical ${verdict.bits}-bit verdict`,
+        }),
+      )
+    }
+  }
+  if (
+    self.diagnostics.length !== unavailable.length ||
+    unavailable.some((verdict) =>
+      self.diagnostics.every(
+        (diagnostic) =>
+          diagnostic.code !== Diagnostic.usizeTargetOutOfRangeCode ||
+          diagnostic.span.sourceId !== verdict.span.sourceId ||
+          diagnostic.span.start !== verdict.span.start ||
+          diagnostic.span.end !== verdict.span.end ||
+          diagnostic.reason._tag !== 'UsizeTargetOutOfRange' ||
+          diagnostic.reason.spelling !== verdict.value.toString() ||
+          diagnostic.reason.target !== self.target.id ||
+          diagnostic.reason.bits !== bits,
+      ),
+    )
+  ) {
+    violations.push(
+      Object.freeze({
+        _tag: 'LayoutViolation',
+        rule: 'InvalidLiteralVerdict',
+        type: 'Usize',
+        detail: 'target literal diagnostics do not match unavailable verdicts',
+      }),
+    )
+  }
+  return Object.freeze(violations)
+}
+
 /** Verifies canonical target, ordering, uniqueness, representation, and ABI facts. */
 export const verify = (self: Plan): ReadonlyArray<Violation> =>
-  Object.freeze([...commonViolations(self.target, self.entries), ...verifyCallingShapes(self)])
+  Object.freeze([
+    ...commonViolations(self.target, self.entries),
+    ...verifyCallingShapes(self),
+    ...verifyLiteralVerdicts(self),
+  ])
 
 /** Verifies all available entries and deterministic ordering within a nominal catalog. */
 export const verifyCatalog = (self: Catalog): ReadonlyArray<Violation> =>
@@ -1484,15 +1668,17 @@ export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArra
 const representationText = (representation: Representation): string =>
   representation._tag === 'SignedInteger'
     ? `signed-i${representation.bits}`
-    : representation._tag === 'Boolean'
-      ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
-      : representation._tag === 'Repeated'
-        ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-        : representation._tag === 'Slice'
-          ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=I32@${representation.length.offset}/4 address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-          : representation._tag === 'Union'
-            ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-            : `aggregate tail-padding=${representation.tailPadding}`
+    : representation._tag === 'UnsignedInteger'
+      ? `unsigned-i${representation.bits}`
+      : representation._tag === 'Boolean'
+        ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
+        : representation._tag === 'Repeated'
+          ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+          : representation._tag === 'Slice'
+            ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=I32@${representation.length.offset}/4 address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+            : representation._tag === 'Union'
+              ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+              : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -1552,6 +1738,10 @@ export const encode = (self: Plan): string =>
                 )
                 .join(',')}`
         }`,
+    ),
+    ...self.literalVerdicts.map(
+      (verdict) =>
+        `usize-literal ${verdict.value.toString()} bits=${verdict.bits} ${verdict._tag === 'AvailableUsizeLiteral' ? 'available' : `unavailable cause=${verdict.cause.code}`} [${verdict.span.start}, ${verdict.span.end})`,
     ),
     '',
   ].join('\n')

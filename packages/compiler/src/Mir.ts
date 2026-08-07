@@ -19,6 +19,7 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 
 export type Type =
   | { readonly _tag: 'I32' }
+  | { readonly _tag: 'Usize' }
   | { readonly _tag: 'Bool' }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
@@ -36,6 +37,29 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
 const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
   SilkType.isBuiltin(type) || (SilkType.isFixedArray(type) && isCopyType(type.element))
+
+const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingScalar): boolean =>
+  typeof left === 'string'
+    ? left === right
+    : typeof right !== 'string' &&
+      SilkType.equals(left.element, right.element) &&
+      left.bits === right.bits
+
+const callingShapeEquals = (left: Layout.CallingShape, right: Layout.CallingShape): boolean =>
+  left.laneCount === right.laneCount &&
+  left.lanes.length === right.lanes.length &&
+  left.lanes.every((lane, ordinal) => {
+    const candidate = right.lanes.at(ordinal)
+    return (
+      candidate !== undefined &&
+      callingScalarEquals(lane.type, candidate.type) &&
+      lane.path.length === candidate.path.length &&
+      lane.path.every((selector, index) => {
+        const other = candidate.path.at(index)
+        return other !== undefined && Layout.selectorEquals(selector, other)
+      })
+    )
+  })
 
 export interface LocalId {
   readonly _tag: 'Local'
@@ -96,7 +120,7 @@ export type Operation =
       readonly _tag: 'Literal'
       readonly destination: LocalId
       readonly type: Type
-      readonly value: number
+      readonly value: number | bigint
       readonly provenance: Provenance
     }
   | {
@@ -434,6 +458,7 @@ export interface Violation {
     | 'InvalidLoopTarget'
     | 'UndeclaredLocal'
     | 'InvalidAggregateOperation'
+    | 'InvalidIntegerOperation'
     | 'InvalidCallShape'
     | 'InvalidWrite'
     | 'InvalidLoan'
@@ -1121,6 +1146,75 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
       const operations = operationsOf(region).flatMap(operationTree)
       for (const [index, operation] of operations.entries()) {
+        if (operation._tag === 'Literal') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const semantic = semanticType(operation.type)
+          const value = BigInt(operation.value)
+          const usizeMaximum =
+            self.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+          const validValue =
+            semantic === 'I32'
+              ? value >= -2147483648n && value <= 2147483647n
+              : semantic === 'Usize'
+                ? value >= 0n && value <= usizeMaximum
+                : semantic === 'Bool'
+                  ? value === 0n || value === 1n
+                  : false
+          if (
+            destination === undefined ||
+            !SilkType.equals(semanticType(destination), semantic) ||
+            !validValue
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidIntegerOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `literal ${operation.value.toString()} disagrees with its destination or target range`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'Binary') {
+          const left = fn.localTypes.at(operation.left.ordinal)
+          const right = fn.localTypes.at(operation.right.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const operand = left === undefined ? undefined : semanticType(left)
+          const comparison =
+            operation.operator === 'Equals' ||
+            operation.operator === 'NotEquals' ||
+            operation.operator === 'LessThan' ||
+            operation.operator === 'LessOrEqual' ||
+            operation.operator === 'GreaterThan' ||
+            operation.operator === 'GreaterOrEqual'
+          const supportsOperation =
+            operand === 'I32' ||
+            operand === 'Usize' ||
+            (operand === 'Bool' &&
+              (operation.operator === 'Equals' || operation.operator === 'NotEquals'))
+          const expectedResult = comparison ? 'Bool' : operand
+          if (
+            operand === undefined ||
+            right === undefined ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(right), operand) ||
+            !supportsOperation ||
+            expectedResult === undefined ||
+            !SilkType.equals(semanticType(operation.type), expectedResult) ||
+            !SilkType.equals(semanticType(destination), expectedResult)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidIntegerOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `${operation.operator} has inconsistent operand or result types`,
+              }),
+            )
+          }
+        }
         if (operation._tag === 'SliceLength') {
           const slice = fn.localTypes.at(operation.slice.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -1156,8 +1250,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(operation.resultShape.type, semanticType(operation.type)) ||
             plannedScrutinee === undefined ||
             plannedResult === undefined ||
-            plannedScrutinee.laneCount !== operation.scrutineeShape.laneCount ||
-            plannedResult.laneCount !== operation.resultShape.laneCount
+            !callingShapeEquals(plannedScrutinee, operation.scrutineeShape) ||
+            !callingShapeEquals(plannedResult, operation.resultShape)
           ) {
             violations.push(
               Object.freeze({
@@ -1328,8 +1422,16 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             mappingsValid &&
             SilkType.equals(operation.sourceShape.type, semanticType(operation.sourceType)) &&
             SilkType.equals(operation.targetShape.type, operation.targetType.type) &&
-            Layout.callingShape(self.layout, operation.sourceShape.type) !== undefined &&
-            Layout.callingShape(self.layout, operation.targetShape.type) !== undefined
+            (() => {
+              const sourceShape = Layout.callingShape(self.layout, operation.sourceShape.type)
+              const targetShape = Layout.callingShape(self.layout, operation.targetShape.type)
+              return (
+                sourceShape !== undefined &&
+                targetShape !== undefined &&
+                callingShapeEquals(sourceShape, operation.sourceShape) &&
+                callingShapeEquals(targetShape, operation.targetShape)
+              )
+            })()
           if (!valid) {
             violations.push(
               Object.freeze({

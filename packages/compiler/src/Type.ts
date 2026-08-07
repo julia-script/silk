@@ -1,5 +1,5 @@
 /** The built-in scalar types implemented by the current executable bootstrap surface. */
-export type Builtin = 'I32' | 'Bool'
+export type Builtin = 'I32' | 'Usize' | 'Bool'
 
 /** The empty structural union and uninhabited bottom type. */
 export type Never = 'Never'
@@ -125,7 +125,8 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
 }
 
 /** Tests whether a semantic type is one of the executable built-in scalars. */
-export const isBuiltin = (self: Type): self is Builtin => self === 'I32' || self === 'Bool'
+export const isBuiltin = (self: Type): self is Builtin =>
+  self === 'I32' || self === 'Usize' || self === 'Bool'
 
 /** Tests whether a semantic type is the empty structural union. */
 export const isNever = (self: Type): self is Never => self === 'Never'

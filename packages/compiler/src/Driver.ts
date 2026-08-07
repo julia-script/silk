@@ -296,6 +296,15 @@ export const compile = Effect.fn('Driver.compile')(function* (
     })
   }
 
+  if (Diagnostic.hasErrors(targetAndLayout.layout.diagnostics)) {
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: closure.sources,
+      diagnostics: Diagnostic.merge(diagnostics, targetAndLayout.layout.diagnostics),
+      report: Object.freeze([...report]),
+    })
+  }
+
   const program = phase(
     'mir-lowering',
     discovery.instances.length,

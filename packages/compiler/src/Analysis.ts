@@ -121,13 +121,13 @@ export const make = Effect.fn('Analysis.make')(function* (
   const instances = frontendSpecializationInvalid
     ? Instances.invalid(request.root.id)
     : Instances.discover(request.root.id, results)
-  const diagnostics = Diagnostic.merge(
+  const baseDiagnostics = Diagnostic.merge(
     frontendDiagnostics,
     Instances.violationDiagnostics(instances),
   )
   const target = Target.select(request.target)
   const specializationError =
-    frontendSpecializationInvalid || Diagnostic.hasGenericSpecializationErrors(diagnostics)
+    frontendSpecializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics)
       ? new AnalysisUnavailable({
           operation: 'Analysis.make',
           message: 'Target-dependent phases are unavailable for invalid source specialization',
@@ -146,13 +146,26 @@ export const make = Effect.fn('Analysis.make')(function* (
     layoutCatalog._tag === 'Available'
       ? Object.freeze({ _tag: 'Available', value: Layout.plan(layoutCatalog.value, instances) })
       : layoutCatalog
-  const mir: Targeted<Mir.Module> =
-    layout._tag === 'Available'
-      ? Object.freeze({
-          _tag: 'Available',
-          value: Lower.lowerProgram(instances, ownership, layout.value),
+  const diagnostics = Diagnostic.merge(
+    baseDiagnostics,
+    ...(layout._tag === 'Available' ? [layout.value.diagnostics] : []),
+  )
+  const targetLiteralError =
+    layout._tag === 'Available' && Diagnostic.hasErrors(layout.value.diagnostics)
+      ? new AnalysisUnavailable({
+          operation: 'Analysis.make',
+          message: 'MIR is unavailable because a Usize literal exceeds the selected target',
         })
-      : layout
+      : undefined
+  const mir: Targeted<Mir.Module> =
+    targetLiteralError !== undefined
+      ? Object.freeze({ _tag: 'Unavailable', error: targetLiteralError })
+      : layout._tag === 'Available'
+        ? Object.freeze({
+            _tag: 'Available',
+            value: Lower.lowerProgram(instances, ownership, layout.value),
+          })
+        : layout
   return Object.freeze({
     _tag: 'AnalysisSnapshot',
     closure,

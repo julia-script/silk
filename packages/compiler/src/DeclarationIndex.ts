@@ -592,7 +592,10 @@ export const analyzeDeclaredType = (
   })
   if (
     segments.length === 1 &&
-    (first.spelling === 'I32' || first.spelling === 'Bool' || first.spelling === 'Never')
+    (first.spelling === 'I32' ||
+      first.spelling === 'Usize' ||
+      first.spelling === 'Bool' ||
+      first.spelling === 'Never')
   ) {
     return Object.freeze({
       fact: Object.freeze({

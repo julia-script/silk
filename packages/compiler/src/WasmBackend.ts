@@ -96,6 +96,16 @@ const comparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemon
     GreaterOrEqual: 'i32.ge_s',
   })
 
+const unsignedComparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
+  Object.freeze({
+    Equals: 'i32.eq',
+    NotEquals: 'i32.ne',
+    LessThan: 'i32.lt_u',
+    LessOrEqual: 'i32.le_u',
+    GreaterThan: 'i32.gt_u',
+    GreaterOrEqual: 'i32.ge_u',
+  })
+
 /**
  * Wasm's `i32.div_s` and `i32.rem_s` already trap on a zero divisor and on `MIN / -1`, matching
  * MIR's trapping division exactly — no guard expansion is needed, unlike the LLVM backend's
@@ -107,6 +117,9 @@ const divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic
     Remainder: 'i32.rem_s',
   },
 )
+
+const unsignedDivisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
+  Object.freeze({ Divide: 'i32.div_u', Remainder: 'i32.rem_u' })
 
 /**
  * Wasm's `i32.add`, `i32.sub`, and `i32.mul` wrap on overflow, but MIR specifies that signed
@@ -192,6 +205,49 @@ const checkedArithmetic = (
           Instr.op('i32.and'),
         ]
 
+  return [
+    ...compute,
+    ...overflowed,
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.localGet(scratch),
+  ]
+}
+
+/** Emits checked unsigned i32 arithmetic for the target-word `Usize` lane. */
+const checkedUnsignedArithmetic = (
+  shape: OverflowShape,
+  left: number,
+  right: number,
+  scratch: number,
+): ReadonlyArray<Instr.Instr> => {
+  const wrapped: Instr.PlainMnemonic =
+    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+  const compute = [
+    Instr.localGet(left),
+    Instr.localGet(right),
+    Instr.op(wrapped),
+    Instr.localSet(scratch),
+  ]
+  const overflowed: ReadonlyArray<Instr.Instr> =
+    shape === 'Add'
+      ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op('i32.lt_u')]
+      : shape === 'Subtract'
+        ? [Instr.localGet(left), Instr.localGet(right), Instr.op('i32.lt_u')]
+        : [
+            Instr.localGet(right),
+            Instr.op('i32.eqz'),
+            Instr.ifElse(
+              Instr.valueBlockType(i32),
+              [Instr.i32Const(0)],
+              [
+                Instr.localGet(scratch),
+                Instr.localGet(right),
+                Instr.op('i32.div_u'),
+                Instr.localGet(left),
+                Instr.op('i32.ne'),
+              ],
+            ),
+          ]
   return [
     ...compute,
     ...overflowed,
@@ -404,7 +460,14 @@ const emitOperation = (
       return emitDecisions()
     }
     case 'Literal':
-      return [Instr.i32Const(operation.value), Instr.localSet(scalar(operation.destination))]
+      return [
+        Instr.i32Const(
+          operation.type._tag === 'Usize'
+            ? Number(BigInt.asIntN(32, BigInt(operation.value)))
+            : Number(operation.value),
+        ),
+        Instr.localSet(scalar(operation.destination)),
+      ]
     case 'Move':
       return copy(slots(operation.source), slots(operation.destination))
     case 'BeginLoan':
@@ -825,7 +888,9 @@ const emitOperation = (
           .flatMap(reloadRoot),
       ]
     case 'Binary': {
-      const comparison = comparisons[operation.operator]
+      const leftType = layout.types.at(operation.left.ordinal)
+      const unsigned = leftType?._tag === 'Usize'
+      const comparison = (unsigned ? unsignedComparisons : comparisons)[operation.operator]
       if (comparison !== undefined) {
         return [
           Instr.localGet(scalar(operation.left)),
@@ -834,7 +899,7 @@ const emitOperation = (
           Instr.localSet(scalar(operation.destination)),
         ]
       }
-      const division = divisions[operation.operator]
+      const division = (unsigned ? unsignedDivisions : divisions)[operation.operator]
       if (division !== undefined) {
         return [
           Instr.localGet(scalar(operation.left)),
@@ -844,7 +909,7 @@ const emitOperation = (
         ]
       }
       return [
-        ...checkedArithmetic(
+        ...(unsigned ? checkedUnsignedArithmetic : checkedArithmetic)(
           operation.operator === 'Add'
             ? 'Add'
             : operation.operator === 'Subtract'

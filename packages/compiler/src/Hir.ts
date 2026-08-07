@@ -130,7 +130,7 @@ export type WritePlace = OwnedWritePlace | BorrowedWritePlace
 export type Expression =
   | {
       readonly _tag: 'IntegerLiteral'
-      readonly value: number
+      readonly value: number | bigint
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -871,11 +871,15 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         } : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
-    case 'BuiltinCall':
+    case 'BuiltinCall': {
+      const first = expression.arguments.at(0)
+      const actor =
+        first === undefined || first._tag === 'Unavailable' ? '?' : Type.encode(first.type)
       return [
-        `${indent}builtin I32.${expression.operation} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}builtin ${actor}.${expression.operation} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
+    }
     case 'Unavailable':
       return `${indent}unavailable ${spanText(expression.span)}`
   }

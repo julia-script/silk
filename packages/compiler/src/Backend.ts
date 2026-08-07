@@ -618,27 +618,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       })
     }
     const scalarBits = i32Layout.representation.bits
-    if (
-      program.layout.entries.some(
-        (entry) =>
-          (entry.representation._tag === 'SignedInteger' ||
-            entry.representation._tag === 'Boolean') &&
-          entry.representation.bits !== scalarBits,
-      )
-    ) {
-      return yield* new BackendError({
-        operation: 'Backend.emit',
-        backend: 'LLVM',
-        message: 'LLVM requires compatible planned scalar widths',
-        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
-      })
-    }
     const builder = yield* Builder.make({
       sourceFilename: program.module,
       targetTriple: program.layout.target.triple,
       strip: request.mode !== 'debug',
     })
     const i32 = yield* LlvmType.integer(builder, scalarBits)
+    const usizeLayout = Layout.entry(program.layout, 'Usize')
+    const usizeType =
+      usizeLayout?.representation._tag === 'UnsignedInteger'
+        ? yield* LlvmType.integer(builder, usizeLayout.representation.bits)
+        : undefined
     const hasAddressLane = program.layout.callingShapes.some((shape) =>
       shape.lanes.some((lane) => typeof lane.type !== 'string'),
     )
@@ -653,8 +643,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       return shape.lanes
     }
     const laneType = (lane: Layout.CallingLane): LlvmType.Type =>
-      typeof lane.type === 'string' ? i32 : pointer
-    let overflowSignature:
+      typeof lane.type !== 'string' ? pointer : lane.type === 'Usize' ? (usizeType ?? i32) : i32
+    let signedOverflowSignature:
+      | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
+      | undefined
+    let unsignedOverflowSignature:
       | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
       | undefined
 
@@ -674,7 +667,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         voidType = selected
         resultType = selected
       } else if (resultLaneCount === 1) {
-        resultType = i32
+        const lane = lanesFor(fn.result).at(0)
+        if (lane === undefined) throw new RangeError('LLVM result lost its scalar lane')
+        resultType = laneType(lane)
       } else {
         resultType = yield* LlvmType.structure(builder, lanesFor(fn.result).map(laneType))
       }
@@ -866,6 +861,24 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               )
             })
 
+          const coerceLane = Effect.fnUntraced(function* (
+            input: Value.Input,
+            source: Layout.CallingLane,
+            target: Layout.CallingLane,
+            name: string,
+          ) {
+            const sourceWide = source.type === 'Usize'
+            const targetWide = target.type === 'Usize'
+            if (sourceWide === targetWide) return input
+            return yield* FunctionBody.cast(
+              body,
+              targetWide ? 'zext' : 'trunc',
+              input,
+              laneType(target),
+              name,
+            )
+          })
+
           const storeMutable = Effect.fnUntraced(function* (
             root: Mir.LocalId,
             values: ReadonlyArray<Value.Input>,
@@ -992,24 +1005,57 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     throw new RangeError('LLVM match lost a pattern payload path')
                   }
                   const source = readLocal(operation.scrutinee)
-                  const selected = physical.flatMap((ordinal) => {
+                  const sourceLanes = operation.shape.lanes
+                  const targetLanes = lanesFor(operation.binding.type)
+                  const selected: Array<Value.Input> = []
+                  for (const [targetOrdinal, ordinal] of physical.entries()) {
                     const value = source.at(ordinal)
-                    return value === undefined ? [] : [value]
-                  })
-                  if (selected.length !== lanesFor(operation.binding.type).length) {
+                    const sourceLane = sourceLanes.at(ordinal)
+                    const targetLane = targetLanes.at(targetOrdinal)
+                    if (
+                      value === undefined ||
+                      sourceLane === undefined ||
+                      targetLane === undefined
+                    ) {
+                      continue
+                    }
+                    selected.push(
+                      yield* coerceLane(
+                        value,
+                        sourceLane,
+                        targetLane,
+                        `match${operation.binding.destination.ordinal}_${targetOrdinal}_lane`,
+                      ),
+                    )
+                  }
+                  if (selected.length !== targetLanes.length) {
                     throw new RangeError('LLVM match binding disagrees with its payload lanes')
                   }
                   locals.set(operation.binding.destination.ordinal, Object.freeze(selected))
                   break
                 }
-                case 'Literal':
+                case 'Literal': {
+                  const lane = lanesFor(operation.type).at(0)
+                  if (lane === undefined) throw new RangeError('LLVM literal lost its lane')
+                  const physicalType = laneType(lane)
                   locals.set(
                     operation.destination.ordinal,
                     Object.freeze([
-                      yield* Constant.integerSigned(builder, i32, BigInt(operation.value)),
+                      operation.type._tag === 'Usize'
+                        ? yield* Constant.integerUnsigned(
+                            builder,
+                            physicalType,
+                            BigInt(operation.value),
+                          )
+                        : yield* Constant.integerSigned(
+                            builder,
+                            physicalType,
+                            BigInt(operation.value),
+                          ),
                     ]),
                   )
                   break
+                }
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
@@ -1046,6 +1092,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const source = readLocal(operation.source)
                   const targetWidth = operation.targetShape.laneCount
                   const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const sourceLanes = operation.sourceShape.lanes
+                  const targetLanes = operation.targetShape.lanes
                   if (operation.conversion === 'Inject') {
                     const mapping = operation.mappings.at(0)
                     if (mapping === undefined) {
@@ -1056,16 +1104,26 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       i32,
                       BigInt(mapping.targetOrdinal),
                     )
-                    locals.set(
-                      operation.destination.ordinal,
-                      Object.freeze([
-                        tag,
-                        ...Array.from(
-                          { length: Math.max(0, targetWidth - 1) },
-                          (_, ordinal) => source.at(ordinal) ?? zero,
-                        ),
-                      ]),
-                    )
+                    const payload: Array<Value.Input> = []
+                    for (let ordinal = 0; ordinal < Math.max(0, targetWidth - 1); ordinal += 1) {
+                      const targetLane = targetLanes.at(ordinal + 1)
+                      if (targetLane === undefined) {
+                        throw new RangeError('LLVM union injection lost a target payload lane')
+                      }
+                      const input = source.at(ordinal)
+                      const sourceLane = sourceLanes.at(ordinal)
+                      payload.push(
+                        input === undefined || sourceLane === undefined
+                          ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                          : yield* coerceLane(
+                              input,
+                              sourceLane,
+                              targetLane,
+                              `union${operation.destination.ordinal}_${ordinal}_inject`,
+                            ),
+                      )
+                    }
+                    locals.set(operation.destination.ordinal, Object.freeze([tag, ...payload]))
                     break
                   }
                   const sourceTag = source.at(0)
@@ -1099,16 +1157,26 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       `union${operation.destination.ordinal}_${ordinal}_tag`,
                     )
                   }
-                  locals.set(
-                    operation.destination.ordinal,
-                    Object.freeze([
-                      tag,
-                      ...Array.from(
-                        { length: Math.max(0, targetWidth - 1) },
-                        (_, ordinal) => source.at(ordinal + 1) ?? zero,
-                      ),
-                    ]),
-                  )
+                  const payload: Array<Value.Input> = []
+                  for (let ordinal = 0; ordinal < Math.max(0, targetWidth - 1); ordinal += 1) {
+                    const targetLane = targetLanes.at(ordinal + 1)
+                    if (targetLane === undefined) {
+                      throw new RangeError('LLVM union widening lost a target payload lane')
+                    }
+                    const input = source.at(ordinal + 1)
+                    const sourceLane = sourceLanes.at(ordinal + 1)
+                    payload.push(
+                      input === undefined || sourceLane === undefined
+                        ? yield* Constant.integerUnsigned(builder, laneType(targetLane), 0n)
+                        : yield* coerceLane(
+                            input,
+                            sourceLane,
+                            targetLane,
+                            `union${operation.destination.ordinal}_${ordinal}_widen`,
+                          ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze([tag, ...payload]))
                   break
                 }
                 case 'Construct':
@@ -1658,17 +1726,29 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 case 'Binary': {
                   const left = readScalar(operation.left)
                   const right = readScalar(operation.right)
+                  const leftType = entry.fn.localTypes.at(operation.left.ordinal)
+                  const leftLane = leftType === undefined ? undefined : lanesFor(leftType).at(0)
+                  if (leftType === undefined || leftLane === undefined) {
+                    throw new RangeError('LLVM binary operation lost its operand type')
+                  }
+                  const unsigned = leftType._tag === 'Usize'
+                  const operandType = laneType(leftLane)
                   const ordinal = checkOrdinal
                   checkOrdinal += 1
                   const comparisonPredicates: Readonly<
-                    Partial<Record<Mir.BinaryOperator, 'eq' | 'ne' | 'slt' | 'sle' | 'sgt' | 'sge'>>
+                    Partial<
+                      Record<
+                        Mir.BinaryOperator,
+                        'eq' | 'ne' | 'slt' | 'sle' | 'sgt' | 'sge' | 'ult' | 'ule' | 'ugt' | 'uge'
+                      >
+                    >
                   > = {
                     Equals: 'eq',
                     NotEquals: 'ne',
-                    LessThan: 'slt',
-                    LessOrEqual: 'sle',
-                    GreaterThan: 'sgt',
-                    GreaterOrEqual: 'sge',
+                    LessThan: unsigned ? 'ult' : 'slt',
+                    LessOrEqual: unsigned ? 'ule' : 'sle',
+                    GreaterThan: unsigned ? 'ugt' : 'sgt',
+                    GreaterOrEqual: unsigned ? 'uge' : 'sge',
                   }
                   const predicate = comparisonPredicates[operation.operator]
                   if (predicate !== undefined) {
@@ -1702,21 +1782,32 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   ) {
                     const intrinsicId =
                       operation.operator === 'Add'
-                        ? ('sadd.with.overflow' as const)
+                        ? unsigned
+                          ? ('uadd.with.overflow' as const)
+                          : ('sadd.with.overflow' as const)
                         : operation.operator === 'Subtract'
-                          ? ('ssub.with.overflow' as const)
-                          : ('smul.with.overflow' as const)
+                          ? unsigned
+                            ? ('usub.with.overflow' as const)
+                            : ('ssub.with.overflow' as const)
+                          : unsigned
+                            ? ('umul.with.overflow' as const)
+                            : ('smul.with.overflow' as const)
+                    let overflowSignature = unsigned
+                      ? unsignedOverflowSignature
+                      : signedOverflowSignature
                     if (overflowSignature === undefined) {
                       const i1 = yield* LlvmType.integer(builder, 1)
                       overflowSignature = Object.freeze({
-                        returnType: yield* LlvmType.structure(builder, [i32, i1]),
-                        parameters: Object.freeze([i32, i32]),
+                        returnType: yield* LlvmType.structure(builder, [operandType, i1]),
+                        parameters: Object.freeze([operandType, operandType]),
                       })
+                      if (unsigned) unsignedOverflowSignature = overflowSignature
+                      else signedOverflowSignature = overflowSignature
                     }
                     const pair = yield* Intrinsic.call(
                       body,
                       intrinsicId,
-                      [i32],
+                      [operandType],
                       [left, right],
                       `arith${ordinal}_pair`,
                       { signature: overflowSignature },
@@ -1746,9 +1837,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     yield* LlvmBlock.setInsertionPoint(body, continueBlock)
                     result = valuePart
                   } else {
-                    const zero = yield* Constant.integerSigned(builder, i32, 0n)
-                    const minimum = yield* Constant.integerSigned(builder, i32, -2147483648n)
-                    const negativeOne = yield* Constant.integerSigned(builder, i32, -1n)
+                    const zero = yield* Constant.integerUnsigned(builder, operandType, 0n)
                     const zeroDivisor = yield* FunctionBody.integerCompare(
                       body,
                       'eq',
@@ -1756,40 +1845,55 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       zero,
                       `div${ordinal}_zero`,
                     )
-                    const minimumDividend = yield* FunctionBody.integerCompare(
-                      body,
-                      'eq',
-                      left,
-                      minimum,
-                      `div${ordinal}_min`,
-                    )
-                    const negativeOneDivisor = yield* FunctionBody.integerCompare(
-                      body,
-                      'eq',
-                      right,
-                      negativeOne,
-                      `div${ordinal}_negone`,
-                    )
-                    const overflowCase = yield* FunctionBody.binary(
-                      body,
-                      'and',
-                      minimumDividend,
-                      negativeOneDivisor,
-                      `div${ordinal}_overflow`,
-                    )
-                    const trapping = yield* FunctionBody.binary(
-                      body,
-                      'or',
-                      zeroDivisor,
-                      overflowCase,
-                      `div${ordinal}_trapping`,
-                    )
+                    let trapping: Value.Value = zeroDivisor
+                    if (!unsigned) {
+                      const minimum = yield* Constant.integerSigned(
+                        builder,
+                        operandType,
+                        -2147483648n,
+                      )
+                      const negativeOne = yield* Constant.integerSigned(builder, operandType, -1n)
+                      const minimumDividend = yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        left,
+                        minimum,
+                        `div${ordinal}_min`,
+                      )
+                      const negativeOneDivisor = yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        right,
+                        negativeOne,
+                        `div${ordinal}_negone`,
+                      )
+                      const overflowCase = yield* FunctionBody.binary(
+                        body,
+                        'and',
+                        minimumDividend,
+                        negativeOneDivisor,
+                        `div${ordinal}_overflow`,
+                      )
+                      trapping = yield* FunctionBody.binary(
+                        body,
+                        'or',
+                        zeroDivisor,
+                        overflowCase,
+                        `div${ordinal}_trapping`,
+                      )
+                    }
                     const continueBlock = yield* LlvmBlock.make(body, `div${ordinal}_ok`)
                     yield* FunctionBody.conditionalBranch(body, trapping, trapBlock, continueBlock)
                     yield* LlvmBlock.setInsertionPoint(body, continueBlock)
                     result = yield* FunctionBody.binary(
                       body,
-                      operation.operator === 'Divide' ? 'sdiv' : 'srem',
+                      operation.operator === 'Divide'
+                        ? unsigned
+                          ? 'udiv'
+                          : 'sdiv'
+                        : unsigned
+                          ? 'urem'
+                          : 'srem',
                       left,
                       right,
                       `arith${ordinal}`,
