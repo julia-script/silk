@@ -26,6 +26,34 @@ pub fn main() -> I32 { return 42 }`),
   }),
 )
 
+it.effect('plans hidden Effect capture environments by construction site and target', () =>
+  Effect.gen(function* () {
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const snapshot = yield* Analysis.ofSource(
+        'layout/effect-environment',
+        ascii(`pub fn main() -> I32 {
+  let mut counter = 0
+  let pending = effect { counter = counter + 1 return counter }
+  return 0
+}`),
+        target.id,
+      )
+      const plan = Analysis.layoutOf(snapshot)
+      assert.strictEqual(plan._tag, 'Available')
+      if (plan._tag !== 'Available') continue
+      const environment = plan.value.effectEnvironments.at(0)
+      assert.strictEqual(environment?._tag, 'EffectEnvironment')
+      if (environment?._tag !== 'EffectEnvironment') continue
+      assert.strictEqual(environment.fields.length, 1)
+      assert.strictEqual(environment.fields.at(0)?.access, 'Exclusive')
+      assert.strictEqual(environment.fields.at(0)?.representation, 'Borrow')
+      assert.strictEqual(environment.size, target.pointerSize)
+      assert.strictEqual(environment.alignment, target.pointerAlignment)
+      assert.deepEqual(Layout.verify(plan.value), [])
+    }
+  }),
+)
+
 it('orders and encodes canonical scalar entries identically on every target', () => {
   for (const target of Target.all) {
     const first = Layout.make(target, ['I32', 'Bool', 'I32'])
@@ -40,26 +68,26 @@ it('orders and encodes canonical scalar entries identically on every target', ()
 })
 
 it.effect(
-  'plans tagged flow outcomes for zero-lane success and target-sized failure payloads',
+  'plans tagged effect outcomes for zero-lane success and target-sized failure payloads',
   () =>
     Effect.gen(function* () {
       const source = `struct Empty {}
 struct Problem { position: Usize }
-flow fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
-flow fn recover(problem: Problem) -> Empty { return Empty {} }
+effect fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
+effect fn recover(problem: Problem) -> Empty { return Empty {} }
 pub fn main() -> I32 {
-  let recipe = Flow.catch<Problem>(risky(), recover)
+  let recipe = Effect.catch<Problem>(risky(), recover)
   let ignored = run recipe
   return 42
 }`
       for (const target of Target.all) {
-        const snapshot = yield* Analysis.ofSource('layout/flow-outcome', ascii(source), target.id)
+        const snapshot = yield* Analysis.ofSource('layout/effect-outcome', ascii(source), target.id)
         assert.deepEqual(Analysis.diagnostics(snapshot), [])
         const planned = Analysis.layoutOf(snapshot)
         assert.strictEqual(planned._tag, 'Available')
         if (planned._tag !== 'Available') continue
         const outcomes = planned.value.callingShapes.filter(
-          (shape) => Type.isFlow(shape.type) && shape.type.failures.length > 0,
+          (shape) => Type.isEffect(shape.type) && shape.type.failures.length > 0,
         )
         assert.isAbove(outcomes.length, 0)
         for (const outcome of outcomes) {
@@ -273,6 +301,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       _tag: 'LayoutPlan',
       target: selected.value.target,
       entries: [malformed],
+      effectEnvironments: [],
       callingShapes: [],
       literalVerdicts: [],
       diagnostics: [],

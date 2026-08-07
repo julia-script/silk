@@ -117,17 +117,23 @@ export const invalidSliceReborrowCode = 'SEM0058' as const
 export const implicitSliceDecayCode = 'SEM0059' as const
 /** Stable code for a negative decimal literal contextualized as unsigned `Usize`. */
 export const usizeNegativeCode = 'SEM0060' as const
-/** Stable code for a non-concrete or non-nominal member of a flow failure row. */
+/** Stable code for a non-concrete or non-nominal member of a effect failure row. */
 export const invalidFailureTypeCode = 'SEM0061' as const
 /** Stable code for a failure row attached to an ordinary function. */
 export const failureRowOnOrdinaryCode = 'SEM0062' as const
-export const failOutsideFlowCode = 'SEM0063' as const
+export const failOutsideEffectCode = 'SEM0063' as const
 export const undeclaredFailureCode = 'SEM0064' as const
-export const runNonFlowCode = 'SEM0065' as const
-export const unhandledFlowFailuresCode = 'SEM0066' as const
-export const invalidFlowHandlerCode = 'SEM0067' as const
-export const mutableFlowRecipeCode = 'SEM0068' as const
-export const flowRecipeEscapeCode = 'SEM0069' as const
+export const runNonEffectCode = 'SEM0065' as const
+export const unhandledEffectFailuresCode = 'SEM0066' as const
+export const invalidEffectHandlerCode = 'SEM0067' as const
+export const mutableEffectRecipeCode = 'SEM0068' as const
+export const effectIdentityErasureCode = 'SEM0069' as const
+/** Stable code for a non-concrete or non-nominal capability in a requirement row. */
+export const invalidRequirementTypeCode = 'SEM0070' as const
+export const unhandledEffectRequirementsCode = 'SEM0071' as const
+export const invalidEffectRetryCode = 'SEM0072' as const
+export const providerBackedFailureCode = 'SEM0073' as const
+export const invalidEffectProvisionCode = 'SEM0074' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -217,13 +223,18 @@ export type Code =
   | typeof usizeNegativeCode
   | typeof invalidFailureTypeCode
   | typeof failureRowOnOrdinaryCode
-  | typeof failOutsideFlowCode
+  | typeof failOutsideEffectCode
   | typeof undeclaredFailureCode
-  | typeof runNonFlowCode
-  | typeof unhandledFlowFailuresCode
-  | typeof invalidFlowHandlerCode
-  | typeof mutableFlowRecipeCode
-  | typeof flowRecipeEscapeCode
+  | typeof runNonEffectCode
+  | typeof unhandledEffectFailuresCode
+  | typeof invalidEffectHandlerCode
+  | typeof mutableEffectRecipeCode
+  | typeof effectIdentityErasureCode
+  | typeof invalidRequirementTypeCode
+  | typeof unhandledEffectRequirementsCode
+  | typeof invalidEffectRetryCode
+  | typeof providerBackedFailureCode
+  | typeof invalidEffectProvisionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -271,13 +282,18 @@ export type Reason =
   | { readonly _tag: 'UsizeNegative'; readonly spelling: string }
   | { readonly _tag: 'InvalidFailureType'; readonly type: string }
   | { readonly _tag: 'FailureRowOnOrdinary' }
-  | { readonly _tag: 'FailOutsideFlow' }
+  | { readonly _tag: 'FailOutsideEffect' }
   | { readonly _tag: 'UndeclaredFailure'; readonly type: string }
-  | { readonly _tag: 'RunNonFlow'; readonly type: string }
-  | { readonly _tag: 'UnhandledFlowFailures'; readonly failures: ReadonlyArray<string> }
-  | { readonly _tag: 'InvalidFlowHandler'; readonly detail: string }
-  | { readonly _tag: 'MutableFlowRecipe' }
-  | { readonly _tag: 'FlowRecipeEscape' }
+  | { readonly _tag: 'RunNonEffect'; readonly type: string }
+  | { readonly _tag: 'UnhandledEffectFailures'; readonly failures: ReadonlyArray<string> }
+  | { readonly _tag: 'InvalidEffectHandler'; readonly detail: string }
+  | { readonly _tag: 'MutableEffectRecipe' }
+  | { readonly _tag: 'EffectIdentityErasure' }
+  | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
+  | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
+  | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
+  | { readonly _tag: 'ProviderBackedFailure'; readonly type: string }
+  | { readonly _tag: 'InvalidEffectProvision'; readonly detail: string }
   | {
       readonly _tag: 'UsizeTargetOutOfRange'
       readonly spelling: string
@@ -1017,8 +1033,20 @@ export const invalidFailureType = (type: string, span: SourceSpan.SourceSpan): D
     phase: 'semantic',
     code: invalidFailureTypeCode,
     severity: 'error',
-    message: `Flow failure ${type} must be one concrete nominal type`,
+    message: `Effect failure ${type} must be one concrete nominal type`,
     reason: Object.freeze({ _tag: 'InvalidFailureType', type }),
+    span,
+  })
+
+/** Creates the diagnostic for a requirement that cannot name one concrete capability type. */
+export const invalidRequirementType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidRequirementTypeCode,
+    severity: 'error',
+    message: `Effect requirement ${type} must be one concrete nominal capability type`,
+    reason: Object.freeze({ _tag: 'InvalidRequirementType', type }),
     span,
   })
 
@@ -1029,19 +1057,19 @@ export const failureRowOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
     phase: 'semantic',
     code: failureRowOnOrdinaryCode,
     severity: 'error',
-    message: 'Only flow functions may declare a failure row',
+    message: 'Only effect functions may declare a failure row',
     reason: Object.freeze({ _tag: 'FailureRowOnOrdinary' }),
     span,
   })
 
-export const failOutsideFlow = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const failOutsideEffect = (span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: failOutsideFlowCode,
+    code: failOutsideEffectCode,
     severity: 'error',
-    message: 'Only flow functions may originate a typed failure',
-    reason: Object.freeze({ _tag: 'FailOutsideFlow' }),
+    message: 'Only effect functions may originate a typed failure',
+    reason: Object.freeze({ _tag: 'FailOutsideEffect' }),
     span,
   })
 
@@ -1051,66 +1079,117 @@ export const undeclaredFailure = (type: string, span: SourceSpan.SourceSpan): Di
     phase: 'semantic',
     code: undeclaredFailureCode,
     severity: 'error',
-    message: `Failure ${type} is not declared by this flow function`,
+    message: `Failure ${type} is not declared by this effect function`,
     reason: Object.freeze({ _tag: 'UndeclaredFailure', type }),
     span,
   })
 
-export const runNonFlow = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const runNonEffect = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: runNonFlowCode,
+    code: runNonEffectCode,
     severity: 'error',
-    message: `Cannot run non-flow value ${type}`,
-    reason: Object.freeze({ _tag: 'RunNonFlow', type }),
+    message: `Cannot run non-effect value ${type}`,
+    reason: Object.freeze({ _tag: 'RunNonEffect', type }),
     span,
   })
 
-export const unhandledFlowFailures = (
+export const unhandledEffectFailures = (
   failures: ReadonlyArray<string>,
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: unhandledFlowFailuresCode,
+    code: unhandledEffectFailuresCode,
     severity: 'error',
     message: `Run leaves unhandled failures: ${failures.join(' | ')}`,
-    reason: Object.freeze({ _tag: 'UnhandledFlowFailures', failures: Object.freeze(failures) }),
+    reason: Object.freeze({ _tag: 'UnhandledEffectFailures', failures: Object.freeze(failures) }),
     span,
   })
 
-export const invalidFlowHandler = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unhandledEffectRequirements = (
+  requirements: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: invalidFlowHandlerCode,
+    code: unhandledEffectRequirementsCode,
     severity: 'error',
-    message: `Invalid Flow.catch handler: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidFlowHandler', detail }),
+    message: `Run leaves unsatisfied requirements: ${requirements.join(' | ')}`,
+    reason: Object.freeze({
+      _tag: 'UnhandledEffectRequirements',
+      requirements: Object.freeze(requirements),
+    }),
     span,
   })
 
-export const mutableFlowRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidEffectRetry = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: mutableFlowRecipeCode,
+    code: invalidEffectRetryCode,
     severity: 'error',
-    message: 'Flow recipe bindings are immutable',
-    reason: Object.freeze({ _tag: 'MutableFlowRecipe' }),
+    message: `Invalid Effect.retry input: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidEffectRetry', detail }),
     span,
   })
 
-export const flowRecipeEscape = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const providerBackedFailure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: flowRecipeEscapeCode,
+    code: providerBackedFailureCode,
     severity: 'error',
-    message: 'Flow recipes cannot escape their declaring function in this bootstrap slice',
-    reason: Object.freeze({ _tag: 'FlowRecipeEscape' }),
+    message: `Failure ${type} is not detached because it contains a lexical borrow`,
+    reason: Object.freeze({ _tag: 'ProviderBackedFailure', type }),
+    span,
+  })
+
+export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidEffectProvisionCode,
+    severity: 'error',
+    message: `Invalid Effect provider: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidEffectProvision', detail }),
+    span,
+  })
+
+export const invalidEffectHandler = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidEffectHandlerCode,
+    severity: 'error',
+    message: `Invalid Effect.catch handler: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidEffectHandler', detail }),
+    span,
+  })
+
+export const mutableEffectRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: mutableEffectRecipeCode,
+    severity: 'error',
+    message: 'Effect recipe bindings are immutable',
+    reason: Object.freeze({ _tag: 'MutableEffectRecipe' }),
+    span,
+  })
+
+export const effectIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: effectIdentityErasureCode,
+    severity: 'error',
+    message:
+      'Cannot merge Effect values from different construction sites without explicit erasure',
+    reason: Object.freeze({ _tag: 'EffectIdentityErasure' }),
     span,
   })
 

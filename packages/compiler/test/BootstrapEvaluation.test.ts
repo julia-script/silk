@@ -74,9 +74,47 @@ pub fn main() -> I32 { return identity(42) }`)
   }),
 )
 
-it.effect('constructs flow calls lazily and executes them only at run', () =>
+it.effect('runs a hidden Effect environment returned across an ordinary function boundary', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`flow fn delayed(value: I32) -> I32 { return value + 1 }
+    const outcome = yield* evaluateSource(`fn delayed(value: I32) -> Effect<I32> {
+  let eager = value + 1
+  return effect { return eager + 1 }
+}
+pub fn main() -> I32 {
+  let pending = delayed(40)
+  return run pending
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.isTrue(
+      outcome.trace.some(
+        (event) => event._tag === 'Call' && event.target.name.includes('$effect$'),
+      ),
+    )
+  }),
+)
+
+it.effect('preserves exclusive capture state across repeated Effect runs', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`pub fn main() -> I32 {
+  let mut counter = 0
+  let pending = effect { counter = counter + 1 return counter }
+  let first = run pending
+  let second = run pending
+  return first * 10 + second
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 12)
+  }),
+)
+
+it.effect('constructs effect calls lazily and executes them only at run', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`effect fn delayed(value: I32) -> I32 { return value + 1 }
 pub fn main() -> I32 {
   let recipe = delayed(41)
   return run recipe
@@ -89,35 +127,40 @@ pub fn main() -> I32 {
       [
         'Entry',
         'RegionEntry',
-        'RegionEntry',
         'Call',
         'Binding',
         'RegionEntry',
-        'FlowSuccess',
         'Return',
+        'RegionEntry',
+        'Call',
+        'RegionEntry',
+        'EffectSuccess',
+        'Return',
+        'RegionEntry',
+        'Cleanup',
         'Return',
       ],
     )
   }),
 )
 
-it.effect('catches one exact owned flow failure without using traps', () =>
+it.effect('catches one exact owned effect failure without using traps', () =>
   Effect.gen(function* () {
     const outcome = yield* evaluateSource(`struct Problem { code: I32 }
-flow fn risky(value: I32) -> I32 ! Problem {
+effect fn risky(value: I32) -> I32 ! Problem {
   if value == 0 { fail move Problem { code: 41 } }
   return value
 }
-flow fn recover(problem: Problem) -> I32 { return problem.code + 1 }
+effect fn recover(problem: Problem) -> I32 { return problem.code + 1 }
 pub fn main() -> I32 {
-  let recipe = Flow.catch<Problem>(risky(0), recover)
+  let recipe = Effect.catch<Problem>(risky(0), recover)
   return run recipe
 }`)
 
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
-    assert.isTrue(outcome.trace.some((event) => event._tag === 'FlowFailure'))
-    assert.isTrue(outcome.trace.some((event) => event._tag === 'FlowSuccess'))
+    assert.isTrue(outcome.trace.some((event) => event._tag === 'EffectFailure'))
+    assert.isTrue(outcome.trace.some((event) => event._tag === 'EffectSuccess'))
   }),
 )
 
@@ -299,6 +342,21 @@ pub fn main() -> I32 {
       first.path?.map((field) => field.ordinal),
       [1],
     )
+  }),
+)
+
+it.effect('executes explicit drop exactly once before the following statement', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`struct Token { value: I32 }
+pub fn main() -> I32 {
+  let token = Token { value: 1 }
+  drop token
+  return 42
+}`)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Cleanup').length, 1)
   }),
 )
 

@@ -160,37 +160,132 @@ pub fn main() -> I32 {
 `,
   ),
   one(
-    'flows',
-    'Typed flow recovery',
+    'effects',
+    'Eager setup, lazy Effect body',
+    `pub fn main() -> I32 {
+  let eager = I32.add(20, 1)
+  let delayed = effect {
+    return I32.add(eager, 21)
+  }
+  return run delayed
+}
+`,
+  ),
+  one(
+    'effects',
+    'Reusable exclusive capture',
+    `pub fn main() -> I32 {
+  let mut counter = 10
+  let increment = effect {
+    counter = counter + 1
+    return counter
+  }
+  let first = run increment
+  return run increment
+}
+`,
+  ),
+  one(
+    'effects',
+    'Retry with persistent capture',
     `struct Problem { code: I32 }
 
-flow fn risky<T>(value: T, selector: I32) -> T ! Problem {
+effect fn retrying() -> I32 ! Problem {
+  let mut counter = 0
+  let attempt = effect {
+    counter = counter + 1
+    if counter < 3 { fail Problem { code: counter } }
+    return counter
+  }
+  return run (attempt |> Effect.retry(2))
+}
+
+effect fn recover(problem: Problem) -> I32 { return 99 }
+
+pub fn main() -> I32 {
+  return run (retrying() |> Effect.catch<Problem>(recover))
+}
+`,
+  ),
+  one(
+    'effects',
+    'Existing provider capture',
+    `struct Clock {}
+
+effect fn read() -> I32 ? &Clock@Primary {
+  return 42
+}
+
+pub fn main() -> I32 {
+  let clock = Clock {}
+  let pending = read()
+    |> Clock.provide(&clock, @Primary)
+  return run pending
+}
+`,
+  ),
+  one(
+    'allocation',
+    'Validated target Layout',
+    `pub fn main() -> I32 {
+  let candidate = Layout.make(64, 32)
+  return match move candidate {
+    Layout { bytes, alignment } => 42
+    InvalidAlignment { alignment } => 0
+  }
+}
+`,
+  ),
+  one(
+    'allocation',
+    'Self-contained Allocation contract',
+    `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
+  return Allocator.allocate(move layout)
+}
+
+fn consume(allocation: Allocation) -> I32 {
+  drop allocation
+  return 42
+}
+
+pub fn main() -> I32 {
+  let allocator = SystemAllocator.make()
+  return 42
+}
+`,
+  ),
+  one(
+    'effects',
+    'Typed Effect recovery',
+    `struct Problem { code: I32 }
+
+effect fn risky<T>(value: T, selector: I32) -> T ! Problem {
   if selector == 0 { fail move Problem { code: 41 } }
   return move value
 }
 
-flow fn relay(value: I32) -> I32 ! Problem {
+effect fn relay(value: I32) -> I32 ! Problem {
   let pending = risky<I32>(value, value)
   return run pending
 }
 
-flow fn recover(problem: Problem) -> I32 {
+effect fn recover(problem: Problem) -> I32 {
   return problem.code |> I32.add(1)
 }
 
 pub fn main() -> I32 {
   let recipe = relay(0)
-    |> Flow.catch<Problem>(recover)
+    |> Effect.catch<Problem>(recover)
   return run recipe
 }
 `,
   ),
   one(
-    'flows',
-    'Unhandled flow residual',
+    'effects',
+    'Unhandled Effect residual',
     `struct Problem { code: I32 }
 
-flow fn risky() -> I32 ! Problem {
+effect fn risky() -> I32 ! Problem {
   fail move Problem { code: 41 }
 }
 
@@ -251,19 +346,19 @@ pub fn main() -> I32 { return identity(42) }`,
   ),
   one(
     'syntax',
-    'Flow unknown reference',
+    'Effect unknown reference',
     `pub fn identity(value: I32) -> I32 { return missing }
 pub fn main() -> I32 { return identity(42) }`,
   ),
   one(
     'syntax',
-    'Flow ambiguous reference',
+    'Effect ambiguous reference',
     `pub fn choose(value: I32, value: I32) -> I32 { return value }
 pub fn main() -> I32 { return choose(1, 2) }`,
   ),
   one(
     'syntax',
-    'Flow damaged syntax',
+    'Effect damaged syntax',
     `${identity}
 pub fn main() -> I32 { return identity(@) }`,
   ),

@@ -46,7 +46,7 @@ export interface Release {
   readonly cleanup: CleanupPlan
 }
 
-/** A deterministic compiler-only identity for one direct-call or delayed-flow slice loan. */
+/** A deterministic compiler-only identity for one direct-call or delayed-effect slice loan. */
 export type BorrowId = Hir.BorrowId
 
 export interface LoanFact {
@@ -54,7 +54,7 @@ export interface LoanFact {
   readonly id: BorrowId
   readonly root: BindingSite
   readonly access: Type.Slice['access']
-  readonly origin: 'FixedArrayBorrow' | 'SliceReborrow'
+  readonly origin: 'FixedArrayBorrow' | 'SliceReborrow' | 'EffectCapture'
   readonly parent?: BindingSite
   readonly suspendsParent: boolean
   readonly startRegion: Hir.RegionId
@@ -76,6 +76,12 @@ export interface BorrowedReplacementFact {
 export type CleanupPlan =
   | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
   | { readonly _tag: 'ParameterCleanup'; readonly type: Type.Parameter }
+  | {
+      readonly _tag: 'AllocationCleanup'
+      readonly type: Type.Nominal
+      /** Compiler-private proof that exactly one reclaim obligation is still active. */
+      readonly ticket: 'ActiveReclaimTicket'
+    }
   | {
       readonly _tag: 'StructCleanup'
       readonly type: Type.Nominal
@@ -174,7 +180,7 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
 const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
-  type === undefined || Type.isBuiltin(type) || Type.isNever(type)
+  type === undefined || Type.isBuiltin(type) || Type.isNever(type) || Type.isOutOfMemory(type)
     ? copyable
     : Type.isSlice(type)
       ? type.access === 'Shared'
@@ -184,7 +190,7 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
         ? categoryOf(type.element)._tag === 'Copyable'
           ? copyable
           : Object.freeze({ _tag: 'MoveOnly', type })
-        : Type.isFlow(type) && type.access === 'Shared'
+        : Type.isEffect(type) && type.access === 'Shared'
           ? copyable
           : Object.freeze({ _tag: 'MoveOnly', type })
 
@@ -385,18 +391,50 @@ const checkExpression = (
         checkExpression(state, live, argument, true, guard, escaping)
       return
     }
-    case 'FlowConstruct': {
+    case 'EffectConstruct': {
       for (const argument of expression.arguments)
         checkExpression(state, live, argument, true, guard, escaping)
       return
     }
-    case 'FlowCatch':
+    case 'EffectBlock': {
+      for (const capture of expression.captures) {
+        const site: BindingSite | undefined =
+          capture.binding !== undefined
+            ? Object.freeze({ _tag: 'Let', binding: capture.binding })
+            : capture.parameter !== undefined
+              ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
+              : undefined
+        if (site !== undefined) checkUse(state, live, site, capture.span, capture.access === 'Take')
+      }
+      return
+    }
+    case 'EffectCatch':
       checkExpression(state, live, expression.protected, false, guard, escaping)
+      return
+    case 'EffectRetry':
+      checkExpression(state, live, expression.protected, false, guard, escaping)
+      checkExpression(state, live, expression.retries, false, guard, escaping)
+      return
+    case 'EffectProvide': {
+      checkExpression(state, live, expression.protected, false, guard, escaping)
+      const site: BindingSite | undefined =
+        expression.provider.binding !== undefined
+          ? Object.freeze({ _tag: 'Let', binding: expression.provider.binding })
+          : expression.provider.parameter !== undefined
+            ? Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
+            : undefined
+      if (site !== undefined)
+        checkUse(state, live, site, expression.provider.span, expression.provider.access === 'Take')
+      return
+    }
+    case 'EffectProvideWith':
+      checkExpression(state, live, expression.protected, false, guard, escaping)
+      checkExpression(state, live, expression.acquisition, false, guard, escaping)
       return
     case 'Run': {
       if (
         expression.subject._tag === 'BindingReference' &&
-        Type.isFlow(expression.subject.type) &&
+        Type.isEffect(expression.subject.type) &&
         expression.subject.type.access === 'Take'
       ) {
         const site = useSite(expression.subject)
@@ -624,8 +662,10 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
       case 'Call':
         for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
         return
-      case 'FlowCatch':
+      case 'EffectCatch':
         scanRunEnds(expression.protected, region)
+        return
+      case 'EffectBlock':
         return
       case 'Integer':
       case 'Boolean':
@@ -809,11 +849,107 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         }
         return
       }
+      case 'EffectBlock': {
+        const captureActive: Array<LoanFact> = [
+          ...active,
+          ...delayedLoansAt(expression.syntax.span),
+        ]
+        for (const [ordinal, capture] of expression.captures.entries()) {
+          const root: BindingSite =
+            capture.reference._tag === 'BindingFact'
+              ? Object.freeze({ _tag: 'Let', binding: capture.reference.id })
+              : Object.freeze({ _tag: 'Parameter', parameter: capture.reference.id })
+          const candidateAccess = capture.access === 'Exclusive' ? 'Exclusive' : 'Shared'
+          const conflict = captureActive.find(
+            (loan) =>
+              sameSite(loan.root, root) &&
+              (loan.access === 'Exclusive' || candidateAccess === 'Exclusive'),
+          )
+          if (conflict !== undefined) {
+            diagnostics.push(
+              Diagnostic.conflictingSliceLoan(
+                conflict.access,
+                candidateAccess,
+                conflict.startSpan,
+                capture.span,
+              ),
+            )
+          }
+          if (capture.access !== 'Shared' && capture.access !== 'Exclusive') continue
+          const loan: LoanFact = Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal,
+            }),
+            root,
+            access: capture.access,
+            origin: 'EffectCapture',
+            suspendsParent: false,
+            startRegion: region,
+            endRegion: delayedEnd?.region ?? region,
+            startSpan: capture.span,
+            endSpan: delayedEnd?.span ?? expression.syntax.span,
+          })
+          loans.push(loan)
+          captureActive.push(loan)
+        }
+        return
+      }
       case 'Run':
         inspect(expression.subject, region, active, 'Read')
         return
-      case 'FlowCatch':
+      case 'EffectCatch':
         inspect(expression.protected, region, active, 'Read', delayedEnd)
+        return
+      case 'EffectProvide': {
+        inspect(expression.protected, region, active, 'Read', delayedEnd)
+        const provider = expression.provider
+        if (provider === undefined || provider.access === 'Take') return
+        const root: BindingSite =
+          provider.reference._tag === 'BindingFact'
+            ? Object.freeze({ _tag: 'Let', binding: provider.reference.id })
+            : Object.freeze({ _tag: 'Parameter', parameter: provider.reference.id })
+        const conflict = active.find(
+          (loan) =>
+            sameSite(loan.root, root) &&
+            (loan.access === 'Exclusive' || provider.access === 'Exclusive'),
+        )
+        if (conflict !== undefined)
+          diagnostics.push(
+            Diagnostic.conflictingSliceLoan(
+              conflict.access,
+              provider.access,
+              conflict.startSpan,
+              provider.span,
+            ),
+          )
+        loans.push(
+          Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal: 0,
+            }),
+            root,
+            access: provider.access,
+            origin: 'EffectCapture',
+            suspendsParent: false,
+            startRegion: region,
+            endRegion: delayedEnd?.region ?? region,
+            startSpan: provider.span,
+            endSpan: delayedEnd?.span ?? expression.syntax.span,
+          }),
+        )
+        return
+      }
+      case 'EffectProvideWith':
+        inspect(expression.protected, region, active, 'Read', delayedEnd)
+        inspect(expression.acquisition, region, active, 'Read', delayedEnd)
         return
     }
   }
@@ -828,7 +964,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
             [],
             'Read',
             statement.binding.initializer.type._tag === 'Available' &&
-              Type.isFlow(statement.binding.initializer.type.type)
+              Type.isEffect(statement.binding.initializer.type.type)
               ? (runEnds.get(statement.binding.id.ordinal) ?? {
                   region: statement.region,
                   span: fn.declaration.syntax.span,
@@ -853,6 +989,9 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           inspect(statement.expression, statement.region, [], naturalAccess(statement.expression))
           break
         case 'FailStatement':
+          inspect(statement.expression, statement.region, [], 'Move')
+          break
+        case 'DropStatement':
           inspect(statement.expression, statement.region, [], 'Move')
           break
         case 'BreakStatement':
@@ -916,7 +1055,13 @@ const cleanupPlan = (
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
   if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isFlow(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.equals(type, Type.allocation))
+    return Object.freeze({
+      _tag: 'AllocationCleanup',
+      type: Type.allocation,
+      ticket: 'ActiveReclaimTicket',
+    })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
@@ -1019,6 +1164,14 @@ export const specializeCleanup = (
       return Type.isParameter(type)
         ? Object.freeze({ _tag: 'ParameterCleanup', type })
         : (resolveConcrete?.(type) ?? Object.freeze({ _tag: 'NoCleanup', type }))
+    case 'AllocationCleanup':
+      return Type.equals(type, Type.allocation)
+        ? Object.freeze({
+            _tag: 'AllocationCleanup',
+            type: Type.allocation,
+            ticket: 'ActiveReclaimTicket',
+          })
+        : Object.freeze({ _tag: 'NoCleanup', type })
     case 'StructCleanup':
       if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
       return Object.freeze({
@@ -1347,6 +1500,10 @@ const checkFunction = (
         )
         return Object.freeze({ returned: true, live })
       }
+      if (statement._tag === 'Drop') {
+        checkExpression(state, live, statement.expression, true)
+        continue
+      }
       if (statement._tag === 'UnavailableStatement') {
         continue
       }
@@ -1541,6 +1698,8 @@ const siteText = (site: BindingSite): string =>
 const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
   if (cleanup._tag === 'ParameterCleanup') return `parameter:${Type.key(cleanup.type)}`
+  if (cleanup._tag === 'AllocationCleanup')
+    return `allocation:${Type.encode(cleanup.type)} ticket=${cleanup.ticket}`
   if (cleanup._tag === 'ArrayCleanup') {
     return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
   }

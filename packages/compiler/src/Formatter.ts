@@ -323,19 +323,20 @@ const printFunctionDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
-  const flowKeyword = directTokens(node).find((token) => token.kind === 'FlowKeyword')
+  const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
+  const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
   return FormatDocument.concat(
     ...(publicKeyword === undefined
       ? []
       : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
-    ...(flowKeyword === undefined
+    ...(effectKeyword === undefined
       ? []
       : [
           printToken(
             context,
-            flowKeyword,
+            effectKeyword,
             publicKeyword === undefined ? prefix : FormatDocument.empty,
           ),
           FormatDocument.text(' '),
@@ -343,13 +344,16 @@ const printFunctionDeclaration = (
     printToken(
       context,
       tokenOf(node, 'FnKeyword'),
-      publicKeyword === undefined && flowKeyword === undefined ? prefix : FormatDocument.empty,
+      publicKeyword === undefined && effectKeyword === undefined ? prefix : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
     printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
     ...(failureRow === undefined ? [] : [printNode(context, failureRow, FormatDocument.hardLine)]),
+    ...(requirementRow === undefined
+      ? []
+      : [printNode(context, requirementRow, FormatDocument.hardLine)]),
     printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
   )
 }
@@ -403,8 +407,39 @@ const printNode = (
     case 'ImportPath':
     case 'TypePath':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'TypeArgumentList': {
+      const nodes = directNodes(node)
+      const failure = nodes.find((child) => child.kind === 'FailureRow')
+      const requirements = nodes.find((child) => child.kind === 'RequirementRow')
+      if (failure === undefined && requirements === undefined)
+        return printDelimited(
+          context,
+          tokenOf(node, 'Less'),
+          nodes,
+          commaTokens(node),
+          tokenOf(node, 'Greater'),
+          prefix,
+        )
+      const arguments_ = nodes.filter(
+        (child) => child.kind !== 'FailureRow' && child.kind !== 'RequirementRow',
+      )
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Less'), prefix, preserveBlank),
+        ...arguments_.map((argument, ordinal) =>
+          printNode(
+            context,
+            argument,
+            ordinal === 0 ? FormatDocument.empty : FormatDocument.text(', '),
+          ),
+        ),
+        ...(failure === undefined ? [] : [printNode(context, failure, FormatDocument.text(' '))]),
+        ...(requirements === undefined
+          ? []
+          : [printNode(context, requirements, FormatDocument.text(' '))]),
+        printToken(context, tokenOf(node, 'Greater')),
+      )
+    }
     case 'TypeParameterList':
-    case 'TypeArgumentList':
     case 'CallTypeArgumentList':
       return printDelimited(
         context,
@@ -548,6 +583,31 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    case 'RequirementRow': {
+      const requirements = directNodes(node).filter((child) => child.kind === 'Requirement')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Question'), prefix, preserveBlank),
+        ...requirements.map((requirement, ordinal) =>
+          printNode(
+            context,
+            requirement,
+            ordinal === 0 ? FormatDocument.text(' ') : FormatDocument.text(' | '),
+          ),
+        ),
+      )
+    }
+    case 'Requirement': {
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const at = directTokens(node).find((token) => token.kind === 'At')
+      const role = directTokens(node).find((token) => token.kind === 'Identifier')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
+        ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
+        printNode(context, nodeOf(node, 'TypePath')),
+        ...(at === undefined ? [] : [printToken(context, at)]),
+        ...(role === undefined ? [] : [printToken(context, role)]),
+      )
+    }
     case 'Block':
       return printBlock(context, node, prefix)
     case 'BindingStatement': {
@@ -622,16 +682,29 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
-    case 'FailStatement':
+    case 'FailStatement': {
+      const move = directTokens(node).find((token) => token.kind === 'MoveKeyword')
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'FailKeyword'), prefix, preserveBlank),
-        printToken(context, tokenOf(node, 'MoveKeyword'), FormatDocument.text(' ')),
+        ...(move === undefined ? [] : [printToken(context, move, FormatDocument.text(' '))]),
         printNode(
           context,
           directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
           FormatDocument.text(' '),
         ),
       )
+    }
+    case 'DropStatement':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'DropKeyword'), prefix, preserveBlank),
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+          FormatDocument.text(' '),
+        ),
+      )
+    case 'RoleExpression':
+      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'IntegerLiteralExpression':
     case 'BooleanLiteralExpression':
     case 'IdentifierExpression':
@@ -644,6 +717,11 @@ const printNode = (
           directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
           FormatDocument.text(' '),
         ),
+      )
+    case 'EffectExpression':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'EffectKeyword'), prefix, preserveBlank),
+        printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
       )
     case 'RunExpression':
       return FormatDocument.concat(

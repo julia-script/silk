@@ -11,8 +11,8 @@ let piped = 2 |> Math.sum(3)`,
   {
     title: 'Construct now, run later',
     note:
-      'Calling compile packages its owned input but does not enter the body. run evaluates exactly one flow layer.',
-    source: `pub flow fn compile(request: own Request) -> Artifact
+      'Calling compile packages its owned input but does not enter the body. run evaluates exactly one Effect layer.',
+    source: `pub effect fn compile(request: own Request) -> Artifact
   ! FileError | ProcessError | OutOfMemory
   ? &FileSystem | &mut Allocator@Scratch
 {
@@ -26,10 +26,10 @@ let artifact = run computation
 return artifact`,
   },
   {
-    title: 'Specialize an open flow twice',
+    title: 'Specialize an open Effect twice',
     note:
-      'Providers are attached before the owned requests. Borrowed providers constrain the specialized flow lifetime.',
-    source: `let mut scratch = ArenaAllocator.make()
+      'Providers are attached before the owned requests. Borrowed providers constrain the specialized Effect lifetime.',
+    source: `let mut scratch = SystemAllocator.make()
 let fileSystem = NativeFileSystem.make()
 let virtualFileSystem = MemoryFileSystem.make()
 
@@ -48,12 +48,12 @@ return run memoryCompilation(move memoryRequest)`,
   {
     title: 'Captured ownership determines reuse',
     note:
-      'There is no separate single-shot Flow type. The closed environment permits view twice but take only once.',
-    source: `pub flow fn inspect(payload: &Payload) -> Report {
+      'There is no separate single-shot Effect type. The closed environment permits view twice but take only once.',
+    source: `pub effect fn inspect(payload: &Payload) -> Report {
   return Inspector.inspect(payload)
 }
 
-pub flow fn consume(payload: own Payload) -> Digest {
+pub effect fn consume(payload: own Payload) -> Digest {
   return Hasher.digest(move payload)
 }
 
@@ -66,27 +66,27 @@ let digest = run once
 let again = run once // error: captured payload was taken`,
   },
   {
-    title: 'Preserve or flatten one flow layer',
+    title: 'Preserve or flatten one Effect layer',
     note:
-      'return flow preserves nesting; run evaluates one layer; Flow.flatten explicitly removes one layer.',
+      'return Effect preserves nesting; run evaluates one layer; Effect.flatten explicitly removes one layer.',
     source: `let planned = Planner.plan(move request)
-let nested = Flow.map(planned, Compiler.compile)
+let nested = Effect.map(planned, Compiler.compile)
 
-// Flow<Flow<Artifact>> remains nested until requested.
-let compilation = Flow.flatten(nested)
+// Effect<Effect<Artifact>> remains nested until requested.
+let compilation = Effect.flatten(nested)
 return run compilation`,
   },
   {
     title: 'Acquire a fresh provider for every run',
     note:
-      'provideWith brackets each execution. Artifact.promote runs before the build scope closes, so no Scratch borrow escapes.',
-    source: `let promoted = Flow.map(Compiler.compile, Artifact.promote)
+      'provideWith acquires and drops a fresh provider owner for each execution. Allocation results remain self-contained.',
+    source: `let promoted = Effect.map(Compiler.compile, Artifact.promote)
 let withScratch = Allocator.provideWith(
   promoted,
   Scratch.acquire,
   @Scratch,
 )
-let compilation = Scope.scoped(withScratch, 'build)
+let compilation = withScratch
 
 let first = run compilation(move firstRequest)
 return run compilation(move secondRequest)`,
@@ -94,13 +94,13 @@ return run compilation(move secondRequest)`,
   {
     title: 'Guard non-tail recursion explicitly',
     note:
-      'The compiler accepts a recursive cycle only when it is tail-recursive or crosses Flow.suspend.',
-    source: `pub flow fn depth(node: &Node) -> U32 {
+      'The compiler accepts a recursive cycle only when it is tail-recursive or crosses Effect.suspend.',
+    source: `pub effect fn depth(node: &Node) -> U32 {
   if node.isLeaf {
     return 1
   }
 
-  let child = Flow.suspend(depth(&node.child))
+  let child = Effect.suspend(depth(&node.child))
   let childDepth = run child
   return 1 + childDepth
 }`,
@@ -119,22 +119,22 @@ let piped = 2 |> Math.sum(3)`,
   {
     title: 'Construct now, run later',
     note:
-      'The body is still lazy, but flatMap makes the dependency between flow steps visible without nested blocks.',
-    source: `pub flow fn compile(request: own Request) -> Artifact
+      'The body is still lazy, but flatMap makes the dependency between Effect steps visible without nested blocks.',
+    source: `pub effect fn compile(request: own Request) -> Artifact
   ! FileError | ProcessError | OutOfMemory
   ? &FileSystem | &mut Allocator@Scratch
   return run (
     request.sourcePath
       |> FileSystem.read
-      |> Flow.flatMap(Parser.parse)
-      |> Flow.flatMap(Backend.emit)
+      |> Effect.flatMap(Parser.parse)
+      |> Effect.flatMap(Backend.emit)
   )
 
 let computation = compile(move request)
 return run computation`,
   },
   {
-    title: 'Specialize an open flow twice',
+    title: 'Specialize an open Effect twice',
     note:
       'The pipe specializes the open function value. Owned inputs arrive only when each specialized function is called.',
     source: `let withScratch = Compiler.compile
@@ -153,10 +153,10 @@ return run memoryCompilation(move memoryRequest)`,
     title: 'Captured ownership determines reuse',
     note:
       'Piping does not change access. A borrowed capture remains reusable; a moved capture remains take-only.',
-    source: `pub flow fn inspect(payload: &Payload) -> Report
+    source: `pub effect fn inspect(payload: &Payload) -> Report
   return payload |> Inspector.inspect
 
-pub flow fn consume(payload: own Payload) -> Digest
+pub effect fn consume(payload: own Payload) -> Digest
   return move payload |> Hasher.digest
 
 let reusable = payload |> inspect
@@ -170,21 +170,20 @@ let again = run once // error: captured payload was taken`,
   {
     title: 'flatMap flattens while composing',
     note:
-      'map would preserve Flow<Flow<Artifact>>. flatMap deliberately composes and removes that one layer.',
+      'map would preserve Effect<Effect<Artifact>>. flatMap deliberately composes and removes that one layer.',
     source: `let compilation = move request
   |> Planner.plan
-  |> Flow.flatMap(Compiler.compile)
+  |> Effect.flatMap(Compiler.compile)
 
 return run compilation`,
   },
   {
     title: 'Acquire a fresh provider for every run',
     note:
-      'This chain is a reusable recipe. Acquisition, LIFO cleanup, and the build scope occur independently on every run.',
+      'This chain is a reusable recipe. Provider acquisition and Drop occur independently on every run.',
     source: `let compilation = Compiler.compile
-  |> Flow.map(Artifact.promote)
+  |> Effect.map(Artifact.promote)
   |> Allocator.provideWith(Scratch.acquire, @Scratch)
-  |> Scope.scoped('build)
 
 let first = run compilation(move firstRequest)
 return run compilation(move secondRequest)`,
@@ -192,16 +191,16 @@ return run compilation(move secondRequest)`,
   {
     title: 'Guard non-tail recursion explicitly',
     note:
-      'Flow.suspend is an ordinary pipeable operation. It lowers the recursive edge through a trampoline frame.',
-    source: `pub flow fn depth(node: &Node) -> U32 {
+      'Effect.suspend is an ordinary pipeable operation. It lowers the recursive edge through a trampoline frame.',
+    source: `pub effect fn depth(node: &Node) -> U32 {
   if node.isLeaf {
     return 1
   }
 
   return run (
     depth(&node.child)
-      |> Flow.suspend
-      |> Flow.map(Math.add(1))
+      |> Effect.suspend
+      |> Effect.map(Math.add(1))
   )
 }`,
   },
@@ -222,7 +221,7 @@ pipe(2, sum(3))`,
   {
     title: 'Effect reference: suspend and run',
     note:
-      'Effect needs a thunk because an ordinary JavaScript function constructs its Effect eagerly. Silk flow calls are lazy already.',
+      'Effect needs a thunk because an ordinary JavaScript function constructs its Effect eagerly. Silk effect calls are lazy already.',
     source: `// effect/packages/effect/src/Effect.ts
 let value = 0
 const computation = Effect.suspend(() =>
@@ -298,7 +297,7 @@ export const variants = [
     id: 'imperative',
     name: 'Reified imperative',
     thesis:
-      'flow fn builds a lazy computation; run sequences one layer while ordinary actor calls stay data-first.',
+      'effect fn builds a lazy computation; run sequences one layer while ordinary actor calls stay data-first.',
     tension:
       'Sequencing is explicit and familiar, but repeated run expressions may feel heavier in orchestration code.',
     examples: imperativeExamples,
@@ -307,7 +306,7 @@ export const variants = [
     id: 'piped',
     name: 'Reified fully piped',
     thesis:
-      'Flow operations compose recipes before run; providers, scopes, flattening, and suspension remain ordinary actor calls.',
+      'Effect operations compose recipes before run; providers, flattening, and suspension remain ordinary actor calls.',
     tension:
       'The grammar must make run over a multiline pipeline unambiguous without turning run into another block form.',
     examples: pipedExamples,

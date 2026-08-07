@@ -7,70 +7,92 @@ one-layer execution, propagation, recovery, and separation from unrecoverable tr
 
 ## Requirements
 
-### Requirement: Flow calls are lazy and run evaluates one layer
+### Requirement: Effect expressions and functions are lazy
 
-Calling a `flow fn` SHALL construct a flow without entering its body. `run` SHALL execute exactly one
-flow layer and produce that layer's success value or propagate its owned typed failure. The first
-executable slice SHALL keep these flow values statically shaped and MUST NOT fabricate a general
-runtime closure object.
+Evaluating `effect { ... }` SHALL construct `Effect<A ! E ? R>` without entering its body.
+Invoking an `effect fn` SHALL have the same behavior for its entire body. `run` SHALL evaluate exactly
+one Effect layer. Ordinary `fn` statements outside an explicit effect block SHALL execute eagerly.
 
-#### Scenario: Delay a body until run
+#### Scenario: Preserve an eager setup boundary
 
-- **WHEN** a flow call is bound before a later `run`
-- **THEN** evaluation records capture at construction and enters the body only at `run`
+- **WHEN** an ordinary function computes one value and returns an effect block that uses it
+- **THEN** the setup executes at the call while the block executes only when run
 
-### Requirement: Failure rows are normalized nominal contracts
+### Requirement: Effect construction has hidden nominal identity
 
-The `!` row of a `flow fn` SHALL be a deterministic normalized set of owned canonical nominal
-types. A body MUST NOT originate or propagate a failure absent from its declared row. Ordinary `fn`
-functions and executable entries SHALL have empty failure rows.
+Every `effect {}` construction site SHALL produce one compiler-only nominal Effect instance with a
+target-planned capture environment and generated runner. The public structural Effect contract MUST
+NOT expose that identity, and the implementation MUST NOT use a universal runtime interpreter or
+erase different construction sites merely because their public contracts match.
 
-#### Scenario: Normalize an equivalent row
+#### Scenario: Return a delayed computation across a function boundary
 
-- **WHEN** equivalent failure members are written in a different order or repeated
-- **THEN** semantic facts publish the same canonical row and discriminants
+- **WHEN** an ordinary function performs eager setup and returns `effect { ... }`
+- **THEN** the returned Effect preserves its construction-site identity and captured environment until it is run or dropped
 
-#### Scenario: Reject an undeclared propagated failure
+### Requirement: Effect failure rows are normalized owned contracts
 
-- **WHEN** a flow body runs a flow whose residual row contains an undeclared member
-- **THEN** analysis rejects the body before HIR execution or backend emission
+The `!` row SHALL be a deterministic normalized set of canonical nominal types. `fail` SHALL stop
+the current Effect execution with success type `Never`, copying a Copy payload or consuming an
+explicitly moved affine payload. Failure payloads MUST be detached owned values with no lexical or
+provider borrow.
 
-### Requirement: Fail transfers one owned payload abortively
+#### Scenario: Fail with a Copy problem
 
-`fail move value` SHALL consume one owned nominal payload, have success type `Never`, stop the current
-flow execution, and transfer the payload to the nearest matching handler or caller. It MUST NOT be
-catchable as a trap or copy an affine payload.
+- **WHEN** an Effect executes `fail problem` for a Copy nominal value
+- **THEN** the failure channel receives the copied value without requiring `fail move`
 
-#### Scenario: Propagate an owned failure
+### Requirement: Effect catch subtracts and composes rows
 
-- **WHEN** an inner flow fails with a declared nominal payload and no local handler matches
-- **THEN** the payload leaves the inner execution once and the caller observes the same failure member
+`Effect.catch<E>(effect, handler)` and `effect |> Effect.catch<E>(handler)` SHALL handle only an `E`
+present in the protected row, remove that member when coverage is complete, union the handler's
+failures, bypass the handler on success, and propagate nonmatching members unchanged.
 
-### Requirement: Exact-member catch subtracts and composes rows
+#### Scenario: Recover through a pipeline
 
-`Flow.catch<E>(flow, handler)` and its equivalent pipeline spelling
-`flow |> Flow.catch<E>(handler)` SHALL accept only an `E` present in the protected row and a
-statically known `flow fn` handler accepting owned `E` and producing the same success type. The
-resulting row SHALL be the protected row without `E`, union the handler row. Success bypasses the
-handler; nonmatching members propagate unchanged.
+- **WHEN** `relay(0) |> Effect.catch<Problem>(recover)` fails with `Problem`
+- **THEN** `recover` owns the payload and its success becomes the pipeline result
 
-#### Scenario: Recover one member
+### Requirement: Capture access derives repeatability
 
-- **WHEN** a protected flow fails with `E`
-- **THEN** the handler owns the payload and its successful result becomes the protected result
+Copy captures SHALL snapshot at construction, shared captures SHALL permit repeated shared runs,
+exclusive captures SHALL require exclusive runs while preserving mutations across runs, and an
+Effect whose execution consumes a captured affine owner SHALL be take-once.
 
-#### Scenario: Preserve another member
+#### Scenario: Reject a second consuming run
 
-- **WHEN** the protected flow fails with another declared member
-- **THEN** the handler is not entered and that member remains in the residual row
+- **WHEN** one execution consumes a moved capture and the caller runs the same Effect again
+- **THEN** ownership rejects the second run and identifies the consumed capture
 
-### Requirement: Traps remain outside typed failure
+### Requirement: Retry accepts only repeatable Effects
 
-Bounds violations, integer traps, impossible compiler states, and violated unsafe contracts SHALL
-remain abnormal traps. `Flow.catch` MUST NOT intercept them and the typed-failure ABI MUST NOT
-translate them into nominal payloads.
+`Effect.retry` SHALL reconstruct execution-local state for every attempt while reusing captures. It
+MUST reject a take-once Effect. Providers acquired inside the retried Effect SHALL be reacquired;
+captured providers SHALL be reused.
 
-#### Scenario: Arithmetic trap bypasses catch
+#### Scenario: Preserve mutable retry state
 
-- **WHEN** a protected flow divides by zero
-- **THEN** execution traps without invoking a typed failure handler
+- **WHEN** a repeatable Effect mutates an exclusive captured counter and is retried
+- **THEN** each attempt receives fresh locals while observing the counter changes from earlier attempts
+
+### Requirement: Provision distinguishes capture from acquisition
+
+`Capability.provide` SHALL capture an existing provider and MUST NOT imply per-run cleanup.
+`Capability.provideWith` SHALL acquire a fresh affine provider owner per execution and drop every
+successfully acquired owner after success or typed failure without replacing the original outcome.
+
+#### Scenario: Catch outside per-run acquisition
+
+- **WHEN** a failing Effect is wrapped by `provideWith` and then by `Effect.catch`
+- **THEN** the per-run provider drops before recovery begins
+
+### Requirement: Traps remain outside Effect failure and cleanup
+
+Bounds violations, arithmetic traps, impossible compiler states, and violated unsafe contracts
+SHALL remain abnormal termination. `Effect.catch` MUST NOT intercept them, and bootstrap MUST NOT
+promise Drop unwinding after a trap.
+
+#### Scenario: Trap bypasses catch and cleanup claims
+
+- **WHEN** a protected Effect divides by zero
+- **THEN** execution traps without invoking the typed handler or reporting structured cleanup completion

@@ -5,6 +5,7 @@ import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as Type from '../src/Type.js'
 import { elaborate as elaborateSyntax } from './support/elaborate.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -318,14 +319,14 @@ it('erases builtin pipelines into ordinary builtin HIR calls', () => {
   assert.strictEqual(returned.arguments.length, 2)
 })
 
-it('retains lazy flow recipes, exact catches, runs, and owned failures in HIR', () => {
+it('desugars effect functions to hidden effect blocks while retaining catches and runs', () => {
   const result = elaborate(
-    'hir://flow.silk',
+    'hir://effect.silk',
     `struct Problem { code: I32 }
-flow fn risky() -> I32 ! Problem { fail move Problem { code: 41 } }
-flow fn recover(problem: Problem) -> I32 { return problem.code + 1 }
+effect fn risky() -> I32 ! Problem { fail move Problem { code: 41 } }
+effect fn recover(problem: Problem) -> I32 { return problem.code + 1 }
 pub fn main() -> I32 {
-  let recipe = Flow.catch<Problem>(risky(), recover)
+  let recipe = Effect.catch<Problem>(risky(), recover)
   return run recipe
 }`,
   )
@@ -335,18 +336,47 @@ pub fn main() -> I32 {
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(risky?.contract._tag, 'Contract')
   if (risky?.contract._tag === 'Contract') {
-    assert.strictEqual(risky.contract.functionKind, 'Flow')
-    assert.deepEqual(
-      risky.contract.failures?.map((failure) => failure.name),
-      ['Problem'],
+    assert.isUndefined(risky.contract.functionKind)
+    assert.strictEqual(
+      Type.encode(risky.contract.result),
+      'Effect<I32 ! hir://effect.silk.Problem>',
     )
   }
-  assert.strictEqual(risky?.statements.at(0)?._tag, 'Fail')
+  assert.strictEqual(risky?.statements.at(0)?._tag, 'Return')
+  const riskyBody = risky?.statements.at(0)
+  assert.strictEqual(
+    riskyBody?._tag === 'Return' ? riskyBody.expression._tag : undefined,
+    'EffectBlock',
+  )
+  if (riskyBody?._tag === 'Return' && riskyBody.expression._tag === 'EffectBlock')
+    assert.strictEqual(riskyBody.expression.statements.at(0)?._tag, 'Fail')
   assert.strictEqual(main?.statements.at(0)?._tag, 'Bind')
   const binding = main?.statements.at(0)
-  assert.strictEqual(binding?._tag === 'Bind' ? binding.initializer._tag : undefined, 'FlowCatch')
-  if (binding?._tag === 'Bind' && binding.initializer._tag === 'FlowCatch')
-    assert.strictEqual(binding.initializer.protected._tag, 'FlowConstruct')
+  assert.strictEqual(binding?._tag === 'Bind' ? binding.initializer._tag : undefined, 'EffectCatch')
+  if (binding?._tag === 'Bind' && binding.initializer._tag === 'EffectCatch')
+    assert.strictEqual(binding.initializer.protected._tag, 'EffectConstruct')
   assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Run')
   assert.deepEqual(Hir.verify(result.hir), [])
+})
+
+it('retains effect blocks as lazy statement regions with canonical captures', () => {
+  const result = elaborate(
+    'hir://effect-block.silk',
+    `fn main(value: I32) -> I32 {
+  let mut counter = value
+  let pending = effect { counter = counter + 1 return counter }
+  return 0
+}`,
+  )
+  const binding = result.hir.functions.at(0)?.statements.at(1)
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(binding?._tag, 'Bind')
+  if (binding?._tag !== 'Bind' || binding.initializer._tag !== 'EffectBlock') return
+  assert.strictEqual(binding.initializer.type.access, 'Exclusive')
+  assert.deepEqual(
+    binding.initializer.captures.map((capture) => [capture.binding?.ordinal, capture.access]),
+    [[0, 'Exclusive']],
+  )
+  assert.include(Hir.encode(result.hir), 'effect-block site=fn0@')
+  assert.include(Hir.encode(result.hir), 'access=exclusive')
 })

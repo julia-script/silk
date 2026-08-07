@@ -90,21 +90,21 @@ it('collapses empty and singleton unions and rejects non-nominal leaves', () => 
     assert.deepEqual(invalid.members.map(Type.encode), ['I32', 'Array<model/Token.Token, 2>'])
 })
 
-it('normalizes compiler-private flow contract identity and traverses substitutions', () => {
+it('normalizes compiler-private effect contract identity and traverses substitutions', () => {
   const owner = { module: 'work', name: 'load' }
   const parameter = Type.parameter(owner, 0, 'T')
   const first = Type.nominal('errors', 'First')
   const second = Type.nominal('errors', 'Second')
-  const contract = Type.flow(parameter, [second, first, second], 'Take')
-  const permuted = Type.flow(parameter, [first, second], 'Take')
+  const contract = Type.effect(parameter, [second, first, second], 'Take')
+  const permuted = Type.effect(parameter, [first, second], 'Take')
 
-  assert.strictEqual(Type.isFlow(contract), true)
+  assert.strictEqual(Type.isEffect(contract), true)
   assert.strictEqual(Type.equals(contract, permuted), true)
-  assert.strictEqual(Type.encode(contract), 'Flow<T ! errors.First | errors.Second>')
+  assert.strictEqual(Type.encode(contract), 'Effect<T ! errors.First | errors.Second>')
   assert.deepEqual(Type.parameters(contract), [parameter])
   assert.deepEqual(Type.nominals(contract).map(Type.encode), ['errors.First', 'errors.Second'])
 
   const substituted = Type.substitute(contract, new Map([[Type.key(parameter), 'Usize']]))
-  assert.strictEqual(Type.encode(substituted), 'Flow<Usize ! errors.First | errors.Second>')
+  assert.strictEqual(Type.encode(substituted), 'Effect<Usize ! errors.First | errors.Second>')
   assert.strictEqual(Type.isConcrete(substituted), true)
 })

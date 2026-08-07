@@ -37,8 +37,8 @@ const typeText = (type: Type.Type): string =>
         ? `Array<${typeText(type.element)}, ${type.length}>`
       : type._tag === 'SliceType'
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-        : type._tag === 'FlowType'
-          ? `Flow<${typeText(type.success)}${
+        : type._tag === 'EffectType'
+          ? `Effect<${typeText(type.success)}${
               type.failures.length === 0
                 ? ''
                 : ` ! ${type.failures.map(typeText).join(' | ')}`
@@ -129,10 +129,10 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
     )
     .join(', ')
   const failures =
-    member.functionKind === 'Flow'
+    member.functionKind === 'Effect'
       ? ` ! ${member.failureRow.failures.map(typeText).join(' | ') || 'empty'}`
       : ''
-  return `${member.visibility === 'Public' ? 'pub ' : ''}${member.functionKind === 'Flow' ? 'flow ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
+  return `${member.visibility === 'Public' ? 'pub ' : ''}${member.functionKind === 'Effect' ? 'effect ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
     member.returnType,
   )}${failures}`
 }
@@ -270,6 +270,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return 'no cleanup'
     case 'ParameterCleanup':
       return `${typeText(cleanup.type)} · symbolic cleanup`
+    case 'AllocationCleanup':
+      return `${typeText(cleanup.type)} · active reclaim ticket`
     case 'StructCleanup':
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
@@ -586,6 +588,12 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(
         operation.left,
       )}, ${localText(operation.right)}`
+    case 'ValidateLayout':
+      return `${localText(operation.destination)} = layout ${localText(operation.bytes)} bytes · align ${localText(operation.alignment)}`
+    case 'RepeatLayout':
+      return `${localText(operation.destination)} = repeat ${localText(operation.layout)} × ${localText(operation.count)}`
+    case 'Allocate':
+      return `${localText(operation.destination)} = allocate ${localText(operation.layout)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)}`
     case 'BeginLoan':
@@ -600,14 +608,20 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = call ${operation.target.name}(${operation.arguments
         .map(localText)
         .join(', ')})`
-    case 'PackFlowOutcome':
-      return `${localText(operation.destination)} = flow outcome tag ${operation.tag} payload ${localText(operation.source)}`
-    case 'UnpackFlowSuccess':
-      return `${localText(operation.destination)} = flow success ${localText(operation.source)}`
-    case 'CatchFlow':
+    case 'MakeEffect':
+      return `${localText(operation.destination)} = effect ${operation.runner.name} captures ${operation.captures.map((capture) => `${capture.access.toLowerCase()} ${localText(capture.source)}`).join(', ') || 'none'}`
+    case 'PackEffectOutcome':
+      return `${localText(operation.destination)} = effect outcome tag ${operation.tag} payload ${localText(operation.source)}`
+    case 'UnpackEffectSuccess':
+      return `${localText(operation.destination)} = effect success ${localText(operation.source)}`
+    case 'CatchEffect':
       return `${localText(operation.destination)} = catch tag ${operation.handledTag} from ${operation.protectedTarget.name} with ${operation.handlerTarget.name}`
-    case 'RunFlow':
+    case 'RetryEffect':
+      return `${localText(operation.destination)} = retry ${operation.protectedRunner.name} using ${localText(operation.retries)}`
+    case 'RunEffect':
       return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
+    case 'RunEffectValue':
+      return `${localText(operation.destination)} = run ${localText(operation.effect)} with ${operation.runner.name}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
@@ -841,9 +855,15 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
         ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
       : value._tag === 'UnionValue'
         ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
-        : value._tag === 'FlowOutcomeValue'
-          ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
-          : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+      : value._tag === 'EffectOutcomeValue'
+        ? `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
+        : value._tag === 'EffectBorrowValue'
+          ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
+          : value._tag === 'EffectValue'
+            ? `${typeText(value.type)} recipe ${value.runner.name}`
+            : value._tag === 'AllocationValue'
+              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
+              : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -907,10 +927,10 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `exit loop${event.loop ?? '?'}`
     case 'Transfer':
       return `transfer in r${event.region}${event.loop === undefined ? '' : ` · loop${event.loop}`}`
-    case 'FlowSuccess':
-      return `flow success · tag ${event.tag}`
-    case 'FlowFailure':
-      return `flow failure · tag ${event.tag}`
+    case 'EffectSuccess':
+      return `effect success · tag ${event.tag}`
+    case 'EffectFailure':
+      return `effect failure · tag ${event.tag}`
   }
 }
 
@@ -944,8 +964,8 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'Repeat':
     case 'Exit':
     case 'Transfer':
-    case 'FlowSuccess':
-    case 'FlowFailure':
+    case 'EffectSuccess':
+    case 'EffectFailure':
       return 2
   }
 }

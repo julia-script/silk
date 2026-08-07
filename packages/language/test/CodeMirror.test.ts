@@ -25,7 +25,7 @@ it('distinguishes doc comments from line comments', () => {
 })
 
 it('marks invalid bytes', () => {
-  assert.deepStrictEqual(spellings('let @', 'invalid'), ['@'])
+  assert.deepStrictEqual(spellings('let ^', 'invalid'), ['^'])
 })
 
 it('booleans are their own category', () => {
@@ -125,6 +125,6 @@ it('the state field re-lexes on edit', () => {
 })
 
 it('invalid tokens carry a distinct stable class', () => {
-  const state = EditorState.create({ doc: 'let @', extensions: [CodeMirror.extension()] })
+  const state = EditorState.create({ doc: 'let ^', extensions: [CodeMirror.extension()] })
   assert.isTrue(stateClasses(state).some((cls) => cls.includes('cm-silk-invalid')))
 })

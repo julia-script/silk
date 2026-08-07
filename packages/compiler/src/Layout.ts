@@ -106,9 +106,42 @@ export interface Plan {
   readonly _tag: 'LayoutPlan'
   readonly target: Target.Target
   readonly entries: ReadonlyArray<Entry>
+  readonly effectEnvironments: ReadonlyArray<EffectEnvironment>
   readonly callingShapes: ReadonlyArray<CallingShape>
   readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+/** Target-owned storage for one monomorphized hidden Effect closure environment. */
+export type EffectEnvironment =
+  | {
+      readonly _tag: 'EffectEnvironment'
+      readonly instance: Instances.InstanceKey
+      readonly site: Hir.EffectSiteId
+      readonly effect: Type.Effect
+      readonly fields: ReadonlyArray<EffectEnvironmentField>
+      readonly size: number
+      readonly alignment: number
+      readonly tailPadding: number
+    }
+  | {
+      readonly _tag: 'UnavailableEffectEnvironment'
+      readonly instance: Instances.InstanceKey
+      readonly site: Hir.EffectSiteId
+      readonly effect: Type.Effect
+      readonly reason: string
+    }
+
+export interface EffectEnvironmentField {
+  readonly source: 'Binding' | 'Parameter'
+  readonly ordinal: number
+  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly type: DeclarationIndex.SemanticType
+  readonly offset: number
+  readonly size: number
+  readonly alignment: number
+  readonly padding: number
+  readonly representation: 'Value' | 'Borrow'
 }
 
 /** A target-owned verdict for one reachable exact contextual `Usize` literal. */
@@ -193,7 +226,7 @@ export type CallingShapeNode =
     }
   | {
       readonly _tag: 'OutcomeShape'
-      readonly type: Type.Flow
+      readonly type: Type.Effect
       readonly success: CallingShapeNode
       readonly failures: ReadonlyArray<{
         readonly type: Type.Nominal
@@ -418,6 +451,59 @@ export const catalog = (
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
+    if (Type.isIntrinsicNominal(type)) {
+      const ordinal = Type.intrinsicNominalOrdinal(type)
+      const structId: DeclarationIndex.DeclarationId = Object.freeze({
+        _tag: 'DeclarationId',
+        sourceId: type.module,
+        ordinal,
+      })
+      const fieldTypes: ReadonlyArray<readonly [string, Type.Builtin]> = Type.equals(
+        type,
+        Type.layout,
+      )
+        ? Object.freeze([
+            Object.freeze(['bytes', 'Usize'] as const),
+            Object.freeze(['alignment', 'Usize'] as const),
+          ])
+        : Type.equals(type, Type.invalidAlignment)
+          ? Object.freeze([Object.freeze(['alignment', 'Usize'] as const)])
+          : Type.equals(type, Type.allocation)
+            ? Object.freeze([Object.freeze(['$reclaim', 'Usize'] as const)])
+            : Object.freeze([])
+      let cursor = 0
+      const fields = fieldTypes.map(([name, fieldType], fieldOrdinal): Field => {
+        const fieldLayout = scalarEntry(target, fieldType)
+        const previous = cursor
+        const offset = alignUp(cursor, fieldLayout.alignment)
+        cursor = offset + fieldLayout.size
+        return Object.freeze({
+          _tag: 'LayoutField',
+          id: Object.freeze({ _tag: 'FieldId', struct: structId, ordinal: fieldOrdinal }),
+          name,
+          type: fieldType,
+          offset,
+          size: fieldLayout.size,
+          alignment: fieldLayout.alignment,
+          padding: offset - previous,
+        })
+      })
+      const alignment = fields.reduce((maximum, field) => Math.max(maximum, field.alignment), 1)
+      const size = alignUp(cursor, alignment)
+      const entry: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        size,
+        alignment,
+        representation: Object.freeze({
+          _tag: 'Aggregate',
+          fields: Object.freeze(fields),
+          tailPadding: size - cursor,
+        }),
+      })
+      completed.set(key, entry)
+      return entry
+    }
     const declaration = byType.get(`${type.module}\u0000${type.name}`)
     if (declaration === undefined) {
       return unavailable(type, Object.freeze([]), {
@@ -597,10 +683,10 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
-    if (Type.isFlow(type)) {
+    if (Type.isEffect(type)) {
       const result = unavailable(type, Object.freeze(Type.nominals(type)), {
         _tag: 'InvalidDeclaration',
-        detail: 'compiler-private flow values have no target layout',
+        detail: 'compiler-private effect values have no target layout',
       })
       completed.set(key, result)
       return result
@@ -637,7 +723,7 @@ export const catalog = (
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isSlice(type)) addReferenced(type.element)
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
-    if (Type.isFlow(type)) {
+    if (Type.isEffect(type)) {
       addReferenced(type.success)
       for (const failure of type.failures) addReferenced(failure)
     }
@@ -723,6 +809,22 @@ const addExpressionTypes = (
   if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
   }
+  if (expression._tag === 'EffectBlock') {
+    addStatementTypes(types, expression.statements, substitution)
+  }
+  if (expression._tag === 'Run') addExpressionTypes(types, expression.subject, substitution)
+  if (expression._tag === 'EffectCatch')
+    addExpressionTypes(types, expression.protected, substitution)
+  if (expression._tag === 'EffectRetry') {
+    addExpressionTypes(types, expression.protected, substitution)
+    addExpressionTypes(types, expression.retries, substitution)
+  }
+  if (expression._tag === 'EffectProvide')
+    addExpressionTypes(types, expression.protected, substitution)
+  if (expression._tag === 'EffectProvideWith') {
+    addExpressionTypes(types, expression.protected, substitution)
+    addExpressionTypes(types, expression.acquisition, substitution)
+  }
   if (expression._tag === 'Match') {
     addExpressionTypes(types, expression.scrutinee, substitution)
     for (const member of expression.members) {
@@ -782,16 +884,145 @@ const addFunctionTypes = (
   if (fn.declaration.returnType._tag === 'Resolved') {
     const type = Type.substitute(fn.declaration.returnType.type, substitution)
     types.set(Type.key(type), type)
-    if (fn.declaration.functionKind === 'Flow') {
+    if (fn.declaration.functionKind === 'Effect') {
       const failures = fn.declaration.failureRow.failures.flatMap((failure) => {
         const specialized = Type.substitute(failure, substitution)
         return Type.isNominal(specialized) ? [specialized] : []
       })
-      const outcome = Type.flow(type, failures)
+      const requirements = fn.declaration.requirementRow.requirements.flatMap((requirement) => {
+        const capability = Type.substitute(requirement.capability, substitution)
+        return Type.isNominal(capability) ? [Object.freeze({ ...requirement, capability })] : []
+      })
+      const outcome = Type.effect(type, failures, 'Shared', requirements)
       types.set(Type.key(outcome), outcome)
     }
   }
   addStatementTypes(types, fn.statements, substitution)
+}
+
+const effectEnvironments = (
+  target: Target.Target,
+  entries: ReadonlyArray<Entry>,
+  discovery: Instances.Discovery,
+): ReadonlyArray<EffectEnvironment> => {
+  const layouts = new Map(
+    entries.map((candidate) => [Type.key(candidate.type), candidate] as const),
+  )
+  const environments: Array<EffectEnvironment> = []
+
+  for (const instance of discovery.instances) {
+    const bindingTypes = new Map<number, DeclarationIndex.SemanticType>()
+    const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+      for (const statement of statements) {
+        if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
+          bindingTypes.set(
+            statement.binding.ordinal,
+            Type.substitute(statement.initializer.type, instance.substitution),
+          )
+        } else if (statement._tag === 'If') {
+          collectBindings(statement.taken)
+          collectBindings(statement.otherwise)
+        } else if (statement._tag === 'While') collectBindings(statement.body)
+        for (const expression of Hir.statementExpressions(statement)) {
+          for (const child of Hir.expressionTree(expression)) {
+            if (child._tag === 'EffectBlock') collectBindings(child.statements)
+          }
+        }
+      }
+    }
+    collectBindings(instance.function.statements)
+
+    const blocks = instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .filter(
+        (expression): expression is Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> =>
+          expression._tag === 'EffectBlock',
+      )
+    for (const block of blocks) {
+      const effect = Type.substitute(block.type, instance.substitution)
+      if (!Type.isEffect(effect)) continue
+      let cursor = 0
+      let environmentAlignment = 1
+      let unavailable: string | undefined
+      const fields: Array<EffectEnvironmentField> = []
+      for (const capture of block.captures) {
+        const source = capture.binding === undefined ? 'Parameter' : 'Binding'
+        const ordinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
+        const type =
+          capture.binding === undefined
+            ? instance.function.contract._tag === 'Contract' && ordinal !== undefined
+              ? instance.function.contract.parameters.at(ordinal)
+              : undefined
+            : ordinal === undefined
+              ? undefined
+              : bindingTypes.get(ordinal)
+        if (ordinal === undefined || type === undefined) {
+          unavailable = `capture ${source.toLowerCase()} has no concrete type`
+          break
+        }
+        const specialized = Type.substitute(type, instance.substitution)
+        const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+        const valueLayout = borrowed ? undefined : layouts.get(Type.key(specialized))
+        if (!borrowed && valueLayout === undefined) {
+          unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`
+          break
+        }
+        const size = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
+        const alignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
+        const offset = alignUp(cursor, alignment)
+        fields.push(
+          Object.freeze({
+            source,
+            ordinal,
+            access: capture.access,
+            type: specialized,
+            offset,
+            size,
+            alignment,
+            padding: offset - cursor,
+            representation: borrowed ? 'Borrow' : 'Value',
+          }),
+        )
+        cursor = offset + size
+        environmentAlignment = Math.max(environmentAlignment, alignment)
+      }
+      if (unavailable !== undefined) {
+        environments.push(
+          Object.freeze({
+            _tag: 'UnavailableEffectEnvironment',
+            instance: instance.key,
+            site: block.site,
+            effect,
+            reason: unavailable,
+          }),
+        )
+        continue
+      }
+      const size = alignUp(cursor, environmentAlignment)
+      environments.push(
+        Object.freeze({
+          _tag: 'EffectEnvironment',
+          instance: instance.key,
+          site: block.site,
+          effect,
+          fields: Object.freeze(fields),
+          size,
+          alignment: environmentAlignment,
+          tailPadding: size - cursor,
+        }),
+      )
+    }
+  }
+
+  return Object.freeze(
+    environments.sort(
+      (left, right) =>
+        left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
+        left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
+        left.site.span.start - right.site.span.start,
+    ),
+  )
 }
 
 const usizeLiteralVerdicts = (
@@ -877,7 +1108,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   }
   const add = (type: DeclarationIndex.SemanticType): void => {
     const key = Type.key(type)
-    if (Type.isFlow(type)) {
+    if (Type.isEffect(type)) {
       add(type.success)
       for (const failure of type.failures) add(failure)
       return
@@ -903,7 +1134,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const literals = usizeLiteralVerdicts(self.target, discovery)
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
-    if (Type.isConcrete(type) && (Type.isFlow(type) || Type.isNever(type)))
+    if (Type.isConcrete(type) && (Type.isEffect(type) || Type.isNever(type)))
       shaped.set(Type.key(type), type)
   }
   const shapeTypes = Object.freeze([...shaped.values()].sort(Type.compare))
@@ -911,6 +1142,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     _tag: 'LayoutPlan',
     target: self.target,
     entries: orderedEntries,
+    effectEnvironments: effectEnvironments(self.target, orderedEntries, discovery),
     callingShapes: callingShapes(self.target, orderedEntries, shapeTypes),
     literalVerdicts: literals.verdicts,
     diagnostics: literals.diagnostics,
@@ -927,6 +1159,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     _tag: 'LayoutPlan',
     target,
     entries: orderedEntries,
+    effectEnvironments: Object.freeze([]),
     callingShapes: callingShapes(target, orderedEntries),
     literalVerdicts: Object.freeze([]),
     diagnostics: Object.freeze([]),
@@ -1014,7 +1247,7 @@ const shapeNode = (
       laneCount: 1 + payloadLaneCount,
     })
   }
-  if (Type.isFlow(type)) {
+  if (Type.isEffect(type)) {
     const success = shapeNode(target, type.success, entries)
     const failures = type.failures.map((failure, index) =>
       Object.freeze({
@@ -1174,6 +1407,30 @@ export const callingShape = (
   type: DeclarationIndex.SemanticType,
 ): CallingShape | undefined =>
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
+
+/** Materializes the ABI lanes of one hidden Effect environment separately from its outcome. */
+export const effectEnvironmentLanes = (
+  self: Plan,
+  environment: Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
+): ReadonlyArray<CallingLane> =>
+  Object.freeze(
+    environment.fields.flatMap((field): ReadonlyArray<CallingLane> => {
+      if (field.representation === 'Borrow') {
+        return [
+          Object.freeze({
+            _tag: 'CallingLane',
+            path: Object.freeze([]),
+            type: Object.freeze({
+              _tag: 'Address',
+              element: field.type,
+              bits: self.target.pointerSize === 4 ? 32 : 64,
+            }),
+          }),
+        ]
+      }
+      return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+    }),
+  )
 
 const fieldSlice = (
   node: CallingShapeNode,
@@ -1809,6 +2066,11 @@ export const encode = (self: Plan): string =>
   [
     `target ${Target.encode(self.target)}`,
     ...self.entries.flatMap(entryLines),
+    ...self.effectEnvironments.map((environment) =>
+      environment._tag === 'UnavailableEffectEnvironment'
+        ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${environment.site.span.start} unavailable=${environment.reason}`
+        : `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${environment.site.span.start} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `${field.source.toLowerCase()}${field.ordinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'}`,
+    ),
     ...self.callingShapes.map(
       (shape) =>
         `calling ${Type.encode(shape.type)} lanes=${shape.laneCount}${

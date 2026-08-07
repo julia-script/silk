@@ -25,14 +25,30 @@ export type Type =
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
-  | { readonly _tag: 'FlowOutcome'; readonly type: SilkType.Flow }
+  | {
+      readonly _tag: 'EffectBorrow'
+      readonly type: DeclarationIndex.SemanticType
+      readonly access: 'Shared' | 'Exclusive'
+    }
+  | {
+      readonly _tag: 'EffectValue'
+      readonly type: SilkType.Effect
+      readonly site: Hir.EffectSiteId
+      readonly environment: Extract<
+        Layout.EffectEnvironment,
+        { readonly _tag: 'EffectEnvironment' }
+      >
+    }
+  | { readonly _tag: 'EffectOutcome'; readonly type: SilkType.Effect }
 
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
   self._tag === 'Nominal' ||
   self._tag === 'FixedArray' ||
   self._tag === 'Slice' ||
   self._tag === 'Union' ||
-  self._tag === 'FlowOutcome'
+  self._tag === 'EffectBorrow' ||
+  self._tag === 'EffectValue' ||
+  self._tag === 'EffectOutcome'
     ? self.type
     : self._tag
 
@@ -135,6 +151,33 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'ValidateLayout'
+      readonly destination: LocalId
+      readonly bytes: LocalId
+      readonly alignment: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Union' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'RepeatLayout'
+      readonly destination: LocalId
+      readonly layout: LocalId
+      readonly count: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Union' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Creates one logical heap block and its self-contained reclaim ticket. */
+      readonly _tag: 'Allocate'
+      readonly destination: LocalId
+      readonly layout: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly failure: SilkType.Nominal
+      readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly failureTag: number
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Move'
       readonly destination: LocalId
       readonly source: LocalId
@@ -190,51 +233,107 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      readonly _tag: 'PackFlowOutcome'
+      readonly _tag: 'MakeEffect'
+      readonly destination: LocalId
+      readonly runner: DeclarationIndex.CanonicalId
+      readonly runnerTypeArguments: ReadonlyArray<SilkType.Type>
+      readonly captures: ReadonlyArray<{
+        readonly source: LocalId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }>
+      readonly type: Extract<Type, { readonly _tag: 'EffectValue' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'PackEffectOutcome'
       readonly destination: LocalId
       readonly source: LocalId
       readonly tag: number
-      readonly type: Extract<Type, { readonly _tag: 'FlowOutcome' }>
+      readonly type: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly provenance: Provenance
     }
   | {
-      readonly _tag: 'UnpackFlowSuccess'
+      readonly _tag: 'UnpackEffectSuccess'
       readonly destination: LocalId
       readonly source: LocalId
-      readonly type: Exclude<Type, { readonly _tag: 'FlowOutcome' }>
+      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
       readonly provenance: Provenance
     }
   | {
-      readonly _tag: 'CatchFlow'
+      readonly _tag: 'CatchEffect'
       readonly destination: LocalId
+      readonly protectedValue: LocalId
       readonly protectedOutcome: LocalId
+      readonly handlerValue: LocalId
       readonly handlerOutcome: LocalId
       readonly protectedTarget: DeclarationIndex.CanonicalId
       readonly protectedTypeArguments: ReadonlyArray<SilkType.Type>
       readonly protectedArguments: ReadonlyArray<LocalId>
-      readonly protectedType: Extract<Type, { readonly _tag: 'FlowOutcome' }>
+      readonly protectedValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
+      readonly protectedRunner: DeclarationIndex.CanonicalId
+      readonly protectedType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly handledTag: number
       readonly handledLaneCount: number
       readonly handlerTarget: DeclarationIndex.CanonicalId
-      readonly handlerType: Extract<Type, { readonly _tag: 'FlowOutcome' }>
-      readonly type: Exclude<Type, { readonly _tag: 'FlowOutcome' }>
+      readonly handlerValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
+      readonly handlerRunner: DeclarationIndex.CanonicalId
+      readonly handlerType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
       readonly provenance: Provenance
     }
   | {
-      readonly _tag: 'RunFlow'
+      readonly _tag: 'RetryEffect'
+      readonly destination: LocalId
+      readonly protectedValue: LocalId
+      readonly protectedOutcome: LocalId
+      readonly protectedTarget?: DeclarationIndex.CanonicalId
+      readonly protectedTypeArguments: ReadonlyArray<SilkType.Type>
+      readonly protectedArguments: ReadonlyArray<LocalId>
+      readonly protectedValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
+      readonly protectedRunner: DeclarationIndex.CanonicalId
+      readonly protectedType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly retries: LocalId
+      readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
+      readonly propagationLaneCount: number
+      readonly type: Exclude<
+        Type,
+        { readonly _tag: 'EffectOutcome' | 'EffectValue' | 'EffectBorrow' }
+      >
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'RunEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
       readonly target: DeclarationIndex.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.Type>
       readonly arguments: ReadonlyArray<LocalId>
-      readonly outcomeType: Extract<Type, { readonly _tag: 'FlowOutcome' }>
-      readonly propagationType: Extract<Type, { readonly _tag: 'FlowOutcome' }>
+      readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{
         readonly source: number
         readonly target: number
       }>
       readonly propagationLaneCount: number
-      readonly type: Exclude<Type, { readonly _tag: 'FlowOutcome' }>
+      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'RunEffectValue'
+      readonly destination: LocalId
+      readonly outcome: LocalId
+      readonly effect: LocalId
+      readonly runner: DeclarationIndex.CanonicalId
+      readonly runnerTypeArguments: ReadonlyArray<SilkType.Type>
+      readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly tagMappings: ReadonlyArray<{
+        readonly source: number
+        readonly target: number
+      }>
+      readonly propagationLaneCount: number
+      readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' | 'EffectValue' }>
       readonly provenance: Provenance
     }
   | {
@@ -509,8 +608,10 @@ export interface Violation {
     | 'UndeclaredLocal'
     | 'InvalidAggregateOperation'
     | 'InvalidIntegerOperation'
+    | 'InvalidLayoutOperation'
+    | 'InvalidAllocationOperation'
     | 'InvalidCallShape'
-    | 'InvalidFlowOperation'
+    | 'InvalidEffectOperation'
     | 'InvalidWrite'
     | 'InvalidLoan'
     | 'InvalidSliceOperation'
@@ -585,6 +686,12 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination]
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
+    case 'ValidateLayout':
+      return [operation.destination, operation.bytes, operation.alignment]
+    case 'RepeatLayout':
+      return [operation.destination, operation.layout, operation.count]
+    case 'Allocate':
+      return [operation.destination, operation.layout]
     case 'Move':
       return [operation.destination, operation.source]
     case 'BeginLoan':
@@ -597,18 +704,32 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.source]
     case 'Call':
       return [operation.destination, ...operation.arguments]
-    case 'PackFlowOutcome':
-    case 'UnpackFlowSuccess':
+    case 'MakeEffect':
+      return [operation.destination, ...operation.captures.map((capture) => capture.source)]
+    case 'PackEffectOutcome':
+    case 'UnpackEffectSuccess':
       return [operation.destination, operation.source]
-    case 'CatchFlow':
+    case 'CatchEffect':
       return [
         operation.destination,
+        operation.protectedValue,
         operation.protectedOutcome,
+        operation.handlerValue,
         operation.handlerOutcome,
         ...operation.protectedArguments,
       ]
-    case 'RunFlow':
+    case 'RetryEffect':
+      return [
+        operation.destination,
+        operation.protectedValue,
+        operation.protectedOutcome,
+        operation.retries,
+        ...operation.protectedArguments,
+      ]
+    case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
+    case 'RunEffectValue':
+      return [operation.destination, operation.outcome, operation.effect]
     case 'Construct':
       return [operation.destination, ...operation.fields.map((field) => field.value)]
     case 'ConstructArray':
@@ -757,6 +878,7 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
   switch (cleanup._tag) {
     case 'NoCleanup':
     case 'ParameterCleanup':
+    case 'AllocationCleanup':
       return [cleanup.type]
     case 'StructCleanup':
       return [cleanup.type, ...cleanup.fields.flatMap((field) => cleanupTypes(field.cleanup))]
@@ -771,6 +893,9 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
   switch (operation._tag) {
     case 'Literal':
     case 'Binary':
+    case 'ValidateLayout':
+    case 'RepeatLayout':
+    case 'Allocate':
     case 'Project':
     case 'ReadPlace':
     case 'CheckPlace':
@@ -783,22 +908,45 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
       return []
     case 'Call':
       return [semanticType(operation.type), ...operation.typeArguments]
-    case 'PackFlowOutcome':
-    case 'UnpackFlowSuccess':
+    case 'MakeEffect':
+      return [semanticType(operation.type), ...operation.runnerTypeArguments]
+    case 'PackEffectOutcome':
+    case 'UnpackEffectSuccess':
       return [semanticType(operation.type)]
-    case 'CatchFlow':
+    case 'CatchEffect':
       return [
+        semanticType(operation.protectedValueType),
         semanticType(operation.protectedType),
+        semanticType(operation.handlerValueType),
         semanticType(operation.handlerType),
         semanticType(operation.type),
         ...operation.protectedTypeArguments,
       ]
-    case 'RunFlow':
+    case 'RetryEffect':
+      return [
+        semanticType(operation.protectedValueType),
+        semanticType(operation.protectedType),
+        ...(operation.propagationType === undefined
+          ? []
+          : [semanticType(operation.propagationType)]),
+        semanticType(operation.type),
+        ...operation.protectedTypeArguments,
+      ]
+    case 'RunEffect':
       return [
         semanticType(operation.outcomeType),
         semanticType(operation.propagationType),
         semanticType(operation.type),
         ...operation.typeArguments,
+      ]
+    case 'RunEffectValue':
+      return [
+        semanticType(operation.outcomeType),
+        ...(operation.propagationType === undefined
+          ? []
+          : [semanticType(operation.propagationType)]),
+        semanticType(operation.type),
+        ...operation.runnerTypeArguments,
       ]
     case 'Construct':
     case 'ConstructArray':
@@ -839,19 +987,31 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'Binary':
       return [operation.left, operation.right]
+    case 'ValidateLayout':
+      return [operation.bytes, operation.alignment]
+    case 'RepeatLayout':
+      return [operation.layout, operation.count]
+    case 'Allocate':
+      return [operation.layout]
     case 'Move':
       return [operation.source]
     case 'ConvertUnion':
       return [operation.source]
     case 'Call':
       return operation.arguments
-    case 'PackFlowOutcome':
-    case 'UnpackFlowSuccess':
+    case 'MakeEffect':
+      return operation.captures.map((capture) => capture.source)
+    case 'PackEffectOutcome':
+    case 'UnpackEffectSuccess':
       return [operation.source]
-    case 'CatchFlow':
+    case 'CatchEffect':
       return operation.protectedArguments
-    case 'RunFlow':
+    case 'RetryEffect':
+      return [operation.retries, ...operation.protectedArguments]
+    case 'RunEffect':
       return operation.arguments
+    case 'RunEffectValue':
+      return [operation.effect]
     case 'Construct':
       return operation.fields.map((field) => field.value)
     case 'ConstructArray':
@@ -1306,6 +1466,73 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
+        if (operation._tag === 'ValidateLayout' || operation._tag === 'RepeatLayout') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const left = fn.localTypes.at(
+            operation._tag === 'ValidateLayout'
+              ? operation.bytes.ordinal
+              : operation.layout.ordinal,
+          )
+          const right = fn.localTypes.at(
+            operation._tag === 'ValidateLayout'
+              ? operation.alignment.ordinal
+              : operation.count.ordinal,
+          )
+          const expectedMembers = [
+            SilkType.layout,
+            operation._tag === 'ValidateLayout'
+              ? SilkType.invalidAlignment
+              : SilkType.layoutOverflow,
+          ].sort(SilkType.compare)
+          const validLeft =
+            operation._tag === 'ValidateLayout'
+              ? left?._tag === 'Usize'
+              : left?._tag === 'Nominal' && SilkType.equals(left.type, SilkType.layout)
+          if (
+            !validLeft ||
+            right?._tag !== 'Usize' ||
+            destination?._tag !== 'Union' ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            !sameMembers(operation.type.type.members, expectedMembers)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidLayoutOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `${operation._tag} has inconsistent operands or validation result`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'Allocate') {
+          const layout = fn.localTypes.at(operation.layout.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const expectedFailure = operation.propagationType.type.failures.at(
+            operation.failureTag - 1,
+          )
+          if (
+            layout?._tag !== 'Nominal' ||
+            !SilkType.equals(layout.type, SilkType.layout) ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.allocation) ||
+            !SilkType.equals(operation.type.type, SilkType.allocation) ||
+            !SilkType.equals(operation.failure, SilkType.outOfMemory) ||
+            expectedFailure === undefined ||
+            !SilkType.equals(expectedFailure, operation.failure) ||
+            !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAllocationOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'allocation does not preserve Layout, Allocation, or OutOfMemory contracts',
+              }),
+            )
+        }
         if (operation._tag === 'SliceLength') {
           const slice = fn.localTypes.at(operation.slice.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -1538,6 +1765,23 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         if (operation._tag === 'Drop') {
           const dropped = fn.localTypes.at(operation.local.ordinal)
           const cleanup = operation.cleanup
+          const droppedSemantic = dropped === undefined ? undefined : semanticType(dropped)
+          const cleanupTypeMatches =
+            droppedSemantic !== undefined &&
+            (SilkType.equals(droppedSemantic, cleanup.type) ||
+              (SilkType.isEffect(droppedSemantic) &&
+                SilkType.isEffect(cleanup.type) &&
+                (() => {
+                  const cleanupEffect = cleanup.type
+                  return (
+                    SilkType.equals(droppedSemantic.success, cleanupEffect.success) &&
+                    droppedSemantic.failures.length === cleanupEffect.failures.length &&
+                    droppedSemantic.failures.every((failure, ordinal) => {
+                      const expected = cleanupEffect.failures.at(ordinal)
+                      return expected !== undefined && SilkType.equals(failure, expected)
+                    })
+                  )
+                })()))
           const unionCasesValid =
             cleanup._tag !== 'UnionCleanup' ||
             (cleanup.cases.length === cleanup.type.members.length &&
@@ -1549,11 +1793,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   SilkType.equals(member.member, expected)
                 )
               }))
-          if (
-            dropped === undefined ||
-            !SilkType.equals(semanticType(dropped), operation.cleanup.type) ||
-            !unionCasesValid
-          ) {
+          if (dropped === undefined || !cleanupTypeMatches || !unionCasesValid) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
@@ -1731,7 +1971,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
-        if (operation._tag === 'PackFlowOutcome') {
+        if (operation._tag === 'PackEffectOutcome') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const source = fn.localTypes.at(operation.source.ordinal)
           const payload =
@@ -1739,7 +1979,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               ? operation.type.type.success
               : operation.type.type.failures.at(operation.tag - 1)
           if (
-            destination?._tag !== 'FlowOutcome' ||
+            destination?._tag !== 'EffectOutcome' ||
             source === undefined ||
             payload === undefined ||
             !SilkType.equals(destination.type, operation.type.type) ||
@@ -1748,18 +1988,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
-                rule: 'InvalidFlowOperation',
+                rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'flow outcome tag, payload, or destination type is inconsistent',
+                detail: 'effect outcome tag, payload, or destination type is inconsistent',
               }),
             )
         }
-        if (operation._tag === 'UnpackFlowSuccess') {
+        if (operation._tag === 'UnpackEffectSuccess') {
           const source = fn.localTypes.at(operation.source.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           if (
-            source?._tag !== 'FlowOutcome' ||
+            source?._tag !== 'EffectOutcome' ||
             destination === undefined ||
             !SilkType.equals(source.type.success, semanticType(destination)) ||
             !SilkType.equals(semanticType(operation.type), semanticType(destination))
@@ -1767,14 +2007,14 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
-                rule: 'InvalidFlowOperation',
+                rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'flow success projection does not match its outcome contract',
+                detail: 'effect success projection does not match its outcome contract',
               }),
             )
         }
-        if (operation._tag === 'RunFlow') {
+        if (operation._tag === 'RunEffect') {
           const target = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.target, operation.typeArguments),
           )
@@ -1791,7 +2031,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             })
           if (
             target === undefined ||
-            target.result._tag !== 'FlowOutcome' ||
+            target.result._tag !== 'EffectOutcome' ||
             !SilkType.equals(target.result.type, operation.outcomeType.type) ||
             !SilkType.equals(semanticType(fn.result), operation.propagationType.type) ||
             !mappingsValid
@@ -1799,16 +2039,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
-                rule: 'InvalidFlowOperation',
+                rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
                 detail: 'run propagation does not preserve canonical outcome contracts',
               }),
             )
         }
-        if (operation._tag === 'CatchFlow') {
+        if (operation._tag === 'CatchEffect') {
           const protectedTarget = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.protectedTarget, operation.protectedTypeArguments),
+          )
+          const protectedRunner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.protectedRunner, operation.protectedTypeArguments),
           )
           const handlerTarget = self.functions.find(
             (candidate) =>
@@ -1816,11 +2059,21 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               candidate.id.name === operation.handlerTarget.name &&
               candidate.instance.typeArguments.length === 0,
           )
+          const handlerRunner = self.functions.find(
+            (candidate) =>
+              candidate.id.module === operation.handlerRunner.module &&
+              candidate.id.name === operation.handlerRunner.name &&
+              candidate.instance.typeArguments.length === 0,
+          )
           if (
-            protectedTarget?.result._tag !== 'FlowOutcome' ||
-            handlerTarget?.result._tag !== 'FlowOutcome' ||
-            !SilkType.equals(protectedTarget.result.type, operation.protectedType.type) ||
-            !SilkType.equals(handlerTarget.result.type, operation.handlerType.type) ||
+            protectedTarget?.result._tag !== 'EffectValue' ||
+            protectedRunner?.result._tag !== 'EffectOutcome' ||
+            handlerTarget?.result._tag !== 'EffectValue' ||
+            handlerRunner?.result._tag !== 'EffectOutcome' ||
+            !SilkType.equals(protectedTarget.result.type, operation.protectedValueType.type) ||
+            !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
+            !SilkType.equals(handlerTarget.result.type, operation.handlerValueType.type) ||
+            !SilkType.equals(handlerRunner.result.type, operation.handlerType.type) ||
             operation.handledTag < 1 ||
             operation.handledTag > operation.protectedType.type.failures.length ||
             operation.protectedType.type.failures.at(operation.handledTag - 1) === undefined
@@ -1828,10 +2081,48 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
-                rule: 'InvalidFlowOperation',
+                rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'flow catch target, handler, or handled tag is inconsistent',
+                detail: 'effect catch target, handler, or handled tag is inconsistent',
+              }),
+            )
+        }
+        if (operation._tag === 'RetryEffect') {
+          const protectedTargetId = operation.protectedTarget
+          const protectedTarget =
+            protectedTargetId === undefined
+              ? undefined
+              : self.functions.find((candidate) =>
+                  matchesInstance(candidate, protectedTargetId, operation.protectedTypeArguments),
+                )
+          const protectedRunner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.protectedRunner, operation.protectedTypeArguments),
+          )
+          const retriesType = fn.localTypes.at(operation.retries.ordinal)
+          const mappingsValid = operation.tagMappings.every((mapping) => {
+            const source = operation.protectedType.type.failures.at(mapping.source - 1)
+            const target = operation.propagationType?.type.failures.at(mapping.target - 1)
+            return source !== undefined && target !== undefined && SilkType.equals(source, target)
+          })
+          if (
+            (protectedTargetId !== undefined && protectedTarget?.result._tag !== 'EffectValue') ||
+            protectedRunner?.result._tag !== 'EffectOutcome' ||
+            (protectedTargetId !== undefined &&
+              protectedTarget?.result._tag === 'EffectValue' &&
+              !SilkType.equals(protectedTarget.result.type, operation.protectedValueType.type)) ||
+            !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
+            retriesType?._tag !== 'I32' ||
+            (operation.protectedType.type.failures.length > 0 &&
+              (operation.propagationType === undefined || !mappingsValid))
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'effect retry target, runner, retry count, or propagation is inconsistent',
               }),
             )
         }
@@ -1864,6 +2155,12 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ValidateLayout':
+      return `${localText(operation.destination)} = layout-make bytes=${localText(operation.bytes)} alignment=${localText(operation.alignment)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RepeatLayout':
+      return `${localText(operation.destination)} = layout-repeat ${localText(operation.layout)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'Allocate':
+      return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
     case 'BeginLoan':
@@ -1880,14 +2177,20 @@ const operationText = (operation: Operation): string => {
           ? ''
           : `<${operation.typeArguments.map(SilkType.encode).join(', ')}>`
       }(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'PackFlowOutcome':
-      return `${localText(operation.destination)} = flow-outcome tag=${operation.tag} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'UnpackFlowSuccess':
-      return `${localText(operation.destination)} = flow-success ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'CatchFlow':
-      return `${localText(operation.destination)} = flow-catch tag=${operation.handledTag} ${targetText(operation.protectedTarget)} -> ${targetText(operation.handlerTarget)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'RunFlow':
-      return `${localText(operation.destination)} = run-flow ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'MakeEffect':
+      return `${localText(operation.destination)} = make-effect ${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PackEffectOutcome':
+      return `${localText(operation.destination)} = effect-outcome tag=${operation.tag} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'UnpackEffectSuccess':
+      return `${localText(operation.destination)} = effect-success ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'CatchEffect':
+      return `${localText(operation.destination)} = effect-catch tag=${operation.handledTag} ${targetText(operation.protectedTarget)} -> ${targetText(operation.handlerTarget)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RetryEffect':
+      return `${localText(operation.destination)} = effect-retry ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} retries=${localText(operation.retries)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RunEffect':
+      return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RunEffectValue':
+      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':

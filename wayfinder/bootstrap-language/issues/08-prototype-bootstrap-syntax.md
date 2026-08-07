@@ -15,14 +15,15 @@ pipeline insertion for actor-module functions without introducing import-depende
 
 ## Answer
 
-The accepted direction is a keyword-light language with two function forms. An ordinary `fn`
-executes directly and is pure. Calling a `flow fn` packages its supplied inputs into a lazy typed
-flow value without entering its body. The `run` keyword evaluates exactly one flow layer, including
-when it appears inside another flow body, and `return` is always explicit. A single-statement body
-may omit braces, but it may not omit `return`.
+The accepted direction is a keyword-light language with an explicit eager/lazy boundary. An ordinary
+`fn` executes directly. An `effect { ... }` expression creates a lazy typed effect whose imperative
+body does not execute during construction. An `effect fn` is sugar for an ordinary function whose
+entire body is such an effect. The `run` keyword evaluates exactly one effect layer, including inside
+another effect body, and `return` is always explicit. A single-statement body may omit braces, but it
+may not omit `return`.
 
 ```silk
-pub flow fn compile(request: own Request) -> Artifact
+pub effect fn compile(request: own Request) -> Artifact
   ! FileError | ProcessError | OutOfMemory
   ? &FileSystem | &mut Allocator@Scratch
 {
@@ -54,18 +55,37 @@ let disabled = flag |> Bool.not
 
 This is static elaboration of the same actor operation, not import-dependent method lookup. Actor
 names therefore remain visible in both forms. Language behavior should prefer ordinary pipeable
-actor operations such as `Flow.flatMap`, `FileSystem.provide`, and `Scope.scoped` over additional
+actor operations such as `Effect.flatMap`, `Effect.catch`, and `FileSystem.provide` over additional
 keywords.
 
-Flow nesting is valid and never flattened implicitly. Returning a flow preserves the nested layer;
-`run` evaluates one layer; `Flow.flatten` removes one layer explicitly; and `Flow.flatMap` composes
-with the same one-layer flattening rule. The bootstrap Flow actor also needs the ordinary small
-composition family: `map`, `flatMap`, `flatten`, `tap`, and typed failure handlers. Their data-first
-forms are all pipeable through the same dual-call rule.
+Effect nesting is valid and never flattened implicitly. Returning an effect preserves the nested
+layer; `run` evaluates one layer; `Effect.flatten` removes one layer explicitly; and
+`Effect.flatMap` composes with the same one-layer flattening rule. The bootstrap Effect actor needs
+`map`, `flatMap`, `flatten`, `tap`, `catch`, and `retry`. Their data-first forms are pipeable through
+the same dual-call rule.
 
-Provision is specialization of a flow value rather than a new lexical block syntax.
+The explicit expression form isolates eager setup from delayed work:
+
+```silk
+fn risky<T>(value: T, selector: I32) -> Effect<T ! Problem> {
+  let prepared = normalize(selector)
+
+  return effect {
+    if prepared == 0 {
+      fail Problem { code: 41 }
+    }
+
+    return move value
+  }
+}
+```
+
+`prepared` is eager; the block is lazy. A Copy failure value needs no `move`; `fail move problem` is
+used only when ownership actually transfers from a non-Copy binding.
+
+Provision is specialization of an effect value rather than a new lexical block syntax.
 `Capability.provide(provider, @Role)` captures an existing implementation and removes that
-capability-role entry from the flow's requirement row. Because the open function is itself a value,
+capability-role entry from the effect's requirement row. Because the open function is itself a value,
 callers can branch and specialize it before supplying affine inputs.
 
 ```silk
@@ -82,24 +102,20 @@ let diskArtifact = run fsCompilation(move diskRequest)
 return run memoryCompilation(move memoryRequest)
 ```
 
-A borrowed provider constrains the specialized flow's lifetime. A moved provider is owned by the
-specialized flow and is cleaned up when that flow ends. Shared, exclusive, and consuming access are
-checked exactly like other captures. `Capability.provideWith(acquisitionFlow, @Role)` is the
-separate operation for acquiring a fresh provider on every execution. Its acquisition requirements
-and failures compose mechanically with the target flow, it brackets the target, and successful
-providers are cleaned up infallibly in reverse acquisition order after success, typed failure,
-defect, or interruption. Acquisition is never implicitly memoized.
+A borrowed provider constrains the specialized effect's lifetime. A moved provider is owned by the
+specialized effect and is cleaned when that effect is consumed or dropped. `provide` is not a
+per-execution cleanup boundary. `Capability.provideWith(acquisitionEffect, @Role)` is the separate
+operation for acquiring a fresh provider on every execution. Its acquisition requirements and
+failures compose with the target effect, and successful provider owners clean up in reverse
+acquisition order after success or typed failure. Traps abort without a cleanup guarantee;
+cancellation and interruption are absent from bootstrap. Acquisition is never implicitly memoized.
 
-`Scope.scoped('name)` likewise creates a fresh named scope for every execution of the wrapped flow.
-Providers and scopes are ordinary wrappers, so their order determines acquisition, handler, and
-cleanup order. A value borrowing a provider or allocation tied to such a per-run scope cannot escape
-the wrapper. It must be consumed there, copied or promoted into an enclosing scope, or returned from
-a flow using a longer-lived captured provider.
-
-Flow reuse is derived from captured ownership rather than represented by separate reusable and
-single-shot effect types. A flow whose body only views captured state can run repeatedly. One that
-edits captured state requires exclusive run access. Once an execution takes a captured owned value,
-the closed flow cannot run again. Diagnostics should identify the consumed capture, even though the
+Effect reuse is derived from captured ownership rather than represented by separate reusable and
+single-shot types. Copy captures are snapshotted at construction. An effect whose body only views
+captured state can run repeatedly. One that edits captured state requires exclusive run access and
+observes its mutations on later runs. Once execution takes a captured owned value, the closed effect
+cannot run again. `Effect.retry` accepts only repeatable effects: it reconstructs execution locals
+for each attempt but reuses captures. Diagnostics should identify the consumed capture, even though the
 failed operation is a second `run`.
 
 ```silk
@@ -112,31 +128,40 @@ let digest = run once
 let again = run once // error: captured payload was taken
 ```
 
-Recursive flow construction is lazy, but laziness alone does not guarantee bounded native stack
-usage during execution. Compiler-proven tail-recursive flow calls lower directly to loops. Every
-other recursive cycle must cross the ordinary pipeable `Flow.suspend` operation or compilation
-fails. A suspended recursive edge lowers through a trampoline and explicit continuation frames.
-This makes stack safety a checked property without imposing interpreter overhead on every flow.
+Typed handlers compose through the Effect actor and ordinary pipelines:
 
 ```silk
-pub flow fn depth(node: &Node) -> U32 {
+let recipe = relay(0)
+  |> Effect.catch<Problem>(recover)
+
+return run recipe
+```
+
+Recursive effect construction is lazy, but laziness alone does not guarantee bounded native stack
+usage during execution. Compiler-proven tail-recursive effect calls lower directly to loops. Every
+other recursive cycle must cross the ordinary pipeable `Effect.suspend` operation or compilation
+fails. A suspended recursive edge lowers through a trampoline and explicit continuation frames.
+This makes stack safety a checked property without imposing interpreter overhead on every effect.
+
+```silk
+pub effect fn depth(node: &Node) -> U32 {
   if node.isLeaf {
     return 1
   }
 
   return run (
     depth(&node.child)
-      |> Flow.suspend
-      |> Flow.map(Math.add(1))
+      |> Effect.suspend
+      |> Effect.map(Math.add(1))
   )
 }
 ```
 
 Statically known non-recursive compositions elaborate directly to MIR and need no generic runtime
-Flow objects, vtables, or per-combinator allocation. Tail recursion becomes a loop. A stored or
-dynamically selected flow may require a compiler-shaped environment, and suspended non-tail
+Effect objects, vtables, or per-combinator allocation. Tail recursion becomes a loop. A stored or
+dynamically selected effect may require a compiler-shaped environment, and suspended non-tail
 recursion necessarily requires memory for unfinished continuations, but the compiler may
-monomorphize and stack- or scope-allocate those structures. The target is zero abstraction overhead
+monomorphize and stack- or owner-allocate those structures. The target is zero abstraction overhead
 where semantics permit it, not the impossible promise of zero memory for arbitrary non-tail
 recursion.
 
@@ -154,6 +179,11 @@ The rest of the accepted surface follows the same low-keyword direction:
   Member }` is the hybrid form that binds both the namespace and selected members.
 - Unsafe operations remain qualified actor operations inside the explicit unsafe boundary settled
   by the earlier semantic issues rather than gaining unrelated special call syntax.
+- `drop value` explicitly consumes an affine owner. A restricted `impl Drop for Name` hook supplies
+  automatic cleanup but is not callable as an ordinary public operation.
+- Allocation remains an unsafe qualified actor operation over validated `Layout`; safe
+  `RawBuffer<T>`, `Vector<T>`, and other containers are ordinary Silk standard-library actors built
+  above that boundary. No syntax names an allocation scope or allocator implementation.
 
 The concrete import forms are therefore:
 
@@ -202,7 +232,7 @@ the corresponding real Effect patterns and records the ownership or lowering con
 example. The isolated capture is branch `julia/prototype-bootstrap-syntax-20260804` at commit
 `db1db1518e28032233fbbed4f8bf8f5ee98cc3c6`; the branch contains only the throwaway prototype and
 its run script. This answer supersedes issue 03's original direct-execution assumption for
-effectful functions and issue 02's blanket deferral of owned environments, narrowly for typed flow
+effectful functions and issue 02's blanket deferral of owned environments, narrowly for typed effect
 values.
 
 ## Amendment — 2026-08-05
@@ -231,3 +261,12 @@ are immediately followed by the call postfix. Thus `left < right`, `left <= righ
 reserved primary template start remain separate grammar cases. A call either supplies every type
 argument explicitly or supplies none and infers all of them from its value arguments; partial
 explicit argument lists and expected-result inference are not accepted.
+
+## Amendment — 2026-08-07: Effect and owned allocation
+
+The Effect and allocation review renamed the language abstraction from Flow to Effect, made
+`effect {}` the primitive lazy imperative boundary and `effect fn` its function sugar, and removed
+named scope wrappers from bootstrap. Allocation results are self-contained affine owners; arena-
+backed escaping values and general provider-dependent validity remain deferred. The checked-in
+prototype reflects this current direction, while its cited isolated branch remains the historical
+experiment that led to it.

@@ -1,8 +1,9 @@
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -38,8 +39,8 @@ const mirType = (
           ? Object.freeze({ _tag: 'Slice', type: specialized })
           : Type.isUnion(specialized)
             ? Object.freeze({ _tag: 'Union', type: specialized })
-            : Type.isFlow(specialized)
-              ? Object.freeze({ _tag: 'FlowOutcome', type: specialized })
+            : Type.isEffect(specialized)
+              ? Object.freeze({ _tag: 'EffectOutcome', type: specialized })
               : undefined
 }
 
@@ -55,7 +56,8 @@ class FunctionLowering {
   readonly regions: Array<Mir.Region | undefined> = []
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()
-  readonly flowRecipes = new Map<number, Hir.Expression>()
+  readonly parameterLocals = new Map<number, Mir.LocalId>()
+  readonly effectRecipes = new Map<number, Hir.Expression>()
   readonly patternLocals = new Map<string, Mir.LocalId>()
   readonly loanLocals = new Map<string, Mir.LocalId>()
   private operations: Array<Mir.Operation> = []
@@ -65,9 +67,18 @@ class FunctionLowering {
     parameterTypes: ReadonlyArray<Mir.Type>,
     readonly ownership: Ownership.FunctionOwnership | undefined,
     readonly substitution: ReadonlyMap<string, Type.Type>,
-    readonly flowOutcome: Type.Flow | undefined,
+    readonly effectOutcome: Type.Effect | undefined,
+    readonly owner: Instances.Instance,
+    readonly effectResults: ReadonlyMap<
+      string,
+      Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
+    >,
+    readonly generatedRunners: Array<GeneratedEffectRunner>,
   ) {
     this.localTypes.push(...parameterTypes)
+    parameterTypes.forEach((_, ordinal) => {
+      this.parameterLocals.set(ordinal, local(ordinal))
+    })
   }
 
   reserve(): Mir.RegionId {
@@ -106,6 +117,48 @@ class FunctionLowering {
   semantic(type: Type.Type): Type.Type {
     return Type.substitute(type, this.substitution)
   }
+}
+
+interface GeneratedEffectRunner {
+  readonly owner: Instances.Instance
+  readonly block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>
+  readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
+}
+
+const instanceText = (
+  declaration: { readonly module: string; readonly name: string },
+  typeArguments: ReadonlyArray<Type.Type>,
+): string =>
+  `${declaration.module}\u0000${declaration.name}\u0000${typeArguments.map(Type.key).join('\u0000')}`
+
+const runnerId = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): typeof owner.declaration =>
+  Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module: owner.declaration.module,
+    name: `${owner.declaration.name}$effect$${site.function.ordinal}$${site.span.start}`,
+  })
+
+const effectValueType = (
+  layout: Layout.Plan,
+  instance: Instances.InstanceKey,
+  block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+  const environment = layout.effectEnvironments.find(
+    (candidate) =>
+      candidate._tag === 'EffectEnvironment' &&
+      instanceText(candidate.instance.declaration, candidate.instance.typeArguments) ===
+        instanceText(instance.declaration, instance.typeArguments) &&
+      candidate.site.function.sourceId === block.site.function.sourceId &&
+      candidate.site.function.ordinal === block.site.function.ordinal &&
+      candidate.site.span.start === block.site.span.start,
+  )
+  if (environment?._tag !== 'EffectEnvironment') return undefined
+  return Object.freeze({
+    _tag: 'EffectValue',
+    type: environment.effect,
+    site: block.site,
+    environment,
+  })
 }
 
 interface LoweredExpression {
@@ -244,8 +297,10 @@ function lowerExpression(
       )
       return { result: destination }
     }
-    case 'ParameterReference':
-      return { result: local(expression.parameter.ordinal) }
+    case 'ParameterReference': {
+      const parameter = fn.parameterLocals.get(expression.parameter.ordinal)
+      return parameter === undefined ? undefined : { result: parameter }
+    }
     case 'BindingReference': {
       const bound = fn.bindingLocals.get(expression.binding.ordinal)
       if (bound === undefined) return undefined
@@ -258,18 +313,294 @@ function lowerExpression(
     }
     case 'Move':
       return lowerExpression(fn, expression.subject)
-    case 'FlowConstruct':
-      return undefined
+    case 'EffectConstruct': {
+      const resultType = fn.effectResults.get(
+        instanceText(
+          expression.target,
+          expression.typeArguments.map((argument) => fn.semantic(argument)),
+        ),
+      )
+      if (resultType === undefined) return undefined
+      const arguments_: Array<Mir.LocalId> = []
+      for (const argument of expression.arguments) {
+        const lowered = lowerExpression(fn, argument)
+        if (lowered === undefined) return undefined
+        arguments_.push(lowered.result)
+      }
+      const destination = fn.alloc(resultType)
+      fn.emit(
+        Object.freeze({
+          _tag: 'Call',
+          destination,
+          target: expression.target,
+          typeArguments: Object.freeze(
+            expression.typeArguments.map((argument) => fn.semantic(argument)),
+          ),
+          arguments: Object.freeze(arguments_),
+          type: resultType,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'EffectBlock': {
+      const type = effectValueType(fn.layout, fn.owner.key, expression)
+      if (type === undefined) return undefined
+      const captures: Array<{
+        readonly source: Mir.LocalId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }> = []
+      for (const capture of expression.captures) {
+        const source =
+          capture.binding === undefined
+            ? capture.parameter === undefined
+              ? undefined
+              : fn.parameterLocals.get(capture.parameter.ordinal)
+            : fn.bindingLocals.get(capture.binding.ordinal)
+        if (source === undefined) return undefined
+        captures.push(Object.freeze({ source, access: capture.access }))
+      }
+      const destination = fn.alloc(type)
+      const runner = runnerId(fn.owner.key, expression.site)
+      fn.emit(
+        Object.freeze({
+          _tag: 'MakeEffect',
+          destination,
+          runner,
+          runnerTypeArguments: fn.owner.key.typeArguments,
+          captures: Object.freeze(captures),
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      if (
+        !fn.generatedRunners.some(
+          (candidate) =>
+            instanceText(candidate.owner.key.declaration, candidate.owner.key.typeArguments) ===
+              instanceText(fn.owner.key.declaration, fn.owner.key.typeArguments) &&
+            candidate.block.site.span.start === expression.site.span.start,
+        )
+      ) {
+        fn.generatedRunners.push(
+          Object.freeze({
+            owner: fn.owner,
+            block: expression,
+            type,
+          }),
+        )
+      }
+      return Object.freeze({ result: destination })
+    }
     case 'Run': {
+      const loweredSubject = lowerExpression(fn, expression.subject)
+      const effectValueType =
+        loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
+      if (loweredSubject !== undefined && effectValueType?._tag === 'EffectValue') {
+        const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+          _tag: 'EffectOutcome',
+          type: effectValueType.type,
+        })
+        const successType = fn.type(expression.type)
+        if (
+          successType === undefined ||
+          successType._tag === 'EffectOutcome' ||
+          successType._tag === 'EffectValue'
+        )
+          return undefined
+        const outcome = fn.alloc(outcomeType)
+        const destination = fn.alloc(successType)
+        const propagationType =
+          effectValueType.type.failures.length === 0 || fn.effectOutcome === undefined
+            ? undefined
+            : fn.type(fn.effectOutcome)
+        if (propagationType !== undefined && propagationType._tag !== 'EffectOutcome')
+          return undefined
+        const tagMappings = effectValueType.type.failures.flatMap((failure, source) => {
+          const target = propagationType?.type.failures.findIndex((candidate) =>
+            Type.equals(candidate, failure),
+          )
+          return target === undefined || target < 0
+            ? []
+            : [Object.freeze({ source: source + 1, target: target + 1 })]
+        })
+        if (tagMappings.length !== effectValueType.type.failures.length) return undefined
+        const propagationShape =
+          propagationType === undefined
+            ? undefined
+            : Layout.callingShape(fn.layout, propagationType.type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RunEffectValue',
+            destination,
+            outcome,
+            effect: loweredSubject.result,
+            runner: runnerId(effectValueType.environment.instance, effectValueType.site),
+            runnerTypeArguments: effectValueType.environment.instance.typeArguments,
+            outcomeType,
+            ...(propagationType === undefined ? {} : { propagationType }),
+            tagMappings: Object.freeze(tagMappings),
+            propagationLaneCount: propagationShape?.laneCount ?? 0,
+            type: successType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
       const recipe =
         expression.subject._tag === 'BindingReference'
-          ? fn.flowRecipes.get(expression.subject.binding.ordinal)
+          ? fn.effectRecipes.get(expression.subject.binding.ordinal)
           : expression.subject
-      if (recipe?._tag === 'FlowCatch') {
+      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'AllocatorAllocate') {
+        const [layoutExpression] = recipe.arguments
+        if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
+        const loweredLayout = lowerExpression(fn, layoutExpression)
+        const type = fn.type(expression.type)
+        const propagationType = fn.type(fn.effectOutcome)
+        const failureTag = fn.effectOutcome.failures.findIndex((failure) =>
+          Type.equals(failure, Type.outOfMemory),
+        )
+        if (
+          loweredLayout === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.equals(type.type, Type.allocation) ||
+          propagationType?._tag !== 'EffectOutcome' ||
+          failureTag < 0
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'Allocate' as const,
+            destination,
+            layout: loweredLayout.result,
+            type,
+            failure: Type.outOfMemory,
+            propagationType,
+            failureTag: failureTag + 1,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
+      if (recipe?._tag === 'EffectProvide') {
+        const provider =
+          recipe.provider.binding !== undefined
+            ? fn.bindingLocals.get(recipe.provider.binding.ordinal)
+            : recipe.provider.parameter !== undefined
+              ? fn.parameterLocals.get(recipe.provider.parameter.ordinal)
+              : undefined
+        if (provider === undefined) return undefined
+        return lowerExpression(
+          fn,
+          Object.freeze({
+            ...expression,
+            subject: recipe.protected,
+          }),
+        )
+      }
+      if (recipe?._tag === 'EffectRetry') {
+        const arguments_: Array<Mir.LocalId> = []
+        let protectedValue: Mir.LocalId
+        let protectedValueType: Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined
+        let protectedTarget: DeclarationIndex.CanonicalId | undefined
+        let protectedTypeArguments: ReadonlyArray<Type.Type> = Object.freeze([])
+        if (recipe.protected._tag === 'EffectConstruct') {
+          for (const argument of recipe.protected.arguments) {
+            const lowered = lowerExpression(fn, argument)
+            if (lowered === undefined) return undefined
+            arguments_.push(lowered.result)
+          }
+          protectedTarget = recipe.protected.target
+          protectedTypeArguments = Object.freeze(
+            recipe.protected.typeArguments.map((argument) => fn.semantic(argument)),
+          )
+          protectedValueType = fn.effectResults.get(
+            instanceText(recipe.protected.target, protectedTypeArguments),
+          )
+          if (protectedValueType === undefined) return undefined
+          protectedValue = fn.alloc(protectedValueType)
+        } else {
+          const loweredProtected = lowerExpression(fn, recipe.protected)
+          if (loweredProtected === undefined) return undefined
+          const loweredType = fn.localTypes.at(loweredProtected.result.ordinal)
+          if (loweredType?._tag !== 'EffectValue') return undefined
+          protectedValue = loweredProtected.result
+          protectedValueType = loweredType
+          protectedTypeArguments = loweredType.environment.instance.typeArguments
+        }
+        const loweredRetries = lowerExpression(fn, recipe.retries)
+        if (loweredRetries === undefined) return undefined
+        const protectedType =
+          protectedValueType === undefined
+            ? undefined
+            : Object.freeze({ _tag: 'EffectOutcome' as const, type: protectedValueType.type })
+        const successType = fn.type(expression.type)
+        if (
+          protectedValueType === undefined ||
+          protectedType === undefined ||
+          successType === undefined ||
+          successType._tag === 'EffectOutcome' ||
+          successType._tag === 'EffectValue' ||
+          successType._tag === 'EffectBorrow'
+        )
+          return undefined
+        const propagationType =
+          protectedValueType.type.failures.length === 0 || fn.effectOutcome === undefined
+            ? undefined
+            : fn.type(fn.effectOutcome)
+        if (propagationType !== undefined && propagationType._tag !== 'EffectOutcome')
+          return undefined
+        const propagationShape =
+          propagationType === undefined
+            ? undefined
+            : Layout.callingShape(fn.layout, propagationType.type)
+        const tagMappings = protectedValueType.type.failures.flatMap((failure, source) => {
+          const target = propagationType?.type.failures.findIndex((candidate) =>
+            Type.equals(candidate, failure),
+          )
+          return target === undefined || target < 0
+            ? []
+            : [Object.freeze({ source: source + 1, target: target + 1 })]
+        })
+        if (
+          protectedValueType.type.failures.length > 0 &&
+          (propagationType?._tag !== 'EffectOutcome' ||
+            propagationShape === undefined ||
+            tagMappings.length !== protectedValueType.type.failures.length)
+        )
+          return undefined
+        const protectedOutcome = fn.alloc(protectedType)
+        const destination = fn.alloc(successType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RetryEffect',
+            destination,
+            protectedValue,
+            protectedOutcome,
+            ...(protectedTarget === undefined ? {} : { protectedTarget }),
+            protectedTypeArguments,
+            protectedArguments: Object.freeze(arguments_),
+            protectedValueType,
+            protectedRunner: runnerId(
+              protectedValueType.environment.instance,
+              protectedValueType.site,
+            ),
+            protectedType,
+            retries: loweredRetries.result,
+            ...(propagationType === undefined ? {} : { propagationType }),
+            tagMappings: Object.freeze(tagMappings),
+            propagationLaneCount: propagationShape?.laneCount ?? 0,
+            type: successType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
+      if (recipe?._tag === 'EffectCatch') {
         if (
           recipe.type.failures.length !== 0 ||
           recipe.handlerFailures.length !== 0 ||
-          recipe.protected._tag !== 'FlowConstruct'
+          recipe.protected._tag !== 'EffectConstruct'
         )
           return undefined
         const protectedRecipe = recipe.protected
@@ -279,40 +610,65 @@ function lowerExpression(
           if (lowered === undefined) return undefined
           arguments_.push(lowered.result)
         }
-        const protectedType = fn.type(protectedRecipe.type)
-        const handlerType = fn.type(Type.flow(recipe.type.success, recipe.handlerFailures))
+        const protectedTypeArguments = Object.freeze(
+          protectedRecipe.typeArguments.map((argument) => fn.semantic(argument)),
+        )
+        const protectedValueType = fn.effectResults.get(
+          instanceText(protectedRecipe.target, protectedTypeArguments),
+        )
+        const handlerValueType = fn.effectResults.get(instanceText(recipe.handler, []))
+        const protectedType =
+          protectedValueType === undefined
+            ? undefined
+            : Object.freeze({ _tag: 'EffectOutcome' as const, type: protectedValueType.type })
+        const handlerType =
+          handlerValueType === undefined
+            ? undefined
+            : Object.freeze({ _tag: 'EffectOutcome' as const, type: handlerValueType.type })
         const successType = fn.type(expression.type)
         const handledTag = protectedRecipe.type.failures.findIndex((failure) =>
           Type.equals(failure, recipe.handled),
         )
         const handledShape = Layout.callingShape(fn.layout, fn.semantic(recipe.handled))
         if (
-          protectedType?._tag !== 'FlowOutcome' ||
-          handlerType?._tag !== 'FlowOutcome' ||
+          protectedType?._tag !== 'EffectOutcome' ||
+          handlerType?._tag !== 'EffectOutcome' ||
+          protectedValueType === undefined ||
+          handlerValueType === undefined ||
           successType === undefined ||
-          successType._tag === 'FlowOutcome' ||
+          successType._tag === 'EffectOutcome' ||
+          successType._tag === 'EffectValue' ||
           handledTag < 0 ||
           handledShape === undefined
         )
           return undefined
         const protectedOutcome = fn.alloc(protectedType)
+        const protectedValue = fn.alloc(protectedValueType)
         const handlerOutcome = fn.alloc(handlerType)
+        const handlerValue = fn.alloc(handlerValueType)
         const destination = fn.alloc(successType)
         fn.emit(
           Object.freeze({
-            _tag: 'CatchFlow',
+            _tag: 'CatchEffect',
             destination,
+            protectedValue,
             protectedOutcome,
+            handlerValue,
             handlerOutcome,
             protectedTarget: protectedRecipe.target,
-            protectedTypeArguments: Object.freeze(
-              protectedRecipe.typeArguments.map((argument) => fn.semantic(argument)),
-            ),
+            protectedTypeArguments,
             protectedArguments: Object.freeze(arguments_),
+            protectedValueType,
+            protectedRunner: runnerId(
+              protectedValueType.environment.instance,
+              protectedValueType.site,
+            ),
             protectedType,
             handledTag: handledTag + 1,
             handledLaneCount: handledShape.laneCount,
             handlerTarget: recipe.handler,
+            handlerValueType,
+            handlerRunner: runnerId(handlerValueType.environment.instance, handlerValueType.site),
             handlerType,
             type: successType,
             provenance: authored(expression.span),
@@ -320,7 +676,7 @@ function lowerExpression(
         )
         return Object.freeze({ result: destination })
       }
-      if (recipe?._tag !== 'FlowConstruct') return undefined
+      if (recipe?._tag !== 'EffectConstruct') return undefined
       const arguments_: Array<Mir.LocalId> = []
       for (const argument of recipe.arguments) {
         const lowered = lowerExpression(fn, argument)
@@ -330,18 +686,21 @@ function lowerExpression(
       const outcomeType = fn.type(recipe.type)
       const successType = fn.type(expression.type)
       if (
-        outcomeType?._tag !== 'FlowOutcome' ||
+        outcomeType?._tag !== 'EffectOutcome' ||
         successType === undefined ||
-        successType._tag === 'FlowOutcome'
+        successType._tag === 'EffectOutcome'
       )
         return undefined
       const outcome = fn.alloc(outcomeType)
       const destination = fn.alloc(successType)
       if (recipe.type.failures.length > 0) {
-        const propagationType = fn.flowOutcome === undefined ? undefined : fn.type(fn.flowOutcome)
+        const propagationType =
+          fn.effectOutcome === undefined ? undefined : fn.type(fn.effectOutcome)
         const propagationShape =
-          fn.flowOutcome === undefined ? undefined : Layout.callingShape(fn.layout, fn.flowOutcome)
-        if (propagationType?._tag !== 'FlowOutcome' || propagationShape === undefined)
+          fn.effectOutcome === undefined
+            ? undefined
+            : Layout.callingShape(fn.layout, fn.effectOutcome)
+        if (propagationType?._tag !== 'EffectOutcome' || propagationShape === undefined)
           return undefined
         const tagMappings = recipe.type.failures.flatMap((failure, source) => {
           const target = propagationType.type.failures.findIndex((candidate) =>
@@ -352,7 +711,7 @@ function lowerExpression(
         if (tagMappings.length !== recipe.type.failures.length) return undefined
         fn.emit(
           Object.freeze({
-            _tag: 'RunFlow',
+            _tag: 'RunEffect',
             destination,
             outcome,
             target: recipe.target,
@@ -385,7 +744,7 @@ function lowerExpression(
       )
       fn.emit(
         Object.freeze({
-          _tag: 'UnpackFlowSuccess',
+          _tag: 'UnpackEffectSuccess',
           destination,
           source: outcome,
           type: successType,
@@ -723,6 +1082,48 @@ function lowerExpression(
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
+      if (expression.operation === 'LayoutMake' || expression.operation === 'LayoutRepeat') {
+        const [left, right] = argumentLocals
+        const type = fn.type(expression.type)
+        if (left === undefined || right === undefined || type?._tag !== 'Union') return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          expression.operation === 'LayoutMake'
+            ? Object.freeze({
+                _tag: 'ValidateLayout' as const,
+                destination,
+                bytes: left,
+                alignment: right,
+                type,
+                provenance: authored(expression.span),
+              })
+            : Object.freeze({
+                _tag: 'RepeatLayout' as const,
+                destination,
+                layout: left,
+                count: right,
+                type,
+                provenance: authored(expression.span),
+              }),
+        )
+        return { result: destination }
+      }
+      if (expression.operation === 'SystemAllocatorMake') {
+        const type = fn.type(expression.type)
+        if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.allocator)) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'Construct' as const,
+            destination,
+            type,
+            fields: Object.freeze([]),
+            provenance: authored(expression.span),
+          }),
+        )
+        return { result: destination }
+      }
+      if (expression.operation === 'AllocatorAllocate') return undefined
       if (expression.operation === 'Not' || expression.operation === 'Negate') {
         const [subject] = argumentLocals
         if (subject === undefined) return undefined
@@ -815,7 +1216,13 @@ const concreteCleanup = (
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
   if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isFlow(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.equals(type, Type.allocation))
+    return Object.freeze({
+      _tag: 'AllocationCleanup',
+      type: Type.allocation,
+      ticket: 'ActiveReclaimTicket',
+    })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
       _tag: 'ArrayCleanup',
@@ -1016,10 +1423,20 @@ const lowerSequence = (
 
   if (statement._tag === 'Bind') {
     if (
-      statement.initializer._tag === 'FlowConstruct' ||
-      statement.initializer._tag === 'FlowCatch'
+      (statement.initializer._tag === 'EffectConstruct' &&
+        fn.effectResults.get(
+          instanceText(
+            statement.initializer.target,
+            statement.initializer.typeArguments.map((argument) => fn.semantic(argument)),
+          ),
+        ) === undefined) ||
+      statement.initializer._tag === 'EffectCatch' ||
+      statement.initializer._tag === 'EffectRetry' ||
+      statement.initializer._tag === 'EffectProvide' ||
+      statement.initializer._tag === 'EffectProvideWith' ||
+      (statement.initializer._tag === 'BuiltinCall' && Type.isEffect(statement.initializer.type))
     ) {
-      fn.flowRecipes.set(statement.binding.ordinal, statement.initializer)
+      fn.effectRecipes.set(statement.binding.ordinal, statement.initializer)
       const following = fn.reserve()
       fn.publish(
         Object.freeze({
@@ -1123,6 +1540,51 @@ const lowerSequence = (
         id,
         ...ownerFields(ownerLoop),
         operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+      ? undefined
+      : id
+  }
+
+  if (statement._tag === 'Drop') {
+    const [lowered, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
+    if (lowered === undefined) return undefined
+    const localType = fn.localTypes.at(lowered.result.ordinal)
+    if (localType === undefined) return undefined
+    const cleanup = fn.reserve()
+    const following = fn.reserve()
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: cleanup,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    fn.publish(
+      Object.freeze({
+        _tag: 'CleanupRegion',
+        id: cleanup,
+        ...ownerFields(ownerLoop),
+        releases: Object.freeze([
+          Object.freeze({
+            _tag: 'Drop',
+            local: lowered.result,
+            cleanup: concreteCleanup(fn, Mir.semanticType(localType)),
+            provenance: authored(statement.span),
+          }),
+        ]),
         outcome: Object.freeze({
           _tag: 'Forward',
           target: following,
@@ -1305,11 +1767,11 @@ const lowerSequence = (
   if (statement._tag === 'Fail') {
     const [failedValue, operations] = fn.capture(() => {
       const failed = lowerExpression(fn, statement.expression)
-      const outcomeType = fn.flowOutcome === undefined ? undefined : fn.type(fn.flowOutcome)
+      const outcomeType = fn.effectOutcome === undefined ? undefined : fn.type(fn.effectOutcome)
       const specializedFailure = fn.semantic(statement.failure)
       if (
         failed === undefined ||
-        outcomeType?._tag !== 'FlowOutcome' ||
+        outcomeType?._tag !== 'EffectOutcome' ||
         !Type.isNominal(specializedFailure)
       )
         return undefined
@@ -1320,7 +1782,7 @@ const lowerSequence = (
       const destination = fn.alloc(outcomeType)
       fn.emit(
         Object.freeze({
-          _tag: 'PackFlowOutcome',
+          _tag: 'PackEffectOutcome',
           destination,
           source: failed.result,
           tag: tag + 1,
@@ -1382,13 +1844,13 @@ const lowerSequence = (
   const [returnedValue, operations] = fn.capture(() => {
     const returned = lowerExpression(fn, statement.expression)
     if (returned === undefined) return undefined
-    if (fn.flowOutcome === undefined) return returned.result
-    const outcomeType = fn.type(fn.flowOutcome)
-    if (outcomeType?._tag !== 'FlowOutcome') return undefined
+    if (fn.effectOutcome === undefined) return returned.result
+    const outcomeType = fn.type(fn.effectOutcome)
+    if (outcomeType?._tag !== 'EffectOutcome') return undefined
     const destination = fn.alloc(outcomeType)
     fn.emit(
       Object.freeze({
-        _tag: 'PackFlowOutcome',
+        _tag: 'PackEffectOutcome',
         destination,
         source: returned.result,
         tag: 0,
@@ -1487,10 +1949,27 @@ const planFor = (
 const bodySpan = (fn: Hir.HirFunction): SourceSpan.SourceSpan =>
   fn.statements.at(-1)?.span ?? fn.declaration.syntax.span
 
+const returnedEffectBlock = (
+  fn: Hir.HirFunction,
+): Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> | undefined => {
+  const terminal = fn.statements.at(-1)
+  if (terminal?._tag !== 'Return') return undefined
+  const returned = terminal.expression
+  if (returned._tag === 'EffectBlock') return returned
+  if (returned._tag !== 'BindingReference') return undefined
+  const binding = fn.statements.find(
+    (statement): statement is Extract<Hir.Statement, { readonly _tag: 'Bind' }> =>
+      statement._tag === 'Bind' && statement.binding.ordinal === returned.binding.ordinal,
+  )
+  return binding?.initializer._tag === 'EffectBlock' ? binding.initializer : undefined
+}
+
 const lowerInstance = (
   instance: Instances.Instance,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
+  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  generatedRunners: Array<GeneratedEffectRunner>,
 ): Mir.MirFunction => {
   const fn = instance.function
   const plan = planFor(ownership, fn)
@@ -1507,20 +1986,29 @@ const lowerInstance = (
           return lowered === undefined ? [] : [lowered]
         })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
-  const flowOutcome =
-    contract._tag === 'Contract' && contract.functionKind === 'Flow'
-      ? Type.flow(
+  const effectOutcome =
+    contract._tag === 'Contract' && contract.functionKind === 'Effect'
+      ? Type.effect(
           Type.substitute(contract.result, instance.substitution),
           (contract.failures ?? []).flatMap((failure) => {
             const specialized = Type.substitute(failure, instance.substitution)
             return Type.isNominal(specialized) ? [specialized] : []
           }),
+          'Shared',
+          (contract.requirements ?? []).flatMap((requirement) => {
+            const capability = Type.substitute(requirement.capability, instance.substitution)
+            return Type.isNominal(capability) ? [Object.freeze({ ...requirement, capability })] : []
+          }),
         )
       : undefined
+  const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
+  const hiddenEffectResult =
+    returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
   const resultType =
-    contract._tag === 'Contract'
-      ? mirType(flowOutcome ?? contract.result, instance.substitution)
-      : i32
+    hiddenEffectResult ??
+    (contract._tag === 'Contract'
+      ? mirType(effectOutcome ?? contract.result, instance.substitution)
+      : i32)
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
   }
@@ -1530,7 +2018,10 @@ const lowerInstance = (
     parameterTypes,
     plan,
     instance.substitution,
-    flowOutcome,
+    effectOutcome,
+    instance,
+    effectResults,
+    generatedRunners,
   )
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
@@ -1558,19 +2049,119 @@ const lowerInstance = (
   })
 }
 
+const lowerEffectRunner = (
+  spec: GeneratedEffectRunner,
+  ownership: Ownership.ModuleOwnership | undefined,
+  layout: Layout.Plan,
+  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  generatedRunners: Array<GeneratedEffectRunner>,
+): Mir.MirFunction | undefined => {
+  const { owner, block, type } = spec
+  const id = runnerId(owner.key, block.site)
+  const instance: Instances.InstanceKey = Object.freeze({
+    _tag: 'InstanceKey',
+    declaration: id,
+    typeArguments: owner.key.typeArguments,
+    contractRow: Object.freeze([
+      ...owner.key.contractRow,
+      `effect-site:${block.site.function.sourceId}:${block.site.function.ordinal}:${block.site.span.start}`,
+    ]),
+  })
+  const parameterTypes = type.environment.fields.flatMap((field) => {
+    const lowered = mirType(field.type)
+    if (lowered === undefined) return []
+    return [
+      field.access === 'Shared' || field.access === 'Exclusive'
+        ? Object.freeze({ _tag: 'EffectBorrow' as const, type: field.type, access: field.access })
+        : lowered,
+    ]
+  })
+  if (parameterTypes.length !== block.captures.length) return undefined
+  const plan = planFor(ownership, owner.function)
+  const lowering = new FunctionLowering(
+    layout,
+    parameterTypes,
+    plan,
+    owner.substitution,
+    type.type,
+    owner,
+    effectResults,
+    generatedRunners,
+  )
+  lowering.parameterLocals.clear()
+  block.captures.forEach((capture, ordinal) => {
+    const captureLocal = local(ordinal)
+    if (capture.binding !== undefined)
+      lowering.bindingLocals.set(capture.binding.ordinal, captureLocal)
+    if (capture.parameter !== undefined)
+      lowering.parameterLocals.set(capture.parameter.ordinal, captureLocal)
+  })
+  const terminal: Mir.Outcome = Object.freeze({
+    _tag: 'Trap',
+    reason: 'effect body fell through without return',
+    provenance: generated(block.span),
+  })
+  const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
+  if (entry === undefined || lowering.regions.some((region) => region === undefined))
+    return undefined
+  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+    _tag: 'EffectOutcome',
+    type: type.type,
+  })
+  return Object.freeze({
+    _tag: 'MirFunction',
+    id,
+    instance,
+    parameterCount: parameterTypes.length,
+    localTypes: Object.freeze([...lowering.localTypes]),
+    result,
+    entry,
+    regions: Object.freeze(
+      lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
+    ),
+  })
+}
+
 /** Lowers the discovered instances into one MIR program module in discovery order. */
 export const lowerProgram = (
   discovery: Instances.Discovery,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   layout: Layout.Plan,
-): Mir.Module =>
-  Object.freeze({
+): Mir.Module => {
+  const effectResults = new Map<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>()
+  for (const instance of discovery.instances) {
+    const block = returnedEffectBlock(instance.function)
+    if (block === undefined) continue
+    const type = effectValueType(layout, instance.key, block)
+    if (type !== undefined)
+      effectResults.set(instanceText(instance.key.declaration, instance.key.typeArguments), type)
+  }
+  const generatedRunners: Array<GeneratedEffectRunner> = []
+  const functions = discovery.instances.map((instance) =>
+    lowerInstance(
+      instance,
+      ownership.get(instance.key.declaration.module),
+      layout,
+      effectResults,
+      generatedRunners,
+    ),
+  )
+  for (let ordinal = 0; ordinal < generatedRunners.length; ordinal += 1) {
+    const generated = generatedRunners.at(ordinal)
+    if (generated === undefined) continue
+    const runner = lowerEffectRunner(
+      generated,
+      ownership.get(generated.owner.key.declaration.module),
+      layout,
+      effectResults,
+      generatedRunners,
+    )
+    if (runner !== undefined) functions.push(runner)
+  }
+  return Object.freeze({
     _tag: 'MirModule',
     module: discovery.rootModule,
     layout,
-    functions: Object.freeze(
-      discovery.instances.map((instance) =>
-        lowerInstance(instance, ownership.get(instance.key.declaration.module), layout),
-      ),
-    ),
+    functions: Object.freeze(functions),
   })
+}

@@ -46,6 +46,8 @@ const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x2f ||
   byte === 0x25 ||
   byte === 0x21 ||
+  byte === 0x3f ||
+  byte === 0x40 ||
   byte === 0x3c ||
   byte === 0x3e ||
   byte === 0x7c ||
@@ -85,7 +87,8 @@ const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['as', 'AsKeyword'],
   ['run', 'RunKeyword'],
   ['fail', 'FailKeyword'],
-  ['flow', 'FlowKeyword'],
+  ['drop', 'DropKeyword'],
+  ['effect', 'EffectKeyword'],
   ['if', 'IfKeyword'],
   ['else', 'ElseKeyword'],
   ['mut', 'MutKeyword'],
@@ -202,6 +205,10 @@ const punctuationKind = (byte: number | undefined): Token.TokenKind => {
       return 'Percent'
     case 0x21:
       return 'Bang'
+    case 0x3f:
+      return 'Question'
+    case 0x40:
+      return 'At'
     case 0x3c:
       return 'Less'
     case 0x3e:

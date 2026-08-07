@@ -37,11 +37,19 @@ export interface Slice {
   readonly element: Type
 }
 
-/** A compiler-private lazy flow contract. Flow values never cross the executable ABI. */
-export interface Flow {
-  readonly _tag: 'FlowType'
+/** One compile-time capability requirement. Roles select slots and have no runtime value. */
+export interface Requirement {
+  readonly capability: Nominal
+  readonly role: string
+  readonly access: 'Shared' | 'Exclusive'
+}
+
+/** A compiler-private lazy effect contract. Effect values never cross the executable ABI. */
+export interface Effect {
+  readonly _tag: 'EffectType'
   readonly success: Type
   readonly failures: ReadonlyArray<Nominal>
+  readonly requirements: ReadonlyArray<Requirement>
   readonly access: 'Shared' | 'Exclusive' | 'Take'
 }
 
@@ -61,7 +69,7 @@ export type Type =
   | Parameter
   | FixedArray
   | Slice
-  | Flow
+  | Effect
   | StructuralUnion
 
 /** The typed result of attempting to normalize structural-union inputs. */
@@ -81,6 +89,32 @@ export const nominal = (
     name,
     arguments: Object.freeze(Array.from(arguments_)),
   })
+
+/** Canonical allocation-free failure used by every allocator implementation. */
+export const outOfMemory: Nominal = nominal('silk/core', 'OutOfMemory')
+export const layout: Nominal = nominal('silk/core', 'Layout')
+export const invalidAlignment: Nominal = nominal('silk/core', 'InvalidAlignment')
+export const layoutOverflow: Nominal = nominal('silk/core', 'LayoutOverflow')
+/** The implementation-erased allocation capability requested by allocation Effects. */
+export const allocator: Nominal = nominal('silk/core', 'Allocator')
+/** A self-contained affine owner carrying one private active reclaim ticket. */
+export const allocation: Nominal = nominal('silk/core', 'Allocation')
+
+export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
+  [outOfMemory.name, outOfMemory],
+  [layout.name, layout],
+  [invalidAlignment.name, invalidAlignment],
+  [layoutOverflow.name, layoutOverflow],
+  [allocator.name, allocator],
+  [allocation.name, allocation],
+])
+export const intrinsicNominalOrdinal = (self: Nominal): number =>
+  [...intrinsicNominals.values()].findIndex((candidate) => equals(candidate, self))
+
+/** Tests the one compiler-sealed allocation exhaustion payload. */
+export const isOutOfMemory = (self: Type): self is Nominal => equals(self, outOfMemory)
+export const isIntrinsicNominal = (self: Type): boolean =>
+  isNominal(self) && self.module === 'silk/core' && intrinsicNominals.get(self.name) !== undefined
 
 /** Constructs one declaration-owned generic type parameter. */
 export const parameter = (
@@ -103,17 +137,42 @@ export const fixedArray = (element: Type, length: number): FixedArray =>
 export const slice = (access: Slice['access'], element: Type): Slice =>
   Object.freeze({ _tag: 'SliceType', access, element })
 
-/** Constructs one normalized compiler-private lazy flow contract. */
-export const flow = (
+/** Constructs one normalized compiler-private lazy effect contract. */
+export const effect = (
   success: Type,
   failures: ReadonlyArray<Nominal>,
-  access: Flow['access'] = 'Shared',
-): Flow => {
+  access: Effect['access'] = 'Shared',
+  requirements: ReadonlyArray<Requirement> = [],
+): Effect => {
   const normalized = new Map(failures.map((failure) => [key(failure), failure] as const))
+  const normalizedRequirements = new Map<string, Requirement>()
+  for (const requirement of requirements) {
+    const identity = `${key(requirement.capability)}@${requirement.role}`
+    const existing = normalizedRequirements.get(identity)
+    normalizedRequirements.set(
+      identity,
+      Object.freeze({
+        capability: requirement.capability,
+        role: requirement.role,
+        access:
+          existing?.access === 'Exclusive' || requirement.access === 'Exclusive'
+            ? 'Exclusive'
+            : 'Shared',
+      }),
+    )
+  }
   return Object.freeze({
-    _tag: 'FlowType',
+    _tag: 'EffectType',
     success,
     failures: Object.freeze([...normalized.values()].sort(compare)),
+    requirements: Object.freeze(
+      [...normalizedRequirements.values()].sort((left, right) =>
+        compareText(
+          `${key(left.capability)}@${left.role}`,
+          `${key(right.capability)}@${right.role}`,
+        ),
+      ),
+    ),
     access,
   })
 }
@@ -178,9 +237,9 @@ export const isFixedArray = (self: Type): self is FixedArray =>
 export const isSlice = (self: Type): self is Slice =>
   typeof self !== 'string' && self._tag === 'SliceType'
 
-/** Tests whether a semantic type is a compiler-private lazy flow contract. */
-export const isFlow = (self: Type): self is Flow =>
-  typeof self !== 'string' && self._tag === 'FlowType'
+/** Tests whether a semantic type is a compiler-private lazy effect contract. */
+export const isEffect = (self: Type): self is Effect =>
+  typeof self !== 'string' && self._tag === 'EffectType'
 
 /** Tests whether a semantic type is a normalized multi-member structural union. */
 export const isUnion = (self: Type): self is StructuralUnion =>
@@ -195,8 +254,8 @@ export const key = (self: Type): string => {
   if (isParameter(self)) return `parameter:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
-  if (isFlow(self))
-    return `flow:${self.access}<${key(self.success)}!${self.failures.map(key).join('|')}>`
+  if (isEffect(self))
+    return `effect:${self.access}<${key(self.success)}!${self.failures.map(key).join('|')}?${self.requirements.map((requirement) => `${requirement.access}:${key(requirement.capability)}@${requirement.role}`).join('|')}>`
   return `union:${self.members.map(key).join('|')}`
 }
 
@@ -218,9 +277,18 @@ export const encode = (self: Type): string => {
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
   if (isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
-  if (isFlow(self)) {
+  if (isEffect(self)) {
     const row = self.failures.length === 0 ? '' : ` ! ${self.failures.map(encode).join(' | ')}`
-    return `Flow<${encode(self.success)}${row}>`
+    const requirements =
+      self.requirements.length === 0
+        ? ''
+        : ` ? ${self.requirements
+            .map(
+              (requirement) =>
+                `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+            )
+            .join(' | ')}`
+    return `Effect<${encode(self.success)}${row}${requirements}>`
   }
   return self.members.map(encode).join(' | ')
 }
@@ -233,8 +301,12 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
       ? nominals(self.element)
       : isSlice(self)
         ? nominals(self.element)
-        : isFlow(self)
-          ? Object.freeze([...nominals(self.success), ...self.failures.flatMap(nominals)])
+        : isEffect(self)
+          ? Object.freeze([
+              ...nominals(self.success),
+              ...self.failures.flatMap(nominals),
+              ...self.requirements.flatMap((requirement) => nominals(requirement.capability)),
+            ])
           : isUnion(self)
             ? Object.freeze(self.members.flatMap(nominals))
             : []
@@ -252,9 +324,10 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
       return
     }
     if (isFixedArray(type) || isSlice(type)) visit(type.element)
-    else if (isFlow(type)) {
+    else if (isEffect(type)) {
       visit(type.success)
       for (const failure of type.failures) visit(failure)
+      for (const requirement of type.requirements) visit(requirement.capability)
     } else if (isUnion(type)) for (const member of type.members) visit(member)
   }
   visit(self)
@@ -269,7 +342,7 @@ export const containsBorrow = (self: Type): boolean => {
   if (isSlice(self)) return true
   if (isNominal(self)) return self.arguments.some(containsBorrow)
   if (isFixedArray(self)) return containsBorrow(self.element)
-  if (isFlow(self)) return containsBorrow(self.success) || self.failures.some(containsBorrow)
+  if (isEffect(self)) return containsBorrow(self.success) || self.failures.some(containsBorrow)
   if (isUnion(self)) return self.members.some(containsBorrow)
   return false
 }
@@ -285,13 +358,17 @@ export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>):
     )
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
   if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
-  if (isFlow(self)) {
+  if (isEffect(self)) {
     const success = substitute(self.success, substitution)
     const failures = self.failures.map((failure) => substitute(failure, substitution))
-    return flow(
+    return effect(
       success,
       failures.filter((failure): failure is Nominal => isNominal(failure)),
       self.access,
+      self.requirements.flatMap((requirement) => {
+        const capability = substitute(requirement.capability, substitution)
+        return isNominal(capability) ? [Object.freeze({ ...requirement, capability })] : []
+      }),
     )
   }
   if (isUnion(self)) {
@@ -330,14 +407,24 @@ export const infer = (pattern: Type, actual: Type, inferred: Map<string, Type>):
   if (isSlice(pattern) && isSlice(actual)) {
     return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
   }
-  if (isFlow(pattern) && isFlow(actual)) {
+  if (isEffect(pattern) && isEffect(actual)) {
     return (
       pattern.access === actual.access &&
       pattern.failures.length === actual.failures.length &&
+      pattern.requirements.length === actual.requirements.length &&
       infer(pattern.success, actual.success, inferred) &&
       pattern.failures.every((failure, index) => {
         const supplied = actual.failures.at(index)
         return supplied !== undefined && infer(failure, supplied, inferred)
+      }) &&
+      pattern.requirements.every((requirement, index) => {
+        const supplied = actual.requirements.at(index)
+        return (
+          supplied !== undefined &&
+          requirement.access === supplied.access &&
+          requirement.role === supplied.role &&
+          infer(requirement.capability, supplied.capability, inferred)
+        )
       })
     )
   }

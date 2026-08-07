@@ -98,7 +98,7 @@ recipe-declared tools.
 A closed requirements-to-fixtures manifest defines the minimum corpus. Every normative bootstrap
 decision from issues 01 through 08 maps to at least one stable fixture ID. Applicable rules receive
 both accepted and rejected cases, with edge cases for ownership, borrowing, cleanup, typed
-failures, services and witnesses, scopes, flow reuse and suspension, imports and cycles,
+failures, services and witnesses, effect reuse and suspension, affine allocation and Drop, imports and cycles,
 incomplete-source recovery, host boundaries, target ABI, and deterministic ordering.
 
 Fixtures belong to six classes: compile-and-run, compile-and-reject, operational-failure, trap,

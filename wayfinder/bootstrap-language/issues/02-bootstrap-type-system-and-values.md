@@ -83,11 +83,12 @@ calls must preserve their type and contract-row arguments.
 Function value types include parameter access modes, return type, failure row, and requirement row.
 A function with smaller failure or requirement rows may be used where larger rows are expected, but
 the reverse is invalid. Generic functions must be concretely instantiated before becoming values.
-Named and non-capturing functions are storable. As resolved by issue 08, invoking or specializing a
-`flow fn` may also create a storable typed flow value with a compiler-shaped environment containing
-its supplied inputs and providers. That environment may borrow or own captures; ordinary lifetime
-and affine checks determine whether the flow may escape and whether it supports shared, exclusive,
-or consuming execution. This narrowly admits owned environments for flow values. General-purpose
+Named and non-capturing functions are storable. As resolved by issue 08, invoking or specializing an
+`effect fn`, or evaluating an `effect {}` expression, may create a storable typed Effect value with
+a compiler-shaped environment containing its supplied inputs and providers. That environment may
+borrow or own captures; ordinary lexical-borrow and affine checks determine whether the effect may
+escape and whether it supports shared, exclusive, or consuming execution. This narrowly admits
+owned environments for Effect values. General-purpose
 capturing closures remain non-escaping callbacks with explicit shared or exclusive capture lists;
 general move closures, arbitrary owned closure objects, and polymorphic function values are still
 deferred.

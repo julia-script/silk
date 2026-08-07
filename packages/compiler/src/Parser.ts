@@ -156,11 +156,12 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ContinueKeyword',
   'ReturnKeyword',
   'FailKeyword',
+  'DropKeyword',
   'ElseKeyword',
   'PubKeyword',
   'StructKeyword',
   'FnKeyword',
-  'FlowKeyword',
+  'EffectKeyword',
   'ImportKeyword',
   'MatchKeyword',
 ])
@@ -177,6 +178,7 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LeftParenthesis',
   'LeftBracket',
   'MatchKeyword',
+  'EffectKeyword',
   'RunKeyword',
   'Less',
   'Ampersand',
@@ -319,6 +321,7 @@ const primaryKind = (
   | 'Boolean'
   | 'Identifier'
   | 'Move'
+  | 'Effect'
   | 'Run'
   | 'Borrow'
   | 'Call'
@@ -339,6 +342,8 @@ const primaryKind = (
     if (token.kind === 'Bang') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
+    if (token.kind === 'EffectKeyword' && significantKindAfter(state, 1) === 'LeftBrace')
+      return 'Effect'
     if (token.kind === 'RunKeyword') return 'Run'
     if (token.kind === 'Ampersand') return 'Borrow'
     if (token.kind === 'MatchKeyword') return 'Match'
@@ -376,7 +381,7 @@ const primaryKind = (
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
       token.kind === 'FnKeyword' ||
-      token.kind === 'FlowKeyword' ||
+      token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
     ) {
@@ -439,6 +444,7 @@ const expectCallRightParenthesis = (
 
 function parseArgumentList(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
+    'At',
     ...expressionStarts,
     'RightParenthesis',
     'RightBrace',
@@ -461,7 +467,17 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
-    const argument = parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
+    const argument =
+      kind === 'At'
+        ? (() => {
+            const at = expect(state, 'At', ['Identifier', 'Comma', 'RightParenthesis'])
+            const name = expect(at.state, 'Identifier', ['Comma', 'RightParenthesis'])
+            return Object.freeze({
+              state: name.state,
+              node: syntaxNode(name.state, 'RoleExpression', [...at.elements, ...name.elements]),
+            })
+          })()
+        : parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier')
     children = Object.freeze([...children, argument.node])
     state = argument.state
     kind = nextSignificantKind(state)
@@ -477,6 +493,7 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
       break
 
     const comma = expect(state, 'Comma', [
+      'At',
       ...expressionStarts,
       'RightParenthesis',
       'RightBrace',
@@ -890,6 +907,15 @@ const parseReservedTemplateExpression = (initial: State): NodeResult => {
   })
 }
 
+const parseEffectExpression = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'EffectKeyword', ['LeftBrace', ...expressionFollowing])
+  const block = parseBlock(keyword.state, true)
+  return Object.freeze({
+    state: block.state,
+    node: syntaxNode(block.state, 'EffectExpression', [...keyword.elements, block.node]),
+  })
+}
+
 function parsePrimaryExpression(
   initial: State,
   reservedForEnclosingCalls: number,
@@ -904,6 +930,7 @@ function parsePrimaryExpression(
   if (kind === 'ArrayLiteral')
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls)
+  if (kind === 'Effect') return parseEffectExpression(initial)
   if (kind === 'Run') {
     const keyword = expect(initial, 'RunKeyword', [...expressionStarts, ...expressionFollowing])
     const operand = parsePrefixExpression(
@@ -1141,8 +1168,11 @@ const parseReturnStatement = (initial: State): NodeResult => {
 }
 
 const parseFailStatement = (initial: State): NodeResult => {
-  const keyword = expect(initial, 'FailKeyword', ['MoveKeyword', ...expressionFollowing])
-  const move = expect(keyword.state, 'MoveKeyword', [...expressionStarts, ...expressionFollowing])
+  const keyword = expect(initial, 'FailKeyword', ['MoveKeyword', ...expressionStarts])
+  const move =
+    nextSignificantKind(keyword.state) === 'MoveKeyword'
+      ? expect(keyword.state, 'MoveKeyword', [...expressionStarts, ...expressionFollowing])
+      : Object.freeze({ state: keyword.state, elements: Object.freeze([]) })
   const expression = parseExpression(move.state, 0, 'Identifier')
   return Object.freeze({
     state: expression.state,
@@ -1151,6 +1181,15 @@ const parseFailStatement = (initial: State): NodeResult => {
       ...move.elements,
       expression.node,
     ]),
+  })
+}
+
+const parseDropStatement = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'DropKeyword', expressionStarts)
+  const expression = parseExpression(keyword.state, 0, 'Identifier')
+  return Object.freeze({
+    state: expression.state,
+    node: syntaxNode(expression.state, 'DropStatement', [...keyword.elements, expression.node]),
   })
 }
 
@@ -1293,6 +1332,7 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
     kind === 'LetKeyword' ||
     kind === 'ReturnKeyword' ||
     kind === 'FailKeyword' ||
+    kind === 'DropKeyword' ||
     kind === 'IfKeyword' ||
     kind === 'WhileKeyword' ||
     kind === 'BreakKeyword' ||
@@ -1314,7 +1354,9 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
                   ? parseAssignmentStatement(state)
                   : kind === 'FailKeyword'
                     ? parseFailStatement(state)
-                    : parseReturnStatement(state)
+                    : kind === 'DropKeyword'
+                      ? parseDropStatement(state)
+                      : parseReturnStatement(state)
     if (kind === 'ReturnKeyword' || kind === 'FailKeyword') sawReturn = true
     children = Object.freeze([...children, statement.node])
     state = statement.state
@@ -1339,7 +1381,7 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
     'PubKeyword',
     'StructKeyword',
     'FnKeyword',
-    'FlowKeyword',
+    'EffectKeyword',
     'ImportKeyword',
   ])
   return Object.freeze({
@@ -1396,13 +1438,23 @@ const parseTypeArgumentList = (
     nextSignificantKind(state) !== 'EndOfFile' &&
     !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
   ) {
-    const argument = parseType(state, ['Comma', 'Greater', ...following])
+    const argument = parseType(state, ['Comma', 'Bang', 'Question', 'Greater', ...following])
     children = Object.freeze([...children, argument.node])
     state = argument.state
     if (nextSignificantKind(state) !== 'Comma') break
     const comma = expect(state, 'Comma', [...typeStarts, 'Greater', ...following])
     children = Object.freeze([...children, ...comma.elements])
     state = comma.state
+  }
+  if (kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Bang') {
+    const failure = parseFailureRow(state, ['Question', 'Greater', ...following])
+    children = Object.freeze([...children, failure.node])
+    state = failure.state
+  }
+  if (kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Question') {
+    const requirements = parseRequirementRow(state, ['Greater', ...following])
+    children = Object.freeze([...children, requirements.node])
+    state = requirements.state
   }
   const right = expect(state, 'Greater', following)
   return Object.freeze({
@@ -1539,21 +1591,73 @@ function parseType(
 }
 
 const parseReturnType = (initial: State): NodeResult => {
-  const arrow = expect(initial, 'Arrow', [...typeStarts, 'Bang', 'LeftBrace'])
-  const type = parseType(arrow.state, ['Bang', 'LeftBrace'])
+  const arrow = expect(initial, 'Arrow', [...typeStarts, 'Bang', 'Question', 'LeftBrace'])
+  const type = parseType(arrow.state, ['Bang', 'Question', 'LeftBrace'])
   return Object.freeze({
     state: type.state,
     node: syntaxNode(type.state, 'ReturnType', [...arrow.elements, type.node]),
   })
 }
 
-const parseFailureRow = (initial: State): NodeResult => {
-  const bang = expect(initial, 'Bang', [...typeStarts, 'LeftBrace'])
-  const members = parseType(bang.state, ['LeftBrace'])
+const parseFailureRow = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind> = ['Question', 'LeftBrace'],
+): NodeResult => {
+  const bang = expect(initial, 'Bang', [...typeStarts, ...following])
+  const members = parseType(bang.state, following)
   return Object.freeze({
     state: members.state,
     node: syntaxNode(members.state, 'FailureRow', [...bang.elements, members.node]),
   })
+}
+
+const parseRequirement = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const ampersand = expect(initial, 'Ampersand', ['MutKeyword', 'Identifier', ...following])
+  const mut =
+    nextSignificantKind(ampersand.state) === 'MutKeyword'
+      ? expect(ampersand.state, 'MutKeyword', ['Identifier', ...following])
+      : undefined
+  const capability = parseTypePath(mut?.state ?? ampersand.state, ['At', ...following])
+  const role =
+    nextSignificantKind(capability.state) === 'At'
+      ? (() => {
+          const at = expect(capability.state, 'At', ['Identifier', ...following])
+          const name = expect(at.state, 'Identifier', following)
+          return Object.freeze({ state: name.state, elements: [...at.elements, ...name.elements] })
+        })()
+      : undefined
+  return Object.freeze({
+    state: role?.state ?? capability.state,
+    node: syntaxNode(role?.state ?? capability.state, 'Requirement', [
+      ...ampersand.elements,
+      ...(mut?.elements ?? []),
+      capability.node,
+      ...(role?.elements ?? []),
+    ]),
+  })
+}
+
+const parseRequirementRow = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const question = expect(initial, 'Question', ['Ampersand', ...following])
+  let requirement = parseRequirement(question.state, ['Pipe', ...following])
+  let state = requirement.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...question.elements,
+    requirement.node,
+  ])
+  while (nextSignificantKind(state) === 'Pipe') {
+    const pipe = expect(state, 'Pipe', ['Ampersand', ...following])
+    requirement = parseRequirement(pipe.state, ['Pipe', ...following])
+    children = Object.freeze([...children, ...pipe.elements, requirement.node])
+    state = requirement.state
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'RequirementRow', children) })
 }
 
 const parseParameterList = (initial: State): NodeResult => {
@@ -1633,7 +1737,7 @@ const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'PubKeyword',
   'StructKeyword',
   'FnKeyword',
-  'FlowKeyword',
+  'EffectKeyword',
   'EndOfFile',
 ])
 
@@ -1741,13 +1845,13 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
   if (
     kind === 'ImportKeyword' ||
     kind === 'FnKeyword' ||
-    kind === 'FlowKeyword' ||
+    kind === 'EffectKeyword' ||
     kind === 'StructKeyword'
   )
     return true
   if (kind !== 'PubKeyword') return false
   const following = significantKindAfter(state, 1)
-  return following === 'FnKeyword' || following === 'FlowKeyword' || following === 'StructKeyword'
+  return following === 'FnKeyword' || following === 'EffectKeyword' || following === 'StructKeyword'
 }
 
 const parseStructField = (initial: State): NodeResult => {
@@ -1828,7 +1932,7 @@ const parseFunctionDeclaration = (initial: State): NodeResult => {
   while (
     lookaheadToken !== undefined &&
     lookaheadToken.kind !== 'FnKeyword' &&
-    lookaheadToken.kind !== 'FlowKeyword' &&
+    lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'EndOfFile'
   ) {
@@ -1840,13 +1944,13 @@ const parseFunctionDeclaration = (initial: State): NodeResult => {
     lookaheadToken = initial.lexical.tokens.at(lookahead)
   }
   const pubKeyword = hasPublicModifier
-    ? expect(initial, 'PubKeyword', ['FlowKeyword', 'FnKeyword', 'Identifier', 'LeftParenthesis'])
+    ? expect(initial, 'PubKeyword', ['EffectKeyword', 'FnKeyword', 'Identifier', 'LeftParenthesis'])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
-  const flowKeyword =
-    nextSignificantKind(pubKeyword.state) === 'FlowKeyword'
-      ? expect(pubKeyword.state, 'FlowKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+  const effectKeyword =
+    nextSignificantKind(pubKeyword.state) === 'EffectKeyword'
+      ? expect(pubKeyword.state, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
       : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
-  const fnKeyword = expect(flowKeyword.state, 'FnKeyword', ['Identifier', 'LeftParenthesis'])
+  const fnKeyword = expect(effectKeyword.state, 'FnKeyword', ['Identifier', 'LeftParenthesis'])
   const name = expect(fnKeyword.state, 'Identifier', ['Less', 'LeftParenthesis'])
   const typeParameters =
     nextSignificantKind(name.state) === 'Less'
@@ -1856,19 +1960,24 @@ const parseFunctionDeclaration = (initial: State): NodeResult => {
   const returnType = parseReturnType(parameters.state)
   const failureRow =
     nextSignificantKind(returnType.state) === 'Bang' ? parseFailureRow(returnType.state) : undefined
-  const block = parseBlock(failureRow?.state ?? returnType.state, true)
+  const requirementRow =
+    nextSignificantKind(failureRow?.state ?? returnType.state) === 'Question'
+      ? parseRequirementRow(failureRow?.state ?? returnType.state, ['LeftBrace'])
+      : undefined
+  const block = parseBlock(requirementRow?.state ?? failureRow?.state ?? returnType.state, true)
 
   return Object.freeze({
     state: block.state,
     node: syntaxNode(block.state, 'FunctionDeclaration', [
       ...pubKeyword.elements,
-      ...flowKeyword.elements,
+      ...effectKeyword.elements,
       ...fnKeyword.elements,
       ...name.elements,
       ...(typeParameters === undefined ? [] : [typeParameters.node]),
       parameters.node,
       returnType.node,
       ...(failureRow === undefined ? [] : [failureRow.node]),
+      ...(requirementRow === undefined ? [] : [requirementRow.node]),
       block.node,
     ]),
   })

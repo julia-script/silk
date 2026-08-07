@@ -70,6 +70,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallExpression',
   'ConditionalStatement',
   'ContinueStatement',
+  'DropStatement',
+  'EffectExpression',
   'FieldProjectionExpression',
   'FailStatement',
   'FailureRow',
@@ -96,10 +98,13 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'PipelineExpression',
   'PipelineTarget',
   'PrefixExpression',
+  'Requirement',
+  'RequirementRow',
   'PatternField',
   'ReturnStatement',
   'RunExpression',
   'ReturnType',
+  'RoleExpression',
   'RestPattern',
   'SliceType',
   'SourceFile',
@@ -113,34 +118,34 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'WhileStatement',
 ])
 
-it.effect('formats a generic flow catch pipeline canonically and idempotently', () =>
+it.effect('formats a generic effect catch pipeline canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =
-      'pub fn main()->I32 { let recipe=risky()|>Flow.catch<Problem>(recover) return 0 }'
-    const first = yield* Formatter.format(parse('memory://flow-catch-pipeline.silk', source))
+      'pub fn main()->I32 { let recipe=risky()|>Effect.catch<Problem>(recover) return 0 }'
+    const first = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
       `pub fn main() -> I32 {
-  let recipe = risky() |> Flow.catch<Problem>(recover)
+  let recipe = risky() |> Effect.catch<Problem>(recover)
   return 0
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://flow-catch-pipeline.silk', text))
+    const second = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
 
-it.effect('formats flow contracts, run, and fail canonically and idempotently', () =>
+it.effect('formats effect contracts, run, and fail canonically and idempotently', () =>
   Effect.gen(function* () {
-    const source = `flow   fn work(problem:Problem)->I32 ! Problem|Other { if true { fail   move problem } return 42 }
+    const source = `effect   fn work(problem:Problem)->I32 ! Problem|Other { if true { fail   move problem } return 42 }
 fn main()->I32 { let pending=work(Problem { code:1 }) return run   pending }`
-    const first = yield* Formatter.format(parse('memory://flow-format.silk', source))
+    const first = yield* Formatter.format(parse('memory://effect-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `flow fn work(problem: Problem) -> I32
+      `effect fn work(problem: Problem) -> I32
 ! Problem | Other {
   if true {
     fail move problem
@@ -154,7 +159,72 @@ fn main() -> I32 {
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://flow-format.silk', text))
+    const second = yield* Formatter.format(parse('memory://effect-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('formats explicit drop canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const first = yield* Formatter.format(
+      parse(
+        'memory://drop-format.silk',
+        'struct Token { value:I32 } fn main()->I32 { let token=Token { value:1 } drop   token return 42 }',
+      ),
+    )
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `struct Token {
+  value: I32
+}
+
+fn main() -> I32 {
+  let token = Token {value: 1}
+  drop token
+  return 42
+}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://drop-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('formats explicit Effect and declaration requirement rows', () =>
+  Effect.gen(function* () {
+    const source = `fn later()->Effect<I32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
+effect fn work()->I32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
+    const first = yield* Formatter.format(parse('memory://effect-requirement-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn later() -> Effect<I32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+  return effect {
+    return 1
+  }
+}
+
+effect fn work() -> I32
+! Problem
+? &FileSystem | &mut Allocator@Scratch {
+  return 1
+}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://effect-requirement-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('formats effect blocks and Copy failure transfer canonically', () =>
+  Effect.gen(function* () {
+    const source = 'fn later()->I32 { let pending=effect{fail Problem{code:1}} return 0 }'
+    const first = yield* Formatter.format(parse('memory://effect-expression-format.silk', source))
+    const text = formattedText(first)
+    assert.include(text, 'let pending = effect {')
+    assert.include(text, 'fail Problem {code: 1}')
+    const second = yield* Formatter.format(parse('memory://effect-expression-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -414,12 +484,16 @@ fn inspect(event: Token | End) -> I32 {
 fn scan(values: &[I32], output: &mut [I32]) -> I32 {
   return helper(values.length, output[0])
 }
-flow fn delayed(problem: Token) -> I32 ! Token {
+effect fn delayed(problem: Token) -> I32 ! Token {
   if false { fail move problem }
   return 1
 }
+effect fn timed() -> I32 ? &End@Clock { return 1 }
 fn execute(problem: Token) -> I32 {
+  let local = effect { return 2 }
+  drop local
   let pending = delayed(move problem)
+  let timed = timed() |> End.provide(&local, @Clock)
   return run pending
 }
 fn borrow(values: [I32; 2], output: [I32; 2]) -> I32 {

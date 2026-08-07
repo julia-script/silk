@@ -19,8 +19,16 @@ const snapshotOf = (preset: (typeof presets)[number], target?: string): Analysis
 
 const acceptancePreset = presets.find((preset) => preset.label === 'Algorithmic coverage fold')
 const exclusiveSlicePreset = presets.find((preset) => preset.label === 'Exclusive runtime slice')
-const typedFlowPreset = presets.find((preset) => preset.label === 'Typed flow recovery')
-const residualFlowPreset = presets.find((preset) => preset.label === 'Unhandled flow residual')
+const typedEffectPreset = presets.find((preset) => preset.label === 'Typed Effect recovery')
+const residualEffectPreset = presets.find((preset) => preset.label === 'Unhandled Effect residual')
+const eagerEffectPreset = presets.find((preset) => preset.label === 'Eager setup, lazy Effect body')
+const captureEffectPreset = presets.find((preset) => preset.label === 'Reusable exclusive capture')
+const retryEffectPreset = presets.find((preset) => preset.label === 'Retry with persistent capture')
+const providerEffectPreset = presets.find((preset) => preset.label === 'Existing provider capture')
+const layoutPreset = presets.find((preset) => preset.label === 'Validated target Layout')
+const allocationPreset = presets.find(
+  (preset) => preset.label === 'Self-contained Allocation contract',
+)
 
 const acceptanceContext = (
   preset: (typeof presets)[number],
@@ -93,7 +101,8 @@ describe('preset catalog', () => {
         'control',
         'discovery',
         'backend',
-        'flows',
+        'effects',
+        'allocation',
       ]),
     )
   })
@@ -149,31 +158,66 @@ describe('preset catalog', () => {
     expect(viewById('backend')).toBeDefined()
   })
 
-  it('exposes typed flow recovery through the unified inspector', () => {
-    expect(typedFlowPreset).toBeDefined()
-    if (typedFlowPreset === undefined) return
-    const native = snapshotOf(typedFlowPreset, 'aarch64-apple-darwin')
-    const wasm = snapshotOf(typedFlowPreset, 'wasm32-unknown-unknown')
+  it('exposes typed Effect recovery through the unified inspector', () => {
+    expect(typedEffectPreset).toBeDefined()
+    if (typedEffectPreset === undefined) return
+    const native = snapshotOf(typedEffectPreset, 'aarch64-apple-darwin')
+    const wasm = snapshotOf(typedEffectPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
-    expect(Analysis.hirOf(native, typedFlowPreset.root)).toBeDefined()
+    expect(Analysis.hirOf(native, typedEffectPreset.root)).toBeDefined()
     expect(Analysis.layoutOf(native)._tag).toBe('Available')
     expect(Analysis.mirOf(wasm)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
     expect(evaluation._tag).toBe('Completed')
     if (evaluation._tag === 'Completed') {
       expect(evaluation.result.value).toBe(42)
-      expect(evaluation.trace.some((event) => event._tag === 'FlowFailure')).toBe(true)
-      expect(evaluation.trace.some((event) => event._tag === 'FlowSuccess')).toBe(true)
+      expect(evaluation.trace.some((event) => event._tag === 'EffectFailure')).toBe(true)
+      expect(evaluation.trace.some((event) => event._tag === 'EffectSuccess')).toBe(true)
     }
     for (const id of ['hir', 'ownership', 'layout', 'mir', 'evaluation', 'backend']) {
       expect(viewById(id)?.id, id).toBe(id)
     }
   })
 
-  it('keeps an unhandled flow residual visibly stopped in the unified inspector', () => {
-    expect(residualFlowPreset).toBeDefined()
-    if (residualFlowPreset === undefined) return
-    const snapshot = snapshotOf(residualFlowPreset, 'aarch64-apple-darwin')
+  it('keeps construction, reusable capture, and retry examples executable', () => {
+    for (const [preset, expected] of [
+      [eagerEffectPreset, 42],
+      [captureEffectPreset, 12],
+      [retryEffectPreset, 3],
+      [providerEffectPreset, 42],
+    ] as const) {
+      expect(preset).toBeDefined()
+      if (preset === undefined) continue
+      const snapshot = snapshotOf(preset, 'aarch64-apple-darwin')
+      expect(Analysis.diagnostics(snapshot), preset.label).toEqual([])
+      const evaluation = Analysis.evaluate(snapshot)
+      expect(evaluation._tag, preset.label).toBe('Completed')
+      if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(expected)
+    }
+  })
+
+  it('shows validated Layout and affine Allocation facts in the unified inspector', () => {
+    expect(layoutPreset).toBeDefined()
+    expect(allocationPreset).toBeDefined()
+    if (layoutPreset === undefined || allocationPreset === undefined) return
+
+    const layout = snapshotOf(layoutPreset, 'aarch64-apple-darwin')
+    expect(Analysis.diagnostics(layout)).toEqual([])
+    const evaluation = Analysis.evaluate(layout)
+    expect(evaluation._tag).toBe('Completed')
+    if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+
+    const allocation = snapshotOf(allocationPreset, 'wasm32-unknown-unknown')
+    expect(Analysis.diagnostics(allocation)).toEqual([])
+    expect(Analysis.hirOf(allocation, allocationPreset.root)).toBeDefined()
+    expect(Analysis.ownershipOf(allocation, allocationPreset.root)).toBeDefined()
+    expect(Analysis.layoutOf(allocation)._tag).toBe('Available')
+  })
+
+  it('keeps an unhandled Effect residual visibly stopped in the unified inspector', () => {
+    expect(residualEffectPreset).toBeDefined()
+    if (residualEffectPreset === undefined) return
+    const snapshot = snapshotOf(residualEffectPreset, 'aarch64-apple-darwin')
 
     expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toContain(
       'SEM0066',

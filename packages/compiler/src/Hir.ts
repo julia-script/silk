@@ -14,10 +14,11 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 /** A normalized function contract: ordered parameter types and the result type. */
 export interface Contract {
   readonly _tag: 'Contract'
-  readonly functionKind?: 'Ordinary' | 'Flow'
+  readonly functionKind?: 'Ordinary' | 'Effect'
   readonly parameters: ReadonlyArray<DeclarationIndex.SemanticType>
   readonly result: DeclarationIndex.SemanticType
   readonly failures?: ReadonlyArray<Type.Nominal>
+  readonly requirements?: ReadonlyArray<Type.Requirement>
 }
 
 /** The normalized or explicitly unavailable contract of one declaration. */
@@ -47,6 +48,13 @@ export interface BorrowId {
   readonly ordinal: number
 }
 
+/** Hidden nominal identity for one source `effect {}` construction site. */
+export interface EffectSiteId {
+  readonly _tag: 'EffectSiteId'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** A canonical lexical loop identity local to one function. */
 export interface LoopId {
   readonly _tag: 'HirLoop'
@@ -69,6 +77,10 @@ export type BuiltinOperation =
   | 'GreaterThan'
   | 'GreaterOrEqual'
   | 'Not'
+  | 'LayoutMake'
+  | 'LayoutRepeat'
+  | 'SystemAllocatorMake'
+  | 'AllocatorAllocate'
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }
@@ -289,12 +301,25 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'FlowConstruct'
+      readonly _tag: 'EffectConstruct'
       readonly target: DeclarationIndex.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
-      readonly type: Type.Flow
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EffectBlock'
+      readonly site: EffectSiteId
+      readonly statements: ReadonlyArray<Statement>
+      readonly captures: ReadonlyArray<{
+        readonly binding?: BindingId
+        readonly parameter?: DeclarationIndex.ParameterId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+        readonly span: SourceSpan.SourceSpan
+      }>
+      readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -304,12 +329,42 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'FlowCatch'
+      readonly _tag: 'EffectCatch'
       readonly protected: Expression
       readonly handled: Type.Nominal
       readonly handler: DeclarationIndex.CanonicalId
       readonly handlerFailures: ReadonlyArray<Type.Nominal>
-      readonly type: Type.Flow
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EffectRetry'
+      readonly protected: Expression
+      readonly retries: Expression
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EffectProvide'
+      readonly protected: Expression
+      readonly provider: {
+        readonly binding?: BindingId
+        readonly parameter?: DeclarationIndex.ParameterId
+        readonly capability: Type.Nominal
+        readonly role: string
+        readonly access: 'Shared' | 'Exclusive' | 'Take'
+        readonly span: SourceSpan.SourceSpan
+      }
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EffectProvideWith'
+      readonly protected: Expression
+      readonly acquisition: Expression
+      readonly capability: Type.Nominal
+      readonly role: string
+      readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -387,6 +442,13 @@ export type Statement =
       readonly _tag: 'Fail'
       readonly expression: Expression
       readonly failure: Type.Nominal
+      readonly transfer: 'Copy' | 'Move'
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Drop'
+      readonly expression: Expression
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
     }
@@ -427,6 +489,7 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
     case 'Return':
       return [statement.expression]
     case 'Fail':
+    case 'Drop':
       return [statement.expression]
     case 'Break':
     case 'Continue':
@@ -460,13 +523,21 @@ const expressionChildren = (expression: Expression): ReadonlyArray<Expression> =
       case 'ArrayConstruct':
         return expression.elements
       case 'Call':
-      case 'FlowConstruct':
+      case 'EffectConstruct':
       case 'BuiltinCall':
         return expression.arguments
+      case 'EffectBlock':
+        return expression.statements.flatMap(statementExpressions)
       case 'Run':
         return [expression.subject]
-      case 'FlowCatch':
+      case 'EffectCatch':
         return [expression.protected]
+      case 'EffectRetry':
+        return [expression.protected, expression.retries]
+      case 'EffectProvide':
+        return [expression.protected]
+      case 'EffectProvideWith':
+        return [expression.protected, expression.acquisition]
       case 'Match':
         return [
           expression.scrutinee,
@@ -508,13 +579,19 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'ArrayConstruct':
         return expression.elements.some(walk)
       case 'Call':
-      case 'FlowConstruct':
+      case 'EffectConstruct':
       case 'BuiltinCall':
         return expression.arguments.some(walk)
       case 'Run':
         return walk(expression.subject)
-      case 'FlowCatch':
+      case 'EffectCatch':
         return walk(expression.protected)
+      case 'EffectRetry':
+        return walk(expression.protected) || walk(expression.retries)
+      case 'EffectProvide':
+        return walk(expression.protected)
+      case 'EffectProvideWith':
+        return walk(expression.protected) || walk(expression.acquisition)
       case 'Match':
         return (
           walk(expression.scrutinee) ||
@@ -565,7 +642,7 @@ export const firstUnavailable = (
         return undefined
       }
       case 'Call':
-      case 'FlowConstruct':
+      case 'EffectConstruct':
       case 'BuiltinCall': {
         for (const argument of expression.arguments) {
           const found = walk(argument)
@@ -575,8 +652,14 @@ export const firstUnavailable = (
       }
       case 'Run':
         return walk(expression.subject)
-      case 'FlowCatch':
+      case 'EffectCatch':
         return walk(expression.protected)
+      case 'EffectRetry':
+        return walk(expression.protected) ?? walk(expression.retries)
+      case 'EffectProvide':
+        return walk(expression.protected)
+      case 'EffectProvideWith':
+        return walk(expression.protected) ?? walk(expression.acquisition)
       case 'Match': {
         const scrutinee = walk(expression.scrutinee)
         if (scrutinee !== undefined) return scrutinee
@@ -801,10 +884,11 @@ export const contractOf = (declaration: DeclarationIndex.DeclarationFact): Contr
   }
   return Object.freeze({
     _tag: 'Contract',
-    ...(declaration.functionKind === 'Flow'
+    ...(declaration.functionKind === 'Effect'
       ? {
-          functionKind: 'Flow' as const,
+          functionKind: 'Effect' as const,
           failures: declaration.failureRow.failures,
+          requirements: declaration.requirementRow.requirements,
         }
       : {}),
     parameters: Object.freeze(parameters),
@@ -853,10 +937,32 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
-    case 'FlowCatch':
+    case 'EffectCatch':
       return [
-        `${indent}flow-catch ${Type.encode(expression.handled)} handler=${expression.handler.module}.${expression.handler.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-catch ${Type.encode(expression.handled)} handler=${expression.handler.module}.${expression.handler.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
+      ].join('\n')
+    case 'EffectRetry':
+      return [
+        `${indent}effect-retry : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.protected, depth + 1),
+        encodeExpression(expression.retries, depth + 1),
+      ].join('\n')
+    case 'EffectProvide':
+      return [
+        `${indent}effect-provide ${Type.encode(expression.provider.capability)}@${expression.provider.role} ${expression.provider.access.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.protected, depth + 1),
+      ].join('\n')
+    case 'EffectProvideWith':
+      return [
+        `${indent}effect-provide-with ${Type.encode(expression.capability)}@${expression.role} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.protected, depth + 1),
+        encodeExpression(expression.acquisition, depth + 1),
+      ].join('\n')
+    case 'EffectBlock':
+      return [
+        `${indent}effect-block site=fn${expression.site.function.ordinal}@${expression.site.span.start} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${capture.binding === undefined ? `p${capture.parameter?.ordinal ?? '?'}` : `b${capture.binding.ordinal}`}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        ...expression.statements.map((statement) => encodeStatement(statement, depth + 1)),
       ].join('\n')
     case 'UnionConvert':
       return [
@@ -929,9 +1035,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'Call':
-    case 'FlowConstruct':
+    case 'EffectConstruct':
       return [
-        `${indent}${expression._tag === 'FlowConstruct' ? 'flow-' : ''}call ${expression.target.module}.${expression.target.name}${
+        `${indent}${expression._tag === 'EffectConstruct' ? 'effect-' : ''}call ${expression.target.module}.${expression.target.name}${
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encode).join(', ')}>`
@@ -1007,6 +1113,11 @@ const encodeStatement = (statement: Statement, depth: number): string => {
     case 'Fail':
       return [
         `${indent}fail ${Type.encode(statement.failure)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        encodeExpression(statement.expression, depth + 1),
+      ].join('\n')
+    case 'Drop':
+      return [
+        `${indent}drop r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
   }

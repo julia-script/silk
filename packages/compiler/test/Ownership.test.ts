@@ -4,6 +4,7 @@ import * as Lexer from '../src/Lexer.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as Type from '../src/Type.js'
 import { elaborate } from './support/elaborate.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -101,6 +102,23 @@ it('ranges let bindings from their statement to the end of the body', () => {
     ],
   )
   assert.strictEqual(facts.diagnostics.length, 0)
+})
+
+it('consumes an owner at explicit drop and rejects later use', () => {
+  const facts = check(
+    'ownership://explicit-drop.silk',
+    `struct Token { value: I32 }
+fn inspect(token: Token) -> I32 { return token.value }
+fn main() -> I32 {
+  let token = Token { value: 1 }
+  drop token
+  return inspect(token)
+}`,
+  )
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
 })
 
 it('releases live let bindings in reverse binding order at the return exit', () => {
@@ -217,9 +235,9 @@ pub fn main() -> I32 { let value = 1 if I32.equals(1, 1) { return identity(move 
 
 it('consumes a take recipe on its first run and rejects a repeated run', () => {
   const facts = check(
-    'ownership://take-flow.silk',
+    'ownership://take-effect.silk',
     `struct Payload { value: I32 }
-flow fn inspect(payload: Payload) -> I32 { return payload.value }
+effect fn inspect(payload: Payload) -> I32 { return payload.value }
 pub fn main() -> I32 {
   let payload = Payload { value: 21 }
   let recipe = inspect(move payload)
@@ -235,10 +253,29 @@ pub fn main() -> I32 {
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
 })
 
+it('derives take-once execution from an effect-block moved capture', () => {
+  const facts = check(
+    'ownership://take-effect-block.silk',
+    `struct Payload { value: I32 }
+pub fn main(payload: Payload) -> I32 {
+  let pending = effect { return move payload }
+  let first = run pending
+  let second = run pending
+  return first.value + second.value
+}`,
+  )
+
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+  assert.strictEqual(facts.functions.at(0)?.verdict._tag, 'Violation')
+})
+
 it('allows a shared copy-only recipe to run repeatedly', () => {
   const facts = check(
-    'ownership://shared-flow.silk',
-    `flow fn inspect(value: I32) -> I32 { return value }
+    'ownership://shared-effect.silk',
+    `effect fn inspect(value: I32) -> I32 { return value }
 pub fn main() -> I32 {
   let recipe = inspect(21)
   return run recipe + run recipe
@@ -249,10 +286,10 @@ pub fn main() -> I32 {
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
 })
 
-it('keeps a borrowed flow capture loan live until its last run', () => {
+it('keeps a borrowed effect capture loan live until its last run', () => {
   const facts = check(
-    'ownership://borrowed-flow.silk',
-    `flow fn inspect(values: &[I32]) -> I32 { return values[0] }
+    'ownership://borrowed-effect.silk',
+    `effect fn inspect(values: &[I32]) -> I32 { return values[0] }
 pub fn main() -> I32 {
   let mut values = [1]
   let recipe = inspect(&values)
@@ -272,10 +309,50 @@ pub fn main() -> I32 {
   assert.ok((loan?.endSpan.start ?? 0) > (loan?.startSpan.start ?? 0))
 })
 
+it('keeps an existing borrowed provider live until its last run', () => {
+  const facts = check(
+    'ownership://borrowed-provider.silk',
+    `struct Clock { tick: I32 }
+effect fn read() -> I32 ? &Clock { return 42 }
+pub fn main() -> I32 {
+  let mut clock = Clock { tick: 0 }
+  let recipe = read() |> Clock.provide(&clock)
+  clock.tick = 1
+  return run recipe
+}`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0011'],
+  )
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
+})
+
+it('moves an owned provider into a take-once Effect wrapper', () => {
+  const facts = check(
+    'ownership://moved-provider.silk',
+    `struct Clock { tick: I32 }
+effect fn read() -> I32 ? &mut Clock { return 42 }
+pub fn main() -> I32 {
+  let clock = Clock { tick: 0 }
+  let recipe = read() |> Clock.provide(move clock)
+  let first = run recipe
+  return first + run recipe
+}`,
+  )
+
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
+})
+
 it('allows an owner to change after the borrowed recipe has finished its last run', () => {
   const facts = check(
-    'ownership://finished-borrowed-flow.silk',
-    `flow fn inspect(values: &[I32]) -> I32 { return values[0] }
+    'ownership://finished-borrowed-effect.silk',
+    `effect fn inspect(values: &[I32]) -> I32 { return values[0] }
 pub fn main() -> I32 {
   let mut values = [1]
   let recipe = inspect(&values)
@@ -287,4 +364,42 @@ pub fn main() -> I32 {
 
   assert.deepEqual(facts.diagnostics, [])
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
+})
+
+it('assigns Allocation one private active reclaim ticket', () => {
+  const facts = check(
+    'ownership://allocation-ticket.silk',
+    `fn consume(allocation: Allocation) -> I32 { return 42 }
+pub fn main() -> I32 { return 0 }`,
+  )
+  const release = facts.functions.at(0)?.exits.at(0)?.releases.at(0)
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(release?.binding.name, 'allocation')
+  assert.strictEqual(release?.binding.category._tag, 'MoveOnly')
+  assert.deepEqual(release?.cleanup, {
+    _tag: 'AllocationCleanup',
+    type: Type.allocation,
+    ticket: 'ActiveReclaimTicket',
+  })
+})
+
+it('ends exclusive allocator access when allocation returns, not when Allocation drops', () => {
+  const facts = check(
+    'ownership://allocation-provider-loan.silk',
+    `effect fn allocateTwice(firstLayout: Layout, secondLayout: Layout, provider: Allocator) -> I32 ! OutOfMemory {
+  let mut allocator = move provider
+  let firstRecipe = Allocator.allocate(move firstLayout) |> Allocator.provide(&mut allocator)
+  let first = run firstRecipe
+  let secondRecipe = Allocator.allocate(move secondLayout) |> Allocator.provide(&mut allocator)
+  let second = run secondRecipe
+  drop second
+  drop first
+  return 42
+}
+pub fn main() -> I32 { return 0 }`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(0)?.verdict._tag, 'Satisfied')
 })

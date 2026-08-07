@@ -7,7 +7,7 @@ Blocked by: 01, 02, 03, 04
 ## Question
 
 Which runtime primitives and standard-library actors are strictly required to implement and run the
-single-threaded bootstrap compiler—including allocation, scopes, strings, collections, source bytes,
+single-threaded bootstrap compiler—including allocation, cleanup, strings, collections, source bytes,
 files, diagnostics, and process boundaries—and which capabilities must remain outside the milestone?
 
 ## Answer
@@ -20,21 +20,22 @@ its syntax/HIR/MIR graphs, emit path-backed LLVM artifacts, run pinned Clang pro
 diagnostics, report phase timing and allocator memory, and close a native entry without Node.js or
 TypeScript. The surface below is sufficient for that program.
 
-Dynamic allocation uses a copyable nominal `Layout` containing a byte size and a validated power-of-
-two alignment. Layout construction and repeated-element multiplication return ordinary validation
-data distinguishing invalid alignment from representational overflow. Zero-sized layouts and
-representable over-aligned layouts are valid. An allocator receives only a valid layout plus a named
-destination scope, and its sole fallible primitive creates an owned allocation. Bootstrap has no
-primitive resize, zero-fill, user-callable `free`, or unchecked size-and-alignment pair. Collection
-growth allocates a new block, moves or copies initialized elements, and drops the old block.
+Dynamic allocation uses a copyable nominal `Layout` containing a target-sized byte count and a
+validated power-of-two alignment. Layout construction and repeated-element multiplication return
+ordinary validation data distinguishing invalid alignment from representational overflow.
+Zero-sized and representable over-aligned layouts are valid. An allocator receives only a valid
+layout, and its sole fallible primitive creates an affine self-contained `Allocation`. Bootstrap has
+no primitive resize, implicit zero-fill, user-callable `free`, or unchecked size-and-alignment pair.
+Collection growth allocates a new block, moves or copies initialized elements, and drops the old
+owner.
 
-Allocation exhaustion is the typed `OutOfMemory` failure rather than a trap. It propagates through
-ordinary failure rows independently of the allocator requirement; automatic release after failure
-remains infallible. Each allocation carries a private unforgeable reclaim ticket containing enough
-information to invoke the originating allocator's release behavior. The allocator provider must
-outlive the allocation's destination scope, so cleanup never consults whichever allocator is
-currently provided. The public container type does not expose or own an allocator, and a static
-optimization may erase a reclaim ticket when its origin is known.
+Allocation exhaustion is the typed allocation-free `OutOfMemory` failure rather than a trap. It
+propagates through ordinary failure rows independently of the allocator requirement; automatic
+release after failure remains infallible. Each `Allocation` carries a private unforgeable reclaim
+ticket containing everything needed to invoke the originating release behavior after the allocator
+call and provider borrow have ended. Cleanup never consults whichever allocator is currently
+provided. Public containers do not expose or retain an allocator, and static optimization may erase
+a reclaim ticket when its origin is known.
 
 As revised in issue 03, every service requirement is keyed by a nominal capability and nominal role
 pair. The notation `Allocator@Durable` and `Allocator@Scratch` here is semantic notation only; issue
@@ -44,25 +45,26 @@ implementation that happens to be visible. This mechanism applies uniformly to e
 only allocators. It adds distinct statically selected slots rather than runtime names, keys, or
 registries.
 
-Bootstrap ships two allocator implementations. `SystemAllocator` is backed by the platform shim and
-may physically reclaim storage when an owner ends. `ArenaAllocator` obtains chunks from an outer
-allocator and retains physical storage until a caller-provided named scope closes; it never creates
-or encapsulates its own scope. A deterministic quota/failing allocator is a test fixture rather than
-public standard-library surface. Pools, shared ownership, garbage collection, and specialized
-allocation policies are deferred.
+Bootstrap ships `SystemAllocator`, backed by the platform shim, as the first implementation of this
+contract. A deterministic quota/failing allocator is a test fixture rather than public
+standard-library surface. `ArenaAllocator` is deferred with every allocator whose returned storage
+cannot remain valid independently of the provider. When added, it must be ordinary Silk
+standard-library code implementing a general allocator API or exposed through a general
+non-escaping operation; the compiler must never recognize arena allocation specially. Pools,
+shared ownership, garbage collection, and specialized allocation policies are also deferred.
 
-Every allocator exposes an infallible copyable `AllocationMetrics` snapshot containing current live
+`SystemAllocator` exposes an infallible copyable `AllocationMetrics` snapshot containing current live
 logical bytes, current reserved physical bytes, peak reserved bytes, cumulative requested bytes,
-and allocation count. Logical liveness falls when an owner ends even if an arena retains the
-physical bytes. Compiler phases take snapshots directly; the external acceptance harness measures
-process peak RSS.
+and allocation count. Compiler phases take snapshots directly; the external acceptance harness
+measures process peak RSS. Metrics are an actor operation of implementations that support them, not
+a requirement of the minimal allocator interface.
 
-Named scopes privately maintain last-acquired, first-released cleanup records. Registration is
-compiler/runtime machinery, not a safe user API. An automatic finalizer is infallible,
-non-allocating, independent of ambient services, and skipped after its resource has already been
-consumed and cleaned. Cleanup that matters to the caller is an explicit fallible consuming
-operation followed by the infallible automatic fallback. Bootstrap therefore needs no owned
-capturing closure facility merely to implement finalization.
+Affine owners and synchronous `Drop` provide cleanup. A restricted drop hook is infallible,
+non-allocating, requirement-free, and runs before automatic field cleanup. It lets a Silk-written
+container destroy its initialized elements before releasing raw storage and lets a safe wrapper own
+an external handle immediately. Cleanup that matters to the caller is an explicit fallible consuming
+operation followed by the infallible automatic fallback. Bootstrap has no named scope, dynamic
+finalizer registry, `defer`, `errdefer`, or asynchronous cleanup hook.
 
 The core owned indirection and sequence surface consists of the already settled `Box<T>`, intrinsic
 `[T; N]`, lexical `Slice<T>`, and one dynamic `Vector<T>`. `Vector` owns growable contiguous
@@ -83,8 +85,8 @@ separate string-builder actor is unnecessary because a mutable owned `String` al
 reuses capacity.
 
 `StaticString` and `StaticBytes` are copyable immutable pointer-and-length values backed by compiler-
-emitted read-only program data. Static strings are validated UTF-8. Neither value allocates, owns
-cleanup, nor requires a named scope; each may produce a lexical view or be explicitly copied into
+emitted read-only program data. Static strings are validated UTF-8. Neither value allocates nor owns
+cleanup; each may produce a lexical view or be explicitly copied into
 its growable owned counterpart. Only literals and compile-time constants create them. There are no
 general static references, mutable globals, lazy initialization, or user-controlled linker
 sections.
@@ -138,15 +140,16 @@ general compile-time execution are deferred.
 Host access is split into four nominal services rather than one platform capability:
 
 - `FileSystem` performs explicit path-based whole-file reads and writes, path inspection and
-  resolution, directory creation, unique scoped temporary-directory creation, rename, and removal.
+  resolution, directory creation, unique owned temporary-directory creation, rename, and removal.
   It exposes no handles, seeking, streaming, mapping, buffering, locking, directory-discovery API,
   implicit current directory, or environment lookup. `PathResolution` reports exact absolute host
   spelling, final entry kind, and whether any traversed component was a symlink. The source loader,
   not the service, applies the policy that a requested module path is normalized beneath its source
   root, is a regular file, crosses no symlink, and matches physical casing byte-for-byte.
-- `TemporaryDirectory` is an owned resource in a caller-provided scope. Deterministically named
-  bitcode and object children live beneath it; automatic cleanup recursively removes it. Saving an
-  intermediate explicitly copies or renames it to a durable path before scope closure. There is no
+- `TemporaryDirectory` is an affine owned resource with an infallible best-effort `Drop` fallback.
+  Deterministically named bitcode and object children live beneath it. An explicit consuming removal
+  operation exposes cleanup failure when it matters. Saving an intermediate copies or renames it to
+  a durable path before the owner ends. There is no
   standalone temporary-path or temporary-file API.
 - `ChildProcess` synchronously executes one explicit executable path with ordered `OsString`
   arguments, an optional explicit working directory, an exact environment map, and closed standard
@@ -197,8 +200,8 @@ runtime object. Private symbols are compiler-versioned; compiler, standard libra
 from one toolchain bundle. There is no stable runtime ABI, dynamic shim discovery, compatibility
 negotiation, user-facing FFI, LLVM API, or independently replaceable system runtime.
 
-Finally, the native entry adapter creates the root scope and approved provider values, constructs
-`HostInput`, specializes the compiler-driver flow with the allocator roles and four host services,
+Finally, the native entry adapter creates the approved provider owners, constructs `HostInput`,
+specializes the compiler-driver effect with the allocator roles and four host services,
 and runs it. It closes three ordinary outcome classes: successful artifact production, source
 rejection with diagnostics, and operational failure. It deterministically renders the latter two,
 writes them to stderr, cleans up providers, and returns a class-specific platform status. If
@@ -207,14 +210,16 @@ broken stderr pipe returns the operational-failure status. Exact numeric statuse
 and acceptance assertions belong to issue 09. Traps remain abnormal termination without a cleanup
 guarantee.
 
-The actor inventory is therefore intentionally finite: layouts and allocation metrics; system and
-arena allocator implementations; `Box`, arrays, slices, vectors, bytes, strings and their static
+The actor inventory is therefore intentionally finite: layouts and allocation metrics; the system
+allocator implementation; `Allocation`, typed raw buffers and uninitialized slots; `Box`, arrays,
+slices, vectors, bytes, strings and their static
 forms, OS strings, paths, hash maps and sets, hash keys and seeds; scalar conversion operations;
 host input, instants and durations; the four host capabilities and their owned results/errors;
 temporary directories; and pure diagnostic rendering. Concurrency, atomics, async scheduling,
 networking, serialization, observability, testing frameworks, general FFI, directory discovery,
 open or streaming files, random entropy, wall-clock time, shared ownership, stored borrows, public
-finalizers, general iterators and formatting, richer allocators, and specialized collections remain
+finalizer registries, arena-backed escaping values, general iterators and formatting, richer
+allocators, and specialized collections remain
 outside the bootstrap milestone.
 
 All service-role and operation spelling above is illustrative. Issue 08 owns concrete syntax; issue

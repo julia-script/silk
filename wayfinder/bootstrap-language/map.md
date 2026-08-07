@@ -22,16 +22,17 @@ native self-hosting compiler—clear enough to hand each implementation stage to
 ## Decisions
 
 - [Choose the ownership, lifetime, and scoped-allocation model](issues/01-ownership-lifetimes-and-scoped-allocation.md)
-  — Use affine whole-value ownership, lexical shared/exclusive borrows, and named hierarchical scope
-  requirements separate from allocators, with automatic typed-infallible LIFO cleanup.
+  — Use affine whole-value ownership, lexical shared/exclusive borrows, self-contained allocation
+  owners, and synchronous infallible Drop, without named lifetime scopes or provider-dependent
+  results in the bootstrap milestone.
 - [Define the bootstrap type system and value model](issues/02-bootstrap-type-system-and-values.md)
   — Use nominal structs, normalized structural unions, finite monomorphized generics, actor-module
   functions with type-owned conformance witnesses, lexical slices, typed unsafe pointers, and
   mode-aware exhaustive matching without general subtyping, methods, overloads, or truthiness.
 - [Define function contracts, services, and failure propagation](issues/03-function-contracts-services-and-failures.md)
-  — Use direct pure functions plus lazy typed flow functions, owned abortive typed failures,
+  — Use eager ordinary functions plus lazy typed Effect expressions and functions, owned abortive typed failures,
   selective row-subtracting handlers, access-and-role-qualified nominal service requirements,
-  flow specialization with captured or per-run providers, contract-row-polymorphic callbacks,
+  Effect specialization with captured or per-run providers, contract-row-polymorphic callbacks,
   witness-table service dispatch, and explicit tagged failure returns with a closed native entry.
 - [Define modules, visibility, imports, and name resolution](issues/04-modules-visibility-and-name-resolution.md)
   — Use inert one-file modules with path-derived identity, explicit namespace or selective imports,
@@ -46,15 +47,16 @@ native self-hosting compiler—clear enough to hand each implementation stage to
   linker services, direct LLVM bitcode plus external Clang, native line debugging, and measurable
   determinism and performance gates.
 - [Define the minimum runtime and standard library](issues/07-minimum-runtime-and-standard-library.md)
-  — Use role-qualified typed allocation with system and arena providers, nominal bytes/text/path
+  — Use role-qualified self-contained allocation with a system provider, nominal bytes/text/path
   values, vectors and deterministic hash collections, a closed constant subset, four narrow host
   services over a private caller-buffer C shim, pure diagnostic rendering, and a closed native entry
-  while deferring concurrency, networking, general FFI, streaming I/O, and broader library families.
+  while deferring arenas with escaping outputs, concurrency, networking, general FFI, streaming I/O,
+  and broader library families.
 - [Prototype the bootstrap language syntax](issues/08-prototype-bootstrap-syntax.md)
-  — Use explicit `flow fn`, `run`, and `return`; compact `!` failure and `?` requirement rows;
-  qualified data-first actor operations with built-in pipe insertion; reified flow specialization,
-  flattening, per-run providers and scopes; capture-derived reuse; strict non-escape; and guarded
-  recursive flows that lower without universal interpreter overhead.
+  — Use `effect {}`, `effect fn`, `run`, and explicit `return`; compact `!` failure and `?`
+  requirement rows; qualified data-first actor operations with built-in pipe insertion; Effect
+  specialization, flattening, and per-run providers; capture-derived reuse; strict non-escape; and
+  guarded recursive effects that lower without universal interpreter overhead.
 - [Define the staged self-hosting build and acceptance procedure](issues/09-self-hosting-build-and-acceptance.md)
   — Use a content-addressed stage-0-to-stage-2 build with a native fixed-point rebuild, hermetic
   recipes and explicit trust boundaries, traceable cross-stage conformance, byte-identical release
@@ -74,5 +76,5 @@ rather than reopening them implicitly.
 - Package registries, dependency solving, a production build system, and a full language server.
 - Implementing a direct WebAssembly backend; the bootstrap architecture should merely avoid an
   unnecessary LLVM lock-in where doing so is cheap and clear.
-- Built-in shared ownership, stored borrows, and aggregates that own private scopes; the bootstrap
-  compiler should use caller-provided scopes, owned collections, and stable identifiers instead.
+- Built-in shared ownership, stored borrows, named scopes, and owned-region aggregates; the bootstrap
+  compiler should use affine owned collections and stable identifiers instead.

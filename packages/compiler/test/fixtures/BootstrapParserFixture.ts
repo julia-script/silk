@@ -72,8 +72,8 @@ export const acceptedShape: ExpectedNodeShape = Object.freeze({
 
 export const missingNameSource = 'pub fn () -> I32 { return 42 }'
 export const missingRightBraceSource = 'pub fn main() -> I32 { return 42'
-export const unexpectedPunctuationSource = 'pub fn @ main() -> I32 { return 42 }'
-export const whollyUnrelatedSource = '@@@'
+export const unexpectedPunctuationSource = 'pub fn ^ main() -> I32 { return 42 }'
+export const whollyUnrelatedSource = '^^^'
 export const twoFunctionSource = `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return 0 }`
 export const threeFunctionSource = `pub fn one() -> I32 { return 1 }
@@ -82,7 +82,7 @@ pub fn three() -> I32 { return 3 }`
 export const missingFirstRightBraceSource = `pub fn answer() -> I32 { return 42
 pub fn main() -> I32 { return 0 }`
 export const interFunctionPunctuationSource = `pub fn answer() -> I32 { return 42 }
-@@
+^^
 pub fn main() -> I32 { return 0 }`
 export const trailingTriviaSource = `pub fn main() -> I32 { return 42 }
 // trailing source trivia
@@ -104,7 +104,7 @@ export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 {
 export const missingParameterTypeSource = 'pub fn identity(value:) -> I32 { return value }'
 export const missingParameterCommaSource =
   'pub fn choose(left: I32 right: I32) -> I32 { return left }'
-export const malformedArgumentSource = 'pub fn main(value: I32) -> I32 { return answer(@, value) }'
+export const malformedArgumentSource = 'pub fn main(value: I32) -> I32 { return answer(:, value) }'
 export const damagedCallBeforeNextFunctionSource = `pub fn main() -> I32 { return answer(
 pub fn after() -> I32 { return 0 }`
 export const nestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
@@ -114,7 +114,7 @@ pub fn choose(left: I32, right: I32) -> I32 { return left }
 pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
 export const damagedNestedSiblingSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn choose(left: I32, right: I32) -> I32 { return left }
-pub fn main() -> I32 { return choose(identity(@), identity(2)) }`
+pub fn main() -> I32 { return choose(identity(:), identity(2)) }`
 export const missingNestedRightParenthesisSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42) }`
 export const damagedNestedBeforeNextFunctionSource = `pub fn identity(value: I32) -> I32 { return value }

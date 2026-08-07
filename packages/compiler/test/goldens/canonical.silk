@@ -46,7 +46,7 @@ fn scan(values: &[I32], output: &mut [I32]) -> I32 {
   return helper(values.length, output[0])
 }
 
-flow fn delayed(problem: Token) -> I32
+effect fn delayed(problem: Token) -> I32
 ! Token {
   if false {
     fail move problem
@@ -54,8 +54,18 @@ flow fn delayed(problem: Token) -> I32
   return 1
 }
 
+effect fn timed() -> I32
+? &End@Clock {
+  return 1
+}
+
 fn execute(problem: Token) -> I32 {
+  let local = effect {
+    return 2
+  }
+  drop local
   let pending = delayed(move problem)
+  let timed = timed() |> End.provide(&local, @Clock)
   return run pending
 }
 

@@ -7,33 +7,33 @@ import * as Mir from '../../dist/Mir.js'
 import * as Ownership from '../../dist/Ownership.js'
 
 const source = `struct Problem { code: I32 }
-flow fn risky<T>(value: T, selector: I32) -> T ! Problem {
+effect fn risky<T>(value: T, selector: I32) -> T ! Problem {
   if selector == 0 { fail move Problem { code: 41 } }
   return move value
 }
-flow fn relay(value: I32) -> I32 ! Problem {
+effect fn relay(value: I32) -> I32 ! Problem {
   let pending = risky<I32>(value, value)
   return run pending
 }
-flow fn recover(problem: Problem) -> I32 { return problem.code |> I32.add(1) }
+effect fn recover(problem: Problem) -> I32 { return problem.code |> I32.add(1) }
 pub fn main() -> I32 {
-  let recipe = relay(0) |> Flow.catch<Problem>(recover)
+  let recipe = relay(0) |> Effect.catch<Problem>(recover)
   return run recipe
 }`
 const bytes = new TextEncoder().encode(source)
 const snapshot = (name, target) => Effect.runPromise(Analysis.ofSource(name, bytes, target))
-const native = await snapshot('fixture/flow-native-determinism', 'aarch64-apple-darwin')
-const wasm = await snapshot('fixture/flow-wasm-determinism', 'wasm32-unknown-unknown')
+const native = await snapshot('fixture/effect-native-determinism', 'aarch64-apple-darwin')
+const wasm = await snapshot('fixture/effect-wasm-determinism', 'wasm32-unknown-unknown')
 const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
 const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
 const nativeLayout = Analysis.layoutOf(native)
 const wasmLayout = Analysis.layoutOf(wasm)
-const nativeOwnership = Analysis.ownershipOf(native, 'fixture/flow-native-determinism')
+const nativeOwnership = Analysis.ownershipOf(native, 'fixture/effect-native-determinism')
 
 process.stdout.write(
   JSON.stringify({
     diagnostics: Analysis.diagnostics(native),
-    hir: Hir.encode(Analysis.hirOf(native, 'fixture/flow-native-determinism')),
+    hir: Hir.encode(Analysis.hirOf(native, 'fixture/effect-native-determinism')),
     ownership:
       nativeOwnership === undefined ? 'ownership-unavailable' : Ownership.encode(nativeOwnership),
     instances: Analysis.instancesOf(native).instances.map((instance) => instance.symbol),

@@ -114,6 +114,10 @@ const keyOf = (
               ...(contract.failures ?? []).map(
                 (failure) => `failure:${Type.key(Type.substitute(failure, substitution))}`,
               ),
+              ...(contract.requirements ?? []).map((requirement) => {
+                const capability = Type.substitute(requirement.capability, substitution)
+                return `requirement:${requirement.access}:${Type.key(capability)}@${requirement.role}`
+              }),
             ])
           : Object.freeze([]),
     })
@@ -160,11 +164,16 @@ interface CallTarget {
 
 const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   if (expression._tag === 'Run') return callTargets(expression.subject)
-  if (expression._tag === 'FlowCatch')
+  if (expression._tag === 'EffectCatch')
     return [
       ...callTargets(expression.protected),
       Object.freeze({ declaration: expression.handler, typeArguments: Object.freeze([]) }),
     ]
+  if (expression._tag === 'EffectRetry')
+    return [...callTargets(expression.protected), ...callTargets(expression.retries)]
+  if (expression._tag === 'EffectProvide') return callTargets(expression.protected)
+  if (expression._tag === 'EffectProvideWith')
+    return [...callTargets(expression.protected), ...callTargets(expression.acquisition)]
   if (expression._tag === 'Move') return callTargets(expression.subject)
   if (expression._tag === 'UnionConvert') return callTargets(expression.source)
   if (expression._tag === 'Project') return callTargets(expression.subject)
@@ -194,7 +203,12 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
       ),
     ]
   }
-  if (expression._tag !== 'Call' && expression._tag !== 'FlowConstruct') return []
+  if (expression._tag === 'EffectBlock') {
+    return expression.statements.flatMap((statement) =>
+      Hir.statementExpressions(statement).flatMap(callTargets),
+    )
+  }
+  if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return []
   return [
     Object.freeze({ declaration: expression.target, typeArguments: expression.typeArguments }),
     ...expression.arguments.flatMap((argument) => callTargets(argument)),

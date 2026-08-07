@@ -208,9 +208,9 @@ it.effect('lowers branch diamonds identically across runs', () =>
   }),
 )
 
-it.effect('discovers one concrete generic flow body without specializing runtime outcomes', () =>
+it.effect('discovers one generic Effect factory and generates its hidden runner', () =>
   Effect.gen(function* () {
-    const result = yield* snapshot(`flow fn delayed<T>(value: T) -> T { return move value }
+    const result = yield* snapshot(`effect fn delayed<T>(value: T) -> T { return move value }
 pub fn main() -> I32 {
   let recipe = delayed<I32>(42)
   return run recipe
@@ -228,10 +228,13 @@ pub fn main() -> I32 {
         { name: 'delayed', arguments: ['I32'] },
       ],
     )
-    const delayed = Analysis.loweredMir(result).functions.find((fn) => fn.id.name === 'delayed')
-    assert.strictEqual(delayed?.result._tag, 'FlowOutcome')
+    const lowered = Analysis.loweredMir(result)
+    const delayed = lowered.functions.find((fn) => fn.id.name === 'delayed')
+    const runner = lowered.functions.find((fn) => fn.id.name.includes('delayed$effect$'))
+    assert.strictEqual(delayed?.result._tag, 'EffectValue')
+    assert.strictEqual(runner?.result._tag, 'EffectOutcome')
     const outcome = Analysis.evaluate(result)
-    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
   }),
 )

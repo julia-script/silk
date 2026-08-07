@@ -7,13 +7,15 @@ import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
+export type IntrinsicActor = Type.Builtin | 'Layout' | 'Allocator' | 'SystemAllocator'
+
 export type Binding =
   | {
       readonly _tag: 'LocalDeclaration'
       readonly spelling: string
       readonly declaration: DeclarationIndex.CanonicalId
     }
-  | { readonly _tag: 'IntrinsicActor'; readonly spelling: Type.Builtin }
+  | { readonly _tag: 'IntrinsicActor'; readonly spelling: IntrinsicActor }
   | {
       readonly _tag: 'ModuleNamespace'
       readonly spelling: string
@@ -73,7 +75,7 @@ export type Lookup =
       readonly spelling: string
       readonly declaration: DeclarationIndex.MemberFact
     }
-  | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: Type.Builtin }
+  | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: IntrinsicActor }
   | { readonly _tag: 'Namespace'; readonly spelling: string; readonly module: string }
   | { readonly _tag: 'Missing'; readonly spelling: string }
   | {
@@ -136,6 +138,9 @@ export const resolve = (
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'I32' }),
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Usize' }),
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Bool' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Layout' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Allocator' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'SystemAllocator' }),
     ]
     const headers = index.modules.find((value) => value.module === module.name)
     for (const declaration of headers?.members ?? [])
@@ -505,7 +510,13 @@ export const resolveType = (
     second === undefined
       ? lookup(scope, index, first.spelling)
       : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
-  if (result._tag === 'Intrinsic') return resolvedType(path, result.actor)
+  if (result._tag === 'Intrinsic') {
+    if (result.actor === 'Layout') return resolvedType(path, Type.layout)
+    if (result.actor === 'Allocator') return resolvedType(path, Type.allocator)
+    if (result.actor === 'SystemAllocator')
+      return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
+    return resolvedType(path, result.actor)
+  }
   if (result._tag === 'Resolved') {
     const nominal = nominalOf(result.declaration)
     if (nominal !== undefined) return resolvedType(path, nominal)

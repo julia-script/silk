@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 
-it('keeps typed-flow phases and artifacts byte-identical across fresh processes', () => {
-  const fixture = fileURLToPath(new URL('./fixtures/flow-determinism.mjs', import.meta.url))
+it('keeps typed-effect phases and artifacts byte-identical across fresh processes', () => {
+  const fixture = fileURLToPath(new URL('./fixtures/effect-determinism.mjs', import.meta.url))
   const run = () => spawnSync(process.execPath, [fixture], { encoding: 'utf8' })
   const first = run()
   const second = run()
@@ -17,7 +17,7 @@ it('keeps typed-flow phases and artifacts byte-identical across fresh processes'
     readonly native: string
     readonly wasm: string
   }
-  assert.include(encoded.hir, 'flow-catch')
+  assert.include(encoded.hir, 'effect-catch')
   assert.include(encoded.ownership, 'loan')
   assert.strictEqual(encoded.native.length, 64)
   assert.strictEqual(encoded.wasm.length, 64)

@@ -43,7 +43,7 @@ const alignUp = (value: number, alignment: number): number =>
 interface FrameRoot {
   readonly local: number
   readonly offset: number
-  readonly type: Extract<Mir.Type, { readonly _tag: 'FixedArray' }>
+  readonly type: Exclude<Mir.Type, { readonly _tag: 'EffectBorrow' | 'EffectOutcome' }>
 }
 
 interface FramePlan {
@@ -58,18 +58,33 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
     (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
       operation._tag === 'BeginLoan',
   )
-  const rootOrdinals = new Set(
-    formations.flatMap((operation) =>
+  const rootOrdinals = new Set([
+    ...formations.flatMap((operation) =>
       operation.sourceType._tag === 'FixedArray' ? [operation.root.ordinal] : [],
     ),
-  )
+    ...Mir.operations(fn).flatMap((operation) =>
+      operation._tag === 'MakeEffect'
+        ? operation.captures.flatMap((capture) =>
+            (capture.access === 'Shared' || capture.access === 'Exclusive') &&
+            fn.localTypes.at(capture.source.ordinal)?._tag !== 'EffectBorrow'
+              ? [capture.source.ordinal]
+              : [],
+          )
+        : [],
+    ),
+  ])
   const roots = new Map<number, FrameRoot>()
   let cursor = 0
   let alignment = 1
   for (const local of [...rootOrdinals].sort((left, right) => left - right)) {
     const type = fn.localTypes.at(local)
     const entry = type === undefined ? undefined : LayoutPlan.entry(plan, Mir.semanticType(type))
-    if (type?._tag !== 'FixedArray' || entry === undefined) {
+    if (
+      type === undefined ||
+      type._tag === 'EffectBorrow' ||
+      type._tag === 'EffectOutcome' ||
+      entry === undefined
+    ) {
       throw new RangeError(`Wasm frame lost address-taken root %${local}`)
     }
     cursor = alignUp(cursor, entry.alignment)
@@ -273,6 +288,8 @@ interface Layout {
   /** Physical wasm locals realizing each logical MIR local's compiler-selected lanes. */
   readonly slots: ReadonlyArray<ReadonlyArray<number>>
   readonly lanes: ReadonlyArray<ReadonlyArray<LayoutPlan.CallingLane>>
+  /** Incoming address parameter for each capture represented internally by its loaded value lanes. */
+  readonly borrowPointers: ReadonlyMap<number, number>
   readonly types: ReadonlyArray<Mir.Type>
 }
 
@@ -292,19 +309,52 @@ const layoutOf = (
 ): Layout => {
   const named = (type: ValType.ValType, name: string): FuncActor.Local =>
     debug ? { type, name } : { type }
-  const lanes = fn.localTypes.map((type) => {
+  const logicalLanes = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
+    if (type._tag === 'EffectBorrow') {
+      const shape = LayoutPlan.callingShape(plan, type.type)
+      if (shape === undefined) throw new RangeError('Wasm backend lost a borrowed calling shape')
+      return shape.lanes
+    }
+    if (type._tag === 'EffectValue')
+      return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
     const shape = LayoutPlan.callingShape(plan, Mir.semanticType(type))
     if (shape === undefined) throw new RangeError('Wasm backend lost a logical calling shape')
     return shape.lanes
-  })
-  let physical = 0
-  const slots = lanes.map((shape) => Object.freeze(shape.map(() => physical++)))
-  const parameterLaneCount = lanes
+  }
+  const lanes = fn.localTypes.map(logicalLanes)
+  const signatureLaneCount = (type: Mir.Type): number =>
+    type._tag === 'EffectBorrow' ? 1 : logicalLanes(type).length
+  const parameterLaneCount = fn.localTypes
     .slice(0, fn.parameterCount)
-    .reduce((total, shape) => total + shape.length, 0)
+    .reduce((total, type) => total + signatureLaneCount(type), 0)
+  const slots: Array<ReadonlyArray<number>> = []
+  const borrowPointers = new Map<number, number>()
+  let parameterPhysical = 0
+  for (let ordinal = 0; ordinal < fn.parameterCount; ordinal += 1) {
+    const type = fn.localTypes.at(ordinal)
+    if (type === undefined) throw new RangeError(`Wasm backend lost parameter %${ordinal}`)
+    if (type._tag === 'EffectBorrow') {
+      borrowPointers.set(ordinal, parameterPhysical)
+      parameterPhysical += 1
+      slots.push(Object.freeze([]))
+    } else {
+      slots.push(Object.freeze(logicalLanes(type).map(() => parameterPhysical++)))
+    }
+  }
+  let physical = parameterLaneCount
   const declared: Array<FuncActor.Local> = []
+  for (const [ordinal] of borrowPointers) {
+    const type = fn.localTypes.at(ordinal)
+    if (type === undefined) throw new RangeError(`Wasm backend lost borrow %${ordinal}`)
+    const localSlots = logicalLanes(type).map(() => physical++)
+    slots[ordinal] = Object.freeze(localSlots)
+    for (const [lane] of localSlots.entries()) declared.push(named(i32, `borrow${ordinal}_${lane}`))
+  }
   for (let ordinal = fn.parameterCount; ordinal < fn.localTypes.length; ordinal += 1) {
-    const localSlots = slots.at(ordinal) ?? []
+    const type = fn.localTypes.at(ordinal)
+    if (type === undefined) throw new RangeError(`Wasm backend lost local %${ordinal}`)
+    const localSlots = logicalLanes(type).map(() => physical++)
+    slots.push(Object.freeze(localSlots))
     for (const [lane] of localSlots.entries()) {
       declared.push(named(i32, `local${ordinal}_${lane}`))
     }
@@ -317,14 +367,12 @@ const layoutOf = (
   if (frameBase !== undefined && frameEnd !== undefined && framePages !== undefined) {
     declared.push(named(i32, 'frame_base'), named(i32, 'frame_end'), named(i32, 'frame_pages'))
   }
-  if (parameterLaneCount !== (slots.at(fn.parameterCount)?.at(0) ?? parameterLaneCount)) {
-    throw new RangeError('Wasm physical parameter layout is not contiguous')
-  }
   return {
     scratch,
     declared: Object.freeze(declared),
     slots: Object.freeze(slots),
     lanes: Object.freeze(lanes),
+    borrowPointers,
     types: fn.localTypes,
     ...(frameBase === undefined ? {} : { frameBase }),
     ...(frameEnd === undefined ? {} : { frameEnd }),
@@ -371,7 +419,7 @@ const emitOperation = (
     const rootSlots = slots(root)
     const rootLanes = layout.lanes.at(root.ordinal) ?? []
     return rootLanes.flatMap((lane, ordinal) => {
-      const offset = LayoutPlan.laneOffset(memory.plan, planned.type.type, lane.path)
+      const offset = LayoutPlan.laneOffset(memory.plan, Mir.semanticType(planned.type), lane.path)
       const source = rootSlots.at(ordinal)
       if (offset === undefined || source === undefined) {
         throw new RangeError(`Wasm frame lost lane ${ordinal} of %${root.ordinal}`)
@@ -390,7 +438,7 @@ const emitOperation = (
     const rootSlots = layout.slots.at(root) ?? []
     if (planned === undefined) return []
     return rootLanes.flatMap((lane, ordinal) => {
-      const offset = LayoutPlan.laneOffset(memory.plan, planned.type.type, lane.path)
+      const offset = LayoutPlan.laneOffset(memory.plan, Mir.semanticType(planned.type), lane.path)
       const destination = rootSlots.at(ordinal)
       if (offset === undefined || destination === undefined) {
         throw new RangeError(`Wasm frame lost reload lane ${ordinal} of %${root}`)
@@ -402,7 +450,33 @@ const emitOperation = (
       ]
     })
   }
+  const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
+    const pointer = layout.borrowPointers.get(root.ordinal)
+    if (pointer === undefined) return []
+    if (memory === undefined) throw new RangeError('Wasm Effect borrow has no private memory')
+    const type = layout.types.at(root.ordinal)
+    if (type?._tag !== 'EffectBorrow') throw new RangeError('Wasm Effect borrow lost its type')
+    const rootLanes = layout.lanes.at(root.ordinal) ?? []
+    const rootSlots = slots(root)
+    return rootLanes.flatMap((lane, ordinal) => {
+      const offset = LayoutPlan.laneOffset(memory.plan, type.type, lane.path)
+      const source = rootSlots.at(ordinal)
+      if (offset === undefined || source === undefined)
+        throw new RangeError(`Wasm Effect borrow lost lane ${ordinal}`)
+      return [
+        Instr.localGet(pointer),
+        ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
+        Instr.localGet(source),
+        Instr.memoryAccess('i32.store', memory.memory),
+      ]
+    })
+  }
   switch (operation._tag) {
+    case 'ValidateLayout':
+    case 'RepeatLayout':
+      throw new RangeError('Wasm layout validation lowering is not available yet')
+    case 'Allocate':
+      throw new RangeError('Wasm allocation lowering is not available yet')
     case 'Match': {
       const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
         operations.flatMap((nested) => emitOperation(nested, layout, resolve, memory))
@@ -800,7 +874,10 @@ const emitOperation = (
         })
       }
       if (operation.selectors.length === 0) {
-        return copy(slots(operation.source), slots(operation.root))
+        return [
+          ...copy(slots(operation.source), slots(operation.root)),
+          ...flushBorrowRoot(operation.root),
+        ]
       }
       const rootLanes = layout.lanes.at(operation.root.ordinal) ?? []
       const rootSlots = slots(operation.root)
@@ -869,16 +946,47 @@ const emitOperation = (
         ])
         instructions.push(...condition, Instr.ifElse(Instr.emptyBlockType, assignment, []))
       }
-      return instructions
+      return [...instructions, ...flushBorrowRoot(operation.root)]
     }
     case 'Drop':
       // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
       return []
-    case 'PackFlowOutcome': {
+    case 'MakeEffect': {
+      const destination = slots(operation.destination)
+      const instructions: Array<Instr.Instr> = []
+      let cursor = 0
+      for (const capture of operation.captures) {
+        if (capture.access === 'Copy' || capture.access === 'Take') {
+          const source = slots(capture.source)
+          instructions.push(...copy(source, destination.slice(cursor, cursor + source.length)))
+          cursor += source.length
+          continue
+        }
+        const target = destination.at(cursor)
+        if (target === undefined) throw new RangeError('Wasm Effect capture lost its lane')
+        const inherited = layout.borrowPointers.get(capture.source.ordinal)
+        if (inherited !== undefined) {
+          instructions.push(Instr.localGet(inherited), Instr.localSet(target))
+        } else {
+          const planned = memory?.frame.roots.get(capture.source.ordinal)
+          if (planned === undefined) throw new RangeError('Wasm Effect capture lost its frame root')
+          instructions.push(
+            ...materializeRoot(capture.source),
+            ...frameAddress(planned.offset),
+            Instr.localSet(target),
+          )
+        }
+        cursor += 1
+      }
+      if (cursor !== destination.length)
+        throw new RangeError('Wasm Effect environment capture lanes do not match its plan')
+      return instructions
+    }
+    case 'PackEffectOutcome': {
       const source = slots(operation.source)
       const destination = slots(operation.destination)
       const tag = destination.at(0)
-      if (tag === undefined) throw new RangeError('Wasm flow outcome lost its tag lane')
+      if (tag === undefined) throw new RangeError('Wasm effect outcome lost its tag lane')
       return [
         Instr.i32Const(operation.tag),
         Instr.localSet(tag),
@@ -890,17 +998,19 @@ const emitOperation = (
         }),
       ]
     }
-    case 'UnpackFlowSuccess':
+    case 'UnpackEffectSuccess':
       return copy(
         slots(operation.source).slice(1, 1 + slots(operation.destination).length),
         slots(operation.destination),
       )
-    case 'CatchFlow': {
+    case 'CatchEffect': {
+      const protectedValueSlots = slots(operation.protectedValue)
       const protectedSlots = slots(operation.protectedOutcome)
+      const handlerValueSlots = slots(operation.handlerValue)
       const handlerSlots = slots(operation.handlerOutcome)
       const destinationSlots = slots(operation.destination)
       const tag = protectedSlots.at(0)
-      if (tag === undefined) throw new RangeError('Wasm flow catch lost its tag lane')
+      if (tag === undefined) throw new RangeError('Wasm effect catch lost its tag lane')
       const success = copy(protectedSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
       const failure = [
         Instr.localGet(tag),
@@ -911,6 +1021,9 @@ const emitOperation = (
           .slice(1, 1 + operation.handledLaneCount)
           .map((slot) => Instr.localGet(slot)),
         Instr.call(resolve(operation.handlerTarget, Object.freeze([]))),
+        ...[...handlerValueSlots].reverse().map((slot) => Instr.localSet(slot)),
+        ...handlerValueSlots.map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.handlerRunner, Object.freeze([]))),
         ...[...handlerSlots].reverse().map((slot) => Instr.localSet(slot)),
         ...copy(handlerSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
       ]
@@ -919,17 +1032,95 @@ const emitOperation = (
           slots(argument).map((slot) => Instr.localGet(slot)),
         ),
         Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
+        ...[...protectedValueSlots].reverse().map((slot) => Instr.localSet(slot)),
+        ...protectedValueSlots.map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.protectedRunner, operation.protectedTypeArguments)),
         ...[...protectedSlots].reverse().map((slot) => Instr.localSet(slot)),
         Instr.localGet(tag),
         Instr.op('i32.eqz'),
         Instr.ifElse(Instr.emptyBlockType, success, failure),
       ]
     }
-    case 'RunFlow': {
+    case 'RetryEffect': {
+      const valueSlots = slots(operation.protectedValue)
+      const outcomeSlots = slots(operation.protectedOutcome)
+      const destinationSlots = slots(operation.destination)
+      const tag = outcomeSlots.at(0)
+      if (tag === undefined) throw new RangeError('Wasm Effect retry lost its outcome tag')
+      const invokeRunner = [
+        ...valueSlots.map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.protectedRunner, operation.protectedTypeArguments)),
+        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+      ]
+      const loop = Instr.block(Instr.emptyBlockType, [
+        Instr.loop(Instr.emptyBlockType, [
+          ...invokeRunner,
+          Instr.localGet(tag),
+          Instr.op('i32.eqz'),
+          Instr.brIf(1),
+          Instr.localGet(layout.scratch),
+          Instr.i32Const(0),
+          Instr.op('i32.le_s'),
+          Instr.brIf(1),
+          Instr.localGet(layout.scratch),
+          Instr.i32Const(1),
+          Instr.op('i32.sub'),
+          Instr.localSet(layout.scratch),
+          Instr.br(0),
+        ]),
+      ])
+      const success = [
+        ...copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
+        ...[...(memory?.frame.roots.keys() ?? [])]
+          .sort((left, right) => left - right)
+          .flatMap(reloadRoot),
+      ]
+      const failure =
+        operation.propagationType === undefined
+          ? [Instr.op('unreachable')]
+          : [
+              Instr.i32Const(-1),
+              Instr.localSet(layout.scratch),
+              ...operation.tagMappings.flatMap((mapping) => [
+                Instr.localGet(tag),
+                Instr.i32Const(mapping.source),
+                Instr.op('i32.eq'),
+                Instr.ifElse(
+                  Instr.emptyBlockType,
+                  [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+                  [],
+                ),
+              ]),
+              Instr.localGet(layout.scratch),
+              ...Array.from({ length: operation.propagationLaneCount - 1 }, (_, index) => {
+                const source = outcomeSlots.at(index + 1)
+                return source === undefined ? Instr.i32Const(0) : Instr.localGet(source)
+              }),
+              Instr.op('return'),
+            ]
+      return [
+        ...(operation.protectedTarget === undefined
+          ? []
+          : [
+              ...operation.protectedArguments.flatMap((argument) =>
+                slots(argument).map((slot) => Instr.localGet(slot)),
+              ),
+              Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
+              ...[...valueSlots].reverse().map((slot) => Instr.localSet(slot)),
+            ]),
+        Instr.localGet(scalar(operation.retries)),
+        Instr.localSet(layout.scratch),
+        loop,
+        Instr.localGet(tag),
+        Instr.op('i32.eqz'),
+        Instr.ifElse(Instr.emptyBlockType, success, failure),
+      ]
+    }
+    case 'RunEffect': {
       const outcomeSlots = slots(operation.outcome)
       const destinationSlots = slots(operation.destination)
       const tag = outcomeSlots.at(0)
-      if (tag === undefined) throw new RangeError('Wasm propagated flow lost its tag lane')
+      if (tag === undefined) throw new RangeError('Wasm propagated effect lost its tag lane')
       const mapTag = [
         Instr.i32Const(-1),
         Instr.localSet(layout.scratch),
@@ -967,6 +1158,52 @@ const emitOperation = (
           copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
           failure,
         ),
+      ]
+    }
+    case 'RunEffectValue': {
+      const outcomeSlots = slots(operation.outcome)
+      const destinationSlots = slots(operation.destination)
+      const tag = outcomeSlots.at(0)
+      if (tag === undefined) throw new RangeError('Wasm Effect value lost its outcome tag lane')
+      const invoke = [
+        ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
+        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+        ...[...(memory?.frame.roots.keys() ?? [])]
+          .sort((left, right) => left - right)
+          .flatMap(reloadRoot),
+      ]
+      const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
+      if (operation.propagationType === undefined) return [...invoke, ...success]
+      const mapTag = [
+        Instr.i32Const(-1),
+        Instr.localSet(layout.scratch),
+        ...operation.tagMappings.flatMap((mapping) => [
+          Instr.localGet(tag),
+          Instr.i32Const(mapping.source),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+            [],
+          ),
+        ]),
+      ]
+      const propagationPayloadCount = operation.propagationLaneCount - 1
+      const failure = [
+        ...mapTag,
+        Instr.localGet(layout.scratch),
+        ...Array.from({ length: propagationPayloadCount }, (_, index) => {
+          const source = outcomeSlots.at(index + 1)
+          return source === undefined ? Instr.i32Const(0) : Instr.localGet(source)
+        }),
+        Instr.op('return'),
+      ]
+      return [
+        ...invoke,
+        Instr.localGet(tag),
+        Instr.op('i32.eqz'),
+        Instr.ifElse(Instr.emptyBlockType, success, failure),
       ]
     }
     case 'Call':
@@ -1115,6 +1352,29 @@ const emitBody = (
       Instr.globalSet(memory.stackPointer),
     ]
   }
+  const loadBorrowedParameters = (): ReadonlyArray<Instr.Instr> => {
+    if (layout.borrowPointers.size === 0) return []
+    if (memory === undefined) throw new RangeError('Wasm Effect borrow has no private memory')
+    return [...layout.borrowPointers].flatMap(([ordinal, pointer]) => {
+      const type = layout.types.at(ordinal)
+      if (type?._tag !== 'EffectBorrow')
+        throw new RangeError(`Wasm Effect borrow %${ordinal} lost its type`)
+      const lanes = layout.lanes.at(ordinal) ?? []
+      const slots = layout.slots.at(ordinal) ?? []
+      return lanes.flatMap((lane, laneOrdinal) => {
+        const offset = LayoutPlan.laneOffset(memory.plan, type.type, lane.path)
+        const destination = slots.at(laneOrdinal)
+        if (offset === undefined || destination === undefined)
+          throw new RangeError(`Wasm Effect borrow %${ordinal} lost lane ${laneOrdinal}`)
+        return [
+          Instr.localGet(pointer),
+          ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
+          Instr.memoryAccess('i32.load', memory.memory),
+          Instr.localSet(destination),
+        ]
+      })
+    })
+  }
 
   const emitOutcome = (
     outcome: Mir.Outcome,
@@ -1195,7 +1455,12 @@ const emitBody = (
     ]
   }
 
-  return [...reserveFrame(), ...emitRegion(fn.entry, Object.freeze([])), Instr.op('unreachable')]
+  return [
+    ...reserveFrame(),
+    ...loadBorrowedParameters(),
+    ...emitRegion(fn.entry, Object.freeze([])),
+    Instr.op('unreachable'),
+  ]
 }
 
 const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
@@ -1257,6 +1522,20 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     }> = []
     for (const [ordinal, fn] of program.functions.entries()) {
       const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
+        if (type._tag === 'EffectBorrow')
+          return Object.freeze([
+            Object.freeze({
+              _tag: 'CallingLane' as const,
+              path: Object.freeze([]),
+              type: Object.freeze({
+                _tag: 'Address' as const,
+                element: type.type,
+                bits: program.layout.target.pointerSize === 4 ? 32 : 64,
+              }),
+            }),
+          ])
+        if (type._tag === 'EffectValue')
+          return LayoutPlan.effectEnvironmentLanes(program.layout, type.environment)
         const shape = LayoutPlan.callingShape(program.layout, Mir.semanticType(type))
         if (shape === undefined) throw new RangeError('Wasm declaration lost a calling shape')
         return shape.lanes

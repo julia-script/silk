@@ -13,8 +13,8 @@ const typeText = (type: Type.Type): string =>
         ? `Array<${typeText(type.element)}, ${type.length}>`
       : type._tag === 'SliceType'
         ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-        : type._tag === 'FlowType'
-          ? `Flow<${typeText(type.success)}${
+        : type._tag === 'EffectType'
+          ? `Effect<${typeText(type.success)}${
               type.failures.length === 0
                 ? ''
                 : ` ! ${type.failures.map(typeText).join(' | ')}`
@@ -180,7 +180,7 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
     return `${expression.access === 'Exclusive' ? '&mut ' : '&'}${argumentLabel({ ...argument, expression: expression.subject })}`
   }
   if (expression._tag === 'Run') return 'run result'
-  if (expression._tag === 'FlowCatch')
+  if (expression._tag === 'EffectCatch')
     return `catch ${expression.handled === undefined ? 'unavailable failure' : typeText(expression.handled)}`
   if (expression._tag !== 'Integer') return 'unavailable expression'
   if (expression.integer._tag === 'Available') return String(expression.integer.value)

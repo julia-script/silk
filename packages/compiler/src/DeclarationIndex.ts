@@ -134,6 +134,21 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'Effect'
+      readonly success: DeclaredTypeFact
+      readonly failures: ReadonlyArray<DeclaredTypeFact>
+      readonly requirements: ReadonlyArray<{
+        readonly capability: DeclaredTypeFact
+        readonly role: string
+        readonly access: Type.Requirement['access']
+        readonly syntax: SyntaxTree.Node
+      }>
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Union'
       readonly members: ReadonlyArray<DeclaredTypeFact>
       readonly separators: ReadonlyArray<Token.Token>
@@ -158,11 +173,25 @@ export interface UnionSourceFact {
 
 export type ReturnTypeFact = DeclaredTypeFact
 
-/** A source-retained and canonically normalized flow failure row. */
+/** A source-retained and canonically normalized effect failure row. */
 export interface FailureRowFact {
   readonly _tag: 'FailureRow'
   readonly members: ReadonlyArray<DeclaredTypeFact>
   readonly failures: ReadonlyArray<Type.Nominal>
+  readonly syntax?: SyntaxTree.Node
+  readonly available: boolean
+}
+
+/** A source-retained and canonically normalized Effect capability requirement row. */
+export interface RequirementRowFact {
+  readonly _tag: 'RequirementRow'
+  readonly entries: ReadonlyArray<{
+    readonly capability: DeclaredTypeFact
+    readonly role: string
+    readonly access: Type.Requirement['access']
+    readonly syntax: SyntaxTree.Node
+  }>
+  readonly requirements: ReadonlyArray<Type.Requirement>
   readonly syntax?: SyntaxTree.Node
   readonly available: boolean
 }
@@ -182,13 +211,14 @@ export interface DeclarationFact {
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
-  readonly functionKind: 'Ordinary' | 'Flow'
+  readonly functionKind: 'Ordinary' | 'Effect'
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly name: DeclaredName
   readonly returnType: ReturnTypeFact
   readonly failureRow: FailureRowFact
+  readonly requirementRow: RequirementRowFact
   readonly syntax: SyntaxTree.Node
 }
 
@@ -560,6 +590,121 @@ export const analyzeDeclaredType = (
     const arguments_ = list.children
       .filter(isDeclaredTypeNode)
       .map((argument) => analyzeDeclaredType(source, argument, typeParameters))
+    const pathSegments = SyntaxTree.tokens(pathSyntax)
+      .filter((token) => token.kind === 'Identifier')
+      .map((token) => spelling(source, token))
+    if (pathSegments.length === 1 && pathSegments.at(0) === 'Effect') {
+      const failureRow = SyntaxTree.directNode(list, 'FailureRow')
+      const failureType =
+        failureRow === undefined ? undefined : failureRow.children.find(isDeclaredTypeNode)
+      const failureNodes =
+        failureType?.kind === 'UnionType'
+          ? failureType.children.filter(isDeclaredTypeNode)
+          : failureType === undefined
+            ? []
+            : [failureType]
+      const failures = failureNodes.map((member) =>
+        analyzeDeclaredType(source, member, typeParameters),
+      )
+      const requirements =
+        SyntaxTree.directNode(list, 'RequirementRow')
+          ?.children.filter(
+            (element): element is SyntaxTree.Node =>
+              SyntaxTree.isNode(element) && element.kind === 'Requirement',
+          )
+          .map((requirement) => {
+            const capability = SyntaxTree.directNode(requirement, 'TypePath')
+            const analyzed =
+              capability === undefined
+                ? Object.freeze({
+                    fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: requirement }),
+                    diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+                  })
+                : analyzeDeclaredType(source, capability, typeParameters)
+            const role = SyntaxTree.directToken(requirement, 'Identifier')
+            return Object.freeze({
+              capability: analyzed,
+              role: role === undefined ? 'DefaultRole' : spelling(source, role),
+              access:
+                SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
+                  ? ('Shared' as const)
+                  : ('Exclusive' as const),
+              syntax: requirement,
+            })
+          }) ?? []
+      const diagnostics = [
+        ...arguments_.flatMap((argument) => argument.diagnostics),
+        ...failures.flatMap((failure) => failure.diagnostics),
+        ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
+      ]
+      const success = arguments_.at(0)?.fact
+      if (arguments_.length !== 1) {
+        diagnostics.push(
+          Diagnostic.typeArgumentArity('Effect', 1, arguments_.length, firstToken.span),
+        )
+      }
+      const resolvedFailures = failures.flatMap((failure) =>
+        failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)
+          ? [failure.fact.type]
+          : [],
+      )
+      const resolvedRequirements = requirements.flatMap((requirement) =>
+        requirement.capability.fact._tag === 'Resolved' &&
+        Type.isNominal(requirement.capability.fact.type)
+          ? [
+              Object.freeze({
+                capability: requirement.capability.fact.type,
+                role: requirement.role,
+                access: requirement.access,
+              }),
+            ]
+          : [],
+      )
+      const failuresAvailable = failures.every(
+        (failure) =>
+          failure.fact._tag === 'Resolved' &&
+          (Type.isNominal(failure.fact.type) || Type.isNever(failure.fact.type)),
+      )
+      if (
+        arguments_.length === 1 &&
+        success?._tag === 'Resolved' &&
+        failuresAvailable &&
+        resolvedRequirements.length === requirements.length
+      ) {
+        const type = Type.effect(success.type, resolvedFailures, 'Shared', resolvedRequirements)
+        return Object.freeze({
+          fact: Object.freeze({
+            _tag: 'Resolved',
+            type,
+            spelling: Type.encode(type),
+            token: firstToken,
+            syntax,
+          }),
+          diagnostics: Object.freeze(diagnostics),
+        })
+      }
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Effect',
+          success: success ?? Object.freeze({ _tag: 'Unavailable', syntax: list }),
+          failures: Object.freeze(failures.map((failure) => failure.fact)),
+          requirements: Object.freeze(
+            requirements.map((requirement) =>
+              Object.freeze({
+                capability: requirement.capability.fact,
+                role: requirement.role,
+                access: requirement.access,
+                syntax: requirement.syntax,
+              }),
+            ),
+          ),
+          spelling: 'Effect',
+          token: firstToken,
+          syntax,
+        }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Applied',
@@ -612,6 +757,20 @@ export const analyzeDeclaredType = (
       fact: Object.freeze({
         _tag: 'Resolved',
         type: first.spelling,
+        spelling: first.spelling,
+        token: first.token,
+        syntax,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const intrinsicNominal =
+    segments.length === 1 ? Type.intrinsicNominals.get(first.spelling) : undefined
+  if (intrinsicNominal !== undefined) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Resolved',
+        type: intrinsicNominal,
         spelling: first.spelling,
         token: first.token,
         syntax,
@@ -862,6 +1021,59 @@ const collectFailureRow = (
   })
 }
 
+const collectRequirementRow = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): {
+  readonly fact: RequirementRowFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const syntax = SyntaxTree.directNode(node, 'RequirementRow')
+  if (syntax === undefined)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'RequirementRow',
+        entries: Object.freeze([]),
+        requirements: Object.freeze([]),
+        available: true,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const entries = SyntaxTree.directNodes(syntax, 'Requirement').map((requirement) => {
+    const capabilitySyntax = SyntaxTree.directNode(requirement, 'TypePath')
+    const analyzed =
+      capabilitySyntax === undefined
+        ? Object.freeze({
+            fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: requirement }),
+            diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+          })
+        : analyzeDeclaredType(source, capabilitySyntax, typeParameters)
+    diagnostics.push(...analyzed.diagnostics)
+    const roleToken = SyntaxTree.directToken(requirement, 'Identifier')
+    return Object.freeze({
+      capability: analyzed.fact,
+      role: roleToken === undefined ? 'DefaultRole' : spelling(source, roleToken),
+      access:
+        SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
+          ? ('Shared' as const)
+          : ('Exclusive' as const),
+      syntax: requirement,
+    })
+  })
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'RequirementRow',
+      entries: Object.freeze(entries),
+      requirements: Object.freeze([]),
+      syntax,
+      available: false,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const nodes = syntax.root.children.filter(
@@ -934,14 +1146,16 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       typeParameters.environment,
     )
     const functionKind =
-      SyntaxTree.directToken(node, 'FlowKeyword') === undefined ? 'Ordinary' : 'Flow'
+      SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect'
     const failureRow = collectFailureRow(source, node, typeParameters.environment)
+    const requirementRow = collectRequirementRow(source, node, typeParameters.environment)
     const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
       ...duplicateParameterDiagnostics(facts),
       ...returnType.diagnostics,
       ...failureRow.diagnostics,
+      ...requirementRow.diagnostics,
     )
     if (functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureRowOnOrdinary(failureRow.fact.syntax.span))
@@ -957,6 +1171,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       name,
       returnType: returnType.fact,
       failureRow: failureRow.fact,
+      requirementRow: requirementRow.fact,
       syntax: node,
     })
   })
@@ -1009,6 +1224,90 @@ const resolveDeclaredType = (
         candidate: resolved.fact.type,
       }),
       diagnostics: Object.freeze([diagnostic]),
+    })
+  }
+  if (fact._tag === 'Effect') {
+    const success = resolveDeclaredType(module, fact.success, resolver, modules)
+    const failures = fact.failures.map((failure) =>
+      resolveDeclaredType(module, failure, resolver, modules),
+    )
+    const requirements = fact.requirements.map((requirement) =>
+      Object.freeze({
+        ...requirement,
+        capability: resolveDeclaredType(module, requirement.capability, resolver, modules),
+      }),
+    )
+    const diagnostics: Array<Diagnostic.Diagnostic> = [
+      ...success.diagnostics,
+      ...failures.flatMap((failure) => failure.diagnostics),
+      ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
+    ]
+    const failureTypes: Array<Type.Nominal> = []
+    let failuresAvailable = true
+    for (const failure of failures) {
+      if (failure.fact._tag === 'Resolved' && Type.isNominal(failure.fact.type)) {
+        failureTypes.push(failure.fact.type)
+      } else if (!(failure.fact._tag === 'Resolved' && Type.isNever(failure.fact.type))) {
+        failuresAvailable = false
+        if (failure.fact._tag === 'Resolved')
+          diagnostics.push(
+            Diagnostic.invalidFailureType(Type.encode(failure.fact.type), failure.fact.syntax.span),
+          )
+      }
+    }
+    const requirementTypes: Array<Type.Requirement> = []
+    let requirementsAvailable = true
+    for (const requirement of requirements) {
+      if (
+        requirement.capability.fact._tag === 'Resolved' &&
+        Type.isNominal(requirement.capability.fact.type) &&
+        Type.isConcrete(requirement.capability.fact.type)
+      ) {
+        requirementTypes.push(
+          Object.freeze({
+            capability: requirement.capability.fact.type,
+            role: requirement.role,
+            access: requirement.access,
+          }),
+        )
+      } else {
+        requirementsAvailable = false
+        if (requirement.capability.fact._tag === 'Resolved')
+          diagnostics.push(
+            Diagnostic.invalidRequirementType(
+              Type.encode(requirement.capability.fact.type),
+              requirement.syntax.span,
+            ),
+          )
+      }
+    }
+    if (success.fact._tag === 'Resolved' && failuresAvailable && requirementsAvailable) {
+      const type = Type.effect(success.fact.type, failureTypes, 'Shared', requirementTypes)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token: fact.token,
+          syntax: fact.syntax,
+        }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
+    const cause = diagnostics.at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        success: success.fact,
+        failures: Object.freeze(failures.map((failure) => failure.fact)),
+        requirements: Object.freeze(
+          requirements.map((requirement) =>
+            Object.freeze({ ...requirement, capability: requirement.capability.fact }),
+          ),
+        ),
+        ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
+      }),
+      diagnostics: Object.freeze(diagnostics),
     })
   }
   if (fact._tag === 'Applied') {
@@ -1268,6 +1567,57 @@ const resolveFailureRow = (
   })
 }
 
+const resolveRequirementRow = (
+  module: string,
+  row: RequirementRowFact,
+  resolver: TypeResolver,
+  modules: ReadonlyArray<ModuleHeaders>,
+): {
+  readonly fact: RequirementRowFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const entries = row.entries.map((entry) => {
+    const capability = resolveDeclaredType(module, entry.capability, resolver, modules)
+    diagnostics.push(...capability.diagnostics)
+    return Object.freeze({ ...entry, capability: capability.fact })
+  })
+  const requirements: Array<Type.Requirement> = []
+  let available = true
+  for (const entry of entries) {
+    if (
+      entry.capability._tag === 'Resolved' &&
+      Type.isNominal(entry.capability.type) &&
+      Type.isConcrete(entry.capability.type)
+    ) {
+      requirements.push(
+        Object.freeze({
+          capability: entry.capability.type,
+          role: entry.role,
+          access: entry.access,
+        }),
+      )
+    } else {
+      available = false
+      if (entry.capability._tag === 'Resolved')
+        diagnostics.push(
+          Diagnostic.invalidRequirementType(Type.encode(entry.capability.type), entry.syntax.span),
+        )
+    }
+  }
+  const normalized = Type.effect('Never', [], 'Shared', requirements).requirements
+  return Object.freeze({
+    fact: Object.freeze({
+      ...row,
+      entries: Object.freeze(entries),
+      requirements: normalized,
+      available,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 const attachExposure = (
   fact: DeclaredTypeFact,
   modules: ReadonlyArray<ModuleHeaders>,
@@ -1381,11 +1731,19 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           self.modules,
         )
         diagnostics.push(...failureRow.diagnostics)
+        const requirementRow = resolveRequirementRow(
+          module.module,
+          member.requirementRow,
+          resolver,
+          self.modules,
+        )
+        diagnostics.push(...requirementRow.diagnostics)
         return Object.freeze({
           ...member,
           parameters: Object.freeze(parameters),
           returnType: result.fact,
           failureRow: failureRow.fact,
+          requirementRow: requirementRow.fact,
         })
       }
       const fields = member.fields.map((field) => {
@@ -1684,4 +2042,42 @@ export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefine
   return result._tag === 'Resolved' && result.declaration.canonical._tag === 'Canonical'
     ? result.declaration
     : undefined
+}
+
+/** Tests whether a value of this type can retain lexical storage through its fields. */
+export const containsLexicalBorrow = (
+  self: Index,
+  type: Type.Type,
+  seen: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (Type.isSlice(type)) return true
+  if (Type.isFixedArray(type)) return containsLexicalBorrow(self, type.element, seen)
+  if (Type.isUnion(type))
+    return type.members.some((member) => containsLexicalBorrow(self, member, seen))
+  if (Type.isEffect(type))
+    return (
+      containsLexicalBorrow(self, type.success, seen) ||
+      type.failures.some((failure) => containsLexicalBorrow(self, failure, seen))
+    )
+  if (!Type.isNominal(type)) return false
+  const key = Type.key(type)
+  if (seen.has(key)) return false
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration')
+    return type.arguments.some((argument) => containsLexicalBorrow(self, argument, seen))
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const next = new Set(seen).add(key)
+  return declaration.fields.some(
+    (field) =>
+      field.declaredType._tag === 'Resolved' &&
+      containsLexicalBorrow(self, Type.substitute(field.declaredType.type, substitution), next),
+  )
 }

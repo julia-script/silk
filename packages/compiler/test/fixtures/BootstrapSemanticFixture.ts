@@ -45,7 +45,7 @@ pub fn main() -> I32 { return identity(42) }`
 export const unavailableArgumentContractSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(missing) }`
 export const recoveredArgumentSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(@) }`
+pub fn main() -> I32 { return identity(:) }`
 export const nestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity(42)) }`
 export const nestedSiblingCallsSource = `pub fn identity(value: I32) -> I32 { return value }
@@ -56,7 +56,7 @@ pub fn main() -> I32 { return identity(missing(42)) }`
 export const incompatibleNestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return identity(identity()) }`
 export const damagedNestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(@)) }`
+pub fn main() -> I32 { return identity(identity(:)) }`
 export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
 export const duplicateParameterSource =
   'pub fn choose(value: I32, value: I32) -> I32 { return value }'

@@ -222,10 +222,13 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'SliceLength':
     case 'ConvertUnion':
     case 'Call':
-    case 'PackFlowOutcome':
-    case 'UnpackFlowSuccess':
-    case 'CatchFlow':
-    case 'RunFlow':
+    case 'MakeEffect':
+    case 'PackEffectOutcome':
+    case 'UnpackEffectSuccess':
+    case 'CatchEffect':
+    case 'RetryEffect':
+    case 'RunEffect':
+    case 'RunEffectValue':
     case 'Construct':
     case 'ConstructArray':
     case 'Project':
@@ -242,8 +245,10 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
 }
 
 const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
-  operation._tag === 'CatchFlow' ||
-  operation._tag === 'RunFlow' ||
+  operation._tag === 'CatchEffect' ||
+  operation._tag === 'RetryEffect' ||
+  operation._tag === 'RunEffect' ||
+  operation._tag === 'RunEffectValue' ||
   ((operation._tag === 'ReadPlace' ||
     operation._tag === 'CheckPlace' ||
     operation._tag === 'WritePlace') &&
@@ -635,16 +640,46 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       usizeLayout?.representation._tag === 'UnsignedInteger'
         ? yield* LlvmType.integer(builder, usizeLayout.representation.bits)
         : undefined
-    const hasAddressLane = program.layout.callingShapes.some((shape) =>
-      shape.lanes.some((lane) => typeof lane.type !== 'string'),
-    )
+    const hasAddressLane =
+      program.layout.callingShapes.some((shape) =>
+        shape.lanes.some((lane) => typeof lane.type !== 'string'),
+      ) ||
+      program.layout.effectEnvironments.some(
+        (environment) =>
+          environment._tag === 'EffectEnvironment' &&
+          environment.fields.some((field) => field.representation === 'Borrow'),
+      )
     const i8 = hasAddressLane ? yield* LlvmType.integer(builder, 8) : i32
     const pointer = hasAddressLane ? yield* LlvmType.pointer(builder) : i32
     let voidType: LlvmType.Type | undefined
     const lanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> => {
+      if (type._tag === 'EffectBorrow')
+        return Object.freeze([
+          Object.freeze({
+            _tag: 'CallingLane' as const,
+            path: Object.freeze([]),
+            type: Object.freeze({
+              _tag: 'Address' as const,
+              element: type.type,
+              bits: program.layout.target.pointerSize === 4 ? 32 : 64,
+            }),
+          }),
+        ])
+      if (type._tag === 'EffectValue')
+        return Layout.effectEnvironmentLanes(program.layout, type.environment)
       const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
       if (shape === undefined) {
         throw new RangeError(`LLVM backend lost calling shape for ${Mir.semanticType(type)}`)
+      }
+      return shape.lanes
+    }
+    const valueLanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> => {
+      if (type._tag !== 'EffectBorrow') return lanesFor(type)
+      const shape = Layout.callingShape(program.layout, type.type)
+      if (shape === undefined) {
+        throw new RangeError(
+          `LLVM backend lost borrowed calling shape for ${SilkType.encode(type.type)}`,
+        )
       }
       return shape.lanes
     }
@@ -774,22 +809,38 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
             ...continuationLocals,
           ])
-          const addressRoots = new Set(
+          const borrowedCaptureRoots = new Set(
             entry.linear.flatMap((block) =>
+              block.operations.flatMap((operation) =>
+                operation._tag === 'MakeEffect'
+                  ? operation.captures.flatMap((capture) =>
+                      capture.access === 'Shared' || capture.access === 'Exclusive'
+                        ? [capture.source.ordinal]
+                        : [],
+                    )
+                  : [],
+              ),
+            ),
+          )
+          for (const root of borrowedCaptureRoots) mutableRoots.add(root)
+          const addressRoots = new Set([
+            ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
                 operation._tag === 'BeginLoan' && operation.sourceType._tag === 'FixedArray'
                   ? [operation.root.ordinal]
                   : [],
               ),
             ),
-          )
+            ...borrowedCaptureRoots,
+          ])
           const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
           for (const root of [...mutableRoots].sort((left, right) => left - right)) {
             const logicalType = entry.fn.localTypes.at(root)
             if (logicalType === undefined)
               throw new RangeError(`Backend lost mutable root %${root}`)
+            if (logicalType._tag === 'EffectBorrow') continue
             const storage: Array<Value.Input> = []
-            for (const [lane, callingLane] of lanesFor(logicalType).entries()) {
+            for (const [lane, callingLane] of valueLanesFor(logicalType).entries()) {
               storage.push(
                 yield* FunctionBody.alloca(body, laneType(callingLane), `mut${root}_${lane}`),
               )
@@ -803,8 +854,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               logicalType === undefined
                 ? undefined
                 : Layout.entry(program.layout, Mir.semanticType(logicalType))
-            if (logicalType?._tag !== 'FixedArray' || layout === undefined) {
-              throw new RangeError(`Backend lost address-taken fixed array %${root}`)
+            if (logicalType === undefined || layout === undefined) {
+              throw new RangeError(`Backend lost address-taken value %${root}`)
             }
             const count = yield* Constant.integerUnsigned(builder, i32, BigInt(layout.size))
             addressStorage.set(
@@ -825,6 +876,36 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {
               values.push(yield* Value.argument(body, physicalParameter))
               physicalParameter += 1
+            }
+            if (logicalType._tag === 'EffectBorrow') {
+              const base = values.at(0)
+              if (base === undefined) throw new RangeError(`Backend lost Effect borrow %${ordinal}`)
+              const storage: Array<Value.Input> = []
+              const loaded: Array<Value.Input> = []
+              for (const [lane, callingLane] of valueLanesFor(logicalType).entries()) {
+                const offset = Layout.laneOffset(program.layout, logicalType.type, callingLane.path)
+                if (offset === undefined)
+                  throw new RangeError(`Backend lost Effect borrow lane ${lane}`)
+                const pointer = yield* FunctionBody.getElementPtr(
+                  body,
+                  i8,
+                  base,
+                  [yield* Constant.integerUnsigned(builder, i32, BigInt(offset))],
+                  `borrow${ordinal}_${lane}_ptr`,
+                )
+                storage.push(pointer)
+                loaded.push(
+                  yield* FunctionBody.load(
+                    body,
+                    laneType(callingLane),
+                    pointer,
+                    `borrow${ordinal}_${lane}`,
+                  ),
+                )
+              }
+              mutableStorage.set(ordinal, Object.freeze(storage))
+              locals.set(ordinal, Object.freeze(loaded))
+              continue
             }
             locals.set(ordinal, Object.freeze(values))
             const storage = mutableStorage.get(ordinal)
@@ -943,7 +1024,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               throw new RangeError(`Backend lost address storage for %${root.ordinal}`)
             }
             const values = readLocal(root)
-            for (const [ordinal, lane] of lanesFor(logicalType).entries()) {
+            for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
               const offset = Layout.laneOffset(
                 program.layout,
                 Mir.semanticType(logicalType),
@@ -971,7 +1052,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               throw new RangeError(`Backend lost address storage for %${root}`)
             }
             const values: Array<Value.Input> = []
-            for (const [ordinal, lane] of lanesFor(logicalType).entries()) {
+            for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
               const offset = Layout.laneOffset(
                 program.layout,
                 Mir.semanticType(logicalType),
@@ -1004,7 +1085,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 const logicalType = entry.fn.localTypes.at(root)
                 if (logicalType === undefined) throw new RangeError('Mutable root lost its type')
                 for (const [lane, pointer] of storage.entries()) {
-                  const callingLane = lanesFor(logicalType).at(lane)
+                  const callingLane = valueLanesFor(logicalType).at(lane)
                   if (callingLane === undefined) throw new RangeError('Mutable root lost a lane')
                   loaded.push(
                     yield* FunctionBody.load(
@@ -1752,7 +1833,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const left = readScalar(operation.left)
                   const right = readScalar(operation.right)
                   const leftType = entry.fn.localTypes.at(operation.left.ordinal)
-                  const leftLane = leftType === undefined ? undefined : lanesFor(leftType).at(0)
+                  const leftLane =
+                    leftType === undefined ? undefined : valueLanesFor(leftType).at(0)
                   if (leftType === undefined || leftLane === undefined) {
                     throw new RangeError('LLVM binary operation lost its operand type')
                   }
@@ -1931,7 +2013,25 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 }
                 case 'Drop':
                   break
-                case 'PackFlowOutcome': {
+                case 'MakeEffect': {
+                  const captured: Array<Value.Input> = []
+                  for (const capture of operation.captures) {
+                    if (capture.access === 'Copy' || capture.access === 'Take') {
+                      captured.push(...readLocal(capture.source))
+                      continue
+                    }
+                    yield* materializeAddressRoot(capture.source)
+                    const base = addressStorage.get(capture.source.ordinal)
+                    if (base === undefined)
+                      throw new RangeError('Effect borrowed capture lost its storage')
+                    captured.push(base)
+                  }
+                  if (captured.length !== lanesFor(operation.type).length)
+                    throw new RangeError('Effect environment capture lanes do not match its plan')
+                  locals.set(operation.destination.ordinal, Object.freeze(captured))
+                  break
+                }
+                case 'PackEffectOutcome': {
                   const source = [...readLocal(operation.source)]
                   const lanes = lanesFor(operation.type)
                   const values: Array<Value.Input> = [
@@ -1946,7 +2046,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
-                case 'UnpackFlowSuccess': {
+                case 'UnpackEffectSuccess': {
                   const count = lanesFor(operation.type).length
                   locals.set(
                     operation.destination.ordinal,
@@ -1954,39 +2054,39 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   break
                 }
-                case 'RunFlow': {
+                case 'RunEffect': {
                   const target = declared.find((candidate) =>
                     Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
                   )
                   if (target === undefined)
-                    throw new RangeError('Backend cannot resolve propagated flow target')
+                    throw new RangeError('Backend cannot resolve propagated effect target')
                   const outcomeValues = yield* callValues(
                     target,
                     operation.arguments.flatMap((argument) => [...readLocal(argument)]),
-                    `flow_run${operation.destination.ordinal}`,
+                    `effect_run${operation.destination.ordinal}`,
                   )
                   locals.set(operation.outcome.ordinal, outcomeValues)
                   const tag = outcomeValues.at(0)
-                  if (tag === undefined) throw new RangeError('Flow outcome lost its tag')
+                  if (tag === undefined) throw new RangeError('Effect outcome lost its tag')
                   const zero = yield* Constant.integerSigned(builder, i32, 0n)
                   const succeeded = yield* FunctionBody.integerCompare(
                     body,
                     'eq',
                     tag,
                     zero,
-                    `flow_run_success${operation.destination.ordinal}`,
+                    `effect_run_success${operation.destination.ordinal}`,
                   )
                   const successBlock = yield* LlvmBlock.make(
                     body,
-                    `flow_run${operation.destination.ordinal}_success`,
+                    `effect_run${operation.destination.ordinal}_success`,
                   )
                   const failureBlock = yield* LlvmBlock.make(
                     body,
-                    `flow_run${operation.destination.ordinal}_failure`,
+                    `effect_run${operation.destination.ordinal}_failure`,
                   )
                   const followingBlock = yield* LlvmBlock.make(
                     body,
-                    `flow_run${operation.destination.ordinal}_following`,
+                    `effect_run${operation.destination.ordinal}_following`,
                   )
                   yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
                   const resultLaneCount = lanesFor(operation.type).length
@@ -2009,14 +2109,14 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       'eq',
                       tag,
                       source,
-                      `flow_tag${operation.destination.ordinal}_${ordinal}`,
+                      `effect_tag${operation.destination.ordinal}_${ordinal}`,
                     )
                     mappedTag = yield* FunctionBody.select(
                       body,
                       matches,
                       yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
                       mappedTag,
-                      `flow_mapped_tag${operation.destination.ordinal}_${ordinal}`,
+                      `effect_mapped_tag${operation.destination.ordinal}_${ordinal}`,
                     )
                   }
                   const propagationLanes = lanesFor(operation.propagationType)
@@ -2028,7 +2128,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   }
                   if (returned.length === 1) {
                     const single = returned.at(0)
-                    if (single === undefined) throw new RangeError('Flow propagation lost its tag')
+                    if (single === undefined)
+                      throw new RangeError('Effect propagation lost its tag')
                     yield* FunctionBody.returnValue(body, single)
                   } else {
                     yield* FunctionBody.returnValue(
@@ -2037,36 +2138,341 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         body,
                         entry.resultType,
                         Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-                        'propagated_flow',
+                        'propagated_effect',
                       ),
                     )
                   }
                   yield* LlvmBlock.setInsertionPoint(body, followingBlock)
                   const storage = mutableStorage.get(operation.destination.ordinal)
                   if (storage === undefined)
-                    throw new RangeError('Flow run destination is not materialized')
+                    throw new RangeError('Effect run destination is not materialized')
                   const loaded: Array<Value.Input> = []
                   for (const [lane, pointer] of storage.entries()) {
                     const callingLane = lanesFor(operation.type).at(lane)
                     if (callingLane === undefined)
-                      throw new RangeError('Flow run destination lost a lane')
+                      throw new RangeError('Effect run destination lost a lane')
                     loaded.push(
                       yield* FunctionBody.load(
                         body,
                         laneType(callingLane),
                         pointer,
-                        `flow_run${operation.destination.ordinal}_${lane}`,
+                        `effect_run${operation.destination.ordinal}_${lane}`,
                       ),
                     )
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(loaded))
                   break
                 }
-                case 'CatchFlow': {
+                case 'RunEffectValue': {
+                  const target = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.runner,
+                      operation.runnerTypeArguments,
+                    ),
+                  )
+                  if (target === undefined)
+                    throw new RangeError('Backend cannot resolve Effect value runner')
+                  const outcomeValues = yield* callValues(
+                    target,
+                    [...readLocal(operation.effect)],
+                    `effect_value_run${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.outcome.ordinal, outcomeValues)
+                  const resultLaneCount = lanesFor(operation.type).length
+                  if (operation.propagationType === undefined) {
+                    locals.set(
+                      operation.destination.ordinal,
+                      Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+                    )
+                    break
+                  }
+                  const tag = outcomeValues.at(0)
+                  if (tag === undefined) throw new RangeError('Effect outcome lost its tag')
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const succeeded = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    tag,
+                    zero,
+                    `effect_value_success${operation.destination.ordinal}`,
+                  )
+                  const successBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_value${operation.destination.ordinal}_success`,
+                  )
+                  const failureBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_value${operation.destination.ordinal}_failure`,
+                  )
+                  const followingBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_value${operation.destination.ordinal}_following`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+                  )
+                  yield* FunctionBody.branch(body, followingBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+                  let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
+                  for (const [ordinal, mapping] of operation.tagMappings.entries()) {
+                    const source = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(mapping.source),
+                    )
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      tag,
+                      source,
+                      `effect_value_tag${operation.destination.ordinal}_${ordinal}`,
+                    )
+                    mappedTag = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                      mappedTag,
+                      `effect_value_mapped_tag${operation.destination.ordinal}_${ordinal}`,
+                    )
+                  }
+                  const propagationLanes = lanesFor(operation.propagationType)
+                  const returned: Array<Value.Input> = [mappedTag, ...outcomeValues.slice(1)]
+                  while (returned.length < operation.propagationLaneCount) {
+                    const lane = propagationLanes.at(returned.length)
+                    if (lane === undefined) break
+                    returned.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                  }
+                  yield* FunctionBody.returnValue(
+                    body,
+                    returned.length === 1
+                      ? (returned.at(0) ?? mappedTag)
+                      : yield* FunctionBody.buildAggregate(
+                          body,
+                          entry.resultType,
+                          Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+                          'propagated_effect_value',
+                        ),
+                  )
+                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  const storage = mutableStorage.get(operation.destination.ordinal)
+                  if (storage === undefined)
+                    throw new RangeError('Effect value run destination is not materialized')
+                  const loaded: Array<Value.Input> = []
+                  for (const [lane, pointer] of storage.entries()) {
+                    const callingLane = lanesFor(operation.type).at(lane)
+                    if (callingLane === undefined)
+                      throw new RangeError('Effect value run destination lost a lane')
+                    loaded.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(callingLane),
+                        pointer,
+                        `effect_value${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
+                case 'RetryEffect': {
+                  const protectedTargetId = operation.protectedTarget
+                  const protectedTarget =
+                    protectedTargetId === undefined
+                      ? undefined
+                      : declared.find((candidate) =>
+                          Mir.matchesInstance(
+                            candidate.fn,
+                            protectedTargetId,
+                            operation.protectedTypeArguments,
+                          ),
+                        )
+                  const protectedRunner = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.protectedRunner,
+                      operation.protectedTypeArguments,
+                    ),
+                  )
+                  if (
+                    (operation.protectedTarget !== undefined && protectedTarget === undefined) ||
+                    protectedRunner === undefined
+                  )
+                    throw new RangeError('Backend cannot resolve Effect retry target or runner')
+                  const environment =
+                    protectedTarget === undefined
+                      ? readLocal(operation.protectedValue)
+                      : yield* callValues(
+                          protectedTarget,
+                          operation.protectedArguments.flatMap((argument) => [
+                            ...readLocal(argument),
+                          ]),
+                          `effect_retry_factory${operation.destination.ordinal}`,
+                        )
+                  locals.set(operation.protectedValue.ordinal, environment)
+                  const counter = yield* FunctionBody.alloca(
+                    body,
+                    i32,
+                    `effect_retry${operation.destination.ordinal}_remaining`,
+                  )
+                  yield* FunctionBody.store(body, readScalar(operation.retries), counter)
+                  const attemptBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_retry${operation.destination.ordinal}_attempt`,
+                  )
+                  const failedBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_retry${operation.destination.ordinal}_failed`,
+                  )
+                  const repeatBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_retry${operation.destination.ordinal}_repeat`,
+                  )
+                  const exhaustedBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_retry${operation.destination.ordinal}_exhausted`,
+                  )
+                  const successBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_retry${operation.destination.ordinal}_success`,
+                  )
+                  const followingBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_retry${operation.destination.ordinal}_following`,
+                  )
+                  yield* FunctionBody.branch(body, attemptBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, attemptBlock)
+                  const outcomeValues = yield* callValues(
+                    protectedRunner,
+                    environment,
+                    `effect_retry_run${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.protectedOutcome.ordinal, outcomeValues)
+                  const tag = outcomeValues.at(0)
+                  if (tag === undefined) throw new RangeError('Effect retry outcome lost its tag')
+                  const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                  const succeeded = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    tag,
+                    zero,
+                    `effect_retry${operation.destination.ordinal}_succeeded`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failedBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
+                  const resultLaneCount = lanesFor(operation.type).length
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+                  )
+                  yield* FunctionBody.branch(body, followingBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, failedBlock)
+                  const remaining = yield* FunctionBody.load(
+                    body,
+                    i32,
+                    counter,
+                    `effect_retry${operation.destination.ordinal}_remaining_value`,
+                  )
+                  const canRetry = yield* FunctionBody.integerCompare(
+                    body,
+                    'sgt',
+                    remaining,
+                    zero,
+                    `effect_retry${operation.destination.ordinal}_can_retry`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, canRetry, repeatBlock, exhaustedBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, repeatBlock)
+                  const one = yield* Constant.integerSigned(builder, i32, 1n)
+                  const decremented = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    remaining,
+                    one,
+                    `effect_retry${operation.destination.ordinal}_decremented`,
+                  )
+                  yield* FunctionBody.store(body, decremented, counter)
+                  yield* FunctionBody.branch(body, attemptBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, exhaustedBlock)
+                  if (operation.propagationType === undefined) {
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    yield* FunctionBody.branch(body, trapBlock)
+                  } else {
+                    let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
+                    for (const [ordinal, mapping] of operation.tagMappings.entries()) {
+                      const source = yield* Constant.integerSigned(
+                        builder,
+                        i32,
+                        BigInt(mapping.source),
+                      )
+                      const matches = yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        tag,
+                        source,
+                        `effect_retry${operation.destination.ordinal}_tag${ordinal}`,
+                      )
+                      mappedTag = yield* FunctionBody.select(
+                        body,
+                        matches,
+                        yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                        mappedTag,
+                        `effect_retry${operation.destination.ordinal}_mapped${ordinal}`,
+                      )
+                    }
+                    const propagationLanes = lanesFor(operation.propagationType)
+                    const returned: Array<Value.Input> = [mappedTag, ...outcomeValues.slice(1)]
+                    while (returned.length < operation.propagationLaneCount) {
+                      const lane = propagationLanes.at(returned.length)
+                      if (lane === undefined) break
+                      returned.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                    }
+                    yield* FunctionBody.returnValue(
+                      body,
+                      returned.length === 1
+                        ? (returned.at(0) ?? mappedTag)
+                        : yield* FunctionBody.buildAggregate(
+                            body,
+                            entry.resultType,
+                            Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+                            'propagated_effect_retry',
+                          ),
+                    )
+                  }
+                  yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+                  const storage = mutableStorage.get(operation.destination.ordinal)
+                  if (storage === undefined)
+                    throw new RangeError('Effect retry destination is not materialized')
+                  const loaded: Array<Value.Input> = []
+                  for (const [lane, storagePointer] of storage.entries()) {
+                    const callingLane = lanesFor(operation.type).at(lane)
+                    if (callingLane === undefined) throw new RangeError('Effect retry lost a lane')
+                    loaded.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(callingLane),
+                        storagePointer,
+                        `effect_retry${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
+                case 'CatchEffect': {
                   const protectedTarget = declared.find((candidate) =>
                     Mir.matchesInstance(
                       candidate.fn,
                       operation.protectedTarget,
+                      operation.protectedTypeArguments,
+                    ),
+                  )
+                  const protectedRunner = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.protectedRunner,
                       operation.protectedTypeArguments,
                     ),
                   )
@@ -2076,35 +2482,52 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       candidate.fn.id.name === operation.handlerTarget.name &&
                       candidate.fn.instance.typeArguments.length === 0,
                   )
-                  if (protectedTarget === undefined || handlerTarget === undefined)
-                    throw new RangeError('Backend cannot resolve flow catch target')
-                  const protectedValues = yield* callValues(
+                  const handlerRunner = declared.find(
+                    (candidate) =>
+                      candidate.fn.id.module === operation.handlerRunner.module &&
+                      candidate.fn.id.name === operation.handlerRunner.name &&
+                      candidate.fn.instance.typeArguments.length === 0,
+                  )
+                  if (
+                    protectedTarget === undefined ||
+                    protectedRunner === undefined ||
+                    handlerTarget === undefined ||
+                    handlerRunner === undefined
+                  )
+                    throw new RangeError('Backend cannot resolve effect catch target')
+                  const protectedEnvironment = yield* callValues(
                     protectedTarget,
                     operation.protectedArguments.flatMap((argument) => [...readLocal(argument)]),
-                    `flow_protected${operation.destination.ordinal}`,
+                    `effect_protected_factory${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.protectedValue.ordinal, protectedEnvironment)
+                  const protectedValues = yield* callValues(
+                    protectedRunner,
+                    protectedEnvironment,
+                    `effect_protected${operation.destination.ordinal}`,
                   )
                   locals.set(operation.protectedOutcome.ordinal, protectedValues)
                   const tag = protectedValues.at(0)
-                  if (tag === undefined) throw new RangeError('Flow outcome lost its tag')
+                  if (tag === undefined) throw new RangeError('Effect outcome lost its tag')
                   const zero = yield* Constant.integerSigned(builder, i32, 0n)
                   const succeeded = yield* FunctionBody.integerCompare(
                     body,
                     'eq',
                     tag,
                     zero,
-                    `flow_success${operation.destination.ordinal}`,
+                    `effect_success${operation.destination.ordinal}`,
                   )
                   const successBlock = yield* LlvmBlock.make(
                     body,
-                    `flow${operation.destination.ordinal}_success`,
+                    `effect${operation.destination.ordinal}_success`,
                   )
                   const failureBlock = yield* LlvmBlock.make(
                     body,
-                    `flow${operation.destination.ordinal}_failure`,
+                    `effect${operation.destination.ordinal}_failure`,
                   )
                   const followingBlock = yield* LlvmBlock.make(
                     body,
-                    `flow${operation.destination.ordinal}_following`,
+                    `effect${operation.destination.ordinal}_following`,
                   )
                   yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
                   const resultLaneCount = lanesFor(operation.type).length
@@ -2118,10 +2541,16 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const handlerParameterCount = handlerTarget.fn.localTypes
                     .slice(0, handlerTarget.fn.parameterCount)
                     .reduce((total, type) => total + lanesFor(type).length, 0)
-                  const handlerValues = yield* callValues(
+                  const handlerEnvironment = yield* callValues(
                     handlerTarget,
                     Object.freeze(protectedValues.slice(1, 1 + handlerParameterCount)),
-                    `flow_handler${operation.destination.ordinal}`,
+                    `effect_handler_factory${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.handlerValue.ordinal, handlerEnvironment)
+                  const handlerValues = yield* callValues(
+                    handlerRunner,
+                    handlerEnvironment,
+                    `effect_handler${operation.destination.ordinal}`,
                   )
                   locals.set(operation.handlerOutcome.ordinal, handlerValues)
                   yield* storeMutable(
@@ -2132,18 +2561,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   yield* LlvmBlock.setInsertionPoint(body, followingBlock)
                   const storage = mutableStorage.get(operation.destination.ordinal)
                   if (storage === undefined)
-                    throw new RangeError('Flow catch destination is not materialized')
+                    throw new RangeError('Effect catch destination is not materialized')
                   const loaded: Array<Value.Input> = []
                   for (const [lane, pointer] of storage.entries()) {
                     const callingLane = lanesFor(operation.type).at(lane)
                     if (callingLane === undefined)
-                      throw new RangeError('Flow catch destination lost a lane')
+                      throw new RangeError('Effect catch destination lost a lane')
                     loaded.push(
                       yield* FunctionBody.load(
                         body,
                         laneType(callingLane),
                         pointer,
-                        `flow${operation.destination.ordinal}_${lane}`,
+                        `effect${operation.destination.ordinal}_${lane}`,
                       ),
                     )
                   }

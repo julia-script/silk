@@ -446,6 +446,36 @@ export interface PipelineExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One outer binding or parameter captured by a lazy effect block. */
+export interface EffectCaptureFact {
+  readonly _tag: 'EffectCapture'
+  readonly reference: BindingDeclarationFact | ParameterFact
+  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly span: SourceSpan.SourceSpan
+}
+
+/** One existing provider retained by an Effect provision wrapper. */
+export interface EffectProviderCaptureFact {
+  readonly _tag: 'EffectProviderCapture'
+  readonly reference: BindingDeclarationFact | ParameterFact
+  readonly capability: Type.Nominal
+  readonly role: string
+  readonly access: 'Shared' | 'Exclusive' | 'Take'
+  readonly span: SourceSpan.SourceSpan
+}
+
+/** One lazy imperative effect block and its capture-derived execution contract. */
+export interface EffectExpressionFact {
+  readonly _tag: 'EffectBlock'
+  readonly site: Hir.EffectSiteId
+  readonly statements: ReadonlyArray<StatementFact>
+  readonly captures: ReadonlyArray<EffectCaptureFact>
+  readonly bindings: ReadonlyArray<BindingDeclarationFact>
+  readonly regions: ReadonlyArray<Hir.RegionId>
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One semantic expression fact at any returned or argument position. */
 export type ExpressionFact =
   | {
@@ -466,6 +496,7 @@ export type ExpressionFact =
   | GroupedExpressionFact
   | OperatorExpressionFact
   | PipelineExpressionFact
+  | EffectExpressionFact
   | {
       readonly _tag: 'Run'
       readonly subject: ExpressionFact
@@ -473,10 +504,33 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
-      readonly _tag: 'FlowCatch'
+      readonly _tag: 'EffectCatch'
       readonly protected: ExpressionFact
       readonly handled?: Type.Nominal
       readonly handler?: DeclarationFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'EffectRetry'
+      readonly protected: ExpressionFact
+      readonly retries: ExpressionFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'EffectProvide'
+      readonly protected: ExpressionFact
+      readonly provider?: EffectProviderCaptureFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'EffectProvideWith'
+      readonly protected: ExpressionFact
+      readonly acquisition: ExpressionFact
+      readonly capability?: Type.Nominal
+      readonly role?: string
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
@@ -619,6 +673,13 @@ export type StatementFact =
       readonly _tag: 'FailStatement'
       readonly expression: ExpressionFact
       readonly failure?: Type.Nominal
+      readonly transfer: 'Copy' | 'Move'
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'DropStatement'
+      readonly expression: ExpressionFact
       readonly region: Hir.RegionId
       readonly syntax: SyntaxTree.Node
     }
@@ -697,6 +758,7 @@ const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'BooleanLiteralExpression',
   'IdentifierExpression',
   'MoveExpression',
+  'EffectExpression',
   'BorrowExpression',
   'MatchExpression',
   'StructLiteralExpression',
@@ -718,6 +780,7 @@ const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is Syntax
   isExpressionNode(element) &&
   (element.kind === 'CallExpression' ||
     element.kind === 'MoveExpression' ||
+    element.kind === 'EffectExpression' ||
     element.kind === 'BorrowExpression' ||
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
@@ -1207,6 +1270,66 @@ interface StructTargetResult {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+const intrinsicStruct = (
+  type: Type.Nominal,
+  syntax: SyntaxTree.Node,
+  token: Token.Token,
+): DeclarationIndex.StructFact => {
+  const ordinal = Type.intrinsicNominalOrdinal(type)
+  const id: DeclarationIndex.DeclarationId = Object.freeze({
+    _tag: 'DeclarationId',
+    sourceId: type.module,
+    ordinal,
+  })
+  const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(type, Type.layout)
+    ? Object.freeze([
+        Object.freeze(['bytes', 'Usize'] as const),
+        Object.freeze(['alignment', 'Usize'] as const),
+      ])
+    : Type.equals(type, Type.invalidAlignment)
+      ? Object.freeze([Object.freeze(['alignment', 'Usize'] as const)])
+      : Object.freeze([])
+  return Object.freeze({
+    _tag: 'StructDeclaration',
+    id,
+    canonical: Object.freeze({
+      _tag: 'Canonical',
+      id: Object.freeze({
+        _tag: 'CanonicalDeclarationId',
+        module: type.module,
+        name: type.name,
+      }),
+    }),
+    visibility: 'Public',
+    typeParameters: Object.freeze([]),
+    name: Object.freeze({ _tag: 'Present', spelling: type.name, token }),
+    fields: Object.freeze(
+      fieldTypes.map(([name, fieldType], fieldOrdinal) =>
+        Object.freeze({
+          _tag: 'StructField' as const,
+          id: Object.freeze({ _tag: 'FieldId' as const, struct: id, ordinal: fieldOrdinal }),
+          state: Object.freeze({
+            _tag: 'Unique' as const,
+            id: Object.freeze({ _tag: 'FieldId' as const, struct: id, ordinal: fieldOrdinal }),
+          }),
+          visibility: 'Public' as const,
+          name: Object.freeze({ _tag: 'Present' as const, spelling: name, token }),
+          declaredType: Object.freeze({
+            _tag: 'Resolved' as const,
+            type: fieldType,
+            spelling: Type.encode(fieldType),
+            token,
+            syntax,
+          }),
+          syntax,
+        }),
+      ),
+    ),
+    dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
+    syntax,
+  })
+}
+
 const resolveStructTarget = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
@@ -1231,6 +1354,18 @@ const resolveStructTarget = (
     (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
   )
   if (resolved.fact._tag === 'Resolved' && Type.isNominal(resolved.fact.type)) {
+    if (Type.isIntrinsicNominal(resolved.fact.type)) {
+      const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
+      if (token !== undefined)
+        return Object.freeze({
+          fact: Object.freeze({
+            _tag: 'Resolved',
+            struct: intrinsicStruct(resolved.fact.type, syntax, token),
+            type: resolved.fact.type,
+          }),
+          diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
+        })
+    }
     const declaration = DeclarationIndex.byCanonical(resolution.index, {
       _tag: 'CanonicalDeclarationId',
       module: resolved.fact.type.module,
@@ -1670,6 +1805,15 @@ const analyzeMatch = (
       arm.guard.type._tag === 'Available' &&
       arm.guard.type.type !== 'Bool',
   )
+  const effectSites = arms.flatMap((arm) =>
+    arm.reachable && arm.result._tag === 'EffectBlock'
+      ? [
+          `${arm.result.site.function.sourceId}:${arm.result.site.function.ordinal}:${arm.result.site.span.start}`,
+        ]
+      : [],
+  )
+  const erasesEffectIdentity = new Set(effectSites).size > 1
+  if (erasesEffectIdentity) diagnostics.push(Diagnostic.effectIdentityErasure(node.span))
   const type =
     members !== undefined &&
     coverage.exhaustive &&
@@ -1678,6 +1822,7 @@ const analyzeMatch = (
     ) &&
     !unavailableReachableResult &&
     !hasInvalidGuard &&
+    !erasesEffectIdentity &&
     joined._tag === 'Joined'
       ? availableExpressionType(joined.type)
       : unavailableExpressionType
@@ -1720,7 +1865,8 @@ const analyzeStructLiteral = (
           struct.typeParameters.map((parameter) => parameter.type),
           nominal.arguments,
         ) ?? new Map())
-  const authorized = nominal !== undefined && nominal.module === source.id
+  const authorized =
+    nominal !== undefined && (nominal.module === source.id || Type.isOutOfMemory(nominal))
   if (nominal !== undefined && !authorized) {
     diagnostics.push(Diagnostic.externalRawStructLiteral(Type.encode(nominal), node.span))
   }
@@ -2401,6 +2547,7 @@ const analyzeCallContract = (
           }),
         }),
         diagnostics: Object.freeze([]),
+        type: undefined,
       })
     }
     for (const [ordinal, argument] of argumentsList.entries()) {
@@ -2570,6 +2717,7 @@ const analyzeCallContract = (
           ...(cause === undefined ? {} : { cause }),
         }),
         diagnostics: Object.freeze([]),
+        type: undefined,
       })
     }
     typeArguments = Object.freeze(Array.from(callTypeArguments.types))
@@ -2687,6 +2835,11 @@ const comparisonI32 = (operation: Hir.BuiltinOperation): BuiltinSignature =>
 const comparisonBool = (operation: Hir.BuiltinOperation): BuiltinSignature =>
   Object.freeze({ operation, parameters: Object.freeze(['Bool', 'Bool'] as const), result: 'Bool' })
 
+const intrinsicUnion = (members: ReadonlyArray<Type.Nominal>): SemanticType => {
+  const normalized = Type.union(members)
+  return normalized._tag === 'Normalized' ? normalized.type : 'Never'
+}
+
 /** The compiler-known built-in actor table. Issue 07's runtime actors extend this shape. */
 const builtinActors: Readonly<
   Record<string, Readonly<Record<string, BuiltinSignature>> | undefined>
@@ -2773,6 +2926,43 @@ const builtinActors: Readonly<
       operation: 'Not' as const,
       parameters: Object.freeze(['Bool'] as const),
       result: 'Bool' as const,
+    }),
+  }),
+  Layout: Object.freeze({
+    make: Object.freeze({
+      operation: 'LayoutMake' as const,
+      parameters: Object.freeze(['Usize', 'Usize'] as const),
+      result: intrinsicUnion([Type.layout, Type.invalidAlignment]),
+    }),
+    repeat: Object.freeze({
+      operation: 'LayoutRepeat' as const,
+      parameters: Object.freeze([Type.layout, 'Usize'] as const),
+      result: intrinsicUnion([Type.layout, Type.layoutOverflow]),
+    }),
+  }),
+  SystemAllocator: Object.freeze({
+    make: Object.freeze({
+      operation: 'SystemAllocatorMake' as const,
+      parameters: Object.freeze([]),
+      result: Type.allocator,
+    }),
+  }),
+  Allocator: Object.freeze({
+    allocate: Object.freeze({
+      operation: 'AllocatorAllocate' as const,
+      parameters: Object.freeze([Type.layout]),
+      result: Type.effect(
+        Type.allocation,
+        Object.freeze([Type.outOfMemory]),
+        'Exclusive',
+        Object.freeze([
+          Object.freeze({
+            capability: Type.allocator,
+            role: 'DefaultRole',
+            access: 'Exclusive' as const,
+          }),
+        ]),
+      ),
     }),
   }),
 })
@@ -3282,8 +3472,8 @@ const analyzePipelineExpression = (
   })
 }
 
-const flowCaptureAccess = (arguments_: ReadonlyArray<ArgumentFact>): Type.Flow['access'] => {
-  const accessOf = (expression: ExpressionFact): Type.Flow['access'] => {
+const effectCaptureAccess = (arguments_: ReadonlyArray<ArgumentFact>): Type.Effect['access'] => {
+  const accessOf = (expression: ExpressionFact): Type.Effect['access'] => {
     if (expression._tag === 'Move') return 'Take'
     if (expression._tag === 'Borrow')
       return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
@@ -3298,7 +3488,7 @@ const flowCaptureAccess = (arguments_: ReadonlyArray<ArgumentFact>): Type.Flow['
       : 'Shared'
 }
 
-const isFlowCatchTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
+const isEffectCatchTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
   const identifiers = node.children.filter(
     (element): element is Token.Token =>
       SyntaxTree.isToken(element) && element.kind === 'Identifier',
@@ -3309,12 +3499,375 @@ const isFlowCatchTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node)
     directToken(node, 'Dot') !== undefined &&
     qualifier !== undefined &&
     member !== undefined &&
-    spelling(source, qualifier) === 'Flow' &&
+    spelling(source, qualifier) === 'Effect' &&
     spelling(source, member) === 'catch'
   )
 }
 
-const analyzeFlowCatch = (
+const isEffectRetryTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
+  const identifiers = node.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const qualifier = identifiers.at(0)
+  const member = identifiers.at(1)
+  return (
+    directToken(node, 'Dot') !== undefined &&
+    qualifier !== undefined &&
+    member !== undefined &&
+    spelling(source, qualifier) === 'Effect' &&
+    spelling(source, member) === 'retry'
+  )
+}
+
+const isEffectProvideTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
+  const identifiers = node.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const qualifier = identifiers.at(0)
+  const member = identifiers.at(1)
+  return (
+    directToken(node, 'Dot') !== undefined &&
+    qualifier !== undefined &&
+    member !== undefined &&
+    spelling(source, member) === 'provide'
+  )
+}
+
+const isEffectProvideWithTarget = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): boolean => {
+  const identifiers = node.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const qualifier = identifiers.at(0)
+  const member = identifiers.at(1)
+  return (
+    directToken(node, 'Dot') !== undefined &&
+    qualifier !== undefined &&
+    member !== undefined &&
+    spelling(source, member) === 'provideWith'
+  )
+}
+
+const analyzeEffectProvide = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const pipelined = node.kind === 'PipelineExpression'
+  const target = pipelined ? (SyntaxTree.directNode(node, 'PipelineTarget') ?? node) : node
+  const identifiers = target.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const qualifier = identifiers.at(0)
+  const capabilityLookup =
+    qualifier === undefined
+      ? undefined
+      : NameResolution.lookup(resolution.scope, resolution.index, spelling(source, qualifier))
+  const capabilityDeclaration =
+    capabilityLookup?._tag === 'Resolved' &&
+    capabilityLookup.declaration._tag === 'StructDeclaration' &&
+    capabilityLookup.declaration.canonical._tag === 'Canonical'
+      ? capabilityLookup.declaration
+      : undefined
+  const capability =
+    capabilityDeclaration === undefined
+      ? undefined
+      : Type.nominal(
+          capabilityDeclaration.canonical._tag === 'Canonical'
+            ? capabilityDeclaration.canonical.id.module
+            : source.id,
+          capabilityDeclaration.name._tag === 'Present'
+            ? capabilityDeclaration.name.spelling
+            : qualifier === undefined
+              ? '?'
+              : spelling(source, qualifier),
+        )
+  const list = SyntaxTree.directNode(target, 'ArgumentList')
+  const nodes =
+    list?.children.filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element)) ?? []
+  const roleNode = nodes.find((candidate) => candidate.kind === 'RoleExpression')
+  const argumentNodes = nodes.filter(isRecursiveArgumentNode)
+  const protectedNode = pipelined ? node.children.find(isExpressionNode) : argumentNodes.at(0)
+  const providerNode = argumentNodes.at(pipelined ? 0 : 1)
+  const protectedResult =
+    protectedNode === undefined
+      ? undefined
+      : analyzeExpression(source, protectedNode, declarations, declaration, scope, resolution)
+  const effect =
+    protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
+      ? protectedResult.type
+      : undefined
+  const roleToken = roleNode?.children.find(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const explicitRole = roleToken === undefined ? undefined : spelling(source, roleToken)
+  const diagnostics: Array<Diagnostic.Diagnostic> = [...(protectedResult?.diagnostics ?? [])]
+  let valid = true
+  const reject = (detail: string, span: SourceSpan.SourceSpan = node.span): void => {
+    diagnostics.push(Diagnostic.invalidEffectProvision(detail, span))
+    valid = false
+  }
+  if (argumentNodes.length !== (pipelined ? 1 : 2))
+    reject('provide requires one Effect and one explicit provider borrow')
+  if (effect === undefined) reject('the protected argument is not an Effect', protectedNode?.span)
+  if (capability === undefined)
+    reject('the capability qualifier must name one concrete nominal type', qualifier?.span)
+
+  const providerSubject =
+    providerNode?.kind === 'BorrowExpression' || providerNode?.kind === 'MoveExpression'
+      ? providerNode.children.find(
+          (element): element is SyntaxTree.Node =>
+            SyntaxTree.isNode(element) && element.kind === 'IdentifierExpression',
+        )
+      : undefined
+  const providerResult =
+    providerSubject === undefined ? undefined : analyzeIdentifier(source, providerSubject, scope)
+  diagnostics.push(...(providerResult?.diagnostics ?? []))
+  const providerReference =
+    providerResult?.fact._tag === 'Identifier'
+      ? providerResult.fact.reference._tag === 'ResolvedBinding'
+        ? providerResult.fact.reference.binding
+        : providerResult.fact.reference._tag === 'Resolved'
+          ? providerResult.fact.reference.parameter
+          : undefined
+      : undefined
+  const providerAccess =
+    providerNode?.kind === 'MoveExpression'
+      ? ('Take' as const)
+      : providerNode?.kind === 'BorrowExpression' &&
+          SyntaxTree.directToken(providerNode, 'MutKeyword') !== undefined
+        ? ('Exclusive' as const)
+        : ('Shared' as const)
+  if (
+    (providerNode?.kind !== 'BorrowExpression' && providerNode?.kind !== 'MoveExpression') ||
+    providerReference === undefined
+  )
+    reject('the provider must be a direct &value, &mut value, or move value', providerNode?.span)
+  if (
+    providerAccess === 'Exclusive' &&
+    (providerReference?._tag !== 'BindingFact' || providerReference.mutability !== 'Mutable')
+  )
+    reject('exclusive provision requires a mutable local binding', providerNode?.span)
+  if (
+    capability !== undefined &&
+    providerResult?.type !== undefined &&
+    !Type.equals(providerResult.type, capability)
+  )
+    reject(
+      `provider type ${Type.encode(providerResult.type)} does not match ${Type.encode(capability)}`,
+      providerNode?.span,
+    )
+  const candidates =
+    effect?.requirements.filter(
+      (requirement) => capability !== undefined && Type.equals(requirement.capability, capability),
+    ) ?? []
+  const selected =
+    explicitRole === undefined
+      ? candidates.length === 1
+        ? candidates[0]
+        : undefined
+      : candidates.find((candidate) => candidate.role === explicitRole)
+  if (selected === undefined) {
+    reject(
+      candidates.length > 1 && explicitRole === undefined
+        ? 'the capability has multiple roles; select one with @Role'
+        : 'the Effect does not require the selected capability role',
+      roleNode?.span ?? node.span,
+    )
+  } else if (selected.access === 'Exclusive' && providerAccess === 'Shared') {
+    reject('the selected requirement needs an exclusive provider', providerNode?.span)
+  }
+  const requirements =
+    effect === undefined || selected === undefined
+      ? []
+      : effect.requirements.filter((requirement) => requirement !== selected)
+  const access =
+    effect?.access === 'Take' || providerAccess === 'Take'
+      ? ('Take' as const)
+      : effect?.access === 'Exclusive' || providerAccess === 'Exclusive'
+        ? ('Exclusive' as const)
+        : ('Shared' as const)
+  const resultType =
+    valid && effect !== undefined
+      ? availableExpressionType(Type.effect(effect.success, effect.failures, access, requirements))
+      : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'EffectProvide',
+      protected: protectedResult?.fact ?? unavailableExpression(node),
+      ...(providerReference === undefined || capability === undefined || selected === undefined
+        ? {}
+        : {
+            provider: Object.freeze({
+              _tag: 'EffectProviderCapture' as const,
+              reference: providerReference,
+              capability,
+              role: selected.role,
+              access: providerAccess,
+              span: providerNode?.span ?? node.span,
+            }),
+          }),
+      type: resultType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: resultType._tag === 'Available' ? resultType.type : undefined,
+  })
+}
+
+const analyzeEffectProvideWith = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const pipelined = node.kind === 'PipelineExpression'
+  const target = pipelined ? (SyntaxTree.directNode(node, 'PipelineTarget') ?? node) : node
+  const identifiers = target.children.filter(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const qualifier = identifiers.at(0)
+  const capabilityLookup =
+    qualifier === undefined
+      ? undefined
+      : NameResolution.lookup(resolution.scope, resolution.index, spelling(source, qualifier))
+  const capabilityDeclaration =
+    capabilityLookup?._tag === 'Resolved' &&
+    capabilityLookup.declaration._tag === 'StructDeclaration' &&
+    capabilityLookup.declaration.canonical._tag === 'Canonical'
+      ? capabilityLookup.declaration
+      : undefined
+  const capability =
+    capabilityDeclaration?.canonical._tag === 'Canonical'
+      ? Type.nominal(
+          capabilityDeclaration.canonical.id.module,
+          capabilityDeclaration.canonical.id.name,
+        )
+      : undefined
+  const list = SyntaxTree.directNode(target, 'ArgumentList')
+  const nodes =
+    list?.children.filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element)) ?? []
+  const roleNode = nodes.find((candidate) => candidate.kind === 'RoleExpression')
+  const argumentNodes = nodes.filter(isRecursiveArgumentNode)
+  const protectedNode = pipelined ? node.children.find(isExpressionNode) : argumentNodes.at(0)
+  const acquisitionNode = argumentNodes.at(pipelined ? 0 : 1)
+  const protectedResult =
+    protectedNode === undefined
+      ? undefined
+      : analyzeExpression(source, protectedNode, declarations, declaration, scope, resolution)
+  const acquisitionResult =
+    acquisitionNode === undefined
+      ? undefined
+      : analyzeExpression(source, acquisitionNode, declarations, declaration, scope, resolution)
+  const protectedEffect =
+    protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
+      ? protectedResult.type
+      : undefined
+  const acquisitionEffect =
+    acquisitionResult?.type !== undefined && Type.isEffect(acquisitionResult.type)
+      ? acquisitionResult.type
+      : undefined
+  const roleToken = roleNode?.children.find(
+    (element): element is Token.Token =>
+      SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  )
+  const explicitRole = roleToken === undefined ? undefined : spelling(source, roleToken)
+  const diagnostics: Array<Diagnostic.Diagnostic> = [
+    ...(protectedResult?.diagnostics ?? []),
+    ...(acquisitionResult?.diagnostics ?? []),
+  ]
+  let valid = true
+  const reject = (detail: string, span: SourceSpan.SourceSpan = node.span): void => {
+    diagnostics.push(Diagnostic.invalidEffectProvision(detail, span))
+    valid = false
+  }
+  if (argumentNodes.length !== (pipelined ? 1 : 2))
+    reject('provideWith requires one protected Effect and one acquisition Effect')
+  if (protectedEffect === undefined)
+    reject('the protected argument is not an Effect', protectedNode?.span)
+  if (acquisitionEffect === undefined)
+    reject('the acquisition argument is not an Effect', acquisitionNode?.span)
+  if (capability === undefined)
+    reject('the capability qualifier must name one concrete nominal type', qualifier?.span)
+  if (
+    capability !== undefined &&
+    acquisitionEffect !== undefined &&
+    !Type.equals(acquisitionEffect.success, capability)
+  )
+    reject(
+      `acquisition succeeds with ${Type.encode(acquisitionEffect.success)}, not ${Type.encode(capability)}`,
+      acquisitionNode?.span,
+    )
+  const candidates =
+    protectedEffect?.requirements.filter(
+      (requirement) => capability !== undefined && Type.equals(requirement.capability, capability),
+    ) ?? []
+  const selected =
+    explicitRole === undefined
+      ? candidates.length === 1
+        ? candidates[0]
+        : undefined
+      : candidates.find((candidate) => candidate.role === explicitRole)
+  if (selected === undefined)
+    reject(
+      candidates.length > 1 && explicitRole === undefined
+        ? 'the capability has multiple roles; select one with @Role'
+        : 'the Effect does not require the selected capability role',
+      roleNode?.span ?? node.span,
+    )
+  const access =
+    protectedEffect?.access === 'Take' || acquisitionEffect?.access === 'Take'
+      ? ('Take' as const)
+      : protectedEffect?.access === 'Exclusive' || acquisitionEffect?.access === 'Exclusive'
+        ? ('Exclusive' as const)
+        : ('Shared' as const)
+  const resultType =
+    valid &&
+    protectedEffect !== undefined &&
+    acquisitionEffect !== undefined &&
+    capability !== undefined &&
+    selected !== undefined
+      ? availableExpressionType(
+          Type.effect(
+            protectedEffect.success,
+            [...protectedEffect.failures, ...acquisitionEffect.failures],
+            access,
+            [
+              ...protectedEffect.requirements.filter((requirement) => requirement !== selected),
+              ...acquisitionEffect.requirements,
+            ],
+          ),
+        )
+      : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'EffectProvideWith',
+      protected: protectedResult?.fact ?? unavailableExpression(node),
+      acquisition: acquisitionResult?.fact ?? unavailableExpression(node),
+      ...(capability === undefined ? {} : { capability }),
+      ...(selected === undefined ? {} : { role: selected.role }),
+      type: resultType,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: resultType._tag === 'Available' ? resultType.type : undefined,
+  })
+}
+
+const analyzeEffectCatch = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
@@ -3356,8 +3909,8 @@ const analyzeFlowCatch = (
     handlerLookup?._tag === 'Resolved' && handlerLookup.declaration._tag === 'FunctionDeclaration'
       ? handlerLookup.declaration
       : undefined
-  const flow =
-    protectedResult?.type !== undefined && Type.isFlow(protectedResult.type)
+  const effect =
+    protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
       ? protectedResult.type
       : undefined
   const diagnostics: Array<Diagnostic.Diagnostic> = [
@@ -3366,20 +3919,20 @@ const analyzeFlowCatch = (
   ]
   let valid = true
   const reject = (detail: string, span: SourceSpan.SourceSpan = node.span): void => {
-    diagnostics.push(Diagnostic.invalidFlowHandler(detail, span))
+    diagnostics.push(Diagnostic.invalidEffectHandler(detail, span))
     valid = false
   }
   if (typeArguments.types?.length !== 1 || handled === undefined)
     reject('catch requires one concrete nominal type argument')
   if (arguments_.length !== (pipelined ? 1 : 2))
-    reject('catch requires a protected flow and one handler function')
-  if (flow === undefined) reject('the protected argument is not a flow', protectedNode?.span)
+    reject('catch requires a protected effect and one handler function')
+  if (effect === undefined) reject('the protected argument is not a effect', protectedNode?.span)
   if (
     handler === undefined ||
-    handler.functionKind !== 'Flow' ||
+    handler.functionKind !== 'Effect' ||
     handler.canonical._tag !== 'Canonical'
   )
-    reject('the handler must name one statically known flow function', handlerNode?.span)
+    reject('the handler must name one statically known effect function', handlerNode?.span)
   if (handler?.parameters.length !== 1) reject('the handler must accept exactly one failure')
   const handlerParameter = handler?.parameters.at(0)?.declaredType
   if (
@@ -3388,32 +3941,36 @@ const analyzeFlowCatch = (
   )
     reject('the handler parameter must exactly match the caught failure')
   if (
-    flow !== undefined &&
+    effect !== undefined &&
     handled !== undefined &&
-    !flow.failures.some((failure) => Type.equals(failure, handled))
+    !effect.failures.some((failure) => Type.equals(failure, handled))
   )
     reject('the caught failure is absent from the protected row')
   if (
-    flow !== undefined &&
+    effect !== undefined &&
     handler?.returnType._tag === 'Resolved' &&
-    !Type.equals(flow.success, handler.returnType.type)
+    !Type.equals(effect.success, handler.returnType.type)
   )
-    reject('the handler success type must match the protected flow')
+    reject('the handler success type must match the protected effect')
   const residual =
-    flow === undefined || handled === undefined
+    effect === undefined || handled === undefined
       ? []
-      : flow.failures.filter((failure) => !Type.equals(failure, handled))
+      : effect.failures.filter((failure) => !Type.equals(failure, handled))
   const failures = [
     ...residual,
-    ...(handler?.functionKind === 'Flow' ? handler.failureRow.failures : []),
+    ...(handler?.functionKind === 'Effect' ? handler.failureRow.failures : []),
+  ]
+  const requirements = [
+    ...(effect?.requirements ?? []),
+    ...(handler?.functionKind === 'Effect' ? handler.requirementRow.requirements : []),
   ]
   const resultType =
-    valid && flow !== undefined
-      ? availableExpressionType(Type.flow(flow.success, failures, flow.access))
+    valid && effect !== undefined
+      ? availableExpressionType(Type.effect(effect.success, failures, effect.access, requirements))
       : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
-      _tag: 'FlowCatch',
+      _tag: 'EffectCatch',
       protected: protectedResult?.fact ?? unavailableExpression(node),
       ...(handled === undefined ? {} : { handled }),
       ...(handler === undefined ? {} : { handler }),
@@ -3423,6 +3980,206 @@ const analyzeFlowCatch = (
     diagnostics: Object.freeze(diagnostics),
     type: resultType._tag === 'Available' ? resultType.type : undefined,
   })
+}
+
+const analyzeEffectRetry = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const pipelined = node.kind === 'PipelineExpression'
+  const target = pipelined ? (SyntaxTree.directNode(node, 'PipelineTarget') ?? node) : node
+  const list = SyntaxTree.directNode(target, 'ArgumentList')
+  const arguments_ =
+    list?.children.filter((element): element is SyntaxTree.Node =>
+      isRecursiveArgumentNode(element),
+    ) ?? []
+  const protectedNode = pipelined ? node.children.find(isExpressionNode) : arguments_.at(0)
+  const retriesNode = arguments_.at(pipelined ? 0 : 1)
+  const protectedResult =
+    protectedNode === undefined
+      ? undefined
+      : analyzeExpression(source, protectedNode, declarations, declaration, scope, resolution)
+  const retriesResult =
+    retriesNode === undefined
+      ? undefined
+      : analyzeExpression(source, retriesNode, declarations, declaration, scope, resolution, 'I32')
+  const effect =
+    protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
+      ? protectedResult.type
+      : undefined
+  const diagnostics: Array<Diagnostic.Diagnostic> = [
+    ...(protectedResult?.diagnostics ?? []),
+    ...(retriesResult?.diagnostics ?? []),
+  ]
+  let valid = true
+  const reject = (detail: string, span: SourceSpan.SourceSpan = node.span): void => {
+    diagnostics.push(Diagnostic.invalidEffectRetry(detail, span))
+    valid = false
+  }
+  if (arguments_.length !== (pipelined ? 1 : 2))
+    reject('retry requires one Effect and one I32 retry count')
+  if (effect === undefined) reject('the protected argument is not an Effect', protectedNode?.span)
+  if (effect?.access === 'Take') reject('a take-once Effect cannot be retried', protectedNode?.span)
+  if (retriesResult?.type !== 'I32') reject('the retry count must be I32', retriesNode?.span)
+  const type =
+    valid && effect !== undefined ? availableExpressionType(effect) : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'EffectRetry',
+      protected: protectedResult?.fact ?? unavailableExpression(node),
+      retries: retriesResult?.fact ?? unavailableExpression(node),
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
+const effectCaptureFacts = (
+  statements: ReadonlyArray<StatementFact>,
+  firstLocalBinding: number,
+): ReadonlyArray<EffectCaptureFact> => {
+  const captures = new Map<string, EffectCaptureFact>()
+  const rank = (access: EffectCaptureFact['access']): number =>
+    access === 'Take' ? 3 : access === 'Exclusive' ? 2 : access === 'Shared' ? 1 : 0
+  const recordReference = (
+    reference: BindingDeclarationFact | ParameterFact | undefined,
+    requested: EffectCaptureFact['access'],
+    span: SourceSpan.SourceSpan,
+    copy: boolean,
+  ): void => {
+    if (reference === undefined) return
+    if (reference._tag === 'BindingFact' && reference.id.ordinal >= firstLocalBinding) return
+    const key = `${reference._tag}:${reference.id.ordinal}`
+    const access = requested === 'Shared' && copy ? 'Copy' : requested
+    const prior = captures.get(key)
+    if (prior === undefined || rank(access) > rank(prior.access)) {
+      captures.set(key, Object.freeze({ _tag: 'EffectCapture', reference, access, span }))
+    }
+  }
+  const record = (fact: IdentifierExpressionFact, requested: EffectCaptureFact['access']): void => {
+    const reference =
+      fact.reference._tag === 'ResolvedBinding'
+        ? fact.reference.binding
+        : fact.reference._tag === 'Resolved'
+          ? fact.reference.parameter
+          : undefined
+    recordReference(
+      reference,
+      requested,
+      fact.syntax.span,
+      fact.type._tag === 'Available' && typeof fact.type.type === 'string',
+    )
+  }
+  const expression = (
+    fact: ExpressionFact,
+    requested: EffectCaptureFact['access'] = 'Shared',
+  ): void => {
+    switch (fact._tag) {
+      case 'Identifier':
+        record(fact, requested)
+        return
+      case 'Move':
+        expression(fact.subject, 'Take')
+        return
+      case 'Borrow':
+        expression(fact.subject, fact.access === 'Exclusive' ? 'Exclusive' : 'Shared')
+        return
+      case 'Grouped':
+      case 'FieldProjection':
+        expression(fact._tag === 'Grouped' ? fact.expression : fact.subject, requested)
+        return
+      case 'IndexProjection':
+        expression(fact.subject, requested)
+        expression(fact.index)
+        return
+      case 'StructLiteral':
+        for (const item of fact.initializers) expression(item.expression)
+        return
+      case 'ArrayLiteral':
+        for (const item of fact.elements) expression(item.expression)
+        return
+      case 'Match':
+        expression(fact.scrutinee, requested)
+        for (const arm of fact.arms) {
+          if (arm.guard !== undefined) expression(arm.guard)
+          expression(arm.result)
+        }
+        return
+      case 'Operator':
+      case 'Pipeline':
+      case 'Call':
+        for (const argument of fact.arguments) expression(argument.expression)
+        return
+      case 'Run':
+        expression(fact.subject)
+        return
+      case 'EffectCatch':
+        expression(fact.protected)
+        return
+      case 'EffectRetry':
+        expression(fact.protected)
+        expression(fact.retries)
+        return
+      case 'EffectProvide':
+        expression(fact.protected)
+        recordReference(
+          fact.provider?.reference,
+          fact.provider?.access ?? 'Shared',
+          fact.syntax.span,
+          false,
+        )
+        return
+      case 'EffectBlock':
+        return
+      case 'Integer':
+      case 'Boolean':
+        return
+    }
+  }
+  const visit = (items: ReadonlyArray<StatementFact>): void => {
+    for (const statement of items) {
+      switch (statement._tag) {
+        case 'BindStatement':
+          expression(statement.binding.initializer)
+          break
+        case 'IfStatement':
+          expression(statement.condition)
+          visit(statement.taken)
+          visit(statement.otherwise)
+          break
+        case 'WriteStatement':
+          expression(statement.destination, 'Exclusive')
+          expression(statement.value)
+          break
+        case 'WhileStatement':
+          expression(statement.condition)
+          visit(statement.body)
+          break
+        case 'ReturnStatement':
+        case 'FailStatement':
+        case 'DropStatement':
+          expression(statement.expression)
+          break
+        case 'BreakStatement':
+        case 'ContinueStatement':
+          break
+      }
+    }
+  }
+  visit(statements)
+  return Object.freeze(
+    [...captures.values()].sort(
+      (left, right) =>
+        left.reference.id.ordinal - right.reference.id.ordinal ||
+        left.span.start - right.span.start,
+    ),
+  )
 }
 
 function analyzeExpression(
@@ -3435,6 +4192,87 @@ function analyzeExpression(
   expected?: SemanticType,
   borrowAllowed = false,
 ): ExpressionResult | undefined {
+  if (node.kind === 'EffectExpression') {
+    const block = SyntaxTree.directNode(node, 'Block')
+    if (block === undefined)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'EffectBlock',
+          site: Object.freeze({
+            _tag: 'EffectSiteId',
+            function: declaration.id,
+            span: node.span,
+          }),
+          statements: Object.freeze([]),
+          captures: Object.freeze([]),
+          bindings: Object.freeze([]),
+          regions: Object.freeze([]),
+          type: unavailableExpressionType,
+          syntax: node,
+        }),
+        diagnostics: Object.freeze([]),
+        type: undefined,
+      })
+    const firstLocalBinding =
+      Math.max(-1, ...scope.bindings.map((binding) => binding.id.ordinal)) + 1
+    const nested: BodyContext = {
+      source,
+      declaration,
+      declarations,
+      bindings: [],
+      diagnostics: [],
+      regions: [],
+      loops: [],
+      resolution,
+      bindingBase: firstLocalBinding,
+      regionBase: 1_000_000 + node.span.start * 100,
+      effectBlock: true,
+    }
+    const statements = analyzeStatements(nested, block, scope)
+    const returned: Array<ExpressionFact> = []
+    const failures: Array<Type.Nominal> = []
+    const collectTerminals = (items: ReadonlyArray<StatementFact>): void => {
+      for (const statement of items) {
+        if (statement._tag === 'ReturnStatement') returned.push(statement.expression)
+        else if (statement._tag === 'FailStatement' && statement.failure !== undefined)
+          failures.push(statement.failure)
+        else if (statement._tag === 'IfStatement') {
+          collectTerminals(statement.taken)
+          collectTerminals(statement.otherwise)
+        } else if (statement._tag === 'WhileStatement') collectTerminals(statement.body)
+      }
+    }
+    collectTerminals(statements)
+    const success = returned.at(-1)?.type
+    const captures = effectCaptureFacts(statements, firstLocalBinding)
+    const access = captures.some((capture) => capture.access === 'Take')
+      ? 'Take'
+      : captures.some((capture) => capture.access === 'Exclusive')
+        ? 'Exclusive'
+        : 'Shared'
+    const type =
+      success?._tag === 'Available'
+        ? availableExpressionType(Type.effect(success.type, failures, access))
+        : unavailableExpressionType
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'EffectBlock',
+        site: Object.freeze({
+          _tag: 'EffectSiteId',
+          function: declaration.id,
+          span: node.span,
+        }),
+        statements,
+        captures,
+        bindings: Object.freeze(nested.bindings),
+        regions: Object.freeze(nested.regions),
+        type,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(nested.diagnostics),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
   if (node.kind === 'BooleanLiteralExpression') {
     const token = directToken(node, 'TrueKeyword') ?? directToken(node, 'FalseKeyword')
     const type = token === undefined ? unavailableExpressionType : availableBoolExpressionType
@@ -3477,21 +4315,46 @@ function analyzeExpression(
       subjectNode === undefined
         ? undefined
         : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
-    if (subject === undefined) throw new RangeError('Run expression requires one flow subject')
-    const flow = subject.type !== undefined && Type.isFlow(subject.type) ? subject.type : undefined
+    if (subject === undefined) throw new RangeError('Run expression requires one effect subject')
+    const effect =
+      subject.type !== undefined && Type.isEffect(subject.type) ? subject.type : undefined
     const type =
-      flow !== undefined ? availableExpressionType(flow.success) : unavailableExpressionType
+      effect !== undefined ? availableExpressionType(effect.success) : unavailableExpressionType
     const allowed =
-      declaration.functionKind === 'Flow' ? declaration.failureRow.failures : Object.freeze([])
+      declaration.functionKind === 'Effect' ? declaration.failureRow.failures : Object.freeze([])
     const unhandled =
-      flow?.failures.filter(
+      effect?.failures.filter(
         (failure) => !allowed.some((candidate) => Type.equals(candidate, failure)),
       ) ?? []
+    const allowedRequirements =
+      declaration.functionKind === 'Effect'
+        ? declaration.requirementRow.requirements
+        : Object.freeze<Type.Requirement[]>([])
+    const unsatisfiedRequirements =
+      effect?.requirements.filter(
+        (requirement) =>
+          !allowedRequirements.some(
+            (allowed) =>
+              Type.equals(allowed.capability, requirement.capability) &&
+              allowed.role === requirement.role &&
+              (allowed.access === 'Exclusive' || allowed.access === requirement.access),
+          ),
+      ) ?? []
     const diagnostics = [...subject.diagnostics]
-    if (flow === undefined && subject.type !== undefined)
-      diagnostics.push(Diagnostic.runNonFlow(Type.encode(subject.type), node.span))
+    if (effect === undefined && subject.type !== undefined)
+      diagnostics.push(Diagnostic.runNonEffect(Type.encode(subject.type), node.span))
     if (unhandled.length > 0)
-      diagnostics.push(Diagnostic.unhandledFlowFailures(unhandled.map(Type.encode), node.span))
+      diagnostics.push(Diagnostic.unhandledEffectFailures(unhandled.map(Type.encode), node.span))
+    if (unsatisfiedRequirements.length > 0)
+      diagnostics.push(
+        Diagnostic.unhandledEffectRequirements(
+          unsatisfiedRequirements.map(
+            (requirement) =>
+              `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${Type.encode(requirement.capability)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+          ),
+          node.span,
+        ),
+      )
     return Object.freeze({
       fact: Object.freeze({ _tag: 'Run', subject: subject.fact, type, syntax: node }),
       diagnostics: Object.freeze(diagnostics),
@@ -3567,15 +4430,27 @@ function analyzeExpression(
 
   if (node.kind === 'PipelineExpression') {
     const target = SyntaxTree.directNode(node, 'PipelineTarget')
-    if (target !== undefined && isFlowCatchTarget(source, target))
-      return analyzeFlowCatch(source, node, declarations, declaration, scope, resolution)
+    if (target !== undefined && isEffectCatchTarget(source, target))
+      return analyzeEffectCatch(source, node, declarations, declaration, scope, resolution)
+    if (target !== undefined && isEffectRetryTarget(source, target))
+      return analyzeEffectRetry(source, node, declarations, declaration, scope, resolution)
+    if (target !== undefined && isEffectProvideWithTarget(source, target))
+      return analyzeEffectProvideWith(source, node, declarations, declaration, scope, resolution)
+    if (target !== undefined && isEffectProvideTarget(source, target))
+      return analyzeEffectProvide(source, node, declarations, declaration, scope, resolution)
     return analyzePipelineExpression(source, node, declarations, declaration, scope, resolution)
   }
 
   if (node.kind !== 'CallExpression') return undefined
 
-  if (isFlowCatchTarget(source, node))
-    return analyzeFlowCatch(source, node, declarations, declaration, scope, resolution)
+  if (isEffectCatchTarget(source, node))
+    return analyzeEffectCatch(source, node, declarations, declaration, scope, resolution)
+  if (isEffectRetryTarget(source, node))
+    return analyzeEffectRetry(source, node, declarations, declaration, scope, resolution)
+  if (isEffectProvideWithTarget(source, node))
+    return analyzeEffectProvideWith(source, node, declarations, declaration, scope, resolution)
+  if (isEffectProvideTarget(source, node))
+    return analyzeEffectProvide(source, node, declarations, declaration, scope, resolution)
 
   const callTypeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
   const argumentsResult = analyzeArguments(
@@ -3763,14 +4638,20 @@ function analyzeExpression(
                 ? callContract.fact.substitution
                 : new Map<string, SemanticType>()
             const success = Type.substitute(reference.declaration.returnType.type, substitution)
-            if (reference.declaration.functionKind !== 'Flow') return success
-            return Type.flow(
+            if (reference.declaration.functionKind !== 'Effect') return success
+            return Type.effect(
               success,
               reference.declaration.failureRow.failures.flatMap((failure) => {
                 const specialized = Type.substitute(failure, substitution)
                 return Type.isNominal(specialized) ? [specialized] : []
               }),
-              flowCaptureAccess(argumentsResult.facts),
+              effectCaptureAccess(argumentsResult.facts),
+              reference.declaration.requirementRow.requirements.flatMap((requirement) => {
+                const capability = Type.substitute(requirement.capability, substitution)
+                return Type.isNominal(capability)
+                  ? [Object.freeze({ ...requirement, capability })]
+                  : []
+              }),
             )
           })(),
         )
@@ -3821,14 +4702,20 @@ const finishDeclarationCall = (
                 ? callContract.fact.substitution
                 : new Map<string, SemanticType>()
             const success = Type.substitute(reference.declaration.returnType.type, substitution)
-            if (reference.declaration.functionKind !== 'Flow') return success
-            return Type.flow(
+            if (reference.declaration.functionKind !== 'Effect') return success
+            return Type.effect(
               success,
               reference.declaration.failureRow.failures.flatMap((failure) => {
                 const specialized = Type.substitute(failure, substitution)
                 return Type.isNominal(specialized) ? [specialized] : []
               }),
-              flowCaptureAccess(argumentsResult.facts),
+              effectCaptureAccess(argumentsResult.facts),
+              reference.declaration.requirementRow.requirements.flatMap((requirement) => {
+                const capability = Type.substitute(requirement.capability, substitution)
+                return Type.isNominal(capability)
+                  ? [Object.freeze({ ...requirement, capability })]
+                  : []
+              }),
             )
           })(),
         )
@@ -3915,6 +4802,9 @@ interface BodyContext {
   readonly regions: Array<Hir.RegionId>
   readonly loops: Array<Hir.LoopId>
   readonly resolution: ResolutionContext
+  readonly bindingBase?: number
+  readonly regionBase?: number
+  readonly effectBlock?: true
 }
 
 interface ResolutionContext {
@@ -3935,7 +4825,7 @@ const analyzeStatements = (
     const region = Object.freeze({
       _tag: 'HirRegion' as const,
       function: context.declaration.id,
-      ordinal: context.regions.length,
+      ordinal: (context.regionBase ?? 0) + context.regions.length,
     })
     context.regions.push(region)
     return region
@@ -3976,9 +4866,9 @@ const analyzeStatements = (
       if (
         SyntaxTree.directToken(element, 'MutKeyword') !== undefined &&
         initializer.type !== undefined &&
-        Type.isFlow(initializer.type)
+        Type.isEffect(initializer.type)
       )
-        context.diagnostics.push(Diagnostic.mutableFlowRecipe(element.span))
+        context.diagnostics.push(Diagnostic.mutableEffectRecipe(element.span))
 
       const name = bindingName(context.source, element)
       const binding: BindingDeclarationFact = Object.freeze({
@@ -3986,7 +4876,7 @@ const analyzeStatements = (
         id: Object.freeze({
           _tag: 'HirBinding',
           function: context.declaration.id,
-          ordinal: context.bindings.length,
+          ordinal: (context.bindingBase ?? 0) + context.bindings.length,
         }),
         name,
         mutability:
@@ -4222,7 +5112,7 @@ const analyzeStatements = (
         context.declaration,
         scope,
         context.resolution,
-        context.declaration.returnType._tag === 'Resolved'
+        !context.effectBlock && context.declaration.returnType._tag === 'Resolved'
           ? context.declaration.returnType.type
           : undefined,
       )
@@ -4230,9 +5120,8 @@ const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
       }
       context.diagnostics.push(...expression.diagnostics)
-      if (expression.type !== undefined && Type.isFlow(expression.type))
-        context.diagnostics.push(Diagnostic.flowRecipeEscape(expressionNode.span))
       if (
+        !context.effectBlock &&
         context.declaration.returnType._tag === 'Resolved' &&
         expression.type !== undefined &&
         !typesCompatible(expression.type, context.declaration.returnType.type)
@@ -4273,13 +5162,14 @@ const analyzeStatements = (
         expression.type !== undefined && Type.isNominal(expression.type)
           ? expression.type
           : undefined
-      if (context.declaration.functionKind !== 'Flow')
-        context.diagnostics.push(Diagnostic.failOutsideFlow(element.span))
+      if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
+        context.diagnostics.push(Diagnostic.failOutsideEffect(element.span))
       if (expression.type !== undefined && failure === undefined)
         context.diagnostics.push(
           Diagnostic.invalidFailureType(Type.encode(expression.type), expressionNode.span),
         )
       if (
+        !context.effectBlock &&
         failure !== undefined &&
         !context.declaration.failureRow.failures.some((candidate) =>
           Type.equals(candidate, failure),
@@ -4293,11 +5183,36 @@ const analyzeStatements = (
           _tag: 'FailStatement',
           expression: expression.fact,
           ...(failure === undefined ? {} : { failure }),
+          transfer: SyntaxTree.directToken(element, 'MoveKeyword') === undefined ? 'Copy' : 'Move',
           region,
           syntax: element,
         }),
       )
       break
+    }
+
+    if (element.kind === 'DropStatement') {
+      const region = nextRegion()
+      const expressionNode = statementExpressionNode(element)
+      const expression = analyzeExpression(
+        context.source,
+        expressionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+      )
+      if (expression === undefined)
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+      context.diagnostics.push(...expression.diagnostics)
+      facts.push(
+        Object.freeze({
+          _tag: 'DropStatement',
+          expression: expression.fact,
+          region,
+          syntax: element,
+        }),
+      )
     }
   }
 
@@ -4321,6 +5236,17 @@ const analyzeFunctionBody = (
     loops: [],
     resolution,
   }
+  declaration.failureRow.failures.forEach((failure, ordinal) => {
+    if (!DeclarationIndex.containsLexicalBorrow(resolution.index, failure)) return
+    context.diagnostics.push(
+      Diagnostic.providerBackedFailure(
+        Type.encode(failure),
+        declaration.failureRow.members.at(ordinal)?.syntax.span ??
+          declaration.failureRow.syntax?.span ??
+          declaration.syntax.span,
+      ),
+    )
+  })
   const statements = analyzeStatements(
     context,
     blockNode,
@@ -4406,6 +5332,134 @@ const hirReference = (
   })
 }
 
+const hirEffectStatements = (
+  facts: ReadonlyArray<StatementFact>,
+  resultType?: SemanticType,
+): ReadonlyArray<Hir.Statement> =>
+  Object.freeze(
+    facts.map((statement): Hir.Statement => {
+      if (statement._tag === 'BindStatement')
+        return Object.freeze({
+          _tag: 'Bind',
+          binding: statement.binding.id,
+          name:
+            statement.binding.name._tag === 'Present' ? statement.binding.name.spelling : undefined,
+          mutability: statement.binding.mutability,
+          initializer: hirExpression(statement.binding.initializer),
+          region: statement.region,
+          span: statement.binding.syntax.span,
+        })
+      if (statement._tag === 'IfStatement')
+        return Object.freeze({
+          _tag: 'If',
+          condition: hirExpression(statement.condition),
+          taken: hirEffectStatements(statement.taken, resultType),
+          otherwise: hirEffectStatements(statement.otherwise, resultType),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
+      if (statement._tag === 'WriteStatement') {
+        const place =
+          statement.root?._tag === 'BindingFact'
+            ? hirWritePlace(statement.destination, statement.root)
+            : statement.root?._tag === 'ParameterDeclaration'
+              ? hirBorrowedWritePlace(statement.destination, statement.root)
+              : undefined
+        if (place === undefined || !statement.compatible)
+          return Object.freeze({
+            _tag: 'UnavailableStatement',
+            region: statement.region,
+            span: statement.syntax.span,
+          })
+        return Object.freeze({
+          _tag: 'Write',
+          place,
+          value: hirExpectedExpression(statement.value, place.type, 'Assignment', place.span),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
+      }
+      if (statement._tag === 'WhileStatement')
+        return Object.freeze({
+          _tag: 'While',
+          loop: statement.loop,
+          ...(statement.parent === undefined ? {} : { parent: statement.parent }),
+          condition: hirExpression(statement.condition),
+          body: hirEffectStatements(statement.body, resultType),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
+      if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement')
+        return statement.target === undefined
+          ? Object.freeze({
+              _tag: 'UnavailableStatement',
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          : Object.freeze({
+              _tag: statement._tag === 'BreakStatement' ? 'Break' : 'Continue',
+              target: statement.target,
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+      if (statement._tag === 'ReturnStatement')
+        return Object.freeze({
+          _tag: 'Return',
+          expression:
+            resultType === undefined
+              ? hirExpression(statement.expression)
+              : hirExpectedExpression(
+                  statement.expression,
+                  resultType,
+                  'Return',
+                  statement.syntax.span,
+                ),
+          region: statement.region,
+          span: statement.expression.syntax.span,
+        })
+      if (statement._tag === 'DropStatement')
+        return Object.freeze({
+          _tag: 'Drop',
+          expression:
+            statement.expression.type._tag === 'Available'
+              ? Object.freeze({
+                  _tag: 'Move' as const,
+                  subject: hirExpression(statement.expression),
+                  type: statement.expression.type.type,
+                  span: statement.expression.syntax.span,
+                })
+              : hirExpression(statement.expression),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
+      if (statement.failure === undefined)
+        return Object.freeze({
+          _tag: 'UnavailableStatement',
+          region: statement.region,
+          span: statement.syntax.span,
+        })
+      return Object.freeze({
+        _tag: 'Fail',
+        expression:
+          statement.transfer === 'Move'
+            ? Object.freeze({
+                _tag: 'Move',
+                subject: hirExpression(statement.expression),
+                type:
+                  statement.expression.type._tag === 'Available'
+                    ? statement.expression.type.type
+                    : statement.failure,
+                span: statement.expression.syntax.span,
+              })
+            : hirExpression(statement.expression),
+        failure: statement.failure,
+        transfer: statement.transfer,
+        region: statement.region,
+        span: statement.syntax.span,
+      })
+    }),
+  )
+
 const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Expression => {
   if (fact._tag === 'Integer') {
     return fact.integer._tag === 'Available'
@@ -4447,6 +5501,28 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       span: fact.syntax.span,
     })
   }
+  if (fact._tag === 'EffectBlock') {
+    if (fact.type._tag !== 'Available' || !Type.isEffect(fact.type.type))
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'EffectBlock',
+      site: fact.site,
+      statements: hirEffectStatements(fact.statements, fact.type.type.success),
+      captures: Object.freeze(
+        fact.captures.map((capture) =>
+          Object.freeze({
+            ...(capture.reference._tag === 'BindingFact'
+              ? { binding: capture.reference.id }
+              : { parameter: capture.reference.id }),
+            access: capture.access,
+            span: capture.span,
+          }),
+        ),
+      ),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
   if (fact._tag === 'Run') {
     const subject = hirExpression(fact.subject)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available')
@@ -4458,22 +5534,87 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       span: fact.syntax.span,
     })
   }
-  if (fact._tag === 'FlowCatch') {
+  if (fact._tag === 'EffectCatch') {
     const protected_ = hirExpression(fact.protected)
     if (
       protected_._tag === 'Unavailable' ||
       fact.handled === undefined ||
       fact.handler?.canonical._tag !== 'Canonical' ||
       fact.type._tag !== 'Available' ||
-      !Type.isFlow(fact.type.type)
+      !Type.isEffect(fact.type.type)
     )
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     return Object.freeze({
-      _tag: 'FlowCatch',
+      _tag: 'EffectCatch',
       protected: protected_,
       handled: fact.handled,
       handler: fact.handler.canonical.id,
       handlerFailures: fact.handler.failureRow.failures,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'EffectRetry') {
+    const protected_ = hirExpression(fact.protected)
+    const retries = hirExpression(fact.retries)
+    if (
+      protected_._tag === 'Unavailable' ||
+      retries._tag === 'Unavailable' ||
+      fact.type._tag !== 'Available' ||
+      !Type.isEffect(fact.type.type)
+    )
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'EffectRetry',
+      protected: protected_,
+      retries,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'EffectProvide') {
+    const protected_ = hirExpression(fact.protected)
+    if (
+      protected_._tag === 'Unavailable' ||
+      fact.provider === undefined ||
+      fact.type._tag !== 'Available' ||
+      !Type.isEffect(fact.type.type)
+    )
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'EffectProvide',
+      protected: protected_,
+      provider: Object.freeze({
+        ...(fact.provider.reference._tag === 'BindingFact'
+          ? { binding: fact.provider.reference.id }
+          : { parameter: fact.provider.reference.id }),
+        capability: fact.provider.capability,
+        role: fact.provider.role,
+        access: fact.provider.access,
+        span: fact.provider.span,
+      }),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'EffectProvideWith') {
+    const protected_ = hirExpression(fact.protected)
+    const acquisition = hirExpression(fact.acquisition)
+    if (
+      protected_._tag === 'Unavailable' ||
+      acquisition._tag === 'Unavailable' ||
+      fact.capability === undefined ||
+      fact.role === undefined ||
+      fact.type._tag !== 'Available' ||
+      !Type.isEffect(fact.type.type)
+    )
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    return Object.freeze({
+      _tag: 'EffectProvideWith',
+      protected: protected_,
+      acquisition,
+      capability: fact.capability,
+      role: fact.role,
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -4789,8 +5930,8 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       type: fact.type.type,
       span: fact.syntax.span,
     }
-    return Type.isFlow(fact.type.type)
-      ? Object.freeze({ ...call, _tag: 'FlowConstruct' as const, type: fact.type.type })
+    return Type.isEffect(fact.type.type)
+      ? Object.freeze({ ...call, _tag: 'EffectConstruct' as const, type: fact.type.type })
       : Object.freeze({ ...call, _tag: 'Call' as const })
   }
   const cause =
@@ -5093,6 +6234,21 @@ export const elaborateModule = (input: Input): Result => {
             region: statement.region,
             span: statement.expression.syntax.span,
           })
+        if (statement._tag === 'DropStatement')
+          return Object.freeze({
+            _tag: 'Drop' as const,
+            expression:
+              statement.expression.type._tag === 'Available'
+                ? Object.freeze({
+                    _tag: 'Move' as const,
+                    subject: hirExpression(statement.expression),
+                    type: statement.expression.type.type,
+                    span: statement.expression.syntax.span,
+                  })
+                : hirExpression(statement.expression),
+            region: statement.region,
+            span: statement.syntax.span,
+          })
         if (statement._tag === 'FailStatement') {
           if (statement.failure === undefined)
             return Object.freeze({
@@ -5102,8 +6258,20 @@ export const elaborateModule = (input: Input): Result => {
             })
           return Object.freeze({
             _tag: 'Fail' as const,
-            expression: hirExpression(statement.expression),
+            expression:
+              statement.transfer === 'Move'
+                ? Object.freeze({
+                    _tag: 'Move' as const,
+                    subject: hirExpression(statement.expression),
+                    type:
+                      statement.expression.type._tag === 'Available'
+                        ? statement.expression.type.type
+                        : statement.failure,
+                    span: statement.expression.syntax.span,
+                  })
+                : hirExpression(statement.expression),
             failure: statement.failure,
+            transfer: statement.transfer,
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -5117,18 +6285,96 @@ export const elaborateModule = (input: Input): Result => {
     functions: Object.freeze(
       functions.map((fact) =>
         (() => {
-          const entryRegion =
+          const originalEntryRegion =
             fact.regionOrder.at(0) ??
             Object.freeze({
               _tag: 'HirRegion' as const,
               function: fact.declaration.id,
               ordinal: 0,
             })
+          const baseContract = Hir.contractOf(fact.declaration)
+          if (
+            fact.declaration.functionKind === 'Effect' &&
+            fact.declaration.returnType._tag === 'Resolved' &&
+            baseContract._tag === 'Contract'
+          ) {
+            const copyCapture = (type: Type.Type): boolean =>
+              Type.isBuiltin(type) || (Type.isFixedArray(type) && copyCapture(type.element))
+            const captures = effectCaptureFacts(fact.statements, 0).map((capture) => {
+              if (capture.reference._tag !== 'ParameterDeclaration') return capture
+              const declared = capture.reference.declaredType
+              if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
+              return Object.freeze({
+                ...capture,
+                access: copyCapture(declared.type) ? ('Copy' as const) : ('Take' as const),
+              })
+            })
+            const access = captures.some((capture) => capture.access === 'Take')
+              ? 'Take'
+              : captures.some((capture) => capture.access === 'Exclusive')
+                ? 'Exclusive'
+                : 'Shared'
+            const type = Type.effect(
+              fact.declaration.returnType.type,
+              fact.declaration.failureRow.failures,
+              access,
+              fact.declaration.requirementRow.requirements,
+            )
+            const body = SyntaxTree.directNode(fact.declaration.syntax, 'Block')
+            const siteSpan = body?.span ?? fact.declaration.syntax.span
+            const entryRegion: Hir.RegionId = Object.freeze({
+              _tag: 'HirRegion',
+              function: fact.declaration.id,
+              ordinal: Math.max(-1, ...fact.regionOrder.map((region) => region.ordinal)) + 1,
+            })
+            const effectBlock: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> =
+              Object.freeze({
+                _tag: 'EffectBlock',
+                site: Object.freeze({
+                  _tag: 'EffectSiteId',
+                  function: fact.declaration.id,
+                  span: siteSpan,
+                }),
+                statements: hirStatements(fact.statements, fact.declaration.returnType.type),
+                captures: Object.freeze(
+                  captures.map((capture) =>
+                    Object.freeze({
+                      ...(capture.reference._tag === 'BindingFact'
+                        ? { binding: capture.reference.id }
+                        : { parameter: capture.reference.id }),
+                      access: capture.access,
+                      span: capture.span,
+                    }),
+                  ),
+                ),
+                type,
+                span: siteSpan,
+              })
+            return Object.freeze({
+              _tag: 'HirFunction' as const,
+              declaration: fact.declaration,
+              contract: Object.freeze({
+                _tag: 'Contract' as const,
+                parameters: baseContract.parameters,
+                result: type,
+              }),
+              entryRegion,
+              regionOrder: Object.freeze([entryRegion, ...fact.regionOrder]),
+              statements: Object.freeze([
+                Object.freeze({
+                  _tag: 'Return' as const,
+                  expression: effectBlock,
+                  region: entryRegion,
+                  span: siteSpan,
+                }),
+              ]),
+            })
+          }
           return Object.freeze({
             _tag: 'HirFunction' as const,
             declaration: fact.declaration,
-            contract: Hir.contractOf(fact.declaration),
-            entryRegion,
+            contract: baseContract,
+            entryRegion: originalEntryRegion,
             regionOrder: fact.regionOrder,
             statements: hirStatements(
               fact.statements,

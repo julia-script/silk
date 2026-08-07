@@ -78,18 +78,18 @@ it('recognizes struct only as a complete keyword', () => {
   )
 })
 
-it('recognizes the flow execution and failure keywords without prefix capture', () => {
+it('recognizes the effect execution and failure keywords without prefix capture', () => {
   const result = Lexer.lex(
     SourceFile.make(
-      'memory://flow-keywords.silk',
-      ascii('flow fn work() -> I32 ! Error { fail move error } run work() flower runner failed'),
+      'memory://effect-keywords.silk',
+      ascii('effect fn work() -> I32 ! Error { fail move error } run work() flower runner failed'),
     ),
   )
 
   assert.deepEqual(
     result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
     [
-      'FlowKeyword',
+      'EffectKeyword',
       'FnKeyword',
       'Identifier',
       'LeftParenthesis',
@@ -112,6 +112,26 @@ it('recognizes the flow execution and failure keywords without prefix capture', 
       'Identifier',
       'EndOfFile',
     ],
+  )
+})
+
+it('recognizes drop only as a complete keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://drop-keyword.silk', ascii('drop dropped dropper')),
+  )
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['DropKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
+it('recognizes requirement-row and role punctuation', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://effect-requirements.silk', ascii('? &Allocator@Scratch')),
+  )
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['Question', 'Ampersand', 'Identifier', 'At', 'Identifier', 'EndOfFile'],
   )
 })
 

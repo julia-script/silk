@@ -5,6 +5,7 @@ import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -106,26 +107,26 @@ it.effect('resolves header signatures and diagnoses unknown types at exact spans
   }),
 )
 
-it.effect('normalizes flow failure rows while retaining source members', () =>
+it.effect('normalizes effect failure rows while retaining source members', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
       [
         'root',
         'struct First {}\nstruct Second {}\n' +
-          'flow fn work() -> I32 ! Second | First | Second { return 1 }\n' +
+          'effect fn work() -> I32 ! Second | First | Second { return 1 }\n' +
           'fn plain() -> I32 { return 0 }',
       ],
     ])
-    const flow = index.modules.at(0)?.declarations.at(0)
+    const effect = index.modules.at(0)?.declarations.at(0)
     const plain = index.modules.at(0)?.declarations.at(1)
 
-    assert.strictEqual(flow?.functionKind, 'Flow')
-    assert.strictEqual(flow?.failureRow.members.length, 3)
+    assert.strictEqual(effect?.functionKind, 'Effect')
+    assert.strictEqual(effect?.failureRow.members.length, 3)
     assert.deepEqual(
-      flow?.failureRow.failures.map((failure) => `${failure.module}.${failure.name}`),
+      effect?.failureRow.failures.map((failure) => `${failure.module}.${failure.name}`),
       ['root.First', 'root.Second'],
     )
-    assert.strictEqual(flow?.failureRow.available, true)
+    assert.strictEqual(effect?.failureRow.available, true)
     assert.strictEqual(plain?.functionKind, 'Ordinary')
     assert.deepEqual(plain?.failureRow.failures, [])
     assert.deepEqual(index.diagnostics, [])
@@ -138,10 +139,10 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
       [
         'root',
         'import errors.Error\n' +
-          'flow fn imported() -> I32 ! Error.Error { return 1 }\n' +
-          'flow fn generic<T>() -> I32 ! T { return 1 }\n' +
-          'flow fn scalar() -> I32 ! I32 { return 1 }\n' +
-          'flow fn missing() -> I32 ! Mystery { return 1 }',
+          'effect fn imported() -> I32 ! Error.Error { return 1 }\n' +
+          'effect fn generic<T>() -> I32 ! T { return 1 }\n' +
+          'effect fn scalar() -> I32 ! I32 { return 1 }\n' +
+          'effect fn missing() -> I32 ! Mystery { return 1 }',
       ],
       ['errors/Error', 'pub struct Error {}'],
     ])
@@ -185,6 +186,45 @@ it.effect('rejects failure rows on ordinary functions without losing the row', (
       index.diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0062'],
     )
+  }),
+)
+
+it.effect('resolves explicit Effect contracts and canonical requirement rows', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `struct Problem {}
+struct FileSystem {}
+struct Allocator {}
+fn later() -> Effect<I32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+  return effect { return 1 }
+}
+effect fn work() -> I32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+      ],
+    ])
+    const [later, work] = index.modules.at(0)?.declarations ?? []
+    assert.deepEqual(index.diagnostics, [])
+    assert.strictEqual(later?.returnType._tag, 'Resolved')
+    const laterType = later?.returnType._tag === 'Resolved' ? later.returnType.type : undefined
+    assert.isTrue(laterType !== undefined && Type.isEffect(laterType))
+    if (laterType === undefined || !Type.isEffect(laterType)) return
+    assert.deepEqual(
+      laterType.failures.map((failure) => failure.name),
+      ['Problem'],
+    )
+    assert.deepEqual(
+      laterType.requirements.map((requirement) => ({
+        capability: requirement.capability.name,
+        role: requirement.role,
+        access: requirement.access,
+      })),
+      [
+        { capability: 'FileSystem', role: 'DefaultRole', access: 'Shared' },
+        { capability: 'Allocator', role: 'Scratch', access: 'Exclusive' },
+      ],
+    )
+    assert.deepEqual(work?.requirementRow.requirements, laterType.requirements)
   }),
 )
 

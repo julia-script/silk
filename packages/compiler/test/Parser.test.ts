@@ -118,22 +118,22 @@ const diagnosticView = (result: SyntaxFile.SyntaxFile) =>
     reason: diagnostic.reason,
   }))
 
-it('parses flow declarations, failure rows, delayed run, and consuming fail losslessly', () => {
+it('parses effect declarations, failure rows, delayed run, and consuming fail losslessly', () => {
   const result = parseText(
-    'memory://flow.silk',
+    'memory://effect.silk',
     `struct Problem { code: I32 }
-flow fn work(problem: Problem) -> I32 ! Problem | Problem {
+effect fn work(problem: Problem) -> I32 ! Problem | Problem {
   if true { fail move problem }
   return 42
 }
 fn main() -> I32 { let pending = work(Problem { code: 1 }) return run pending }`,
   )
-  const flow = directFunctionDeclarations(result.root).at(0)
+  const effect = directFunctionDeclarations(result.root).at(0)
   assert.strictEqual(
-    SyntaxTree.directToken(flow ?? result.root, 'FlowKeyword')?.kind,
-    'FlowKeyword',
+    SyntaxTree.directToken(effect ?? result.root, 'EffectKeyword')?.kind,
+    'EffectKeyword',
   )
-  assert.strictEqual(SyntaxTree.directNode(flow ?? result.root, 'FailureRow')?.kind, 'FailureRow')
+  assert.strictEqual(SyntaxTree.directNode(effect ?? result.root, 'FailureRow')?.kind, 'FailureRow')
   assert.include(
     descendants(result.root)
       .filter(SyntaxTree.isNode)
@@ -150,10 +150,10 @@ fn main() -> I32 { let pending = work(Problem { code: 1 }) return run pending }`
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
 })
 
-it('recovers a missing failure-row member without consuming the flow body or next function', () => {
+it('recovers a missing failure-row member without consuming the effect body or next function', () => {
   const result = parseText(
-    'memory://damaged-flow.silk',
-    'flow fn work() -> I32 ! { return 1 } fn after() -> I32 { return 2 }',
+    'memory://damaged-effect.silk',
+    'effect fn work() -> I32 ! { return 1 } fn after() -> I32 { return 2 }',
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
   const first = directFunctionDeclarations(result.root).at(0)
@@ -163,6 +163,109 @@ it('recovers a missing failure-row member without consuming the flow body or nex
     missingLeaves(result.root).map((token) => token.expected),
     'Identifier',
   )
+})
+
+it('parses an effect block as a primary lazy expression and retains Copy fail syntax', () => {
+  const result = parseText(
+    'memory://effect-expression.silk',
+    'fn later() -> I32 { let pending = effect { fail Problem { code: 1 } } return 0 }',
+  )
+  const kinds = descendants(result.root)
+    .filter(SyntaxTree.isNode)
+    .map((node) => node.kind)
+  assert.include(kinds, 'EffectExpression')
+  const failed = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'FailStatement',
+  )
+  assert.strictEqual(
+    failed === undefined ? undefined : SyntaxTree.directToken(failed, 'MoveKeyword'),
+    undefined,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
+it('bounds damaged effect-block recovery before the following declaration', () => {
+  const result = parseText(
+    'memory://damaged-effect-expression.silk',
+    'fn make() -> I32 { let pending = effect { return broken( } return 0 } fn after() -> I32 { return 2 }',
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'EffectExpression',
+  )
+})
+
+it('parses Effect.retry in direct and pipeline insertion forms', () => {
+  const result = parseText(
+    'memory://effect-retry.silk',
+    `fn main() -> I32 {
+  let direct = Effect.retry(work(), policy)
+  let piped = work() |> Effect.retry(policy)
+  return 0
+}`,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  const identifiers = descendants(result.root)
+    .filter(SyntaxTree.isToken)
+    .filter((token) => token.kind === 'Identifier')
+    .map((token) => directTokenText(result, result.root, token.kind))
+  assert.isAtLeast(identifiers.length, 1)
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'PipelineExpression',
+  )
+})
+
+it('parses explicit drop as a statement without making the block terminal', () => {
+  const result = parseText(
+    'memory://drop-statement.silk',
+    'struct Token { value: I32 } fn main() -> I32 { let token = Token { value: 1 } drop token return 42 }',
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'DropStatement',
+  )
+})
+
+it('parses an explicit provider role in a provision pipeline', () => {
+  const result = parseText(
+    'memory://provider-role.silk',
+    'fn main() -> I32 { let recipe = work() |> Clock.provide(&clock, @Scratch) return 0 }',
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'RoleExpression',
+  )
+})
+
+it('parses explicit Effect contracts and declaration requirement rows', () => {
+  const result = parseText(
+    'memory://effect-contract-rows.silk',
+    `fn later() -> Effect<I32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+  return effect { return 1 }
+}
+effect fn work() -> I32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  const kinds = descendants(result.root)
+    .filter(SyntaxTree.isNode)
+    .map((node) => node.kind)
+  assert.strictEqual(kinds.filter((kind) => kind === 'FailureRow').length, 2)
+  assert.strictEqual(kinds.filter((kind) => kind === 'RequirementRow').length, 2)
+  assert.strictEqual(kinds.filter((kind) => kind === 'Requirement').length, 4)
 })
 
 it('parses the accepted function into the exact first concrete node shape', () => {
@@ -655,7 +758,7 @@ it('keeps malformed arguments explicit and resumes at the next comma', () => {
     errorNodes(call)
       .flatMap((node) => SyntaxTree.tokens(node))
       .map((token) => token.kind),
-    ['Invalid'],
+    ['Colon'],
   )
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => diagnostic.code),
@@ -858,7 +961,8 @@ it('terminates on wholly unrelated input and retains it in one error region', ()
   const errors = errorNodes(result.root)
 
   assert.strictEqual(errors.length, 1)
-  assert.deepEqual(errors.at(0)?.span, result.tokens.at(0)?.span)
+  assert.strictEqual(errors.at(0)?.span.start, 0)
+  assert.strictEqual(errors.at(0)?.span.end, whollyUnrelatedSource.length)
   assert.strictEqual(missingLeaves(result.root).length, 10)
   assert.strictEqual(result.parserDiagnostics.at(0)?.code, 'PAR0002')
   assertOriginalTokenTraversal(result)
@@ -1382,7 +1486,7 @@ it('parses qualified pipelines left-to-right with optional argument lists', () =
   const source =
     'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }\n' +
     'pub fn flag() -> Bool { return true |> Bool.not }\n' +
-    'pub fn recover() -> I32 { return risky() |> Flow.catch<Problem>(handler) }'
+    'pub fn recover() -> I32 { return risky() |> Effect.catch<Problem>(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>

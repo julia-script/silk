@@ -1,4 +1,5 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -55,11 +56,36 @@ export interface UnionValue {
   readonly payload: AggregateValue
 }
 
-export interface FlowOutcomeValue {
-  readonly _tag: 'FlowOutcomeValue'
-  readonly type: Type.Flow
+export interface EffectOutcomeValue {
+  readonly _tag: 'EffectOutcomeValue'
+  readonly type: Type.Effect
   readonly tag: number
   readonly payload: Value
+}
+
+export interface EffectBorrowValue {
+  readonly _tag: 'EffectBorrowValue'
+  readonly frame: number
+  readonly cell: number
+  readonly access: 'Shared' | 'Exclusive'
+}
+
+export interface EffectValue {
+  readonly _tag: 'EffectValue'
+  readonly type: Type.Effect
+  readonly site: Hir.EffectSiteId
+  readonly runner: DeclarationIndex.CanonicalId
+  readonly runnerTypeArguments: ReadonlyArray<Type.Type>
+  readonly captures: ReadonlyArray<Value>
+}
+
+/** One logical heap block; identity and liveness live in evaluator state, not JS identity. */
+export interface AllocationValue {
+  readonly _tag: 'AllocationValue'
+  readonly type: Type.Nominal
+  readonly ticket: number
+  readonly bytes: bigint
+  readonly alignment: bigint
 }
 
 /** One immutable logical evaluator value, independent of backend lane realization. */
@@ -70,7 +96,10 @@ export type Value =
   | ArrayValue
   | SliceValue
   | UnionValue
-  | FlowOutcomeValue
+  | EffectBorrowValue
+  | EffectValue
+  | EffectOutcomeValue
+  | AllocationValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -209,8 +238,8 @@ export interface ControlTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
-export interface FlowTraceEvent {
-  readonly _tag: 'FlowSuccess' | 'FlowFailure'
+export interface EffectTraceEvent {
+  readonly _tag: 'EffectSuccess' | 'EffectFailure'
   readonly function: DeclarationIndex.CanonicalId
   readonly tag: number
   readonly span: SourceSpan.SourceSpan
@@ -229,7 +258,7 @@ export type TraceEvent =
   | CleanupTraceEvent
   | MatchTraceEvent
   | ControlTraceEvent
-  | FlowTraceEvent
+  | EffectTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -317,7 +346,9 @@ interface LocalState {
 
 interface EvaluationState {
   nextFrame: number
+  nextAllocation: number
   readonly cells: Map<string, LocalState>
+  readonly allocations: Map<number, { active: boolean }>
 }
 
 const cellKey = (frame: number, cell: number): string => `${frame}:${cell}`
@@ -337,11 +368,24 @@ function executeFunction(
     locals.set(ordinal, { value: argument, fromCall: false })
   })
 
-  const read = (local: Mir.LocalId): LocalState =>
-    state.cells.get(cellKey(frame, local.ordinal)) ??
-    locals.get(local.ordinal) ?? { value: value(0), fromCall: false }
+  const read = (local: Mir.LocalId): LocalState => {
+    const direct = state.cells.get(cellKey(frame, local.ordinal)) ??
+      locals.get(local.ordinal) ?? { value: value(0), fromCall: false }
+    if (direct.value._tag !== 'EffectBorrowValue') return direct
+    return (
+      state.cells.get(cellKey(direct.value.frame, direct.value.cell)) ?? {
+        value: value(0),
+        fromCall: false,
+      }
+    )
+  }
 
   const write = (local: Mir.LocalId, next: LocalState): void => {
+    const alias = locals.get(local.ordinal)?.value
+    if (alias?._tag === 'EffectBorrowValue') {
+      state.cells.set(cellKey(alias.frame, alias.cell), next)
+      return
+    }
     locals.set(local.ordinal, next)
     const key = cellKey(frame, local.ordinal)
     if (state.cells.has(key)) state.cells.set(key, next)
@@ -389,6 +433,7 @@ function executeFunction(
     if (cleanup._tag === 'NoCleanup' || cleanup._tag === 'ParameterCleanup') {
       return Object.freeze([])
     }
+    if (cleanup._tag === 'AllocationCleanup') return Object.freeze([Type.allocation])
     if (cleanup._tag === 'UnionCleanup') {
       if (owner._tag !== 'UnionValue') return Object.freeze([])
       const active = cleanup.cases.find((candidate) => Type.equals(candidate.member, owner.member))
@@ -857,6 +902,143 @@ function executeFunction(
             )
             break
           }
+          case 'ValidateLayout': {
+            const bytes = readInteger(operation.bytes)
+            const alignment = readInteger(operation.alignment)
+            if (bytes._tag !== 'UsizeValue' || alignment._tag !== 'UsizeValue') {
+              throw new RangeError('MIR verifier allowed non-Usize layout construction')
+            }
+            const valid = alignment.value > 0n && (alignment.value & (alignment.value - 1n)) === 0n
+            const member = valid ? Type.layout : Type.invalidAlignment
+            const entry = program.layout.entries.find((candidate) =>
+              Type.equals(candidate.type, member),
+            )
+            if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate') {
+              throw new RangeError('Target plan omitted an intrinsic layout validation member')
+            }
+            const payload: AggregateValue = Object.freeze({
+              _tag: 'AggregateValue',
+              type: member,
+              fields: Object.freeze(
+                entry.representation.fields.map((field) =>
+                  Object.freeze({
+                    field: field.id,
+                    value: field.name === 'bytes' ? bytes : alignment,
+                  }),
+                ),
+              ),
+            })
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'UnionValue',
+                type: operation.type.type,
+                member,
+                payload,
+              }),
+              fromCall: false,
+            })
+            break
+          }
+          case 'RepeatLayout': {
+            const layout = read(operation.layout).value
+            const count = readInteger(operation.count)
+            if (layout._tag !== 'AggregateValue' || count._tag !== 'UsizeValue') {
+              throw new RangeError('MIR verifier allowed invalid repeated-layout operands')
+            }
+            const entry = program.layout.entries.find((candidate) =>
+              Type.equals(candidate.type, Type.layout),
+            )
+            if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate') {
+              throw new RangeError('Target plan omitted Layout')
+            }
+            const representation = entry.representation
+            const fieldValue = (name: string): UsizeValue | undefined => {
+              const field = representation.fields.find((candidate) => candidate.name === name)
+              const value = layout.fields.find(
+                (candidate) => candidate.field.ordinal === field?.id.ordinal,
+              )?.value
+              return value?._tag === 'UsizeValue' ? value : undefined
+            }
+            const bytes = fieldValue('bytes')
+            const alignment = fieldValue('alignment')
+            if (bytes === undefined || alignment === undefined) {
+              throw new RangeError('Layout payload omitted bytes or alignment')
+            }
+            const maximum =
+              program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+            const overflow = count.value !== 0n && bytes.value > maximum / count.value
+            const member = overflow ? Type.layoutOverflow : Type.layout
+            const memberEntry = program.layout.entries.find((candidate) =>
+              Type.equals(candidate.type, member),
+            )
+            if (
+              memberEntry?._tag !== 'LayoutEntry' ||
+              memberEntry.representation._tag !== 'Aggregate'
+            ) {
+              throw new RangeError('Target plan omitted a repeated-layout result member')
+            }
+            const total = usizeValue(overflow ? 0n : bytes.value * count.value)
+            const payload: AggregateValue = Object.freeze({
+              _tag: 'AggregateValue',
+              type: member,
+              fields: Object.freeze(
+                memberEntry.representation.fields.map((field) =>
+                  Object.freeze({
+                    field: field.id,
+                    value: field.name === 'bytes' ? total : alignment,
+                  }),
+                ),
+              ),
+            })
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'UnionValue',
+                type: operation.type.type,
+                member,
+                payload,
+              }),
+              fromCall: false,
+            })
+            break
+          }
+          case 'Allocate': {
+            const layout = read(operation.layout).value
+            if (layout._tag !== 'AggregateValue' || !Type.equals(layout.type, Type.layout)) {
+              throw new RangeError('MIR verifier allowed allocation with a non-Layout value')
+            }
+            const entry = program.layout.entries.find((candidate) =>
+              Type.equals(candidate.type, Type.layout),
+            )
+            if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate') {
+              throw new RangeError('Target plan omitted Layout')
+            }
+            const representation = entry.representation
+            const fieldValue = (name: string): UsizeValue | undefined => {
+              const field = representation.fields.find((candidate) => candidate.name === name)
+              const found = layout.fields.find(
+                (candidate) => candidate.field.ordinal === field?.id.ordinal,
+              )?.value
+              return found?._tag === 'UsizeValue' ? found : undefined
+            }
+            const bytes = fieldValue('bytes')
+            const alignment = fieldValue('alignment')
+            if (bytes === undefined || alignment === undefined)
+              throw new RangeError('Layout payload omitted bytes or alignment')
+            const ticket = state.nextAllocation
+            state.nextAllocation += 1
+            state.allocations.set(ticket, { active: true })
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AllocationValue',
+                type: Type.allocation,
+                ticket,
+                bytes: bytes.value,
+                alignment: alignment.value,
+              }),
+              fromCall: false,
+            })
+            break
+          }
           case 'Binary': {
             const leftValue = readInteger(operation.left)
             const rightValue = readInteger(operation.right)
@@ -1156,6 +1338,14 @@ function executeFunction(
           }
           case 'Drop': {
             const dropped = read(operation.local).value
+            if (operation.cleanup._tag === 'AllocationCleanup') {
+              if (dropped._tag !== 'AllocationValue')
+                throw new RangeError('Allocation cleanup lost its private reclaim ticket')
+              const ticket = state.allocations.get(dropped.ticket)
+              if (ticket === undefined || !ticket.active)
+                throw new RangeError('Allocation reclaim ticket was consumed more than once')
+              ticket.active = false
+            }
             const members = cleanupMembers(operation.cleanup, dropped)
             trace.push(
               Object.freeze({
@@ -1168,11 +1358,37 @@ function executeFunction(
             )
             break
           }
-          case 'PackFlowOutcome': {
+          case 'MakeEffect': {
+            const captures = operation.captures.map((capture): Value => {
+              if (capture.access === 'Copy' || capture.access === 'Take')
+                return read(capture.source).value
+              const key = cellKey(frame, capture.source.ordinal)
+              if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
+              return Object.freeze({
+                _tag: 'EffectBorrowValue',
+                frame,
+                cell: capture.source.ordinal,
+                access: capture.access,
+              })
+            })
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'EffectValue',
+                type: operation.type.type,
+                site: operation.type.site,
+                runner: operation.runner,
+                runnerTypeArguments: operation.runnerTypeArguments,
+                captures: Object.freeze(captures),
+              }),
+              fromCall: false,
+            })
+            break
+          }
+          case 'PackEffectOutcome': {
             const payload = read(operation.source).value
             write(operation.destination, {
               value: Object.freeze({
-                _tag: 'FlowOutcomeValue',
+                _tag: 'EffectOutcomeValue',
                 type: operation.type.type,
                 tag: operation.tag,
                 payload,
@@ -1181,7 +1397,7 @@ function executeFunction(
             })
             trace.push(
               Object.freeze({
-                _tag: operation.tag === 0 ? 'FlowSuccess' : 'FlowFailure',
+                _tag: operation.tag === 0 ? 'EffectSuccess' : 'EffectFailure',
                 function: fn.id,
                 tag: operation.tag,
                 span: operation.provenance.span,
@@ -1189,20 +1405,20 @@ function executeFunction(
             )
             break
           }
-          case 'UnpackFlowSuccess': {
+          case 'UnpackEffectSuccess': {
             const outcome = read(operation.source)
-            if (outcome.value._tag !== 'FlowOutcomeValue' || outcome.value.tag !== 0) {
+            if (outcome.value._tag !== 'EffectOutcomeValue' || outcome.value.tag !== 0) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
-                reason: 'attempted to unpack a failed flow outcome as success',
+                reason: 'attempted to unpack a failed effect outcome as success',
                 span: operation.provenance.span,
               })
             }
             write(operation.destination, { value: outcome.value.payload, fromCall: true })
             break
           }
-          case 'CatchFlow': {
+          case 'CatchEffect': {
             const protectedTarget = functionFor(
               program,
               operation.protectedTarget,
@@ -1251,18 +1467,42 @@ function executeFunction(
               state,
             )
             if (protectedResult._tag === 'Blocked') return protectedResult
-            if (protectedResult.value._tag !== 'FlowOutcomeValue')
-              throw new RangeError('MIR flow catch target returned a non-outcome value')
-            write(operation.protectedOutcome, { value: protectedResult.value, fromCall: true })
-            if (protectedResult.value.tag === 0) {
+            if (protectedResult.value._tag !== 'EffectValue')
+              throw new RangeError('MIR effect catch factory returned a non-Effect value')
+            write(operation.protectedValue, { value: protectedResult.value, fromCall: true })
+            const protectedRunner = functionFor(
+              program,
+              operation.protectedRunner,
+              operation.protectedTypeArguments,
+            )
+            if (protectedRunner === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.protectedRunner,
+                span: operation.provenance.span,
+              })
+            const protectedExecution = executeFunction(
+              program,
+              protectedRunner,
+              protectedResult.value.captures,
+              Object.freeze([...active, protectedRunner.instance]),
+              trace,
+              state,
+            )
+            if (protectedExecution._tag === 'Blocked') return protectedExecution
+            if (protectedExecution.value._tag !== 'EffectOutcomeValue')
+              throw new RangeError('MIR effect catch runner returned a non-outcome value')
+            const protectedOutcome = protectedExecution.value
+            write(operation.protectedOutcome, { value: protectedOutcome, fromCall: true })
+            if (protectedOutcome.tag === 0) {
               write(operation.destination, {
-                value: protectedResult.value.payload,
+                value: protectedOutcome.payload,
                 fromCall: true,
               })
               break
             }
-            if (protectedResult.value.tag !== operation.handledTag)
-              throw new RangeError('MIR flow catch reached an unmatched failure tag')
+            if (protectedOutcome.tag !== operation.handledTag)
+              throw new RangeError('MIR effect catch reached an unmatched failure tag')
             const handlerTarget = functionFor(program, operation.handlerTarget, Object.freeze([]))
             if (handlerTarget === undefined)
               return blockedStep({
@@ -1286,7 +1526,7 @@ function executeFunction(
                 callSpan: operation.provenance.span,
                 argumentOrdinal: 0,
                 parameterOrdinal: 0,
-                value: protectedResult.value.payload,
+                value: protectedOutcome.payload,
                 fromCall: true,
                 span: operation.provenance.span,
               }),
@@ -1294,19 +1534,147 @@ function executeFunction(
             const handlerResult = executeFunction(
               program,
               handlerTarget,
-              [protectedResult.value.payload],
+              [protectedOutcome.payload],
               Object.freeze([...active, handlerTarget.instance]),
               trace,
               state,
             )
             if (handlerResult._tag === 'Blocked') return handlerResult
-            if (handlerResult.value._tag !== 'FlowOutcomeValue' || handlerResult.value.tag !== 0)
-              throw new RangeError('MIR catch handler did not return an infallible flow outcome')
-            write(operation.handlerOutcome, { value: handlerResult.value, fromCall: true })
-            write(operation.destination, { value: handlerResult.value.payload, fromCall: true })
+            if (handlerResult.value._tag !== 'EffectValue')
+              throw new RangeError('MIR catch handler factory returned a non-Effect value')
+            write(operation.handlerValue, { value: handlerResult.value, fromCall: true })
+            const handlerRunner = functionFor(program, operation.handlerRunner, Object.freeze([]))
+            if (handlerRunner === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.handlerRunner,
+                span: operation.provenance.span,
+              })
+            const handlerExecution = executeFunction(
+              program,
+              handlerRunner,
+              handlerResult.value.captures,
+              Object.freeze([...active, handlerRunner.instance]),
+              trace,
+              state,
+            )
+            if (handlerExecution._tag === 'Blocked') return handlerExecution
+            if (
+              handlerExecution.value._tag !== 'EffectOutcomeValue' ||
+              handlerExecution.value.tag !== 0
+            )
+              throw new RangeError('MIR catch handler did not return an infallible effect outcome')
+            write(operation.handlerOutcome, { value: handlerExecution.value, fromCall: true })
+            write(operation.destination, { value: handlerExecution.value.payload, fromCall: true })
             break
           }
-          case 'RunFlow': {
+          case 'RetryEffect': {
+            const protectedTarget =
+              operation.protectedTarget === undefined
+                ? undefined
+                : functionFor(program, operation.protectedTarget, operation.protectedTypeArguments)
+            const protectedRunner = functionFor(
+              program,
+              operation.protectedRunner,
+              operation.protectedTypeArguments,
+            )
+            if (
+              (operation.protectedTarget !== undefined && protectedTarget === undefined) ||
+              protectedRunner === undefined
+            )
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target:
+                  operation.protectedTarget !== undefined && protectedTarget === undefined
+                    ? operation.protectedTarget
+                    : operation.protectedRunner,
+                span: operation.provenance.span,
+              })
+            const protectedArguments = operation.protectedArguments.map((argument) =>
+              read(argument),
+            )
+            const protectedValue =
+              protectedTarget === undefined
+                ? read(operation.protectedValue).value
+                : executeFunction(
+                    program,
+                    protectedTarget,
+                    protectedArguments.map((argument) => argument.value),
+                    Object.freeze([...active, protectedTarget.instance]),
+                    trace,
+                    state,
+                  )
+            if ('_tag' in protectedValue && protectedValue._tag === 'Blocked') return protectedValue
+            const effectValue =
+              protectedTarget === undefined
+                ? protectedValue
+                : protectedValue._tag === 'Value'
+                  ? protectedValue.value
+                  : undefined
+            if (effectValue?._tag !== 'EffectValue')
+              throw new RangeError('MIR retry factory returned a non-Effect value')
+            write(operation.protectedValue, { value: effectValue, fromCall: true })
+            const retries = Math.max(0, readI32(operation.retries).value)
+            let last: EffectOutcomeValue | undefined
+            for (let attempt = 0; attempt <= retries; attempt += 1) {
+              trace.push(
+                Object.freeze({
+                  _tag: 'Call',
+                  caller: fn.id,
+                  target: operation.protectedRunner,
+                  callerInstance: fn.instance,
+                  targetInstance: protectedRunner.instance,
+                  span: operation.provenance.span,
+                }),
+              )
+              const execution = executeFunction(
+                program,
+                protectedRunner,
+                effectValue.captures,
+                Object.freeze([...active, protectedRunner.instance]),
+                trace,
+                state,
+              )
+              if (execution._tag === 'Blocked') return execution
+              if (execution.value._tag !== 'EffectOutcomeValue')
+                throw new RangeError('MIR retry runner returned a non-outcome value')
+              last = execution.value
+              write(operation.protectedOutcome, { value: last, fromCall: true })
+              if (last.tag === 0) {
+                write(operation.destination, { value: last.payload, fromCall: true })
+                break
+              }
+            }
+            if (last?.tag === 0) break
+            if (last === undefined || operation.propagationType === undefined)
+              throw new RangeError('MIR retry exhausted without a propagation contract')
+            const mapping = operation.tagMappings.find((candidate) => candidate.source === last.tag)
+            if (mapping === undefined)
+              throw new RangeError('MIR retry has no canonical failure-tag mapping')
+            const propagated: EffectOutcomeValue = Object.freeze({
+              _tag: 'EffectOutcomeValue',
+              type: operation.propagationType.type,
+              tag: mapping.target,
+              payload: last.payload,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'EffectFailure',
+                function: fn.id,
+                tag: mapping.target,
+                span: operation.provenance.span,
+              }),
+              Object.freeze({
+                _tag: 'Return',
+                function: fn.id,
+                instance: fn.instance,
+                value: propagated,
+                span: operation.provenance.span,
+              }),
+            )
+            return Object.freeze({ _tag: 'Value', value: propagated })
+          }
+          case 'RunEffect': {
             const target = functionFor(program, operation.target, operation.typeArguments)
             if (target === undefined)
               return blockedStep({
@@ -1349,28 +1717,28 @@ function executeFunction(
               state,
             )
             if (result._tag === 'Blocked') return result
-            if (result.value._tag !== 'FlowOutcomeValue')
-              throw new RangeError('MIR propagated flow returned a non-outcome value')
-            const flowOutcome = result.value
-            write(operation.outcome, { value: flowOutcome, fromCall: true })
-            if (flowOutcome.tag === 0) {
-              write(operation.destination, { value: flowOutcome.payload, fromCall: true })
+            if (result.value._tag !== 'EffectOutcomeValue')
+              throw new RangeError('MIR propagated effect returned a non-outcome value')
+            const effectOutcome = result.value
+            write(operation.outcome, { value: effectOutcome, fromCall: true })
+            if (effectOutcome.tag === 0) {
+              write(operation.destination, { value: effectOutcome.payload, fromCall: true })
               break
             }
             const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === flowOutcome.tag,
+              (candidate) => candidate.source === effectOutcome.tag,
             )
             if (mapping === undefined)
-              throw new RangeError('MIR propagated flow has no canonical failure-tag mapping')
-            const propagated: FlowOutcomeValue = Object.freeze({
-              _tag: 'FlowOutcomeValue',
+              throw new RangeError('MIR propagated effect has no canonical failure-tag mapping')
+            const propagated: EffectOutcomeValue = Object.freeze({
+              _tag: 'EffectOutcomeValue',
               type: operation.propagationType.type,
               tag: mapping.target,
-              payload: flowOutcome.payload,
+              payload: effectOutcome.payload,
             })
             trace.push(
               Object.freeze({
-                _tag: 'FlowFailure',
+                _tag: 'EffectFailure',
                 function: fn.id,
                 tag: mapping.target,
                 span: operation.provenance.span,
@@ -1383,6 +1751,64 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
+            return Object.freeze({ _tag: 'Value', value: propagated })
+          }
+          case 'RunEffectValue': {
+            const effect = read(operation.effect).value
+            if (effect._tag !== 'EffectValue')
+              throw new RangeError('MIR attempted to run a non-Effect value')
+            const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
+            if (target === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: operation.runner,
+                span: operation.provenance.span,
+              })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                caller: fn.id,
+                target: operation.runner,
+                callerInstance: fn.instance,
+                targetInstance: target.instance,
+                span: operation.provenance.span,
+              }),
+            )
+            const result = executeFunction(
+              program,
+              target,
+              effect.captures,
+              Object.freeze([...active, target.instance]),
+              trace,
+              state,
+            )
+            if (result._tag === 'Blocked') return result
+            if (result.value._tag !== 'EffectOutcomeValue')
+              throw new RangeError('MIR Effect runner returned a non-outcome value')
+            const effectOutcome = result.value
+            write(operation.outcome, { value: effectOutcome, fromCall: true })
+            if (effectOutcome.tag === 0) {
+              write(operation.destination, { value: effectOutcome.payload, fromCall: true })
+              break
+            }
+            if (operation.propagationType === undefined)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'unhandled Effect failure escaped an infallible context',
+                span: operation.provenance.span,
+              })
+            const mapping = operation.tagMappings.find(
+              (candidate) => candidate.source === effectOutcome.tag,
+            )
+            if (mapping === undefined)
+              throw new RangeError('MIR Effect runner has no failure-tag mapping')
+            const propagated: EffectOutcomeValue = Object.freeze({
+              _tag: 'EffectOutcomeValue',
+              type: operation.propagationType.type,
+              tag: mapping.target,
+              payload: effectOutcome.payload,
+            })
             return Object.freeze({ _tag: 'Value', value: propagated })
           }
           case 'Call': {
@@ -1589,7 +2015,9 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
   )
   const result = executeFunction(program, fn, [], Object.freeze([fn.instance]), trace, {
     nextFrame: 0,
+    nextAllocation: 0,
     cells: new Map(),
+    allocations: new Map(),
   })
   if (result._tag === 'Blocked') {
     return Object.freeze({
