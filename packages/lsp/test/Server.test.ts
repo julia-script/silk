@@ -368,7 +368,7 @@ it(
         const report = publishedDiagnosticReport(message, mainUri)
         return report === undefined ? [] : report.diagnostics
       })
-      assert.isFalse(staleDiskDiagnostics.some((diagnostic) => diagnostic.code === 'SEM0004'))
+      assert.isFalse(staleDiskDiagnostics.some((diagnostic) => diagnostic.code === 'SEM0014'))
 
       client.send({
         method: 'textDocument/didClose',
@@ -381,7 +381,7 @@ it(
       })
       await client.waitFor((message) => {
         const report = publishedDiagnosticReport(message, mainUri)
-        return report?.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0004')
+        return report?.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0014')
           ? report
           : undefined
       })
