@@ -257,6 +257,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Operator',
       './Ownership',
       './Parser',
+      './SemanticTarget',
       './SourceFile',
       './SourceResolver',
       './SourceSpan',
@@ -857,7 +858,7 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
 
@@ -1122,7 +1123,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      `overrides:\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
 
