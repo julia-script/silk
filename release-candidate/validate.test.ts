@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -18,6 +18,17 @@ const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
 const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
+
+const installOffline = (cwd: string): void => {
+  const result = spawnSync('pnpm', ['install', '--offline'], {
+    cwd,
+    encoding: 'utf8',
+  })
+  if (result.status === 0) return
+  throw new Error(
+    `pnpm install --offline failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+  )
+}
 
 test('the llvm release candidate is a self-contained ESM package', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-release-candidate-'))
@@ -621,6 +632,7 @@ console.log(
       'Operator',
       'Ownership',
       'Parser',
+      'SemanticTarget',
       'SourceFile',
       'SourceResolver',
       'SourceSpan',
@@ -860,7 +872,7 @@ test('the compiler CLI release candidate installs with its project-first command
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
-    execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
+    installOffline(consumerRoot)
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk')
     const help = execFileSync(executable, ['--help'], { cwd: consumerRoot, encoding: 'utf8' })
@@ -1125,7 +1137,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       `overrides:\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
-    execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
+    installOffline(consumerRoot)
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk-lsp')
     const initialize = JSON.stringify({
