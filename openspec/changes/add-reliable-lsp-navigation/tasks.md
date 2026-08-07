@@ -36,7 +36,7 @@
 - [x] 5.1 Add `Document` tests for `LocationLink` conversion across local bindings, parameters, declarations, imports, qualified calls, fields, callable values, and unavailable targets
 - [x] 5.2 Implement definition conversion from UTF-16 position to the `Analysis` semantic target and from exact snapshot sources to origin, target, and selection ranges
 - [x] 5.3 Advertise `definitionProvider`, add the exact-version definition handler, and return no result for superseded, absent, ambiguous, inaccessible, conflicting, or unavailable targets
-- [x] 5.4 Extend real stdio tests for capability negotiation, Unicode positions, shadowing, open unsaved target modules, and closed cross-file target modules
+- [ ] 5.4 Extend real stdio tests for capability negotiation, Unicode positions, shadowing, open unsaved target modules, and closed cross-file target modules
 - [x] 5.5 Update the LSP package documentation to describe go-to-definition, project scheduling, watched-file behavior, and unsupported-client limitations
 
 ## 6. Verification and Release Validation
