@@ -65,7 +65,8 @@ fn execute(problem: Token) -> I32 {
   }
   drop local
   let pending = delayed(move problem)
-  let timed = timed() |> End.provide(&local, @Clock)
+  let timed = timed()
+    |> End.provide(&local, @Clock)
   return run pending
 }
 
@@ -75,5 +76,6 @@ fn borrow(values: [I32; 2], output: [I32; 2]) -> I32 {
 }
 
 pub fn main() -> I32 {
-  return helper(-1, 2) |> Core.finish()
+  return helper(-1, 2)
+    |> Core.finish()
 }

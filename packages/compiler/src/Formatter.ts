@@ -930,8 +930,16 @@ const printNode = (
       const nodes = directNodes(node)
       return FormatDocument.concat(
         printNode(context, nodes[0] ?? nodeOf(node, 'IdentifierExpression'), prefix, preserveBlank),
-        printToken(context, tokenOf(node, 'PipeGreater'), FormatDocument.text(' ')),
-        printNode(context, nodes[1] ?? nodeOf(node, 'PipelineTarget'), FormatDocument.text(' ')),
+        FormatDocument.indent(
+          FormatDocument.concat(
+            printToken(context, tokenOf(node, 'PipeGreater'), FormatDocument.hardLine),
+            printNode(
+              context,
+              nodes[1] ?? nodeOf(node, 'PipelineTarget'),
+              FormatDocument.text(' '),
+            ),
+          ),
+        ),
       )
     }
     case 'PipelineTarget': {
