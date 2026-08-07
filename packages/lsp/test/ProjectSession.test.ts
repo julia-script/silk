@@ -31,14 +31,14 @@ const analyzed = Effect.fnUntraced(function* (self: Document.Document) {
 
 it.effect('coalesces a burst into the latest pending project revision', () =>
   Effect.gen(function* () {
-    const analyzedVersions: Array<number> = []
+    const analyzedDocuments: Array<string> = []
     const publishedVersions: Array<number> = []
     const project = ProjectSession.make({
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
       analyze: Effect.fnUntraced(function* (self) {
-        analyzedVersions.push(self.version)
+        analyzedDocuments.push(`${self.module}@${self.version}`)
         return yield* analyzed(self)
       }),
       publish: Effect.fnUntraced(function* (session) {
@@ -51,6 +51,11 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
     )
     yield* Effect.yieldNow
     const second = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Util.silk', 1)),
+      { startImmediately: true },
+    )
+    yield* Effect.yieldNow
+    const latest = yield* Effect.forkChild(
       project.open(document('file:///workspace/Main.silk', 2)),
       { startImmediately: true },
     )
@@ -58,9 +63,10 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
     yield* TestClock.adjust(10)
     yield* Fiber.join(first)
     yield* Fiber.join(second)
+    yield* Fiber.join(latest)
 
-    assert.deepEqual(analyzedVersions, [2])
-    assert.deepEqual(publishedVersions, [2])
+    assert.deepEqual(analyzedDocuments, ['Main@2', 'Util@1'])
+    assert.deepEqual(publishedVersions, [2, 1])
   }),
 )
 
