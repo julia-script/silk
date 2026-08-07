@@ -870,7 +870,7 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installOffline(consumerRoot)
 
@@ -1135,7 +1135,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installOffline(consumerRoot)
 
