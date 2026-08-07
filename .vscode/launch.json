@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Silk: Run current file",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "command": "out=$(mktemp -t silk-run) && node \"${workspaceFolder}/packages/compiler-cli/dist/bin.js\" build-exe \"${file}\" --source-root \"${fileDirname}\" --output \"$out\" && \"$out\"; echo \"exit: $?\"; rm -f \"$out\""
+    }
+  ]
+}
