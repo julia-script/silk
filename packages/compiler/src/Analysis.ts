@@ -14,6 +14,7 @@ import * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
+import * as SemanticTarget from './SemanticTarget.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -50,6 +51,7 @@ export interface Snapshot {
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly results: ReadonlyMap<string, Elaboration.Result>
+  readonly semanticTargets: SemanticTarget.Index
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
@@ -104,6 +106,7 @@ export const make = Effect.fn('Analysis.make')(function* (
       ]
     }),
   )
+  const semanticTargets = SemanticTarget.make(results, index, resolution)
   const ownership = new Map(
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
@@ -172,6 +175,7 @@ export const make = Effect.fn('Analysis.make')(function* (
     index,
     resolution,
     results,
+    semanticTargets,
     ownership,
     instances,
     target,
@@ -204,6 +208,21 @@ export const cycles = (self: Snapshot): ReadonlyArray<ReadonlyArray<string>> => 
 /** Returns exact immutable source snapshots for every successfully loaded module. */
 export const sources = (self: Snapshot): ReadonlyMap<string, SourceFile.SourceFile> =>
   self.closure.sources
+
+/** Returns the smallest reference-bearing semantic target containing one byte offset. */
+export const semanticTargetAt = (
+  self: Snapshot,
+  module: string,
+  byteOffset: number,
+): SemanticTarget.SemanticTarget | undefined =>
+  SemanticTarget.at(self.semanticTargets, module, byteOffset)
+
+/** Resolves one semantic identity to its exact declaration and name spans. */
+export const declarationLocation = (
+  self: Snapshot,
+  identity: SemanticTarget.Identity,
+): SemanticTarget.DeclarationLocation | undefined =>
+  SemanticTarget.declarationLocation(self.semanticTargets, identity)
 
 /** Returns operational source-resolution failures in canonical module order. */
 export const resolutionFailures = (

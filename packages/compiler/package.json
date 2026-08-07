@@ -125,6 +125,10 @@
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
     },
+    "./SemanticTarget": {
+      "types": "./dist/SemanticTarget.d.ts",
+      "import": "./dist/SemanticTarget.js"
+    },
     "./Elaboration": {
       "types": "./dist/Elaboration.d.ts",
       "import": "./dist/Elaboration.js"
