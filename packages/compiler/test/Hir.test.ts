@@ -441,3 +441,42 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
   assert.include(Hir.encode(result.hir), 'effect-block site=fn0@')
   assert.include(Hir.encode(result.hir), 'access=exclusive')
 })
+
+it('retains explicit unsafe boundaries as typed HIR regions', () => {
+  const result = elaborate(
+    'hir://unsafe.silk',
+    'struct Token { value: I32 } pub fn main() -> I32 { unsafe { let token = Token { value: 1 } drop token } return 42 }',
+  )
+  const statement = result.hir.functions.at(0)?.statements.at(0)
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(statement?._tag, 'Unsafe')
+  if (statement?._tag !== 'Unsafe') return
+  assert.deepEqual(statement.statements.map((nested) => nested._tag), ['Bind', 'Drop'])
+  assert.include(Hir.encode(result.hir), 'unsafe r')
+  assert.deepEqual(Hir.verify(result.hir), [])
+})
+
+it('retains generic raw-buffer operations and whole-value borrows', () => {
+  const result = elaborate(
+    'hir://raw-storage.silk',
+    `fn destroy(buffer: RawBuffer<I32>) -> Unit {
+  let mut owner = move buffer
+  unsafe { return Slot.drop(RawBuffer.slot(&mut owner, 0)) }
+}`,
+  )
+  const unsafe = result.hir.functions.at(0)?.statements.at(1)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(unsafe?._tag, 'Unsafe')
+  if (unsafe?._tag !== 'Unsafe') return
+  const returned = unsafe.statements.at(0)
+  assert.strictEqual(returned?._tag, 'Return')
+  if (returned?._tag !== 'Return' || returned.expression._tag !== 'BuiltinCall') return
+  assert.strictEqual(returned.expression.operation, 'SlotDrop')
+  const slot = returned.expression.arguments.at(0)
+  assert.strictEqual(slot?._tag, 'BuiltinCall')
+  if (slot?._tag !== 'BuiltinCall') return
+  assert.strictEqual(slot.operation, 'RawBufferSlot')
+  assert.strictEqual(slot.arguments.at(0)?._tag, 'ValueBorrow')
+  assert.deepEqual(Hir.verify(result.hir), [])
+})

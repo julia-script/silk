@@ -334,6 +334,8 @@ const statementExpressionFacts = (
   statement: Elaboration.StatementFact,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
   switch (statement._tag) {
+    case 'UnsafeStatement':
+      return Object.freeze(statement.statements.flatMap(statementExpressionFacts))
     case 'BindStatement':
       return nestedExpressionFacts(statement.binding.initializer)
     case 'ReturnStatement':
@@ -367,6 +369,8 @@ const nestedStatementFacts = (
   statement: Elaboration.StatementFact,
 ): ReadonlyArray<Elaboration.StatementFact> => {
   switch (statement._tag) {
+    case 'UnsafeStatement':
+      return Object.freeze([statement, ...statement.statements.flatMap(nestedStatementFacts)])
     case 'IfStatement':
       return Object.freeze([
         statement,
@@ -941,5 +945,22 @@ export const unionTraceEventsOf = (
     outcome.trace.filter(
       (event): event is BootstrapEvaluation.UnionConversionTraceEvent =>
         event._tag === 'UnionConversion',
+    ),
+  )
+
+/** Returns logical allocation and typed-storage events without exposing host addresses. */
+export const allocationTraceEventsOf = (
+  outcome: BootstrapEvaluation.Outcome,
+): ReadonlyArray<BootstrapEvaluation.AllocationTraceEvent> =>
+  Object.freeze(
+    outcome.trace.filter(
+      (event): event is BootstrapEvaluation.AllocationTraceEvent =>
+        event._tag === 'AllocationAcquire' ||
+        event._tag === 'RawBufferForm' ||
+        event._tag === 'SlotProject' ||
+        event._tag === 'SlotWrite' ||
+        event._tag === 'SlotTake' ||
+        event._tag === 'SlotDrop' ||
+        event._tag === 'AllocationRelease',
     ),
   )

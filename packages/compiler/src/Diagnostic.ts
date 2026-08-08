@@ -141,6 +141,12 @@ export const redundantUnaryEmptyCallCode = 'SEM0078' as const
 export const deeperUnderApplicationCode = 'SEM0079' as const
 export const callableIdentityErasureCode = 'SEM0080' as const
 export const unknownOwnedCallableReturnCode = 'SEM0081' as const
+/** Stable code for a raw storage operation outside lexical unsafe authority. */
+export const missingUnsafeBoundaryCode = 'SEM0082' as const
+/** Stable code for an invalid source-declared capability implementation. */
+export const invalidConformanceCode = 'SEM0083' as const
+/** Stable code for a Drop implementation outside the compiler-sealed hook contract. */
+export const invalidDropHookCode = 'SEM0084' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -249,6 +255,9 @@ export type Code =
   | typeof deeperUnderApplicationCode
   | typeof callableIdentityErasureCode
   | typeof unknownOwnedCallableReturnCode
+  | typeof missingUnsafeBoundaryCode
+  | typeof invalidConformanceCode
+  | typeof invalidDropHookCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -305,6 +314,9 @@ export type Reason =
   | { readonly _tag: 'EffectIdentityErasure' }
   | { readonly _tag: 'CallableIdentityErasure' }
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
+  | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
+  | { readonly _tag: 'InvalidConformance'; readonly detail: string }
+  | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
@@ -1704,6 +1716,45 @@ export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =
     severity: 'error',
     message: 'A slice borrow is only valid as an immediate ordinary-call argument',
     reason: Object.freeze({ _tag: 'InvalidBorrowPosition' }),
+    span,
+  })
+
+export const missingUnsafeBoundary = (
+  operation: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingUnsafeBoundaryCode,
+    severity: 'error',
+    message: `${operation} requires a lexical unsafe block`,
+    reason: Object.freeze({ _tag: 'MissingUnsafeBoundary', operation }),
+    span,
+  })
+
+export const invalidConformance = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidConformanceCode,
+    severity: 'error',
+    message: `Invalid conformance: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidConformance', detail }),
+    span,
+  })
+
+export const invalidDropHook = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidDropHookCode,
+    severity: 'error',
+    message: `Invalid Drop hook: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidDropHook', detail }),
     span,
   })
 

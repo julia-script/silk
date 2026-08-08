@@ -49,6 +49,12 @@ export interface SliceValue {
   readonly length: number
 }
 
+export interface ReferenceValue {
+  readonly _tag: 'ReferenceValue'
+  readonly frame: number
+  readonly cell: number
+}
+
 export interface UnionValue {
   readonly _tag: 'UnionValue'
   readonly type: Type.StructuralUnion
@@ -109,6 +115,23 @@ export interface AllocationValue {
   readonly alignment: bigint
 }
 
+export interface RawBufferValue {
+  readonly _tag: 'RawBufferValue'
+  readonly type: Type.Nominal
+  readonly ticket: number
+  readonly count: bigint
+  readonly element: Type.Type
+  readonly stride: number
+}
+
+export interface SlotValue {
+  readonly _tag: 'SlotValue'
+  readonly type: Type.Nominal
+  readonly ticket: number
+  readonly index: bigint
+  readonly element: Type.Type
+}
+
 /** One immutable logical evaluator value, independent of backend lane realization. */
 export type Value =
   | I32Value
@@ -116,6 +139,7 @@ export type Value =
   | AggregateValue
   | ArrayValue
   | SliceValue
+  | ReferenceValue
   | UnionValue
   | EffectBorrowValue
   | CallableBorrowValue
@@ -123,6 +147,8 @@ export type Value =
   | CallableValue
   | EffectOutcomeValue
   | AllocationValue
+  | RawBufferValue
+  | SlotValue
 
 /** Entered the resolved entry instance. */
 export interface EntryTraceEvent {
@@ -276,6 +302,23 @@ export interface CallableTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface AllocationTraceEvent {
+  readonly _tag:
+    | 'AllocationAcquire'
+    | 'RawBufferForm'
+    | 'SlotProject'
+    | 'SlotWrite'
+    | 'SlotTake'
+    | 'SlotDrop'
+    | 'AllocationRelease'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly ticket: number
+  readonly index?: bigint
+  readonly count?: bigint
+  readonly element?: Type.Type
+  readonly span: SourceSpan.SourceSpan
+}
+
 export type TraceEvent =
   | EntryTraceEvent
   | CallTraceEvent
@@ -291,6 +334,7 @@ export type TraceEvent =
   | ControlTraceEvent
   | EffectTraceEvent
   | CallableTraceEvent
+  | AllocationTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -388,7 +432,7 @@ interface EvaluationState {
   nextAllocation: number
   nextCallable: number
   readonly cells: Map<string, LocalState>
-  readonly allocations: Map<number, { active: boolean }>
+  readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
 }
 
@@ -436,6 +480,16 @@ function executeFunction(
   const cell = (slice: SliceValue): LocalState => {
     const found = state.cells.get(cellKey(slice.frame, slice.cell))
     if (found === undefined) throw new RangeError('MIR slice references a missing evaluator cell')
+    return found
+  }
+
+  const referenced = (local: Mir.LocalId): LocalState => {
+    const reference = read(local).value
+    if (reference._tag !== 'ReferenceValue') {
+      throw new RangeError('MIR raw storage operation lost its whole-value reference')
+    }
+    const found = state.cells.get(cellKey(reference.frame, reference.cell))
+    if (found === undefined) throw new RangeError('MIR reference points at a missing evaluator cell')
     return found
   }
 
@@ -714,6 +768,7 @@ function executeFunction(
         }),
       )
     }
+    if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
     if (owner._tag !== 'AggregateValue') return Object.freeze([])
     return Object.freeze(
       cleanup.fields.flatMap((field) => {
@@ -1095,6 +1150,22 @@ function executeFunction(
             break
           case 'BeginLoan': {
             const source = read(operation.root)
+            if (operation.type._tag === 'Reference') {
+              const key = cellKey(frame, operation.root.ordinal)
+              if (!state.cells.has(key)) state.cells.set(key, source)
+              write(operation.destination, {
+                value: Object.freeze({
+                  _tag: 'ReferenceValue' as const,
+                  frame,
+                  cell: operation.root.ordinal,
+                }),
+                fromCall: source.fromCall,
+              })
+              break
+            }
+            if (operation.sourceType._tag === 'Nominal') {
+              throw new RangeError('MIR verifier allowed a nominal slice root')
+            }
             const slice =
               operation.sourceType._tag === 'Slice'
                 ? source.value
@@ -1231,7 +1302,11 @@ function executeFunction(
             }
             const maximum =
               program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
-            const overflow = count.value !== 0n && bytes.value > maximum / count.value
+            const stride =
+              alignment.value === 0n
+                ? 0n
+                : ((bytes.value + alignment.value - 1n) / alignment.value) * alignment.value
+            const overflow = count.value !== 0n && stride > maximum / count.value
             const member = overflow ? Type.layoutOverflow : Type.layout
             const memberEntry = program.layout.entries.find((candidate) =>
               Type.equals(candidate.type, member),
@@ -1242,7 +1317,7 @@ function executeFunction(
             ) {
               throw new RangeError('Target plan omitted a repeated-layout result member')
             }
-            const total = usizeValue(overflow ? 0n : bytes.value * count.value)
+            const total = usizeValue(overflow ? 0n : stride * count.value)
             const payload: AggregateValue = Object.freeze({
               _tag: 'AggregateValue',
               type: member,
@@ -1291,7 +1366,7 @@ function executeFunction(
               throw new RangeError('Layout payload omitted bytes or alignment')
             const ticket = state.nextAllocation
             state.nextAllocation += 1
-            state.allocations.set(ticket, { active: true })
+            state.allocations.set(ticket, { active: true, values: new Map() })
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AllocationValue',
@@ -1302,6 +1377,197 @@ function executeFunction(
               }),
               fromCall: false,
             })
+            trace.push(
+              Object.freeze({
+                _tag: 'AllocationAcquire',
+                function: fn.id,
+                ticket,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'RawBufferFrom': {
+            const allocation = read(operation.allocation).value
+            const count = readInteger(operation.count)
+            if (allocation._tag !== 'AllocationValue' || count._tag !== 'UsizeValue') {
+              throw new RangeError('MIR verifier allowed invalid RawBuffer construction operands')
+            }
+            const expectedBytes = BigInt(operation.stride) * count.value
+            if (
+              allocation.bytes !== expectedBytes ||
+              allocation.alignment !== BigInt(operation.elementAlignment)
+            ) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer allocation layout does not match its element type and count',
+                span: operation.provenance.span,
+              })
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'RawBufferValue',
+                type: operation.type.type,
+                ticket: allocation.ticket,
+                count: count.value,
+                element: operation.element,
+                stride: operation.stride,
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'RawBufferForm',
+                function: fn.id,
+                ticket: allocation.ticket,
+                count: count.value,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'RawBufferCount': {
+            const buffer = referenced(operation.buffer).value
+            if (buffer._tag !== 'RawBufferValue') {
+              throw new RangeError('MIR verifier allowed RawBuffer.count on another value')
+            }
+            write(operation.destination, { value: usizeValue(buffer.count), fromCall: false })
+            break
+          }
+          case 'RawBufferSlot': {
+            const buffer = referenced(operation.buffer).value
+            const index = readInteger(operation.index)
+            if (buffer._tag !== 'RawBufferValue' || index._tag !== 'UsizeValue') {
+              throw new RangeError('MIR verifier allowed invalid RawBuffer.slot operands')
+            }
+            if (index.value >= buffer.count) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer slot index is out of bounds',
+                span: operation.provenance.span,
+              })
+            }
+            if (!Type.equals(buffer.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed mismatched RawBuffer element provenance')
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'SlotValue',
+                type: operation.type.type,
+                ticket: buffer.ticket,
+                index: index.value,
+                element: operation.element,
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'SlotProject',
+                function: fn.id,
+                ticket: buffer.ticket,
+                index: index.value,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'SlotWrite': {
+            const slot = read(operation.slot).value
+            if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed Slot.write with mismatched provenance')
+            }
+            const allocation = state.allocations.get(slot.ticket)
+            const key = slot.index.toString()
+            if (allocation === undefined || !allocation.active || allocation.values.has(key)) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Slot.write requires live uninitialized storage',
+                span: operation.provenance.span,
+              })
+            }
+            allocation.values.set(key, read(operation.value).value)
+            write(operation.destination, {
+              value: Object.freeze({ _tag: 'AggregateValue', type: Type.unit, fields: Object.freeze([]) }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'SlotWrite',
+                function: fn.id,
+                ticket: slot.ticket,
+                index: slot.index,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'SlotTake': {
+            const slot = read(operation.slot).value
+            if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed Slot.take with mismatched provenance')
+            }
+            const allocation = state.allocations.get(slot.ticket)
+            const key = slot.index.toString()
+            const selected = allocation?.values.get(key)
+            if (allocation === undefined || !allocation.active || selected === undefined) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Slot.take requires live initialized storage',
+                span: operation.provenance.span,
+              })
+            }
+            allocation.values.delete(key)
+            write(operation.destination, { value: selected, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'SlotTake',
+                function: fn.id,
+                ticket: slot.ticket,
+                index: slot.index,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'SlotDrop': {
+            const slot = read(operation.slot).value
+            if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed Slot.drop with mismatched provenance')
+            }
+            const allocation = state.allocations.get(slot.ticket)
+            const key = slot.index.toString()
+            const selected = allocation?.values.get(key)
+            if (allocation === undefined || !allocation.active || selected === undefined) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Slot.drop requires live initialized storage',
+                span: operation.provenance.span,
+              })
+            }
+            allocation.values.delete(key)
+            write(operation.destination, {
+              value: Object.freeze({ _tag: 'AggregateValue', type: Type.unit, fields: Object.freeze([]) }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'SlotDrop',
+                function: fn.id,
+                ticket: slot.ticket,
+                index: slot.index,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
             break
           }
           case 'Binary': {
@@ -1610,6 +1876,31 @@ function executeFunction(
               if (ticket === undefined || !ticket.active)
                 throw new RangeError('Allocation reclaim ticket was consumed more than once')
               ticket.active = false
+              trace.push(
+                Object.freeze({
+                  _tag: 'AllocationRelease',
+                  function: fn.id,
+                  ticket: dropped.ticket,
+                  span: operation.provenance.span,
+                }),
+              )
+            }
+            if (operation.cleanup._tag === 'RawBufferCleanup') {
+              if (dropped._tag !== 'RawBufferValue')
+                throw new RangeError('RawBuffer cleanup lost its private reclaim ticket')
+              const ticket = state.allocations.get(dropped.ticket)
+              if (ticket === undefined || !ticket.active)
+                throw new RangeError('RawBuffer reclaim ticket was consumed more than once')
+              ticket.active = false
+              ticket.values.clear()
+              trace.push(
+                Object.freeze({
+                  _tag: 'AllocationRelease',
+                  function: fn.id,
+                  ticket: dropped.ticket,
+                  span: operation.provenance.span,
+                }),
+              )
             }
             if (operation.cleanup._tag === 'CallableCleanup') {
               if (dropped._tag !== 'CallableValue')

@@ -125,6 +125,15 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'Reference'
+      readonly access: 'Shared' | 'Exclusive'
+      readonly target: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Callable'
       readonly mode: Type.CallableMode
       readonly parameters: ReadonlyArray<DeclaredTypeFact>
@@ -271,6 +280,60 @@ export interface StructFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One source-retained capability conformance witness. */
+export interface ConformanceFact {
+  readonly _tag: 'ConformanceDeclaration'
+  readonly module: string
+  readonly ordinal: number
+  readonly capability: DeclaredTypeFact
+  readonly provider: DeclaredTypeFact
+  readonly operations: ReadonlyArray<{
+    readonly name: DeclaredName
+    readonly target:
+      | TypePathFact
+      | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+    readonly syntax: SyntaxTree.Node
+  }>
+  readonly hook?: DropHookFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** The source-retained header of one compiler-sealed Drop hook. */
+export interface DropHookFact {
+  readonly _tag: 'DropHookDeclaration'
+  readonly name: DeclaredName
+  readonly functionKind: 'Ordinary' | 'Effect'
+  readonly typeParameterCount: number
+  readonly parameterCount: number
+  readonly parameterName: DeclaredName
+  readonly parameterType: DeclaredTypeFact
+  readonly returnType: DeclaredTypeFact
+  readonly failureRow: FailureRowFact
+  readonly requirementRow: RequirementRowFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One canonical nominal capability witness selected without erasing its provider type. */
+export type ConformanceWitness =
+  | {
+      readonly _tag: 'IdentityConformanceWitness'
+      readonly capability: Type.Nominal
+      readonly provider: Type.Nominal
+    }
+  | {
+      readonly _tag: 'IntrinsicConformanceWitness'
+      readonly capability: Type.Nominal
+      readonly provider: Type.Nominal
+    }
+  | {
+      readonly _tag: 'SourceConformanceWitness'
+      readonly module: string
+      readonly ordinal: number
+      readonly capability: Type.Nominal
+      readonly provider: Type.Nominal
+      readonly operation?: CanonicalId
+    }
+
 /** Any declaration kind occupying the shared module-level namespace. */
 export type MemberFact = DeclarationFact | StructFact
 
@@ -326,6 +389,7 @@ export interface ModuleHeaders {
   readonly members: ReadonlyArray<MemberFact>
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly structs: ReadonlyArray<StructFact>
+  readonly conformances: ReadonlyArray<ConformanceFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -363,6 +427,7 @@ const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'AppliedType' ||
     element.kind === 'FixedArrayType' ||
     element.kind === 'SliceType' ||
+    element.kind === 'ReferenceType' ||
     element.kind === 'CallableType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
@@ -574,6 +639,33 @@ export const analyzeDeclaredType = (
           : {}),
       }),
       diagnostics: element.diagnostics,
+    })
+  }
+  if (syntax.kind === 'ReferenceType') {
+    const token = SyntaxTree.directToken(syntax, 'Ampersand')
+    const targetSyntax = syntax.children.find(isDeclaredTypeNode)
+    if (token === undefined || targetSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const access: 'Shared' | 'Exclusive' =
+      SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
+    const target = analyzeDeclaredType(source, targetSyntax, typeParameters)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Reference',
+        access,
+        target: target.fact,
+        spelling: `${access === 'Exclusive' ? '&mut ' : '&'}unavailable`,
+        token,
+        syntax,
+        ...('cause' in target.fact && target.fact.cause !== undefined
+          ? { cause: target.fact.cause }
+          : {}),
+      }),
+      diagnostics: target.diagnostics,
     })
   }
   if (syntax.kind === 'FixedArrayType') {
@@ -1152,6 +1244,123 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const conformances = syntax.root.children
+    .filter(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
+    )
+    .map((node, ordinal): ConformanceFact => {
+      const types = node.children.filter(isDeclaredTypeNode)
+      const capabilitySyntax = types.at(0)
+      const providerSyntax = types.at(1)
+      const capability =
+        capabilitySyntax === undefined
+          ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
+          : analyzeDeclaredType(source, capabilitySyntax).fact
+      const provider =
+        providerSyntax === undefined
+          ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
+          : analyzeDeclaredType(source, providerSyntax).fact
+      const operations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
+        const name = presentName(source, operation)
+        const targetSyntax = SyntaxTree.directNode(operation, 'TypePath')
+        const target =
+          targetSyntax === undefined
+            ? Object.freeze({ _tag: 'Unavailable' as const, syntax: operation })
+            : (() => {
+                const tokens = SyntaxTree.tokens(targetSyntax).filter(
+                  (token) => token.kind === 'Identifier',
+                )
+                return tokens.length === 0
+                  ? Object.freeze({ _tag: 'Unavailable' as const, syntax: targetSyntax })
+                  : Object.freeze({
+                      _tag: 'TypePath' as const,
+                      spelling: tokens.map((token) => spelling(source, token)).join('.'),
+                      segments: Object.freeze(
+                        tokens.map((token) =>
+                          Object.freeze({ spelling: spelling(source, token), token }),
+                        ),
+                      ),
+                      syntax: targetSyntax,
+                    })
+              })()
+        return Object.freeze({ name, target, syntax: operation })
+      })
+      const hookSyntax = SyntaxTree.directNode(node, 'FunctionDeclaration')
+      const hook =
+        hookSyntax === undefined
+          ? undefined
+          : (() => {
+              const parameterList = SyntaxTree.directNode(hookSyntax, 'ParameterList')
+              const parameters =
+                parameterList === undefined
+                  ? []
+                  : SyntaxTree.directNodes(parameterList, 'ParameterDeclaration')
+              const parameter = parameters.at(0)
+              const parameterTypeSyntax =
+                parameter === undefined
+                  ? undefined
+                  : parameter.children.find(
+                      (element): element is SyntaxTree.Node => isDeclaredTypeNode(element),
+                    )
+              const returnSyntax = SyntaxTree.directNode(hookSyntax, 'ReturnType')
+              const returnTypeSyntax = returnSyntax?.children.find(
+                (element): element is SyntaxTree.Node => isDeclaredTypeNode(element),
+              )
+              const failure = collectFailureRow(source, hookSyntax, new Map())
+              const requirements = collectRequirementRow(source, hookSyntax, new Map())
+              const hookNameToken = SyntaxTree.directToken(hookSyntax, 'DropKeyword')
+              diagnostics.push(...failure.diagnostics, ...requirements.diagnostics)
+              return Object.freeze({
+                _tag: 'DropHookDeclaration' as const,
+                name:
+                  hookNameToken === undefined
+                    ? presentName(source, hookSyntax)
+                    : Object.freeze({
+                        _tag: 'Present' as const,
+                        spelling: 'drop',
+                        token: hookNameToken,
+                      }),
+                functionKind:
+                  SyntaxTree.directToken(hookSyntax, 'EffectKeyword') === undefined
+                    ? ('Ordinary' as const)
+                    : ('Effect' as const),
+                typeParameterCount:
+                  SyntaxTree.directNode(hookSyntax, 'TypeParameterList') === undefined
+                    ? 0
+                    : SyntaxTree.directNodes(
+                        childNode(hookSyntax, 'TypeParameterList'),
+                        'TypeParameter',
+                      ).length,
+                parameterCount: parameters.length,
+                parameterName:
+                  parameter === undefined
+                    ? Object.freeze({ _tag: 'Unavailable' as const, syntax: hookSyntax })
+                    : presentName(source, parameter),
+                parameterType:
+                  parameterTypeSyntax === undefined
+                    ? Object.freeze({ _tag: 'Unavailable' as const, syntax: parameter ?? hookSyntax })
+                    : analyzeDeclaredType(source, parameterTypeSyntax).fact,
+                returnType:
+                  returnTypeSyntax === undefined
+                    ? Object.freeze({ _tag: 'Unavailable' as const, syntax: returnSyntax ?? hookSyntax })
+                    : analyzeDeclaredType(source, returnTypeSyntax).fact,
+                failureRow: failure.fact,
+                requirementRow: requirements.fact,
+                syntax: hookSyntax,
+              })
+            })()
+      return Object.freeze({
+        _tag: 'ConformanceDeclaration',
+        module: source.id,
+        ordinal,
+        capability,
+        provider,
+        operations: Object.freeze(operations),
+        ...(hook === undefined ? {} : { hook }),
+        syntax: node,
+      })
+    })
   const members = nodes.map((node, ordinal): MemberFact => {
     const id: DeclarationId = Object.freeze({ _tag: 'DeclarationId', sourceId: source.id, ordinal })
     const name = presentName(source, node)
@@ -1254,6 +1463,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     structs: Object.freeze(
       members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
     ),
+    conformances: Object.freeze(conformances),
     diagnostics: Object.freeze(diagnostics.sort(compareDiagnostics)),
   })
 }
@@ -1279,10 +1489,12 @@ const resolveDeclaredType = (
     const resolved = resolver(module, fact.path)
     if (resolved.fact._tag !== 'Resolved' || !Type.isNominal(resolved.fact.type)) return resolved
     const declaration = memberByNominal(modules, resolved.fact.type)
-    if (declaration === undefined || declaration.typeParameters.length === 0) return resolved
+    const expected =
+      declaration?.typeParameters.length ?? Type.intrinsicNominalArity(resolved.fact.type)
+    if (expected === 0) return resolved
     const diagnostic = Diagnostic.typeArgumentArity(
       fact.spelling,
-      declaration.typeParameters.length,
+      expected,
       0,
       fact.token.span,
     )
@@ -1440,7 +1652,7 @@ const resolveDeclaredType = (
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
       const declaration = memberByNominal(modules, target.fact.type)
-      const expected = declaration?.typeParameters.length ?? 0
+      const expected = declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
       const available = arguments_.map((argument) =>
         argument.fact._tag === 'Resolved' ? argument.fact.type : undefined,
       )
@@ -1564,6 +1776,32 @@ const resolveDeclaredType = (
         ...(cause === undefined ? {} : { cause }),
       }),
       diagnostics: element.diagnostics,
+    })
+  }
+  if (fact._tag === 'Reference') {
+    const target = resolveDeclaredType(module, fact.target, resolver, modules)
+    if (target.fact._tag === 'Resolved') {
+      const type = Type.reference(fact.access, target.fact.type)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token: fact.token,
+          syntax: fact.syntax,
+        }),
+        diagnostics: target.diagnostics,
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        target: target.fact,
+        ...('cause' in target.fact && target.fact.cause !== undefined
+          ? { cause: target.fact.cause }
+          : {}),
+      }),
+      diagnostics: target.diagnostics,
     })
   }
   if (fact._tag !== 'FixedArray') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
@@ -1874,6 +2112,69 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       })
       return Object.freeze({ ...member, fields: Object.freeze(fields) })
     })
+    const conformances = module.conformances.map((conformance) => {
+      const capability = resolveDeclaredType(
+        module.module,
+        conformance.capability,
+        resolver,
+        self.modules,
+      )
+      const provider = resolveDeclaredType(
+        module.module,
+        conformance.provider,
+        resolver,
+        self.modules,
+      )
+      diagnostics.push(...capability.diagnostics, ...provider.diagnostics)
+      const hook =
+        conformance.hook === undefined
+          ? undefined
+          : (() => {
+              const parameterType = resolveDeclaredType(
+                module.module,
+                conformance.hook.parameterType,
+                resolver,
+                self.modules,
+              )
+              const returnType = resolveDeclaredType(
+                module.module,
+                conformance.hook.returnType,
+                resolver,
+                self.modules,
+              )
+              const failureRow = resolveFailureRow(
+                module.module,
+                conformance.hook.failureRow,
+                resolver,
+                self.modules,
+              )
+              const requirementRow = resolveRequirementRow(
+                module.module,
+                conformance.hook.requirementRow,
+                resolver,
+                self.modules,
+              )
+              diagnostics.push(
+                ...parameterType.diagnostics,
+                ...returnType.diagnostics,
+                ...failureRow.diagnostics,
+                ...requirementRow.diagnostics,
+              )
+              return Object.freeze({
+                ...conformance.hook,
+                parameterType: parameterType.fact,
+                returnType: returnType.fact,
+                failureRow: failureRow.fact,
+                requirementRow: requirementRow.fact,
+              })
+            })()
+      return Object.freeze({
+        ...conformance,
+        capability: capability.fact,
+        provider: provider.fact,
+        ...(hook === undefined ? {} : { hook }),
+      })
+    })
     return Object.freeze({
       ...module,
       members: Object.freeze(members),
@@ -1885,8 +2186,208 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
       ),
+      conformances: Object.freeze(conformances),
     })
   })
+
+  const conformanceKeys = new Map<string, SourceSpan.SourceSpan>()
+  const copyMemo = new Map<string, boolean>()
+  const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
+    if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
+    if (Type.isFixedArray(type)) return isCopyType(type.element, visiting)
+    if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
+    const key = Type.key(type)
+    const remembered = copyMemo.get(key)
+    if (remembered !== undefined) return remembered
+    if (visiting.has(key)) return false
+    const declaration = modules
+      .flatMap((module) => module.structs)
+      .find(
+        (struct) =>
+          struct.canonical._tag === 'Canonical' &&
+          struct.canonical.id.module === type.module &&
+          struct.canonical.id.name === type.name,
+      )
+    if (declaration === undefined) return false
+    const next = new Set(visiting).add(key)
+    const result = declaration.fields.every(
+      (field) =>
+        field.declaredType._tag === 'Resolved' &&
+        isCopyType(field.declaredType.type, next),
+    )
+    copyMemo.set(key, result)
+    return result
+  }
+
+  for (const module of modules) {
+    for (const conformance of module.conformances) {
+      if (
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.capability.type) ||
+        conformance.provider._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.provider.type)
+      ) {
+        diagnostics.push(
+          Diagnostic.invalidConformance(
+            'the capability and provider must resolve to concrete nominal types',
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
+      const capability = conformance.capability.type
+      const provider = conformance.provider.type
+      const key = `${Type.key(capability)}\0${Type.key(provider)}`
+      const original = conformanceKeys.get(key)
+      if (original !== undefined) {
+        diagnostics.push(
+          Object.freeze({
+            ...Diagnostic.invalidConformance(
+              `duplicate ${capability.name} implementation for ${Type.encode(provider)}`,
+              conformance.syntax.span,
+            ),
+            relatedSpans: Object.freeze([
+              Object.freeze({ label: 'first implementation', span: original }),
+            ]),
+          }),
+        )
+        continue
+      }
+      conformanceKeys.set(key, conformance.syntax.span)
+
+      if (Type.equals(capability, Type.allocator)) {
+        if (conformance.hook !== undefined) {
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              'Allocator implementations use operation mappings, not a hook body',
+              conformance.hook.syntax.span,
+            ),
+          )
+        }
+        const allocations = conformance.operations.filter(
+          (operation) => operation.name._tag === 'Present' && operation.name.spelling === 'allocate',
+        )
+        if (conformance.operations.length !== 1 || allocations.length !== 1) {
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              'Allocator requires exactly one allocate operation mapping',
+              conformance.syntax.span,
+            ),
+          )
+          continue
+        }
+        const mapping = allocations.at(0)
+        const target = mapping?.target
+        if (
+          target?._tag !== 'TypePath' ||
+          target.segments.length !== 2 ||
+          target.segments.at(0)?.spelling !== provider.name ||
+          target.segments.at(1)?.spelling !== 'allocate'
+        ) {
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              `allocate must map to ${provider.name}.allocate in the provider's actor`,
+              mapping?.syntax.span ?? conformance.syntax.span,
+            ),
+          )
+          continue
+        }
+        const declaration = module.declarations.find(
+          (candidate) =>
+            candidate.name._tag === 'Present' && candidate.name.spelling === 'allocate',
+        )
+        if (declaration !== undefined) {
+          const selfType = declaration.parameters.at(0)?.declaredType
+          const layoutType = declaration.parameters.at(1)?.declaredType
+          const validSelf =
+            selfType?._tag === 'Resolved' &&
+            Type.isReference(selfType.type) &&
+            selfType.type.access === 'Exclusive' &&
+            Type.equals(selfType.type.target, provider)
+          const validLayout =
+            layoutType?._tag === 'Resolved' && Type.equals(layoutType.type, Type.layout)
+          const validResult =
+            declaration.returnType._tag === 'Resolved' &&
+            Type.equals(declaration.returnType.type, Type.allocation)
+          const validFailure =
+            declaration.failureRow.failures.length === 1 &&
+            Type.equals(declaration.failureRow.failures[0] ?? Type.unit, Type.outOfMemory)
+          if (
+            declaration.functionKind !== 'Effect' ||
+            declaration.parameters.length !== 2 ||
+            !validSelf ||
+            !validLayout ||
+            !validResult ||
+            !validFailure ||
+            declaration.requirementRow.requirements.length !== 0
+          ) {
+            diagnostics.push(
+              Diagnostic.invalidConformance(
+                'allocate must be effect fn (&mut Provider, Layout) -> Allocation ! OutOfMemory with no requirements',
+                mapping?.syntax.span ?? conformance.syntax.span,
+              ),
+            )
+          }
+        }
+        continue
+      }
+
+      if (Type.equals(capability, Type.dropCapability)) {
+        const hook = conformance.hook
+        if (conformance.operations.length !== 0 || hook === undefined) {
+          diagnostics.push(
+            Diagnostic.invalidDropHook(
+              'Drop requires one inline fn drop hook and no operation mappings',
+              conformance.syntax.span,
+            ),
+          )
+          continue
+        }
+        const parameter = hook.parameterType
+        const validSelf =
+          parameter._tag === 'Resolved' &&
+          Type.isReference(parameter.type) &&
+          parameter.type.access === 'Exclusive' &&
+          Type.equals(parameter.type.target, provider)
+        if (
+          hook.name._tag !== 'Present' ||
+          hook.name.spelling !== 'drop' ||
+          hook.functionKind !== 'Ordinary' ||
+          hook.typeParameterCount !== 0 ||
+          hook.parameterCount !== 1 ||
+          hook.parameterName._tag !== 'Present' ||
+          hook.parameterName.spelling !== 'self' ||
+          !validSelf ||
+          hook.returnType._tag !== 'Resolved' ||
+          !Type.equals(hook.returnType.type, Type.unit) ||
+          hook.failureRow.failures.length !== 0 ||
+          hook.requirementRow.requirements.length !== 0
+        ) {
+          diagnostics.push(
+            Diagnostic.invalidDropHook(
+              'the hook must be fn drop(self: &mut Provider) -> Unit with no generics, failures, or requirements',
+              hook.syntax.span,
+            ),
+          )
+        } else if (isCopyType(provider)) {
+          diagnostics.push(
+            Diagnostic.invalidDropHook(
+              `Copy type ${Type.encode(provider)} cannot implement Drop`,
+              conformance.syntax.span,
+            ),
+          )
+        }
+        continue
+      }
+
+      diagnostics.push(
+        Diagnostic.invalidConformance(
+          `unsupported compiler-sealed capability ${Type.encode(capability)}`,
+          conformance.syntax.span,
+        ),
+      )
+    }
+  }
 
   for (const module of modules) {
     for (const member of module.members) {
@@ -1895,8 +2396,13 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           if (
             parameter.declaredType._tag === 'Resolved' &&
             Type.containsBorrow(parameter.declaredType.type) &&
-            (!Type.isSlice(parameter.declaredType.type) ||
-              Type.containsBorrow(parameter.declaredType.type.element))
+            (!(Type.isSlice(parameter.declaredType.type) ||
+              Type.isReference(parameter.declaredType.type)) ||
+              Type.containsBorrow(
+                Type.isSlice(parameter.declaredType.type)
+                  ? parameter.declaredType.type.element
+                  : parameter.declaredType.type.target,
+              ))
           ) {
             diagnostics.push(
               Diagnostic.sliceTypePosition('parameter', parameter.declaredType.syntax.span),
@@ -2056,6 +2562,80 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   })
 }
 
+/** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
+export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean => {
+  return witness(self, provider, capability) !== undefined
+}
+
+/** Selects the unique compiler-shipped or source-declared witness for one provider. */
+export const witness = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): ConformanceWitness | undefined => {
+  if (!Type.isNominal(provider)) return undefined
+  if (Type.equals(provider, capability)) {
+    return Object.freeze({ _tag: 'IdentityConformanceWitness', capability, provider })
+  }
+  if (Type.intrinsicallyConforms(provider, capability)) {
+    return Object.freeze({
+      _tag: 'IntrinsicConformanceWitness',
+      capability,
+      provider,
+    })
+  }
+  const matches = self.modules.flatMap((module) =>
+    module.conformances.flatMap((conformance) =>
+      conformance.capability._tag === 'Resolved' &&
+      Type.equals(conformance.capability.type, capability) &&
+      conformance.provider._tag === 'Resolved' &&
+      Type.equals(conformance.provider.type, provider)
+        ? [Object.freeze({ module, conformance })]
+        : [],
+    ),
+  )
+  if (matches.length !== 1) return undefined
+  const selected = matches.at(0)
+  if (selected === undefined) return undefined
+  const conformance = selected.conformance
+  if (!Type.equals(capability, Type.allocator)) {
+    return Type.equals(capability, Type.dropCapability)
+      ? Object.freeze({
+          _tag: 'SourceConformanceWitness',
+          module: conformance.module,
+          ordinal: conformance.ordinal,
+          capability,
+          provider,
+        })
+      : undefined
+  }
+  const mapping = conformance.operations.at(0)
+  if (!(
+    conformance.hook === undefined &&
+    conformance.operations.length === 1 &&
+    mapping?.name._tag === 'Present' &&
+    mapping.name.spelling === 'allocate' &&
+    mapping.target._tag === 'TypePath' &&
+    mapping.target.segments.length === 2 &&
+    mapping.target.segments.at(0)?.spelling === provider.name &&
+    mapping.target.segments.at(1)?.spelling === 'allocate'
+  )) return undefined
+  const operation = selected.module.declarations.find(
+    (declaration) =>
+      declaration.name._tag === 'Present' &&
+      declaration.name.spelling === 'allocate' &&
+      declaration.canonical._tag === 'Canonical',
+  )
+  return Object.freeze({
+    _tag: 'SourceConformanceWitness',
+    module: conformance.module,
+    ordinal: conformance.ordinal,
+    capability,
+    provider,
+    ...(operation?.canonical._tag === 'Canonical' ? { operation: operation.canonical.id } : {}),
+  })
+}
+
 const presentParameterNameEntries = (parameters: ReadonlyArray<ParameterFact>) =>
   presentParameterEntries(parameters)
 
@@ -2166,7 +2746,7 @@ export const containsLexicalBorrow = (
   type: Type.Type,
   seen: ReadonlySet<string> = new Set(),
 ): boolean => {
-  if (Type.isSlice(type)) return true
+  if (Type.isSlice(type) || Type.isReference(type)) return true
   if (Type.isFixedArray(type)) return containsLexicalBorrow(self, type.element, seen)
   if (Type.isUnion(type))
     return type.members.some((member) => containsLexicalBorrow(self, member, seen))

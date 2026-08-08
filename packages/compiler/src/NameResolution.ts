@@ -7,7 +7,14 @@ import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
-export type IntrinsicActor = Type.Builtin | 'Layout' | 'Allocator' | 'SystemAllocator'
+export type IntrinsicActor =
+  | Type.Builtin
+  | 'Layout'
+  | 'Allocator'
+  | 'SystemAllocator'
+  | 'RawBuffer'
+  | 'Slot'
+  | 'Unit'
 
 export type Binding =
   | {
@@ -141,6 +148,9 @@ export const resolve = (
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Layout' }),
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Allocator' }),
       Object.freeze({ _tag: 'IntrinsicActor', spelling: 'SystemAllocator' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'RawBuffer' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Slot' }),
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Unit' }),
     ]
     const headers = index.modules.find((value) => value.module === module.name)
     for (const declaration of headers?.members ?? [])
@@ -513,8 +523,11 @@ export const resolveType = (
   if (result._tag === 'Intrinsic') {
     if (result.actor === 'Layout') return resolvedType(path, Type.layout)
     if (result.actor === 'Allocator') return resolvedType(path, Type.allocator)
-    if (result.actor === 'SystemAllocator')
-      return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
+    if (result.actor === 'SystemAllocator') return resolvedType(path, Type.systemAllocator)
+    if (result.actor === 'RawBuffer')
+      return resolvedType(path, Type.nominal('silk/core', 'RawBuffer'))
+    if (result.actor === 'Slot') return resolvedType(path, Type.nominal('silk/core', 'Slot'))
+    if (result.actor === 'Unit') return resolvedType(path, Type.unit)
     return resolvedType(path, result.actor)
   }
   if (result._tag === 'Resolved') {

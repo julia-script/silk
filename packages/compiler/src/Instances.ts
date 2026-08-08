@@ -271,7 +271,8 @@ const callableBindings = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expressi
   const statements = (body: ReadonlyArray<Hir.Statement>): void => {
     for (const statement of body) {
       if (statement._tag === 'Bind') bindings.set(statement.binding.ordinal, statement.initializer)
-      if (statement._tag === 'If') {
+      if (statement._tag === 'Unsafe') statements(statement.statements)
+      else if (statement._tag === 'If') {
         statements(statement.taken)
         statements(statement.otherwise)
       } else if (statement._tag === 'While') statements(statement.body)

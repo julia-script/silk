@@ -24,6 +24,7 @@ export type Type =
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
+  | { readonly _tag: 'Reference'; readonly type: SilkType.Reference }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
   | {
       readonly _tag: 'EffectBorrow'
@@ -55,6 +56,7 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
   self._tag === 'Nominal' ||
   self._tag === 'FixedArray' ||
   self._tag === 'Slice' ||
+  self._tag === 'Reference' ||
   self._tag === 'Union' ||
   self._tag === 'EffectBorrow' ||
   self._tag === 'EffectValue' ||
@@ -123,6 +125,19 @@ export type BinaryOperator =
   | 'GreaterThan'
   | 'GreaterOrEqual'
 
+export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is BinaryOperator =>
+  operation === 'Add' ||
+  operation === 'Subtract' ||
+  operation === 'Multiply' ||
+  operation === 'Divide' ||
+  operation === 'Remainder' ||
+  operation === 'Equals' ||
+  operation === 'NotEquals' ||
+  operation === 'LessThan' ||
+  operation === 'LessOrEqual' ||
+  operation === 'GreaterThan' ||
+  operation === 'GreaterOrEqual'
+
 export type PlaceSelector =
   | {
       readonly _tag: 'FieldSelector'
@@ -189,6 +204,59 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'RawBufferFrom'
+      readonly destination: LocalId
+      readonly allocation: LocalId
+      readonly count: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly stride: number
+      readonly elementAlignment: number
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'RawBufferCount'
+      readonly destination: LocalId
+      readonly buffer: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Usize' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'RawBufferSlot'
+      readonly destination: LocalId
+      readonly buffer: LocalId
+      readonly index: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'SlotWrite'
+      readonly destination: LocalId
+      readonly slot: LocalId
+      readonly value: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'SlotTake'
+      readonly destination: LocalId
+      readonly slot: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'SlotDrop'
+      readonly destination: LocalId
+      readonly slot: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly cleanup: Ownership.CleanupPlan
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'Move'
       readonly destination: LocalId
       readonly source: LocalId
@@ -199,8 +267,8 @@ export type Operation =
       readonly borrow: Hir.BorrowId
       readonly destination: LocalId
       readonly root: LocalId
-      readonly sourceType: Extract<Type, { readonly _tag: 'FixedArray' | 'Slice' }>
-      readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly sourceType: Extract<Type, { readonly _tag: 'Nominal' | 'FixedArray' | 'Slice' }>
+      readonly type: Extract<Type, { readonly _tag: 'Slice' | 'Reference' }>
       readonly access: SilkType.Slice['access']
       readonly reborrow: boolean
       readonly suspendsParent: boolean
@@ -658,6 +726,7 @@ export interface Violation {
     | 'InvalidIntegerOperation'
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
+    | 'InvalidRawStorageOperation'
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'
@@ -741,6 +810,18 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.layout, operation.count]
     case 'Allocate':
       return [operation.destination, operation.layout]
+    case 'RawBufferFrom':
+      return [operation.destination, operation.allocation, operation.count]
+    case 'RawBufferCount':
+      return [operation.destination, operation.buffer]
+    case 'RawBufferSlot':
+      return [operation.destination, operation.buffer, operation.index]
+    case 'SlotWrite':
+      return [operation.destination, operation.slot, operation.value]
+    case 'SlotTake':
+      return [operation.destination, operation.slot]
+    case 'SlotDrop':
+      return [operation.destination, operation.slot]
     case 'Move':
       return [operation.destination, operation.source]
     case 'BeginLoan':
@@ -952,6 +1033,8 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
     case 'ParameterCleanup':
     case 'AllocationCleanup':
       return [cleanup.type]
+    case 'RawBufferCleanup':
+      return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
     case 'StructCleanup':
       return [cleanup.type, ...cleanup.fields.flatMap((field) => cleanupTypes(field.cleanup))]
     case 'ArrayCleanup':
@@ -974,6 +1057,16 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ReadPlace':
     case 'CheckPlace':
       return [semanticType(operation.type)]
+    case 'RawBufferFrom':
+      return [semanticType(operation.type), operation.element]
+    case 'RawBufferCount':
+      return [semanticType(operation.type)]
+    case 'RawBufferSlot':
+    case 'SlotWrite':
+    case 'SlotTake':
+      return [semanticType(operation.type), operation.element]
+    case 'SlotDrop':
+      return [semanticType(operation.type), operation.element, ...cleanupTypes(operation.cleanup)]
     case 'BeginLoan':
       return [semanticType(operation.sourceType), semanticType(operation.type)]
     case 'SliceLength':
@@ -1071,6 +1164,17 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout, operation.count]
     case 'Allocate':
       return [operation.layout]
+    case 'RawBufferFrom':
+      return [operation.allocation, operation.count]
+    case 'RawBufferCount':
+      return [operation.buffer]
+    case 'RawBufferSlot':
+      return [operation.buffer, operation.index]
+    case 'SlotWrite':
+      return [operation.slot, operation.value]
+    case 'SlotTake':
+    case 'SlotDrop':
+      return [operation.slot]
     case 'Move':
       return [operation.source]
     case 'ConvertUnion':
@@ -1153,11 +1257,11 @@ const loanViolations = (
         const source = fn.localTypes.at(operation.root.ordinal)
         const destination = fn.localTypes.at(operation.destination.ordinal)
         const sourceSemantic = semanticType(operation.sourceType)
-        const slice = operation.type.type
+        const borrowed = operation.type.type
         const sourceElement =
-          operation.sourceType._tag === 'FixedArray'
+          operation.sourceType._tag === 'FixedArray' || operation.sourceType._tag === 'Slice'
             ? operation.sourceType.type.element
-            : operation.sourceType.type.element
+            : undefined
         const parent = [...active.entries()].find(
           ([, loan]) => loan.operation.destination.ordinal === operation.root.ordinal,
         )
@@ -1177,10 +1281,12 @@ const loanViolations = (
           source === undefined ||
           destination === undefined ||
           !SilkType.equals(semanticType(source), sourceSemantic) ||
-          destination._tag !== 'Slice' ||
-          !SilkType.equals(destination.type, slice) ||
-          slice.access !== operation.access ||
-          !SilkType.equals(slice.element, sourceElement) ||
+          (destination._tag !== 'Slice' && destination._tag !== 'Reference') ||
+          !SilkType.equals(destination.type, borrowed) ||
+          borrowed.access !== operation.access ||
+          (SilkType.isSlice(borrowed)
+            ? sourceElement === undefined || !SilkType.equals(borrowed.element, sourceElement)
+            : !SilkType.equals(borrowed.target, sourceSemantic)) ||
           (operation.sourceType._tag === 'Slice' &&
             operation.sourceType.type.access === 'Shared' &&
             operation.access === 'Exclusive') ||
@@ -1628,6 +1734,123 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'allocation does not preserve Layout, Allocation, or OutOfMemory contracts',
+              }),
+            )
+        }
+        if (operation._tag === 'RawBufferFrom') {
+          const allocation = fn.localTypes.at(operation.allocation.ordinal)
+          const count = fn.localTypes.at(operation.count.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const elementLayout = Layout.entry(self.layout, operation.element)
+          const expectedStride =
+            elementLayout === undefined
+              ? undefined
+              : Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment
+          if (
+            allocation?._tag !== 'Nominal' ||
+            !SilkType.equals(allocation.type, SilkType.allocation) ||
+            count?._tag !== 'Usize' ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.isRawBuffer(destination.type) ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            !SilkType.equals(destination.type.arguments[0], operation.element) ||
+            expectedStride === undefined ||
+            operation.stride !== expectedStride ||
+            operation.elementAlignment !== elementLayout?.alignment
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'RawBuffer construction lost allocation, count, element, or layout provenance',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'RawBufferCount') {
+          const buffer = fn.localTypes.at(operation.buffer.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (
+            buffer?._tag !== 'Reference' ||
+            !SilkType.isRawBuffer(buffer.type.target) ||
+            destination?._tag !== 'Usize'
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'RawBuffer.count lost its borrowed buffer or Usize result',
+              }),
+            )
+        }
+        if (operation._tag === 'RawBufferSlot') {
+          const buffer = fn.localTypes.at(operation.buffer.ordinal)
+          const index = fn.localTypes.at(operation.index.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const bufferElement =
+            buffer?._tag === 'Reference' && SilkType.isRawBuffer(buffer.type.target)
+              ? buffer.type.target.arguments[0]
+              : undefined
+          if (
+            buffer?._tag !== 'Reference' ||
+            buffer.type.access !== 'Exclusive' ||
+            index?._tag !== 'Usize' ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.isSlot(destination.type) ||
+            bufferElement === undefined ||
+            !SilkType.equals(bufferElement, operation.element) ||
+            !SilkType.equals(destination.type.arguments[0], operation.element)
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'Slot projection lost its exclusive buffer, bounds operand, or element provenance',
+              }),
+            )
+        }
+        if (
+          operation._tag === 'SlotWrite' ||
+          operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotDrop'
+        ) {
+          const slot = fn.localTypes.at(operation.slot.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const slotElement =
+            slot?._tag === 'Nominal' && SilkType.isSlot(slot.type)
+              ? slot.type.arguments[0]
+              : undefined
+          const unitResult = operation._tag === 'SlotTake' ? true : destination?._tag === 'Nominal' && SilkType.equals(destination.type, SilkType.unit)
+          const takeResult =
+            operation._tag !== 'SlotTake' ||
+            (destination !== undefined &&
+              SilkType.equals(semanticType(destination), operation.element))
+          const writeValue =
+            operation._tag !== 'SlotWrite' ||
+            (() => {
+              const value = fn.localTypes.at(operation.value.ordinal)
+              return value !== undefined && SilkType.equals(semanticType(value), operation.element)
+            })()
+          if (
+            slotElement === undefined ||
+            !SilkType.equals(slotElement, operation.element) ||
+            !unitResult ||
+            !takeResult ||
+            !writeValue
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `${operation._tag} lost its slot, element, value, or result provenance`,
               }),
             )
         }
@@ -2406,6 +2629,18 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = layout-repeat ${localText(operation.layout)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RawBufferFrom':
+      return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RawBufferCount':
+      return `${localText(operation.destination)} = raw-buffer-count ${localText(operation.buffer)} : Usize ${provenanceText(operation.provenance)}`
+    case 'RawBufferSlot':
+      return `${localText(operation.destination)} = raw-buffer-slot ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SlotWrite':
+      return `${localText(operation.destination)} = slot-write ${localText(operation.slot)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SlotTake':
+      return `${localText(operation.destination)} = slot-take ${localText(operation.slot)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SlotDrop':
+      return `${localText(operation.destination)} = slot-drop ${localText(operation.slot)} element=${SilkType.encode(operation.element)} cleanup=${operation.cleanup._tag} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Move':
       return `${localText(operation.destination)} = move ${localText(operation.source)} ${provenanceText(operation.provenance)}`
     case 'BeginLoan':

@@ -96,9 +96,17 @@ export type BuiltinOperation =
   | 'GreaterOrEqual'
   | 'Not'
   | 'LayoutMake'
+  | 'LayoutOf'
   | 'LayoutRepeat'
   | 'SystemAllocatorMake'
   | 'AllocatorAllocate'
+  | 'UnitMake'
+  | 'RawBufferFrom'
+  | 'RawBufferSlot'
+  | 'RawBufferCount'
+  | 'SlotWrite'
+  | 'SlotTake'
+  | 'SlotDrop'
 
 export type BoundsMode =
   | { readonly _tag: 'Proven'; readonly index: number; readonly length: number }
@@ -295,6 +303,15 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ValueBorrow'
+      readonly borrow: BorrowId
+      readonly root: SliceRoot
+      readonly source: Type.Type
+      readonly access: Type.Reference['access']
+      readonly type: Type.Reference
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'SliceLength'
       readonly slice: Expression
       readonly type: 'I32'
@@ -412,6 +429,8 @@ export type Expression =
         readonly binding?: BindingId
         readonly parameter?: DeclarationIndex.ParameterId
         readonly capability: Type.Nominal
+        readonly providerType: Type.Nominal
+        readonly witness: DeclarationIndex.ConformanceWitness
         readonly role: string
         readonly access: 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
@@ -431,7 +450,10 @@ export type Expression =
   | {
       readonly _tag: 'BuiltinCall'
       readonly operation: BuiltinOperation
+      readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
+      readonly loanEnds: ReadonlyArray<BorrowId>
+      readonly heldLoans: ReadonlyArray<BorrowId>
       readonly type: DeclarationIndex.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -445,6 +467,12 @@ export type Expression =
 export type Statement =
   | {
       readonly _tag: 'UnavailableStatement'
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Unsafe'
+      readonly statements: ReadonlyArray<Statement>
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
     }
@@ -538,6 +566,8 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
   switch (statement._tag) {
     case 'UnavailableStatement':
       return []
+    case 'Unsafe':
+      return statement.statements.flatMap(statementExpressions)
     case 'Bind':
       return [statement.initializer]
     case 'Write':
@@ -783,6 +813,7 @@ export type VerificationIssue =
   | { readonly _tag: 'InvalidMatchResult'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidPatternBinding'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidSliceBorrow'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidValueBorrow'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidSliceOperation'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidLoanEnd'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidBorrowedWrite'; readonly span: SourceSpan.SourceSpan }
@@ -821,6 +852,14 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         issues.push(Object.freeze({ _tag: 'InvalidSliceBorrow', span: expression.span }))
       }
     }
+    if (expression._tag === 'ValueBorrow') {
+      if (
+        !Type.equals(expression.type, Type.reference(expression.access, expression.source)) ||
+        expression.type.access !== expression.access
+      ) {
+        issues.push(Object.freeze({ _tag: 'InvalidValueBorrow', span: expression.span }))
+      }
+    }
     if (expression._tag === 'SliceLength') {
       if (expression.slice._tag === 'Unavailable' || !Type.isSlice(expression.slice.type)) {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
@@ -849,17 +888,23 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
       }
     }
-    if (expression._tag === 'Call') {
+    if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
       const begins = expression.arguments
         .flatMap(expressionTree)
         .filter(
-          (candidate): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' }> =>
-            candidate._tag === 'SliceBorrow' &&
-            candidate.borrow.callSpan.start === expression.span.start &&
-            candidate.borrow.callSpan.end === expression.span.end,
+          (
+            candidate,
+          ): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' | 'ValueBorrow' }> =>
+            (candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow') &&
+            (expression._tag === 'BuiltinCall' ||
+              (candidate.borrow.callSpan.start === expression.span.start &&
+                candidate.borrow.callSpan.end === expression.span.end)),
         )
         .map((candidate) => borrowKey(candidate.borrow))
-      const ends = expression.loanEnds.map(borrowKey)
+      const ends = [
+        ...expression.loanEnds,
+        ...(expression._tag === 'BuiltinCall' ? expression.heldLoans : []),
+      ].map(borrowKey)
       if (
         begins.length !== ends.length ||
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
@@ -933,7 +978,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             issues.push(Object.freeze({ _tag: 'InvalidBorrowedWrite', span: statement.place.span }))
           }
         }
-        if (statement._tag === 'If') {
+        if (statement._tag === 'Unsafe') statements(statement.statements)
+        else if (statement._tag === 'If') {
           statements(statement.taken)
           statements(statement.otherwise)
         } else if (statement._tag === 'While') statements(statement.body)
@@ -1123,6 +1169,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'SliceBorrow':
       return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : `p${expression.root.parameter.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+    case 'ValueBorrow':
+      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : `p${expression.root.parameter.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
         `${indent}slice-length : I32 ${spanText(expression.span)}`,
@@ -1202,6 +1250,11 @@ const encodeStatement = (statement: Statement, depth: number): string => {
   switch (statement._tag) {
     case 'UnavailableStatement':
       return `${indent}unavailable-statement r${statement.region.ordinal} ${spanText(statement.span)}`
+    case 'Unsafe':
+      return [
+        `${indent}unsafe r${statement.region.ordinal} ${spanText(statement.span)}`,
+        ...statement.statements.map((inner) => encodeStatement(inner, depth + 1)),
+      ].join('\n')
     case 'Bind':
       return [
         `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,

@@ -37,6 +37,13 @@ export interface Slice {
   readonly element: Type
 }
 
+/** A lexical borrow of one complete value. Unlike a Slice, it carries no runtime length. */
+export interface Reference {
+  readonly _tag: 'ReferenceType'
+  readonly access: 'Shared' | 'Exclusive'
+  readonly target: Type
+}
+
 /** How a callable environment may be accessed by one invocation. */
 export type CallableMode = 'Shared' | 'Exclusive' | 'Take'
 
@@ -80,6 +87,7 @@ export type Type =
   | Parameter
   | FixedArray
   | Slice
+  | Reference
   | Callable
   | Effect
   | StructuralUnion
@@ -111,6 +119,34 @@ export const layoutOverflow: Nominal = nominal('silk/core', 'LayoutOverflow')
 export const allocator: Nominal = nominal('silk/core', 'Allocator')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
+/** Compiler-sealed cleanup capability used only by restricted impl declarations. */
+export const dropCapability: Nominal = nominal('silk/core', 'Drop')
+/** The nominal system-backed implementation of the Allocator capability. */
+export const systemAllocator: Nominal = nominal('silk/core', 'SystemAllocator')
+/** The canonical empty success value used by effect-free cleanup operations. */
+export const unit: Nominal = nominal('silk/core', 'Unit')
+/** Compiler-checked typed raw storage owned independently from its allocator provider. */
+export const rawBuffer = (element: Type): Nominal => nominal('silk/core', 'RawBuffer', [element])
+/** A lexical exclusive projection into one RawBuffer element. */
+export const slot = (element: Type): Nominal => nominal('silk/core', 'Slot', [element])
+
+export const isRawBuffer = (
+  self: Type,
+): self is Nominal & {
+  readonly module: 'silk/core'
+  readonly name: 'RawBuffer'
+  readonly arguments: readonly [Type]
+} =>
+  isNominal(self) && self.module === 'silk/core' && self.name === 'RawBuffer' && self.arguments.length === 1
+
+export const isSlot = (
+  self: Type,
+): self is Nominal & {
+  readonly module: 'silk/core'
+  readonly name: 'Slot'
+  readonly arguments: readonly [Type]
+} =>
+  isNominal(self) && self.module === 'silk/core' && self.name === 'Slot' && self.arguments.length === 1
 
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [outOfMemory.name, outOfMemory],
@@ -119,9 +155,29 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [layoutOverflow.name, layoutOverflow],
   [allocator.name, allocator],
   [allocation.name, allocation],
+  [dropCapability.name, dropCapability],
+  [systemAllocator.name, systemAllocator],
+  [unit.name, unit],
+  ['RawBuffer', nominal('silk/core', 'RawBuffer')],
+  ['Slot', nominal('silk/core', 'Slot')],
 ])
+
+/** Returns the compiler-known generic arity of an intrinsic nominal actor. */
+export const intrinsicNominalArity = (self: Nominal): number =>
+  self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot') ? 1 : 0
 export const intrinsicNominalOrdinal = (self: Nominal): number =>
-  [...intrinsicNominals.values()].findIndex((candidate) => equals(candidate, self))
+  [...intrinsicNominals.values()].findIndex(
+    (candidate) => candidate.module === self.module && candidate.name === self.name,
+  )
+
+/** Compiler-shipped nominal capability witnesses; user declarations extend this in the index. */
+export const intrinsicConformances: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['nominal:silk/core.SystemAllocator<>', new Set(['nominal:silk/core.Allocator<>'])],
+])
+
+/** Tests one compiler-shipped nominal capability witness without inspecting provider kinds. */
+export const intrinsicallyConforms = (provider: Type, capability: Nominal): boolean =>
+  isNominal(provider) && (intrinsicConformances.get(key(provider))?.has(key(capability)) ?? false)
 
 /** Tests the one compiler-sealed allocation exhaustion payload. */
 export const isOutOfMemory = (self: Type): self is Nominal => equals(self, outOfMemory)
@@ -148,6 +204,10 @@ export const fixedArray = (element: Type, length: number): FixedArray =>
 /** Constructs one canonical lexical slice type. */
 export const slice = (access: Slice['access'], element: Type): Slice =>
   Object.freeze({ _tag: 'SliceType', access, element })
+
+/** Constructs one canonical lexical whole-value reference. */
+export const reference = (access: Reference['access'], target: Type): Reference =>
+  Object.freeze({ _tag: 'ReferenceType', access, target })
 
 /** Constructs one immutable canonical callable contract. */
 export const callable = (
@@ -262,6 +322,10 @@ export const isFixedArray = (self: Type): self is FixedArray =>
 export const isSlice = (self: Type): self is Slice =>
   typeof self !== 'string' && self._tag === 'SliceType'
 
+/** Tests whether a semantic type is a lexical whole-value reference. */
+export const isReference = (self: Type): self is Reference =>
+  typeof self !== 'string' && self._tag === 'ReferenceType'
+
 /** Tests whether a semantic type is a structural callable contract. */
 export const isCallable = (self: Type): self is Callable =>
   typeof self !== 'string' && self._tag === 'CallableType'
@@ -283,6 +347,7 @@ export const key = (self: Type): string => {
   if (isParameter(self)) return `parameter:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
+  if (isReference(self)) return `reference:${self.access}<${key(self.target)}>`
   if (isCallable(self))
     return `callable:${self.mode}<(${self.parameters.map(key).join(',')})->${key(self.result)}>`
   if (isEffect(self))
@@ -308,6 +373,8 @@ export const encode = (self: Type): string => {
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
   if (isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
+  if (isReference(self))
+    return `${self.access === 'Exclusive' ? '&mut ' : '&'}${encode(self.target)}`
   if (isCallable(self)) {
     const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
     return `${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
@@ -336,6 +403,8 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
       ? nominals(self.element)
       : isSlice(self)
         ? nominals(self.element)
+        : isReference(self)
+          ? nominals(self.target)
         : isCallable(self)
           ? Object.freeze([...self.parameters.flatMap(nominals), ...nominals(self.result)])
           : isEffect(self)
@@ -361,6 +430,7 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
       return
     }
     if (isFixedArray(type) || isSlice(type)) visit(type.element)
+    else if (isReference(type)) visit(type.target)
     else if (isCallable(type)) {
       for (const parameter_ of type.parameters) visit(parameter_)
       visit(type.result)
@@ -379,7 +449,8 @@ export const isConcrete = (self: Type): boolean => parameters(self).length === 0
 
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean => {
-  if (isSlice(self)) return true
+  if (isSlice(self) || isReference(self)) return true
+  if (isSlot(self)) return true
   if (isNominal(self)) return self.arguments.some(containsBorrow)
   if (isFixedArray(self)) return containsBorrow(self.element)
   if (isCallable(self)) return self.parameters.some(containsBorrow) || containsBorrow(self.result)
@@ -399,6 +470,7 @@ export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>):
     )
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
   if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
+  if (isReference(self)) return reference(self.access, substitute(self.target, substitution))
   if (isCallable(self))
     return callable(
       self.parameters.map((parameter_) => substitute(parameter_, substitution)),
@@ -453,6 +525,9 @@ export const infer = (pattern: Type, actual: Type, inferred: Map<string, Type>):
   }
   if (isSlice(pattern) && isSlice(actual)) {
     return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
+  }
+  if (isReference(pattern) && isReference(actual)) {
+    return pattern.access === actual.access && infer(pattern.target, actual.target, inferred)
   }
   if (isCallable(pattern) && isCallable(actual)) {
     return (

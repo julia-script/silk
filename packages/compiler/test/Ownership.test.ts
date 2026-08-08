@@ -501,3 +501,36 @@ pub fn main() -> I32 { return 0 }`,
   assert.deepEqual(facts.diagnostics, [])
   assert.strictEqual(facts.functions.at(0)?.verdict._tag, 'Satisfied')
 })
+
+it('ends unsafe lexical owners at the explicit boundary', () => {
+  const facts = check(
+    'ownership://unsafe-boundary.silk',
+    'struct Token { value: I32 } pub fn main() -> I32 { unsafe { let token = Token { value: 1 } } return 42 }',
+  )
+  const scopeExit = facts.functions.at(0)?.exits.find((exit) => exit.kind === 'ScopeEnd')
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(scopeExit?.releases.at(0)?.binding.name, 'token')
+  assert.strictEqual(scopeExit?.releases.at(0)?.cleanup._tag, 'StructCleanup')
+})
+
+it('keeps a Slot loan active until the lexical Slot is consumed', () => {
+  const facts = check(
+    'ownership://slot-loan.silk',
+    `fn misuse(buffer: RawBuffer<I32>) -> I32 {
+  let mut owner = move buffer
+  unsafe {
+    let slot = RawBuffer.slot(&mut owner, 0)
+    drop owner
+    let value = Slot.take(move slot)
+    return value
+  }
+  return 0
+}`,
+  )
+
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0011',
+  )
+  assert.strictEqual(facts.functions.at(0)?.loans.at(0)?.origin, 'ValueBorrow')
+})

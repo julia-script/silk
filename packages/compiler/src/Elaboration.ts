@@ -185,6 +185,11 @@ export type BorrowFormationFact =
       readonly parent: Type.Slice
       readonly suspendsParent: boolean
     }
+  | {
+      readonly _tag: 'ValueBorrow'
+      readonly root: BorrowRootFact
+      readonly source: Type.Type
+    }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
 /** One explicit whole-root slice borrow accepted only at an ordinary call boundary. */
@@ -503,6 +508,8 @@ export interface EffectProviderCaptureFact {
   readonly _tag: 'EffectProviderCapture'
   readonly reference: BindingDeclarationFact | ParameterFact
   readonly capability: Type.Nominal
+  readonly providerType: Type.Nominal
+  readonly witness: DeclarationIndex.ConformanceWitness
   readonly role: string
   readonly access: 'Shared' | 'Exclusive' | 'Take'
   readonly span: SourceSpan.SourceSpan
@@ -675,6 +682,12 @@ export type DeclarationFact = DeclarationIndex.DeclarationFact
 
 /** One analyzed body statement in source order, nesting through conditionals. */
 export type StatementFact =
+  | {
+      readonly _tag: 'UnsafeStatement'
+      readonly statements: ReadonlyArray<StatementFact>
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
+    }
   | {
       readonly _tag: 'BindStatement'
       readonly binding: BindingDeclarationFact
@@ -1259,7 +1272,11 @@ const analyzeBorrow = (
       : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
   const subject = subjectResult?.fact ?? unavailableExpression(node)
   const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
-  if (!borrowAllowed || expected === undefined || !Type.isSlice(expected)) {
+  if (
+    !borrowAllowed ||
+    expected === undefined ||
+    (!Type.isSlice(expected) && !Type.isReference(expected))
+  ) {
     return unavailableBorrow(
       node,
       access,
@@ -1278,6 +1295,55 @@ const analyzeBorrow = (
       diagnostics,
       Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
     )
+  }
+  if (Type.isReference(expected)) {
+    if (!Type.infer(expected.target, sourceType, new Map())) {
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
+      )
+    }
+    if (
+      access === 'Exclusive' &&
+      (root._tag !== 'BindingRoot' || root.binding.mutability !== 'Mutable')
+    ) {
+      const name =
+        subject._tag === 'Identifier' && 'spelling' in subject.reference
+          ? subject.reference.spelling
+          : '?'
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.exclusiveBorrowRequiresMutable(name, subjectNode?.span ?? node.span),
+      )
+    }
+    if (access !== expected.access) {
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
+      )
+    }
+    const type = Type.reference(access, sourceType)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Borrow',
+        access,
+        subject,
+        formation: Object.freeze({ _tag: 'ValueBorrow', root, source: sourceType }),
+        type: availableExpressionType(type),
+        syntax: node,
+      }),
+      diagnostics,
+      type,
+    })
   }
   if (Type.isFixedArray(sourceType)) {
     if (
@@ -2452,6 +2518,7 @@ function analyzeArguments(
   const second = identifiers.at(1)
   let target: DeclarationFact | undefined
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
+  let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
   if (first !== undefined && second === undefined) {
     const name = spelling(source, first)
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
@@ -2467,8 +2534,9 @@ function analyzeArguments(
     const memberSpelling = spelling(source, second)
     const qualifier = NameResolution.lookup(resolution.scope, resolution.index, qualifierSpelling)
     if (qualifier._tag === 'Intrinsic') {
-      builtinParameters =
-        builtinActors[qualifierSpelling]?.[memberSpelling]?.parameters ?? Object.freeze([])
+      const builtin = builtinActors[qualifierSpelling]?.[memberSpelling]
+      builtinParameters = builtin?.parameters ?? Object.freeze([])
+      builtinTypeParameters = builtin?.typeParameters ?? Object.freeze([])
     } else if (qualifier._tag === 'Namespace') {
       const member = DeclarationIndex.lookup(resolution.index, qualifier.module, memberSpelling)
       target = member._tag === 'Resolved' ? member.declaration : undefined
@@ -2477,6 +2545,12 @@ function analyzeArguments(
   const declaredTypeParameters =
     target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
   const explicitTypes = callTypeArguments?.types
+  const builtinSubstitution =
+    callTypeArguments?.explicit === true &&
+    explicitTypes !== undefined &&
+    explicitTypes.length === builtinTypeParameters.length
+      ? Type.substitution(builtinTypeParameters, explicitTypes)
+      : undefined
   const substitution =
     callTypeArguments?.explicit === true &&
     explicitTypes !== undefined &&
@@ -2485,11 +2559,13 @@ function analyzeArguments(
       : undefined
   const expectedTypes = Object.freeze(
     builtinParameters.length > 0
-      ? builtinParameters.slice(
-          builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
-            ? 1
-            : 0,
-        )
+      ? builtinParameters
+          .slice(
+            builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
+              ? 1
+              : 0,
+          )
+          .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
       : (target?.parameters ?? [])
           .slice(
             target !== undefined &&
@@ -2953,9 +3029,14 @@ const analyzeCallContract = (
 
 interface BuiltinSignature {
   readonly operation: Hir.BuiltinOperation
+  readonly typeParameters?: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<SemanticType>
   readonly result: SemanticType
+  readonly unsafe?: boolean
 }
+
+const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
+const rawTypeParameters = Object.freeze([rawElement])
 
 const binaryI32 = (operation: Hir.BuiltinOperation): BuiltinSignature =>
   Object.freeze({ operation, parameters: Object.freeze(['I32', 'I32'] as const), result: 'I32' })
@@ -3060,6 +3141,12 @@ const builtinActors: Readonly<
     }),
   }),
   Layout: Object.freeze({
+    of: Object.freeze({
+      operation: 'LayoutOf' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([]),
+      result: Type.layout,
+    }),
     make: Object.freeze({
       operation: 'LayoutMake' as const,
       parameters: Object.freeze(['Usize', 'Usize'] as const),
@@ -3075,7 +3162,7 @@ const builtinActors: Readonly<
     make: Object.freeze({
       operation: 'SystemAllocatorMake' as const,
       parameters: Object.freeze([]),
-      result: Type.allocator,
+      result: Type.systemAllocator,
     }),
   }),
   Allocator: Object.freeze({
@@ -3094,6 +3181,63 @@ const builtinActors: Readonly<
           }),
         ]),
       ),
+    }),
+  }),
+  Unit: Object.freeze({
+    make: Object.freeze({
+      operation: 'UnitMake' as const,
+      parameters: Object.freeze([]),
+      result: Type.unit,
+    }),
+  }),
+  RawBuffer: Object.freeze({
+    from: Object.freeze({
+      operation: 'RawBufferFrom' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([Type.allocation, 'Usize'] as const),
+      result: Type.rawBuffer(rawElement),
+      unsafe: true,
+    }),
+    slot: Object.freeze({
+      operation: 'RawBufferSlot' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        'Usize' as const,
+      ]),
+      result: Type.slot(rawElement),
+      unsafe: true,
+    }),
+    count: Object.freeze({
+      operation: 'RawBufferCount' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([
+        Type.reference('Shared', Type.rawBuffer(rawElement)),
+      ]),
+      result: 'Usize' as const,
+    }),
+  }),
+  Slot: Object.freeze({
+    write: Object.freeze({
+      operation: 'SlotWrite' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([Type.slot(rawElement), rawElement]),
+      result: Type.unit,
+      unsafe: true,
+    }),
+    take: Object.freeze({
+      operation: 'SlotTake' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([Type.slot(rawElement)]),
+      result: rawElement,
+      unsafe: true,
+    }),
+    drop: Object.freeze({
+      operation: 'SlotDrop' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([Type.slot(rawElement)]),
+      result: Type.unit,
+      unsafe: true,
     }),
   }),
 })
@@ -3582,6 +3726,7 @@ function analyzeBuiltinCall(
   call: SyntaxTree.Node,
   argumentsResult: ArgumentsResult,
   typeArguments: CallTypeArgumentsResult,
+  resolution: ResolutionContext,
 ): ExpressionResult {
   const identifiers = callReferenceTokens(call)
   const actorToken = identifiers.at(0)
@@ -3614,6 +3759,60 @@ function analyzeBuiltinCall(
   const operationSpelling = spelling(source, operationToken)
   const actor = builtinActors[actorSpelling]
   const signature = actor?.[operationSpelling]
+  const declaredTypeParameters = signature?.typeParameters ?? Object.freeze([])
+  const specializationDiagnostic =
+    typeArguments.explicit &&
+    (typeArguments.types === undefined || typeArguments.types.length !== declaredTypeParameters.length)
+      ? Diagnostic.typeArgumentArity(
+          `${actorSpelling}.${operationSpelling}`,
+          declaredTypeParameters.length,
+          typeArguments.types?.length ?? 0,
+          call.span,
+        )
+      : undefined
+  const substitution = new Map<string, SemanticType>()
+  if (
+    typeArguments.explicit &&
+    typeArguments.types !== undefined &&
+    typeArguments.types.length === declaredTypeParameters.length
+  ) {
+    for (const [ordinal, parameter] of declaredTypeParameters.entries()) {
+      const argument = typeArguments.types.at(ordinal)
+      if (argument !== undefined) substitution.set(Type.key(parameter), argument)
+    }
+  } else if (!typeArguments.explicit && signature !== undefined) {
+    for (const [ordinal, parameter] of signature.parameters.entries()) {
+      const argument = argumentsResult.facts.at(ordinal)
+      if (argument?.type._tag === 'Available') Type.infer(parameter, argument.type.type, substitution)
+    }
+  }
+  const missingInference = declaredTypeParameters.find(
+    (parameter) => substitution.get(Type.key(parameter)) === undefined,
+  )
+  const inferenceDiagnostic =
+    specializationDiagnostic === undefined && missingInference !== undefined
+      ? Diagnostic.typeArgumentArity(
+          `${actorSpelling}.${operationSpelling}`,
+          declaredTypeParameters.length,
+          0,
+          call.span,
+        )
+      : undefined
+  const instantiatedParameters =
+    signature === undefined
+      ? Object.freeze([])
+      : Object.freeze(signature.parameters.map((parameter) => Type.substitute(parameter, substitution)))
+  const instantiatedResult =
+    signature === undefined ? undefined : Type.substitute(signature.result, substitution)
+  const unsafeAuthorized =
+    signature?.unsafe !== true ||
+    (resolution.unsafeSpans ?? []).some(
+      (span) => span.sourceId === call.span.sourceId && span.start <= call.span.start && span.end >= call.span.end,
+    )
+  const unsafeDiagnostic =
+    unsafeAuthorized || signature === undefined
+      ? undefined
+      : Diagnostic.missingUnsafeBoundary(`${actorSpelling}.${operationSpelling}`, call.span)
   const missingDiagnostic =
     actor === undefined
       ? Diagnostic.unknownActor(actorSpelling, actorToken.span)
@@ -3628,8 +3827,8 @@ function analyzeBuiltinCall(
           token: operationToken,
           actor: actorSpelling,
           operation: signature.operation,
-          parameters: signature.parameters,
-          result: signature.result,
+          parameters: instantiatedParameters,
+          result: instantiatedResult ?? signature.result,
         })
       : Object.freeze({
           _tag: 'Missing',
@@ -3641,24 +3840,19 @@ function analyzeBuiltinCall(
         })
   if (
     reference._tag === 'ResolvedBuiltin' &&
+    declaredTypeParameters.length === 0 &&
     reference.parameters.length >= 2 &&
     argumentsResult.facts.length === reference.parameters.length - 1
   ) {
     return finishCallableSection(call, reference, argumentsResult, typeArguments)
   }
   const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
-  const specializationDiagnostic = typeArguments.explicit
-    ? Diagnostic.typeArgumentArity(
-        `${actorSpelling}.${operationSpelling}`,
-        0,
-        typeArguments.types?.length ?? 0,
-        call.span,
-      )
-    : undefined
   const expressionType =
     hasAvailableCallSyntax(call) &&
     reference._tag === 'ResolvedBuiltin' &&
-    specializationDiagnostic === undefined
+    specializationDiagnostic === undefined &&
+    inferenceDiagnostic === undefined &&
+    unsafeDiagnostic === undefined
       ? availableExpressionType(reference.result)
       : unavailableExpressionType
 
@@ -3676,6 +3870,8 @@ function analyzeBuiltinCall(
     diagnostics: Object.freeze([
       ...(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
       ...(specializationDiagnostic === undefined ? [] : [specializationDiagnostic]),
+      ...(inferenceDiagnostic === undefined ? [] : [inferenceDiagnostic]),
+      ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
       ...argumentsResult.diagnostics,
       ...typeArguments.diagnostics,
       ...callContract.diagnostics,
@@ -4134,18 +4330,20 @@ const analyzeEffectProvide = (
       ? capabilityLookup.declaration
       : undefined
   const capability =
-    capabilityDeclaration === undefined
-      ? undefined
-      : Type.nominal(
-          capabilityDeclaration.canonical._tag === 'Canonical'
-            ? capabilityDeclaration.canonical.id.module
-            : source.id,
-          capabilityDeclaration.name._tag === 'Present'
-            ? capabilityDeclaration.name.spelling
-            : qualifier === undefined
-              ? '?'
-              : spelling(source, qualifier),
-        )
+    capabilityLookup?._tag === 'Intrinsic' && capabilityLookup.actor === 'Allocator'
+      ? Type.allocator
+      : capabilityDeclaration === undefined
+        ? undefined
+        : Type.nominal(
+            capabilityDeclaration.canonical._tag === 'Canonical'
+              ? capabilityDeclaration.canonical.id.module
+              : source.id,
+            capabilityDeclaration.name._tag === 'Present'
+              ? capabilityDeclaration.name.spelling
+              : qualifier === undefined
+                ? '?'
+                : spelling(source, qualifier),
+          )
   const list = SyntaxTree.directNode(target, 'ArgumentList')
   const nodes =
     list?.children.filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element)) ?? []
@@ -4203,6 +4401,10 @@ const analyzeEffectProvide = (
           SyntaxTree.directToken(providerNode, 'MutKeyword') !== undefined
         ? ('Exclusive' as const)
         : ('Shared' as const)
+  const selectedWitness =
+    capability === undefined || providerResult?.type === undefined
+      ? undefined
+      : DeclarationIndex.witness(resolution.index, providerResult.type, capability)
   if (
     (providerNode?.kind !== 'BorrowExpression' && providerNode?.kind !== 'MoveExpression') ||
     providerReference === undefined
@@ -4216,7 +4418,8 @@ const analyzeEffectProvide = (
   if (
     capability !== undefined &&
     providerResult?.type !== undefined &&
-    !Type.equals(providerResult.type, capability)
+    !Type.equals(providerResult.type, capability) &&
+    selectedWitness === undefined
   )
     reject(
       `provider type ${Type.encode(providerResult.type)} does not match ${Type.encode(capability)}`,
@@ -4260,13 +4463,20 @@ const analyzeEffectProvide = (
     fact: Object.freeze({
       _tag: 'EffectProvide',
       protected: protectedResult?.fact ?? unavailableExpression(node),
-      ...(providerReference === undefined || capability === undefined || selected === undefined
+      ...(providerReference === undefined ||
+      capability === undefined ||
+      selected === undefined ||
+      providerResult?.type === undefined ||
+      !Type.isNominal(providerResult.type) ||
+      selectedWitness === undefined
         ? {}
         : {
             provider: Object.freeze({
               _tag: 'EffectProviderCapture' as const,
               reference: providerReference,
               capability,
+              providerType: providerResult.type,
+              witness: selectedWitness,
               role: selected.role,
               access: providerAccess,
               span: providerNode?.span ?? node.span,
@@ -4303,12 +4513,14 @@ const analyzeEffectProvideWith = (
       ? capabilityLookup.declaration
       : undefined
   const capability =
-    capabilityDeclaration?.canonical._tag === 'Canonical'
-      ? Type.nominal(
-          capabilityDeclaration.canonical.id.module,
-          capabilityDeclaration.canonical.id.name,
-        )
-      : undefined
+    capabilityLookup?._tag === 'Intrinsic' && capabilityLookup.actor === 'Allocator'
+      ? Type.allocator
+      : capabilityDeclaration?.canonical._tag === 'Canonical'
+        ? Type.nominal(
+            capabilityDeclaration.canonical.id.module,
+            capabilityDeclaration.canonical.id.name,
+          )
+        : undefined
   const list = SyntaxTree.directNode(target, 'ArgumentList')
   const nodes =
     list?.children.filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element)) ?? []
@@ -4357,7 +4569,8 @@ const analyzeEffectProvideWith = (
   if (
     capability !== undefined &&
     acquisitionEffect !== undefined &&
-    !Type.equals(acquisitionEffect.success, capability)
+    !Type.equals(acquisitionEffect.success, capability) &&
+    !DeclarationIndex.conforms(resolution.index, acquisitionEffect.success, capability)
   )
     reject(
       `acquisition succeeds with ${Type.encode(acquisitionEffect.success)}, not ${Type.encode(capability)}`,
@@ -4705,6 +4918,9 @@ const effectCaptureFacts = (
   const visit = (items: ReadonlyArray<StatementFact>): void => {
     for (const statement of items) {
       switch (statement._tag) {
+        case 'UnsafeStatement':
+          visit(statement.statements)
+          break
         case 'BindStatement':
           expression(statement.binding.initializer)
           break
@@ -5067,12 +5283,12 @@ function analyzeExpression(
     const qualifierToken = identifiers.at(0)
     const memberToken = identifiers.at(1)
     if (qualifierToken === undefined || memberToken === undefined)
-      return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments)
+      return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
     const qualifier = spelling(source, qualifierToken)
     const member = spelling(source, memberToken)
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag === 'Intrinsic')
-      return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments)
+      return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
     if (qualifierLookup._tag === 'Namespace') {
       const memberLookup = DeclarationIndex.lookup(resolution.index, qualifierLookup.module, member)
       const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
@@ -5421,6 +5637,7 @@ interface BodyContext {
 interface ResolutionContext {
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
+  readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
 }
 
 const analyzeStatements = (
@@ -5458,6 +5675,24 @@ const analyzeStatements = (
 
   for (const element of blockNode.children) {
     if (!SyntaxTree.isNode(element)) continue
+
+    if (element.kind === 'UnsafeStatement') {
+      const region = nextRegion()
+      const body = SyntaxTree.directNode(element, 'Block')
+      const statements =
+        body === undefined
+          ? Object.freeze<StatementFact[]>([])
+          : analyzeStatements(context, body, scope, loopStack)
+      facts.push(
+        Object.freeze({
+          _tag: 'UnsafeStatement',
+          statements,
+          region,
+          syntax: element,
+        }),
+      )
+      continue
+    }
 
     if (element.kind === 'BindingStatement') {
       const region = nextRegion()
@@ -5848,6 +6083,16 @@ const analyzeFunctionBody = (
   resolution: ResolutionContext,
 ): FunctionAnalysis => {
   const blockNode = childNode(declaration.syntax, 'Block')
+  const unsafeSpans: Array<SourceSpan.SourceSpan> = []
+  const collectUnsafeSpans = (node: SyntaxTree.Node): void => {
+    if (node.kind === 'UnsafeStatement') unsafeSpans.push(node.span)
+    for (const child of node.children) if (SyntaxTree.isNode(child)) collectUnsafeSpans(child)
+  }
+  collectUnsafeSpans(declaration.syntax)
+  const bodyResolution: ResolutionContext = Object.freeze({
+    ...resolution,
+    unsafeSpans: Object.freeze(unsafeSpans),
+  })
   const context: BodyContext = {
     source,
     declaration,
@@ -5856,10 +6101,10 @@ const analyzeFunctionBody = (
     diagnostics: [],
     regions: [],
     loops: [],
-    resolution,
+    resolution: bodyResolution,
   }
   declaration.failureRow.failures.forEach((failure, ordinal) => {
-    if (!DeclarationIndex.containsLexicalBorrow(resolution.index, failure)) return
+    if (!DeclarationIndex.containsLexicalBorrow(bodyResolution.index, failure)) return
     context.diagnostics.push(
       Diagnostic.providerBackedFailure(
         Type.encode(failure),
@@ -5960,6 +6205,13 @@ const hirEffectStatements = (
 ): ReadonlyArray<Hir.Statement> =>
   Object.freeze(
     facts.map((statement): Hir.Statement => {
+      if (statement._tag === 'UnsafeStatement')
+        return Object.freeze({
+          _tag: 'Unsafe',
+          statements: hirEffectStatements(statement.statements, resultType),
+          region: statement.region,
+          span: statement.syntax.span,
+        })
       if (statement._tag === 'BindStatement')
         return Object.freeze({
           _tag: 'Bind',
@@ -6247,6 +6499,8 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
           ? { binding: fact.provider.reference.id }
           : { parameter: fact.provider.reference.id }),
         capability: fact.provider.capability,
+        providerType: fact.provider.providerType,
+        witness: fact.provider.witness,
         role: fact.provider.role,
         access: fact.provider.access,
         span: fact.provider.span,
@@ -6485,7 +6739,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       borrow === undefined ||
       fact.formation._tag === 'Unavailable' ||
       fact.type._tag !== 'Available' ||
-      !Type.isSlice(fact.type.type)
+      (!Type.isSlice(fact.type.type) && !Type.isReference(fact.type.type))
     ) {
       return Object.freeze({
         _tag: 'Unavailable',
@@ -6505,6 +6759,21 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
             _tag: 'ParameterSliceRoot',
             parameter: fact.formation.root.parameter.id,
           })
+    if (fact.formation._tag === 'ValueBorrow' && Type.isReference(fact.type.type)) {
+      return Object.freeze({
+        _tag: 'ValueBorrow',
+        borrow,
+        root,
+        source: fact.formation.source,
+        access: fact.access,
+        type: fact.type.type,
+        span: fact.syntax.span,
+      })
+    }
+    if (fact.formation._tag === 'ValueBorrow')
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    if (!Type.isSlice(fact.type.type))
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     return Object.freeze({
       _tag: 'SliceBorrow',
       borrow,
@@ -6590,11 +6859,80 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
+    const directLoanEnds = fact.arguments.flatMap(
+      (argument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+        argument.expression._tag === 'Borrow' &&
+        argument.expression.formation._tag !== 'Unavailable'
+          ? [
+              Object.freeze({
+                _tag: 'BorrowId' as const,
+                function: argument.id.function,
+                callSpan: argument.id.callSpan,
+                ordinal,
+              }),
+            ]
+          : [],
+    )
+    const nestedSlotLoanEnds =
+      fact.reference.operation === 'SlotWrite' ||
+      fact.reference.operation === 'SlotTake' ||
+      fact.reference.operation === 'SlotDrop'
+        ? fact.arguments.flatMap((argument): ReadonlyArray<Hir.BorrowId> => {
+            const nested = argument.expression
+            if (
+              nested._tag !== 'Call' ||
+              nested.reference._tag !== 'ResolvedBuiltin' ||
+              nested.reference.operation !== 'RawBufferSlot'
+            )
+              return []
+            return nested.arguments.flatMap(
+              (slotArgument, ordinal): ReadonlyArray<Hir.BorrowId> =>
+                slotArgument.expression._tag === 'Borrow' &&
+                slotArgument.expression.formation._tag !== 'Unavailable'
+                  ? [
+                      Object.freeze({
+                        _tag: 'BorrowId' as const,
+                        function: slotArgument.id.function,
+                        callSpan: slotArgument.id.callSpan,
+                        ordinal,
+                      }),
+                    ]
+                  : [],
+            )
+          })
+        : []
     return Object.freeze({
       _tag: 'BuiltinCall',
       operation: fact.reference.operation,
+      typeArguments: Object.freeze(
+        fact._tag === 'Call'
+          ? fact.typeArguments.flatMap((argument) =>
+              argument.type === undefined ? [] : [argument.type],
+            )
+          : [],
+      ),
       arguments: Object.freeze(
-        fact.arguments.map((argument) => hirExpression(argument.expression)),
+        fact.arguments.map((argument, ordinal) => {
+          const borrowId: Hir.BorrowId | undefined =
+            argument.expression._tag === 'Borrow' &&
+            argument.expression.formation._tag !== 'Unavailable'
+              ? Object.freeze({
+                  _tag: 'BorrowId',
+                  function: argument.id.function,
+                  callSpan: argument.id.callSpan,
+                  ordinal,
+                })
+              : undefined
+          return hirExpression(argument.expression, borrowId)
+        }),
+      ),
+      loanEnds: Object.freeze(
+        fact.reference.operation === 'RawBufferSlot'
+          ? []
+          : [...directLoanEnds, ...nestedSlotLoanEnds],
+      ),
+      heldLoans: Object.freeze(
+        fact.reference.operation === 'RawBufferSlot' ? directLoanEnds : [],
       ),
       type: fact.type.type,
       span: fact.syntax.span,
@@ -6868,6 +7206,14 @@ export const elaborateModule = (input: Input): Result => {
   ): ReadonlyArray<Hir.Statement> =>
     Object.freeze(
       facts.map((statement): Hir.Statement => {
+        if (statement._tag === 'UnsafeStatement') {
+          return Object.freeze({
+            _tag: 'Unsafe' as const,
+            statements: hirStatements(statement.statements, resultType),
+            region: statement.region,
+            span: statement.syntax.span,
+          })
+        }
         if (statement._tag === 'BindStatement') {
           return Object.freeze({
             _tag: 'Bind' as const,

@@ -49,6 +49,16 @@ export type Representation =
       readonly stride: number
     }
   | {
+      readonly _tag: 'Reference'
+      readonly target: DeclarationIndex.SemanticType
+      readonly address: {
+        readonly bits: 32 | 64
+        readonly offset: 0
+        readonly size: 4 | 8
+        readonly alignment: 4 | 8
+      }
+    }
+  | {
       readonly _tag: 'Union'
       readonly tag: { readonly bits: 32; readonly size: 4 }
       readonly members: ReadonlyArray<{
@@ -222,6 +232,7 @@ export type Selector =
   | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
   | { readonly _tag: 'SliceAddressSelector' }
   | { readonly _tag: 'SliceLengthSelector' }
+  | { readonly _tag: 'ReferenceAddressSelector' }
 
 export type CallingShapeNode =
   | { readonly _tag: 'EmptyShape'; readonly type: Type.Never; readonly laneCount: 0 }
@@ -248,6 +259,12 @@ export type CallingShapeNode =
       readonly address: { readonly type: AddressScalar; readonly lane: 0 }
       readonly length: { readonly type: 'I32'; readonly lane: 1 }
       readonly laneCount: 2
+    }
+  | {
+      readonly _tag: 'ReferenceShape'
+      readonly type: Type.Reference
+      readonly address: { readonly type: AddressScalar; readonly lane: 0 }
+      readonly laneCount: 1
     }
   | {
       readonly _tag: 'SumShape'
@@ -391,6 +408,24 @@ const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): En
   })
 }
 
+const referenceEntry = (target: Target.Target, type: Type.Reference): Entry =>
+  Object.freeze({
+    _tag: 'LayoutEntry',
+    type,
+    size: target.pointerSize,
+    alignment: target.pointerAlignment,
+    representation: Object.freeze({
+      _tag: 'Reference',
+      target: type.target,
+      address: Object.freeze({
+        bits: target.pointerSize === 4 ? 32 : 64,
+        offset: 0,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+      }),
+    }),
+  })
+
 const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<Entry>): Entry => {
   const payloadAlignment = members.reduce(
     (maximum, member) => Math.max(maximum, member.alignment),
@@ -498,7 +533,7 @@ export const catalog = (
         sourceId: type.module,
         ordinal,
       })
-      const fieldTypes: ReadonlyArray<readonly [string, Type.Builtin]> = Type.equals(
+      const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(
         type,
         Type.layout,
       )
@@ -509,15 +544,44 @@ export const catalog = (
         : Type.equals(type, Type.invalidAlignment)
           ? Object.freeze([Object.freeze(['alignment', 'Usize'] as const)])
           : Type.equals(type, Type.allocation)
-            ? Object.freeze([Object.freeze(['$reclaim', 'Usize'] as const)])
+            ? Object.freeze([
+                Object.freeze(['$base', 'Usize'] as const),
+                Object.freeze(['$bytes', 'Usize'] as const),
+                Object.freeze(['$alignment', 'Usize'] as const),
+                Object.freeze(['$reclaim', 'Usize'] as const),
+                Object.freeze(['$context', 'Usize'] as const),
+                Object.freeze(['$active', 'Usize'] as const),
+              ])
+            : Type.isRawBuffer(type)
+              ? Object.freeze([
+                  Object.freeze(['$allocation', Type.allocation] as const),
+                  Object.freeze(['count', 'Usize'] as const),
+                ])
+              : Type.isSlot(type)
+                ? Object.freeze([Object.freeze(['$address', 'Usize'] as const)])
             : Object.freeze([])
       let cursor = 0
-      const fields = fieldTypes.map(([name, fieldType], fieldOrdinal): Field => {
-        const fieldLayout = scalarEntry(target, fieldType)
+      const fields: Array<Field> = []
+      for (const [fieldOrdinal, [name, fieldType]] of fieldTypes.entries()) {
+        const fieldLayout = Type.isBuiltin(fieldType)
+          ? scalarEntry(target, fieldType)
+          : Type.isNominal(fieldType)
+            ? layoutNominal(fieldType)
+            : undefined
+        if (fieldLayout === undefined || fieldLayout._tag === 'UnavailableLayoutEntry') {
+          const result = unavailable(
+            type,
+            Object.freeze(Type.nominals(fieldType)),
+            { _tag: 'UnavailableDependency', dependency: fieldType },
+            fieldLayout?.cause,
+          )
+          completed.set(key, result)
+          return result
+        }
         const previous = cursor
         const offset = alignUp(cursor, fieldLayout.alignment)
         cursor = offset + fieldLayout.size
-        return Object.freeze({
+        fields.push(Object.freeze({
           _tag: 'LayoutField',
           id: Object.freeze({ _tag: 'FieldId', struct: structId, ordinal: fieldOrdinal }),
           name,
@@ -526,8 +590,8 @@ export const catalog = (
           size: fieldLayout.size,
           alignment: fieldLayout.alignment,
           padding: offset - previous,
-        })
-      })
+        }))
+      }
       const alignment = fields.reduce((maximum, field) => Math.max(maximum, field.alignment), 1)
       const size = alignUp(cursor, alignment)
       const entry: Entry = Object.freeze({
@@ -700,6 +764,11 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
+    if (Type.isReference(type)) {
+      const result = referenceEntry(target, type)
+      completed.set(Type.key(type), result)
+      return result
+    }
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
@@ -770,6 +839,7 @@ export const catalog = (
     referenced.set(Type.key(type), type)
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isSlice(type)) addReferenced(type.element)
+    else if (Type.isReference(type)) addReferenced(type.target)
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
     if (Type.isEffect(type)) {
       addReferenced(type.success)
@@ -807,6 +877,11 @@ export const catalog = (
       for (const child of Hir.expressionTree(expression).slice(1)) {
         if (child._tag !== 'Unavailable') addReferenced(Type.substitute(child.type, substitution))
       }
+      for (const child of Hir.expressionTree(expression)) {
+        if (child._tag !== 'BuiltinCall') continue
+        for (const argument of child.typeArguments)
+          addReferenced(Type.substitute(argument, substitution))
+      }
     }
     for (const statement of instance.function.statements) {
       for (const expression of Hir.statementExpressions(statement))
@@ -834,6 +909,12 @@ const addExpressionTypes = (
   if (expression._tag === 'Unavailable') return
   const specialized = Type.substitute(expression.type, substitution)
   types.set(Type.key(specialized), specialized)
+  if (expression._tag === 'BuiltinCall') {
+    for (const argument of expression.typeArguments) {
+      const type = Type.substitute(argument, substitution)
+      types.set(Type.key(type), type)
+    }
+  }
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject, substitution)
   if (expression._tag === 'UnionConvert') addExpressionTypes(types, expression.source, substitution)
   if (expression._tag === 'Project') addExpressionTypes(types, expression.subject, substitution)
@@ -914,8 +995,11 @@ const addStatementTypes = (
   substitution: ReadonlyMap<string, Type.Type> = new Map(),
 ): void => {
   for (const statement of statements) {
+    if (statement._tag === 'Unsafe') addStatementTypes(types, statement.statements, substitution)
     if (statement._tag === 'Bind') addExpressionTypes(types, statement.initializer, substitution)
     if (statement._tag === 'Return') addExpressionTypes(types, statement.expression, substitution)
+    if (statement._tag === 'Fail' || statement._tag === 'Drop')
+      addExpressionTypes(types, statement.expression, substitution)
     if (statement._tag === 'If') {
       addExpressionTypes(types, statement.condition, substitution)
       addStatementTypes(types, statement.taken, substitution)
@@ -990,6 +1074,7 @@ const effectEnvironments = (
           collectBindings(statement.taken)
           collectBindings(statement.otherwise)
         } else if (statement._tag === 'While') collectBindings(statement.body)
+        else if (statement._tag === 'Unsafe') collectBindings(statement.statements)
         for (const expression of Hir.statementExpressions(statement)) {
           for (const child of Hir.expressionTree(expression)) {
             if (child._tag === 'EffectBlock') collectBindings(child.statements)
@@ -1237,6 +1322,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       const element = resolve(type.element)
       return element === undefined ? undefined : sliceEntry(self.target, type, element)
     }
+    if (Type.isReference(type)) return referenceEntry(self.target, type)
     if (!Type.isFixedArray(type) || candidate?._tag === 'UnavailableLayoutEntry') return undefined
     const element = resolve(type.element)
     return element === undefined ? undefined : repeatedEntry(type, element)
@@ -1258,6 +1344,8 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       add(candidate.representation.element)
     } else if (candidate.representation._tag === 'Slice') {
       add(candidate.representation.element)
+    } else if (candidate.representation._tag === 'Reference') {
+      add(candidate.representation.target)
     } else if (candidate.representation._tag === 'Union') {
       for (const member of candidate.representation.members) add(member.type)
     }
@@ -1331,6 +1419,21 @@ const shapeNode = (
       }),
       length: Object.freeze({ type: 'I32', lane: 1 }),
       laneCount: 2,
+    })
+  }
+  if (Type.isReference(type)) {
+    return Object.freeze({
+      _tag: 'ReferenceShape',
+      type,
+      address: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: type.target,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      laneCount: 1,
     })
   }
   if (Type.isCallable(type)) {
@@ -1455,6 +1558,15 @@ const materializeLanes = (
         _tag: 'CallingLane',
         path: Object.freeze([...path, Object.freeze({ _tag: 'SliceLengthSelector' })]),
         type: 'I32',
+      }),
+    ])
+  }
+  if (node._tag === 'ReferenceShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane',
+        path: Object.freeze([...path, Object.freeze({ _tag: 'ReferenceAddressSelector' })]),
+        type: node.address.type,
       }),
     ])
   }
@@ -1691,6 +1803,16 @@ const representationEquals = (left: Representation, right: Representation): bool
       left.stride === right.stride
     )
   }
+  if (left._tag === 'Reference') {
+    return (
+      right._tag === 'Reference' &&
+      Type.equals(left.target, right.target) &&
+      left.address.bits === right.address.bits &&
+      left.address.offset === right.address.offset &&
+      left.address.size === right.address.size &&
+      left.address.alignment === right.address.alignment
+    )
+  }
   if (left._tag === 'Union') {
     return (
       right._tag === 'Union' &&
@@ -1809,6 +1931,20 @@ const verifyEntry = (
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has non-canonical slice layout facts`,
+          ),
+        ])
+  }
+  if (Type.isReference(candidate.type)) {
+    const expected = referenceEntry(target, candidate.type)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidScalar',
+            candidate.type,
+            `${Type.encode(candidate.type)} does not match the canonical reference layout`,
           ),
         ])
   }
@@ -1984,7 +2120,9 @@ export const selectorEquals = (left: Selector, right: Selector): boolean =>
           ? right._tag === 'SliceAddressSelector'
           : left._tag === 'SliceLengthSelector'
             ? right._tag === 'SliceLengthSelector'
-            : right._tag === 'FieldId' && fieldIdEquals(left, right)
+            : left._tag === 'ReferenceAddressSelector'
+              ? right._tag === 'ReferenceAddressSelector'
+              : right._tag === 'FieldId' && fieldIdEquals(left, right)
 
 /** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
 export const laneOffset = (
@@ -2039,6 +2177,11 @@ export const laneOffset = (
     }
     if (selector._tag === 'SliceAddressSelector') {
       return ordinal === path.length - 1 && candidate.representation._tag === 'Slice'
+        ? offset + candidate.representation.address.offset
+        : undefined
+    }
+    if (selector._tag === 'ReferenceAddressSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'Reference'
         ? offset + candidate.representation.address.offset
         : undefined
     }
@@ -2168,7 +2311,12 @@ export const verifyCatalog = (self: Catalog): ReadonlyArray<Violation> =>
 export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArray<Violation> =>
   Object.freeze(
     self.entries.flatMap((candidate) => {
-      if (Type.isBuiltin(candidate.type) || Type.isFixedArray(candidate.type)) return []
+      if (
+        Type.isBuiltin(candidate.type) ||
+        Type.isFixedArray(candidate.type) ||
+        Type.isReference(candidate.type)
+      )
+        return []
       const expected = catalogEntry(catalog, candidate.type)
       return expected?._tag === 'LayoutEntry' &&
         candidate.size === expected.size &&
@@ -2196,6 +2344,8 @@ const representationText = (representation: Representation): string =>
           ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
           : representation._tag === 'Slice'
             ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=I32@${representation.length.offset}/4 address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+            : representation._tag === 'Reference'
+              ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
             : representation._tag === 'Union'
               ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
               : `aggregate tail-padding=${representation.tailPadding}`
@@ -2216,6 +2366,10 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
             `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
             `  length I32 offset=${candidate.representation.length.offset} size=4 stride=${candidate.representation.stride}`,
           ]
+        : candidate.representation._tag === 'Reference'
+          ? [
+              `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+            ]
         : candidate.representation._tag === 'Union'
           ? candidate.representation.members.map(
               (member) =>
@@ -2264,7 +2418,9 @@ export const encode = (self: Plan): string =>
                                 ? 'address'
                                 : selector._tag === 'SliceLengthSelector'
                                   ? 'length'
-                                  : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
+                                  : selector._tag === 'ReferenceAddressSelector'
+                                    ? 'address'
+                                    : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
                       )
                       .join('.')}]`,
                 )

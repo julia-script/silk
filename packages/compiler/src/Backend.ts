@@ -245,6 +245,9 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
 }
 
 const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
+  operation._tag === 'Allocate' ||
+  operation._tag === 'RawBufferFrom' ||
+  operation._tag === 'RawBufferSlot' ||
   operation._tag === 'CatchEffect' ||
   operation._tag === 'RetryEffect' ||
   operation._tag === 'RunEffect' ||
@@ -648,6 +651,18 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         ? yield* LlvmType.integer(builder, usizeLayout.representation.bits)
         : undefined
     const hasAddressLane =
+      program.functions.some((fn) =>
+        Mir.operations(fn).some(
+          (operation) =>
+            operation._tag === 'Allocate' ||
+            operation._tag === 'RawBufferFrom' ||
+            operation._tag === 'RawBufferCount' ||
+            operation._tag === 'RawBufferSlot' ||
+            operation._tag === 'SlotWrite' ||
+            operation._tag === 'SlotTake' ||
+            operation._tag === 'SlotDrop',
+        ),
+      ) ||
       program.layout.callingShapes.some((shape) =>
         shape.lanes.some((lane) => typeof lane.type !== 'string'),
       ) ||
@@ -707,6 +722,38 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     let unsignedOverflowSignature:
       | { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
       | undefined
+    const needsAllocation = program.functions.some((fn) =>
+      Mir.operations(fn).some(
+        (operation) =>
+          operation._tag === 'Allocate' ||
+          operation._tag === 'RawBufferFrom' ||
+          operation._tag === 'RawBufferCount' ||
+          operation._tag === 'RawBufferSlot' ||
+          operation._tag === 'SlotWrite' ||
+          operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotDrop',
+      ),
+    )
+    const malloc =
+      needsAllocation && usizeType !== undefined
+        ? yield* FunctionActor.declare(
+            builder,
+            'malloc',
+            yield* LlvmType.functionType(builder, pointer, [usizeType]),
+          )
+        : undefined
+    const free =
+      needsAllocation
+        ? yield* FunctionActor.declare(
+            builder,
+            'free',
+            yield* LlvmType.functionType(
+              builder,
+              voidType ?? (yield* LlvmType.voidType(builder)),
+              [pointer],
+            ),
+          )
+        : undefined
 
     const declared: Array<{
       readonly fn: Mir.MirFunction
@@ -851,7 +898,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           const addressRoots = new Set([
             ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
-                operation._tag === 'BeginLoan' && operation.sourceType._tag === 'FixedArray'
+                operation._tag === 'BeginLoan' && operation.sourceType._tag !== 'Slice'
                   ? [operation.root.ordinal]
                   : [],
               ),
@@ -1196,6 +1243,50 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               name,
             )
           })
+          const aggregateFieldOffset = (type: SilkType.Type, name: string): number => {
+            const planned = Layout.entry(program.layout, type)
+            if (planned?.representation._tag !== 'Aggregate') {
+              throw new RangeError(`LLVM raw storage lost aggregate ${SilkType.encode(type)}`)
+            }
+            const field = planned.representation.fields.find(
+              (candidate) => candidate.name === name,
+            )
+            if (field === undefined) throw new RangeError(`LLVM raw storage lost field ${name}`)
+            return field.offset
+          }
+          const emitAllocationFailure = Effect.fnUntraced(function* (
+            operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' }>,
+          ) {
+            const lanes = lanesFor(operation.propagationType)
+            const values: Array<Value.Input> = []
+            for (const [ordinal, lane] of lanes.entries()) {
+              values.push(
+                yield* Constant.integerUnsigned(
+                  builder,
+                  laneType(lane),
+                  ordinal === 0 ? BigInt(operation.failureTag) : 0n,
+                ),
+              )
+            }
+            if (values.length === 0) {
+              yield* FunctionBody.returnVoid(body)
+              return
+            }
+            const single = values.at(0)
+            if (values.length === 1 && single !== undefined) {
+              yield* FunctionBody.returnValue(body, single)
+              return
+            }
+            yield* FunctionBody.returnValue(
+              body,
+              yield* FunctionBody.buildAggregate(
+                body,
+                entry.resultType,
+                Object.freeze(values),
+                `allocation_failure${operation.destination.ordinal}`,
+              ),
+            )
+          })
           const materializeAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
             const base = addressStorage.get(root.ordinal)
             const logicalType = entry.fn.localTypes.at(root.ordinal)
@@ -1360,6 +1451,361 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   break
                 }
+                case 'Allocate': {
+                  const [bytes, alignment] = readLocal(operation.layout)
+                  if (
+                    bytes === undefined ||
+                    alignment === undefined ||
+                    usizeType === undefined ||
+                    malloc === undefined
+                  ) {
+                    throw new RangeError('LLVM allocation lost its platform boundary')
+                  }
+                  const one = yield* Constant.integerUnsigned(builder, usizeType, 1n)
+                  const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
+                  const padding = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    alignment,
+                    one,
+                    `allocation${operation.destination.ordinal}_padding`,
+                  )
+                  if (unsignedOverflowSignature === undefined) {
+                    const i1 = yield* LlvmType.integer(builder, 1)
+                    unsignedOverflowSignature = Object.freeze({
+                      returnType: yield* LlvmType.structure(builder, [usizeType, i1]),
+                      parameters: Object.freeze([usizeType, usizeType]),
+                    })
+                  }
+                  const requestPair = yield* Intrinsic.call(
+                    body,
+                    'uadd.with.overflow',
+                    [usizeType],
+                    [bytes, padding],
+                    `allocation${operation.destination.ordinal}_request_pair`,
+                    { signature: unsignedOverflowSignature },
+                  )
+                  if (requestPair === undefined) {
+                    throw new RangeError('LLVM allocation size calculation produced no value')
+                  }
+                  const requested = yield* FunctionBody.extractValue(
+                    body,
+                    requestPair,
+                    [0],
+                    `allocation${operation.destination.ordinal}_requested`,
+                  )
+                  const overflowed = yield* FunctionBody.extractValue(
+                    body,
+                    requestPair,
+                    [1],
+                    `allocation${operation.destination.ordinal}_overflowed`,
+                  )
+                  const empty = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    requested,
+                    zero,
+                    `allocation${operation.destination.ordinal}_empty`,
+                  )
+                  const physicalSize = yield* FunctionBody.select(
+                    body,
+                    empty,
+                    one,
+                    requested,
+                    `allocation${operation.destination.ordinal}_physical_size`,
+                  )
+                  const raw = yield* FunctionBody.callDirect(
+                    body,
+                    malloc,
+                    [physicalSize],
+                    `allocation${operation.destination.ordinal}_raw`,
+                  )
+                  if (raw === undefined) throw new RangeError('LLVM malloc returned no value')
+                  const rawAddress = yield* FunctionBody.cast(
+                    body,
+                    'ptrtoint',
+                    raw,
+                    usizeType,
+                    `allocation${operation.destination.ordinal}_context`,
+                  )
+                  const missing = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    rawAddress,
+                    zero,
+                    `allocation${operation.destination.ordinal}_missing`,
+                  )
+                  const rejected = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    overflowed,
+                    missing,
+                    `allocation${operation.destination.ordinal}_rejected`,
+                  )
+                  const failed = yield* LlvmBlock.make(
+                    body,
+                    `allocation${operation.destination.ordinal}_failure`,
+                  )
+                  const acquired = yield* LlvmBlock.make(
+                    body,
+                    `allocation${operation.destination.ordinal}_success`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, rejected, failed, acquired)
+                  yield* LlvmBlock.setInsertionPoint(body, failed)
+                  if (free === undefined) throw new RangeError('LLVM allocation lost release shim')
+                  yield* FunctionBody.callDirect(body, free, [raw])
+                  yield* emitAllocationFailure(operation)
+                  yield* LlvmBlock.setInsertionPoint(body, acquired)
+                  const advanced = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    rawAddress,
+                    padding,
+                    `allocation${operation.destination.ordinal}_advanced`,
+                  )
+                  const mask = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    zero,
+                    alignment,
+                    `allocation${operation.destination.ordinal}_mask`,
+                  )
+                  const base = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    advanced,
+                    mask,
+                    `allocation${operation.destination.ordinal}_base`,
+                  )
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([base, bytes, alignment, one, rawAddress, one]),
+                  )
+                  break
+                }
+                case 'RawBufferFrom': {
+                  const allocation = readLocal(operation.allocation)
+                  const count = readLocal(operation.count).at(0)
+                  const bytes = allocation.at(1)
+                  const alignment = allocation.at(2)
+                  if (
+                    count === undefined ||
+                    bytes === undefined ||
+                    alignment === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer construction lost its lanes')
+                  }
+                  const expected = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    count,
+                    yield* Constant.integerUnsigned(
+                      builder,
+                      usizeType,
+                      BigInt(operation.stride),
+                    ),
+                    `raw_buffer${operation.destination.ordinal}_bytes`,
+                  )
+                  const bytesMismatch = yield* FunctionBody.integerCompare(
+                    body,
+                    'ne',
+                    expected,
+                    bytes,
+                    `raw_buffer${operation.destination.ordinal}_bytes_mismatch`,
+                  )
+                  const alignmentMismatch = yield* FunctionBody.integerCompare(
+                    body,
+                    'ne',
+                    alignment,
+                    yield* Constant.integerUnsigned(
+                      builder,
+                      usizeType,
+                      BigInt(operation.elementAlignment),
+                    ),
+                    `raw_buffer${operation.destination.ordinal}_alignment_mismatch`,
+                  )
+                  const invalid = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    bytesMismatch,
+                    alignmentMismatch,
+                    `raw_buffer${operation.destination.ordinal}_invalid`,
+                  )
+                  if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+                  const accepted = yield* LlvmBlock.make(
+                    body,
+                    `raw_buffer${operation.destination.ordinal}_accepted`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
+                  yield* LlvmBlock.setInsertionPoint(body, accepted)
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([...allocation, count]),
+                  )
+                  break
+                }
+                case 'RawBufferCount': {
+                  const address = readLocal(operation.buffer).at(0)
+                  const referenceType = entry.fn.localTypes.at(operation.buffer.ordinal)
+                  if (
+                    address === undefined ||
+                    referenceType?._tag !== 'Reference' ||
+                    !SilkType.isRawBuffer(referenceType.type.target) ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer.count lost its referenced buffer')
+                  }
+                  const value = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      aggregateFieldOffset(referenceType.type.target, 'count'),
+                      `raw_buffer_count${operation.destination.ordinal}_ptr`,
+                    ),
+                    `raw_buffer_count${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([value]))
+                  break
+                }
+                case 'RawBufferSlot': {
+                  const address = readLocal(operation.buffer).at(0)
+                  const index = readLocal(operation.index).at(0)
+                  const element = Layout.entry(program.layout, operation.element)
+                  if (
+                    address === undefined ||
+                    index === undefined ||
+                    element === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer.slot lost its storage provenance')
+                  }
+                  const bufferType = SilkType.rawBuffer(operation.element)
+                  const count = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      aggregateFieldOffset(bufferType, 'count'),
+                      `raw_slot${operation.destination.ordinal}_count_ptr`,
+                    ),
+                    `raw_slot${operation.destination.ordinal}_count`,
+                  )
+                  const outOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'uge',
+                    index,
+                    count,
+                    `raw_slot${operation.destination.ordinal}_bounds`,
+                  )
+                  if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+                  const accepted = yield* LlvmBlock.make(
+                    body,
+                    `raw_slot${operation.destination.ordinal}_accepted`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, outOfBounds, trapBlock, accepted)
+                  yield* LlvmBlock.setInsertionPoint(body, accepted)
+                  const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+                  const baseAddress = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+                      `raw_slot${operation.destination.ordinal}_base_ptr`,
+                    ),
+                    `raw_slot${operation.destination.ordinal}_base`,
+                  )
+                  const stride = Math.ceil(element.size / element.alignment) * element.alignment
+                  const offset = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    index,
+                    yield* Constant.integerUnsigned(builder, usizeType, BigInt(stride)),
+                    `raw_slot${operation.destination.ordinal}_offset`,
+                  )
+                  const selected = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    baseAddress,
+                    offset,
+                    `raw_slot${operation.destination.ordinal}_address`,
+                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([selected]))
+                  break
+                }
+                case 'SlotWrite': {
+                  const address = readLocal(operation.slot).at(0)
+                  if (address === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM Slot.write lost its address')
+                  }
+                  const base = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    address,
+                    pointer,
+                    `slot_write${operation.destination.ordinal}_base`,
+                  )
+                  const values = readLocal(operation.value)
+                  const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
+                  if (lanes === undefined) throw new RangeError('LLVM Slot.write lost its shape')
+                  for (const [ordinal, lane] of lanes.entries()) {
+                    const value = values.at(ordinal)
+                    const offset = Layout.laneOffset(program.layout, operation.element, lane.path)
+                    if (value === undefined || offset === undefined) {
+                      throw new RangeError('LLVM Slot.write lost an element lane')
+                    }
+                    yield* FunctionBody.store(
+                      body,
+                      value,
+                      yield* constantBytePointer(
+                        base,
+                        offset,
+                        `slot_write${operation.destination.ordinal}_${ordinal}_ptr`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze([]))
+                  break
+                }
+                case 'SlotTake': {
+                  const address = readLocal(operation.slot).at(0)
+                  if (address === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM Slot.take lost its address')
+                  }
+                  const base = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    address,
+                    pointer,
+                    `slot_take${operation.destination.ordinal}_base`,
+                  )
+                  const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
+                  if (lanes === undefined) throw new RangeError('LLVM Slot.take lost its shape')
+                  const values: Array<Value.Input> = []
+                  for (const [ordinal, lane] of lanes.entries()) {
+                    const offset = Layout.laneOffset(program.layout, operation.element, lane.path)
+                    if (offset === undefined) throw new RangeError('LLVM Slot.take lost a lane')
+                    values.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(lane),
+                        yield* constantBytePointer(
+                          base,
+                          offset,
+                          `slot_take${operation.destination.ordinal}_${ordinal}_ptr`,
+                        ),
+                        `slot_take${operation.destination.ordinal}_${ordinal}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
+                  break
+                }
+                case 'SlotDrop':
+                  locals.set(operation.destination.ordinal, Object.freeze([]))
+                  break
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break
@@ -1370,7 +1816,14 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   }
                   yield* materializeAddressRoot(operation.root)
                   const base = addressStorage.get(operation.root.ordinal)
-                  if (base === undefined) throw new RangeError('LLVM slice formation lost its root')
+                  if (base === undefined) throw new RangeError('LLVM borrow formation lost its root')
+                  if (operation.type._tag === 'Reference') {
+                    locals.set(operation.destination.ordinal, Object.freeze([base]))
+                    break
+                  }
+                  if (operation.sourceType._tag !== 'FixedArray') {
+                    throw new RangeError('LLVM slice formation requires an array root')
+                  }
                   locals.set(
                     operation.destination.ordinal,
                     Object.freeze([
@@ -2209,8 +2662,32 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze([result]))
                   break
                 }
-                case 'Drop':
+                case 'Drop': {
+                  if (
+                    operation.cleanup._tag === 'AllocationCleanup' ||
+                    operation.cleanup._tag === 'RawBufferCleanup'
+                  ) {
+                    const values = readLocal(operation.local)
+                    const context = values.at(4)
+                    if (context === undefined || free === undefined || usizeType === undefined) {
+                      throw new RangeError('LLVM allocation cleanup lost its reclaim context')
+                    }
+                    yield* FunctionBody.callDirect(
+                      body,
+                      free,
+                      [
+                        yield* FunctionBody.cast(
+                          body,
+                          'inttoptr',
+                          context,
+                          pointer,
+                          `allocation_cleanup${operation.local.ordinal}_context`,
+                        ),
+                      ],
+                    )
+                  }
                   break
+                }
                 case 'MakeEffect':
                 case 'MakeCallable': {
                   const captured: Array<Value.Input> = []
@@ -2895,7 +3372,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       target.operation === 'LayoutMake' ||
                       target.operation === 'LayoutRepeat' ||
                       target.operation === 'SystemAllocatorMake' ||
-                      target.operation === 'AllocatorAllocate'
+                      target.operation === 'AllocatorAllocate' ||
+                      !Mir.isBinaryOperator(target.operation)
                     ) {
                       throw new RangeError(
                         `LLVM callable builtin ${target.actor}.${target.operation} is unavailable`,

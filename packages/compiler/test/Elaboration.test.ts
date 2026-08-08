@@ -485,6 +485,40 @@ fn main() -> I32 {
     assert.strictEqual(operation.type.access, 'Exclusive')
 })
 
+it('provides Allocator through nominal system and user-authored witnesses', () => {
+  const system = analyzeText(
+    'allocation://nominal-system-provider',
+    `effect fn use(layout: Layout) -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  drop allocation
+  return 42
+}
+pub fn main() -> I32 { return 0 }`,
+  )
+  assert.deepEqual(system.diagnostics, [])
+  const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
+  assert.strictEqual(providerType?._tag, 'Available')
+  if (providerType?._tag === 'Available')
+    assert.isTrue(Type.equals(providerType.type, Type.systemAllocator))
+
+  const custom = analyzeText(
+    'allocation://custom-provider',
+    `struct TestAllocator { remaining: I32 }
+impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
+effect fn use(layout: Layout) -> I32 ! OutOfMemory {
+  let mut allocator = TestAllocator { remaining: 1 }
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  drop allocation
+  return 42
+}
+pub fn main() -> I32 { return 0 }`,
+  )
+  assert.deepEqual(custom.diagnostics, [])
+})
+
 it('rejects dynamically shaped or type-incompatible catch handlers', () => {
   const result = analyzeText(
     'effect://bad-handler',
@@ -1837,4 +1871,30 @@ it('withholds mistyped operator results after one local diagnostic', () => {
   )
   assert.strictEqual(returned._tag, 'Operator')
   assert.deepEqual(returned.type, { _tag: 'Unavailable' })
+})
+
+it('specializes raw storage operations and requires lexical unsafe authority', () => {
+  const accepted = analyzeText(
+    'fixture://raw-storage-accepted.silk',
+    `fn build(allocation: Allocation, count: Usize) -> RawBuffer<I32> {
+  unsafe { return RawBuffer.from<I32>(move allocation, count) }
+}
+fn destroy(buffer: RawBuffer<I32>) -> Unit {
+  let mut owner = move buffer
+  unsafe { return Slot.drop(RawBuffer.slot(&mut owner, 0)) }
+}`,
+  )
+  const rejected = analyzeText(
+    'fixture://raw-storage-safe.silk',
+    `fn build(allocation: Allocation, count: Usize) -> RawBuffer<I32> {
+  return RawBuffer.from<I32>(move allocation, count)
+}`,
+  )
+
+  assert.deepEqual(accepted.diagnostics, [])
+  assert.include(
+    rejected.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0082',
+  )
+  assert.strictEqual(functionAt(rejected, 0).returnedExpression.type._tag, 'Unavailable')
 })

@@ -433,3 +433,104 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
     )
   }),
 )
+
+it.effect('indexes nominal allocator conformance without erasing the provider type', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('allocator', [
+      [
+        'allocator',
+        `struct TestAllocator { remaining: I32 }
+impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
+pub fn main() -> I32 { return 0 }`,
+      ],
+    ])
+    const witness = index.modules.at(0)?.conformances.at(0)
+    assert.strictEqual(witness?.capability._tag, 'Resolved')
+    assert.strictEqual(witness?.provider._tag, 'Resolved')
+    assert.deepEqual(
+      witness?.operations.map((operation) => operation.name._tag),
+      ['Present'],
+    )
+    assert.isTrue(
+      DeclarationIndex.conforms(index, Type.nominal('allocator', 'TestAllocator'), Type.allocator),
+    )
+    assert.isTrue(DeclarationIndex.conforms(index, Type.systemAllocator, Type.allocator))
+  }),
+)
+
+it.effect('validates allocator mappings and rejects duplicate or foreign witnesses', () =>
+  Effect.gen(function* () {
+    const valid = yield* collect('allocator-valid', [
+      [
+        'allocator-valid',
+        `struct TestAllocator { remaining: I32 }
+effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemory { return 0 }
+impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
+      ],
+    ])
+    assert.deepEqual(valid.diagnostics, [])
+    assert.isTrue(
+      DeclarationIndex.conforms(
+        valid,
+        Type.nominal('allocator-valid', 'TestAllocator'),
+        Type.allocator,
+      ),
+    )
+
+    const invalid = yield* collect('allocator-invalid', [
+      [
+        'allocator-invalid',
+        `struct TestAllocator { remaining: I32 }
+fn allocate(self: &TestAllocator) -> I32 { return 0 }
+impl Allocator for TestAllocator { allocate: Foreign.allocate }
+impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
+      ],
+    ])
+    assert.deepEqual(
+      invalid.diagnostics
+        .filter((diagnostic) => diagnostic.code === 'SEM0083')
+        .map((diagnostic) => diagnostic.reason._tag),
+      ['InvalidConformance', 'InvalidConformance'],
+    )
+    assert.isFalse(
+      DeclarationIndex.conforms(
+        invalid,
+        Type.nominal('allocator-invalid', 'TestAllocator'),
+        Type.allocator,
+      ),
+    )
+  }),
+)
+
+it.effect('accepts one affine Drop hook and rejects Copy targets and malformed headers', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('drop-hooks', [
+      [
+        'drop-hooks',
+        `struct Guard { allocation: Allocation }
+struct CopyValue { value: I32 }
+impl Drop for Guard { fn drop(self: &mut Guard) -> Unit { return Unit.make() } }
+impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> Unit { return Unit.make() } }
+impl Drop for Guard { effect fn dispose(value: &Guard) -> I32 { return 0 } }`,
+      ],
+    ])
+    assert.deepEqual(
+      index.diagnostics
+        .filter((diagnostic) => diagnostic.code === 'SEM0084')
+        .map((diagnostic) =>
+          diagnostic.reason._tag === 'InvalidDropHook' ? diagnostic.reason.detail : undefined,
+        ),
+      [
+        'Copy type drop-hooks.CopyValue cannot implement Drop',
+      ],
+    )
+    assert.include(
+      index.diagnostics
+        .filter((diagnostic) => diagnostic.code === 'SEM0083')
+        .map((diagnostic) =>
+          diagnostic.reason._tag === 'InvalidConformance' ? diagnostic.reason.detail : undefined,
+        ),
+      'duplicate Drop implementation for drop-hooks.Guard',
+    )
+  }),
+)

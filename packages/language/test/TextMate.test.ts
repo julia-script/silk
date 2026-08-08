@@ -74,6 +74,9 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   const program = 'pub fn main() -> I32 { return 42 }'
   assert.include(scopesAt(program, 'pub'), 'keyword.other.silk')
   assert.include(scopesAt(program, 'return'), 'keyword.other.silk')
+  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'impl'), 'keyword.other.silk')
+  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'for'), 'keyword.other.silk')
+  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'unsafe'), 'keyword.other.silk')
   assert.include(scopesAt(program, '42'), 'constant.numeric.integer.silk')
   assert.include(scopesAt('let ok = true', 'true'), 'constant.language.boolean.silk')
   assert.include(scopesAt('fn stop() -> Never', 'Never'), 'support.type.builtin.silk')

@@ -37,6 +37,8 @@ const mirType = (
         ? Object.freeze({ _tag: 'FixedArray', type: specialized })
         : Type.isSlice(specialized)
           ? Object.freeze({ _tag: 'Slice', type: specialized })
+          : Type.isReference(specialized)
+            ? Object.freeze({ _tag: 'Reference', type: specialized })
           : Type.isUnion(specialized)
             ? Object.freeze({ _tag: 'Union', type: specialized })
             : Type.isEffect(specialized)
@@ -69,6 +71,7 @@ class FunctionLowering {
   >()
   readonly patternLocals = new Map<string, Mir.LocalId>()
   readonly loanLocals = new Map<string, Mir.LocalId>()
+  readonly slotLoans = new Map<number, ReadonlyArray<Hir.BorrowId>>()
   private operations: Array<Mir.Operation> = []
 
   constructor(
@@ -1398,6 +1401,34 @@ function lowerExpression(
       fn.loanLocals.set(borrowKey(expression.borrow), destination)
       return Object.freeze({ result: destination })
     }
+    case 'ValueBorrow': {
+      const root =
+        expression.root._tag === 'BindingSliceRoot'
+          ? fn.bindingLocals.get(expression.root.binding.ordinal)
+          : local(expression.root.parameter.ordinal)
+      const sourceType = fn.type(expression.source)
+      const type = fn.type(expression.type)
+      if (root === undefined || sourceType?._tag !== 'Nominal' || type?._tag !== 'Reference') {
+        return undefined
+      }
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'BeginLoan',
+          borrow: expression.borrow,
+          destination,
+          root,
+          sourceType,
+          type,
+          access: expression.access,
+          reborrow: false,
+          suspendsParent: false,
+          provenance: authored(expression.span),
+        }),
+      )
+      fn.loanLocals.set(borrowKey(expression.borrow), destination)
+      return Object.freeze({ result: destination })
+    }
     case 'SliceLength': {
       const slice = lowerExpression(fn, expression.slice)
       if (slice === undefined || fn.localTypes.at(slice.result.ordinal)?._tag !== 'Slice') {
@@ -1463,6 +1494,70 @@ function lowerExpression(
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
+      const finishBuiltin = (result: Mir.LocalId): { readonly result: Mir.LocalId } => {
+        const slot = argumentLocals.at(0)
+        const inherited =
+          expression.operation === 'SlotWrite' ||
+          expression.operation === 'SlotTake' ||
+          expression.operation === 'SlotDrop'
+            ? (slot === undefined ? [] : (fn.slotLoans.get(slot.ordinal) ?? []))
+            : []
+        const endings = new Map(
+          [...expression.loanEnds, ...inherited].map((borrow) => [borrowKey(borrow), borrow]),
+        )
+        for (const borrow of endings.values()) {
+          const loan = fn.loanLocals.get(borrowKey(borrow))
+          if (loan === undefined) continue
+          fn.emit(
+            Object.freeze({
+              _tag: 'EndLoan' as const,
+              borrow,
+              slice: loan,
+              provenance: generated(expression.span),
+            }),
+          )
+          fn.loanLocals.delete(borrowKey(borrow))
+        }
+        if (slot !== undefined && inherited.length > 0) fn.slotLoans.delete(slot.ordinal)
+        return Object.freeze({ result })
+      }
+      if (expression.operation === 'LayoutOf') {
+        const [element] = expression.typeArguments
+        const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
+        const layoutEntry = Layout.entry(fn.layout, Type.layout)
+        const type = fn.type(Type.layout)
+        if (
+          elementLayout === undefined ||
+          layoutEntry?.representation._tag !== 'Aggregate' ||
+          type?._tag !== 'Nominal'
+        )
+          return undefined
+        const fields: Array<{ readonly field: DeclarationIndex.FieldId; readonly value: Mir.LocalId }> = []
+        for (const field of layoutEntry.representation.fields) {
+          const value = fn.alloc(usize)
+          fn.emit(
+            Object.freeze({
+              _tag: 'Literal' as const,
+              destination: value,
+              type: usize,
+              value: BigInt(field.name === 'bytes' ? elementLayout.size : elementLayout.alignment),
+              provenance: generated(expression.span),
+            }),
+          )
+          fields.push(Object.freeze({ field: field.id, value }))
+        }
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'Construct' as const,
+            destination,
+            type,
+            fields: Object.freeze(fields),
+            provenance: generated(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
       if (expression.operation === 'LayoutMake' || expression.operation === 'LayoutRepeat') {
         const [left, right] = argumentLocals
         const type = fn.type(expression.type)
@@ -1491,7 +1586,8 @@ function lowerExpression(
       }
       if (expression.operation === 'SystemAllocatorMake') {
         const type = fn.type(expression.type)
-        if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.allocator)) return undefined
+        if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.systemAllocator))
+          return undefined
         const destination = fn.alloc(type)
         fn.emit(
           Object.freeze({
@@ -1505,6 +1601,167 @@ function lowerExpression(
         return { result: destination }
       }
       if (expression.operation === 'AllocatorAllocate') return undefined
+      if (expression.operation === 'RawBufferFrom') {
+        const [allocation, count] = argumentLocals
+        const type = fn.type(expression.type)
+        const element = Type.isRawBuffer(expression.type) ? expression.type.arguments.at(0) : undefined
+        const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
+        if (
+          allocation === undefined ||
+          count === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.isRawBuffer(type.type) ||
+          element === undefined ||
+          elementLayout === undefined
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferFrom' as const,
+            destination,
+            allocation,
+            count,
+            element,
+            stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+            elementAlignment: elementLayout.alignment,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'RawBufferCount') {
+        const [buffer] = argumentLocals
+        if (buffer === undefined) return undefined
+        const destination = fn.alloc(usize)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferCount' as const,
+            destination,
+            buffer,
+            type: usize,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'RawBufferSlot') {
+        const [buffer, index] = argumentLocals
+        const type = fn.type(expression.type)
+        const element = Type.isSlot(expression.type) ? expression.type.arguments.at(0) : undefined
+        if (
+          buffer === undefined ||
+          index === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.isSlot(type.type) ||
+          element === undefined
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferSlot' as const,
+            destination,
+            buffer,
+            index,
+            element,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        fn.slotLoans.set(destination.ordinal, expression.heldLoans)
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'SlotWrite') {
+        const [slot, value] = argumentLocals
+        const slotArgument = expression.arguments.at(0)
+        const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
+        const slotElement =
+          slotType !== undefined && Type.isSlot(slotType) ? slotType.arguments.at(0) : undefined
+        const type = fn.type(expression.type)
+        if (
+          slot === undefined ||
+          value === undefined ||
+          slotElement === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.equals(type.type, Type.unit)
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'SlotWrite' as const,
+            destination,
+            slot,
+            value,
+            element: slotElement,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'SlotTake') {
+        const [slot] = argumentLocals
+        const type = fn.type(expression.type)
+        if (slot === undefined || type === undefined) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'SlotTake' as const,
+            destination,
+            slot,
+            element: expression.type,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'SlotDrop') {
+        const [slot] = argumentLocals
+        const slotArgument = expression.arguments.at(0)
+        const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
+        const element =
+          slotType !== undefined && Type.isSlot(slotType) ? slotType.arguments.at(0) : undefined
+        const type = fn.type(expression.type)
+        if (
+          slot === undefined ||
+          element === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.equals(type.type, Type.unit)
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'SlotDrop' as const,
+            destination,
+            slot,
+            element,
+            cleanup: concreteCleanup(fn, element),
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'UnitMake') {
+        const type = fn.type(expression.type)
+        if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'Construct' as const,
+            destination,
+            type,
+            fields: Object.freeze([]),
+            provenance: authored(expression.span),
+          }),
+        )
+        return { result: destination }
+      }
       if (expression.operation === 'Not' || expression.operation === 'Negate') {
         const [subject] = argumentLocals
         if (subject === undefined) return undefined
@@ -1533,6 +1790,7 @@ function lowerExpression(
         )
         return { result: destination }
       }
+      if (!Mir.isBinaryOperator(expression.operation)) return undefined
       const [left, right] = argumentLocals
       if (left === undefined || right === undefined) return undefined
       const type = fn.type(expression.type)
@@ -1558,6 +1816,7 @@ function lowerExpression(
 
 interface ExitIndex {
   readonly returns: ReadonlyMap<string, Ownership.ExitPlan>
+  readonly scopeEnds: ReadonlyMap<string, Ownership.ExitPlan>
   readonly armEnds: ReadonlyMap<string, Ownership.ExitPlan>
   readonly loopFallthroughs: ReadonlyMap<number, Ownership.ExitPlan>
   readonly transfers: ReadonlyMap<string, Ownership.ExitPlan>
@@ -1565,6 +1824,7 @@ interface ExitIndex {
 
 const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex => {
   const returns = new Map<string, Ownership.ExitPlan>()
+  const scopeEnds = new Map<string, Ownership.ExitPlan>()
   const armEnds = new Map<string, Ownership.ExitPlan>()
   const loopFallthroughs = new Map<number, Ownership.ExitPlan>()
   const transfers = new Map<string, Ownership.ExitPlan>()
@@ -1572,6 +1832,9 @@ const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex =>
     switch (exit.kind) {
       case 'Return':
         returns.set(spanKey(exit.span), exit)
+        break
+      case 'ScopeEnd':
+        scopeEnds.set(spanKey(exit.span), exit)
         break
       case 'ArmEnd':
         armEnds.set(`${spanKey(exit.span)}:${exit.arm ?? 'Taken'}`, exit)
@@ -1585,7 +1848,7 @@ const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex =>
         break
     }
   }
-  return { returns, armEnds, loopFallthroughs, transfers }
+  return { returns, scopeEnds, armEnds, loopFallthroughs, transfers }
 }
 
 const concreteCleanup = (
@@ -1596,13 +1859,24 @@ const concreteCleanup = (
   if (Type.isBuiltin(type) || Type.isNever(type) || Type.isParameter(type)) {
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
-  if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isSlice(type) || Type.isReference(type))
+    return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.equals(type, Type.allocation))
     return Object.freeze({
       _tag: 'AllocationCleanup',
       type: Type.allocation,
       ticket: 'ActiveReclaimTicket',
+    })
+  if (Type.isRawBuffer(type))
+    return Object.freeze({
+      _tag: 'RawBufferCleanup',
+      type,
+      allocation: Object.freeze({
+        _tag: 'AllocationCleanup',
+        type: Type.allocation,
+        ticket: 'ActiveReclaimTicket',
+      }),
     })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
@@ -1990,6 +2264,11 @@ const lowerSequence = (
           provenance: authored(statement.span),
         }),
       )
+      const heldLoans = fn.slotLoans.get(lowered.result.ordinal)
+      if (heldLoans !== undefined) {
+        fn.slotLoans.delete(lowered.result.ordinal)
+        fn.slotLoans.set(destination.ordinal, heldLoans)
+      }
       fn.bindingLocals.set(statement.binding.ordinal, destination)
       return destination
     })
@@ -2215,6 +2494,43 @@ const lowerSequence = (
     return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
       ? undefined
       : id
+  }
+
+  if (statement._tag === 'Unsafe') {
+    const body = fn.reserve()
+    const following = fn.reserve()
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: Object.freeze([]),
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: body,
+          provenance: authored(statement.span),
+        }),
+      }),
+    )
+    const forward = Object.freeze({
+      _tag: 'Forward' as const,
+      target: following,
+      provenance: generated(statement.span),
+    })
+    if (
+      lowerSequence(
+        fn,
+        statement.statements,
+        exits,
+        ownerLoop,
+        forward,
+        body,
+        exits.scopeEnds.get(spanKey(statement.span)),
+      ) === undefined ||
+      lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+    )
+      return undefined
+    return id
   }
 
   if (statement._tag === 'If') {

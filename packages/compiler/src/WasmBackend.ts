@@ -16,7 +16,7 @@ import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Target from './Target.js'
-import type * as SilkType from './Type.js'
+import * as SilkType from './Type.js'
 
 /**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
@@ -60,7 +60,7 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
   )
   const rootOrdinals = new Set([
     ...formations.flatMap((operation) =>
-      operation.sourceType._tag === 'FixedArray' ? [operation.root.ordinal] : [],
+      operation.sourceType._tag === 'Slice' ? [] : [operation.root.ordinal],
     ),
     ...Mir.operations(fn).flatMap((operation) =>
       operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
@@ -296,6 +296,7 @@ interface Layout {
 interface MemoryContext {
   readonly memory: Memory.Memory
   readonly stackPointer: Global.Global
+  readonly heapPointer: Global.Global
   readonly frame: FramePlan
   readonly plan: LayoutPlan.Plan
 }
@@ -417,6 +418,38 @@ const emitOperation = (
     if (layout.frameBase === undefined) throw new RangeError('Wasm frame has no base local')
     return [Instr.localGet(layout.frameBase), Instr.i32Const(offset), Instr.op('i32.add')]
   }
+  const requireMemory = (): MemoryContext => {
+    if (memory === undefined) throw new RangeError('Wasm raw storage requires private memory')
+    return memory
+  }
+  const aggregateFieldOffset = (type: SilkType.Type, name: string): number => {
+    const entry = LayoutPlan.entry(plan, type)
+    if (entry?.representation._tag !== 'Aggregate') {
+      throw new RangeError(`Wasm raw storage lost aggregate layout ${SilkType.encode(type)}`)
+    }
+    const field = entry.representation.fields.find((candidate) => candidate.name === name)
+    if (field === undefined) throw new RangeError(`Wasm raw storage lost field ${name}`)
+    return field.offset
+  }
+  const loadAt = (address: number, offset = 0): ReadonlyArray<Instr.Instr> => {
+    const context = requireMemory()
+    return [
+      Instr.localGet(address),
+      Instr.memoryAccess('i32.load', context.memory, { offset }),
+    ]
+  }
+  const storeAt = (
+    address: number,
+    value: number,
+    offset = 0,
+  ): ReadonlyArray<Instr.Instr> => {
+    const context = requireMemory()
+    return [
+      Instr.localGet(address),
+      Instr.localGet(value),
+      Instr.memoryAccess('i32.store', context.memory, { offset }),
+    ]
+  }
   const materializeRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     if (memory === undefined) throw new RangeError('Wasm slice has no private memory')
     const planned = memory.frame.roots.get(root.ordinal)
@@ -480,8 +513,186 @@ const emitOperation = (
     case 'ValidateLayout':
     case 'RepeatLayout':
       throw new RangeError('Wasm layout validation lowering is not available yet')
-    case 'Allocate':
-      throw new RangeError('Wasm allocation lowering is not available yet')
+    case 'Allocate': {
+      const context = requireMemory()
+      const [bytes, alignment] = slots(operation.layout)
+      const [base, destinationBytes, destinationAlignment, reclaim, rawContext, active] =
+        slots(operation.destination)
+      if (
+        bytes === undefined ||
+        alignment === undefined ||
+        base === undefined ||
+        destinationBytes === undefined ||
+        destinationAlignment === undefined ||
+        reclaim === undefined ||
+        rawContext === undefined ||
+        active === undefined
+      ) {
+        throw new RangeError('Wasm allocation lost its compiler-planned lanes')
+      }
+      const propagationShape = LayoutPlan.callingShape(plan, operation.propagationType.type)
+      if (propagationShape === undefined) {
+        throw new RangeError('Wasm allocation lost its failure calling shape')
+      }
+      const fail = [
+        Instr.i32Const(operation.failureTag),
+        ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
+        Instr.op('return'),
+      ]
+      return [
+        Instr.globalGet(context.heapPointer),
+        Instr.localGet(alignment),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.op('i32.add'),
+        Instr.i32Const(0),
+        Instr.localGet(alignment),
+        Instr.op('i32.sub'),
+        Instr.op('i32.and'),
+        Instr.localSet(base),
+        Instr.localGet(base),
+        Instr.localGet(bytes),
+        Instr.op('i32.add'),
+        Instr.localTee(layout.scratch),
+        Instr.localGet(base),
+        Instr.op('i32.lt_u'),
+        Instr.ifElse(Instr.emptyBlockType, fail, []),
+        Instr.localGet(layout.scratch),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.i32Const(16),
+        Instr.op('i32.shr_u'),
+        Instr.i32Const(1),
+        Instr.op('i32.add'),
+        Instr.memorySize(context.memory),
+        Instr.op('i32.gt_u'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            Instr.localGet(layout.scratch),
+            Instr.i32Const(1),
+            Instr.op('i32.sub'),
+            Instr.i32Const(16),
+            Instr.op('i32.shr_u'),
+            Instr.i32Const(1),
+            Instr.op('i32.add'),
+            Instr.memorySize(context.memory),
+            Instr.op('i32.sub'),
+            Instr.memoryGrow(context.memory),
+            Instr.i32Const(-1),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, fail, []),
+          ],
+          [],
+        ),
+        Instr.localGet(layout.scratch),
+        Instr.globalSet(context.heapPointer),
+        Instr.localGet(bytes),
+        Instr.localSet(destinationBytes),
+        Instr.localGet(alignment),
+        Instr.localSet(destinationAlignment),
+        Instr.i32Const(1),
+        Instr.localSet(reclaim),
+        Instr.i32Const(0),
+        Instr.localSet(rawContext),
+        Instr.i32Const(1),
+        Instr.localSet(active),
+      ]
+    }
+    case 'RawBufferFrom': {
+      const allocation = slots(operation.allocation)
+      const destination = slots(operation.destination)
+      const count = scalar(operation.count)
+      const bytes = allocation.at(1)
+      const alignment = allocation.at(2)
+      const destinationCount = destination.at(-1)
+      if (
+        bytes === undefined ||
+        alignment === undefined ||
+        destinationCount === undefined ||
+        destination.length !== allocation.length + 1
+      ) {
+        throw new RangeError('Wasm RawBuffer construction lost its planned lanes')
+      }
+      return [
+        Instr.localGet(count),
+        Instr.i32Const(operation.stride),
+        Instr.op('i32.mul'),
+        Instr.localGet(bytes),
+        Instr.op('i32.ne'),
+        Instr.localGet(alignment),
+        Instr.i32Const(operation.elementAlignment),
+        Instr.op('i32.ne'),
+        Instr.op('i32.or'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...copy(allocation, destination.slice(0, allocation.length)),
+        Instr.localGet(count),
+        Instr.localSet(destinationCount),
+      ]
+    }
+    case 'RawBufferCount': {
+      const address = scalar(operation.buffer)
+      const reference = layout.types.at(operation.buffer.ordinal)
+      if (reference?._tag !== 'Reference' || !SilkType.isRawBuffer(reference.type.target)) {
+        throw new RangeError('Wasm RawBuffer.count lost its referenced buffer type')
+      }
+      return [
+        ...loadAt(address, aggregateFieldOffset(reference.type.target, 'count')),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    case 'RawBufferSlot': {
+      const address = scalar(operation.buffer)
+      const index = scalar(operation.index)
+      const rawBuffer = SilkType.rawBuffer(operation.element)
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset =
+        allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      const elementLayout = LayoutPlan.entry(plan, operation.element)
+      if (elementLayout === undefined) throw new RangeError('Wasm RawBuffer.slot lost element layout')
+      const stride = alignUp(elementLayout.size, elementLayout.alignment)
+      return [
+        Instr.localGet(index),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.ge_u'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...loadAt(address, baseOffset),
+        Instr.localGet(index),
+        Instr.i32Const(stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    case 'SlotWrite': {
+      const address = scalar(operation.slot)
+      const shape = LayoutPlan.callingShape(plan, operation.element)
+      if (shape === undefined) throw new RangeError('Wasm Slot.write lost its element shape')
+      return shape.lanes.flatMap((lane, ordinal) => {
+        const value = slots(operation.value).at(ordinal)
+        const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+        if (value === undefined || offset === undefined) {
+          throw new RangeError('Wasm Slot.write lost an element lane')
+        }
+        return storeAt(address, value, offset)
+      })
+    }
+    case 'SlotTake': {
+      const address = scalar(operation.slot)
+      const shape = LayoutPlan.callingShape(plan, operation.element)
+      if (shape === undefined) throw new RangeError('Wasm Slot.take lost its element shape')
+      return shape.lanes.flatMap((lane, ordinal) => {
+        const destination = slots(operation.destination).at(ordinal)
+        const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+        if (destination === undefined || offset === undefined) {
+          throw new RangeError('Wasm Slot.take lost an element lane')
+        }
+        return [...loadAt(address, offset), Instr.localSet(destination)]
+      })
+    }
+    case 'SlotDrop':
+      return []
     case 'Match': {
       const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
         operations.flatMap((nested) => emitOperation(nested, layout, plan, resolve, memory))
@@ -560,8 +771,18 @@ const emitOperation = (
       } else {
         const planned = memory?.frame.roots.get(operation.root.ordinal)
         const [address, length] = slots(operation.destination)
-        if (planned === undefined || address === undefined || length === undefined) {
-          throw new RangeError('Wasm slice formation lost its frame root or lanes')
+        if (planned === undefined || address === undefined) {
+          throw new RangeError('Wasm borrow formation lost its frame root or address lane')
+        }
+        if (operation.type._tag === 'Reference') {
+          return [
+            ...materializeRoot(operation.root),
+            ...frameAddress(planned.offset),
+            Instr.localSet(address),
+          ]
+        }
+        if (length === undefined || operation.sourceType._tag !== 'FixedArray') {
+          throw new RangeError('Wasm slice formation lost its length lane or array root')
         }
         return [
           ...materializeRoot(operation.root),
@@ -1318,7 +1539,8 @@ const emitOperation = (
           target.operation === 'LayoutMake' ||
           target.operation === 'LayoutRepeat' ||
           target.operation === 'SystemAllocatorMake' ||
-          target.operation === 'AllocatorAllocate'
+          target.operation === 'AllocatorAllocate' ||
+          !Mir.isBinaryOperator(target.operation)
         ) {
           throw new RangeError(
             `Wasm callable builtin ${target.actor}.${target.operation} is unavailable`,
@@ -1646,9 +1868,25 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     const frames = new Map(
       program.functions.map((fn) => [fn, framePlan(fn, program.layout)] as const),
     )
-    const needsMemory = [...frames.values()].some((frame) => frame.roots.size > 0)
+    const needsHeap = program.functions.some((fn) =>
+      Mir.operations(fn).some(
+        (operation) =>
+          operation._tag === 'Allocate' ||
+          operation._tag === 'RawBufferFrom' ||
+          operation._tag === 'RawBufferCount' ||
+          operation._tag === 'RawBufferSlot' ||
+          operation._tag === 'SlotWrite' ||
+          operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotDrop',
+      ),
+    )
+    const needsMemory = needsHeap || [...frames.values()].some((frame) => frame.roots.size > 0)
     const privateMemory = needsMemory
-      ? yield* Memory.make(builder, { min: 1, max: 65536 }, debug ? { name: 'silk_memory' } : {})
+      ? yield* Memory.make(
+          builder,
+          { min: needsHeap ? 2 : 1, max: 65536 },
+          debug ? { name: 'silk_memory' } : {},
+        )
       : undefined
     const stackPointer = needsMemory
       ? yield* Global.make(
@@ -1657,6 +1895,15 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           true,
           [Instr.i32Const(16)],
           debug ? { name: 'silk_stack_pointer' } : {},
+        )
+      : undefined
+    const heapPointer = needsMemory
+      ? yield* Global.make(
+          builder,
+          i32,
+          true,
+          [Instr.i32Const(65536)],
+          debug ? { name: 'silk_heap_pointer' } : {},
         )
       : undefined
 
@@ -1728,11 +1975,12 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       if (frame === undefined) throw new RangeError('Wasm declaration lost its frame plan')
       const layout = layoutOf(entry.fn, program.layout, frame, debug)
       const memory: MemoryContext | undefined =
-        privateMemory === undefined || stackPointer === undefined
+        privateMemory === undefined || stackPointer === undefined || heapPointer === undefined
           ? undefined
           : Object.freeze({
               memory: privateMemory,
               stackPointer,
+              heapPointer,
               frame,
               plan: program.layout,
             })

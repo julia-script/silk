@@ -3103,11 +3103,13 @@ const callInternal = Effect.fn('FunctionBody.callInternal')(function* (
         )
         const expected = signature.parameters[index]
         if (expected !== undefined && expected !== resolved.type) {
+          const actualDescription = module.types[resolved.type]
+          const expectedDescription = module.types[expected]
           return yield* Result.fail(
             invalidInput({
               operation: 'FunctionBody.call',
-              message: 'Call argument type does not match its parameter',
-              input: { index, argument },
+              message: `Call${name === undefined ? '' : ` ${String(name)}`} argument ${index} type does not match its parameter (${actualDescription?._tag ?? resolved.type} !== ${expectedDescription?._tag ?? expected})`,
+              input: { index, argument, actualType: resolved.type, expectedType: expected },
             }),
           )
         }

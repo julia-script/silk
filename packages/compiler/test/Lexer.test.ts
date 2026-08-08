@@ -125,6 +125,27 @@ it('recognizes drop only as a complete keyword', () => {
   )
 })
 
+it('recognizes unsafe and conformance keywords only as complete words', () => {
+  const result = Lexer.lex(
+    SourceFile.make(
+      'memory://ownership-keywords.silk',
+      ascii('unsafe unsafely impl implement for format'),
+    ),
+  )
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'UnsafeKeyword',
+      'Identifier',
+      'ImplKeyword',
+      'Identifier',
+      'ForKeyword',
+      'Identifier',
+      'EndOfFile',
+    ],
+  )
+})
+
 it('recognizes once only as a complete callable-mode keyword', () => {
   const result = Lexer.lex(
     SourceFile.make('memory://once-keyword.silk', ascii('once fn onceOnly once_more dual')),

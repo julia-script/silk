@@ -42,6 +42,13 @@ it('highlights mutable loop keywords through the compiler lexer', () => {
   ])
 })
 
+it('highlights unsafe and conformance syntax through compiler tokens', () => {
+  assert.deepStrictEqual(
+    spellings('impl Allocator for Mine { unsafe { return 1 } }', 'keyword'),
+    ['impl', 'for', 'unsafe', 'return'],
+  )
+})
+
 it('highlights callable mode keywords without reserving dual', () => {
   assert.deepStrictEqual(
     spellings('fn(fn(I32) -> I32, mut fn(I32) -> I32, once fn(I32) -> I32) dual', 'keyword'),

@@ -237,6 +237,56 @@ it('parses explicit drop as a statement without making the block terminal', () =
   )
 })
 
+it('parses unsafe blocks and allocator and Drop conformances losslessly', () => {
+  const source = `struct Guard<T> { value: T }
+impl Allocator for SystemAllocator { allocate: SystemAllocator.allocate }
+impl Drop for Guard<Token> {
+  fn drop(self: &mut Guard<Token>) -> Unit { unsafe { drop self.value } return Unit.make() }
+}
+fn main() -> I32 { unsafe { let allocation = Allocator.allocate(Layout.make(4, 4)) drop allocation } return 42 }`
+  const result = parseText('memory://unsafe-conformance.silk', source)
+  assert.deepEqual(result.parserDiagnostics, [])
+  const kinds = descendants(result.root)
+    .filter(SyntaxTree.isNode)
+    .map((node) => node.kind)
+  assert.strictEqual(kinds.filter((kind) => kind === 'ImplDeclaration').length, 2)
+  assert.include(kinds, 'ImplOperation')
+  assert.strictEqual(kinds.filter((kind) => kind === 'UnsafeStatement').length, 2)
+  assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
+it('bounds damaged conformance recovery before the following declaration', () => {
+  const result = parseText(
+    'memory://damaged-conformance.silk',
+    'impl Allocator for Broken fn after() -> I32 { return 42 }',
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.include(
+    missingLeaves(result.root).map((token) => token.expected),
+    'LeftBrace',
+  )
+  assert.include(
+    missingLeaves(result.root).map((token) => token.expected),
+    'RightBrace',
+  )
+})
+
+it('bounds a damaged unsafe call before the following statement and declaration', () => {
+  const source =
+    'fn main() -> I32 { unsafe { let value = Slot.take( return 42 } } fn after() -> I32 { return 7 }'
+  const result = parseText('memory://damaged-unsafe-call.silk', source)
+  const functions = directFunctionDeclarations(result.root)
+
+  assert.strictEqual(functions.length, 2)
+  assert.include(
+    missingLeaves(functions.at(0) ?? result.root).map((token) => token.expected),
+    'RightParenthesis',
+  )
+  assert.deepEqual(missingLeaves(functions.at(1) ?? result.root), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses an explicit provider role in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',

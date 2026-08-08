@@ -54,7 +54,12 @@ export interface LoanFact {
   readonly id: BorrowId
   readonly root: BindingSite
   readonly access: Type.Slice['access']
-  readonly origin: 'FixedArrayBorrow' | 'SliceReborrow' | 'EffectCapture' | 'CallableCapture'
+  readonly origin:
+    | 'FixedArrayBorrow'
+    | 'SliceReborrow'
+    | 'ValueBorrow'
+    | 'EffectCapture'
+    | 'CallableCapture'
   readonly parent?: BindingSite
   readonly suspendsParent: boolean
   readonly startRegion: Hir.RegionId
@@ -103,6 +108,11 @@ export type CleanupPlan =
       readonly ticket: 'ActiveReclaimTicket'
     }
   | {
+      readonly _tag: 'RawBufferCleanup'
+      readonly type: Type.Nominal
+      readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
+    }
+  | {
       readonly _tag: 'StructCleanup'
       readonly type: Type.Nominal
       readonly fields: ReadonlyArray<{
@@ -139,7 +149,7 @@ export type CleanupPlan =
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
   readonly _tag: 'Exit'
-  readonly kind: 'Return' | 'ArmEnd' | 'LoopFallthrough' | 'Break' | 'Continue'
+  readonly kind: 'Return' | 'ScopeEnd' | 'ArmEnd' | 'LoopFallthrough' | 'Break' | 'Continue'
   readonly span: SourceSpan.SourceSpan
   readonly region?: Hir.RegionId
   readonly arm?: 'Taken' | 'Otherwise'
@@ -217,6 +227,10 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
       ? type.access === 'Shared'
         ? copyable
         : Object.freeze({ _tag: 'MoveOnly', type })
+      : Type.isReference(type)
+        ? type.access === 'Shared'
+          ? copyable
+          : Object.freeze({ _tag: 'MoveOnly', type })
       : Type.isFixedArray(type)
         ? categoryOf(type.element)._tag === 'Copyable'
           ? copyable
@@ -762,6 +776,10 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     number,
     { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
   >()
+  const slotEnds = new Map<
+    number,
+    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+  >()
   const scanRunEnds = (expression: Elaboration.ExpressionFact, region: Hir.RegionId): void => {
     switch (expression._tag) {
       case 'Run': {
@@ -827,13 +845,28 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         return
       case 'Integer':
       case 'Boolean':
-      case 'Identifier':
         return
+      case 'Identifier': {
+        const site = directSite(expression)?.site
+        if (
+          site?._tag === 'Let' &&
+          expression.type._tag === 'Available' &&
+          Type.isSlot(expression.type.type)
+        ) {
+          const previous = slotEnds.get(site.binding.ordinal)
+          if (previous === undefined || previous.span.end < expression.syntax.span.end)
+            slotEnds.set(site.binding.ordinal, { region, span: expression.syntax.span })
+        }
+        return
+      }
     }
   }
   const scanStatementRunEnds = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {
     for (const statement of facts) {
       switch (statement._tag) {
+        case 'UnsafeStatement':
+          scanStatementRunEnds(statement.statements)
+          break
         case 'BindStatement':
           scanRunEnds(statement.binding.initializer, statement.region)
           break
@@ -1052,10 +1085,23 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
       }
       case 'Call': {
         const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
+        const consumesSlot =
+          expression.reference._tag === 'ResolvedBuiltin' &&
+          (expression.reference.operation === 'SlotWrite' ||
+            expression.reference.operation === 'SlotTake' ||
+            expression.reference.operation === 'SlotDrop')
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
           const candidate = argument.expression
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
-            inspect(candidate, region, callActive, naturalAccess(candidate))
+            inspect(
+              candidate,
+              region,
+              callActive,
+              naturalAccess(candidate),
+              consumesSlot
+                ? Object.freeze({ region, span: expression.syntax.span })
+                : undefined,
+            )
             continue
           }
           const root = borrowSite(candidate.formation.root)
@@ -1206,6 +1252,9 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   const statements = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {
     for (const statement of facts) {
       switch (statement._tag) {
+        case 'UnsafeStatement':
+          statements(statement.statements)
+          break
         case 'BindStatement': {
           const initializerType = statement.binding.initializer.type
           inspect(
@@ -1223,6 +1272,11 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
                     region: statement.region,
                     span: fn.declaration.syntax.span,
                   })
+                : initializerType._tag === 'Available' && Type.isSlot(initializerType.type)
+                  ? (slotEnds.get(statement.binding.id.ordinal) ?? {
+                      region: statement.region,
+                      span: fn.declaration.syntax.span,
+                    })
                 : undefined,
           )
           break
@@ -1309,13 +1363,24 @@ const cleanupPlan = (
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
-  if (Type.isSlice(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isSlice(type) || Type.isReference(type))
+    return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.equals(type, Type.allocation))
     return Object.freeze({
       _tag: 'AllocationCleanup',
       type: Type.allocation,
       ticket: 'ActiveReclaimTicket',
+    })
+  if (Type.isRawBuffer(type))
+    return Object.freeze({
+      _tag: 'RawBufferCleanup',
+      type,
+      allocation: Object.freeze({
+        _tag: 'AllocationCleanup',
+        type: Type.allocation,
+        ticket: 'ActiveReclaimTicket',
+      }),
     })
   if (Type.isFixedArray(type)) {
     return Object.freeze({
@@ -1426,6 +1491,14 @@ export const specializeCleanup = (
             _tag: 'AllocationCleanup',
             type: Type.allocation,
             ticket: 'ActiveReclaimTicket',
+          })
+        : Object.freeze({ _tag: 'NoCleanup', type })
+    case 'RawBufferCleanup':
+      return Type.isRawBuffer(type)
+        ? Object.freeze({
+            _tag: 'RawBufferCleanup',
+            type,
+            allocation: cleanup.allocation,
           })
         : Object.freeze({ _tag: 'NoCleanup', type })
     case 'StructCleanup':
@@ -1607,6 +1680,31 @@ const checkFunction = (
   ): { readonly returned: boolean; readonly live: Set<string> } => {
     let live = initial
     for (const statement of statements) {
+      if (statement._tag === 'Unsafe') {
+        const scopeFrames = [...frames.map((frame) => [...frame]), []]
+        const result = walkStatements(
+          statement.statements,
+          statement.span,
+          new Set(live),
+          scopeFrames,
+          loopScopes,
+        )
+        const frame = scopeFrames.at(-1) ?? []
+        if (result.returned) return result
+        if (frame.length > 0) {
+          exits.push(
+            Object.freeze({
+              kind: 'ScopeEnd' as const,
+              span: statement.span,
+              region: statement.region,
+              sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
+            }),
+          )
+        }
+        for (const site of frame) result.live.delete(site)
+        live = result.live
+        continue
+      }
       if (statement._tag === 'Bind') {
         checkExpression(state, live, statement.initializer, true)
         const type =
@@ -1981,6 +2079,8 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'ParameterCleanup') return `parameter:${Type.key(cleanup.type)}`
   if (cleanup._tag === 'AllocationCleanup')
     return `allocation:${Type.encode(cleanup.type)} ticket=${cleanup.ticket}`
+  if (cleanup._tag === 'RawBufferCleanup')
+    return `raw-buffer:${Type.encode(cleanup.type)} owner=(${cleanupText(cleanup.allocation)})`
   if (cleanup._tag === 'ArrayCleanup') {
     return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
   }

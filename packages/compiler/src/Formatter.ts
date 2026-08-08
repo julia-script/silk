@@ -327,6 +327,11 @@ const printFunctionDeclaration = (
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
+  const name =
+    directTokens(node).find((token) => token.kind === 'Identifier') ??
+    directTokens(node).find((token) => token.kind === 'DropKeyword')
+  if (name === undefined)
+    throw new FormatterImplementationError('FunctionDeclaration has no function name')
   return FormatDocument.concat(
     ...(publicKeyword === undefined
       ? []
@@ -346,7 +351,7 @@ const printFunctionDeclaration = (
       tokenOf(node, 'FnKeyword'),
       publicKeyword === undefined && effectKeyword === undefined ? prefix : FormatDocument.empty,
     ),
-    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    printToken(context, name, FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
     printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
@@ -355,6 +360,36 @@ const printFunctionDeclaration = (
       ? []
       : [printNode(context, requirementRow, FormatDocument.hardLine)]),
     printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
+  )
+}
+
+const printImplDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const nodes = directNodes(node)
+  const capability = nodes[0] ?? nodeOf(node, 'TypePath')
+  const target = nodes[1] ?? nodeOf(node, 'TypePath', 1)
+  const members = nodes.slice(2)
+  const open = tokenOf(node, 'LeftBrace')
+  const close = tokenOf(node, 'RightBrace')
+  const head = FormatDocument.concat(
+    printToken(context, tokenOf(node, 'ImplKeyword'), prefix),
+    printNode(context, capability, FormatDocument.text(' ')),
+    printToken(context, tokenOf(node, 'ForKeyword'), FormatDocument.text(' ')),
+    printNode(context, target, FormatDocument.text(' ')),
+    printToken(context, open, FormatDocument.text(' ')),
+  )
+  if (members.length === 0) return FormatDocument.concat(head, printToken(context, close))
+  return FormatDocument.concat(
+    head,
+    FormatDocument.indent(
+      FormatDocument.concat(
+        ...members.map((member) => printNode(context, member, FormatDocument.hardLine, true)),
+      ),
+    ),
+    printToken(context, close, FormatDocument.hardLine),
   )
 }
 
@@ -481,6 +516,14 @@ const printNode = (
     }
     case 'StructDeclaration':
       return printStructDeclaration(context, node, prefix)
+    case 'ImplDeclaration':
+      return printImplDeclaration(context, node, prefix)
+    case 'ImplOperation':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Colon')),
+        printNode(context, nodeOf(node, 'TypePath'), FormatDocument.text(' ')),
+      )
     case 'StructField': {
       const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
       return FormatDocument.concat(
@@ -517,6 +560,14 @@ const printNode = (
         printToken(context, tokenOf(node, 'LeftBracket')),
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
         printToken(context, tokenOf(node, 'RightBracket')),
+      )
+    }
+    case 'ReferenceType': {
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
+        ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
       )
     }
     case 'CallableType': {
@@ -641,6 +692,11 @@ const printNode = (
     }
     case 'Block':
       return printBlock(context, node, prefix)
+    case 'UnsafeStatement':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'UnsafeKeyword'), prefix, preserveBlank),
+        printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
+      )
     case 'BindingStatement': {
       const mutableKeyword = directTokens(node).find((token) => token.kind === 'MutKeyword')
       return FormatDocument.concat(

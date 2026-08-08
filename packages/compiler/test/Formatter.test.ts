@@ -219,6 +219,33 @@ fn main() -> I32 {
   }),
 )
 
+it.effect('formats unsafe blocks and conformance declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'impl Allocator for SystemAllocator{allocate:SystemAllocator.allocate} impl Drop for Guard<Token>{fn drop(self:&mut Guard<Token>)->Unit{unsafe{drop self.value} return Unit.make()}}'
+    const first = yield* Formatter.format(parse('memory://unsafe-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `impl Allocator for SystemAllocator {
+  allocate: SystemAllocator.allocate
+}
+
+impl Drop for Guard<Token> {
+  fn drop(self: &mut Guard<Token>) -> Unit {
+    unsafe {
+      drop self.value
+    }
+    return Unit.make()
+  }
+}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://unsafe-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
 it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
     const source = `fn later()->Effect<I32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
