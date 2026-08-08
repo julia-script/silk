@@ -1,0 +1,101 @@
+## Context
+
+See proposal.md — Why. The substrate from `add-self-contained-owned-allocation` is complete and
+gated; probes against the current compiler establish the exact frontier:
+
+- Generic structs, generic fields, `RawBuffer.from<T>` under a type parameter, and *concrete*
+  conformance instantiations (`impl Drop for Vector<I32>`) already work with zero diagnostics.
+- The parametric form `impl<T> Drop for Vector<T>` fails in the parser (no type-parameter slot on
+  `ImplDeclaration`) and in the declaration index (`SEM0083` demands concrete nominal types).
+- No standard-library mechanism exists; all `.silk` files are test fixtures. Module closure
+  currently resolves only modules present in the compilation request.
+- Scanner input is already expressible: `&[U8]` runtime slices shipped in
+  `add-lexical-runtime-slices`.
+
+Constraints carried forward: no compiler-known collections, no allocator privilege, no iterator
+abstraction, deterministic artifacts, three-engine differential parity, evaluator as semantic
+oracle.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- The smallest parametric-conformance feature that lets one `impl<T>` declaration serve every
+  reachable instantiation of one generic nominal target.
+- The smallest stdlib mechanism that makes `silk.vector` (name illustrative) importable without
+  vendoring, deterministic, and privilege-free.
+- `Vector<T>` and the scanner as pure Silk source, compiled by the existing pipeline unchanged
+  below the declaration index except for parameter substitution in monomorphization.
+
+**Non-Goals:**
+
+- Where-clauses, capability bounds on impl parameters, overlapping-impl resolution, coherence
+  rules beyond exact-duplicate rejection. One generic target type, parameters used positionally.
+- Package management, versioning, a user-extensible library path, or a prelude of implicit names.
+  Importing stdlib modules stays explicit.
+- Bulk byte-memory primitives (memcpy-shaped ops). Growth moves elements one slot at a time; if
+  the scanner workload proves that unacceptable, that evidence feeds a *future* change.
+- Iterators, slices over vectors, or any API surface beyond create/append/get/length/capacity/
+  move/drop.
+
+## Decisions
+
+### D1: Parametric conformances substitute at monomorphization, not a new dispatch layer
+
+The declaration index records the conformance with bound parameters; Instances already keys every
+generic reachability question with normalized concrete arguments, so parameter substitution rides
+the existing worklist. Alternative — instantiation-time impl synthesis (textual expansion) — was
+rejected: it would duplicate diagnostics per instantiation and break canonical artifact identity.
+The Copy-cannot-Drop check moves from header time to instantiation time for parametric impls only;
+concrete impls keep header-time rejection (probe-verified today's behavior).
+
+### D2: Stdlib ships as source compiled into the closure, not as a prebuilt artifact
+
+The compiler embeds the stdlib `.silk` sources and module closure adds them to resolution when
+imported. Compiling from source keeps the no-privilege claim checkable (same pipeline, same
+diagnostics) and keeps artifact determinism a plain byte question. Alternative — precompiled
+HIR/MIR artifacts — rejected for the bootstrap: it would create a second trust root and a version
+skew surface before there is any compile-time problem to solve. Library module identity gets a
+reserved namespace prefix so user modules cannot collide silently (spec requires the collision
+diagnostic).
+
+### D3: Vector layout is an ordinary generic struct
+
+`Vector<T>` = `{ storage: RawBuffer<T> | None-like state, length: Usize, capacity: Usize }` in
+whatever shape ordinary Silk types allow — the design constraint is only that the empty state
+allocates nothing and the struct is affine via its `Allocation`-bearing field. Growth policy:
+capacity 0 → 4 → ×2 (geometric, spec-visible only as "amortized geometric"). Checked access reuses
+the fixed-array checked-index contract.
+
+### D4: The scanner is the acceptance program, not a compiler component
+
+It tokenizes a small fixed grammar (enough to force growth and produce `Vector<Token>`) and lives
+with the other acceptance fixtures. It deliberately does not replace the TypeScript lexer;
+self-hosting substitution is a Later roadmap item.
+
+### D5: Failure-ordinal sweeps extend the existing harness
+
+The dispatch-change harness already injects `OutOfMemory` by allocation ordinal. The scanner gate
+reuses it verbatim over a larger ordinal range; no new injection mechanism.
+
+## Risks / Trade-offs
+
+- [Parametric substitution surfaces latent assumptions that conformance targets are concrete
+  (witness lookup, `callTargets`, Lower's witness dispatch)] → the probe-passing concrete-impl path
+  stays untouched; parametric impls normalize to the same concrete witness form *before* Lower, so
+  downstream phases never see an unsubstituted parameter. Any place that still does is a bug found
+  by the differential gates.
+- [Stdlib determinism obligations grow every future artifact check] → scope stdlib to the vector
+  module now; the determinism gate cost is one module.
+- [Element-at-a-time growth may be slow enough to tempt a primitive mid-change] → explicitly out of
+  scope; the boundary in the proposal makes adding one a new proposal, not a task.
+- [Deferring Copy-check to instantiation could let a never-instantiated absurd impl pass silently]
+  → accepted: uninstantiated generic code is unchecked in exactly the same way uninstantiated
+  generic functions already are.
+
+## Open Questions
+
+- Exact stdlib module naming (`silk.vector` vs `std.vector`) — cosmetic, decide at implementation
+  with the formatter goldens.
+- Whether the scanner's token grammar covers identifiers+integers only or adds punctuation —
+  decide by what most cheaply forces ≥2 reallocations and a mid-token failure ordinal.
