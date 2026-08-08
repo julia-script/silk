@@ -190,13 +190,11 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
         acquiresBeforeFailure,
         name,
       )
-      // The successful sweep releases exactly what it acquired. On the failing ordinals the
-      // earlier live owners are NOT yet released before propagation: run-failure propagation
-      // returns out of the function without visiting cleanup regions. Tracked as open work on
-      // tasks 7.2/7.3 — once fixed, releases must equal acquires on every ordinal.
+      // Release once on every ordinal: earlier live owners release before the failure
+      // propagates, and the successful sweep releases exactly what it acquired.
       assert.strictEqual(
         events.filter((event) => event === 'AllocationRelease').length,
-        expected === 42 ? acquiresBeforeFailure : 0,
+        acquiresBeforeFailure,
         name,
       )
 

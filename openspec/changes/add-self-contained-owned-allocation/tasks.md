@@ -58,12 +58,7 @@
 ## 7. Structured MIR and verification
 
 - [x] 7.1 Add MIR operations and structured regions for checked repeated layout, conformance witness dispatch, fallible allocation, unsafe adoption, RawBuffer and lexical Slot operations, initialization transitions, restricted hooks, explicit drop, and automatic field cleanup.
-- [ ] 7.2 Lower allocation exhaustion through the existing typed outcome shape, cleaning earlier live owners before unchanged `OutOfMemory` propagation and emitting no release for a rejected request.
-  > **Partially done:** atomic rejection and unchanged propagation hold, but run-failure
-  > propagation returns out of the enclosing function without visiting cleanup regions, so
-  > earlier live owners are not released (see the release-count assertions in
-  > `OwnedAllocationDispatch.test.ts`). Needs structured failure regions in Lower plus all
-  > three engines.
+- [x] 7.2 Lower allocation exhaustion through the existing typed outcome shape, cleaning earlier live owners before unchanged `OutOfMemory` propagation and emitting no release for a rejected request.
 - [x] 7.3 Lower partial construction rollback, every structured exit, retry attempt cleanup, and explicit early drop inside the existing acyclic MIR region graph.
 - [x] 7.4 Verify witness contracts, target layout and type provenance, bounds, loans, affine ticket activity, hook restrictions, hook-before-field order, and exactly-once release while leaving unsafe initializedness as a caller obligation.
 - [x] 7.5 Reject forged tickets, mismatched reclaim identities, duplicate release, provider-retention metadata, named scopes, dynamic cleanup registries, and allocator-kind operations before execution.

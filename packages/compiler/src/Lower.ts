@@ -737,6 +737,7 @@ function lowerExpression(
           propagationType === undefined
             ? undefined
             : Layout.callingShape(fn.layout, propagationType.type)
+        const releases = propagationReleases(fn, expression.span)
         fn.emit(
           Object.freeze({
             _tag: 'RunEffectValue',
@@ -749,6 +750,7 @@ function lowerExpression(
             ...(propagationType === undefined ? {} : { propagationType }),
             tagMappings: Object.freeze(tagMappings),
             propagationLaneCount: propagationShape?.laneCount ?? 0,
+            ...(propagationType === undefined || releases.length === 0 ? {} : { releases }),
             type: successType,
             provenance: authored(expression.span),
           }),
@@ -950,6 +952,9 @@ function lowerExpression(
               propagationType,
               tagMappings: Object.freeze(tagMappings),
               propagationLaneCount: propagationShape.laneCount,
+              ...(propagationReleases(fn, expression.span).length === 0
+                ? {}
+                : { releases: propagationReleases(fn, expression.span) }),
               type: successType,
               provenance: authored(expression.span),
             }),
@@ -1062,6 +1067,10 @@ function lowerExpression(
             protectedType,
             retries: loweredRetries.result,
             ...(propagationType === undefined ? {} : { propagationType }),
+            ...(propagationType === undefined ||
+            propagationReleases(fn, expression.span).length === 0
+              ? {}
+              : { releases: propagationReleases(fn, expression.span) }),
             tagMappings: Object.freeze(tagMappings),
             propagationLaneCount: propagationShape?.laneCount ?? 0,
             type: successType,
@@ -1215,6 +1224,9 @@ function lowerExpression(
             arguments: Object.freeze(arguments_),
             outcomeType,
             propagationType,
+            ...(propagationReleases(fn, expression.span).length === 0
+              ? {}
+              : { releases: propagationReleases(fn, expression.span) }),
             tagMappings: Object.freeze(tagMappings),
             propagationLaneCount: propagationShape.laneCount,
             type: successType,
@@ -2063,6 +2075,46 @@ const cleanupForLocal = (
       }),
     ),
   })
+}
+
+/**
+ * The Drop operations a propagating failure must execute before it leaves this function:
+ * every owner the ownership phase saw live at the run site, resolved to this function's
+ * locals. Sites without a local here belong to a different compiled body and are skipped.
+ */
+const propagationReleases = (
+  fn: FunctionLowering,
+  span: SourceSpan.SourceSpan,
+): ReadonlyArray<Mir.DropOperation> => {
+  const exit = fn.ownership?.exits.find(
+    (candidate) =>
+      candidate.kind === 'Propagation' &&
+      candidate.span.start === span.start &&
+      candidate.span.end === span.end,
+  )
+  if (exit === undefined) return Object.freeze([])
+  return Object.freeze(
+    exit.releases.flatMap((release): ReadonlyArray<Mir.DropOperation> => {
+      if (release.cleanup._tag === 'NoCleanup') return []
+      const site = release.binding.site
+      const local =
+        site._tag === 'Let'
+          ? fn.bindingLocals.get(site.binding.ordinal)
+          : site._tag === 'Parameter'
+            ? fn.parameterLocals.get(site.parameter.ordinal)
+            : undefined
+      const localType = local === undefined ? undefined : fn.localTypes.at(local.ordinal)
+      if (local === undefined || localType === undefined) return []
+      return [
+        Object.freeze({
+          _tag: 'Drop' as const,
+          local,
+          cleanup: cleanupForLocal(fn, release.binding.cleanup, localType),
+          provenance: generated(span),
+        }),
+      ]
+    }),
+  )
 }
 
 const callableLocalCleanup = (

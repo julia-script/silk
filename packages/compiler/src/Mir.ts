@@ -412,6 +412,8 @@ export type Operation =
       readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
       readonly propagationLaneCount: number
+      /** Owners still live at this site, released before a failure outcome propagates. */
+      readonly releases?: ReadonlyArray<DropOperation>
       readonly type: Exclude<
         Type,
         { readonly _tag: 'EffectOutcome' | 'EffectValue' | 'EffectBorrow' }
@@ -431,6 +433,8 @@ export type Operation =
         readonly source: number
         readonly target: number
       }>
+      /** Owners still live at this site, released before a failure outcome propagates. */
+      readonly releases?: ReadonlyArray<DropOperation>
       readonly propagationLaneCount: number
       readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
       readonly provenance: Provenance
@@ -449,6 +453,8 @@ export type Operation =
         readonly target: number
       }>
       readonly propagationLaneCount: number
+      /** Owners still live at this site, released before a failure outcome propagates. */
+      readonly releases?: ReadonlyArray<DropOperation>
       readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' | 'EffectValue' }>
       readonly provenance: Provenance
     }
@@ -504,13 +510,16 @@ export type Operation =
       readonly commit: 'AfterCleanup'
       readonly provenance: Provenance
     }
-  | {
-      readonly _tag: 'Drop'
-      readonly local: LocalId
-      readonly cleanup: Ownership.CleanupPlan
-      readonly provenance: Provenance
-    }
+  | DropOperation
   | MatchOperation
+
+/** Releases one owned local through its cleanup plan. */
+export interface DropOperation {
+  readonly _tag: 'Drop'
+  readonly local: LocalId
+  readonly cleanup: Ownership.CleanupPlan
+  readonly provenance: Provenance
+}
 
 export interface MatchBinding {
   readonly id: Match.BindingId
@@ -758,7 +767,11 @@ const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
         ...(arm.guard?.operations ?? []),
         ...arm.selected.operations,
       ])
-    : []
+    : operation._tag === 'RunEffect' ||
+        operation._tag === 'RunEffectValue' ||
+        operation._tag === 'RetryEffect'
+      ? (operation.releases ?? [])
+      : []
 
 /** One operation and all structurally nested operations in deterministic source order. */
 export const operationTree = (operation: Operation): ReadonlyArray<Operation> => {
@@ -2675,11 +2688,11 @@ const operationText = (operation: Operation): string => {
     case 'CatchEffect':
       return `${localText(operation.destination)} = effect-catch tag=${operation.handledTag} ${targetText(operation.protectedTarget)} -> ${targetText(operation.handlerTarget)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RetryEffect':
-      return `${localText(operation.destination)} = effect-retry ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} retries=${localText(operation.retries)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = effect-retry ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} retries=${localText(operation.retries)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffect':
-      return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
-      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':

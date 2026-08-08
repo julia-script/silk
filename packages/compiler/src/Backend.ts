@@ -2790,6 +2790,31 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   // positionally type-identical lanes survive the copy; past the shared failure
                   // member the payload is dead on this path, and zeros keep the aggregate typed.
                   const outcomeLanes = lanesFor(operation.outcomeType)
+                  // Owners still live at this site release before the failure leaves the function;
+                  // only ticket-backed cleanups have a native effect, matching the Drop lowering.
+                  for (const release of operation.releases ?? []) {
+                    if (
+                      release.cleanup._tag !== 'AllocationCleanup' &&
+                      release.cleanup._tag !== 'RawBufferCleanup'
+                    )
+                      continue
+                    const releasedContext = readLocal(release.local).at(4)
+                    if (
+                      releasedContext === undefined ||
+                      free === undefined ||
+                      usizeType === undefined
+                    )
+                      throw new RangeError('LLVM propagation cleanup lost its reclaim context')
+                    yield* FunctionBody.callDirect(body, free, [
+                      yield* FunctionBody.cast(
+                        body,
+                        'inttoptr',
+                        releasedContext,
+                        pointer,
+                        `propagation_release${release.local.ordinal}_context`,
+                      ),
+                    ])
+                  }
                   const returned: Array<Value.Input> = [mappedTag]
                   while (returned.length < operation.propagationLaneCount) {
                     const lane = propagationLanes.at(returned.length)
@@ -2920,6 +2945,31 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const propagationLanes = lanesFor(operation.propagationType)
                   // See RunEffect: only positionally type-identical payload lanes are copied.
                   const outcomeLanes = lanesFor(operation.outcomeType)
+                  // Owners still live at this site release before the failure leaves the function;
+                  // only ticket-backed cleanups have a native effect, matching the Drop lowering.
+                  for (const release of operation.releases ?? []) {
+                    if (
+                      release.cleanup._tag !== 'AllocationCleanup' &&
+                      release.cleanup._tag !== 'RawBufferCleanup'
+                    )
+                      continue
+                    const releasedContext = readLocal(release.local).at(4)
+                    if (
+                      releasedContext === undefined ||
+                      free === undefined ||
+                      usizeType === undefined
+                    )
+                      throw new RangeError('LLVM propagation cleanup lost its reclaim context')
+                    yield* FunctionBody.callDirect(body, free, [
+                      yield* FunctionBody.cast(
+                        body,
+                        'inttoptr',
+                        releasedContext,
+                        pointer,
+                        `propagation_release${release.local.ordinal}_context`,
+                      ),
+                    ])
+                  }
                   const returned: Array<Value.Input> = [mappedTag]
                   while (returned.length < operation.propagationLaneCount) {
                     const lane = propagationLanes.at(returned.length)
@@ -3113,6 +3163,31 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const propagationLanes = lanesFor(operation.propagationType)
                     // See RunEffect: only positionally type-identical payload lanes are copied.
                     const outcomeLanes = lanesFor(operation.protectedType)
+                    // Owners still live at this site release before the failure leaves the function;
+                    // only ticket-backed cleanups have a native effect, matching the Drop lowering.
+                    for (const release of operation.releases ?? []) {
+                      if (
+                        release.cleanup._tag !== 'AllocationCleanup' &&
+                        release.cleanup._tag !== 'RawBufferCleanup'
+                      )
+                        continue
+                      const releasedContext = readLocal(release.local).at(4)
+                      if (
+                        releasedContext === undefined ||
+                        free === undefined ||
+                        usizeType === undefined
+                      )
+                        throw new RangeError('LLVM propagation cleanup lost its reclaim context')
+                      yield* FunctionBody.callDirect(body, free, [
+                        yield* FunctionBody.cast(
+                          body,
+                          'inttoptr',
+                          releasedContext,
+                          pointer,
+                          `propagation_release${release.local.ordinal}_context`,
+                        ),
+                      ])
+                    }
                     const returned: Array<Value.Input> = [mappedTag]
                     while (returned.length < operation.propagationLaneCount) {
                       const lane = propagationLanes.at(returned.length)

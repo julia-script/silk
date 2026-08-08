@@ -149,7 +149,14 @@ export type CleanupPlan =
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
   readonly _tag: 'Exit'
-  readonly kind: 'Return' | 'ScopeEnd' | 'ArmEnd' | 'LoopFallthrough' | 'Break' | 'Continue'
+  readonly kind:
+    | 'Return'
+    | 'ScopeEnd'
+    | 'ArmEnd'
+    | 'LoopFallthrough'
+    | 'Break'
+    | 'Continue'
+    | 'Propagation'
   readonly span: SourceSpan.SourceSpan
   readonly region?: Hir.RegionId
   readonly arm?: 'Taken' | 'Otherwise'
@@ -756,6 +763,25 @@ const deferredBlocks = (
   expression._tag === 'EffectBlock'
     ? [expression]
     : Hir.expressionChildren(expression).flatMap(deferredBlocks)
+
+/**
+ * Run sites in this expression that can propagate a typed failure, stopping at effect blocks:
+ * a deferred body's runs propagate out of its own compiled function, not out of this one.
+ */
+const fallibleRunSites = (
+  expression: Hir.Expression,
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Run' }>> => {
+  if (expression._tag === 'EffectBlock') return []
+  const nested = Hir.expressionChildren(expression).flatMap(fallibleRunSites)
+  if (expression._tag !== 'Run') return nested
+  const subjectType: unknown = 'type' in expression.subject ? expression.subject.type : undefined
+  const fallible =
+    typeof subjectType === 'object' &&
+    subjectType !== null &&
+    (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
+    (subjectType as Type.Effect).failures.length > 0
+  return fallible ? [expression, ...nested] : nested
+}
 
 interface LoanAnalysis {
   readonly loans: ReadonlyArray<LoanFact>
@@ -1673,6 +1699,8 @@ const checkFunction = (
   }
 
   const exits: Array<ExitDescriptor> = []
+  /** Bindings local to deferred effect bodies: resolvable for releases, never published. */
+  const deferredReleaseOrder: Array<MutableBinding> = []
   const continueStates = new Map<number, Array<Set<string>>>()
   const breakStates = new Map<number, Array<Set<string>>>()
   const fixedPoints: Array<{
@@ -1714,11 +1742,26 @@ const checkFunction = (
   ): { readonly returned: boolean; readonly live: Set<string> } => {
     let live = initial
     for (const statement of statements) {
+      // A fallible run can propagate its typed failure out of this function, and the owners
+      // still live at that point must release on the way out. The exit is keyed by the run
+      // expression's span so lowering can attach the releases to the run operation.
+      for (const run of statementRootExpressions(statement).flatMap(fallibleRunSites)) {
+        exits.push(
+          Object.freeze({
+            kind: 'Propagation' as const,
+            span: run.span,
+            sites: frameSitesInnerFirst(frames, live),
+          }),
+        )
+      }
       // A lazy effect body is walked for diagnostics only: its execution is deferred, so its
       // moves never feed the enclosing flow, and its exits, loops, and binding facts are
       // published by lowering through its own compiled body rather than through these facts.
+      // Only its Propagation exits survive — the runs inside the body propagate out of the
+      // body's own compiled function, whose lowering reuses this function's exit plans.
       for (const block of statementRootExpressions(statement).flatMap(deferredBlocks)) {
         const bodyLive = new Set(live)
+        const bodyFrame: Array<string> = []
         for (const capture of block.captures) {
           const site: BindingSite | undefined =
             capture.binding !== undefined
@@ -1726,7 +1769,10 @@ const checkFunction = (
               : capture.parameter !== undefined
                 ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
                 : undefined
-          if (site !== undefined) bodyLive.add(siteKey(site))
+          if (site === undefined) continue
+          bodyLive.add(siteKey(site))
+          // A taken capture is owned by the body, so a failure inside it releases the value.
+          if (capture.access === 'Take') bodyFrame.push(siteKey(site))
         }
         const marks = {
           exits: exits.length,
@@ -1735,8 +1781,10 @@ const checkFunction = (
           matches: state.matches.length,
           callables: state.callables.length,
         }
-        walkStatements(block.statements, block.span, bodyLive, [[]])
-        exits.length = marks.exits
+        walkStatements(block.statements, block.span, bodyLive, [bodyFrame])
+        const kept = exits.splice(marks.exits).filter((exit) => exit.kind === 'Propagation')
+        exits.push(...kept)
+        deferredReleaseOrder.push(...state.order.slice(marks.order))
         fixedPoints.length = marks.fixedPoints
         state.order.length = marks.order
         state.matches.length = marks.matches
@@ -1974,28 +2022,31 @@ const checkFunction = (
     )
   }
 
-  const bindings = Object.freeze(
-    state.order.map(
-      (binding): BindingFact =>
-        Object.freeze({
-          _tag: 'Binding',
-          site: binding.site,
-          name: binding.name,
-          mutability: binding.mutability,
-          category: binding.category,
-          ...(binding.type === undefined ? {} : { type: binding.type }),
-          cleanup:
-            binding.cleanup ??
-            (binding.type === undefined
-              ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const })
-              : cleanupPlan(index, binding.type)),
-          liveFrom: binding.liveFrom,
-          liveTo: binding.liveTo,
-          ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
-        }),
+  const bindingFactOf = (binding: MutableBinding): BindingFact =>
+    Object.freeze({
+      _tag: 'Binding',
+      site: binding.site,
+      name: binding.name,
+      mutability: binding.mutability,
+      category: binding.category,
+      ...(binding.type === undefined ? {} : { type: binding.type }),
+      cleanup:
+        binding.cleanup ??
+        (binding.type === undefined
+          ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const })
+          : cleanupPlan(index, binding.type)),
+      liveFrom: binding.liveFrom,
+      liveTo: binding.liveTo,
+      ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
+    })
+  const bindings = Object.freeze(state.order.map(bindingFactOf))
+  // Deferred-body bindings stay out of the published facts, but their Propagation releases
+  // must still resolve when the body's compiled function is lowered.
+  const bindingBySite = new Map(
+    [...bindings, ...deferredReleaseOrder.map(bindingFactOf)].map(
+      (binding) => [siteKey(binding.site), binding] as const,
     ),
   )
-  const bindingBySite = new Map(bindings.map((binding) => [siteKey(binding.site), binding]))
 
   const exitPlans = Object.freeze(
     exits.map(
@@ -2203,6 +2254,8 @@ export const encode = (self: ModuleOwnership): string =>
               return `break loop${exit.target?.ordinal ?? '?'}`
             case 'Continue':
               return `continue loop${exit.target?.ordinal ?? '?'}`
+            case 'Propagation':
+              return 'propagation'
           }
         })()
         const loanEnds = exit.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'

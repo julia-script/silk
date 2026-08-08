@@ -2360,6 +2360,8 @@ function executeFunction(
             const mapping = operation.tagMappings.find((candidate) => candidate.source === last.tag)
             if (mapping === undefined)
               throw new RangeError('MIR retry has no canonical failure-tag mapping')
+            const released = executeOperations(operation.releases ?? [])
+            if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
               type: operation.propagationType.type,
@@ -2439,6 +2441,8 @@ function executeFunction(
             )
             if (mapping === undefined)
               throw new RangeError('MIR propagated effect has no canonical failure-tag mapping')
+            const released = executeOperations(operation.releases ?? [])
+            if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
               type: operation.propagationType.type,
@@ -2512,6 +2516,8 @@ function executeFunction(
             )
             if (mapping === undefined)
               throw new RangeError('MIR Effect runner has no failure-tag mapping')
+            const released = executeOperations(operation.releases ?? [])
+            if (released !== undefined) return released
             const propagated: EffectOutcomeValue = Object.freeze({
               _tag: 'EffectOutcomeValue',
               type: operation.propagationType.type,
