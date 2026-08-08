@@ -34,8 +34,8 @@
 - [x] 4.4 Write the vector stdlib module: empty construction without allocation, append with geometric growth and commit-after-success, checked get, length, capacity, parametric Drop destroying initialized elements before the buffer
 - [x] 4.5 Prove growth atomicity: acceptance test where injected failure at the replacement-allocation ordinal leaves the original vector observable and leak-free
 - [x] 4.6 Prove release order: Drop-bearing element type records destruction order; elements before buffer, uninitialized capacity untouched
-- [ ] 4.7 Prove ownership transfer and early drop across all three engines
-- [ ] 4.8 Verify no vector-shaped operation appears in MIR, evaluator traces, or backend output for a vector-using program
+- [x] 4.7 Prove ownership transfer and early drop across all three engines
+- [x] 4.8 Verify no vector-shaped operation appears in MIR, evaluator traces, or backend output for a vector-using program
 
 ## 5. Scanner acceptance
 

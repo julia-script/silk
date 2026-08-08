@@ -13,6 +13,21 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+const llvmOperationNames = (ir: string): ReadonlyArray<string> =>
+  ir.split('\n').flatMap((line) => {
+    const operation = line
+      .trim()
+      .match(/^(?:[%@][-a-zA-Z0-9$._]+\s*=\s*)?([a-z][a-z0-9_.-]*)\b/)
+      ?.at(1)
+    return operation === undefined ? [] : [operation]
+  })
+
+const watOperationNames = (wat: string): ReadonlyArray<string> =>
+  [...wat.matchAll(/\(\s*([a-z][a-z0-9_.-]*)\b/g)].flatMap((match) => {
+    const operation = match.at(1)
+    return operation === undefined ? [] : [operation]
+  })
+
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-vector-acceptance-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
@@ -81,10 +96,25 @@ it.effect('grows, reads, and releases a Silk-written vector on all three engines
       ),
     )
     assert.isFalse([...operations].some((tag) => tag.toLowerCase().includes('vector')))
+    assert.isFalse(evaluated.trace.some((event) => event._tag.toLowerCase().includes('vector')))
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.isFalse(
+      watOperationNames(wasm.ir).some((operation) => operation.toLowerCase().includes('vector')),
+    )
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const nativeSnapshot = yield* Analysis.ofSource(
+      'vector-acceptance/growth',
+      ascii(growth),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(nativeSnapshot), [])
+    const llvm = yield* Analysis.codegen(nativeSnapshot, { mode: 'release' })
+    assert.isFalse(
+      llvmOperationNames(llvm.ir).some((operation) => operation.toLowerCase().includes('vector')),
+    )
 
     const compiled = yield* Driver.compile({
       compilation: { root: SourceFile.make('vector-acceptance/growth', ascii(growth)) },
@@ -97,6 +127,7 @@ it.effect('grows, reads, and releases a Silk-written vector on all three engines
     const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42, run.stderr)
   }),
+  15_000,
 )
 
 const failedGrowth = `import silk.vector { Vector, make, append, get, length, capacity }
@@ -263,6 +294,93 @@ it.effect('drops initialized elements in order before releasing vector storage',
       toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
       profile: 'release',
       destination: join(destinationRoot, 'element-release-order'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    assert.strictEqual(run.status, 42, run.stderr)
+  }),
+)
+
+const transferredEarlyDrop = `import silk.vector { Vector, make, append }
+
+struct Entry {
+  value: I32
+  marker: Vector<I32>
+}
+
+fn record(value: I32) -> Unit { return Unit.make() }
+
+impl Drop for Entry {
+  fn drop(self: &mut Entry) -> Unit {
+    return record(self.value)
+  }
+}
+
+fn consume(values: Vector<Entry>) -> I32 {
+  drop values
+  return 40
+}
+
+effect fn build() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Entry>()
+  let entry0 = Entry { value: 11, marker: make<I32>() }
+  let pending0 = append<Entry>(&mut values, move entry0) |> Allocator.provide(&mut allocator)
+  let appended0 = run pending0
+  let entry1 = Entry { value: 13, marker: make<I32>() }
+  let pending1 = append<Entry>(&mut values, move entry1) |> Allocator.provide(&mut allocator)
+  let appended1 = run pending1
+  let consumed = consume(move values)
+  return consumed + 2
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+
+pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+
+it.effect('transfers vector ownership and drops it early on all three engines', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'vector-acceptance/transferred-early-drop',
+      ascii(transferredEarlyDrop),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42)
+    const recorded = evaluated.trace.flatMap((event) =>
+      event._tag === 'Binding' && event.target.name === 'record' && event.value._tag === 'I32Value'
+        ? [event.value.value]
+        : [],
+    )
+    assert.deepEqual(recorded, [11, 13])
+    const releaseIndices = evaluated.trace.flatMap((event, index) =>
+      event._tag === 'AllocationRelease' ? [index] : [],
+    )
+    assert.strictEqual(releaseIndices.length, 1)
+    const consumeReturn = evaluated.trace.findIndex(
+      (event) => event._tag === 'Return' && event.function.name === 'consume',
+    )
+    assert.isBelow(releaseIndices[0] ?? -1, consumeReturn)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make(
+          'vector-acceptance/transferred-early-drop',
+          ascii(transferredEarlyDrop),
+        ),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'transferred-early-drop'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
