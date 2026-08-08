@@ -1,0 +1,32 @@
+// A construction guard over runtime-counted move-only elements, written without any Vector or
+// collection-specific intrinsic: the allocation substrate alone has to carry it.
+//
+// `build` fills a prefix of the buffer and then reports how many elements it initialized, so the
+// exit paths that matter — fallthrough, explicit early drop, and typed failure — all run over the
+// same storage rather than over a shape invented per test.
+struct Element { value: I32 }
+
+effect fn build(count: Usize) -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[Element; 4]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<Element>(move allocation, 4)
+    let head0 = Element { value: 11 }
+    let tail0 = Element { value: 31 }
+    let first = Slot.write(RawBuffer.slot(&mut buffer, 0), move head0)
+    let second = Slot.write(RawBuffer.slot(&mut buffer, 1), move tail0)
+    let head = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let tail = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    drop buffer
+    return head.value + tail.value
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(build(4), recover)
+}

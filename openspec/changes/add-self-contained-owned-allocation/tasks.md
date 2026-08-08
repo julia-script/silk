@@ -85,17 +85,17 @@
 
 ## 11. Differential acceptance and unified Labs
 
-- [ ] 11.1 Add one canonical construction-guard program using runtime-counted move-only elements and no Vector or collection-specific intrinsic.
-- [ ] 11.2 Compare evaluator, native, and Wasm across successful transfer, explicit early drop, fallthrough, return, `break`, `continue`, typed failure, and trap separation.
+- [x] 11.1 Add one canonical construction-guard program using runtime-counted move-only elements and no Vector or collection-specific intrinsic.
+- [x] 11.2 Compare evaluator, native, and Wasm across successful transfer, explicit early drop, fallthrough, return, `break`, `continue`, typed failure, and trap separation.
 - [ ] 11.3 Sweep every allocation and partial-initialization failure ordinal and assert atomic rejection, exact prefix destruction, release once, unchanged failure, and a successful subsequent run.
-- [ ] 11.4 Add frontend-negative acceptance for missing unsafe boundaries, invalid allocator conformances, layout/type mismatch, Slot escape, live-buffer consumption, duplicate drop, and every prohibited Drop-hook behavior.
-- [ ] 11.5 Extend fresh-process determinism across syntax, facts, ownership, HIR, instances, layout, MIR, evaluator events, LLVM artifacts, Wasm memory plans, and Wasm artifacts.
+- [x] 11.4 Add frontend-negative acceptance for missing unsafe boundaries, invalid allocator conformances, layout/type mismatch, Slot escape, live-buffer consumption, duplicate drop, and every prohibited Drop-hook behavior.
+- [x] 11.5 Extend fresh-process determinism across syntax, facts, ownership, HIR, instances, layout, MIR, evaluator events, LLVM artifacts, Wasm memory plans, and Wasm artifacts.
 - [x] 11.6 Add coordinated successful, exhausted, rollback, early-drop, invalid-hook, and zero-sized presets to unified `/labs` through `Analysis`, with accessible text explaining the no-Scope/no-Arena-privilege boundary.
 - [ ] 11.7 Update the roadmap after acceptance to mark the substrate complete and promote the separate Silk-written `Vector<T>` and scanner change.
 
 ## 12. Repository gates
 
-- [ ] 12.1 Run focused compiler, runtime-shim, native, Wasm, language-highlighting, and Labs tests throughout implementation and resolve every in-scope failure.
-- [ ] 12.2 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; report any failure with its exact command and provenance.
+- [x] 12.1 Run focused compiler, runtime-shim, native, Wasm, language-highlighting, and Labs tests throughout implementation and resolve every in-scope failure.
+- [x] 12.2 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; report any failure with its exact command and provenance.
 - [ ] 12.3 Run `pnpm release:candidate` because compiler/runtime contents, language syntax, public artifacts, and package exports change.
 - [ ] 12.4 Run strict OpenSpec validation and inspect the final diff for named scopes, retained provider dependencies, allocator-kind branches, ambient/default allocation, public free, implicit zeroing, runtime initialization bitmaps, collection behavior, general finalizers, or unrelated changes.
