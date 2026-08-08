@@ -731,7 +731,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
-          operation._tag === 'SlotDrop',
+          operation._tag === 'SlotDrop' ||
+          // A witness-dispatched allocation can arrive without any local Allocate operation,
+          // and its cleanup still calls the release shim.
+          (operation._tag === 'Drop' &&
+            (operation.cleanup._tag === 'AllocationCleanup' ||
+              operation.cleanup._tag === 'RawBufferCleanup')),
       ),
     )
     const malloc =
@@ -2781,11 +2786,23 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                   }
                   const propagationLanes = lanesFor(operation.propagationType)
-                  const returned: Array<Value.Input> = [mappedTag, ...outcomeValues.slice(1)]
+                  // The two outcome rows can carry differently shaped payload unions, so only
+                  // positionally type-identical lanes survive the copy; past the shared failure
+                  // member the payload is dead on this path, and zeros keep the aggregate typed.
+                  const outcomeLanes = lanesFor(operation.outcomeType)
+                  const returned: Array<Value.Input> = [mappedTag]
                   while (returned.length < operation.propagationLaneCount) {
                     const lane = propagationLanes.at(returned.length)
                     if (lane === undefined) break
-                    returned.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                    const sourceLane = outcomeLanes.at(returned.length)
+                    const sourceValue = outcomeValues.at(returned.length)
+                    returned.push(
+                      sourceValue !== undefined &&
+                        sourceLane !== undefined &&
+                        laneType(sourceLane) === laneType(lane)
+                        ? sourceValue
+                        : yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
+                    )
                   }
                   if (returned.length === 1) {
                     const single = returned.at(0)
@@ -2901,11 +2918,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                   }
                   const propagationLanes = lanesFor(operation.propagationType)
-                  const returned: Array<Value.Input> = [mappedTag, ...outcomeValues.slice(1)]
+                  // See RunEffect: only positionally type-identical payload lanes are copied.
+                  const outcomeLanes = lanesFor(operation.outcomeType)
+                  const returned: Array<Value.Input> = [mappedTag]
                   while (returned.length < operation.propagationLaneCount) {
                     const lane = propagationLanes.at(returned.length)
                     if (lane === undefined) break
-                    returned.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                    const sourceLane = outcomeLanes.at(returned.length)
+                    const sourceValue = outcomeValues.at(returned.length)
+                    returned.push(
+                      sourceValue !== undefined &&
+                        sourceLane !== undefined &&
+                        laneType(sourceLane) === laneType(lane)
+                        ? sourceValue
+                        : yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
+                    )
                   }
                   yield* FunctionBody.returnValue(
                     body,
@@ -3084,11 +3111,21 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       )
                     }
                     const propagationLanes = lanesFor(operation.propagationType)
-                    const returned: Array<Value.Input> = [mappedTag, ...outcomeValues.slice(1)]
+                    // See RunEffect: only positionally type-identical payload lanes are copied.
+                    const outcomeLanes = lanesFor(operation.protectedType)
+                    const returned: Array<Value.Input> = [mappedTag]
                     while (returned.length < operation.propagationLaneCount) {
                       const lane = propagationLanes.at(returned.length)
                       if (lane === undefined) break
-                      returned.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                      const sourceLane = outcomeLanes.at(returned.length)
+                      const sourceValue = outcomeValues.at(returned.length)
+                      returned.push(
+                        sourceValue !== undefined &&
+                          sourceLane !== undefined &&
+                          laneType(sourceLane) === laneType(lane)
+                          ? sourceValue
+                          : yield* Constant.integerUnsigned(builder, laneType(lane), 0n),
+                      )
                     }
                     yield* FunctionBody.returnValue(
                       body,

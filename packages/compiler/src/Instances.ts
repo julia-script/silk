@@ -209,7 +209,17 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
     return [...callTargets(expression.protected), ...callTargets(expression.retries)]
   if (expression._tag === 'EffectTransform')
     return [...callTargets(expression.protected), ...callTargets(expression.callback)]
-  if (expression._tag === 'EffectProvide') return callTargets(expression.protected)
+  if (expression._tag === 'EffectProvide') {
+    // A source-declared witness makes provision dispatch to its qualified operation, so the
+    // operation is reachable even though no ordinary call names it.
+    const witness = expression.provider.witness
+    return [
+      ...callTargets(expression.protected),
+      ...(witness._tag === 'SourceConformanceWitness' && witness.operation !== undefined
+        ? [Object.freeze({ declaration: witness.operation, typeArguments: Object.freeze([]) })]
+        : []),
+    ]
+  }
   if (expression._tag === 'EffectProvideWith')
     return [...callTargets(expression.protected), ...callTargets(expression.acquisition)]
   if (expression._tag === 'Move') return callTargets(expression.subject)

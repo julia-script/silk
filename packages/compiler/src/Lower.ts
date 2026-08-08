@@ -854,6 +854,116 @@ function lowerExpression(
               ? fn.parameterLocals.get(recipe.provider.parameter.ordinal)
               : undefined
         if (provider === undefined) return undefined
+        const witness = recipe.provider.witness
+        if (
+          witness._tag === 'SourceConformanceWitness' &&
+          witness.operation !== undefined &&
+          recipe.protected._tag === 'BuiltinCall' &&
+          recipe.protected.operation === 'AllocatorAllocate'
+        ) {
+          // A source-declared witness dispatches through the ordinary effect-call machinery,
+          // exactly as if the source had called the qualified operation and run the result:
+          // an exclusive provider loan strictly around the call and run, so provider access
+          // ends when the allocation outcome returns.
+          const [layoutExpression] = recipe.protected.arguments
+          if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
+          const loweredLayout = lowerExpression(fn, layoutExpression)
+          const effectResult = fn.effectResults.get(instanceText(witness.operation, []))
+          const successType = fn.type(expression.type)
+          const propagationType = fn.type(fn.effectOutcome)
+          const propagationShape = Layout.callingShape(fn.layout, fn.effectOutcome)
+          const providerType = fn.type(recipe.provider.providerType)
+          const referenceType = fn.type(
+            Object.freeze({
+              _tag: 'ReferenceType' as const,
+              access: 'Exclusive' as const,
+              target: recipe.provider.providerType,
+            }),
+          )
+          const loan = fn.ownership?.loans.find(
+            (candidate) =>
+              candidate.origin === 'EffectCapture' &&
+              candidate.access === 'Exclusive' &&
+              candidate.startSpan.start === recipe.provider.span.start &&
+              candidate.startSpan.end === recipe.provider.span.end,
+          )
+          if (
+            loweredLayout === undefined ||
+            effectResult === undefined ||
+            successType?._tag !== 'Nominal' ||
+            propagationType?._tag !== 'EffectOutcome' ||
+            propagationShape === undefined ||
+            providerType?._tag !== 'Nominal' ||
+            referenceType?._tag !== 'Reference' ||
+            loan === undefined
+          )
+            return undefined
+          const tagMappings = effectResult.type.failures.flatMap((failure, source) => {
+            const target = propagationType.type.failures.findIndex((candidate) =>
+              Type.equals(candidate, failure),
+            )
+            return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
+          })
+          if (tagMappings.length !== effectResult.type.failures.length) return undefined
+          const reference = fn.alloc(referenceType)
+          fn.emit(
+            Object.freeze({
+              _tag: 'BeginLoan',
+              borrow: loan.id,
+              destination: reference,
+              root: provider,
+              sourceType: providerType,
+              type: referenceType,
+              access: 'Exclusive',
+              reborrow: false,
+              suspendsParent: false,
+              provenance: authored(recipe.provider.span),
+            }),
+          )
+          const effectLocal = fn.alloc(effectResult)
+          fn.emit(
+            Object.freeze({
+              _tag: 'Call',
+              destination: effectLocal,
+              target: witness.operation,
+              typeArguments: Object.freeze([]),
+              arguments: Object.freeze([reference, loweredLayout.result]),
+              type: effectResult,
+              provenance: authored(expression.span),
+            }),
+          )
+          const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+            _tag: 'EffectOutcome',
+            type: effectResult.type,
+          })
+          const outcome = fn.alloc(outcomeType)
+          const destination = fn.alloc(successType)
+          fn.emit(
+            Object.freeze({
+              _tag: 'RunEffectValue',
+              destination,
+              outcome,
+              effect: effectLocal,
+              runner: runnerId(effectResult.environment.instance, effectResult.site),
+              runnerTypeArguments: effectResult.environment.instance.typeArguments,
+              outcomeType,
+              propagationType,
+              tagMappings: Object.freeze(tagMappings),
+              propagationLaneCount: propagationShape.laneCount,
+              type: successType,
+              provenance: authored(expression.span),
+            }),
+          )
+          fn.emit(
+            Object.freeze({
+              _tag: 'EndLoan',
+              borrow: loan.id,
+              slice: reference,
+              provenance: generated(recipe.provider.span),
+            }),
+          )
+          return Object.freeze({ result: destination })
+        }
         return lowerExpression(
           fn,
           Object.freeze({

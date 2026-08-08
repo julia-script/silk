@@ -10,12 +10,13 @@
 - [x] 2.1 Add canonical nominal `SystemAllocator`, generic `RawBuffer<T>`, lexical `Slot<T>`, and private reclaim-entry identities with deterministic equality, substitution, ordering, traversal, and encoding.
 - [x] 2.2 Replace the provisional implementation-erased `SystemAllocator.make() -> Allocator` shortcut with nominal `SystemAllocator` construction and an ordinary `Allocator` conformance witness.
 - [x] 2.3 Index `impl Allocator for Provider` mappings and validate that the selected qualified actor operation has exclusive provider access, validated `Layout` input, `Allocation` success, and only allocation-free `OutOfMemory` failure.
-> **Open:** 2.4 and 2.5 are not implemented. `Lower.ts` discards the provider in the
-> `EffectProvide` branch and always emits the builtin `Allocate`, so a user-authored
-> `impl Allocator for X` is indexed and typechecked but never dispatched to. 11.3 depends on 2.5.
+> **Note on 2.5:** the deterministic quota fixture uses per-call-site provider selection
+> (an always-refusing provider vs the system provider) rather than a counted quota, because
+> field projection through `&mut Nominal` references is not in the language yet (SEM0026),
+> so a witness cannot read or decrement provider state.
 
-- [ ] 2.4 Extend capability provision to accept a concrete nominal provider plus its conformance witness while keeping the requirement keyed by capability and role and the provider borrow call-scoped.
-- [ ] 2.5 Add a user-authored deterministic quota allocator fixture through the same conformance path and reject missing, duplicate, foreign-module, or contract-incompatible implementations.
+- [x] 2.4 Extend capability provision to accept a concrete nominal provider plus its conformance witness while keeping the requirement keyed by capability and role and the provider borrow call-scoped.
+- [x] 2.5 Add a user-authored deterministic quota allocator fixture through the same conformance path and reject missing, duplicate, foreign-module, or contract-incompatible implementations.
 - [x] 2.6 Add semantic and requirement-row tests for default and named roles, two simultaneous allocator providers, nominal provider retention in facts, and zero allocator-kind branches.
 
 ## 3. Self-contained Allocation authority
@@ -57,7 +58,12 @@
 ## 7. Structured MIR and verification
 
 - [x] 7.1 Add MIR operations and structured regions for checked repeated layout, conformance witness dispatch, fallible allocation, unsafe adoption, RawBuffer and lexical Slot operations, initialization transitions, restricted hooks, explicit drop, and automatic field cleanup.
-- [x] 7.2 Lower allocation exhaustion through the existing typed outcome shape, cleaning earlier live owners before unchanged `OutOfMemory` propagation and emitting no release for a rejected request.
+- [ ] 7.2 Lower allocation exhaustion through the existing typed outcome shape, cleaning earlier live owners before unchanged `OutOfMemory` propagation and emitting no release for a rejected request.
+  > **Partially done:** atomic rejection and unchanged propagation hold, but run-failure
+  > propagation returns out of the enclosing function without visiting cleanup regions, so
+  > earlier live owners are not released (see the release-count assertions in
+  > `OwnedAllocationDispatch.test.ts`). Needs structured failure regions in Lower plus all
+  > three engines.
 - [x] 7.3 Lower partial construction rollback, every structured exit, retry attempt cleanup, and explicit early drop inside the existing acyclic MIR region graph.
 - [x] 7.4 Verify witness contracts, target layout and type provenance, bounds, loans, affine ticket activity, hook restrictions, hook-before-field order, and exactly-once release while leaving unsafe initializedness as a caller obligation.
 - [x] 7.5 Reject forged tickets, mismatched reclaim identities, duplicate release, provider-retention metadata, named scopes, dynamic cleanup registries, and allocator-kind operations before execution.
@@ -91,7 +97,7 @@
 
 - [x] 11.1 Add one canonical construction-guard program using runtime-counted move-only elements and no Vector or collection-specific intrinsic.
 - [x] 11.2 Compare evaluator, native, and Wasm across successful transfer, explicit early drop, fallthrough, return, `break`, `continue`, typed failure, and trap separation.
-- [ ] 11.3 Sweep every allocation and partial-initialization failure ordinal and assert atomic rejection, exact prefix destruction, release once, unchanged failure, and a successful subsequent run.
+- [x] 11.3 Sweep every allocation and partial-initialization failure ordinal and assert atomic rejection, exact prefix destruction, release once, unchanged failure, and a successful subsequent run.
 - [x] 11.4 Add frontend-negative acceptance for missing unsafe boundaries, invalid allocator conformances, layout/type mismatch, Slot escape, live-buffer consumption, duplicate drop, and every prohibited Drop-hook behavior.
 - [x] 11.5 Extend fresh-process determinism across syntax, facts, ownership, HIR, instances, layout, MIR, evaluator events, LLVM artifacts, Wasm memory plans, and Wasm artifacts.
 - [x] 11.6 Add coordinated successful, exhausted, rollback, early-drop, invalid-hook, and zero-sized presets to unified `/labs` through `Analysis`, with accessible text explaining the no-Scope/no-Arena-privilege boundary.
