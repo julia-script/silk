@@ -115,6 +115,36 @@ plus expressiveness gaps Vector needs. State as of the last checkpoint:
 - Match arms are single expressions (no statement blocks), so Vector helpers thread affine
   values through call/return pairs (`Taken<T>`-style structs) rather than arm bodies.
 
+### Checkpoint 2 findings (Vector landed)
+
+`silk/vector` now passes three-engine growth acceptance (`VectorAcceptance.test.ts`): make, six
+appends across two geometric growths with element migration, checked reads, hook-driven release,
+no vector-shaped MIR. Landing it surfaced and fixed more latent machinery:
+
+- Effect-call argument borrows (`bump(&mut counter)` then `run`) never emitted `EndLoan`; they
+  now end at the run that consumes the effect, resolved through the ownership facts' end spans.
+- Generic bodies leaked open type parameters into slot/raw-buffer/layout operations and stale
+  union-member mappings; every consumer now substitutes at instantiation.
+- `Layout.of<T>`/`RawBuffer.from<T>` layout lookups used the open parameter and silently
+  stubbed whole functions (`trapFunction`); ordinary-fn `unsafe { return <runtime op> }` region
+  publishing remains fragile — silk/vector binds before returning as a workaround.
+- LLVM: `destinationOf` was missing every post-slice operation (slot family, layout ops,
+  allocate, callables), producing cross-block SSA leaks; duplicate instruction names
+  (`mut*_load`, `return_value`, reload/addr sequences) are now suffixed uniquely; address roots
+  persist through mutable-root storage.
+
+**Open gaps found and not yet fixed** (each has a minimal repro in the session log):
+
+- `Effect.catch` over a provided effect (`x |> provide |> catch`, or catch of a stored provided
+  binding) fails MIR verification ("effect catch target, handler, or handled tag is
+  inconsistent") or leaks loans across statements. Blocks in-source observation of a vector
+  surviving a failed growth; the atomicity test currently proves leak-freedom and element
+  retention through the propagation-release trace instead.
+- Provider state mutations are lost when a requirement is *forwarded*: a `? &mut Allocator`
+  effect fn run under `provide(&mut counter)` calls the witness, but `self` mutations inside the
+  witness do not write back to the caller's value (repro: counting allocator through a nested
+  requirement returns 0 hits). Blocks quota-driven failure-ordinal sweeps over `append`.
+
 ## Open Questions
 
 - Exact stdlib module naming (`silk.vector` vs `std.vector`) — cosmetic, decide at implementation
