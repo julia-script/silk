@@ -54,7 +54,7 @@ export interface LoanFact {
   readonly id: BorrowId
   readonly root: BindingSite
   readonly access: Type.Slice['access']
-  readonly origin: 'FixedArrayBorrow' | 'SliceReborrow' | 'EffectCapture'
+  readonly origin: 'FixedArrayBorrow' | 'SliceReborrow' | 'EffectCapture' | 'CallableCapture'
   readonly parent?: BindingSite
   readonly suspendsParent: boolean
   readonly startRegion: Hir.RegionId
@@ -69,6 +69,26 @@ export interface BorrowedReplacementFact {
   readonly region: Hir.RegionId
   readonly type: DeclarationIndex.SemanticType
   readonly displacedCleanup: CleanupPlan
+  readonly span: SourceSpan.SourceSpan
+}
+
+/** One compiler-planned slot in a concrete callable section environment. */
+export interface CallableEnvironmentSlot {
+  readonly ordinal: number
+  readonly parameterOrdinal: number
+  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly type?: DeclarationIndex.SemanticType
+  readonly cleanup: CleanupPlan
+}
+
+/** Ownership facts for one hidden callable section environment. */
+export interface CallableEnvironmentFact {
+  readonly _tag: 'CallableEnvironment'
+  readonly site: Hir.CallableSiteId
+  readonly mode: Type.CallableMode
+  readonly slots: ReadonlyArray<CallableEnvironmentSlot>
+  readonly retainedDependencies: ReadonlyArray<number>
+  readonly dropOrder: ReadonlyArray<number>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -101,6 +121,16 @@ export type CleanupPlan =
       readonly type: Type.StructuralUnion
       readonly cases: ReadonlyArray<{
         readonly member: Type.Nominal
+        readonly ordinal: number
+        readonly cleanup: CleanupPlan
+      }>
+    }
+  | {
+      readonly _tag: 'CallableCleanup'
+      readonly type: Type.Callable
+      readonly site: Hir.CallableSiteId
+      /** Moved environment slots in deterministic last-captured, first-released order. */
+      readonly slots: ReadonlyArray<{
         readonly ordinal: number
         readonly cleanup: CleanupPlan
       }>
@@ -144,6 +174,7 @@ export interface FunctionOwnership {
   readonly exits: ReadonlyArray<ExitPlan>
   readonly fixedPoints: ReadonlyArray<LoopFixedPoint>
   readonly matches: ReadonlyArray<MatchOwnership>
+  readonly callables: ReadonlyArray<CallableEnvironmentFact>
   readonly loans: ReadonlyArray<LoanFact>
   readonly borrowedReplacements: ReadonlyArray<BorrowedReplacementFact>
   readonly verdict: Verdict
@@ -192,7 +223,9 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
           : Object.freeze({ _tag: 'MoveOnly', type })
         : Type.isEffect(type) && type.access === 'Shared'
           ? copyable
-          : Object.freeze({ _tag: 'MoveOnly', type })
+          : Type.isCallable(type) && type.mode === 'Shared'
+            ? copyable
+            : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
@@ -208,6 +241,7 @@ interface MutableBinding {
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
   readonly type?: DeclarationIndex.SemanticType
+  readonly cleanup?: CleanupPlan
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
   readonly matchAccess?: Match.Access
@@ -219,6 +253,7 @@ interface CheckState {
   readonly order: Array<MutableBinding>
   readonly diagnostics: Array<Diagnostic.Diagnostic>
   readonly matches: Array<MatchOwnership>
+  readonly callables: Array<CallableEnvironmentFact>
 }
 
 const useSite = (expression: Hir.Expression): BindingSite | undefined => {
@@ -256,6 +291,60 @@ const checkUse = (
     live.delete(key)
   }
 }
+
+const callableEnvironment = (
+  state: CheckState,
+  expression: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+): CallableEnvironmentFact => {
+  const slots = Object.freeze(
+    expression.captures.map((capture): CallableEnvironmentSlot => {
+      const type = capture.value._tag === 'Unavailable' ? undefined : capture.value.type
+      return Object.freeze({
+        ordinal: capture.ordinal,
+        parameterOrdinal: capture.parameterOrdinal,
+        access: capture.access,
+        ...(type === undefined ? {} : { type }),
+        cleanup:
+          capture.access === 'Take' && type !== undefined
+            ? cleanupPlan(state.index, type)
+            : Object.freeze({
+                _tag: 'NoCleanup' as const,
+                type: type ?? ('I32' as const),
+              }),
+      })
+    }),
+  )
+  return Object.freeze({
+    _tag: 'CallableEnvironment',
+    site: expression.site,
+    mode: expression.mode,
+    slots,
+    retainedDependencies: expression.retainedDependencies,
+    dropOrder: Object.freeze(
+      [...slots]
+        .reverse()
+        .filter((slot) => slot.cleanup._tag !== 'NoCleanup')
+        .map((slot) => slot.ordinal),
+    ),
+    span: expression.span,
+  })
+}
+
+const callableCleanup = (environment: CallableEnvironmentFact, type: Type.Callable): CleanupPlan =>
+  Object.freeze({
+    _tag: 'CallableCleanup',
+    type,
+    site: environment.site,
+    slots: Object.freeze(
+      [...environment.slots]
+        .reverse()
+        .flatMap((slot) =>
+          slot.cleanup._tag === 'NoCleanup'
+            ? []
+            : [Object.freeze({ ordinal: slot.ordinal, cleanup: slot.cleanup })],
+        ),
+    ),
+  })
 
 const checkExpression = (
   state: CheckState,
@@ -381,6 +470,54 @@ const checkExpression = (
       }
       return
     }
+    case 'FunctionItem':
+      return
+    case 'CallableSection': {
+      const environment = callableEnvironment(state, expression)
+      if (
+        !state.callables.some(
+          (candidate) =>
+            candidate.site.function.ordinal === expression.site.function.ordinal &&
+            candidate.site.span.start === expression.site.span.start,
+        )
+      ) {
+        state.callables.push(environment)
+      }
+      for (const capture of expression.captures) {
+        checkExpression(state, live, capture.value, capture.access === 'Take', guard, escaping)
+      }
+      return
+    }
+    case 'CallableApply': {
+      const checkCallee = (): void => {
+        const site = useSite(expression.callee)
+        if (site !== undefined && expression.access === 'Take') {
+          checkUse(state, live, site, expression.callee.span, true)
+          return
+        }
+        checkExpression(
+          state,
+          live,
+          expression.callee,
+          expression.access === 'Take',
+          guard,
+          escaping,
+        )
+      }
+      const checkArguments = (): void => {
+        for (const argument of expression.arguments) {
+          checkExpression(state, live, argument, true, guard, escaping)
+        }
+      }
+      if (expression.evaluation === 'LeftThenCallable') {
+        checkArguments()
+        checkCallee()
+      } else {
+        checkCallee()
+        checkArguments()
+      }
+      return
+    }
     case 'BuiltinCall': {
       for (const argument of expression.arguments)
         checkExpression(state, live, argument, false, guard, escaping)
@@ -410,10 +547,15 @@ const checkExpression = (
     }
     case 'EffectCatch':
       checkExpression(state, live, expression.protected, false, guard, escaping)
+      checkExpression(state, live, expression.handler, false, guard, true)
       return
     case 'EffectRetry':
       checkExpression(state, live, expression.protected, false, guard, escaping)
       checkExpression(state, live, expression.retries, false, guard, escaping)
+      return
+    case 'EffectTransform':
+      checkExpression(state, live, expression.protected, false, guard, true)
+      checkExpression(state, live, expression.callback, false, guard, true)
       return
     case 'EffectProvide': {
       checkExpression(state, live, expression.protected, false, guard, escaping)
@@ -616,6 +758,10 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
     number,
     { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
   >()
+  const callableEnds = new Map<
+    number,
+    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+  >()
   const scanRunEnds = (expression: Elaboration.ExpressionFact, region: Hir.RegionId): void => {
     switch (expression._tag) {
       case 'Run': {
@@ -658,14 +804,26 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         }
         return
       case 'Operator':
-      case 'Pipeline':
       case 'Call':
         for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
+        return
+      case 'CallableApply':
+        if (expression.provenance._tag === 'PipelineCallableApplication') {
+          for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
+          scanRunEnds(expression.callee, region)
+        } else {
+          scanRunEnds(expression.callee, region)
+          for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
+        }
+        return
+      case 'CallableSection':
+        for (const capture of expression.captures) scanRunEnds(capture.expression, region)
         return
       case 'EffectCatch':
         scanRunEnds(expression.protected, region)
         return
       case 'EffectBlock':
+      case 'FunctionItem':
         return
       case 'Integer':
       case 'Boolean':
@@ -696,6 +854,17 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         case 'FailStatement':
           scanRunEnds(statement.expression, statement.region)
           break
+        case 'DropStatement': {
+          scanRunEnds(statement.expression, statement.region)
+          const site = directSite(statement.expression)?.site
+          if (site?._tag === 'Let') {
+            callableEnds.set(site.binding.ordinal, {
+              region: statement.region,
+              span: statement.syntax.span,
+            })
+          }
+          break
+        }
         case 'BreakStatement':
         case 'ContinueStatement':
           break
@@ -796,11 +965,91 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           inspect(argument.expression, region, active, 'Read')
         }
         return
-      case 'Pipeline':
-        for (const argument of expression.arguments) {
-          inspect(argument.expression, region, active, naturalAccess(argument.expression))
+      case 'FunctionItem':
+        return
+      case 'CallableSection': {
+        const captureActive: Array<LoanFact> = [
+          ...active,
+          ...delayedLoansAt(expression.syntax.span),
+        ]
+        for (const capture of expression.captures) {
+          const candidate = capture.expression
+          if (capture.access !== 'Shared' && capture.access !== 'Exclusive') {
+            inspect(candidate, region, captureActive, naturalAccess(candidate))
+            continue
+          }
+          const root =
+            candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable'
+              ? borrowSite(candidate.formation.root)
+              : directSite(candidate)?.site
+          if (root === undefined) {
+            inspect(candidate, region, captureActive, 'Read')
+            continue
+          }
+          const conflict = captureActive.find(
+            (loan) =>
+              sameSite(loan.root, root) &&
+              (loan.access === 'Exclusive' || capture.access === 'Exclusive'),
+          )
+          if (conflict !== undefined) {
+            diagnostics.push(
+              Diagnostic.conflictingSliceLoan(
+                conflict.access,
+                capture.access,
+                conflict.startSpan,
+                candidate.syntax.span,
+              ),
+            )
+          }
+          const loan: LoanFact = Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal: capture.ordinal,
+            }),
+            root,
+            access: capture.access,
+            origin: 'CallableCapture',
+            suspendsParent: false,
+            startRegion: region,
+            endRegion: delayedEnd?.region ?? region,
+            startSpan: candidate.syntax.span,
+            endSpan: delayedEnd?.span ?? expression.syntax.span,
+          })
+          loans.push(loan)
+          captureActive.push(loan)
         }
         return
+      }
+      case 'CallableApply': {
+        const inspectCallee = (): void =>
+          inspect(
+            expression.callee,
+            region,
+            active,
+            expression.mode === 'Take'
+              ? 'Move'
+              : expression.mode === 'Exclusive'
+                ? 'Write'
+                : 'Read',
+            delayedEnd,
+          )
+        const inspectArguments = (): void => {
+          for (const argument of expression.arguments) {
+            inspect(argument.expression, region, active, naturalAccess(argument.expression))
+          }
+        }
+        if (expression.provenance._tag === 'PipelineCallableApplication') {
+          inspectArguments()
+          inspectCallee()
+        } else {
+          inspectCallee()
+          inspectArguments()
+        }
+        return
+      }
       case 'Call': {
         const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
@@ -957,21 +1206,27 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   const statements = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {
     for (const statement of facts) {
       switch (statement._tag) {
-        case 'BindStatement':
+        case 'BindStatement': {
+          const initializerType = statement.binding.initializer.type
           inspect(
             statement.binding.initializer,
             statement.region,
             [],
             'Read',
-            statement.binding.initializer.type._tag === 'Available' &&
-              Type.isEffect(statement.binding.initializer.type.type)
+            initializerType._tag === 'Available' && Type.isEffect(initializerType.type)
               ? (runEnds.get(statement.binding.id.ordinal) ?? {
                   region: statement.region,
                   span: fn.declaration.syntax.span,
                 })
-              : undefined,
+              : initializerType._tag === 'Available' && Type.isCallable(initializerType.type)
+                ? (callableEnds.get(statement.binding.id.ordinal) ?? {
+                    region: statement.region,
+                    span: fn.declaration.syntax.span,
+                  })
+                : undefined,
           )
           break
+        }
         case 'IfStatement':
           inspect(statement.condition, statement.region, [])
           statements(statement.taken)
@@ -1085,6 +1340,7 @@ const cleanupPlan = (
       ),
     })
   }
+  if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
   const declaration = DeclarationIndex.byCanonical(index, {
@@ -1210,6 +1466,21 @@ export const specializeCleanup = (
           }),
         ),
       })
+    case 'CallableCleanup':
+      if (!Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'CallableCleanup',
+        type,
+        site: cleanup.site,
+        slots: Object.freeze(
+          cleanup.slots.map((slot) =>
+            Object.freeze({
+              ordinal: slot.ordinal,
+              cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
+            }),
+          ),
+        ),
+      })
   }
 }
 
@@ -1272,6 +1543,7 @@ const checkFunction = (
     order: [],
     diagnostics: [...loanAnalysis.diagnostics],
     matches: [],
+    callables: [],
   }
 
   const initialLive = new Set<string>()
@@ -1339,6 +1611,10 @@ const checkFunction = (
         checkExpression(state, live, statement.initializer, true)
         const type =
           statement.initializer._tag === 'Unavailable' ? undefined : statement.initializer.type
+        const environment =
+          statement.initializer._tag === 'CallableSection'
+            ? callableEnvironment(state, statement.initializer)
+            : undefined
         const binding: MutableBinding = {
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
           name: statement.name,
@@ -1347,6 +1623,9 @@ const checkFunction = (
           liveTo: enclosingSpan,
           category: categoryOf(type),
           ...(type === undefined ? {} : { type }),
+          ...(environment === undefined || type === undefined || !Type.isCallable(type)
+            ? {}
+            : { cleanup: callableCleanup(environment, type) }),
         }
         const key = siteKey(binding.site)
         state.bindings.set(key, binding)
@@ -1546,9 +1825,10 @@ const checkFunction = (
           category: binding.category,
           ...(binding.type === undefined ? {} : { type: binding.type }),
           cleanup:
-            binding.type === undefined
+            binding.cleanup ??
+            (binding.type === undefined
               ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const })
-              : cleanupPlan(index, binding.type),
+              : cleanupPlan(index, binding.type)),
           liveFrom: binding.liveFrom,
           liveTo: binding.liveTo,
           ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
@@ -1641,6 +1921,7 @@ const checkFunction = (
         }),
       ),
       matches: Object.freeze(state.matches),
+      callables: Object.freeze(state.callables),
       loans: loanAnalysis.loans,
       borrowedReplacements: replacements,
       verdict,
@@ -1711,6 +1992,9 @@ const cleanupText = (cleanup: CleanupPlan): string => {
       )
       .join(',')}`
   }
+  if (cleanup._tag === 'CallableCleanup') {
+    return `callable:${Type.encode(cleanup.type)} site=${cleanup.site.function.ordinal}@${cleanup.site.span.start} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+  }
   return `struct:${Type.encode(cleanup.type)} fields=${cleanup.fields
     .map((field) => `#${field.field.ordinal}(${cleanupText(field.cleanup)})`)
     .join(',')}`
@@ -1740,6 +2024,10 @@ export const encode = (self: ModuleOwnership): string =>
         (replacement) =>
           `  borrowed-replace p${replacement.root.ordinal} region=${replacement.region.ordinal} type=${Type.encode(replacement.type)} cleanup=${cleanupText(replacement.displacedCleanup)} ${spanText(replacement.span)}`,
       ),
+      ...fn.callables.map(
+        (callable) =>
+          `  callable c${callable.site.function.ordinal}@${callable.site.span.start} ${callable.mode.toLowerCase()} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
+      ),
       ...fn.exits.map((exit) => {
         const label = (() => {
           switch (exit.kind) {
@@ -1762,7 +2050,7 @@ export const encode = (self: ModuleOwnership): string =>
               `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds}`,
               ...exit.releases.map(
                 (release) =>
-                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
+                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
               ),
             ].join('\n')
       }),

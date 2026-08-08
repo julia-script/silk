@@ -729,7 +729,7 @@ console.log(
       callCompatibility: 'Compatible',
       unknownDiagnosticCodes: ['SEM0004'],
       unknownLocalDiagnosticCodes: ['SEM0006'],
-      wrongArityDiagnosticCodes: ['SEM0007'],
+      wrongArityDiagnosticCodes: ['SEM0078'],
       rootLookup: 'Resolved',
       deepLookup: 'Missing',
       legacyResultFields: [],

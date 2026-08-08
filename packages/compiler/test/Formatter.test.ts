@@ -96,7 +96,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ParameterList',
   'ParenthesizedType',
   'PipelineExpression',
-  'PipelineTarget',
+  'CallableType',
   'PrefixExpression',
   'Requirement',
   'RequirementRow',
@@ -137,6 +137,32 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
     const second = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
+)
+
+it.effect(
+  'formats callable contracts, postfix calls, pipelines, and run precedence idempotently',
+  () =>
+    Effect.gen(function* () {
+      const source =
+        'fn apply(callback:mut fn(I32)->I32,value:I32)->I32{return (callback)(value)} fn main(attempt:Effect<I32>)->I32{return run attempt|>Effect.retry(2)}'
+      const first = yield* Formatter.format(parse('memory://callable-format.silk', source))
+      const text = formattedText(first)
+      assert.strictEqual(
+        text,
+        `fn apply(callback: mut fn(I32) -> I32, value: I32) -> I32 {
+  return (callback)(value)
+}
+
+fn main(attempt: Effect<I32>) -> I32 {
+  return run attempt
+    |> Effect.retry(2)
+}
+`,
+      )
+      const second = yield* Formatter.format(parse('memory://callable-format.silk', text))
+      assert.deepEqual(second.bytes, first.bytes)
+      assert.strictEqual(second.changed, false)
+    }),
 )
 
 it.effect('formats effect contracts, run, and fail canonically and idempotently', () =>
@@ -485,6 +511,9 @@ fn inspect(event: Token | End) -> I32 {
 }
 fn scan(values: &[I32], output: &mut [I32]) -> I32 {
   return helper(values.length, output[0])
+}
+fn callbacks(shared: fn(I32, Bool) -> I32, exclusive: mut fn(I32) -> Bool, consuming: once fn() -> I32) -> I32 {
+  return shared(1, true)
 }
 effect fn delayed(problem: Token) -> I32 ! Token {
   if false { fail move problem }

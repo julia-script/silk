@@ -64,12 +64,14 @@ pub fn main() -> I32 {
   let provided = read() |> Clock.provide(&clock, @Primary)
   return run provided
 }`
+const callableMapSource = `effect fn succeed(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return run succeed(2) |> Effect.map(I32.add(40)) }`
 const outOfMemorySource = `effect fn exhaust() -> I32 ! OutOfMemory {
   fail OutOfMemory {}
 }
 effect fn recover(error: OutOfMemory) -> I32 { return 42 }
 pub fn main() -> I32 {
-  return run (exhaust() |> Effect.catch<OutOfMemory>(recover))
+  return run exhaust() |> Effect.catch<OutOfMemory>(recover)
 }`
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-runtime-'))
@@ -150,6 +152,32 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
     assert.strictEqual(main(), 42)
     assert.include(wasm.ir, 'call')
     assert.include(wasm.ir, 'if')
+  }),
+)
+
+it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', () =>
+  Effect.gen(function* () {
+    const native = yield* Analysis.ofSource(
+      'effect-runtime/callable-map',
+      ascii(callableMapSource),
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSource(
+      'effect-runtime/callable-map',
+      ascii(callableMapSource),
+      'wasm32-unknown-unknown',
+    )
+    const logical = Analysis.evaluate(native)
+    const llvm = yield* Analysis.codegen(native, { mode: 'release' })
+    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
+    const main = instance.exports.silk_main
+
+    assert.strictEqual(logical._tag, 'Completed')
+    assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42)
+    assert.include(llvm.ir, 'callable_arith')
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
   }),
 )
 

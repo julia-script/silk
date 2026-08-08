@@ -210,7 +210,9 @@ const hirTypeText = (type: Type.Type): string =>
                 ? ''
                 : ` ! ${type.failures.map(hirTypeText).join(' | ')}`
             }> ${type.access.toLowerCase()}`
-          : type.members.map(hirTypeText).join(' | ')
+          : type._tag === 'CallableType'
+            ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
+            : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -249,16 +251,32 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
           ? ''
           : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
       } · loan ends ${expression.loanEnds.map((loan) => `#${loan.ordinal}`).join(', ') || 'none'}`
+    case 'FunctionItem':
+      return `function ${expression.target._tag === 'DeclarationCallableTarget' ? expression.target.declaration.name : `${expression.target.actor}.${expression.target.operation}`}`
+    case 'CallableSection':
+      return `section ${expression.target._tag === 'DeclarationCallableTarget' ? expression.target.declaration.name : `${expression.target.actor}.${expression.target.operation}`} · ${expression.mode.toLowerCase()} · ${expression.captures.length} capture${expression.captures.length === 1 ? '' : 's'}`
+    case 'CallableApply':
+      return `apply callable · ${expression.access.toLowerCase()} · ${expression.evaluation.toLowerCase()}`
     case 'EffectConstruct':
       return `effect recipe ${expression.target.name}${
         expression.typeArguments.length === 0
           ? ''
           : `<${expression.typeArguments.map(hirTypeText).join(', ')}>`
       } · ${expression.type.access.toLowerCase()}`
+    case 'EffectBlock':
+      return `effect block · ${expression.type.access.toLowerCase()}`
     case 'Run':
       return 'run recipe'
     case 'EffectCatch':
-      return `catch ${hirTypeText(expression.handled)} with ${expression.handler.name}`
+      return `catch ${hirTypeText(expression.handled)} with ${hirExpressionLabel(expression.handler)}`
+    case 'EffectRetry':
+      return 'retry effect'
+    case 'EffectTransform':
+      return `${expression.operation.toLowerCase()} effect with ${hirExpressionLabel(expression.callback)}`
+    case 'EffectProvide':
+      return `provide ${hirTypeText(expression.provider.capability)}@${expression.provider.role}`
+    case 'EffectProvideWith':
+      return `provideWith ${hirTypeText(expression.capability)}@${expression.role}`
     case 'BuiltinCall':
       return `builtin I32.${expression.operation}`
     default:
@@ -292,7 +310,36 @@ export const hirRows = (
     if (node._tag === 'Move' || node._tag === 'Project' || node._tag === 'Run') {
       expression(node.subject, depth + 1, `${path}.s`)
     }
-    if (node._tag === 'EffectCatch') expression(node.protected, depth + 1, `${path}.p`)
+    if (node._tag === 'CallableSection') {
+      node.captures.forEach((capture) =>
+        expression(capture.value, depth + 1, `${path}.capture${capture.ordinal}`),
+      )
+    }
+    if (node._tag === 'CallableApply') {
+      expression(node.callee, depth + 1, `${path}.callee`)
+      node.arguments.forEach((argument, index) =>
+        expression(argument, depth + 1, `${path}.argument${index}`),
+      )
+    }
+    if (node._tag === 'EffectCatch') {
+      expression(node.protected, depth + 1, `${path}.protected`)
+      expression(node.handler, depth + 1, `${path}.handler`)
+    }
+    if (node._tag === 'EffectRetry') {
+      expression(node.protected, depth + 1, `${path}.protected`)
+      expression(node.retries, depth + 1, `${path}.retries`)
+    }
+    if (node._tag === 'EffectTransform') {
+      expression(node.protected, depth + 1, `${path}.protected`)
+      expression(node.callback, depth + 1, `${path}.callback`)
+    }
+    if (node._tag === 'EffectProvide') {
+      expression(node.protected, depth + 1, `${path}.protected`)
+    }
+    if (node._tag === 'EffectProvideWith') {
+      expression(node.protected, depth + 1, `${path}.protected`)
+      expression(node.acquisition, depth + 1, `${path}.acquisition`)
+    }
     if (node._tag === 'SliceLength') expression(node.slice, depth + 1, `${path}.s`)
     if (node._tag === 'SliceIndexPlace') {
       expression(node.slice, depth + 1, `${path}.s`)

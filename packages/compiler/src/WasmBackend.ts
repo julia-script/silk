@@ -63,7 +63,7 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
       operation.sourceType._tag === 'FixedArray' ? [operation.root.ordinal] : [],
     ),
     ...Mir.operations(fn).flatMap((operation) =>
-      operation._tag === 'MakeEffect'
+      operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
         ? operation.captures.flatMap((capture) =>
             (capture.access === 'Shared' || capture.access === 'Exclusive') &&
             fn.localTypes.at(capture.source.ordinal)?._tag !== 'EffectBorrow'
@@ -317,6 +317,10 @@ const layoutOf = (
     }
     if (type._tag === 'EffectValue')
       return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
+    if (type._tag === 'CallableValue')
+      return type.environment === undefined
+        ? Object.freeze([])
+        : LayoutPlan.callableEnvironmentLanes(plan, type.environment)
     const shape = LayoutPlan.callingShape(plan, Mir.semanticType(type))
     if (shape === undefined) throw new RangeError('Wasm backend lost a logical calling shape')
     return shape.lanes
@@ -384,6 +388,7 @@ const layoutOf = (
 const emitOperation = (
   operation: Mir.Operation,
   layout: Layout,
+  plan: LayoutPlan.Plan,
   resolve: (
     target: DeclarationIndex.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.Type>,
@@ -479,7 +484,7 @@ const emitOperation = (
       throw new RangeError('Wasm allocation lowering is not available yet')
     case 'Match': {
       const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
-        operations.flatMap((nested) => emitOperation(nested, layout, resolve, memory))
+        operations.flatMap((nested) => emitOperation(nested, layout, plan, resolve, memory))
       const emitCandidates = (
         member: (typeof operation.members)[number],
         candidates: ReadonlyArray<Match.ArmId>,
@@ -951,7 +956,8 @@ const emitOperation = (
     case 'Drop':
       // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
       return []
-    case 'MakeEffect': {
+    case 'MakeEffect':
+    case 'MakeCallable': {
       const destination = slots(operation.destination)
       const instructions: Array<Instr.Instr> = []
       let cursor = 0
@@ -1020,10 +1026,11 @@ const emitOperation = (
         ...protectedSlots
           .slice(1, 1 + operation.handledLaneCount)
           .map((slot) => Instr.localGet(slot)),
-        Instr.call(resolve(operation.handlerTarget, Object.freeze([]))),
+        ...slots(operation.handlerCallable).map((slot) => Instr.localGet(slot)),
+        Instr.call(resolve(operation.handlerTarget, operation.handlerTypeArguments)),
         ...[...handlerValueSlots].reverse().map((slot) => Instr.localSet(slot)),
         ...handlerValueSlots.map((slot) => Instr.localGet(slot)),
-        Instr.call(resolve(operation.handlerRunner, Object.freeze([]))),
+        Instr.call(resolve(operation.handlerRunner, operation.handlerTypeArguments)),
         ...[...handlerSlots].reverse().map((slot) => Instr.localSet(slot)),
         ...copy(handlerSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
       ]
@@ -1224,6 +1231,143 @@ const emitOperation = (
           .sort((left, right) => left - right)
           .flatMap(reloadRoot),
       ]
+    case 'ApplyCallable': {
+      const sourceType =
+        operation.callable === undefined ? undefined : layout.types.at(operation.callable.ordinal)
+      const target =
+        operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
+      if (target === undefined)
+        throw new RangeError('Wasm callable application lost its hidden identity')
+      const captureOperands: Array<Instr.Instr> = []
+      if (operation.callable !== undefined) {
+        if (sourceType?._tag !== 'CallableValue' || sourceType.environment === undefined)
+          throw new RangeError('Wasm stored callable lost its environment')
+        const environmentSlots = slots(operation.callable)
+        let cursor = 0
+        for (const field of sourceType.environment.fields) {
+          if (memory === undefined && field.representation === 'Borrow')
+            throw new RangeError('Wasm borrowed callable capture requires private memory')
+          const shape = LayoutPlan.callingShape(plan, field.type)
+          if (shape === undefined)
+            throw new RangeError('Wasm callable capture lost its calling shape')
+          if (field.representation === 'Value') {
+            captureOperands.push(
+              ...environmentSlots
+                .slice(cursor, cursor + shape.laneCount)
+                .map((slot) => Instr.localGet(slot)),
+            )
+            cursor += shape.laneCount
+            continue
+          }
+          const pointer = environmentSlots.at(cursor)
+          if (pointer === undefined || memory === undefined)
+            throw new RangeError('Wasm borrowed callable capture lost its pointer')
+          cursor += 1
+          for (const lane of shape.lanes) {
+            const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
+            if (offset === undefined)
+              throw new RangeError('Wasm borrowed callable capture lost its lane offset')
+            captureOperands.push(
+              Instr.localGet(pointer),
+              Instr.i32Const(offset),
+              Instr.op('i32.add'),
+              Instr.memoryAccess('i32.load', memory.memory),
+            )
+          }
+        }
+      } else {
+        for (const capture of operation.captures) {
+          if (capture.access === 'Copy' || capture.access === 'Take') {
+            captureOperands.push(...slots(capture.source).map((slot) => Instr.localGet(slot)))
+            continue
+          }
+          captureOperands.push(...slots(capture.source).map((slot) => Instr.localGet(slot)))
+        }
+      }
+      if (target._tag === 'BuiltinCallableTarget') {
+        const operandSlots = [
+          ...operation.arguments.flatMap((argument) => [...slots(argument)]),
+          ...(operation.callable === undefined
+            ? operation.captures.flatMap((capture) => [...slots(capture.source)])
+            : [...slots(operation.callable)]),
+        ]
+        const left = operandSlots.at(0)
+        if (left === undefined) throw new RangeError('Wasm callable builtin lost its first operand')
+        if (target.operation === 'Not') {
+          return [
+            Instr.localGet(left),
+            Instr.op('i32.eqz'),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        if (target.operation === 'Negate') {
+          return [
+            Instr.localGet(left),
+            Instr.i32Const(-2147483648),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+            Instr.i32Const(0),
+            Instr.localGet(left),
+            Instr.op('i32.sub'),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        const right = operandSlots.at(1)
+        if (
+          right === undefined ||
+          target.operation === 'LayoutMake' ||
+          target.operation === 'LayoutRepeat' ||
+          target.operation === 'SystemAllocatorMake' ||
+          target.operation === 'AllocatorAllocate'
+        ) {
+          throw new RangeError(
+            `Wasm callable builtin ${target.actor}.${target.operation} is unavailable`,
+          )
+        }
+        const firstType = operation.arguments.at(0)
+        const unsigned =
+          firstType !== undefined && layout.types.at(firstType.ordinal)?._tag === 'Usize'
+        const comparison = (unsigned ? unsignedComparisons : comparisons)[target.operation]
+        if (comparison !== undefined) {
+          return [
+            Instr.localGet(left),
+            Instr.localGet(right),
+            Instr.op(comparison),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        const division = (unsigned ? unsignedDivisions : divisions)[target.operation]
+        if (division !== undefined) {
+          return [
+            Instr.localGet(left),
+            Instr.localGet(right),
+            Instr.op(division),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        return [
+          ...(unsigned ? checkedUnsignedArithmetic : checkedArithmetic)(
+            target.operation === 'Add'
+              ? 'Add'
+              : target.operation === 'Subtract'
+                ? 'Subtract'
+                : 'Multiply',
+            left,
+            right,
+            layout.scratch,
+          ),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      }
+      return [
+        ...operation.arguments.flatMap((argument) =>
+          slots(argument).map((slot) => Instr.localGet(slot)),
+        ),
+        ...captureOperands,
+        Instr.call(resolve(target.declaration, operation.typeArguments)),
+        ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+      ]
+    }
     case 'Binary': {
       const leftType = layout.types.at(operation.left.ordinal)
       const unsigned = leftType?._tag === 'Usize'
@@ -1282,6 +1426,7 @@ const branchDepth = (
 const emitBody = (
   fn: Mir.MirFunction,
   layout: Layout,
+  plan: LayoutPlan.Plan,
   resolve: (
     target: DeclarationIndex.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.Type>,
@@ -1415,7 +1560,9 @@ const emitBody = (
     if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
       const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
       return [
-        ...operations.flatMap((operation) => emitOperation(operation, layout, resolve, memory)),
+        ...operations.flatMap((operation) =>
+          emitOperation(operation, layout, plan, resolve, memory),
+        ),
         ...emitOutcome(region.outcome, labels, stop),
       ]
     }
@@ -1442,7 +1589,7 @@ const emitBody = (
     ])
     const loopBody = [
       ...condition.operations.flatMap((operation) =>
-        emitOperation(operation, layout, resolve, memory),
+        emitOperation(operation, layout, plan, resolve, memory),
       ),
       Instr.localGet(scalar(region.conditionValue)),
       Instr.op('i32.eqz'),
@@ -1536,6 +1683,10 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           ])
         if (type._tag === 'EffectValue')
           return LayoutPlan.effectEnvironmentLanes(program.layout, type.environment)
+        if (type._tag === 'CallableValue')
+          return type.environment === undefined
+            ? Object.freeze([])
+            : LayoutPlan.callableEnvironmentLanes(program.layout, type.environment)
         const shape = LayoutPlan.callingShape(program.layout, Mir.semanticType(type))
         if (shape === undefined) throw new RangeError('Wasm declaration lost a calling shape')
         return shape.lanes
@@ -1591,7 +1742,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       const body =
         entry.fn.regions.length === 0
           ? [Instr.op('unreachable')]
-          : emitBody(entry.fn, layout, resolve, memory)
+          : emitBody(entry.fn, layout, program.layout, resolve, memory)
       yield* FuncActor.define(builder, entry.handle, {
         locals: entry.fn.regions.length === 0 ? [] : layout.declared,
         body,

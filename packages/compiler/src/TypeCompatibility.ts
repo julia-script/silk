@@ -29,6 +29,11 @@ export type Compatibility =
       readonly mappings: ReadonlyArray<MemberMapping>
     }
   | {
+      readonly _tag: 'CallableMode'
+      readonly source: Type.Callable
+      readonly target: Type.Callable
+    }
+  | {
       readonly _tag: 'Incompatible'
       readonly source: Type.Type
       readonly target: Type.Type
@@ -45,6 +50,20 @@ const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Nominal> | undefin
 /** Checks exact identity, nominal injection, or monotonic union widening without inference. */
 export const check = (source: Type.Type, target: Type.Type): Compatibility => {
   if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
+  if (Type.isCallable(source) && Type.isCallable(target)) {
+    const sourceRank = source.mode === 'Shared' ? 0 : source.mode === 'Exclusive' ? 1 : 2
+    const targetRank = target.mode === 'Shared' ? 0 : target.mode === 'Exclusive' ? 1 : 2
+    if (
+      sourceRank <= targetRank &&
+      source.parameters.length === target.parameters.length &&
+      source.parameters.every((parameter, index) =>
+        Type.equals(parameter, target.parameters.at(index) ?? 'Never'),
+      ) &&
+      Type.equals(source.result, target.result)
+    ) {
+      return Object.freeze({ _tag: 'CallableMode', source, target })
+    }
+  }
   const members = sourceMembers(source)
   if (members === undefined || !Type.isUnion(target)) {
     return Object.freeze({

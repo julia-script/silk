@@ -20,6 +20,7 @@ export const keywords: Record<KeywordKind, string> = {
   AsKeyword: 'as',
   LetKeyword: 'let',
   MutKeyword: 'mut',
+  OnceKeyword: 'once',
   MoveKeyword: 'move',
   MatchKeyword: 'match',
   IfKeyword: 'if',

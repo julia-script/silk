@@ -66,6 +66,14 @@ an external handle immediately. Cleanup that matters to the caller is an explici
 operation followed by the infallible automatic fallback. Bootstrap has no named scope, dynamic
 finalizer registry, `defer`, `errdefer`, or asynchronous cleanup hook.
 
+First-class callables require no general runtime closure allocator. Named functions and immediate
+sections may erase to direct calls; stored sections use compiler-planned target-local environments.
+The language supplies structural `fn`, `mut fn`, and `once fn` contracts and automatic leading-
+argument sections. The standard Effect actor consumes those ordinary callables in `map`, `flatMap`,
+`tap`, and `catch`; callback captures determine composed Effect repeatability and cleanup. A moved
+allocation captured by a callable remains an ordinary affine owner and is released if the callable
+is dropped uninvoked.
+
 The core owned indirection and sequence surface consists of the already settled `Box<T>`, intrinsic
 `[T; N]`, lexical `Slice<T>`, and one dynamic `Vector<T>`. `Vector` owns growable contiguous
 storage with length and capacity, exposes shared or exclusive slices, and supports the ordinary

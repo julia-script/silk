@@ -39,6 +39,16 @@ export type Type =
         { readonly _tag: 'EffectEnvironment' }
       >
     }
+  | {
+      readonly _tag: 'CallableValue'
+      readonly type: SilkType.Callable
+      readonly target: Hir.CallableTarget
+      readonly site?: Hir.CallableSiteId
+      readonly environment?: Extract<
+        Layout.CallableEnvironment,
+        { readonly _tag: 'CallableEnvironment' }
+      >
+    }
   | { readonly _tag: 'EffectOutcome'; readonly type: SilkType.Effect }
 
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
@@ -48,6 +58,7 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
   self._tag === 'Union' ||
   self._tag === 'EffectBorrow' ||
   self._tag === 'EffectValue' ||
+  self._tag === 'CallableValue' ||
   self._tag === 'EffectOutcome'
     ? self.type
     : self._tag
@@ -245,6 +256,40 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'MakeCallable'
+      readonly destination: LocalId
+      readonly target: Hir.CallableTarget
+      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly captures: ReadonlyArray<{
+        readonly ordinal: number
+        readonly parameterOrdinal: number
+        readonly source: LocalId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }>
+      readonly type: Extract<Type, { readonly _tag: 'CallableValue' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ApplyCallable'
+      readonly destination: LocalId
+      readonly callable?: LocalId
+      readonly target?: Hir.CallableTarget
+      readonly typeArguments: ReadonlyArray<SilkType.Type>
+      readonly captures: ReadonlyArray<{
+        readonly ordinal: number
+        readonly parameterOrdinal: number
+        readonly source: LocalId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }>
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly callableType: SilkType.Callable
+      readonly access: SilkType.CallableMode
+      readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
+      readonly realization: 'Environment' | 'DirectErasedSection'
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'PackEffectOutcome'
       readonly destination: LocalId
       readonly source: LocalId
@@ -274,7 +319,10 @@ export type Operation =
       readonly protectedType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly handledTag: number
       readonly handledLaneCount: number
+      readonly handlerCallable: LocalId
+      readonly handlerCallableType: Extract<Type, { readonly _tag: 'CallableValue' }>
       readonly handlerTarget: DeclarationIndex.CanonicalId
+      readonly handlerTypeArguments: ReadonlyArray<SilkType.Type>
       readonly handlerValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
       readonly handlerRunner: DeclarationIndex.CanonicalId
       readonly handlerType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -472,7 +520,7 @@ export interface OperationRegion extends RegionBase {
 
 export interface CleanupRegion extends RegionBase {
   readonly _tag: 'CleanupRegion'
-  readonly releases: ReadonlyArray<Extract<Operation, { readonly _tag: 'Drop' }>>
+  readonly releases: ReadonlyArray<Extract<Operation, { readonly _tag: 'Drop' | 'EndLoan' }>>
   readonly outcome: Outcome
 }
 
@@ -611,6 +659,7 @@ export interface Violation {
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
     | 'InvalidCallShape'
+    | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'
     | 'InvalidWrite'
     | 'InvalidLoan'
@@ -706,6 +755,15 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, ...operation.arguments]
     case 'MakeEffect':
       return [operation.destination, ...operation.captures.map((capture) => capture.source)]
+    case 'MakeCallable':
+      return [operation.destination, ...operation.captures.map((capture) => capture.source)]
+    case 'ApplyCallable':
+      return [
+        operation.destination,
+        ...(operation.callable === undefined ? [] : [operation.callable]),
+        ...operation.captures.map((capture) => capture.source),
+        ...operation.arguments,
+      ]
     case 'PackEffectOutcome':
     case 'UnpackEffectSuccess':
       return [operation.destination, operation.source]
@@ -866,6 +924,20 @@ const sameMembers = (
 const targetText = (target: DeclarationIndex.CanonicalId): string =>
   `${target.module}.${target.name}`
 
+const callableTargetText = (target: Hir.CallableTarget): string =>
+  target._tag === 'DeclarationCallableTarget'
+    ? targetText(target.declaration)
+    : `${target.actor}.${target.operation}`
+
+const sameCallableTarget = (left: Hir.CallableTarget, right: Hir.CallableTarget): boolean =>
+  left._tag === right._tag &&
+  (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget'
+    ? left.declaration.module === right.declaration.module &&
+      left.declaration.name === right.declaration.name
+    : left._tag === 'BuiltinCallableTarget' && right._tag === 'BuiltinCallableTarget'
+      ? left.actor === right.actor && left.operation === right.operation
+      : false)
+
 const borrowKey = (borrow: Hir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
@@ -886,6 +958,8 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
       return [cleanup.type, ...cleanupTypes(cleanup.element)]
     case 'UnionCleanup':
       return [cleanup.type, ...cleanup.cases.flatMap((entry) => cleanupTypes(entry.cleanup))]
+    case 'CallableCleanup':
+      return [cleanup.type, ...cleanup.slots.flatMap((slot) => cleanupTypes(slot.cleanup))]
   }
 }
 
@@ -910,6 +984,10 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
       return [semanticType(operation.type), ...operation.typeArguments]
     case 'MakeEffect':
       return [semanticType(operation.type), ...operation.runnerTypeArguments]
+    case 'MakeCallable':
+      return [semanticType(operation.type), ...operation.typeArguments]
+    case 'ApplyCallable':
+      return [operation.callableType, semanticType(operation.type), ...operation.typeArguments]
     case 'PackEffectOutcome':
     case 'UnpackEffectSuccess':
       return [semanticType(operation.type)]
@@ -1001,6 +1079,14 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return operation.arguments
     case 'MakeEffect':
       return operation.captures.map((capture) => capture.source)
+    case 'MakeCallable':
+      return operation.captures.map((capture) => capture.source)
+    case 'ApplyCallable':
+      return [
+        ...(operation.callable === undefined ? [] : [operation.callable]),
+        ...operation.captures.map((capture) => capture.source),
+        ...operation.arguments,
+      ]
     case 'PackEffectOutcome':
     case 'UnpackEffectSuccess':
       return [operation.source]
@@ -1038,6 +1124,8 @@ const loanViolations = (
   fn: MirFunction,
   region: Region,
   roots: ReadonlyArray<Operation>,
+  globalBeginnings: ReadonlyMap<string, Extract<Operation, { readonly _tag: 'BeginLoan' }>>,
+  globalEndings: ReadonlySet<string>,
 ): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = []
   const invalid = (detail: string): void => {
@@ -1116,6 +1204,7 @@ const loanViolations = (
             ...(parent === undefined ? {} : { parent: parent[0] }),
           }),
         )
+        calls.add(`${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`)
         continue
       }
       if (operation._tag === 'Call') {
@@ -1124,13 +1213,14 @@ const loanViolations = (
       if (operation._tag === 'EndLoan') {
         const key = borrowKey(operation.borrow)
         const loan = active.get(key)
+        const beginning = loan?.operation ?? globalBeginnings.get(key)
         const call = `${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`
         const liveChild = [...active.values()].some((candidate) => candidate.parent === key)
         if (
-          loan === undefined ||
+          beginning === undefined ||
           completed.has(key) ||
-          loan?.operation.destination.ordinal !== operation.slice.ordinal ||
-          !calls.has(call) ||
+          beginning.destination.ordinal !== operation.slice.ordinal ||
+          (loan !== undefined && !calls.has(call)) ||
           liveChild
         ) {
           invalid(`loan ${key} has a missing, duplicate, premature, or mismatched ending`)
@@ -1176,7 +1266,9 @@ const loanViolations = (
       }
     }
     for (const [key] of active) {
-      if (!inheritedKeys.has(key)) invalid(`loan ${key} has no ending in its operation sequence`)
+      if (!inheritedKeys.has(key) && !globalEndings.has(key)) {
+        invalid(`loan ${key} has no ending in its operation sequence`)
+      }
     }
   }
   process(roots, new Map())
@@ -1220,6 +1312,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     instanceKeys.add(currentInstance)
     const missingTypes = new Set(
       [...fn.localTypes, fn.result]
+        .filter((type) => type._tag !== 'CallableValue')
         .map(semanticType)
         .filter(
           (type) =>
@@ -1310,15 +1403,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     const allOperations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
     const loanBeginnings = new Map<string, number>()
     const loanEndings = new Map<string, number>()
+    const globalBeginnings = new Map<string, Extract<Operation, { readonly _tag: 'BeginLoan' }>>()
     for (const operation of allOperations) {
       if (operation._tag === 'BeginLoan') {
         const key = borrowKey(operation.borrow)
         loanBeginnings.set(key, (loanBeginnings.get(key) ?? 0) + 1)
+        globalBeginnings.set(key, operation)
       } else if (operation._tag === 'EndLoan') {
         const key = borrowKey(operation.borrow)
         loanEndings.set(key, (loanEndings.get(key) ?? 0) + 1)
       }
     }
+    const globalEndings = new Set(loanEndings.keys())
     for (const key of new Set([...loanBeginnings.keys(), ...loanEndings.keys()])) {
       if (loanBeginnings.get(key) !== 1 || loanEndings.get(key) !== 1) {
         violations.push(
@@ -1342,7 +1438,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       return false
     }
     for (const region of fn.regions) {
-      violations.push(...loanViolations(fn, region, operationsOf(region)))
+      violations.push(
+        ...loanViolations(fn, region, operationsOf(region), globalBeginnings, globalEndings),
+      )
       if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal)) {
         violations.push(
           Object.freeze({
@@ -1793,7 +1891,38 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   SilkType.equals(member.member, expected)
                 )
               }))
-          if (dropped === undefined || !cleanupTypeMatches || !unionCasesValid) {
+          const callableCleanupValid =
+            cleanup._tag !== 'CallableCleanup' ||
+            (dropped?._tag === 'CallableValue' &&
+              dropped.environment !== undefined &&
+              dropped.site !== undefined &&
+              dropped.site.function.sourceId === cleanup.site.function.sourceId &&
+              dropped.site.function.ordinal === cleanup.site.function.ordinal &&
+              dropped.site.span.start === cleanup.site.span.start &&
+              dropped.site.span.end === cleanup.site.span.end &&
+              (() => {
+                const expected = dropped.environment.fields
+                  .filter((field) => field.access === 'Take' && !isCopyType(field.type))
+                  .map((field) => field.ordinal)
+                  .reverse()
+                const endedLoans = operations
+                  .slice(0, index)
+                  .filter((candidate) => candidate._tag === 'EndLoan').length
+                const borrowed = dropped.environment.fields.filter(
+                  (field) => field.access === 'Shared' || field.access === 'Exclusive',
+                ).length
+                return (
+                  expected.length === cleanup.slots.length &&
+                  expected.every((ordinal, slot) => cleanup.slots.at(slot)?.ordinal === ordinal) &&
+                  endedLoans >= borrowed
+                )
+              })())
+          if (
+            dropped === undefined ||
+            !cleanupTypeMatches ||
+            !unionCasesValid ||
+            !callableCleanupValid
+          ) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
@@ -1971,6 +2100,125 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
+        if (operation._tag === 'MakeCallable') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const environment = operation.type.environment
+          const fields = environment?.fields ?? []
+          const capturesValid =
+            operation.captures.length === fields.length &&
+            operation.captures.every((capture, ordinal) => {
+              const field = fields.at(ordinal)
+              const source = fn.localTypes.at(capture.source.ordinal)
+              return (
+                field !== undefined &&
+                source !== undefined &&
+                capture.ordinal === field.ordinal &&
+                capture.parameterOrdinal === field.parameterOrdinal &&
+                capture.access === field.access &&
+                SilkType.equals(semanticType(source), field.type)
+              )
+            })
+          const valid =
+            destination?._tag === 'CallableValue' &&
+            SilkType.equals(destination.type, operation.type.type) &&
+            sameCallableTarget(destination.target, operation.target) &&
+            sameCallableTarget(operation.type.target, operation.target) &&
+            operation.typeArguments.every(SilkType.isConcrete) &&
+            (environment === undefined
+              ? operation.captures.length === 0
+              : capturesValid &&
+                sameCallableTarget(environment.callable.target, operation.target) &&
+                environment.callable.mode === operation.type.type.mode)
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidCallableOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'callable construction disagrees with its identity, slots, or layout',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ApplyCallable') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const source =
+            operation.callable === undefined
+              ? undefined
+              : fn.localTypes.at(operation.callable.ordinal)
+          const argumentsValid =
+            operation.arguments.length === operation.callableType.parameters.length &&
+            operation.arguments.every((argument, ordinal) => {
+              const actual = fn.localTypes.at(argument.ordinal)
+              const expected = operation.callableType.parameters.at(ordinal)
+              return (
+                actual !== undefined &&
+                expected !== undefined &&
+                SilkType.equals(semanticType(actual), expected)
+              )
+            })
+          const environmentForm =
+            operation.realization === 'Environment' &&
+            operation.callable !== undefined &&
+            operation.target === undefined &&
+            operation.captures.length === 0 &&
+            source?._tag === 'CallableValue' &&
+            SilkType.equals(source.type, operation.callableType)
+          const directEnvironment = self.layout.callableEnvironments.find(
+            (candidate) =>
+              candidate._tag === 'CallableEnvironment' &&
+              operation.target !== undefined &&
+              sameCallableTarget(candidate.callable.target, operation.target) &&
+              SilkType.equals(candidate.callable.type, operation.callableType) &&
+              candidate.callable.typeArguments.length === operation.typeArguments.length &&
+              candidate.callable.typeArguments.every((argument, ordinal) => {
+                const actual = operation.typeArguments.at(ordinal)
+                return actual !== undefined && SilkType.equals(argument, actual)
+              }),
+          )
+          const directCapturesValid =
+            operation.captures.length === 0 ||
+            (directEnvironment?._tag === 'CallableEnvironment' &&
+              directEnvironment.fields.length === operation.captures.length &&
+              directEnvironment.fields.every((field, ordinal) => {
+                const capture = operation.captures.at(ordinal)
+                const sourceType =
+                  capture === undefined ? undefined : fn.localTypes.at(capture.source.ordinal)
+                return (
+                  capture !== undefined &&
+                  sourceType !== undefined &&
+                  capture.ordinal === field.ordinal &&
+                  capture.parameterOrdinal === field.parameterOrdinal &&
+                  capture.access === field.access &&
+                  SilkType.equals(semanticType(sourceType), field.type)
+                )
+              }))
+          const directForm =
+            operation.realization === 'DirectErasedSection' &&
+            operation.callable === undefined &&
+            operation.target !== undefined &&
+            directCapturesValid
+          const valid =
+            destination !== undefined &&
+            SilkType.equals(semanticType(destination), semanticType(operation.type)) &&
+            operation.access === operation.callableType.mode &&
+            operation.typeArguments.every(SilkType.isConcrete) &&
+            argumentsValid &&
+            (environmentForm || directForm)
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidCallableOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'callable application disagrees with its mode, arguments, realization, or result',
+              }),
+            )
+          }
+        }
         if (operation._tag === 'PackEffectOutcome') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const source = fn.localTypes.at(operation.source.ordinal)
@@ -2053,18 +2301,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const protectedRunner = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.protectedRunner, operation.protectedTypeArguments),
           )
-          const handlerTarget = self.functions.find(
-            (candidate) =>
-              candidate.id.module === operation.handlerTarget.module &&
-              candidate.id.name === operation.handlerTarget.name &&
-              candidate.instance.typeArguments.length === 0,
+          const handlerTarget = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.handlerTarget, operation.handlerTypeArguments),
           )
-          const handlerRunner = self.functions.find(
-            (candidate) =>
-              candidate.id.module === operation.handlerRunner.module &&
-              candidate.id.name === operation.handlerRunner.name &&
-              candidate.instance.typeArguments.length === 0,
+          const handlerRunner = self.functions.find((candidate) =>
+            matchesInstance(candidate, operation.handlerRunner, operation.handlerTypeArguments),
           )
+          const handlerCallable = fn.localTypes.at(operation.handlerCallable.ordinal)
           if (
             protectedTarget?.result._tag !== 'EffectValue' ||
             protectedRunner?.result._tag !== 'EffectOutcome' ||
@@ -2074,6 +2317,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
             !SilkType.equals(handlerTarget.result.type, operation.handlerValueType.type) ||
             !SilkType.equals(handlerRunner.result.type, operation.handlerType.type) ||
+            handlerCallable?._tag !== 'CallableValue' ||
+            !SilkType.equals(handlerCallable.type, operation.handlerCallableType.type) ||
             operation.handledTag < 1 ||
             operation.handledTag > operation.protectedType.type.failures.length ||
             operation.protectedType.type.failures.at(operation.handledTag - 1) === undefined
@@ -2179,6 +2424,10 @@ const operationText = (operation: Operation): string => {
       }(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'MakeEffect':
       return `${localText(operation.destination)} = make-effect ${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'MakeCallable':
+      return `${localText(operation.destination)} = make-callable ${callableTargetText(operation.target)} captures=${operation.captures.map((capture) => `#${capture.ordinal}->p${capture.parameterOrdinal}:${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ApplyCallable':
+      return `${localText(operation.destination)} = apply-callable ${operation.callable === undefined ? (operation.target === undefined ? '?' : callableTargetText(operation.target)) : localText(operation.callable)}(${operation.arguments.map(localText).join(', ')}) captures=${operation.captures.map((capture) => `#${capture.ordinal}:${localText(capture.source)}`).join(',') || 'none'} access=${operation.access.toLowerCase()} evaluation=${operation.evaluation} realization=${operation.realization} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PackEffectOutcome':
       return `${localText(operation.destination)} = effect-outcome tag=${operation.tag} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'UnpackEffectSuccess':

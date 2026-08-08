@@ -20,6 +20,7 @@ export type NodeKind =
   | 'TypeArgumentList'
   | 'FixedArrayType'
   | 'SliceType'
+  | 'CallableType'
   | 'ParenthesizedType'
   | 'UnionType'
   | 'FunctionDeclaration'
@@ -65,7 +66,6 @@ export type NodeKind =
   | 'PrefixExpression'
   | 'InfixExpression'
   | 'PipelineExpression'
-  | 'PipelineTarget'
   | 'ArgumentList'
   | 'Error'
 

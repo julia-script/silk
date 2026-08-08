@@ -20,7 +20,10 @@ The current iteration tests these decisions:
 - `effect {}` opens a lazy imperative body and `effect fn` applies that boundary to a whole function;
 - `run` evaluates or binds exactly one Effect layer;
 - `return` stays explicit, while a single-statement function body may omit braces;
-- actor functions are data-first and automatically dual, with a pipe inserting argument one;
+- named functions are first-class; supplying the trailing arguments of a multi-argument function
+  constructs a unary section, and a pipe invokes any unary callable after evaluating its left side;
+- callable contracts expose shared `fn`, exclusive `mut fn`, and consuming `once fn` invocation;
+- `run` owns the complete following expression, while grouping explicitly pipes an executed result;
 - `provide` specializes an open Effect with an existing provider, while `provideWith` acquires and
   releases a fresh provider for every execution;
 - captured shared, exclusive, and consuming access determines whether a closed Effect may run again;

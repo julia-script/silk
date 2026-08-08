@@ -17,7 +17,7 @@ const nested = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.Exp
   if (fact._tag === 'StructLiteral')
     return fact.initializers.map((initializer) => initializer.expression)
   if (fact._tag === 'Grouped') return [fact.expression]
-  if (fact._tag === 'Call' || fact._tag === 'Operator' || fact._tag === 'Pipeline')
+  if (fact._tag === 'Call' || fact._tag === 'Operator' || fact._tag === 'CallableApply')
     return fact.arguments.map((argument) => argument.expression)
   return []
 }

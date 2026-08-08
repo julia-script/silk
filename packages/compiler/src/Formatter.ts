@@ -519,6 +519,37 @@ const printNode = (
         printToken(context, tokenOf(node, 'RightBracket')),
       )
     }
+    case 'CallableType': {
+      const nodes = directNodes(node)
+      const result = nodes.at(-1) ?? nodeOf(node, 'TypePath')
+      const parameters = nodes.slice(0, -1)
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const once = directTokens(node).find((token) => token.kind === 'OnceKeyword')
+      return FormatDocument.concat(
+        ...(mut === undefined
+          ? []
+          : [printToken(context, mut, prefix, preserveBlank), FormatDocument.text(' ')]),
+        ...(once === undefined
+          ? []
+          : [printToken(context, once, prefix, preserveBlank), FormatDocument.text(' ')]),
+        printToken(
+          context,
+          tokenOf(node, 'FnKeyword'),
+          mut === undefined && once === undefined ? prefix : FormatDocument.empty,
+          preserveBlank,
+        ),
+        printDelimited(
+          context,
+          tokenOf(node, 'LeftParenthesis'),
+          parameters,
+          commaTokens(node),
+          tokenOf(node, 'RightParenthesis'),
+          FormatDocument.empty,
+        ),
+        printToken(context, tokenOf(node, 'Arrow'), FormatDocument.text(' ')),
+        printNode(context, result, FormatDocument.text(' ')),
+      )
+    }
     case 'ParenthesizedType':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'LeftParenthesis'), prefix, preserveBlank),
@@ -881,19 +912,14 @@ const printNode = (
         printToken(context, tokenOf(node, 'RightBracket')),
       )
     case 'CallExpression': {
-      const identifiers = directTokens(node).filter((token) => token.kind === 'Identifier')
-      const dot = directTokens(node).find((token) => token.kind === 'Dot')
-      const first = identifiers[0] ?? tokenOf(node, 'Identifier')
-      const second = identifiers[1]
+      const nodes = directNodes(node)
+      const callee = nodes[0] ?? nodeOf(node, 'IdentifierExpression')
+      const typeArguments = nodes.find((child) => child.kind === 'CallTypeArgumentList')
+      const argumentsList = nodes.find((child) => child.kind === 'ArgumentList')
       return FormatDocument.concat(
-        printToken(context, first, prefix, preserveBlank),
-        ...(dot === undefined || second === undefined
-          ? []
-          : [printToken(context, dot), printToken(context, second)]),
-        ...(directNodes(node).find((child) => child.kind === 'CallTypeArgumentList') === undefined
-          ? []
-          : [printNode(context, nodeOf(node, 'CallTypeArgumentList'))]),
-        printNode(context, nodeOf(node, 'ArgumentList')),
+        printNode(context, callee, prefix, preserveBlank),
+        ...(typeArguments === undefined ? [] : [printNode(context, typeArguments)]),
+        printNode(context, argumentsList ?? nodeOf(node, 'ArgumentList')),
       )
     }
     case 'GroupedExpression':
@@ -935,25 +961,11 @@ const printNode = (
             printToken(context, tokenOf(node, 'PipeGreater'), FormatDocument.hardLine),
             printNode(
               context,
-              nodes[1] ?? nodeOf(node, 'PipelineTarget'),
+              nodes[1] ?? nodeOf(node, 'IdentifierExpression'),
               FormatDocument.text(' '),
             ),
           ),
         ),
-      )
-    }
-    case 'PipelineTarget': {
-      const identifiers = directTokens(node).filter((token) => token.kind === 'Identifier')
-      const qualifier = identifiers[0] ?? tokenOf(node, 'Identifier')
-      const member = identifiers[1] ?? tokenOf(node, 'Identifier', 1)
-      const typeArguments = directNodes(node).find((child) => child.kind === 'CallTypeArgumentList')
-      const argumentsList = directNodes(node).find((child) => child.kind === 'ArgumentList')
-      return FormatDocument.concat(
-        printToken(context, qualifier, prefix, preserveBlank),
-        printToken(context, tokenOf(node, 'Dot')),
-        printToken(context, member),
-        ...(typeArguments === undefined ? [] : [printNode(context, typeArguments)]),
-        ...(argumentsList === undefined ? [] : [printNode(context, argumentsList)]),
       )
     }
     case 'ArgumentList':

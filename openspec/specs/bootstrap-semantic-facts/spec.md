@@ -561,12 +561,13 @@ at the argument's span and keep the call expression explicitly unavailable.
 
 Every present operator expression SHALL publish its concrete operator, ordered operand facts,
 resolved compiler-known actor operation when available, closed contract, result type, and exact
-source provenance. Every pipeline SHALL publish its left input, qualified target lookup, explicit
-later arguments, effective inserted argument mapping, canonical operation or declaration target,
-contract, result type, and provenance. Type mismatches SHALL reuse `SEM0012` at the offending
-operand span. Syntax-damaged, mistyped, missing, inaccessible, or conflicting dependencies SHALL
-keep only the dependent fact explicitly unavailable with the originating diagnostic cause; analysis
-MUST NOT synthesize an alternate operator, call target, type, or argument.
+source provenance. Every pipeline SHALL publish its left input, callable-producing right expression,
+resolved callable type and invocation mode, application contract, result type, and provenance.
+Section facts SHALL separately identify the canonical function, omitted leading parameter, supplied
+trailing arguments, captures, and resulting unary callable. Type mismatches SHALL reuse `SEM0012` at
+the offending operand span. Damaged or unavailable dependencies SHALL keep only the dependent fact
+unavailable with its originating diagnostic cause; analysis MUST NOT synthesize an alternate
+operator, callable, type, or argument.
 
 #### Scenario: Inspect a resolved infix operation
 
@@ -583,15 +584,37 @@ MUST NOT synthesize an alternate operator, call target, type, or argument.
 - **WHEN** a body returns `!1`
 - **THEN** the operand carries `SEM0012` and the prefix fact has no available result type
 
-#### Scenario: Inspect an inserted pipeline argument
+#### Scenario: Inspect a section application pipeline
 
 - **WHEN** a body returns `2 |> I32.add(3)`
-- **THEN** the pipeline fact maps `2` to parameter zero and `3` to parameter one of the resolved operation
+- **THEN** facts distinguish construction of `I32.add(3)` from its unary application to `2`
 
-#### Scenario: Preserve an unavailable imported pipeline target
+#### Scenario: Preserve an unavailable callable
 
-- **WHEN** a pipeline names an inaccessible or conflicting imported operation
-- **THEN** its target and result remain unavailable with the existing name-resolution cause and no secondary unknown-call diagnostic
+- **WHEN** a pipeline right expression resolves to an inaccessible function or a non-callable value
+- **THEN** its callable and result facts remain unavailable with the originating cause and no fabricated target
+
+### Requirement: Callable facts expose mode and capture obligations
+
+Every available function reference and section SHALL publish its complete callable type, shared,
+exclusive, or consuming invocation mode, canonical target, ordered capture facts, capture ownership
+modes, retained dependencies, and exact source provenance. Calls through callable values SHALL
+publish the required and provided invocation access independently of result typing.
+
+#### Scenario: Explain a one-shot section
+
+- **WHEN** a section captures one moved affine owner
+- **THEN** its fact identifies the owner capture and `once fn` mode before any invocation occurs
+
+### Requirement: Run facts retain the complete operand
+
+A run fact SHALL identify the complete Effect-producing operand selected by the low-precedence
+grammar, its residual failure and requirement rows, one-layer success type, and exact provenance.
+
+#### Scenario: Inspect run around retry
+
+- **WHEN** source spells `run attempt |> Effect.retry(2)` without grouping
+- **THEN** the run fact's subject is the retried Effect and not the untransformed `attempt`
 
 
 ### Requirement: Struct literal facts map source fields to canonical fields
@@ -821,16 +844,16 @@ unavailable fact with originating diagnostics rather than substituting a truncat
 - **WHEN** a contextual `Usize` literal exceeds JavaScript's safe integer range
 - **THEN** semantic facts retain its exact digits and canonical value for later target validation
 
-### Requirement: Semantic facts retain flow construction and residual failure rows
+### Requirement: Semantic facts retain Effect construction and residual failure rows
 
-Semantic analysis SHALL publish the success and failure contract for flow construction, `run`,
+Semantic analysis SHALL publish the success and failure contract for Effect construction, `run`,
 `fail`, and exact-member catch. Unavailable operands, invalid handlers, undeclared propagation, and
 non-nominal payloads SHALL retain their causes and MUST NOT fabricate a successful value or empty
 row.
 
 #### Scenario: Inspect a handled run
 
-- **WHEN** `Flow.catch<E>` removes the only failure member before an ordinary function runs the flow
+- **WHEN** `Effect.catch<E>` removes the only failure member before an ordinary function runs the Effect
 - **THEN** facts show the protected row, selected member, handler row, empty residual row, and success type
 
 ### Requirement: Semantic facts expose Effect and owned allocation

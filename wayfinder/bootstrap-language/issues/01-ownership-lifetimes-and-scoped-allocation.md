@@ -24,9 +24,11 @@ as allocation.
 
 Borrows are lexical and non-escaping in the bootstrap language. Any number of shared borrows or one
 exclusive mutable borrow may exist, but not both at once. A borrow may be passed across function
-boundaries or captured by a callback proven not to escape, but it may not be returned, stored in an
-owned struct or union, or captured by a longer-lived callback. Long-lived compiler relationships use
-owned collections and stable copyable identifiers rather than stored references.
+boundaries or retained by a first-class callable environment whose lifetime is proven shorter than
+the borrow, but it may not be returned, stored in an unrelated owned struct or union, or retained by
+a longer-lived callable. A shared capture permits repeated shared invocation; an exclusive capture
+permits repeated sequential invocation through exclusive access. Long-lived compiler relationships
+use owned collections and stable copyable identifiers rather than stored references.
 
 Dynamic memory is represented by ordinary affine owners. The allocator service receives a validated
 target-aware layout and returns a self-contained `Allocation` carrying all authority needed for its
@@ -66,6 +68,13 @@ borrows, named `Scope` capabilities, per-field lifetime parameters, or a full Ru
 lifetime solver. Recursive and cyclic compiler data use owned collections plus stable IDs. Explicit
 shared ownership, region capsules, dependent provider results, and structured task groups remain
 coherent later extensions if concrete workloads demonstrate their need.
+
+Callable environments follow the same affine cleanup rules as every other owner. Copy captures are
+snapshotted at construction, borrowed captures keep their loans live until the environment is
+dropped, and moved captures transfer their cleanup into the environment. A callable that transfers
+an owned capture onward is consuming and may be invoked at most once; dropping it uncalled cleans
+the capture exactly once. This is ordinary ownership state, not closure garbage collection or a
+universal heap box.
 
 All code shown while resolving this ticket was illustrative pseudocode. This answer fixes semantics,
 not concrete syntax; syntax remains the responsibility of

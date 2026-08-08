@@ -125,6 +125,16 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'Callable'
+      readonly mode: Type.CallableMode
+      readonly parameters: ReadonlyArray<DeclaredTypeFact>
+      readonly result: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Applied'
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
@@ -353,6 +363,7 @@ const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'AppliedType' ||
     element.kind === 'FixedArrayType' ||
     element.kind === 'SliceType' ||
+    element.kind === 'CallableType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
 
@@ -380,6 +391,64 @@ export const analyzeDeclaredType = (
   syntax: SyntaxTree.Node,
   typeParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
 ): TypeResolution => {
+  if (syntax.kind === 'CallableType') {
+    const token = SyntaxTree.directToken(syntax, 'FnKeyword')
+    const typeNodes = syntax.children.filter(isDeclaredTypeNode)
+    const resultSyntax = typeNodes.at(-1)
+    if (token === undefined || resultSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const mode: Type.CallableMode =
+      SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined
+        ? 'Take'
+        : SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
+          ? 'Exclusive'
+          : 'Shared'
+    const analyzed = typeNodes.map((node) => analyzeDeclaredType(source, node, typeParameters))
+    const result = analyzed.at(-1)
+    const parameters = analyzed.slice(0, -1)
+    const diagnostics = Object.freeze(analyzed.flatMap((entry) => entry.diagnostics))
+    if (
+      result?.fact._tag === 'Resolved' &&
+      parameters.every((entry) => entry.fact._tag === 'Resolved')
+    ) {
+      const type = Type.callable(
+        parameters.flatMap((entry) => (entry.fact._tag === 'Resolved' ? [entry.fact.type] : [])),
+        result.fact.type,
+        mode,
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token,
+          syntax,
+        }),
+        diagnostics,
+      })
+    }
+    const resultFact = result?.fact ?? Object.freeze({ _tag: 'Unavailable' as const, syntax })
+    const cause = [...parameters.map((entry) => entry.fact), resultFact]
+      .flatMap((fact) => ('cause' in fact && fact.cause !== undefined ? [fact.cause] : []))
+      .at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Callable',
+        mode,
+        parameters: Object.freeze(parameters.map((entry) => entry.fact)),
+        result: resultFact,
+        spelling: `${mode === 'Exclusive' ? 'mut ' : mode === 'Take' ? 'once ' : ''}fn(...)`,
+        token,
+        syntax,
+        ...(cause === undefined ? {} : { cause }),
+      }),
+      diagnostics,
+    })
+  }
   if (syntax.kind === 'ParenthesizedType') {
     const inner = syntax.children.find(isDeclaredTypeNode)
     if (inner === undefined)
@@ -1224,6 +1293,53 @@ const resolveDeclaredType = (
         candidate: resolved.fact.type,
       }),
       diagnostics: Object.freeze([diagnostic]),
+    })
+  }
+  if (fact._tag === 'Callable') {
+    const parameters = fact.parameters.map((parameter) =>
+      resolveDeclaredType(module, parameter, resolver, modules),
+    )
+    const result = resolveDeclaredType(module, fact.result, resolver, modules)
+    const diagnostics = Object.freeze([
+      ...parameters.flatMap((parameter) => parameter.diagnostics),
+      ...result.diagnostics,
+    ])
+    if (
+      result.fact._tag === 'Resolved' &&
+      parameters.every((parameter) => parameter.fact._tag === 'Resolved')
+    ) {
+      const type = Type.callable(
+        parameters.flatMap((parameter) =>
+          parameter.fact._tag === 'Resolved' ? [parameter.fact.type] : [],
+        ),
+        result.fact.type,
+        fact.mode,
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token: fact.token,
+          syntax: fact.syntax,
+        }),
+        diagnostics,
+      })
+    }
+    const resolvedFacts = [...parameters.map((parameter) => parameter.fact), result.fact]
+    const cause = resolvedFacts
+      .flatMap((resolved) =>
+        'cause' in resolved && resolved.cause !== undefined ? [resolved.cause] : [],
+      )
+      .at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        parameters: Object.freeze(parameters.map((parameter) => parameter.fact)),
+        result: result.fact,
+        ...(cause === undefined ? {} : { cause }),
+      }),
+      diagnostics,
     })
   }
   if (fact._tag === 'Effect') {

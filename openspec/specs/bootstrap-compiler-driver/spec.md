@@ -300,9 +300,9 @@ identical facts, layouts, MIR, textual artifacts, and binary artifacts for the s
 - **WHEN** a canonical native fixture computes a valid value above `2^32 - 1`
 - **THEN** evaluator and native execution agree exactly while the Wasm-targeted counterpart is rejected before MIR
 
-### Requirement: Flow acceptance covers both outcome branches deterministically
+### Requirement: Effect acceptance covers both outcome branches deterministically
 
-The compiler corpus SHALL execute flow success, propagation, exact recovery, residual-row rejection,
+The compiler corpus SHALL execute Effect success, propagation, exact recovery, residual-row rejection,
 ownership cleanup, and trap separation through evaluation, native, and Wasm where valid. Equivalent
 fresh-process compilations SHALL preserve semantic facts, layout, MIR, text, and binary artifacts.
 
@@ -313,7 +313,7 @@ fresh-process compilations SHALL preserve semantic facts, layout, MIR, text, and
 
 #### Scenario: Reject an unresolved executable failure
 
-- **WHEN** an ordinary entry attempts to run a flow with a nonempty residual row
+- **WHEN** an ordinary entry attempts to run an Effect with a nonempty residual row
 - **THEN** compilation rejects it before MIR emission and creates no executable artifact
 
 ### Requirement: Driver acceptance covers Effect and owned allocation vertically
@@ -327,3 +327,57 @@ and Wasm where valid. Fresh runs SHALL preserve every textual and binary artifac
 
 - **WHEN** a compiler-shaped program tokenizes borrowed runtime bytes into a growable owned Vector and returns it through an Effect
 - **THEN** evaluation, native, and Wasm agree on tokens, ownership, allocation failures, cleanup, target layout, and emitted artifacts
+
+### Requirement: Driver acceptance covers first-class callables vertically
+
+The compiler corpus SHALL cover named function values, automatic sections, callable bindings and
+returns, generic higher-order functions, Copy and borrowed captures, exclusive mutation, owned
+take-once capture, Effect map, flatMap, tap and logging composition, retry rejection, grouped and
+ungrouped run, cleanup, and diagnostics across evaluator, native, and Wasm where valid. Fresh runs
+SHALL preserve syntax, semantic facts, HIR, ownership, instances, MIR, textual artifacts, and binary
+artifacts deterministically.
+
+#### Scenario: Compile the callable Effect milestone
+
+- **WHEN** a canonical program maps and taps an Effect through stored reusable and consuming sections
+- **THEN** evaluation, native, and Wasm agree on success, effect nesting, invocation access, ownership, and cleanup
+
+#### Scenario: Reject invalid reuse before emission
+
+- **WHEN** the corpus invokes a take-once section twice or supplies it to a repeatable callback contract
+- **THEN** compilation emits the stable ownership or callable-mode diagnostic and no conflicting runtime artifact
+
+#### Scenario: Preserve deterministic callable artifacts
+
+- **WHEN** equivalent callable programs compile repeatedly in fresh processes
+- **THEN** generated environment identities, instance ordering, MIR, symbols, and emitted artifacts are byte-identical
+
+### Requirement: Frontend failures gate artifact production
+
+The driver SHALL run recoverable frontend phases far enough to collect deterministic source
+diagnostics and partial resolver facts, then gate every artifact-producing phase on that frontend
+result. Any error diagnostic SHALL produce a closed source-rejected outcome carrying the merged
+diagnostics, loaded source catalog, and executed-phase report. Any captured source-resolution
+failure SHALL fail compilation as a typed operational failure carrying the canonically ordered
+failures and available frontend report. Neither case SHALL perform MIR lowering, backend emission,
+object emission, shim compilation, linking, or destination commit.
+
+#### Scenario: Reject source errors before lowering
+
+- **WHEN** closure loading and semantic analysis complete with one or more error diagnostics
+- **THEN** the driver returns a source-rejected outcome and reports no MIR, backend, object, shim, or link phase
+
+#### Scenario: Fail operationally after partial resolution
+
+- **WHEN** closure loading captures a typed source-resolution failure
+- **THEN** the driver fails with the ordered resolution failures and invokes no artifact-producing phase
+
+#### Scenario: Preserve tooling-style recovery before the gate
+
+- **WHEN** one import fails while another module remains analyzable
+- **THEN** the driver's frontend result retains the successful module's facts and available diagnostics before compilation stops
+
+#### Scenario: Compile only a clean frontend
+
+- **WHEN** source resolution succeeds and recoverable frontend phases produce no error diagnostics
+- **THEN** the driver proceeds through MIR lowering, backend emission, and the requested toolchain stages

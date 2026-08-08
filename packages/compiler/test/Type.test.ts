@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Type from '../src/Type.js'
+import * as TypeCompatibility from '../src/TypeCompatibility.js'
 
 it('keeps nominal identity independent of field shape and import spelling', () => {
   const first = Type.nominal('syntax/Tree', 'Node')
@@ -107,4 +108,33 @@ it('normalizes compiler-private effect contract identity and traverses substitut
   const substituted = Type.substitute(contract, new Map([[Type.key(parameter), 'Usize']]))
   assert.strictEqual(Type.encode(substituted), 'Effect<Usize ! errors.First | errors.Second>')
   assert.strictEqual(Type.isConcrete(substituted), true)
+})
+
+it('canonicalizes callable contracts and orders invocation guarantees', () => {
+  const owner = { module: 'work', name: 'apply' }
+  const parameter = Type.parameter(owner, 0, 'T')
+  const shared = Type.callable([parameter, 'Bool'], parameter)
+  const exclusive = Type.callable([parameter, 'Bool'], parameter, 'Exclusive')
+  const once = Type.callable([parameter, 'Bool'], parameter, 'Take')
+  const substitution = new Map([[Type.key(parameter), 'I32' as const]])
+
+  assert.strictEqual(Type.encode(shared), 'fn(T, Bool) -> T')
+  assert.strictEqual(Type.encode(exclusive), 'mut fn(T, Bool) -> T')
+  assert.strictEqual(Type.encode(once), 'once fn(T, Bool) -> T')
+  assert.strictEqual(Type.encode(Type.substitute(shared, substitution)), 'fn(I32, Bool) -> I32')
+  assert.deepEqual(Type.parameters(shared), [parameter])
+  assert.strictEqual(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(shared, exclusive)),
+    true,
+  )
+  assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(shared, once)), true)
+  assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(exclusive, once)), true)
+  assert.strictEqual(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(exclusive, shared)),
+    false,
+  )
+  assert.strictEqual(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(once, exclusive)),
+    false,
+  )
 })

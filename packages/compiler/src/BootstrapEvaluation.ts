@@ -70,6 +70,27 @@ export interface EffectBorrowValue {
   readonly access: 'Shared' | 'Exclusive'
 }
 
+export interface CallableBorrowValue {
+  readonly _tag: 'CallableBorrowValue'
+  readonly frame: number
+  readonly cell: number
+  readonly access: 'Shared' | 'Exclusive'
+}
+
+export interface CallableValue {
+  readonly _tag: 'CallableValue'
+  readonly ticket: number
+  readonly type: Type.Callable
+  readonly target: Hir.CallableTarget
+  readonly typeArguments: ReadonlyArray<Type.Type>
+  readonly captures: ReadonlyArray<{
+    readonly ordinal: number
+    readonly parameterOrdinal: number
+    readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+    readonly value: Value
+  }>
+}
+
 export interface EffectValue {
   readonly _tag: 'EffectValue'
   readonly type: Type.Effect
@@ -97,7 +118,9 @@ export type Value =
   | SliceValue
   | UnionValue
   | EffectBorrowValue
+  | CallableBorrowValue
   | EffectValue
+  | CallableValue
   | EffectOutcomeValue
   | AllocationValue
 
@@ -245,6 +268,14 @@ export interface EffectTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface CallableTraceEvent {
+  readonly _tag: 'CallableConstruct' | 'CallableApply' | 'CallableCleanup' | 'CallableRejected'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly ticket: number
+  readonly mode: Type.CallableMode
+  readonly span: SourceSpan.SourceSpan
+}
+
 export type TraceEvent =
   | EntryTraceEvent
   | CallTraceEvent
@@ -259,6 +290,7 @@ export type TraceEvent =
   | MatchTraceEvent
   | ControlTraceEvent
   | EffectTraceEvent
+  | CallableTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -291,6 +323,13 @@ export type BlockedReason =
       readonly _tag: 'RecursiveCycle'
       readonly cycle: ReadonlyArray<Instances.InstanceKey>
       readonly closingCallSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'InvalidCallableReuse'
+      readonly function: DeclarationIndex.CanonicalId
+      readonly ticket: number
+      readonly state: 'Running' | 'Consumed' | 'Released'
+      readonly span: SourceSpan.SourceSpan
     }
 
 /** A completed exact bootstrap result. */
@@ -347,8 +386,10 @@ interface LocalState {
 interface EvaluationState {
   nextFrame: number
   nextAllocation: number
+  nextCallable: number
   readonly cells: Map<string, LocalState>
   readonly allocations: Map<number, { active: boolean }>
+  readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
 }
 
 const cellKey = (frame: number, cell: number): string => `${frame}:${cell}`
@@ -371,7 +412,8 @@ function executeFunction(
   const read = (local: Mir.LocalId): LocalState => {
     const direct = state.cells.get(cellKey(frame, local.ordinal)) ??
       locals.get(local.ordinal) ?? { value: value(0), fromCall: false }
-    if (direct.value._tag !== 'EffectBorrowValue') return direct
+    if (direct.value._tag !== 'EffectBorrowValue' && direct.value._tag !== 'CallableBorrowValue')
+      return direct
     return (
       state.cells.get(cellKey(direct.value.frame, direct.value.cell)) ?? {
         value: value(0),
@@ -426,6 +468,220 @@ function executeFunction(
   )
   const checkedPlaces = new Map<ReadonlyArray<Mir.PlaceSelector>, ReadonlyArray<number>>()
 
+  const invokeCallableTarget = (
+    target: Hir.CallableTarget,
+    typeArguments: ReadonlyArray<Type.Type>,
+    arguments_: ReadonlyArray<Value>,
+    span: SourceSpan.SourceSpan,
+  ): Step => {
+    if (target._tag === 'DeclarationCallableTarget') {
+      const callee = functionFor(program, target.declaration, typeArguments)
+      if (callee === undefined) {
+        return blockedStep({ _tag: 'MissingFunction', target: target.declaration, span })
+      }
+      trace.push(
+        Object.freeze({
+          _tag: 'Call',
+          caller: fn.id,
+          target: target.declaration,
+          callerInstance: fn.instance,
+          targetInstance: callee.instance,
+          span,
+        }),
+      )
+      const cycleStart = active.findIndex((candidate) => sameInstance(candidate, callee.instance))
+      if (cycleStart >= 0) {
+        return blockedStep({
+          _tag: 'RecursiveCycle',
+          cycle: Object.freeze([...active.slice(cycleStart), callee.instance]),
+          closingCallSpan: span,
+        })
+      }
+      arguments_.forEach((argument, ordinal) => {
+        trace.push(
+          Object.freeze({
+            _tag: 'Binding',
+            target: target.declaration,
+            targetInstance: callee.instance,
+            callSpan: span,
+            argumentOrdinal: ordinal,
+            parameterOrdinal: ordinal,
+            value: argument,
+            fromCall: true,
+            span,
+          }),
+        )
+      })
+      return executeFunction(
+        program,
+        callee,
+        arguments_,
+        Object.freeze([...active, callee.instance]),
+        trace,
+        state,
+      )
+    }
+
+    const operation = target.operation
+    if (operation === 'Not' || operation === 'Negate') {
+      const subject = arguments_.at(0)
+      if (subject?._tag !== 'I32Value') {
+        throw new RangeError('MIR verifier allowed a non-scalar unary callable argument')
+      }
+      if (operation === 'Not')
+        return Object.freeze({ _tag: 'Value', value: value(subject.value === 0 ? 1 : 0) })
+      if (subject.value === -2147483648) {
+        return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'arithmetic overflow', span })
+      }
+      return Object.freeze({ _tag: 'Value', value: value(-subject.value) })
+    }
+    if (
+      operation === 'Add' ||
+      operation === 'Subtract' ||
+      operation === 'Multiply' ||
+      operation === 'Divide' ||
+      operation === 'Remainder' ||
+      operation === 'Equals' ||
+      operation === 'NotEquals' ||
+      operation === 'LessThan' ||
+      operation === 'LessOrEqual' ||
+      operation === 'GreaterThan' ||
+      operation === 'GreaterOrEqual'
+    ) {
+      const leftValue = arguments_.at(0)
+      const rightValue = arguments_.at(1)
+      if (
+        (leftValue?._tag !== 'I32Value' && leftValue?._tag !== 'UsizeValue') ||
+        rightValue?._tag !== leftValue._tag
+      ) {
+        throw new RangeError('MIR verifier allowed invalid binary callable arguments')
+      }
+      const left = BigInt(leftValue.value)
+      const right = BigInt(rightValue.value)
+      if (
+        operation === 'Equals' ||
+        operation === 'NotEquals' ||
+        operation === 'LessThan' ||
+        operation === 'LessOrEqual' ||
+        operation === 'GreaterThan' ||
+        operation === 'GreaterOrEqual'
+      ) {
+        const holds =
+          operation === 'Equals'
+            ? left === right
+            : operation === 'NotEquals'
+              ? left !== right
+              : operation === 'LessThan'
+                ? left < right
+                : operation === 'LessOrEqual'
+                  ? left <= right
+                  : operation === 'GreaterThan'
+                    ? left > right
+                    : left >= right
+        return Object.freeze({ _tag: 'Value', value: value(holds ? 1 : 0) })
+      }
+      if ((operation === 'Divide' || operation === 'Remainder') && right === 0n) {
+        return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'division by zero', span })
+      }
+      const exact =
+        operation === 'Add'
+          ? left + right
+          : operation === 'Subtract'
+            ? left - right
+            : operation === 'Multiply'
+              ? left * right
+              : operation === 'Divide'
+                ? left / right
+                : left % right
+      const unsigned = leftValue._tag === 'UsizeValue'
+      const maximum = program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+      if (
+        (unsigned && (exact < 0n || exact > maximum)) ||
+        (!unsigned && (exact < -2147483648n || exact > 2147483647n))
+      ) {
+        return blockedStep({
+          _tag: 'Trap',
+          function: fn.id,
+          reason: unsigned && exact < 0n ? 'arithmetic underflow' : 'arithmetic overflow',
+          span,
+        })
+      }
+      return Object.freeze({
+        _tag: 'Value',
+        value: unsigned ? usizeValue(exact) : value(Number(exact)),
+      })
+    }
+    return blockedStep({
+      _tag: 'Trap',
+      function: fn.id,
+      reason: `bootstrap callable ${target.actor}.${target.operation} is unavailable`,
+      span,
+    })
+  }
+
+  const invokeCallableValue = (
+    callable: CallableValue,
+    supplied: ReadonlyArray<Value>,
+    span: SourceSpan.SourceSpan,
+  ): Step => {
+    const callableState = state.callables.get(callable.ticket)
+    if (callableState === undefined)
+      throw new RangeError('Callable application referenced a missing evaluator identity')
+    if (callableState.state !== 'Available') {
+      trace.push(
+        Object.freeze({
+          _tag: 'CallableRejected',
+          function: fn.id,
+          ticket: callable.ticket,
+          mode: callable.type.mode,
+          span,
+        }),
+      )
+      return blockedStep({
+        _tag: 'InvalidCallableReuse',
+        function: fn.id,
+        ticket: callable.ticket,
+        state: callableState.state,
+        span,
+      })
+    }
+    callableState.state = callable.type.mode === 'Take' ? 'Consumed' : 'Running'
+    const parameters = new Map<number, Value>()
+    supplied.forEach((argument, ordinal) => {
+      parameters.set(ordinal, argument)
+    })
+    for (const capture of callable.captures) {
+      const resolved =
+        capture.value._tag === 'CallableBorrowValue'
+          ? state.cells.get(cellKey(capture.value.frame, capture.value.cell))?.value
+          : capture.value
+      if (resolved === undefined)
+        throw new RangeError('Callable capture references a missing evaluator cell')
+      parameters.set(capture.parameterOrdinal, resolved)
+    }
+    trace.push(
+      Object.freeze({
+        _tag: 'CallableApply',
+        function: fn.id,
+        ticket: callable.ticket,
+        mode: callable.type.mode,
+        span,
+      }),
+    )
+    const result = invokeCallableTarget(
+      callable.target,
+      callable.typeArguments,
+      Object.freeze(
+        [...parameters.entries()]
+          .sort(([left], [right]) => left - right)
+          .map(([, argument]) => argument),
+      ),
+      span,
+    )
+    if (callableState.state === 'Running') callableState.state = 'Available'
+    return result
+  }
+
   const cleanupMembers = (
     cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
     owner: Value,
@@ -448,6 +704,15 @@ function executeFunction(
             owner.elements.flatMap((element) => cleanupMembers(cleanup.element, element)),
           )
         : Object.freeze([])
+    }
+    if (cleanup._tag === 'CallableCleanup') {
+      if (owner._tag !== 'CallableValue') return Object.freeze([])
+      return Object.freeze(
+        cleanup.slots.flatMap((slot) => {
+          const capture = owner.captures.find((candidate) => candidate.ordinal === slot.ordinal)
+          return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture.value)
+        }),
+      )
     }
     if (owner._tag !== 'AggregateValue') return Object.freeze([])
     return Object.freeze(
@@ -1346,6 +1611,23 @@ function executeFunction(
                 throw new RangeError('Allocation reclaim ticket was consumed more than once')
               ticket.active = false
             }
+            if (operation.cleanup._tag === 'CallableCleanup') {
+              if (dropped._tag !== 'CallableValue')
+                throw new RangeError('Callable cleanup lost its evaluator identity')
+              const callable = state.callables.get(dropped.ticket)
+              if (callable === undefined)
+                throw new RangeError('Callable cleanup referenced a missing evaluator identity')
+              if (callable.state !== 'Consumed') callable.state = 'Released'
+              trace.push(
+                Object.freeze({
+                  _tag: 'CallableCleanup',
+                  function: fn.id,
+                  ticket: dropped.ticket,
+                  mode: dropped.type.mode,
+                  span: operation.provenance.span,
+                }),
+              )
+            }
             const members = cleanupMembers(operation.cleanup, dropped)
             trace.push(
               Object.freeze({
@@ -1356,6 +1638,143 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
+            break
+          }
+          case 'MakeCallable': {
+            const ticket = state.nextCallable
+            state.nextCallable += 1
+            state.callables.set(ticket, { state: 'Available' })
+            const captures = operation.captures.map((capture) => {
+              const captured: Value =
+                capture.access === 'Copy' || capture.access === 'Take'
+                  ? read(capture.source).value
+                  : (() => {
+                      const key = cellKey(frame, capture.source.ordinal)
+                      if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
+                      return Object.freeze({
+                        _tag: 'CallableBorrowValue' as const,
+                        frame,
+                        cell: capture.source.ordinal,
+                        access: capture.access,
+                      })
+                    })()
+              return Object.freeze({
+                ordinal: capture.ordinal,
+                parameterOrdinal: capture.parameterOrdinal,
+                access: capture.access,
+                value: captured,
+              })
+            })
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'CallableValue',
+                ticket,
+                type: operation.type.type,
+                target: operation.target,
+                typeArguments: operation.typeArguments,
+                captures: Object.freeze(captures),
+              }),
+              fromCall: false,
+            })
+            trace.push(
+              Object.freeze({
+                _tag: 'CallableConstruct',
+                function: fn.id,
+                ticket,
+                mode: operation.type.type.mode,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'ApplyCallable': {
+            const stored =
+              operation.callable === undefined ? undefined : read(operation.callable).value
+            if (stored !== undefined && stored._tag !== 'CallableValue') {
+              throw new RangeError('MIR verifier allowed applying a non-callable evaluator value')
+            }
+            const target = stored?.target ?? operation.target
+            if (target === undefined)
+              throw new RangeError('MIR verifier allowed a callable application without identity')
+            const ticket = stored?.ticket
+            const callableState = ticket === undefined ? undefined : state.callables.get(ticket)
+            if (ticket !== undefined && callableState === undefined)
+              throw new RangeError('Callable application referenced a missing evaluator identity')
+            if (ticket !== undefined && callableState !== undefined) {
+              if (callableState.state !== 'Available') {
+                trace.push(
+                  Object.freeze({
+                    _tag: 'CallableRejected',
+                    function: fn.id,
+                    ticket,
+                    mode: stored?.type.mode ?? operation.callableType.mode,
+                    span: operation.provenance.span,
+                  }),
+                )
+                return blockedStep({
+                  _tag: 'InvalidCallableReuse',
+                  function: fn.id,
+                  ticket,
+                  state: callableState.state,
+                  span: operation.provenance.span,
+                })
+              }
+              callableState.state =
+                stored?.type.mode === 'Take' || operation.access === 'Take' ? 'Consumed' : 'Running'
+            }
+            const captureValues = (
+              stored?.captures ??
+              operation.captures.map((capture) => {
+                const captured: Value =
+                  capture.access === 'Copy' || capture.access === 'Take'
+                    ? read(capture.source).value
+                    : Object.freeze({
+                        _tag: 'CallableBorrowValue' as const,
+                        frame,
+                        cell: capture.source.ordinal,
+                        access: capture.access,
+                      })
+                return Object.freeze({ ...capture, value: captured })
+              })
+            ).map((capture) => {
+              const captured = capture.value
+              const resolved =
+                captured._tag === 'CallableBorrowValue'
+                  ? state.cells.get(cellKey(captured.frame, captured.cell))?.value
+                  : captured
+              if (resolved === undefined)
+                throw new RangeError('Callable capture references a missing evaluator cell')
+              return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: resolved })
+            })
+            const parameters = new Map<number, Value>()
+            operation.arguments.forEach((argument, ordinal) => {
+              parameters.set(ordinal, read(argument).value)
+            })
+            for (const capture of captureValues)
+              parameters.set(capture.parameterOrdinal, capture.value)
+            const arguments_ = Object.freeze(
+              [...parameters.entries()]
+                .sort(([left], [right]) => left - right)
+                .map(([, argument]) => argument),
+            )
+            trace.push(
+              Object.freeze({
+                _tag: 'CallableApply',
+                function: fn.id,
+                ticket: ticket ?? -1,
+                mode: stored?.type.mode ?? operation.callableType.mode,
+                span: operation.provenance.span,
+              }),
+            )
+            const result = invokeCallableTarget(
+              target,
+              stored?.typeArguments ?? operation.typeArguments,
+              arguments_,
+              operation.provenance.span,
+            )
+            if (callableState?.state === 'Running') callableState.state = 'Available'
+            if (result._tag === 'Blocked') return result
+            write(operation.destination, { value: result.value, fromCall: true })
             break
           }
           case 'MakeEffect': {
@@ -1503,47 +1922,23 @@ function executeFunction(
             }
             if (protectedOutcome.tag !== operation.handledTag)
               throw new RangeError('MIR effect catch reached an unmatched failure tag')
-            const handlerTarget = functionFor(program, operation.handlerTarget, Object.freeze([]))
-            if (handlerTarget === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.handlerTarget,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                caller: fn.id,
-                target: operation.handlerTarget,
-                callerInstance: fn.instance,
-                targetInstance: handlerTarget.instance,
-                span: operation.provenance.span,
-              }),
-              Object.freeze({
-                _tag: 'Binding',
-                target: operation.handlerTarget,
-                targetInstance: handlerTarget.instance,
-                callSpan: operation.provenance.span,
-                argumentOrdinal: 0,
-                parameterOrdinal: 0,
-                value: protectedOutcome.payload,
-                fromCall: true,
-                span: operation.provenance.span,
-              }),
-            )
-            const handlerResult = executeFunction(
-              program,
-              handlerTarget,
-              [protectedOutcome.payload],
-              Object.freeze([...active, handlerTarget.instance]),
-              trace,
-              state,
+            const handlerCallable = read(operation.handlerCallable).value
+            if (handlerCallable._tag !== 'CallableValue')
+              throw new RangeError('MIR catch handler lost its callable environment')
+            const handlerResult = invokeCallableValue(
+              handlerCallable,
+              Object.freeze([protectedOutcome.payload]),
+              operation.provenance.span,
             )
             if (handlerResult._tag === 'Blocked') return handlerResult
             if (handlerResult.value._tag !== 'EffectValue')
               throw new RangeError('MIR catch handler factory returned a non-Effect value')
             write(operation.handlerValue, { value: handlerResult.value, fromCall: true })
-            const handlerRunner = functionFor(program, operation.handlerRunner, Object.freeze([]))
+            const handlerRunner = functionFor(
+              program,
+              operation.handlerRunner,
+              operation.handlerTypeArguments,
+            )
             if (handlerRunner === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
@@ -2016,8 +2411,10 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
   const result = executeFunction(program, fn, [], Object.freeze([fn.instance]), trace, {
     nextFrame: 0,
     nextAllocation: 0,
+    nextCallable: 0,
     cells: new Map(),
     allocations: new Map(),
+    callables: new Map(),
   })
   if (result._tag === 'Blocked') {
     return Object.freeze({

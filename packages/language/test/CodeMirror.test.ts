@@ -42,6 +42,13 @@ it('highlights mutable loop keywords through the compiler lexer', () => {
   ])
 })
 
+it('highlights callable mode keywords without reserving dual', () => {
+  assert.deepStrictEqual(
+    spellings('fn(fn(I32) -> I32, mut fn(I32) -> I32, once fn(I32) -> I32) dual', 'keyword'),
+    ['fn', 'fn', 'mut', 'fn', 'once', 'fn'],
+  )
+})
+
 it('highlights type unions separately from pipelines', () => {
   assert.deepStrictEqual(spellings('Token | End |> inspect', 'operator'), ['|', '|>'])
 })

@@ -70,12 +70,13 @@ source order.
 - **THEN** the call expression retains the actor identifier, the dot, the operation identifier, and the argument list in concrete order
 
 ### Requirement: First call syntax remains explicit and recoverable
-A call expression SHALL retain its callee identifier, left parenthesis, ordered arguments,
-separators, right parenthesis, trivia, and exact source-owned span in concrete order. Missing call
-elements SHALL become explicit missing tokens with parser diagnostics. Unexpected tokens inside an
-argument position SHALL remain in an error region without being interpreted as an argument, and
-recovery SHALL resume at the next comma, right parenthesis, enclosing brace, following declaration,
-or end-of-file.
+A call expression SHALL retain its complete callee expression, left parenthesis, ordered arguments,
+separators, right parenthesis, trivia, and exact source-owned span in concrete order. Callees MAY be
+named or qualified function references, sections, bindings, grouped expressions, or prior call
+results. Missing call elements SHALL become explicit missing syntax with parser diagnostics.
+Unexpected tokens inside a callee or argument position SHALL remain in an error region, and recovery
+SHALL resume at the next comma, right parenthesis, enclosing brace, following declaration, or
+end-of-file.
 
 #### Scenario: Recover a missing right call parenthesis
 - **WHEN** a returned call spells `answer(` immediately before the function's closing brace
@@ -83,7 +84,7 @@ or end-of-file.
 
 #### Scenario: Recover a missing call callee
 - **WHEN** the returned expression consists only of `()`
-- **THEN** the call contains a missing identifier and retains both parentheses without inventing a callee name
+- **THEN** the call retains a missing callee and both parentheses without inventing a name
 
 #### Scenario: Preserve a supported call argument
 - **WHEN** the returned call spells `identity(42)`
@@ -96,6 +97,11 @@ or end-of-file.
 #### Scenario: Keep integer expressions unchanged
 - **WHEN** a function returns a decimal integer
 - **THEN** its existing integer-literal concrete shape and recovery behavior remain unchanged
+
+#### Scenario: Call a section result
+
+- **WHEN** a body spells `I32.add(2)(3)`
+- **THEN** the concrete tree retains two ordered postfix calls, with the first producing the callee of the second
 
 ### Requirement: Parse nested call arguments losslessly
 The bootstrap parser SHALL accept a call expression wherever a call argument expression is allowed.
@@ -367,13 +373,12 @@ anchors, and every token SHALL be retained losslessly.
 
 ### Requirement: Operator expressions parse losslessly by precedence
 
-Every expression position SHALL accept grouped, prefix, infix, and pipeline expressions in the
-closed precedence and associativity order defined by `bootstrap-operator-semantics`. The concrete
-tree SHALL retain a grouped expression's parentheses, a prefix expression's operator and operand,
-an infix expression's left operand, operator, and right operand, and a pipeline expression's left
-operand, pipe token, qualified target path, and optional later-argument list. Every token and trivia
-slice SHALL remain owned exactly once, and concrete structure SHALL not claim that an operator or
-pipeline target resolves successfully.
+Every expression position SHALL accept grouped, prefix, infix, callable-application, and pipeline
+expressions in the closed precedence and associativity order defined by
+`bootstrap-operator-semantics`. A pipeline expression SHALL retain its left operand, pipe token, and
+complete callable expression on the right rather than a qualified-target-only branch. Every token
+and trivia slice SHALL remain owned exactly once, and concrete structure SHALL not claim that an
+operator or callable resolves successfully.
 
 #### Scenario: Parse a precedence ladder
 
@@ -385,20 +390,20 @@ pipeline target resolves successfully.
 - **WHEN** a body returns `-(value + 1)` and another returns `!(left == right)`
 - **THEN** each prefix expression owns one grouped operand with exact parentheses and source spans
 
-#### Scenario: Parse a no-argument pipeline target
+#### Scenario: Parse a function-reference pipeline
 
 - **WHEN** a body returns `flag |> Bool.not`
-- **THEN** the pipeline retains the qualified `Bool.not` target with no explicit argument list
+- **THEN** the pipeline retains `Bool.not` as a callable expression without an invented argument list
 
 #### Scenario: Parse a pipeline chain
 
-- **WHEN** a body returns `2 |> I32.add(3) |> I32.multiply(4)`
+- **WHEN** a body returns `2 |> I32.add(3) |> transform`
 - **THEN** the concrete tree associates the two pipeline branches left-to-right in source order
 
 ### Requirement: Operator recovery stays inside the containing expression
 
-A missing prefix operand, infix right operand, grouping parenthesis, pipeline qualifier, pipeline
-member, or pipeline argument delimiter SHALL become explicit parser recovery data at the nearest
+A missing prefix operand, infix right operand, grouping parenthesis, callable operand, call
+delimiter, or pipeline right expression SHALL become explicit parser recovery data at the nearest
 expression boundary. Unexpected operator sequences SHALL remain in error regions. Recovery SHALL
 resume at the next operand, comma, closing parenthesis, statement keyword, closing brace, top-level
 declaration, or end-of-file, preserving following statements and declarations.
@@ -413,15 +418,49 @@ declaration, or end-of-file, preserving following statements and declarations.
 - **WHEN** a return expression spells `(1 + 2` before the block's closing brace
 - **THEN** the group contains a missing right parenthesis and the block boundary remains separate
 
-#### Scenario: Recover a damaged pipeline target
+#### Scenario: Recover a missing pipeline callable
 
-- **WHEN** a body spells `value |> .apply(1)` before a following declaration
-- **THEN** the missing qualifier and diagnostic remain in the pipeline branch while the following declaration parses independently
+- **WHEN** a body spells `value |>` before a following declaration
+- **THEN** the missing callable and diagnostic remain in the pipeline branch while the following declaration parses independently
 
 #### Scenario: Reject ungrouped comparison chaining
 
 - **WHEN** a body spells `1 < 2 < 3`
 - **THEN** the second comparison is retained as recovered unexpected syntax with a parser diagnostic
+
+### Requirement: Callable types parse explicitly
+
+Type positions SHALL parse `fn(A) -> B`, `mut fn(A) -> B`, and `once fn(A) -> B` as distinct
+callable types with ordered parameter types, result type, invocation-mode tokens, trivia, recovery,
+and exact spans. Missing parameter, parenthesis, arrow, result, or mode-adjacent function keyword
+SHALL recover within the containing type boundary.
+
+#### Scenario: Parse all invocation modes
+
+- **WHEN** one declaration accepts `fn(I32) -> I32`, `mut fn(I32) -> I32`, and `once fn(I32) -> I32`
+- **THEN** the syntax tree retains three distinct callable-type branches with complete tokens and spans
+
+### Requirement: Run consumes the complete following expression
+
+The operand of `run` SHALL extend through the complete following expression until the enclosing
+comma, closing delimiter, block delimiter, or statement boundary. It SHALL include following
+pipeline branches regardless of line breaks. Grouping `run` SHALL terminate the operand explicitly
+and allow the executed success value to participate in a surrounding expression.
+
+#### Scenario: Run a transformed Effect without grouping
+
+- **WHEN** source spells `return run attempt |> Effect.retry(2)`
+- **THEN** the `RunExpression` contains the complete pipeline as its operand
+
+#### Scenario: Pipe the executed result with grouping
+
+- **WHEN** source spells `(run attempt) |> I32.add(1)`
+- **THEN** the grouped run is the left operand of the outer pipeline
+
+#### Scenario: Stop run at an argument comma
+
+- **WHEN** source spells `consume(run attempt |> Effect.retry(2), other)`
+- **THEN** the comma ends the run operand and `other` remains the second argument
 
 ### Requirement: Struct declarations parse losslessly
 
@@ -746,17 +785,17 @@ positions and surrounding expressions SHALL retain the existing bounded recovery
 - **WHEN** a function declares a parameter or result type spelled `Usize`
 - **THEN** parsing preserves the type path and every source span using the existing function grammar
 
-### Requirement: Flow and failure syntax is lossless and locally recoverable
+### Requirement: Effect and failure syntax is lossless and locally recoverable
 
-The syntax layer SHALL preserve `flow fn`, `!` failure rows, prefix `run`, `fail move`, and an
-explicit catch type argument on a pipeline target with every token and source span. Recovery from a
-missing function keyword, row member, run operand, move keyword, or failure operand SHALL stay
-within the damaged declaration or statement.
+The syntax layer SHALL preserve `effect {}`, `effect fn`, `!` failure rows, prefix `run`, Copy or
+moved `fail`, and an explicit catch type argument on a callable section with every token and source
+span. Recovery from a missing function keyword, row member, run operand, or failure operand SHALL
+stay within the damaged declaration or statement.
 
 #### Scenario: Parse the complete surface
 
-- **WHEN** source declares a flow with two failure members, constructs it, runs it, and originates one failure
-- **THEN** the syntax tree retains distinct flow declaration, failure row, run expression, and fail statement nodes
+- **WHEN** source declares an Effect with two failure members, constructs it, runs it, and originates one failure
+- **THEN** the syntax tree retains distinct Effect construction, failure row, run expression, and fail statement nodes
 
 #### Scenario: Recover a missing row member
 
@@ -765,17 +804,17 @@ within the damaged declaration or statement.
 
 #### Scenario: Parse pipelined exact recovery
 
-- **WHEN** a flow recipe is piped into `Flow.catch<E>(handler)`
-- **THEN** the pipeline target retains the explicit `E` and the handler argument losslessly
+- **WHEN** an Effect recipe is piped into `Effect.catch<E>(handler)`
+- **THEN** the callable section retains the explicit `E` and the handler argument losslessly
 
 ### Requirement: Effect and owned-allocation syntax is lossless and recoverable
 
 The syntax layer SHALL preserve `effect {}`, `effect fn`, `Effect` actor calls, `run`, Copy or moved
 `fail`, allocator requirements, explicit consuming `drop`, restricted Drop declarations, and
-qualified unsafe allocation/buffer operations. The lexer SHALL reserve `effect` and cease treating
-`flow` as the effect-function keyword.
+qualified unsafe allocation/buffer operations. The lexer SHALL reserve `effect` as the sole
+effect-function keyword.
 
 #### Scenario: Recover a damaged effect allocation body
 
 - **WHEN** source contains an effect function with a damaged unsafe allocation call followed by a valid `Effect.catch` pipeline
-- **THEN** the syntax tree retains bounded damaged allocation nodes and the later Effect pipeline without reverting to Flow or Scope nodes
+- **THEN** the syntax tree retains bounded damaged allocation nodes and the later Effect pipeline without inventing legacy effect or allocation-scope nodes

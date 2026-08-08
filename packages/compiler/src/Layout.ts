@@ -107,6 +107,7 @@ export interface Plan {
   readonly target: Target.Target
   readonly entries: ReadonlyArray<Entry>
   readonly effectEnvironments: ReadonlyArray<EffectEnvironment>
+  readonly callableEnvironments: ReadonlyArray<CallableEnvironment>
   readonly callingShapes: ReadonlyArray<CallingShape>
   readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -142,6 +143,45 @@ export interface EffectEnvironmentField {
   readonly alignment: number
   readonly padding: number
   readonly representation: 'Value' | 'Borrow'
+}
+
+/** Target-owned storage and call-scoped view for one concrete callable section identity. */
+export type CallableEnvironment =
+  | {
+      readonly _tag: 'CallableEnvironment'
+      readonly callable: Instances.CallableInstance
+      readonly fields: ReadonlyArray<CallableEnvironmentField>
+      readonly size: number
+      readonly alignment: number
+      readonly tailPadding: number
+      readonly view: CallableView
+    }
+  | {
+      readonly _tag: 'UnavailableCallableEnvironment'
+      readonly callable: Instances.CallableInstance
+      readonly reason: string
+      readonly view: CallableView
+    }
+
+export interface CallableEnvironmentField {
+  readonly ordinal: number
+  readonly parameterOrdinal: number
+  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly type: DeclarationIndex.SemanticType
+  readonly offset: number
+  readonly size: number
+  readonly alignment: number
+  readonly padding: number
+  readonly representation: 'Value' | 'Borrow'
+}
+
+/** The ephemeral target-local pair passed at indirect callable application. */
+export interface CallableView {
+  readonly codeOffset: 0
+  readonly environmentOffset: number
+  readonly size: number
+  readonly alignment: number
+  readonly pointerBits: 32 | 64
 }
 
 /** A target-owned verdict for one reachable exact contextual `Usize` literal. */
@@ -691,6 +731,14 @@ export const catalog = (
       completed.set(key, result)
       return result
     }
+    if (Type.isCallable(type)) {
+      const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+        _tag: 'InvalidDeclaration',
+        detail: 'callable environment layout is planned from its hidden concrete identity',
+      })
+      completed.set(key, result)
+      return result
+    }
     const element = layoutType(type.element)
     const dependencies = Object.freeze(Type.nominals(type.element))
     if (element._tag === 'UnavailableLayoutEntry') {
@@ -806,18 +854,37 @@ const addExpressionTypes = (
   if (expression._tag === 'ArrayConstruct') {
     for (const element of expression.elements) addExpressionTypes(types, element, substitution)
   }
-  if (expression._tag === 'Call' || expression._tag === 'BuiltinCall') {
+  if (
+    expression._tag === 'Call' ||
+    expression._tag === 'EffectConstruct' ||
+    expression._tag === 'BuiltinCall'
+  ) {
+    for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
+  }
+  if (expression._tag === 'CallableSection') {
+    for (const capture of expression.captures) {
+      addExpressionTypes(types, capture.value, substitution)
+    }
+  }
+  if (expression._tag === 'CallableApply') {
+    addExpressionTypes(types, expression.callee, substitution)
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
   }
   if (expression._tag === 'EffectBlock') {
     addStatementTypes(types, expression.statements, substitution)
   }
   if (expression._tag === 'Run') addExpressionTypes(types, expression.subject, substitution)
-  if (expression._tag === 'EffectCatch')
+  if (expression._tag === 'EffectCatch') {
     addExpressionTypes(types, expression.protected, substitution)
+    addExpressionTypes(types, expression.handler, substitution)
+  }
   if (expression._tag === 'EffectRetry') {
     addExpressionTypes(types, expression.protected, substitution)
     addExpressionTypes(types, expression.retries, substitution)
+  }
+  if (expression._tag === 'EffectTransform') {
+    addExpressionTypes(types, expression.protected, substitution)
+    addExpressionTypes(types, expression.callback, substitution)
   }
   if (expression._tag === 'EffectProvide')
     addExpressionTypes(types, expression.protected, substitution)
@@ -1025,6 +1092,71 @@ const effectEnvironments = (
   )
 }
 
+const callableView = (target: Target.Target): CallableView =>
+  Object.freeze({
+    codeOffset: 0,
+    environmentOffset: target.pointerSize,
+    size: target.pointerSize * 2,
+    alignment: target.pointerAlignment,
+    pointerBits: target.pointerSize === 4 ? 32 : 64,
+  })
+
+const callableEnvironments = (
+  target: Target.Target,
+  entries: ReadonlyArray<Entry>,
+  discovery: Instances.Discovery,
+): ReadonlyArray<CallableEnvironment> => {
+  const layouts = new Map(entries.map((entry) => [Type.key(entry.type), entry] as const))
+  const view = callableView(target)
+  return Object.freeze(
+    discovery.callables.map((callable): CallableEnvironment => {
+      let cursor = 0
+      let environmentAlignment = 1
+      const fields: Array<CallableEnvironmentField> = []
+      for (const capture of callable.captures) {
+        const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+        const valueLayout = borrowed ? undefined : layouts.get(Type.key(capture.type))
+        if (!borrowed && valueLayout === undefined) {
+          return Object.freeze({
+            _tag: 'UnavailableCallableEnvironment',
+            callable,
+            reason: `capture ${capture.ordinal} has no concrete value layout`,
+            view,
+          })
+        }
+        const size = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
+        const alignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
+        const offset = alignUp(cursor, alignment)
+        fields.push(
+          Object.freeze({
+            ordinal: capture.ordinal,
+            parameterOrdinal: capture.parameterOrdinal,
+            access: capture.access,
+            type: capture.type,
+            offset,
+            size,
+            alignment,
+            padding: offset - cursor,
+            representation: borrowed ? 'Borrow' : 'Value',
+          }),
+        )
+        cursor = offset + size
+        environmentAlignment = Math.max(environmentAlignment, alignment)
+      }
+      const size = alignUp(cursor, environmentAlignment)
+      return Object.freeze({
+        _tag: 'CallableEnvironment',
+        callable,
+        fields: Object.freeze(fields),
+        size,
+        alignment: environmentAlignment,
+        tailPadding: size - cursor,
+        view,
+      })
+    }),
+  )
+}
+
 const usizeLiteralVerdicts = (
   target: Target.Target,
   discovery: Instances.Discovery,
@@ -1091,6 +1223,9 @@ const usizeLiteralVerdicts = (
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationIndex.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
+  for (const callable of discovery.callables) {
+    for (const capture of callable.captures) reached.set(Type.key(capture.type), capture.type)
+  }
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
@@ -1143,6 +1278,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     target: self.target,
     entries: orderedEntries,
     effectEnvironments: effectEnvironments(self.target, orderedEntries, discovery),
+    callableEnvironments: callableEnvironments(self.target, orderedEntries, discovery),
     callingShapes: callingShapes(self.target, orderedEntries, shapeTypes),
     literalVerdicts: literals.verdicts,
     diagnostics: literals.diagnostics,
@@ -1160,6 +1296,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     target,
     entries: orderedEntries,
     effectEnvironments: Object.freeze([]),
+    callableEnvironments: Object.freeze([]),
     callingShapes: callingShapes(target, orderedEntries),
     literalVerdicts: Object.freeze([]),
     diagnostics: Object.freeze([]),
@@ -1195,6 +1332,11 @@ const shapeNode = (
       length: Object.freeze({ type: 'I32', lane: 1 }),
       laneCount: 2,
     })
+  }
+  if (Type.isCallable(type)) {
+    throw new RangeError(
+      `callable ${Type.encode(type)} needs a hidden concrete identity before calling-shape planning`,
+    )
   }
   const candidate = entries.get(Type.key(type))
   if (Type.isFixedArray(type)) {
@@ -1412,6 +1554,30 @@ export const callingShape = (
 export const effectEnvironmentLanes = (
   self: Plan,
   environment: Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
+): ReadonlyArray<CallingLane> =>
+  Object.freeze(
+    environment.fields.flatMap((field): ReadonlyArray<CallingLane> => {
+      if (field.representation === 'Borrow') {
+        return [
+          Object.freeze({
+            _tag: 'CallingLane',
+            path: Object.freeze([]),
+            type: Object.freeze({
+              _tag: 'Address',
+              element: field.type,
+              bits: self.target.pointerSize === 4 ? 32 : 64,
+            }),
+          }),
+        ]
+      }
+      return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+    }),
+  )
+
+/** Materializes the ABI lanes of one hidden callable capture environment. */
+export const callableEnvironmentLanes = (
+  self: Plan,
+  environment: Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }>,
 ): ReadonlyArray<CallingLane> =>
   Object.freeze(
     environment.fields.flatMap((field): ReadonlyArray<CallingLane> => {
@@ -2071,6 +2237,13 @@ export const encode = (self: Plan): string =>
         ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${environment.site.span.start} unavailable=${environment.reason}`
         : `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${environment.site.span.start} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `${field.source.toLowerCase()}${field.ordinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'}`,
     ),
+    ...self.callableEnvironments.map((environment) => {
+      const callable = environment.callable
+      const identity = `${callable.owner.declaration.module}.${callable.owner.declaration.name}@${callable.site.span.start}`
+      return environment._tag === 'UnavailableCallableEnvironment'
+        ? `callable-environment ${identity} unavailable=${environment.reason} view=code@${environment.view.codeOffset},env@${environment.view.environmentOffset},size=${environment.view.size}`
+        : `callable-environment ${identity} mode=${callable.mode.toLowerCase()} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `capture${field.ordinal}->p${field.parameterOrdinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'} view=code@${environment.view.codeOffset},env@${environment.view.environmentOffset},size=${environment.view.size}`
+    }),
     ...self.callingShapes.map(
       (shape) =>
         `calling ${Type.encode(shape.type)} lanes=${shape.laneCount}${

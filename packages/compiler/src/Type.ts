@@ -37,6 +37,17 @@ export interface Slice {
   readonly element: Type
 }
 
+/** How a callable environment may be accessed by one invocation. */
+export type CallableMode = 'Shared' | 'Exclusive' | 'Take'
+
+/** One canonical structural callable contract independent of its hidden concrete environment. */
+export interface Callable {
+  readonly _tag: 'CallableType'
+  readonly parameters: ReadonlyArray<Type>
+  readonly result: Type
+  readonly mode: CallableMode
+}
+
 /** One compile-time capability requirement. Roles select slots and have no runtime value. */
 export interface Requirement {
   readonly capability: Nominal
@@ -69,6 +80,7 @@ export type Type =
   | Parameter
   | FixedArray
   | Slice
+  | Callable
   | Effect
   | StructuralUnion
 
@@ -136,6 +148,19 @@ export const fixedArray = (element: Type, length: number): FixedArray =>
 /** Constructs one canonical lexical slice type. */
 export const slice = (access: Slice['access'], element: Type): Slice =>
   Object.freeze({ _tag: 'SliceType', access, element })
+
+/** Constructs one immutable canonical callable contract. */
+export const callable = (
+  parameters_: ReadonlyArray<Type>,
+  result: Type,
+  mode: CallableMode = 'Shared',
+): Callable =>
+  Object.freeze({
+    _tag: 'CallableType',
+    parameters: Object.freeze(Array.from(parameters_)),
+    result,
+    mode,
+  })
 
 /** Constructs one normalized compiler-private lazy effect contract. */
 export const effect = (
@@ -237,6 +262,10 @@ export const isFixedArray = (self: Type): self is FixedArray =>
 export const isSlice = (self: Type): self is Slice =>
   typeof self !== 'string' && self._tag === 'SliceType'
 
+/** Tests whether a semantic type is a structural callable contract. */
+export const isCallable = (self: Type): self is Callable =>
+  typeof self !== 'string' && self._tag === 'CallableType'
+
 /** Tests whether a semantic type is a compiler-private lazy effect contract. */
 export const isEffect = (self: Type): self is Effect =>
   typeof self !== 'string' && self._tag === 'EffectType'
@@ -254,6 +283,8 @@ export const key = (self: Type): string => {
   if (isParameter(self)) return `parameter:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
+  if (isCallable(self))
+    return `callable:${self.mode}<(${self.parameters.map(key).join(',')})->${key(self.result)}>`
   if (isEffect(self))
     return `effect:${self.access}<${key(self.success)}!${self.failures.map(key).join('|')}?${self.requirements.map((requirement) => `${requirement.access}:${key(requirement.capability)}@${requirement.role}`).join('|')}>`
   return `union:${self.members.map(key).join('|')}`
@@ -277,6 +308,10 @@ export const encode = (self: Type): string => {
   if (isFixedArray(self)) return `Array<${encode(self.element)}, ${self.length}>`
   if (isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
+  if (isCallable(self)) {
+    const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
+    return `${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
+  }
   if (isEffect(self)) {
     const row = self.failures.length === 0 ? '' : ` ! ${self.failures.map(encode).join(' | ')}`
     const requirements =
@@ -301,15 +336,17 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
       ? nominals(self.element)
       : isSlice(self)
         ? nominals(self.element)
-        : isEffect(self)
-          ? Object.freeze([
-              ...nominals(self.success),
-              ...self.failures.flatMap(nominals),
-              ...self.requirements.flatMap((requirement) => nominals(requirement.capability)),
-            ])
-          : isUnion(self)
-            ? Object.freeze(self.members.flatMap(nominals))
-            : []
+        : isCallable(self)
+          ? Object.freeze([...self.parameters.flatMap(nominals), ...nominals(self.result)])
+          : isEffect(self)
+            ? Object.freeze([
+                ...nominals(self.success),
+                ...self.failures.flatMap(nominals),
+                ...self.requirements.flatMap((requirement) => nominals(requirement.capability)),
+              ])
+            : isUnion(self)
+              ? Object.freeze(self.members.flatMap(nominals))
+              : []
 
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
@@ -324,7 +361,10 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
       return
     }
     if (isFixedArray(type) || isSlice(type)) visit(type.element)
-    else if (isEffect(type)) {
+    else if (isCallable(type)) {
+      for (const parameter_ of type.parameters) visit(parameter_)
+      visit(type.result)
+    } else if (isEffect(type)) {
       visit(type.success)
       for (const failure of type.failures) visit(failure)
       for (const requirement of type.requirements) visit(requirement.capability)
@@ -342,6 +382,7 @@ export const containsBorrow = (self: Type): boolean => {
   if (isSlice(self)) return true
   if (isNominal(self)) return self.arguments.some(containsBorrow)
   if (isFixedArray(self)) return containsBorrow(self.element)
+  if (isCallable(self)) return self.parameters.some(containsBorrow) || containsBorrow(self.result)
   if (isEffect(self)) return containsBorrow(self.success) || self.failures.some(containsBorrow)
   if (isUnion(self)) return self.members.some(containsBorrow)
   return false
@@ -358,6 +399,12 @@ export const substitute = (self: Type, substitution: ReadonlyMap<string, Type>):
     )
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
   if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
+  if (isCallable(self))
+    return callable(
+      self.parameters.map((parameter_) => substitute(parameter_, substitution)),
+      substitute(self.result, substitution),
+      self.mode,
+    )
   if (isEffect(self)) {
     const success = substitute(self.success, substitution)
     const failures = self.failures.map((failure) => substitute(failure, substitution))
@@ -406,6 +453,17 @@ export const infer = (pattern: Type, actual: Type, inferred: Map<string, Type>):
   }
   if (isSlice(pattern) && isSlice(actual)) {
     return pattern.access === actual.access && infer(pattern.element, actual.element, inferred)
+  }
+  if (isCallable(pattern) && isCallable(actual)) {
+    return (
+      pattern.mode === actual.mode &&
+      pattern.parameters.length === actual.parameters.length &&
+      pattern.parameters.every((parameter_, index) => {
+        const supplied = actual.parameters.at(index)
+        return supplied !== undefined && infer(parameter_, supplied, inferred)
+      }) &&
+      infer(pattern.result, actual.result, inferred)
+    )
   }
   if (isEffect(pattern) && isEffect(actual)) {
     return (

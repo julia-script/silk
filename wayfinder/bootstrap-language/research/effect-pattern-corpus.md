@@ -1304,6 +1304,41 @@ These scenarios combine several patterns and are more revealing than isolated fe
     scratch, retain a connection in the provider, then return a transaction in a request scope. Test
     all three lifetimes independently instead of treating them as one "service scope."
 
+## Callable composition scenarios selected for Silk
+
+The callable review resolves a gap in the earlier corpus: pipelines are not argument-insertion
+syntax, and Effect combinators do not receive a privileged callback category. Named functions and
+automatic leading-argument sections are ordinary values with compiler-derived environments.
+
+1. **Reusable Copy mapper:** `succeed(2) |> Effect.map(I32.add(40))` snapshots `40`; the section is
+   shared reusable and can also be stored and called as `I32.add(40)(2)`.
+2. **Exclusive stateful mapper:** a section such as `increment(&mut state)` retains one exclusive
+   borrow. The mapped Effect requires exclusive execution, sequential runs observe the same state,
+   and dropping the composition ends the loan.
+3. **Consuming mapper:** `consume(move allocation)` owns the Allocation in its environment. Mapping
+   with it makes the composed Effect take-once, retry is rejected before execution, and dropping the
+   unrun Effect releases the allocation exactly once.
+4. **Generic section:** trailing capture evidence specializes what it can; the omitted leading
+   argument supplies the remaining generic evidence at application. Expected results and later uses
+   never participate in inference.
+5. **Effectful logging:** a Logger-requiring callback is passed to `tap` or `flatMap`, not hidden in a
+   pure `map` or compiler tracing intrinsic. Its requirement row propagates to the composed Effect,
+   and a provider is supplied at the program boundary.
+6. **Nested map:** when the callback returns an Effect, `map` preserves `Effect<Effect<A>>`; a second
+   `run` or explicit flattening is required. `flatMap` removes exactly one layer and `tap` preserves
+   the original success.
+7. **Grouped versus ungrouped run:** `run effect |> Effect.map(callback)` composes before executing
+   because `run` owns the complete following expression. `(run effect) |> transform` executes first
+   and applies an ordinary callable to the eager success value.
+8. **Borrowed resource adapter:** a stored shared or exclusive section may cross ordinary function
+   borders only while its captured loan remains valid. Its structural `fn` or `mut fn` contract
+   hides environment layout but not invocation guarantees.
+
+These scenarios deliberately require no universal closure box. Hidden construction identity,
+ownership, instance discovery, target-aware layout, and the backend-neutral MIR DAG keep every
+environment concrete. Unknown-sized owned erased callable returns and heterogeneous callable
+storage remain deferred.
+
 ## What this corpus suggests measuring before choosing syntax
 
 The examples repeatedly depend on a small semantic kernel. A syntax candidate should be judged by

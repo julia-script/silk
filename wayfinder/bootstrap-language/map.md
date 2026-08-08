@@ -54,7 +54,8 @@ native self-hosting compiler—clear enough to hand each implementation stage to
   and broader library families.
 - [Prototype the bootstrap language syntax](issues/08-prototype-bootstrap-syntax.md)
   — Use `effect {}`, `effect fn`, `run`, and explicit `return`; compact `!` failure and `?`
-  requirement rows; qualified data-first actor operations with built-in pipe insertion; Effect
+  requirement rows; first-class callable values, automatic leading-argument sections, and unary
+  pipeline application; Effect
   specialization, flattening, and per-run providers; capture-derived reuse; strict non-escape; and
   guarded recursive effects that lower without universal interpreter overhead.
 - [Define the staged self-hosting build and acceptance procedure](issues/09-self-hosting-build-and-acceptance.md)

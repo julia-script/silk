@@ -302,3 +302,127 @@ diagnostics by canonical identity without reconstructing specialization from ren
 #### Scenario: Trace a specialization across phases
 - **WHEN** a consumer selects one concrete generic call
 - **THEN** the facade returns its source application, substitution, instance key, layout, ownership proof, and MIR provenance
+
+### Requirement: Position-oriented semantic targets are facade queries
+
+The analysis facade SHALL answer the smallest reference-bearing semantic target containing a byte
+offset in a requested module and SHALL map every available resolved target identity to its exact
+declaration source span. The answer SHALL preserve explicit missing, inaccessible, ambiguous,
+conflicting, and unavailable states from compiler analysis. Tooling MUST NOT recreate lexical
+scope, name lookup, member lookup, callable resolution, or declaration selection from source
+spelling or syntax.
+
+#### Scenario: Query a local reference target
+
+- **WHEN** a consumer queries a byte offset inside a resolved local or parameter reference
+- **THEN** the facade returns that reference's semantic identity and exact declaration-name span
+
+#### Scenario: Query an imported declaration target
+
+- **WHEN** a consumer queries a byte offset inside a resolved qualified or selected import reference
+- **THEN** the facade returns the canonical imported declaration identity and its source module and declaration-name span
+
+#### Scenario: Query a struct field target
+
+- **WHEN** a consumer queries a byte offset inside an available field projection
+- **THEN** the facade returns the resolved field identity and field declaration-name span without reconstructing the nominal type from syntax
+
+#### Scenario: Query an unavailable target
+
+- **WHEN** a reference is missing, inaccessible, ambiguous, conflicting, or unavailable because of recovered analysis
+- **THEN** the facade returns the corresponding explicit state without inventing a declaration location
+
+#### Scenario: Query outside a reference
+
+- **WHEN** a consumer queries trivia, punctuation, or a source offset outside all reference-bearing facts
+- **THEN** the facade returns no semantic target
+
+### Requirement: Position query answers are immutable and deterministic
+
+Position-oriented semantic targets and declaration locations SHALL be immutable snapshot values.
+Repeated queries of the same snapshot and byte offset SHALL return equal answers, and snapshots of
+identical inputs SHALL select the same target through smallest-span and deterministic source-order
+tie breaking.
+
+#### Scenario: Repeat a nested target query
+
+- **WHEN** identical source produces nested semantic facts containing one queried byte offset
+- **THEN** repeated fresh snapshots select the same smallest reference-bearing target and declaration location
+
+#### Scenario: Query a half-open boundary
+
+- **WHEN** a byte offset equals the exclusive end of one reference span
+- **THEN** that reference is not selected unless another containing reference-bearing fact applies
+
+### Requirement: Editor queries preserve recovery isolation
+
+A damaged or unavailable fact SHALL NOT prevent position queries from answering unrelated available
+targets in the same module or another module. The facade SHALL derive editor queries from the same
+recovered semantic facts and diagnostic causes exposed by its existing query surface.
+
+#### Scenario: Query beside recovered syntax
+
+- **WHEN** one declaration contains recovered syntax and another declaration contains an available resolved reference
+- **THEN** the available reference still resolves to its exact declaration location
+
+#### Scenario: Query another module after damage
+
+- **WHEN** one module is damaged while an imported module remains analyzable
+- **THEN** position and declaration-location queries for the analyzable module remain complete
+
+### Requirement: Nested lexical bindings shadow enclosing value declarations
+
+Compiler value resolution SHALL permit a binding in a nested body block to reuse a spelling from
+an enclosing local, pattern binding, or parameter and SHALL select the nearest completed binding
+for references in that nested scope. Repeating a binding spelling in the same body block SHALL
+remain a rebinding error.
+
+#### Scenario: Query a nested shadowing reference
+
+- **WHEN** a nested block declares a local with the same spelling as an enclosing local
+- **THEN** the reference resolves to the nested local identity and its declaration-name span
+
+#### Scenario: Repeat a binding in one block
+
+- **WHEN** one body block declares the same binding spelling twice
+- **THEN** the compiler retains the rebinding diagnostic and references keep the first declaration
+
+### Requirement: Resolver-backed snapshots remain useful around operational failure
+
+The facade SHALL build snapshots using the source-resolution capability and SHALL expose the exact
+loaded source catalog, failed import facts, and canonically ordered source-resolution failures.
+Snapshot construction SHALL capture imported-source resolution failures as immutable analysis data
+rather than failing the whole tooling operation. Successfully loaded modules and every unrelated
+syntax, declaration, name-resolution, HIR, ownership, target, and layout fact SHALL remain
+queryable through the same snapshot.
+
+#### Scenario: Query around an unreadable imported module
+
+- **WHEN** one imported module fails resolution while another imported module loads successfully
+- **THEN** the snapshot exposes the typed failure and failed import while the root and successful module remain queryable
+
+#### Scenario: Render diagnostics from every loaded source
+
+- **WHEN** several loaded modules produce diagnostics
+- **THEN** the facade's source catalog contains the exact bytes for every diagnostic source identity needed to compute its location
+
+#### Scenario: Build a browser snapshot from virtual sources
+
+- **WHEN** browser tooling provides an in-memory resolver for a multi-module project
+- **THEN** the facade builds and answers the same snapshot queries without requiring filesystem services
+
+### Requirement: Emission refuses an invalid snapshot
+
+Backend emission through the facade SHALL be unavailable when the snapshot contains any error
+diagnostic or source-resolution failure. Refusing emission SHALL retain the snapshot's diagnostics
+and resolution failures and SHALL NOT invoke a backend.
+
+#### Scenario: Refuse emission after source rejection
+
+- **WHEN** a snapshot contains a missing-module or semantic error diagnostic
+- **THEN** its codegen query is unavailable and does not invoke the selected backend
+
+#### Scenario: Refuse emission after resolver failure
+
+- **WHEN** a snapshot records an operational source-resolution failure
+- **THEN** its codegen query is unavailable and does not invoke the selected backend

@@ -57,6 +57,138 @@ it.effect('emits byte-identical bitcode across repeated fresh runs', () =>
   }),
 )
 
+it.effect('realizes stored declaration and builtin callable sections in LLVM and Wasm', () =>
+  Effect.gen(function* () {
+    const programs = [
+      `fn add(value: I32, adjustment: I32) -> I32 { return value + adjustment }
+pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`,
+      'pub fn main() -> I32 { let plusTwo = I32.add(2) return plusTwo(40) }',
+    ]
+    for (const [ordinal, source] of programs.entries()) {
+      const native = yield* Analysis.ofSource(
+        `callable/native-${ordinal}`,
+        ascii(source),
+        'aarch64-apple-darwin',
+      )
+      const wasm = yield* Analysis.ofSource(
+        `callable/wasm-${ordinal}`,
+        ascii(source),
+        'wasm32-unknown-unknown',
+      )
+      const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+      const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+      const instance = new WebAssembly.Instance(
+        new WebAssembly.Module(wasmArtifact.bitcode.slice()),
+        {},
+      )
+      const main = instance.exports.silk_main
+      assert.isFunction(main)
+      if (typeof main !== 'function') return
+      assert.strictEqual(main(), 42)
+      assert.strictEqual(Analysis.evaluate(native)._tag, 'Completed')
+      assert.include(nativeArtifact.ir, ordinal === 0 ? 'callable' : 'callable_arith')
+    }
+  }),
+)
+
+it.effect(
+  'keeps reusable, exclusive, take-once, generic, and dropped callables in backend parity',
+  () =>
+    Effect.gen(function* () {
+      const programs = [
+        `fn write(value: I32, values: &mut [I32]) -> I32 { values[0] = value return values[0] }
+pub fn main() -> I32 {
+  let mut values = [0]
+  let mut callback = write(&mut values)
+  let first = callback(40)
+  let second = callback(first + 2)
+  drop callback
+  return second
+}`,
+        `struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value + token.value }
+pub fn main() -> I32 {
+  let token = Token { value: 2 }
+  let callback = consume(move token)
+  return callback(40)
+}`,
+        `fn choose<T>(value: T, fallback: T) -> T { return move value }
+pub fn main() -> I32 { let chosen = choose<I32>(0) return chosen(42) }`,
+        `struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value + token.value }
+pub fn main() -> I32 {
+  let token = Token { value: 2 }
+  let callback = consume(move token)
+  drop callback
+  return 42
+}`,
+      ]
+      for (const [ordinal, source] of programs.entries()) {
+        const native = yield* Analysis.ofSource(
+          `callable-modes/native-${ordinal}`,
+          ascii(source),
+          'aarch64-apple-darwin',
+        )
+        const wasm = yield* Analysis.ofSource(
+          `callable-modes/wasm-${ordinal}`,
+          ascii(source),
+          'wasm32-unknown-unknown',
+        )
+        const llvm = yield* Analysis.codegen(native, { mode: 'release' })
+        const artifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+        const instance = new WebAssembly.Instance(
+          new WebAssembly.Module(artifact.bitcode.slice()),
+          {},
+        )
+        const main = instance.exports.silk_main
+        assert.isFunction(main)
+        if (typeof main !== 'function') return
+        assert.strictEqual(main(), 42)
+        const evaluated = Analysis.evaluate(native)
+        assert.strictEqual(evaluated._tag, 'Completed')
+        assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+        assert.include(llvm.ir, 'define i32 @silk_main')
+      }
+    }),
+)
+
+it.effect('emits deterministic callable layouts, MIR, LLVM, and Wasm artifacts', () =>
+  Effect.gen(function* () {
+    const source = `fn add<T>(value: T, fallback: T) -> T { return move value }
+pub fn main() -> I32 { let callback = add<I32>(2) return callback(42) }`
+    const nativeFirst = yield* Analysis.ofSource(
+      'callable-determinism/native',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const nativeSecond = yield* Analysis.ofSource(
+      'callable-determinism/native',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const wasmFirst = yield* Analysis.ofSource(
+      'callable-determinism/wasm',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    const wasmSecond = yield* Analysis.ofSource(
+      'callable-determinism/wasm',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    const llvmFirst = yield* Analysis.codegen(nativeFirst, { mode: 'release' })
+    const llvmSecond = yield* Analysis.codegen(nativeSecond, { mode: 'release' })
+    const wasmArtifactFirst = yield* Analysis.codegen(wasmFirst, { mode: 'release' })
+    const wasmArtifactSecond = yield* Analysis.codegen(wasmSecond, { mode: 'release' })
+
+    assert.strictEqual(llvmFirst.ir, llvmSecond.ir)
+    assert.deepEqual(llvmFirst.bitcode, llvmSecond.bitcode)
+    assert.deepEqual(wasmArtifactFirst.bitcode, wasmArtifactSecond.bitcode)
+    assert.deepEqual(nativeFirst.layout, nativeSecond.layout)
+    assert.deepEqual(Analysis.loweredMir(nativeFirst), Analysis.loweredMir(nativeSecond))
+  }),
+)
+
 it.effect('refuses diagnosed trap bodies before backend emission', () =>
   Effect.gen(function* () {
     const result = yield* Effect.result(

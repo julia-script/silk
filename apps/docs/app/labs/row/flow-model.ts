@@ -19,7 +19,9 @@ const typeText = (type: Type.Type): string =>
                 ? ''
                 : ` ! ${type.failures.map(typeText).join(' | ')}`
             }> ${type.access.toLowerCase()}`
-          : type.members.map(typeText).join(' | ')
+          : type._tag === 'CallableType'
+            ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+            : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -165,7 +167,7 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   if (expression._tag === 'Grouped')
     return `(${argumentLabel({ ...argument, expression: expression.expression })})`
   if (expression._tag === 'Operator') return `${expression.operator} expression`
-  if (expression._tag === 'Pipeline') return 'pipeline result'
+  if (expression._tag === 'CallableApply') return 'callable result'
   if (expression._tag === 'StructLiteral')
     return expression.target._tag === 'Resolved'
       ? `${typeText(expression.target.type)} {…}`
@@ -407,7 +409,7 @@ const projectCall = (
           group,
           terminalId,
           'Terminal',
-          'Flow stops: no unique target',
+          'Data flow stops: no unique target',
           call.contract._tag === 'Unavailable' ? call.contract.reason._tag : call.reference._tag,
           'Stopped',
           call.syntax.span,
@@ -475,7 +477,7 @@ const projectCall = (
         group,
         terminalId,
         'Terminal',
-        `Flow stops: ${call.contract._tag}`,
+        `Data flow stops: ${call.contract._tag}`,
         call.contract._tag === 'ArityMismatch'
           ? `${call.contract.actualCount} actual / ${call.contract.expectedCount} expected`
           : call.contract.reason._tag,
@@ -514,7 +516,7 @@ const projectCall = (
         group,
         terminalId,
         'Terminal',
-        'Flow stops: nested argument has no result',
+        'Data flow stops: nested argument has no result',
         'The enclosing semantic result is not drawn.',
         'Stopped',
         call.syntax.span,
@@ -538,7 +540,7 @@ const projectCall = (
         group,
         terminalId,
         'Terminal',
-        'Flow stops: target return path is not directly available',
+        'Data flow stops: target return path is not directly available',
         returned === undefined ? 'No function fact' : `${returned._tag} target return`,
         'Stopped',
         target.syntax.span,
@@ -670,6 +672,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return `UnavailableEntry: ${reason.reason}`
     case 'MissingFunction':
       return `MissingFunction: ${reason.target.name}`
+    case 'InvalidCallableReuse':
+      return `InvalidCallableReuse: callable #${reason.ticket} is ${reason.state.toLowerCase()}`
   }
 }
 
@@ -684,6 +688,8 @@ const blockedSpan = (
     case 'Trap':
       return reason.span
     case 'MissingFunction':
+      return reason.span
+    case 'InvalidCallableReuse':
       return reason.span
     case 'RecursiveCycle':
       return reason.closingCallSpan

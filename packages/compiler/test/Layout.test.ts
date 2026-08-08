@@ -38,6 +38,7 @@ it.effect('plans hidden Effect capture environments by construction site and tar
 }`),
         target.id,
       )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const plan = Analysis.layoutOf(snapshot)
       assert.strictEqual(plan._tag, 'Available')
       if (plan._tag !== 'Available') continue
@@ -49,6 +50,54 @@ it.effect('plans hidden Effect capture environments by construction site and tar
       assert.strictEqual(environment.fields.at(0)?.representation, 'Borrow')
       assert.strictEqual(environment.size, target.pointerSize)
       assert.strictEqual(environment.alignment, target.pointerAlignment)
+      assert.deepEqual(Layout.verify(plan.value), [])
+    }
+  }),
+)
+
+it.effect('plans target-aware callable environments and ephemeral code/environment views', () =>
+  Effect.gen(function* () {
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const snapshot = yield* Analysis.ofSource(
+        'layout/callable-environment',
+        ascii(`struct Token { value: I32 }
+fn choose(value: I32, values: &mut [I32], token: Token) -> I32 { return value }
+pub fn main() -> I32 {
+  let mut values = [1]
+  let token = Token { value: 2 }
+  let callback = choose(&mut values, move token)
+  return 0
+}`),
+        target.id,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.strictEqual(Analysis.instancesOf(snapshot).callables.length, 1)
+      const plan = Analysis.layoutOf(snapshot)
+      assert.strictEqual(plan._tag, 'Available')
+      if (plan._tag !== 'Available') continue
+      const environment = plan.value.callableEnvironments.at(0)
+      assert.strictEqual(environment?._tag, 'CallableEnvironment')
+      if (environment?._tag !== 'CallableEnvironment') continue
+      assert.strictEqual(environment.callable.mode, 'Take')
+      assert.deepEqual(
+        environment.fields.map((field) => ({
+          access: field.access,
+          representation: field.representation,
+          offset: field.offset,
+        })),
+        [
+          { access: 'Exclusive', representation: 'Borrow', offset: 0 },
+          { access: 'Take', representation: 'Value', offset: target.pointerSize },
+        ],
+      )
+      assert.strictEqual(environment.size, target.pointerSize === 4 ? 8 : 16)
+      assert.deepEqual(environment.view, {
+        codeOffset: 0,
+        environmentOffset: target.pointerSize,
+        size: target.pointerSize * 2,
+        alignment: target.pointerAlignment,
+        pointerBits: target.pointerSize === 4 ? 32 : 64,
+      })
       assert.deepEqual(Layout.verify(plan.value), [])
     }
   }),
@@ -302,6 +351,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       target: selected.value.target,
       entries: [malformed],
       effectEnvironments: [],
+      callableEnvironments: [],
       callingShapes: [],
       literalVerdicts: [],
       diagnostics: [],

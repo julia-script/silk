@@ -210,9 +210,15 @@ const collectExpression = (
       push(pending, referenceSpan(expression.reference), callResolution(expression.reference))
       for (const argument of expression.arguments) collectExpression(argument.expression, pending)
       return
-    case 'Pipeline':
-      collectExpression(expression.input, pending)
+    case 'FunctionItem':
       push(pending, referenceSpan(expression.reference), callResolution(expression.reference))
+      return
+    case 'CallableSection':
+      push(pending, referenceSpan(expression.reference), callResolution(expression.reference))
+      for (const capture of expression.captures) collectExpression(capture.expression, pending)
+      return
+    case 'CallableApply':
+      collectExpression(expression.callee, pending)
       for (const argument of expression.arguments) collectExpression(argument.expression, pending)
       return
     case 'FieldProjection': {
@@ -284,6 +290,7 @@ const collectExpression = (
       return
     case 'EffectCatch':
       collectExpression(expression.protected, pending)
+      collectExpression(expression.handler, pending)
       return
     case 'EffectRetry':
       collectExpression(expression.protected, pending)
@@ -295,6 +302,10 @@ const collectExpression = (
     case 'EffectProvideWith':
       collectExpression(expression.protected, pending)
       collectExpression(expression.acquisition, pending)
+      return
+    case 'EffectTransform':
+      collectExpression(expression.protected, pending)
+      collectExpression(expression.callback, pending)
       return
     case 'Integer':
     case 'Boolean':

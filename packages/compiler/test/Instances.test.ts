@@ -40,6 +40,58 @@ pub fn other() -> I32 { return main() }`),
   }),
 )
 
+it.effect('discovers concrete stored and deferred-generic callable section identities', () =>
+  Effect.gen(function* () {
+    const stored = Analysis.instancesOf(
+      yield* snapshot(`fn add(left: I32, right: I32) -> I32 { return left + right }
+pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`),
+    )
+    const generic = Analysis.instancesOf(
+      yield* snapshot(`fn select<T>(value: T, enabled: Bool) -> T { return move value }
+pub fn main() -> I32 { let whenEnabled = select(true) return whenEnabled(42) }`),
+    )
+
+    assert.deepEqual(
+      stored.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'add'],
+    )
+    assert.strictEqual(stored.callables.length, 1)
+    assert.deepEqual(stored.callables.at(0)?.captureTypes.map(Type.encode), ['I32'])
+    assert.strictEqual(stored.callables.at(0)?.mode, 'Shared')
+    assert.deepEqual(
+      generic.instances.map((instance) => ({
+        name: instance.key.declaration.name,
+        arguments: instance.key.typeArguments.map(Type.encode),
+      })),
+      [
+        { name: 'main', arguments: [] },
+        { name: 'select', arguments: ['I32'] },
+      ],
+    )
+    assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encode), ['I32'])
+    assert.strictEqual(Type.encode(generic.callables.at(0)?.type ?? 'I32'), 'fn(I32) -> I32')
+  }),
+)
+
+it.effect('rejects polymorphic recursion reached through a callable section', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`fn expand<T>(seed: I32, value: T) -> I32 {
+  let next = expand<[T; 1]>([move value])
+  return next(seed)
+}
+pub fn main() -> I32 { return expand<I32>(0, 1) }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+    assert.deepEqual(result.instances.violations.at(0)?.target.typeArguments.map(Type.encode), [
+      'Array<I32, 1>',
+    ])
+  }),
+)
+
 it.effect('excludes unreachable declarations and reports unavailable entries', () =>
   Effect.gen(function* () {
     const reachable = Analysis.instancesOf(
@@ -67,6 +119,179 @@ it.effect('lowers discovered instances deterministically to verifier-clean MIR',
     const second = Mir.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
     assert.strictEqual(first, golden('lowered.mir.txt'))
     assert.strictEqual(first, second)
+  }),
+)
+
+it.effect('lowers callable construction and application into the structured MIR DAG', () =>
+  Effect.gen(function* () {
+    const stored = Analysis.loweredMir(
+      yield* snapshot(`fn add(left: I32, right: I32) -> I32 { return left + right }
+pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`),
+    )
+    const direct = Analysis.loweredMir(
+      yield* snapshot(`fn add(left: I32, right: I32) -> I32 { return left + right }
+pub fn main() -> I32 { return 40 |> add(2) }`),
+    )
+    const storedOperations = stored.functions.at(0)
+    const directOperations = direct.functions.at(0)
+
+    assert.deepEqual(Mir.verify(stored), [])
+    assert.deepEqual(Mir.verify(direct), [])
+    assert.deepEqual(
+      storedOperations === undefined
+        ? []
+        : Mir.operations(storedOperations).map((operation) => operation._tag),
+      ['Literal', 'MakeCallable', 'Move', 'Literal', 'ApplyCallable', 'Drop'],
+    )
+    assert.deepEqual(
+      directOperations === undefined
+        ? []
+        : Mir.operations(directOperations).map((operation) => operation._tag),
+      ['Literal', 'Literal', 'ApplyCallable'],
+    )
+    const applied =
+      directOperations === undefined
+        ? undefined
+        : Mir.operations(directOperations).find((operation) => operation._tag === 'ApplyCallable')
+    assert.strictEqual(
+      applied?._tag === 'ApplyCallable' ? applied.realization : undefined,
+      'DirectErasedSection',
+    )
+    assert.strictEqual(
+      applied?._tag === 'ApplyCallable' ? applied.evaluation : undefined,
+      'LeftThenCallable',
+    )
+    const malformed: Mir.Module = Object.freeze({
+      ...stored,
+      functions: Object.freeze(
+        stored.functions.map((fn, ordinal) =>
+          ordinal !== 0
+            ? fn
+            : Object.freeze({
+                ...fn,
+                regions: Object.freeze(
+                  fn.regions.map((region) =>
+                    region._tag !== 'OperationRegion'
+                      ? region
+                      : Object.freeze({
+                          ...region,
+                          operations: Object.freeze(
+                            region.operations.map((operation) =>
+                              operation._tag === 'ApplyCallable'
+                                ? Object.freeze({ ...operation, access: 'Take' as const })
+                                : operation,
+                            ),
+                          ),
+                        }),
+                  ),
+                ),
+              }),
+        ),
+      ),
+    })
+    assert.include(
+      Mir.verify(malformed).map((violation) => violation.rule),
+      'InvalidCallableOperation',
+    )
+  }),
+)
+
+it.effect('ends callable capture loans before drop and transfers consuming captures once', () =>
+  Effect.gen(function* () {
+    const borrowed = Analysis.loweredMir(
+      yield* snapshot(`fn read(value: I32, values: &mut [I32]) -> I32 { return value }
+pub fn main() -> I32 {
+  let mut values = [1]
+  let callback = read(&mut values)
+  drop callback
+  values[0] = 2
+  return values[0]
+}`),
+    )
+    const consumed = Analysis.loweredMir(
+      yield* snapshot(`struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value + token.value }
+pub fn main() -> I32 {
+  let token = Token { value: 2 }
+  let callback = consume(move token)
+  return callback(40)
+}`),
+    )
+    const borrowedMain = borrowed.functions.at(0)
+    const consumedMain = consumed.functions.at(0)
+    const borrowedTags =
+      borrowedMain === undefined
+        ? []
+        : Mir.operations(borrowedMain).map((operation) => operation._tag)
+    const consumedTags =
+      consumedMain === undefined
+        ? []
+        : Mir.operations(consumedMain).map((operation) => operation._tag)
+
+    assert.deepEqual(Mir.verify(borrowed), [])
+    assert.deepEqual(Mir.verify(consumed), [])
+    assert.ok(borrowedTags.indexOf('BeginLoan') < borrowedTags.indexOf('MakeCallable'))
+    assert.ok(borrowedTags.indexOf('MakeCallable') < borrowedTags.indexOf('EndLoan'))
+    assert.ok(borrowedTags.indexOf('EndLoan') < borrowedTags.indexOf('Drop'))
+    assert.include(consumedTags, 'ApplyCallable')
+    assert.strictEqual(consumedTags.filter((tag) => tag === 'ApplyCallable').length, 1)
+    assert.strictEqual(consumedTags.includes('Drop'), false)
+  }),
+)
+
+it.effect(
+  'lowers complete ungrouped run operands before grouped post-run callable transforms',
+  () =>
+    Effect.gen(function* () {
+      const composed = Analysis.loweredMir(
+        yield* snapshot(`effect fn work() -> I32 { return 41 }
+pub fn main() -> I32 { return run work() |> Effect.retry(2) }`),
+      )
+      const grouped = Analysis.loweredMir(
+        yield* snapshot(`effect fn work() -> I32 { return 41 }
+pub fn main() -> I32 { return (run work()) |> I32.add(1) }`),
+      )
+      const composedMain = composed.functions.at(0)
+      const groupedMain = grouped.functions.at(0)
+
+      assert.deepEqual(Mir.verify(composed), [])
+      assert.deepEqual(Mir.verify(grouped), [])
+      assert.include(
+        composedMain === undefined
+          ? []
+          : Mir.operations(composedMain).map((operation) => operation._tag),
+        'RetryEffect',
+      )
+      assert.strictEqual(
+        groupedMain === undefined ? undefined : Mir.operations(groupedMain).at(-1)?._tag,
+        'ApplyCallable',
+      )
+    }),
+)
+
+it.effect('encodes generic, consuming, and grouped-run callable MIR deterministically', () =>
+  Effect.gen(function* () {
+    const sources = [
+      `fn select<T>(value: T, enabled: Bool) -> T { return move value }
+pub fn main() -> I32 { let whenEnabled = select(true) return whenEnabled(42) }`,
+      `struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value + token.value }
+pub fn main() -> I32 {
+  let token = Token { value: 2 }
+  let callback = consume(move token)
+  return callback(40)
+}`,
+      `effect fn work() -> I32 { return 41 }
+pub fn main() -> I32 { return (run work()) |> I32.add(1) }`,
+    ]
+    for (const source of sources) {
+      const first = Analysis.loweredMir(yield* snapshot(source))
+      const second = Analysis.loweredMir(yield* snapshot(source))
+      assert.deepEqual(Mir.verify(first), [])
+      assert.deepEqual(Mir.verify(second), [])
+      assert.strictEqual(Mir.encode(first), Mir.encode(second))
+      assert.include(Mir.encode(first), 'apply-callable')
+    }
   }),
 )
 

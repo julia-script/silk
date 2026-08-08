@@ -204,7 +204,7 @@ it('diagnoses unknown actors and unknown operations distinctly', () => {
     'golden://operation.silk',
     'pub fn main() -> I32 { return I32.frobnicate(1, 2) }',
   )
-  const arity = elaborate('golden://arity.silk', 'pub fn main() -> I32 { return I32.add(1) }')
+  const arity = elaborate('golden://arity.silk', 'pub fn main() -> I32 { return I32.add() }')
 
   assert.deepEqual(
     actor.diagnostics.map((diagnostic) => diagnostic.code),
@@ -216,7 +216,7 @@ it('diagnoses unknown actors and unknown operations distinctly', () => {
   )
   assert.deepEqual(
     arity.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0007'],
+    ['SEM0079'],
   )
   for (const result of [actor, operation, arity]) {
     const fn = result.hir.functions.at(0)
@@ -330,7 +330,7 @@ it('erases grouping and operators into canonical builtin HIR calls', () => {
   assert.strictEqual(multiplication.operation, 'Multiply')
 })
 
-it('erases builtin pipelines into ordinary builtin HIR calls', () => {
+it('lowers builtin pipelines into left-first callable application with an erasable section', () => {
   const result = elaborate(
     'golden://pipeline.silk',
     'pub fn main() -> I32 { return 2 |> I32.add(3) }',
@@ -339,10 +339,45 @@ it('erases builtin pipelines into ordinary builtin HIR calls', () => {
   const returned = fn === undefined ? undefined : Hir.returned(fn)
 
   assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(returned?._tag, 'BuiltinCall')
-  if (returned?._tag !== 'BuiltinCall') return
-  assert.strictEqual(returned.operation, 'Add')
-  assert.strictEqual(returned.arguments.length, 2)
+  assert.strictEqual(returned?._tag, 'CallableApply')
+  if (returned?._tag !== 'CallableApply') return
+  assert.strictEqual(returned.evaluation, 'LeftThenCallable')
+  assert.strictEqual(returned.realization, 'DirectErasedSection')
+  assert.strictEqual(returned.arguments.at(0)?._tag, 'IntegerLiteral')
+  assert.strictEqual(returned.callee._tag, 'CallableSection')
+  if (returned.callee._tag !== 'CallableSection') return
+  assert.strictEqual(returned.callee.target._tag, 'BuiltinCallableTarget')
+  assert.strictEqual(returned.callee.captures.at(0)?.value._tag, 'IntegerLiteral')
+})
+
+it('preserves stored and cross-call owned callable environments', () => {
+  const result = elaborate(
+    'hir://owned-callable-return.silk',
+    `struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value }
+fn make(token: Token) -> once fn(I32) -> I32 { return consume(move token) }
+pub fn main() -> I32 {
+  let token = Token { value: 42 }
+  let callback = make(move token)
+  return callback(1)
+}`,
+  )
+  const make = result.hir.functions.at(1)
+  const main = result.hir.functions.at(2)
+  const returnedEnvironment = make === undefined ? undefined : Hir.returned(make)
+  const applied = main === undefined ? undefined : Hir.returned(main)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(returnedEnvironment?._tag, 'CallableSection')
+  assert.strictEqual(
+    returnedEnvironment?._tag === 'CallableSection' ? returnedEnvironment.mode : undefined,
+    'Take',
+  )
+  assert.strictEqual(applied?._tag, 'CallableApply')
+  assert.strictEqual(
+    applied?._tag === 'CallableApply' ? applied.realization : undefined,
+    'Environment',
+  )
 })
 
 it('desugars effect functions to hidden effect blocks while retaining catches and runs', () => {

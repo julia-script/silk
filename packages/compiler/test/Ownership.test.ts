@@ -278,7 +278,7 @@ it('allows a shared copy-only recipe to run repeatedly', () => {
     `effect fn inspect(value: I32) -> I32 { return value }
 pub fn main() -> I32 {
   let recipe = inspect(21)
-  return run recipe + run recipe
+  return (run recipe) + (run recipe)
 }`,
   )
 
@@ -364,6 +364,104 @@ pub fn main() -> I32 {
 
   assert.deepEqual(facts.diagnostics, [])
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
+})
+
+it('plans a stored callable environment and drops moved slots in reverse capture order', () => {
+  const facts = check(
+    'ownership://callable-environment.silk',
+    `struct Token { value: I32 }
+fn select(value: I32, first: Token, second: Token) -> I32 { return value }
+pub fn main() -> I32 {
+  let first = Token { value: 1 }
+  let second = Token { value: 2 }
+  let callback = select(move first, move second)
+  return 0
+}`,
+  )
+  const main = facts.functions.at(1)
+  const environment = main?.callables.at(0)
+  const callback = main?.bindings.find((binding) => binding.name === 'callback')
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(environment?.mode, 'Take')
+  assert.deepEqual(environment?.dropOrder, [1, 0])
+  assert.strictEqual(callback?.cleanup._tag, 'CallableCleanup')
+  if (callback?.cleanup._tag !== 'CallableCleanup') return
+  assert.deepEqual(
+    callback.cleanup.slots.map((slot) => slot.ordinal),
+    [1, 0],
+  )
+})
+
+it('rejects a second invocation of a take-once callable binding', () => {
+  const facts = check(
+    'ownership://take-callable-reuse.silk',
+    `struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value }
+pub fn main() -> I32 {
+  let token = Token { value: 1 }
+  let callback = consume(move token)
+  let first = callback(20)
+  let second = callback(22)
+  return first + second
+}`,
+  )
+
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+  assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Violation')
+})
+
+it('retains a callable capture loan until the callable is dropped', () => {
+  const blocked = check(
+    'ownership://borrowed-callable.silk',
+    `fn read(value: I32, values: &mut [I32]) -> I32 { return value }
+pub fn main() -> I32 {
+  let mut values = [1]
+  let callback = read(&mut values)
+  values[0] = 2
+  return callback(42)
+}`,
+  )
+  const released = check(
+    'ownership://dropped-borrowed-callable.silk',
+    `fn read(value: I32, values: &mut [I32]) -> I32 { return value }
+pub fn main() -> I32 {
+  let mut values = [1]
+  let callback = read(&mut values)
+  drop callback
+  values[0] = 2
+  return values[0]
+}`,
+  )
+
+  assert.include(
+    blocked.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0011',
+  )
+  assert.deepEqual(released.diagnostics, [])
+  assert.strictEqual(released.functions.at(1)?.loans.at(0)?.origin, 'CallableCapture')
+})
+
+it('checks an affine pipeline input once before its callable section', () => {
+  const facts = check(
+    'ownership://affine-pipeline.silk',
+    `struct Token { value: I32 }
+fn consume(token: Token, adjustment: I32) -> I32 { return token.value + adjustment }
+pub fn main() -> I32 {
+  let token = Token { value: 40 }
+  let result = move token |> consume(2)
+  drop token
+  return result
+}`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
 })
 
 it('assigns Allocation one private active reclaim ticket', () => {

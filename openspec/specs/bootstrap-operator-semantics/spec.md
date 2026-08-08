@@ -70,45 +70,38 @@ operation.
 - **WHEN** runtime evaluation negates an `I32` value equal to `-2147483648`
 - **THEN** the operation traps for arithmetic overflow exactly like subtracting it from zero
 
-### Requirement: Pipelines insert one explicit first argument
+### Requirement: Pipelines apply one unary callable
 
-A pipeline SHALL take the completed value on its left and insert it as argument zero of the
-qualified actor or module operation on its right. The right side SHALL be a qualified path either
-without parentheses, supplying no later arguments, or with an argument list supplying arguments
-one onward. Pipelines SHALL associate left-to-right, so each completed call becomes the next
-pipeline's first argument. Resolution, visibility, arity, type checking, evaluation order, and
-diagnostics SHALL be those of the resulting ordinary qualified call. A pipeline MUST NOT create
-method lookup, an implicit import, a runtime pipe value, a distinct HIR call kind, or a backend
-operation.
+A pipeline SHALL evaluate its completed left expression exactly once, then evaluate the callable
+expression on its right and invoke that callable with the left value as its sole argument. The right
+side MAY be a named function, automatic leading-argument section, binding, grouped expression, or
+other expression with compatible unary callable type. Pipelines SHALL associate left-to-right and
+MUST NOT create method lookup, implicit imports, or runtime namespace objects.
 
-#### Scenario: Pipe into a binary actor operation
+#### Scenario: Pipe into an actor section
 
 - **WHEN** a body returns `2 |> I32.add(3)`
-- **THEN** it resolves and evaluates exactly as `I32.add(2, 3)`
+- **THEN** `I32.add(3)` first denotes a unary callable and the pipeline invokes it with `2`, producing `5`
 
-#### Scenario: Pipe into a unary actor operation
+#### Scenario: Pipe into a callable binding
 
-- **WHEN** a body returns `true |> Bool.not`
-- **THEN** it resolves and evaluates exactly as `Bool.not(true)` without requiring an empty argument list
+- **WHEN** `increment` holds `I32.add(1)` and a body returns `2 |> increment`
+- **THEN** the pipeline invokes the stored callable and produces `3`
 
-#### Scenario: Chain pipelines left-to-right
+#### Scenario: Chain applications left-to-right
 
 - **WHEN** a body returns `2 |> I32.add(3) |> I32.multiply(4)`
-- **THEN** the first call's result becomes argument zero of the second call and the result is `20`
-
-#### Scenario: Pipe into an imported public operation
-
-- **WHEN** a module imports `math.Transform as Transform` and returns `value |> Transform.apply(extra)`
-- **THEN** the pipeline resolves through the existing namespace and visibility rules to the canonical imported declaration
+- **THEN** the first application produces `5` and the second produces `20`
 
 ### Requirement: Operator-authored programs reuse the backend-neutral pipeline
 
-Elaboration SHALL erase surface operator and pipeline sugar into ordinary canonical HIR builtin
-calls or declaration calls while retaining the complete source expression span. Lowering SHALL
-reuse the existing MIR binary, call, literal, and generated-operation vocabulary; interpretation,
-LLVM emission, and WebAssembly emission SHALL consume that MIR without a surface-operator-specific
-path. Equivalent operator and qualified-call programs SHALL have the same result or trap behavior,
-and repeated compilation SHALL produce deterministic facts and encodings.
+Elaboration SHALL erase surface operator sugar into ordinary canonical HIR builtin calls and SHALL
+erase pipeline syntax into canonical unary callable application while retaining the complete source
+expression span. Lowering SHALL reuse the existing MIR operation and callable-application
+vocabulary; interpretation, LLVM emission, and WebAssembly emission SHALL consume that MIR without
+a surface-operator-specific or surface-pipeline-specific path. Equivalent programs SHALL have the
+same result or trap behavior, and repeated compilation SHALL produce deterministic facts and
+encodings.
 
 #### Scenario: Preserve arithmetic traps across execution paths
 
@@ -117,12 +110,12 @@ and repeated compilation SHALL produce deterministic facts and encodings.
 
 #### Scenario: Keep MIR backend-neutral
 
-- **WHEN** `40 + 2` is lowered for native and WebAssembly targets
-- **THEN** both targets consume the same canonical `Add` MIR operation and the snapshot's target-aware layout
+- **WHEN** `40 + 2` and `40 |> I32.add(2)` are lowered for native and WebAssembly targets
+- **THEN** both targets consume the same canonical arithmetic and callable plans with target-aware layout
 
 #### Scenario: Repeat operator compilation
 
-- **WHEN** equivalent operator programs are compiled repeatedly in fresh processes
+- **WHEN** equivalent operator and callable-pipeline programs are compiled repeatedly in fresh processes
 - **THEN** syntax, semantic facts, HIR, MIR, diagnostics, symbols, and emitted artifacts are deterministic
 
 ### Requirement: Operators resolve homogeneously for Usize

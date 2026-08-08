@@ -186,6 +186,9 @@ const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
 
 const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Identifier',
+  'FnKeyword',
+  'MutKeyword',
+  'OnceKeyword',
   'LeftParenthesis',
   'LeftBracket',
   'Ampersand',
@@ -293,7 +296,12 @@ const parseIntegerLiteralExpression = (initial: State): NodeResult => {
 }
 
 const parseIdentifierExpression = (initial: State): NodeResult => {
-  const identifier = expect(initial, 'Identifier', expressionFollowing)
+  const identifier = expect(initial, 'Identifier', [
+    'Dot',
+    'LeftBracket',
+    'LeftParenthesis',
+    ...expressionFollowing,
+  ])
   return Object.freeze({
     state: identifier.state,
     node: syntaxNode(identifier.state, 'IdentifierExpression', identifier.elements),
@@ -518,34 +526,44 @@ function parseArgumentList(initial: State, reservedForEnclosingCalls: number): N
 }
 
 function parseCallExpression(initial: State, reservedForEnclosingCalls: number): NodeResult {
-  const callee = expect(initial, 'Identifier', [
-    'LeftParenthesis',
-    'Dot',
-    'RightParenthesis',
-    'RightBrace',
-    'PubKeyword',
-    'StructKeyword',
-    'FnKeyword',
-    'ImportKeyword',
-  ])
+  let callee = parseIdentifierExpression(initial)
   let state = callee.state
-  let elements: ReadonlyArray<SyntaxTree.Element> = callee.elements
   if (nextSignificantKind(state) === 'Dot') {
     const dot = expect(state, 'Dot', ['Identifier', 'LeftParenthesis'])
     const operation = expect(dot.state, 'Identifier', ['LeftParenthesis'])
     state = operation.state
-    elements = Object.freeze([...elements, ...dot.elements, ...operation.elements])
+    callee = Object.freeze({
+      state,
+      node: syntaxNode(state, 'FieldProjectionExpression', [
+        callee.node,
+        ...dot.elements,
+        ...operation.elements,
+      ]),
+    })
   }
+  let typeArguments: SyntaxTree.Node | undefined
   if (nextSignificantKind(state) === 'Less') {
     const arguments_ = parseTypeArgumentList(state, 'CallTypeArgumentList', ['LeftParenthesis'])
     state = arguments_.state
-    elements = Object.freeze([...elements, arguments_.node])
+    typeArguments = arguments_.node
   }
   const argumentsList = parseArgumentList(state, reservedForEnclosingCalls)
-  return Object.freeze({
+  let result: NodeResult = Object.freeze({
     state: argumentsList.state,
-    node: syntaxNode(argumentsList.state, 'CallExpression', [...elements, argumentsList.node]),
+    node: syntaxNode(argumentsList.state, 'CallExpression', [
+      callee.node,
+      ...(typeArguments === undefined ? [] : [typeArguments]),
+      argumentsList.node,
+    ]),
   })
+  while (nextSignificantKind(result.state) === 'LeftParenthesis') {
+    const nextArguments = parseArgumentList(result.state, reservedForEnclosingCalls)
+    result = Object.freeze({
+      state: nextArguments.state,
+      node: syntaxNode(nextArguments.state, 'CallExpression', [result.node, nextArguments.node]),
+    })
+  }
+  return result
 }
 
 function parseStructLiteralExpression(
@@ -933,7 +951,7 @@ function parsePrimaryExpression(
   if (kind === 'Effect') return parseEffectExpression(initial)
   if (kind === 'Run') {
     const keyword = expect(initial, 'RunKeyword', [...expressionStarts, ...expressionFollowing])
-    const operand = parsePrefixExpression(
+    const operand = parseExpression(
       keyword.state,
       reservedForEnclosingCalls,
       recoveryKind,
@@ -986,8 +1004,17 @@ function parseProjectionChain(initial: NodeResult): NodeResult {
   let result = initial
   while (
     nextSignificantKind(result.state) === 'Dot' ||
-    nextSignificantKind(result.state) === 'LeftBracket'
+    nextSignificantKind(result.state) === 'LeftBracket' ||
+    nextSignificantKind(result.state) === 'LeftParenthesis'
   ) {
+    if (nextSignificantKind(result.state) === 'LeftParenthesis') {
+      const arguments_ = parseArgumentList(result.state, 0)
+      result = Object.freeze({
+        state: arguments_.state,
+        node: syntaxNode(arguments_.state, 'CallExpression', [result.node, arguments_.node]),
+      })
+      continue
+    }
     if (nextSignificantKind(result.state) === 'Dot') {
       const dot = expect(result.state, 'Dot', ['Identifier', ...expressionFollowing])
       const field = expect(dot.state, 'Identifier', expressionFollowing)
@@ -1090,46 +1117,6 @@ function parseInfixExpression(
   return left
 }
 
-function parsePipelineTarget(initial: State, reservedForEnclosingCalls: number): NodeResult {
-  const qualifier = expect(initial, 'Identifier', [
-    'Dot',
-    'LeftParenthesis',
-    ...expressionFollowing,
-  ])
-  const dot = expect(qualifier.state, 'Dot', [
-    'Identifier',
-    'LeftParenthesis',
-    ...expressionFollowing,
-  ])
-  const member = expect(dot.state, 'Identifier', [
-    'Less',
-    'LeftParenthesis',
-    'PipeGreater',
-    ...expressionFollowing,
-  ])
-  let state = member.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
-    ...qualifier.elements,
-    ...dot.elements,
-    ...member.elements,
-  ])
-  if (nextSignificantKind(state) === 'Less') {
-    const typeArguments = parseTypeArgumentList(state, 'CallTypeArgumentList', [
-      'LeftParenthesis',
-      'PipeGreater',
-      ...expressionFollowing,
-    ])
-    state = typeArguments.state
-    children = Object.freeze([...children, typeArguments.node])
-  }
-  if (nextSignificantKind(state) === 'LeftParenthesis') {
-    const argumentsList = parseArgumentList(state, reservedForEnclosingCalls)
-    state = argumentsList.state
-    children = Object.freeze([...children, argumentsList.node])
-  }
-  return Object.freeze({ state, node: syntaxNode(state, 'PipelineTarget', children) })
-}
-
 function parseExpression(
   initial: State,
   reservedForEnclosingCalls: number,
@@ -1144,8 +1131,14 @@ function parseExpression(
     allowStructLiteral,
   )
   while (nextSignificantKind(left.state) === 'PipeGreater') {
-    const pipe = expect(left.state, 'PipeGreater', ['Identifier', ...expressionFollowing])
-    const target = parsePipelineTarget(pipe.state, reservedForEnclosingCalls)
+    const pipe = expect(left.state, 'PipeGreater', [...expressionStarts, ...expressionFollowing])
+    const target = parseInfixExpression(
+      pipe.state,
+      reservedForEnclosingCalls,
+      'Identifier',
+      0,
+      allowStructLiteral,
+    )
     left = Object.freeze({
       state: target.state,
       node: syntaxNode(target.state, 'PipelineExpression', [
@@ -1500,6 +1493,59 @@ const parseTypePrimary = (
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
 ): NodeResult => {
+  const callableMode = nextSignificantKind(initial)
+  if (
+    callableMode === 'FnKeyword' ||
+    callableMode === 'MutKeyword' ||
+    callableMode === 'OnceKeyword'
+  ) {
+    const mode =
+      callableMode === 'MutKeyword' || callableMode === 'OnceKeyword'
+        ? expect(initial, callableMode, ['FnKeyword', 'LeftParenthesis', ...following])
+        : undefined
+    const fn = expect(mode?.state ?? initial, 'FnKeyword', ['LeftParenthesis', ...following])
+    const left = expect(fn.state, 'LeftParenthesis', [
+      ...typeStarts,
+      'RightParenthesis',
+      'Arrow',
+      ...following,
+    ])
+    let state = left.state
+    let parameters: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+    while (
+      nextSignificantKind(state) !== 'RightParenthesis' &&
+      nextSignificantKind(state) !== 'Arrow' &&
+      nextSignificantKind(state) !== 'EndOfFile'
+    ) {
+      const parameter = parseType(state, ['Comma', 'RightParenthesis', 'Arrow', ...following])
+      parameters = Object.freeze([...parameters, parameter.node])
+      state = parameter.state
+      if (nextSignificantKind(state) !== 'Comma') break
+      const comma = expect(state, 'Comma', [
+        ...typeStarts,
+        'RightParenthesis',
+        'Arrow',
+        ...following,
+      ])
+      parameters = Object.freeze([...parameters, ...comma.elements])
+      state = comma.state
+    }
+    const right = expect(state, 'RightParenthesis', ['Arrow', ...following])
+    const arrow = expect(right.state, 'Arrow', [...typeStarts, ...following])
+    const result = parseType(arrow.state, following)
+    return Object.freeze({
+      state: result.state,
+      node: syntaxNode(result.state, 'CallableType', [
+        ...(mode?.elements ?? []),
+        ...fn.elements,
+        ...left.elements,
+        ...parameters,
+        ...right.elements,
+        ...arrow.elements,
+        result.node,
+      ]),
+    })
+  }
   if (nextSignificantKind(initial) === 'Ampersand') {
     const ampersand = expect(initial, 'Ampersand', ['MutKeyword', 'LeftBracket', ...following])
     const mut =

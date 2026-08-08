@@ -354,12 +354,18 @@ it('parses a zero-argument call as one lossless concrete expression', () => {
   assert.deepEqual(nodeShape(call), {
     kind: 'CallExpression',
     children: [
-      'Whitespace',
-      'Identifier',
+      {
+        kind: 'IdentifierExpression',
+        children: ['Whitespace', 'Identifier'],
+      },
       { kind: 'ArgumentList', children: ['LeftParenthesis', 'RightParenthesis'] },
     ],
   })
-  assert.strictEqual(directTokenText(result, call, 'Identifier'), 'answer')
+  const callee = SyntaxTree.directNode(call, 'IdentifierExpression')
+  assert.strictEqual(
+    callee === undefined ? undefined : directTokenText(result, callee, 'Identifier'),
+    'answer',
+  )
   assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(validCallSource))
@@ -524,8 +530,10 @@ it('parses nested calls as lossless argument expressions', () => {
   assert.deepEqual(nodeShape(outer), {
     kind: 'CallExpression',
     children: [
-      'Whitespace',
-      'Identifier',
+      {
+        kind: 'IdentifierExpression',
+        children: ['Whitespace', 'Identifier'],
+      },
       {
         kind: 'ArgumentList',
         children: [
@@ -533,7 +541,7 @@ it('parses nested calls as lossless argument expressions', () => {
           {
             kind: 'CallExpression',
             children: [
-              'Identifier',
+              { kind: 'IdentifierExpression', children: ['Identifier'] },
               {
                 kind: 'ArgumentList',
                 children: [
@@ -768,7 +776,7 @@ it('keeps malformed arguments explicit and resumes at the next comma', () => {
     descendants(call).filter(
       (element) => SyntaxTree.isNode(element) && element.kind === 'IdentifierExpression',
     ).length,
-    2,
+    3,
   )
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(malformedArgumentSource))
@@ -1279,11 +1287,14 @@ it('parses signed literals and qualified callees', () => {
 
   assert.notStrictEqual(call, undefined)
   if (call === undefined) return
-  assert.notStrictEqual(SyntaxTree.directToken(call, 'Dot'), undefined)
-  const identifiers = call.children.filter(
-    (element) => SyntaxTree.isToken(element) && element.kind === 'Identifier',
+  const callee = SyntaxTree.directNode(call, 'FieldProjectionExpression')
+  assert.notStrictEqual(callee, undefined)
+  if (callee === undefined) return
+  assert.notStrictEqual(SyntaxTree.directToken(callee, 'Dot'), undefined)
+  assert.strictEqual(
+    SyntaxTree.tokens(callee).filter((token) => token.kind === 'Identifier').length,
+    2,
   )
-  assert.strictEqual(identifiers.length, 2)
   const argumentList = SyntaxTree.directNode(call, 'ArgumentList')
   const firstArgument =
     argumentList === undefined
@@ -1482,7 +1493,7 @@ it('parses grouping and right-associative prefix expressions losslessly', () => 
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
-it('parses qualified pipelines left-to-right with optional argument lists', () => {
+it('parses complete callable pipelines left-to-right', () => {
   const source =
     'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }\n' +
     'pub fn flag() -> Bool { return true |> Bool.not }\n' +
@@ -1492,24 +1503,167 @@ it('parses qualified pipelines left-to-right with optional argument lists', () =
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) && element.kind === 'PipelineExpression',
   )
-  const targets = descendants(result.root).filter(
-    (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) && element.kind === 'PipelineTarget',
+  const targets = pipelines.map((pipeline) =>
+    pipeline.children
+      .filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element))
+      .at(1),
   )
 
   assert.strictEqual(pipelines.length, 4)
   assert.strictEqual(targets.length, 4)
   assert.deepEqual(
-    targets.map((target) => SyntaxTree.directNodes(target, 'ArgumentList').length),
+    targets.map((target) =>
+      target === undefined ? 0 : SyntaxTree.directNodes(target, 'ArgumentList').length,
+    ),
     [1, 1, 0, 1],
   )
   assert.deepEqual(
-    targets.map((target) => SyntaxTree.directNodes(target, 'CallTypeArgumentList').length),
+    targets.map((target) =>
+      target === undefined ? 0 : SyntaxTree.directNodes(target, 'CallTypeArgumentList').length,
+    ),
     [0, 0, 0, 1],
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses callable contracts with ordered parameters and all invocation modes', () => {
+  const source =
+    'fn use(shared: fn(I32, Bool) -> I32, exclusive: mut fn(I32) -> Bool, consuming: once fn() -> I32) -> I32 { return 0 }'
+  const result = parseText('memory/callable-types', source)
+  const callableTypes = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallableType',
+  )
+
+  assert.strictEqual(callableTypes.length, 3)
+  assert.deepEqual(
+    callableTypes.map((type) => ({
+      mut: SyntaxTree.directToken(type, 'MutKeyword') !== undefined,
+      once: SyntaxTree.directToken(type, 'OnceKeyword') !== undefined,
+      parameters: type.children.filter((element) => SyntaxTree.isNode(element)).length - 1,
+    })),
+    [
+      { mut: false, once: false, parameters: 2 },
+      { mut: true, once: false, parameters: 1 },
+      { mut: false, once: true, parameters: 0 },
+    ],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers every callable type boundary without crossing the next declaration', () => {
+  const cases = [
+    ['mut (I32) -> I32', 'FnKeyword'],
+    ['once fn I32) -> I32', 'LeftParenthesis'],
+    ['fn(I32 -> I32', 'RightParenthesis'],
+    ['fn(I32) I32', 'Arrow'],
+    ['fn(I32) ->', 'Identifier'],
+  ] as const
+
+  for (const [damaged, expected] of cases) {
+    const source = `fn damaged(callback: ${damaged}) -> I32 { return 0 } fn after() -> I32 { return 1 }`
+    const result = parseText(`memory/callable-recovery-${expected}`, source)
+    const first = directFunctionDeclarations(result.root).at(0)
+    const second = directFunctionDeclarations(result.root).at(1)
+    assert.notStrictEqual(first, undefined)
+    assert.notStrictEqual(second, undefined)
+    assert.strictEqual(
+      first === undefined ? false : missingLeaves(first).some((leaf) => leaf.expected === expected),
+      true,
+    )
+    assert.strictEqual(
+      second === undefined ? undefined : SyntaxTree.isAvailableSyntax(second),
+      true,
+    )
+    assertOriginalTokenTraversal(result)
+  }
+})
+
+it('parses repeated postfix application over every callable-producing expression', () => {
+  const source = `fn use(operation: fn(I32) -> I32, value: I32) -> I32 {
+  let bound = I32.add(2)
+  let named = operation(value)
+  let qualified = I32.add(2)(value)
+  let grouped = (operation)(value)
+  return choose(true)(value)
+}`
+  const result = parseText('memory/postfix-callables', source)
+  const calls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+  )
+
+  assert.strictEqual(calls.length, 7)
+  assert.strictEqual(
+    calls.some((call) => SyntaxTree.directNode(call, 'CallExpression') !== undefined),
+    true,
+  )
+  assert.strictEqual(
+    calls.some((call) => SyntaxTree.directNode(call, 'GroupedExpression') !== undefined),
+    true,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('gives pipelines a complete callable expression and run the complete following expression', () => {
+  const source = `fn use(attempt: Effect<I32>, operation: fn(I32) -> I32) -> I32 {
+  let a = 1 |> operation
+  let b = 2 |> (operation)
+  let c = 3 |> choose(true)
+  let d = run attempt |> Effect.retry(2)
+  let e = (run attempt) |> operation
+  return run run nested
+}`
+  const result = parseText('memory/callable-pipe-run', source)
+  const bindings = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'BindingStatement',
+  )
+  const d = bindings.at(3)
+  const e = bindings.at(4)
+  const dRun = d === undefined ? undefined : SyntaxTree.directNode(d, 'RunExpression')
+  const ePipeline = e === undefined ? undefined : SyntaxTree.directNode(e, 'PipelineExpression')
+
+  assert.notStrictEqual(dRun, undefined)
+  assert.notStrictEqual(
+    dRun === undefined ? undefined : SyntaxTree.directNode(dRun, 'PipelineExpression'),
+    undefined,
+  )
+  assert.notStrictEqual(ePipeline, undefined)
+  assert.notStrictEqual(
+    ePipeline === undefined ? undefined : SyntaxTree.directNode(ePipeline, 'GroupedExpression'),
+    undefined,
+  )
+  assert.strictEqual(
+    descendants(result.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'RunExpression',
+    ).length,
+    4,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('bounds run at commas, delimiters, blocks, and following statements', () => {
+  const source = `fn comma(first: Effect<I32>, second: I32) -> I32 { return pair(run first, second) }
+fn delimiter(first: Effect<I32>) -> I32 { return (run first) }
+fn block(first: Effect<I32>) -> I32 { if true { return run first } return 0 }
+fn statement(first: Effect<I32>) -> I32 { let value = run first return value }`
+  const result = parseText('memory/run-boundaries', source)
+
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 4)
+  assert.strictEqual(
+    descendants(result.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'RunExpression',
+    ).length,
+    4,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
 })
 
 it('bounds operator recovery at expression and declaration boundaries', () => {

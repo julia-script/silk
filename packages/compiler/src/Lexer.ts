@@ -92,6 +92,7 @@ const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['if', 'IfKeyword'],
   ['else', 'ElseKeyword'],
   ['mut', 'MutKeyword'],
+  ['once', 'OnceKeyword'],
   ['match', 'MatchKeyword'],
   ['while', 'WhileKeyword'],
   ['break', 'BreakKeyword'],

@@ -49,12 +49,13 @@ to grow without reimplementing Silk semantics in a separate tool.
 
 The compiler has two owned intermediate representations between syntax and code generation. HIR is the
 resolved, typed, generic-aware semantic representation. It uses canonical declaration and type IDs,
-normalized function contracts and rows, core semantic operations, and source provenance while
-retaining type and contract-row parameters. MIR is a monomorphic, backend-neutral structured
+normalized function contracts and rows, first-class function items, callable sections and
+applications, core semantic operations, and source provenance while retaining type and contract-row
+parameters. MIR is a monomorphic, backend-neutral structured
 control DAG. Ordered operations, conditionals, loops, cleanup, and terminal outcomes retain their
 canonical region identities; repetition is the meaning of an explicit loop region rather than a
 graph back-edge. MIR makes moves, borrows, drops, cleanup paths, success/failure outcomes, service
-slots, witness calls, matches, traps, and runtime-helper calls explicit without containing LLVM or
+slots, witness calls, callable construction/application/cleanup, matches, traps, and runtime-helper calls explicit without containing LLVM or
 WebAssembly types, instructions, labels, branch depths, intrinsics, attributes, or metadata nodes.
 MIR is backend-neutral but target-aware: the complete compiler-selected target and concrete
 data-layout plan are part of the MIR program, including physical field offsets when aggregate types
@@ -72,18 +73,20 @@ Frontend checking proceeds in this order:
    row subtraction, and HIR construction are one integrated phase because a function's contract is
    part of its type. Private non-recursive dependencies may be memoized on demand; recursive
    strongly connected components use their required explicit contracts.
-4. Check ownership, lexical borrowing, mutation, complete initialization, named-scope outlives and
-   escape rules, and live owners at structured exits once on typed generic HIR. This produces
+4. Check ownership, lexical borrowing, mutation, complete initialization, callable-environment
+   outlives and escape rules, and live owners at structured exits once on typed generic HIR. This produces
    ownership facts and a target-neutral cleanup plan; it does not insert target-specific drops.
 5. Analyze every declaration in the reachable source closure, including unused private and generic
    declarations, but discover concrete runtime instances only from the typed host adapter and user
-   entry. Reachability additionally follows function values, service-witness entries, drop glue,
-   and runtime helpers. An instance key is the canonical declaration ID plus normalized concrete
+   entry. Reachability additionally follows function values, hidden callable construction identities
+   and their concrete capture substitutions, service-witness entries, drop glue, and runtime
+   helpers. An instance key is the canonical declaration ID plus normalized concrete
    type and contract-row arguments. The deterministic worklist records an instance before following
    it so ordinary recursion terminates; the existing restriction that recursive generics preserve
    their parameters prevents polymorphic instance expansion.
 6. Select the canonical target profile and compute one backend-neutral layout plan for every
-   concrete runtime type discovered by the instance worklist. This phase runs before MIR lowering
+   concrete runtime type and callable environment discovered by the instance worklist. Callable
+   layout includes ordered value or borrow slots and a target-local call-scoped view. This phase runs before MIR lowering
    so layout facts and diagnostics are available to the compiler and its analysis facade early,
    while generic types that have no concrete runtime instance need no speculative layout.
 7. Lower reachable instances to MIR while preserving structured control as an acyclic region graph
@@ -106,8 +109,10 @@ plan exactly and cannot independently choose physical layouts at emission time. 
 LLVM control flow merely because LLVM is the bootstrap backend, nor WebAssembly stack and
 structured control flow in anticipation of a future backend. LLVM deterministically flattens the
 common DAG into backend-private blocks and back-edges; WebAssembly maps the same regions directly to
-its nested control constructs. Neither backend may reconstruct compiler-known source structure from
-a flattened graph.
+its nested control constructs. Callable identity, capture order, invocation mode, and cleanup arrive
+in that same DAG. A backend may erase an immediate section or choose target-local environment
+details, but it may not rediscover capture semantics or impose a universal closure box. Neither
+backend may reconstruct compiler-known source structure from a flattened graph.
 
 Code generation is selected through a nominal `Backend` service. Its bootstrap operation consumes
 the whole target-aware monomorphized MIR program plus a codegen request and produces one relocatable

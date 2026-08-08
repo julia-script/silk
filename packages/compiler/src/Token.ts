@@ -19,6 +19,7 @@ export type TokenKind =
   | 'AsKeyword'
   | 'LetKeyword'
   | 'MutKeyword'
+  | 'OnceKeyword'
   | 'MoveKeyword'
   | 'MatchKeyword'
   | 'IfKeyword'

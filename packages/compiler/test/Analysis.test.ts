@@ -46,6 +46,72 @@ it.effect('answers multi-module queries from one snapshot', () =>
   }),
 )
 
+it.effect('resolves imported declarations as stored callable values', () =>
+  Effect.gen(function* () {
+    const source =
+      'import lib as Lib\npub fn main() -> I32 { let callback = Lib.identity return callback(42) }'
+    const self = yield* snapshot('root', [
+      ['root', source],
+      ['lib', 'pub fn identity(value: I32) -> I32 { return value }'],
+    ])
+    const root = self.results.get('root')
+    const main = root?.functions.at(0)
+    const binding = main?.statements.at(0)
+
+    assert.strictEqual(
+      binding?._tag === 'BindStatement' ? binding.binding.initializer._tag : undefined,
+      'FunctionItem',
+    )
+    assert.strictEqual(main?.returnedExpression._tag, 'CallableApply')
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'root', source.indexOf('identity'))?.resolution._tag,
+      'Available',
+    )
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'root', source.lastIndexOf('callback'))?.resolution._tag,
+      'Available',
+    )
+    assert.deepEqual(root?.diagnostics, [])
+  }),
+)
+
+it.effect('indexes automatic section targets and piped callable bindings', () =>
+  Effect.gen(function* () {
+    const source = `fn add(value: I32, amount: I32) -> I32 { return value + amount }
+pub fn main() -> I32 { let increment = add(2) return 40 |> increment }`
+    const self = yield* Analysis.ofSource('main', ascii(source))
+
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'main', source.lastIndexOf('add'))?.resolution._tag,
+      'Available',
+    )
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'main', source.lastIndexOf('increment'))?.resolution._tag,
+      'Available',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('retains inaccessible imported callable targets without inventing a value lookup', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot('root', [
+      ['root', 'import lib as Lib\npub fn main() -> I32 { let callback = Lib.hidden return 0 }'],
+      ['lib', 'fn hidden(value: I32) -> I32 { return value }'],
+    ])
+    const root = self.results.get('root')
+    const binding = root?.functions.at(0)?.statements.at(0)
+    const initializer = binding?._tag === 'BindStatement' ? binding.binding.initializer : undefined
+
+    assert.strictEqual(initializer?._tag, 'FunctionItem')
+    assert.strictEqual(
+      initializer?._tag === 'FunctionItem' ? initializer.reference._tag : undefined,
+      'Missing',
+    )
+    assert.include(root?.diagnostics.map((diagnostic) => diagnostic.code) ?? [], 'SEM0015')
+  }),
+)
+
 it.effect('merges diagnostics while keeping unrelated facts queryable', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('root', [

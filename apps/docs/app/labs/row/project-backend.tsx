@@ -43,7 +43,9 @@ const typeText = (type: Type.Type): string =>
                 ? ''
                 : ` ! ${type.failures.map(typeText).join(' | ')}`
             }> ${type.access.toLowerCase()}`
-          : type.members.map(typeText).join(' | ')
+          : type._tag === 'CallableType'
+            ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+            : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,
@@ -282,6 +284,10 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} active case · ${cleanup.cases
         .map((member) => `${member.ordinal}:${typeText(member.member)}`)
         .join(', ')}`
+    case 'CallableCleanup':
+      return `${typeText(cleanup.type)} captures ${cleanup.slots
+        .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
+        .join(' → ')}`
   }
 }
 
@@ -356,6 +362,30 @@ export const ownershipRows = (
         span: loanSpan,
         onActivate: () => onPick(loanSpan),
       })
+    }
+
+    for (const callable of fn.callables) {
+      const callableSpan = asSpan(callable.span)
+      rows.push({
+        key: `own-${fn.declaration.id.ordinal}-callable-${callable.site.span.start}`,
+        depth: 1,
+        dot: 'symbol',
+        tone: 'symbol',
+        label: `callable · ${callable.mode.toLowerCase()}`,
+        detail: `${callable.slots.length} slot${callable.slots.length === 1 ? '' : 's'} · retained ${callable.retainedDependencies.join(', ') || 'none'} · drop ${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(' → ') || 'none'}`,
+        span: callableSpan,
+        onActivate: () => onPick(callableSpan),
+      })
+      for (const slot of callable.slots) {
+        rows.push({
+          key: `own-${fn.declaration.id.ordinal}-callable-${callable.site.span.start}-slot${slot.ordinal}`,
+          depth: 2,
+          label: `slot #${slot.ordinal} → parameter #${slot.parameterOrdinal}`,
+          detail: `${slot.access.toLowerCase()} · ${slot.type === undefined ? 'unavailable type' : typeText(slot.type)} · ${cleanupText(slot.cleanup)}`,
+          span: callableSpan,
+          onActivate: () => onPick(callableSpan),
+        })
+      }
     }
 
     for (const replacement of fn.borrowedReplacements) {
@@ -454,6 +484,20 @@ export const instanceRows = (
     })
   }
 
+  for (const [ordinal, callable] of discovery.callables.entries()) {
+    const span = asSpan(callable.site.span)
+    rows.push({
+      key: `callable-instance-${ordinal}`,
+      depth: 1,
+      dot: 'symbol',
+      tone: 'symbol',
+      label: `callable ${callable.target._tag === 'DeclarationCallableTarget' ? callable.target.declaration.name : `${callable.target.actor}.${callable.target.operation}`}`,
+      detail: `${typeText(callable.type)} · ${callable.mode.toLowerCase()} · ${callable.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()} ${typeText(capture.type)}`).join(', ') || 'no captures'}`,
+      span,
+      onActivate: () => onPick(span),
+    })
+  }
+
   for (const [ordinal, violation] of discovery.violations.entries()) {
     const caller = discovery.instances.find((instance) => instance.key === violation.caller)
     const span = asSpan(caller?.function.declaration.syntax.span ?? { start: 0, end: 0 })
@@ -514,6 +558,21 @@ export const layoutRows = (
                 ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
                 : `i${entry.representation.bits}`
         }`,
+      })
+    }
+    for (const [ordinal, environment] of plan.callableEnvironments.entries()) {
+      const span = asSpan(environment.callable.site.span)
+      const available = environment._tag === 'CallableEnvironment'
+      rows.push({
+        key: `plan-callable-${ordinal}`,
+        depth: 1,
+        dot: available ? 'symbol' : 'warning',
+        ...(available ? { tone: 'symbol' as const } : { tone: 'warning' as const }),
+        label: `callable environment · ${environment.callable.mode.toLowerCase()}`,
+        detail: available
+          ? `${environment.size} bytes · align ${environment.alignment} · ${environment.fields.map((field) => `#${field.ordinal}@${field.offset} ${field.representation.toLowerCase()}`).join(', ') || 'empty'} · view ${environment.view.pointerBits}-bit`
+          : `unavailable · ${environment.reason}`,
+        span,
       })
     }
     if (plan.literalVerdicts.length > 0) {
@@ -610,6 +669,10 @@ const operationLabel = (operation: Mir.Operation): string => {
         .join(', ')})`
     case 'MakeEffect':
       return `${localText(operation.destination)} = effect ${operation.runner.name} captures ${operation.captures.map((capture) => `${capture.access.toLowerCase()} ${localText(capture.source)}`).join(', ') || 'none'}`
+    case 'MakeCallable':
+      return `${localText(operation.destination)} = callable ${operation.target._tag === 'DeclarationCallableTarget' ? operation.target.declaration.name : `${operation.target.actor}.${operation.target.operation}`} captures ${operation.captures.map((capture) => `${capture.access.toLowerCase()} ${localText(capture.source)}`).join(', ') || 'none'}`
+    case 'ApplyCallable':
+      return `${localText(operation.destination)} = apply ${operation.callable === undefined ? 'erased section' : localText(operation.callable)}(${operation.arguments.map(localText).join(', ')}) · ${operation.access.toLowerCase()}`
     case 'PackEffectOutcome':
       return `${localText(operation.destination)} = effect outcome tag ${operation.tag} payload ${localText(operation.source)}`
     case 'UnpackEffectSuccess':
@@ -861,6 +924,10 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
           ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
           : value._tag === 'EffectValue'
             ? `${typeText(value.type)} recipe ${value.runner.name}`
+            : value._tag === 'CallableBorrowValue'
+              ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
+              : value._tag === 'CallableValue'
+                ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
             : value._tag === 'AllocationValue'
               ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
               : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
@@ -931,6 +998,14 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `effect success · tag ${event.tag}`
     case 'EffectFailure':
       return `effect failure · tag ${event.tag}`
+    case 'CallableConstruct':
+      return `construct callable #${event.ticket} · ${event.mode.toLowerCase()}`
+    case 'CallableApply':
+      return `apply callable #${event.ticket} · ${event.mode.toLowerCase()}`
+    case 'CallableCleanup':
+      return `cleanup callable #${event.ticket}`
+    case 'CallableRejected':
+      return `reject callable #${event.ticket} · ${event.mode.toLowerCase()}`
   }
 }
 
@@ -966,6 +1041,10 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'Transfer':
     case 'EffectSuccess':
     case 'EffectFailure':
+    case 'CallableConstruct':
+    case 'CallableApply':
+    case 'CallableCleanup':
+    case 'CallableRejected':
       return 2
   }
 }
@@ -984,6 +1063,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `missing function · ${reason.target.module}.${reason.target.name}`
     case 'RecursiveCycle':
       return `recursive cycle · ${reason.cycle.map((instance) => instance.declaration.name).join(' → ')}`
+    case 'InvalidCallableReuse':
+      return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
   }
 }
 

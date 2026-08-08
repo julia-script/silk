@@ -107,6 +107,28 @@ it.effect('resolves header signatures and diagnoses unknown types at exact spans
   }),
 )
 
+it.effect('resolves callable parameter and result contracts canonically', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'fn apply<T>(shared: fn(T) -> T, exclusive: mut fn(T) -> Bool, consuming: once fn() -> T) -> T { return shared }',
+      ],
+    ])
+    const declaration = index.modules.at(0)?.declarations.at(0)
+
+    assert.deepEqual(
+      declaration?.parameters.map((parameter) =>
+        parameter.declaredType._tag === 'Resolved'
+          ? Type.encode(parameter.declaredType.type)
+          : parameter.declaredType._tag,
+      ),
+      ['fn(T) -> T', 'mut fn(T) -> Bool', 'once fn() -> T'],
+    )
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
 it.effect('normalizes effect failure rows while retaining source members', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [

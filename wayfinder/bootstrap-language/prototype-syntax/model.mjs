@@ -1,12 +1,14 @@
 const imperativeExamples = [
   {
-    title: 'Built-in dual actor calls',
+    title: 'Automatic callable sections',
     source: `pub fn sum(self: I32, that: I32) -> I32 {
   return self + that
 }
 
 let direct = Math.sum(2, 3)
-let piped = 2 |> Math.sum(3)`,
+let plusThree = Math.sum(3)
+let applied = plusThree(2)
+let piped = 2 |> plusThree`,
   },
   {
     title: 'Construct now, run later',
@@ -28,22 +30,22 @@ return artifact`,
   {
     title: 'Specialize an open Effect twice',
     note:
-      'Providers are attached before the owned requests. Borrowed providers constrain the specialized Effect lifetime.',
+      'Each owned request first constructs its Effect; borrowed providers then specialize that concrete lazy value.',
     source: `let mut scratch = SystemAllocator.make()
 let fileSystem = NativeFileSystem.make()
 let virtualFileSystem = MemoryFileSystem.make()
 
-let withScratch = Allocator.provide(
-  Compiler.compile,
-  &mut scratch,
-  @Scratch,
+let fsCompilation = FileSystem.provide(
+  Allocator.provide(Compiler.compile(move diskRequest), &mut scratch, @Scratch),
+  &fileSystem,
+)
+let memoryCompilation = FileSystem.provide(
+  Allocator.provide(Compiler.compile(move memoryRequest), &mut scratch, @Scratch),
+  &virtualFileSystem,
 )
 
-let fsCompilation = FileSystem.provide(withScratch, &fileSystem)
-let memoryCompilation = FileSystem.provide(withScratch, &virtualFileSystem)
-
-let diskArtifact = run fsCompilation(move diskRequest)
-return run memoryCompilation(move memoryRequest)`,
+let diskArtifact = run fsCompilation
+return run memoryCompilation`,
   },
   {
     title: 'Captured ownership determines reuse',
@@ -105,16 +107,29 @@ return run compilation(move secondRequest)`,
   return 1 + childDepth
 }`,
   },
+  {
+    title: 'Affine callable environment',
+    note:
+      'A moved allocation is owned by the section. Calling transfers it once; dropping the uncalled section releases it.',
+    source: `fn encode(input: &Syntax, storage: Allocation) -> Artifact
+  return Encoder.write(input, move storage)
+
+let storage = run Allocator.allocate(layout)
+let encodeIntoStorage: once fn(&Syntax) -> Artifact = encode(move storage)
+let artifact = encodeIntoStorage(&syntax)`,
+  },
 ]
 
 const pipedExamples = [
   {
-    title: 'Built-in dual actor calls',
+    title: 'Automatic callable sections',
     source: `pub fn sum(self: I32, that: I32) -> I32
   return self + that
 
 let direct = Math.sum(2, 3)
-let piped = 2 |> Math.sum(3)`,
+let plusThree = Math.sum(3)
+let applied = plusThree(2)
+let piped = 2 |> plusThree`,
   },
   {
     title: 'Construct now, run later',
@@ -123,12 +138,10 @@ let piped = 2 |> Math.sum(3)`,
     source: `pub effect fn compile(request: own Request) -> Artifact
   ! FileError | ProcessError | OutOfMemory
   ? &FileSystem | &mut Allocator@Scratch
-  return run (
-    request.sourcePath
-      |> FileSystem.read
-      |> Effect.flatMap(Parser.parse)
-      |> Effect.flatMap(Backend.emit)
-  )
+  return run request.sourcePath
+    |> FileSystem.read
+    |> Effect.flatMap(Parser.parse)
+    |> Effect.flatMap(Backend.emit)
 
 let computation = compile(move request)
 return run computation`,
@@ -136,18 +149,17 @@ return run computation`,
   {
     title: 'Specialize an open Effect twice',
     note:
-      'The pipe specializes the open function value. Owned inputs arrive only when each specialized function is called.',
-    source: `let withScratch = Compiler.compile
+      'The requests construct two Effects; the following callable sections specialize each value without pipeline-only argument insertion.',
+    source: `let fsCompilation = Compiler.compile(move diskRequest)
   |> Allocator.provide(&mut scratch, @Scratch)
-
-let fsCompilation = withScratch
   |> FileSystem.provide(&fileSystem)
 
-let memoryCompilation = withScratch
+let memoryCompilation = Compiler.compile(move memoryRequest)
+  |> Allocator.provide(&mut scratch, @Scratch)
   |> FileSystem.provide(&virtualFileSystem)
 
-let diskArtifact = run fsCompilation(move diskRequest)
-return run memoryCompilation(move memoryRequest)`,
+let diskArtifact = run fsCompilation
+return run memoryCompilation`,
   },
   {
     title: 'Captured ownership determines reuse',
@@ -181,12 +193,11 @@ return run compilation`,
     title: 'Acquire a fresh provider for every run',
     note:
       'This chain is a reusable recipe. Provider acquisition and Drop occur independently on every run.',
-    source: `let compilation = Compiler.compile
+    source: `let compilation = Compiler.compile(move request)
   |> Effect.map(Artifact.promote)
   |> Allocator.provideWith(Scratch.acquire, @Scratch)
 
-let first = run compilation(move firstRequest)
-return run compilation(move secondRequest)`,
+return run compilation`,
   },
   {
     title: 'Guard non-tail recursion explicitly',
@@ -197,12 +208,21 @@ return run compilation(move secondRequest)`,
     return 1
   }
 
-  return run (
-    depth(&node.child)
-      |> Effect.suspend
-      |> Effect.map(Math.add(1))
-  )
+  return run depth(&node.child)
+    |> Effect.suspend
+    |> Effect.map(Math.add(1))
 }`,
+  },
+  {
+    title: 'Affine callable environment',
+    note:
+      'The automatic section is an ordinary once callable whose moved Allocation is visible to ownership and cleanup.',
+    source: `fn encode(input: &Syntax, storage: Allocation) -> Artifact
+  return Encoder.write(input, move storage)
+
+let storage = run Allocator.allocate(layout)
+let encodeIntoStorage = encode(move storage)
+return syntax |> encodeIntoStorage`,
   },
 ]
 

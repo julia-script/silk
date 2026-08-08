@@ -296,18 +296,22 @@ const nestedExpressionFacts = (
       case 'Run':
         return [expression.subject]
       case 'EffectCatch':
-        return [expression.protected]
+        return [expression.protected, expression.handler]
       case 'EffectRetry':
         return [expression.protected, expression.retries]
       case 'EffectProvide':
         return [expression.protected]
       case 'EffectProvideWith':
         return [expression.protected, expression.acquisition]
+      case 'EffectTransform':
+        return [expression.protected, expression.callback]
+      case 'CallableSection':
+        return expression.captures.map((capture) => capture.expression)
+      case 'CallableApply':
+        return [expression.callee, ...expression.arguments.map((argument) => argument.expression)]
       case 'Operator':
       case 'Call':
         return expression.arguments.map((argument) => argument.expression)
-      case 'Pipeline':
-        return [expression.input, ...expression.arguments.map((argument) => argument.expression)]
       case 'Match':
         return [
           expression.scrutinee,

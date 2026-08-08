@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import { corpus } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -92,6 +92,191 @@ pub fn main() -> I32 {
       outcome.trace.some(
         (event) => event._tag === 'Call' && event.target.name.includes('$effect$'),
       ),
+    )
+  }),
+)
+
+it.effect('executes named function values and stored automatic sections', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`fn identity(value: I32) -> I32 { return value }
+pub fn main() -> I32 {
+  let named = identity
+  let plusTwo = I32.add(2)
+  return named(plusTwo(40))
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(
+      outcome.trace.filter((event) => event._tag === 'CallableConstruct').length,
+      2,
+    )
+    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableApply').length, 2)
+  }),
+)
+
+it.effect('reuses an exclusive callable after each synchronous invocation completes', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`fn write(value: I32, values: &mut [I32]) -> I32 {
+  values[0] = value
+  return values[0]
+}
+pub fn main() -> I32 {
+  let mut values = [0]
+  let mut callback = write(&mut values)
+  let first = callback(20)
+  let second = callback(first + 2)
+  drop callback
+  return second
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 22)
+    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableApply').length, 2)
+  }),
+)
+
+it.effect('blocks a second evaluator invocation of a consumed callable identity', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'memory/consumed-callable',
+      ascii(`struct Token { value: I32 }
+fn consume(value: I32, token: Token) -> I32 { return value + token.value }
+pub fn main() -> I32 {
+  let token = Token { value: 2 }
+  let callback = consume(move token)
+  return callback(40)
+}`),
+    )
+    const original = Analysis.loweredMir(self)
+    const repeated: Mir.Module = {
+      ...original,
+      functions: original.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag !== 'OperationRegion'
+            ? region
+            : {
+                ...region,
+                operations: region.operations.flatMap<Mir.Operation>((operation) =>
+                  operation._tag === 'ApplyCallable'
+                    ? ([operation, operation] as const)
+                    : ([operation] as const),
+                ),
+              },
+        ),
+      })),
+    }
+
+    const outcome = BootstrapEvaluation.evaluate(self.instances, repeated)
+    assert.strictEqual(outcome._tag, 'Blocked', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Blocked') return
+    assert.strictEqual(outcome.reason._tag, 'InvalidCallableReuse')
+    assert.strictEqual(outcome.trace.at(-1)?._tag, 'CallableRejected')
+  }),
+)
+
+it.effect('maps, flatMaps, and taps Effect successes through ordinary callable values', () =>
+  Effect.gen(function* () {
+    const mapped = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
+pub fn main() -> I32 { return run succeed(2) |> Effect.map(I32.add(2)) }`)
+    const flatMapped = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
+effect fn double(value: I32) -> I32 { return value * 2 }
+pub fn main() -> I32 { return run succeed(21) |> Effect.flatMap(double) }`)
+    const tapped = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
+effect fn observe(value: I32) -> I32 { return value + 100 }
+pub fn main() -> I32 { return run succeed(42) |> Effect.tap(observe) }`)
+
+    for (const [outcome, expected] of [
+      [mapped, 4],
+      [flatMapped, 42],
+      [tapped, 42],
+    ] as const) {
+      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, expected)
+    }
+  }),
+)
+
+it.effect('keeps an Effect returned from map nested until a second run', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
+effect fn double(value: I32) -> I32 { return value * 2 }
+pub fn main() -> I32 { return run run succeed(21) |> Effect.map(double) }`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('retains an exclusive mapper environment across repeated mapped Effect runs', () =>
+  Effect.gen(function* () {
+    const source = `effect fn succeed(value: I32) -> I32 { return value }
+fn increment(value: I32, state: &mut [I32]) -> I32 {
+  state[0] = state[0] + 1
+  return value + state[0]
+}
+pub fn main() -> I32 {
+  let mut state = [0]
+  let mapped = succeed(20) |> Effect.map(increment(&mut state))
+  let first = run mapped
+  let second = run mapped
+  drop mapped
+  return first + second
+}`
+    const self = yield* Analysis.ofSource('memory/mutable-map', ascii(source))
+    const outcome = Analysis.evaluate(self)
+
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      `${JSON.stringify({ diagnostics: self.diagnostics, outcome }, undefined, 2)}\n${Mir.encode(Analysis.loweredMir(self))}`,
+    )
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 43)
+    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableApply').length, 2)
+  }),
+)
+
+it.effect('drops an unrun mapped Effect owned callback environment exactly once', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`struct Token { value: I32 }
+effect fn succeed(value: I32) -> I32 { return value }
+fn consume(value: I32, token: Token) -> I32 { return value + token.value }
+pub fn main() -> I32 {
+  let token = Token { value: 2 }
+  let mapped = succeed(40) |> Effect.map(consume(move token))
+  drop mapped
+  return 42
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'CallableCleanup').length, 1)
+  }),
+)
+
+it.effect('catches a typed failure through an automatic effect-handler section', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`struct Problem { code: I32 }
+effect fn failNow() -> I32 ! Problem { fail Problem { code: 41 } }
+effect fn recover(problem: Problem, adjustment: I32) -> I32 {
+  return problem.code + adjustment
+}
+pub fn main() -> I32 {
+  let handled = failNow() |> Effect.catch<Problem>(recover(1))
+  return run handled
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.include(
+      outcome.trace.map((event) => event._tag),
+      'CallableApply',
     )
   }),
 )

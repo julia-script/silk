@@ -249,6 +249,13 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RetryEffect' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
+  (operation._tag === 'Binary' &&
+    operation.operator !== 'Equals' &&
+    operation.operator !== 'NotEquals' &&
+    operation.operator !== 'LessThan' &&
+    operation.operator !== 'LessOrEqual' &&
+    operation.operator !== 'GreaterThan' &&
+    operation.operator !== 'GreaterOrEqual') ||
   ((operation._tag === 'ReadPlace' ||
     operation._tag === 'CheckPlace' ||
     operation._tag === 'WritePlace') &&
@@ -648,6 +655,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         (environment) =>
           environment._tag === 'EffectEnvironment' &&
           environment.fields.some((field) => field.representation === 'Borrow'),
+      ) ||
+      program.layout.callableEnvironments.some(
+        (environment) =>
+          environment._tag === 'CallableEnvironment' &&
+          environment.fields.some((field) => field.representation === 'Borrow'),
       )
     const i8 = hasAddressLane ? yield* LlvmType.integer(builder, 8) : i32
     const pointer = hasAddressLane ? yield* LlvmType.pointer(builder) : i32
@@ -667,6 +679,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
         ])
       if (type._tag === 'EffectValue')
         return Layout.effectEnvironmentLanes(program.layout, type.environment)
+      if (type._tag === 'CallableValue')
+        return type.environment === undefined
+          ? Object.freeze([])
+          : Layout.callableEnvironmentLanes(program.layout, type.environment)
       const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
       if (shape === undefined) {
         throw new RangeError(`LLVM backend lost calling shape for ${Mir.semanticType(type)}`)
@@ -787,6 +803,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
           }
           const continuationLocals = entry.linear.flatMap((block) => {
+            if (block.terminator._tag === 'Return' || block.terminator._tag === 'Trap') return []
             let afterRuntimeContinuation = false
             const ordinals: Array<number> = []
             for (const operation of block.operations) {
@@ -797,6 +814,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
             return ordinals
           })
+          const runtimeContinuationDestinations = entry.linear.flatMap((block) =>
+            block.operations.flatMap((operation) => {
+              if (!opensRuntimeContinuation(operation) || operation._tag === 'Binary') return []
+              const destination = destinationOf(operation)
+              return destination === undefined ? [] : [destination.ordinal]
+            }),
+          )
           const mutableRoots = new Set([
             ...entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
@@ -808,11 +832,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             ),
             ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
             ...continuationLocals,
+            ...runtimeContinuationDestinations,
           ])
           const borrowedCaptureRoots = new Set(
             entry.linear.flatMap((block) =>
               block.operations.flatMap((operation) =>
-                operation._tag === 'MakeEffect'
+                operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
                   ? operation.captures.flatMap((capture) =>
                       capture.access === 'Shared' || capture.access === 'Exclusive'
                         ? [capture.source.ordinal]
@@ -985,6 +1010,160 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             return Object.freeze(values)
           })
 
+          const emitCallableBinary = Effect.fnUntraced(function* (
+            operator: Mir.BinaryOperator,
+            left: Value.Input,
+            right: Value.Input,
+            operandMirType: Mir.Type,
+            span: SourceSpan.SourceSpan,
+            nameOrdinal: number,
+          ) {
+            const leftLane = valueLanesFor(operandMirType).at(0)
+            if (leftLane === undefined)
+              throw new RangeError('LLVM callable binary operation lost its operand type')
+            const unsigned = operandMirType._tag === 'Usize'
+            const operandType = laneType(leftLane)
+            const comparisonPredicates: Readonly<
+              Partial<
+                Record<
+                  Mir.BinaryOperator,
+                  'eq' | 'ne' | 'slt' | 'sle' | 'sgt' | 'sge' | 'ult' | 'ule' | 'ugt' | 'uge'
+                >
+              >
+            > = {
+              Equals: 'eq',
+              NotEquals: 'ne',
+              LessThan: unsigned ? 'ult' : 'slt',
+              LessOrEqual: unsigned ? 'ule' : 'sle',
+              GreaterThan: unsigned ? 'ugt' : 'sgt',
+              GreaterOrEqual: unsigned ? 'uge' : 'sge',
+            }
+            const predicate = comparisonPredicates[operator]
+            if (predicate !== undefined) {
+              const flag = yield* FunctionBody.integerCompare(
+                body,
+                predicate,
+                left,
+                right,
+                `callable_cmp${nameOrdinal}_flag`,
+              )
+              const widened = yield* FunctionBody.cast(
+                body,
+                'zext',
+                flag,
+                i32,
+                `callable_cmp${nameOrdinal}`,
+              )
+              yield* locate(span, yield* Value.instruction(body, flag))
+              return widened
+            }
+            if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+            let result: Value.Value
+            if (operator === 'Add' || operator === 'Subtract' || operator === 'Multiply') {
+              const intrinsicId =
+                operator === 'Add'
+                  ? unsigned
+                    ? ('uadd.with.overflow' as const)
+                    : ('sadd.with.overflow' as const)
+                  : operator === 'Subtract'
+                    ? unsigned
+                      ? ('usub.with.overflow' as const)
+                      : ('ssub.with.overflow' as const)
+                    : unsigned
+                      ? ('umul.with.overflow' as const)
+                      : ('smul.with.overflow' as const)
+              let overflowSignature = unsigned ? unsignedOverflowSignature : signedOverflowSignature
+              if (overflowSignature === undefined) {
+                const i1 = yield* LlvmType.integer(builder, 1)
+                overflowSignature = Object.freeze({
+                  returnType: yield* LlvmType.structure(builder, [operandType, i1]),
+                  parameters: Object.freeze([operandType, operandType]),
+                })
+                if (unsigned) unsignedOverflowSignature = overflowSignature
+                else signedOverflowSignature = overflowSignature
+              }
+              const pair = yield* Intrinsic.call(
+                body,
+                intrinsicId,
+                [operandType],
+                [left, right],
+                `callable_arith${nameOrdinal}_pair`,
+                { signature: overflowSignature },
+              )
+              if (pair === undefined)
+                throw new RangeError('Backend callable overflow intrinsic produced no value')
+              result = yield* FunctionBody.extractValue(
+                body,
+                pair,
+                [0],
+                `callable_arith${nameOrdinal}`,
+              )
+              const overflowed = yield* FunctionBody.extractValue(
+                body,
+                pair,
+                [1],
+                `callable_arith${nameOrdinal}_flag`,
+              )
+              const continueBlock = yield* LlvmBlock.make(body, `callable_arith${nameOrdinal}_ok`)
+              yield* FunctionBody.conditionalBranch(body, overflowed, trapBlock, continueBlock)
+              yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+            } else {
+              const zero = yield* Constant.integerUnsigned(builder, operandType, 0n)
+              const zeroDivisor = yield* FunctionBody.integerCompare(
+                body,
+                'eq',
+                right,
+                zero,
+                `callable_div${nameOrdinal}_zero`,
+              )
+              let trapping: Value.Value = zeroDivisor
+              if (!unsigned) {
+                const minimum = yield* Constant.integerSigned(builder, operandType, -2147483648n)
+                const negativeOne = yield* Constant.integerSigned(builder, operandType, -1n)
+                const minimumDividend = yield* FunctionBody.integerCompare(
+                  body,
+                  'eq',
+                  left,
+                  minimum,
+                  `callable_div${nameOrdinal}_min`,
+                )
+                const negativeOneDivisor = yield* FunctionBody.integerCompare(
+                  body,
+                  'eq',
+                  right,
+                  negativeOne,
+                  `callable_div${nameOrdinal}_negone`,
+                )
+                const overflowCase = yield* FunctionBody.binary(
+                  body,
+                  'and',
+                  minimumDividend,
+                  negativeOneDivisor,
+                  `callable_div${nameOrdinal}_overflow`,
+                )
+                trapping = yield* FunctionBody.binary(
+                  body,
+                  'or',
+                  zeroDivisor,
+                  overflowCase,
+                  `callable_div${nameOrdinal}_trapping`,
+                )
+              }
+              const continueBlock = yield* LlvmBlock.make(body, `callable_div${nameOrdinal}_ok`)
+              yield* FunctionBody.conditionalBranch(body, trapping, trapBlock, continueBlock)
+              yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+              result = yield* FunctionBody.binary(
+                body,
+                operator === 'Divide' ? (unsigned ? 'udiv' : 'sdiv') : unsigned ? 'urem' : 'srem',
+                left,
+                right,
+                `callable_arith${nameOrdinal}`,
+              )
+            }
+            yield* locate(span, yield* Value.instruction(body, result))
+            return result
+          })
+
           const storeMutable = Effect.fnUntraced(function* (
             root: Mir.LocalId,
             values: ReadonlyArray<Value.Input>,
@@ -1043,6 +1222,25 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               )
             }
             materializedAddressRoots.add(root.ordinal)
+          })
+          const ensureAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
+            if (!addressStorage.has(root.ordinal)) {
+              const logicalType = entry.fn.localTypes.at(root.ordinal)
+              const layout =
+                logicalType === undefined
+                  ? undefined
+                  : Layout.entry(program.layout, Mir.semanticType(logicalType))
+              if (logicalType === undefined || layout === undefined)
+                throw new RangeError(`Backend cannot materialize callable capture %${root.ordinal}`)
+              addressStorage.set(
+                root.ordinal,
+                yield* FunctionBody.alloca(body, i8, `callable_addr${root.ordinal}`, {
+                  count: yield* Constant.integerUnsigned(builder, i32, BigInt(layout.size)),
+                  alignment: yield* Alignment.fromByteUnits(layout.alignment),
+                }),
+              )
+            }
+            yield* materializeAddressRoot(root)
           })
           const reloadAddressRoot = Effect.fnUntraced(function* (root: number) {
             if (!materializedAddressRoots.has(root)) return
@@ -2013,14 +2211,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 }
                 case 'Drop':
                   break
-                case 'MakeEffect': {
+                case 'MakeEffect':
+                case 'MakeCallable': {
                   const captured: Array<Value.Input> = []
                   for (const capture of operation.captures) {
                     if (capture.access === 'Copy' || capture.access === 'Take') {
                       captured.push(...readLocal(capture.source))
                       continue
                     }
-                    yield* materializeAddressRoot(capture.source)
+                    yield* ensureAddressRoot(capture.source)
                     const base = addressStorage.get(capture.source.ordinal)
                     if (base === undefined)
                       throw new RangeError('Effect borrowed capture lost its storage')
@@ -2476,17 +2675,19 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       operation.protectedTypeArguments,
                     ),
                   )
-                  const handlerTarget = declared.find(
-                    (candidate) =>
-                      candidate.fn.id.module === operation.handlerTarget.module &&
-                      candidate.fn.id.name === operation.handlerTarget.name &&
-                      candidate.fn.instance.typeArguments.length === 0,
+                  const handlerTarget = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.handlerTarget,
+                      operation.handlerTypeArguments,
+                    ),
                   )
-                  const handlerRunner = declared.find(
-                    (candidate) =>
-                      candidate.fn.id.module === operation.handlerRunner.module &&
-                      candidate.fn.id.name === operation.handlerRunner.name &&
-                      candidate.fn.instance.typeArguments.length === 0,
+                  const handlerRunner = declared.find((candidate) =>
+                    Mir.matchesInstance(
+                      candidate.fn,
+                      operation.handlerRunner,
+                      operation.handlerTypeArguments,
+                    ),
                   )
                   if (
                     protectedTarget === undefined ||
@@ -2538,12 +2739,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   yield* FunctionBody.branch(body, followingBlock)
                   yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-                  const handlerParameterCount = handlerTarget.fn.localTypes
-                    .slice(0, handlerTarget.fn.parameterCount)
-                    .reduce((total, type) => total + lanesFor(type).length, 0)
                   const handlerEnvironment = yield* callValues(
                     handlerTarget,
-                    Object.freeze(protectedValues.slice(1, 1 + handlerParameterCount)),
+                    Object.freeze([
+                      ...protectedValues.slice(1, 1 + operation.handledLaneCount),
+                      ...readLocal(operation.handlerCallable),
+                    ]),
                     `effect_handler_factory${operation.destination.ordinal}`,
                   )
                   locals.set(operation.handlerValue.ordinal, handlerEnvironment)
@@ -2577,6 +2778,156 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                   }
                   locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
+                case 'ApplyCallable': {
+                  const sourceType =
+                    operation.callable === undefined
+                      ? undefined
+                      : entry.fn.localTypes.at(operation.callable.ordinal)
+                  const target =
+                    operation.target ??
+                    (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
+                  if (target === undefined)
+                    throw new RangeError('Backend callable application lost its hidden identity')
+                  const captureValues: Array<Value.Input> = []
+                  if (operation.callable !== undefined) {
+                    if (
+                      sourceType?._tag !== 'CallableValue' ||
+                      sourceType.environment === undefined
+                    )
+                      throw new RangeError('Stored callable application lost its environment')
+                    const environmentValues = readLocal(operation.callable)
+                    let cursor = 0
+                    for (const field of sourceType.environment.fields) {
+                      const shape = Layout.callingShape(program.layout, field.type)
+                      if (shape === undefined)
+                        throw new RangeError('Callable capture lost its semantic calling shape')
+                      if (field.representation === 'Value') {
+                        captureValues.push(
+                          ...environmentValues.slice(cursor, cursor + shape.laneCount),
+                        )
+                        cursor += shape.laneCount
+                        continue
+                      }
+                      const base = environmentValues.at(cursor)
+                      if (base === undefined)
+                        throw new RangeError('Callable borrowed environment lost its pointer')
+                      cursor += 1
+                      for (const [laneOrdinal, lane] of shape.lanes.entries()) {
+                        const offset = Layout.laneOffset(program.layout, field.type, lane.path)
+                        if (offset === undefined)
+                          throw new RangeError('Callable borrowed capture lost its lane offset')
+                        captureValues.push(
+                          yield* FunctionBody.load(
+                            body,
+                            laneType(lane),
+                            yield* constantBytePointer(
+                              base,
+                              offset,
+                              `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}_ptr`,
+                            ),
+                            `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}`,
+                          ),
+                        )
+                      }
+                    }
+                  } else {
+                    for (const capture of operation.captures) {
+                      if (capture.access === 'Copy' || capture.access === 'Take') {
+                        captureValues.push(...readLocal(capture.source))
+                        continue
+                      }
+                      captureValues.push(...readLocal(capture.source))
+                    }
+                  }
+                  if (target._tag === 'BuiltinCallableTarget') {
+                    const supplied = Object.freeze([
+                      ...operation.arguments.flatMap((argument) => [...readLocal(argument)]),
+                      ...captureValues,
+                    ])
+                    const first = supplied.at(0)
+                    const firstLocal = operation.arguments.at(0)
+                    const firstType =
+                      firstLocal === undefined
+                        ? undefined
+                        : entry.fn.localTypes.at(firstLocal.ordinal)
+                    if (first === undefined || firstType === undefined)
+                      throw new RangeError('LLVM callable builtin lost its first operand')
+                    if (target.operation === 'Not' || target.operation === 'Negate') {
+                      const zero = yield* Constant.integerSigned(builder, i32, 0n)
+                      if (target.operation === 'Negate') {
+                        const values = Object.freeze([
+                          yield* emitCallableBinary(
+                            'Subtract',
+                            zero,
+                            first,
+                            firstType,
+                            operation.provenance.span,
+                            operation.destination.ordinal,
+                          ),
+                        ])
+                        locals.set(operation.destination.ordinal, values)
+                        break
+                      }
+                      const flag = yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        first,
+                        zero,
+                        `callable_not${operation.destination.ordinal}_flag`,
+                      )
+                      const values = Object.freeze([
+                        yield* FunctionBody.cast(
+                          body,
+                          'zext',
+                          flag,
+                          i32,
+                          `callable_not${operation.destination.ordinal}`,
+                        ),
+                      ])
+                      locals.set(operation.destination.ordinal, values)
+                      break
+                    }
+                    const second = supplied.at(1)
+                    if (
+                      second === undefined ||
+                      target.operation === 'LayoutMake' ||
+                      target.operation === 'LayoutRepeat' ||
+                      target.operation === 'SystemAllocatorMake' ||
+                      target.operation === 'AllocatorAllocate'
+                    ) {
+                      throw new RangeError(
+                        `LLVM callable builtin ${target.actor}.${target.operation} is unavailable`,
+                      )
+                    }
+                    const values = Object.freeze([
+                      yield* emitCallableBinary(
+                        target.operation,
+                        first,
+                        second,
+                        firstType,
+                        operation.provenance.span,
+                        operation.destination.ordinal,
+                      ),
+                    ])
+                    locals.set(operation.destination.ordinal, values)
+                    break
+                  }
+                  const callableTarget = declared.find((candidate) =>
+                    Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
+                  )
+                  if (callableTarget === undefined)
+                    throw new RangeError('Backend cannot resolve callable target')
+                  const result = yield* callValues(
+                    callableTarget,
+                    Object.freeze([
+                      ...operation.arguments.flatMap((argument) => [...readLocal(argument)]),
+                      ...captureValues,
+                    ]),
+                    `callable${operation.destination.ordinal}`,
+                  )
+                  locals.set(operation.destination.ordinal, result)
                   break
                 }
                 case 'Call': {

@@ -134,6 +134,13 @@ export const unhandledEffectRequirementsCode = 'SEM0071' as const
 export const invalidEffectRetryCode = 'SEM0072' as const
 export const providerBackedFailureCode = 'SEM0073' as const
 export const invalidEffectProvisionCode = 'SEM0074' as const
+export const nonCallableApplicationCode = 'SEM0075' as const
+export const incompatibleCallableSignatureCode = 'SEM0076' as const
+export const invalidCallableInvocationAccessCode = 'SEM0077' as const
+export const redundantUnaryEmptyCallCode = 'SEM0078' as const
+export const deeperUnderApplicationCode = 'SEM0079' as const
+export const callableIdentityErasureCode = 'SEM0080' as const
+export const unknownOwnedCallableReturnCode = 'SEM0081' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -235,6 +242,13 @@ export type Code =
   | typeof invalidEffectRetryCode
   | typeof providerBackedFailureCode
   | typeof invalidEffectProvisionCode
+  | typeof nonCallableApplicationCode
+  | typeof incompatibleCallableSignatureCode
+  | typeof invalidCallableInvocationAccessCode
+  | typeof redundantUnaryEmptyCallCode
+  | typeof deeperUnderApplicationCode
+  | typeof callableIdentityErasureCode
+  | typeof unknownOwnedCallableReturnCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -289,6 +303,8 @@ export type Reason =
   | { readonly _tag: 'InvalidEffectHandler'; readonly detail: string }
   | { readonly _tag: 'MutableEffectRecipe' }
   | { readonly _tag: 'EffectIdentityErasure' }
+  | { readonly _tag: 'CallableIdentityErasure' }
+  | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
@@ -335,6 +351,23 @@ export type Reason =
       readonly _tag: 'ArgumentTypeMismatch'
       readonly expected: string
       readonly actual: string
+    }
+  | { readonly _tag: 'NonCallableApplication'; readonly actual: string }
+  | {
+      readonly _tag: 'IncompatibleCallableSignature'
+      readonly expected: string
+      readonly actual: string
+    }
+  | {
+      readonly _tag: 'InvalidCallableInvocationAccess'
+      readonly required: 'Shared' | 'Exclusive' | 'Take'
+    }
+  | { readonly _tag: 'RedundantUnaryEmptyCall'; readonly target: string }
+  | {
+      readonly _tag: 'DeeperUnderApplication'
+      readonly target: string
+      readonly expectedCount: number
+      readonly actualCount: number
     }
   | { readonly _tag: 'RedundantAlias'; readonly spelling: string }
   | { readonly _tag: 'UnknownImportedMember'; readonly module: string; readonly spelling: string }
@@ -1193,6 +1226,29 @@ export const effectIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic =
     span,
   })
 
+export const callableIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: callableIdentityErasureCode,
+    severity: 'error',
+    message:
+      'Cannot merge callable values from different construction sites without explicit erasure',
+    reason: Object.freeze({ _tag: 'CallableIdentityErasure' }),
+    span,
+  })
+
+export const unknownOwnedCallableReturn = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownOwnedCallableReturnCode,
+    severity: 'error',
+    message: 'Cannot return an owned callable whose concrete environment identity is unknown',
+    reason: Object.freeze({ _tag: 'UnknownOwnedCallableReturn' }),
+    span,
+  })
+
 /** Creates the target-owned diagnostic for a `Usize` literal outside its selected word. */
 export const usizeTargetOutOfRange = (
   spelling: string,
@@ -1715,6 +1771,78 @@ export const argumentTypeMismatch = (
     severity: 'error',
     message: `Expected ${expected} but received ${actual}`,
     reason: Object.freeze({ _tag: 'ArgumentTypeMismatch', expected, actual }),
+    span,
+  })
+
+export const nonCallableApplication = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: nonCallableApplicationCode,
+    severity: 'error',
+    message: `Cannot call non-callable value ${actual}`,
+    reason: Object.freeze({ _tag: 'NonCallableApplication', actual }),
+    span,
+  })
+
+export const incompatibleCallableSignature = (
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: incompatibleCallableSignatureCode,
+    severity: 'error',
+    message: `Callable ${actual} cannot satisfy ${expected}`,
+    reason: Object.freeze({ _tag: 'IncompatibleCallableSignature', expected, actual }),
+    span,
+  })
+
+export const invalidCallableInvocationAccess = (
+  required: 'Shared' | 'Exclusive' | 'Take',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidCallableInvocationAccessCode,
+    severity: 'error',
+    message: `Callable invocation requires ${required.toLowerCase()} access`,
+    reason: Object.freeze({ _tag: 'InvalidCallableInvocationAccess', required }),
+    span,
+  })
+
+export const redundantUnaryEmptyCall = (target: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: redundantUnaryEmptyCallCode,
+    severity: 'error',
+    message: `${target} is unary; name it directly instead of calling it with no arguments`,
+    reason: Object.freeze({ _tag: 'RedundantUnaryEmptyCall', target }),
+    span,
+  })
+
+export const deeperUnderApplication = (
+  target: string,
+  expectedCount: number,
+  actualCount: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: deeperUnderApplicationCode,
+    severity: 'error',
+    message: `${target} only permits binding its ${expectedCount - 1} trailing arguments; received ${actualCount}`,
+    reason: Object.freeze({
+      _tag: 'DeeperUnderApplication',
+      target,
+      expectedCount,
+      actualCount,
+    }),
     span,
   })
 

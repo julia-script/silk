@@ -80,18 +80,21 @@ concrete instantiation does not enable duck typing or compile-time type branchin
 automatic cleanup are compiler-verified type properties rather than interfaces. Recursive generic
 calls must preserve their type and contract-row arguments.
 
-Function value types include parameter access modes, return type, failure row, and requirement row.
-A function with smaller failure or requirement rows may be used where larger rows are expected, but
-the reverse is invalid. Generic functions must be concretely instantiated before becoming values.
-Named and non-capturing functions are storable. As resolved by issue 08, invoking or specializing an
-`effect fn`, or evaluating an `effect {}` expression, may create a storable typed Effect value with
-a compiler-shaped environment containing its supplied inputs and providers. That environment may
-borrow or own captures; ordinary lexical-borrow and affine checks determine whether the effect may
-escape and whether it supports shared, exclusive, or consuming execution. This narrowly admits
-owned environments for Effect values. General-purpose
-capturing closures remain non-escaping callbacks with explicit shared or exclusive capture lists;
-general move closures, arbitrary owned closure objects, and polymorphic function values are still
-deferred.
+Callable value types are structural ordered contracts with three invocation modes: `fn(A) -> B` is
+shared reusable, `mut fn(A) -> B` is exclusive reusable, and `once fn(A) -> B` is consuming. Named
+functions are shared callable values. Supplying exactly the trailing `N - 1` arguments of any
+function with `N >= 2` constructs an automatic unary section awaiting parameter zero; every other
+under-application is invalid. Sections may snapshot Copy values, retain shared or exclusive borrows,
+or own moved affine values. Their hidden concrete construction identity preserves environment layout
+and cleanup while their public callable type remains structural. Shared callables satisfy exclusive
+or consuming contracts, and exclusive callables satisfy consuming contracts, never the reverse.
+
+Generic evidence from captured trailing arguments is retained until the omitted leading argument
+completes inference. Expected return types and later uses still do not infer type arguments. Unknown-
+sized owned erased callable returns, heterogeneous callable collections, lambda syntax, arbitrary
+parameter omission, and universal boxed closures remain deferred. Effect values use the same
+compiler-shaped environment principles, but an Effect is lazy execution data rather than an
+ordinary callable value.
 
 Every parameter and struct field has an explicit type. Initialized local bindings and the result,
 failure, and requirement contracts of non-recursive functions may be inferred from their local

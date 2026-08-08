@@ -8,17 +8,17 @@
 ## Vision
 
 Silk Effect will be a low-level systems language that combines explicit memory and execution
-control with typed failures, explicit service requirements, deterministic resource scopes, and
+control with typed failures, explicit service requirements, deterministic cleanup, and
 tooling-friendly semantics. The first destination is the smallest coherent language capable of
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** establish the smallest memory boundary that lets a real compiler pass
-consume source-dependent input and produce source-dependent output. The accepted algorithmic
-baseline already composes target-aware layouts, cross-module declarations, operators, nominal
-structs and values, fixed-size arrays, mutation, structured loops, normalized structural unions,
-exhaustive matching, and lexical runtime-sized borrowed input through the inspectable,
-determinism-gated compiler architecture. Owned growable output is the next missing boundary.
+**Current objective:** complete the self-contained owned-allocation substrate that lets a real
+compiler pass consume source-dependent input and produce source-dependent output. The accepted
+baseline now includes target-aware layouts, runtime-sized borrowed input, typed Effects, capability
+requirements and provision, first-class callables, automatic data-first sections, affine ownership,
+and deterministic cleanup. The next missing boundary is executable allocation and unsafe typed
+storage sufficient to implement growable output entirely in Silk.
 
 ## Column rules
 
@@ -30,25 +30,21 @@ determinism-gated compiler architecture. Owned growable output is the next missi
 
 ### Validate the language's defining effect execution model
 
-- **Problem:** The first executable typed-flow baseline proves lazy calls, failure propagation,
-  recovery, ownership, cleanup, and backend parity, but it also commits several Wayfinder-era
-  surface decisions before they have survived enough real programs: `flow fn` versus a first-class
-  lazy `effect {}` scope, `Flow` versus `Effect`, and unconditional `fail move` even for Copy or
-  freshly constructed payloads. These choices define the language more than the allocation API that
-  currently depends on them.
-- **Outcome & done-when:** A broad, executable example corpus covers pure construction, eager setup
-  around lazy work, generic success, one and several failures, exact and residual recovery, borrowed
-  and moved captures, an effect discarded without running, repeated execution, loops, scoped
-  allocation, and cleanup. A reviewed OpenSpec then chooses the eager-to-lazy boundary, source type
-  and block syntax, representation constraints, terminology, and ordinary ownership rule for
-  failure transfer without weakening the proven compiler/backend contract.
-- **Status:** in discovery — the implemented `add-flow-functions-and-typed-failures` change is an
-  evidence-producing baseline, not a syntax freeze. Capability roles, scopes, and allocation remain
-  behind this review.
-- **Appetite:** one focused design cycle and adversarial review before the next execution-substrate
-  proposal; prefer changing the unreleased surface now over preserving a doubtful abstraction.
-- **Links:** change: `add-flow-functions-and-typed-failures` ·
-  [effect model decision](../wayfinder/bootstrap-language/issues/03-effect-system-and-typed-failures.md) ·
+**Status: complete (2026-08-07).** The review replaced the evidence-producing Flow surface with
+`effect {}` as the primitive lazy imperative boundary, `effect fn` as whole-body sugar, `Effect` as
+the public computation type, and ordinary Copy-versus-move failure transfer. Capture access now
+derives shared-repeatable, exclusive-repeatable, or take-once execution; retry reconstructs locals
+while preserving captures; provision distinguishes captured providers from per-run acquisition;
+and typed failure remains separate from traps. First-class callable values and automatic
+data-first sections subsequently proved Effect composition without pipeline-only callback syntax.
+
+Named lifetime scopes, dynamic cleanup registries, provider-dependent result sets, and allocator
+magic were rejected from the bootstrap model. Allocation owners are self-contained affine values,
+restricted synchronous infallible `Drop` is the cleanup mechanism, and arena-backed escaping values
+remain deferred until Silk has a general non-privileged validity model.
+
+- **Links:** [effect model decision](../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md) ·
+  [ownership and allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
   [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
 
 ### Widen the language, slice 1: bindings, arithmetic, branching
@@ -128,51 +124,42 @@ control remains a DAG until each backend converts it to its required target form
 
 ## Next
 
-### Establish the execution substrate required by explicit allocation
+### Complete the self-contained owned-allocation substrate
 
-- **Problem:** The accepted allocation model is not an isolated memory primitive. `OutOfMemory`
-  requires executable flow failures; allocator access requires capability-role service slots and
-  origin-bound witness dispatch; named allocation lifetime requires `Scope.scoped`; and permanent
-  layout arithmetic requires `Usize`. None of those source-visible foundations is executable yet.
-- **Outcome & done-when:** Land the general language mechanisms without allocator-specific syntax,
-  ambient callbacks, backend-owned ABI choices, or temporary `I32` allocation arithmetic. Each
-  change runs through syntax, semantic facts, ownership, HIR/MIR, target layout, evaluator, native,
-  Wasm, determinism, and unified inspection before the next begins.
+- **Problem:** Slices can borrow source-dependent input, but a compiler pass still cannot own an
+  output whose size emerges at runtime. The general prerequisites are now executable: target-sized
+  `Usize`, typed Effects, capability requirements and provision, target-aware `Layout`, affine
+  ownership, deterministic cleanup, and first-class callables. What remains is the smallest unsafe
+  allocation boundary that composes those mechanisms without privileged allocator kinds.
+- **Outcome & done-when:** Add general `Allocator` capability dispatch, a standard-library
+  `SystemAllocator`, and an affine self-contained `Allocation` whose private reclaim ticket is
+  sufficient for exactly-once cleanup. Allocation failure is typed and allocation-free. Evaluator,
+  LLVM, Wasm, ownership, MIR, determinism, and `/labs` agree on acquisition, transfer, and release.
+  Then add restricted synchronous infallible `Drop` plus unsafe typed raw-buffer/slot operations
+  sufficient to initialize and roll back a dynamic sequence safely.
+- **Boundary:** The compiler recognizes capability, ownership, layout, and drop rules—not arenas,
+  allocator policies, or collection types. No named lifetime `Scope`, dynamic finalizer registry,
+  ambient/default allocator, user-callable `free`, primitive resize, zero-fill promise, or compiler-
+  known `Vector`. An arena is only another Silk standard-library implementation of `Allocator`.
 - **Sequence:**
-  1. ✅ `add-usize-scalar` — archived 2026-08-07
-  2. ✅ `add-flow-functions-and-typed-failures` — archived 2026-08-07 as the executable baseline
-  3. Review and settle the effect execution model and source surface
-  4. `add-capability-requirements-roles-and-provision`
-  5. `add-named-scope-wrappers-and-cleanup`
-  6. `add-scoped-allocation-primitives`
-- **Evidence for the split:** Adversarial minimality, ownership, and backend review found that doing
-  allocation first would either hard-code the allocator into the compiler or silently implement all
-  four foundations inside one oversized memory ticket. The same review replaced impossible static
-  runtime-slot typestate with unsafe lexical `Slot<T>` places plus a restricted drop hook, allowing
-  `Vector<T>` to remain entirely Silk-written without a bitmap or compiler-known collection.
-
-### Allocate owned compiler output in a deterministic scope
-
-- **Problem:** Slices now borrow source-dependent input, but a lexer still cannot own a token list
-  whose length emerges at runtime. Safe values must stay fully initialized, cleanup must be
-  deterministic on every structured outcome, and allocation must not become hidden compiler magic.
-- **Outcome & done-when:** After the four general prerequisites, add the smallest explicit unsafe
-  allocation boundary: validated target-aware `Layout` and `SlotLayout<T>`, an affine byte-owning
-  allocation carrying its originating reclaim capability, unsafe lexical `Slot<T>` places, named
-  destination scopes, typed `OutOfMemory`, and restricted infallible drop hooks. Evaluator, LLVM,
-  Wasm, ownership, MIR, and `/labs` must agree on acquisition and exactly-once cleanup.
-- **Boundary:** No safe raw allocation, ambient/default-static allocator, user-callable `free`,
-  primitive resize, zero-fill promise, collection behavior, runtime initialization bitmap, general
-  capturing finalizer, arena policy, or allocation-metrics surface. Runtime-indexed initializedness
-  and aliasing remain explicit unsafe invariants. The allocator is an explicit requirement; a future
-  Silk-written `Vector<T>` consumes these primitives and uses its restricted hook to drop its
-  initialized prefix before byte release rather than being compiler-known.
-- **Sequence after this change:** implement `Vector<T>` in Silk, prove a scanner with borrowed bytes
-  and owned tokens, then admit only the bulk byte-memory primitives that workload demonstrates.
+  1. General allocator dispatch, `SystemAllocator`, affine `Allocation`, and typed `OutOfMemory`
+  2. Restricted `Drop` and unsafe typed storage operations with deterministic rollback
+  3. Differential allocation and cleanup evidence across evaluator, LLVM, Wasm, and `/labs`
 - **Links:** [ownership and scoped allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
   [types and values](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
   [compiler pipeline](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
   [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
+
+### Implement growable compiler output in Silk
+
+- **Problem:** Raw allocation only proves the boundary. The bootstrap language needs a useful owned
+  sequence, but collection policy belongs in Silk rather than the compiler.
+- **Outcome & done-when:** Implement `Vector<T>` entirely in Silk over `Allocator`, `Allocation`,
+  restricted `Drop`, and unsafe typed storage. Prove it with a scanner that borrows runtime-sized
+  source bytes and returns an owned `Vector<Token>`, including growth, typed out-of-memory failure,
+  partial-initialization rollback, early drop, and deterministic cleanup in every backend.
+- **Boundary:** No compiler-known vector behavior and no mandatory iterable abstraction. Add bulk
+  byte-memory primitives only when this workload demonstrates a concrete need.
 
 ## Later
 
@@ -214,28 +201,27 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Open questions
 
-- Is the primitive lazy boundary an `effect {}` expression with `effect fn` sugar, a distinct
-  function kind, or another form that keeps eager construction and lazy imperative execution
-  explicit?
-- Should the defining computation type be named `Effect` rather than `Flow`, and should `fail`
-  follow ordinary Copy-versus-move rules instead of requiring `move` for every payload?
 - What executable name and public analysis facade should eventually accompany
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
 - Which smallest real pass best distinguishes the required memory semantics: byte-to-token
   lexing, token-to-syntax grouping, or another source-dependent transform?
-- Can one canonical runtime-sized representation serve both borrowed input and owned output, or do
-  their ownership and allocation duties require distinct actors from the first slice?
 
 ## Changelog
 
+- 2026-08-07: Settled the defining execution model around `Effect`, `effect {}`, and `effect fn`;
+  rejected named lifetime scopes and allocator privilege in favor of affine self-contained owners
+  with deterministic `Drop`. Shipped first-class callable values and automatic data-first sections,
+  making pipelines ordinary unary application and enabling reusable `Effect.map`, retry, and custom
+  combinator callbacks. Synced and archived the completed callable, source-resolution, project-CLI,
+  and LSP-navigation changes, leaving no completed records in the active change queue.
 - 2026-08-07: Shipped and archived the first executable typed-flow baseline, then promoted a full
   effect-model review ahead of capability roles, scopes, and allocation. The baseline proves lazy
   construction, typed failure outcomes, exact recovery, cleanup, compiler-owned target layout,
-  structured DAG lowering, evaluator/native/Wasm parity, determinism, and unified Labs inspection;
-  its `flow fn`, `Flow`, and `fail move` spellings remain deliberately open to replacement after a
-  broad scenario corpus and adversarial review.
+  structured DAG lowering, evaluator/native/Wasm parity, determinism, and unified Labs inspection.
+  Its `flow fn`, `Flow`, and `fail move` spellings were deliberately left open at archive time and
+  settled later the same day after a broad scenario corpus and adversarial review.
 - 2026-08-06: The composed remaining-member acceptance fold established the first algorithmic
   baseline across module resolution, all compiler representations, logical evaluation, native LLVM,
   direct WebAssembly, fresh-process determinism, and the unified `/labs` workbench. The program

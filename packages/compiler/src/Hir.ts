@@ -55,6 +55,24 @@ export interface EffectSiteId {
   readonly span: SourceSpan.SourceSpan
 }
 
+/** Hidden nominal identity for one automatic callable-section construction site. */
+export interface CallableSiteId {
+  readonly _tag: 'CallableSiteId'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly span: SourceSpan.SourceSpan
+}
+
+export type CallableTarget =
+  | {
+      readonly _tag: 'DeclarationCallableTarget'
+      readonly declaration: DeclarationIndex.CanonicalId
+    }
+  | {
+      readonly _tag: 'BuiltinCallableTarget'
+      readonly actor: string
+      readonly operation: BuiltinOperation
+    }
+
 /** A canonical lexical loop identity local to one function. */
 export interface LoopId {
   readonly _tag: 'HirLoop'
@@ -301,6 +319,41 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'FunctionItem'
+      readonly target: CallableTarget
+      readonly type: Type.Callable
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'CallableSection'
+      readonly site: CallableSiteId
+      readonly target: CallableTarget
+      readonly omittedParameter: 0
+      readonly captures: ReadonlyArray<{
+        readonly ordinal: number
+        readonly parameterOrdinal: number
+        readonly value: Expression
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }>
+      readonly typeArguments: ReadonlyArray<Type.Type>
+      readonly substitution: ReadonlyMap<string, Type.Type>
+      readonly retainedDependencies: ReadonlyArray<number>
+      readonly mode: Type.CallableMode
+      readonly type: Type.Callable
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'CallableApply'
+      readonly callee: Expression
+      readonly arguments: ReadonlyArray<Expression>
+      readonly access: Type.CallableMode
+      readonly substitution: ReadonlyMap<string, Type.Type>
+      readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
+      readonly realization: 'Environment' | 'DirectErasedSection'
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'EffectConstruct'
       readonly target: DeclarationIndex.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.Type>
@@ -332,8 +385,8 @@ export type Expression =
       readonly _tag: 'EffectCatch'
       readonly protected: Expression
       readonly handled: Type.Nominal
-      readonly handler: DeclarationIndex.CanonicalId
-      readonly handlerFailures: ReadonlyArray<Type.Nominal>
+      readonly handler: Expression
+      readonly handlerEffect: Type.Effect
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
@@ -341,6 +394,14 @@ export type Expression =
       readonly _tag: 'EffectRetry'
       readonly protected: Expression
       readonly retries: Expression
+      readonly type: Type.Effect
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EffectTransform'
+      readonly operation: 'Map' | 'FlatMap' | 'Tap'
+      readonly protected: Expression
+      readonly callback: Expression
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
@@ -526,14 +587,22 @@ const expressionChildren = (expression: Expression): ReadonlyArray<Expression> =
       case 'EffectConstruct':
       case 'BuiltinCall':
         return expression.arguments
+      case 'CallableSection':
+        return expression.captures.map((capture) => capture.value)
+      case 'CallableApply':
+        return expression.evaluation === 'LeftThenCallable'
+          ? [...expression.arguments, expression.callee]
+          : [expression.callee, ...expression.arguments]
       case 'EffectBlock':
         return expression.statements.flatMap(statementExpressions)
       case 'Run':
         return [expression.subject]
       case 'EffectCatch':
-        return [expression.protected]
+        return [expression.protected, expression.handler]
       case 'EffectRetry':
         return [expression.protected, expression.retries]
+      case 'EffectTransform':
+        return [expression.protected, expression.callback]
       case 'EffectProvide':
         return [expression.protected]
       case 'EffectProvideWith':
@@ -582,12 +651,18 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'EffectConstruct':
       case 'BuiltinCall':
         return expression.arguments.some(walk)
+      case 'CallableSection':
+        return expression.captures.some((capture) => walk(capture.value))
+      case 'CallableApply':
+        return walk(expression.callee) || expression.arguments.some(walk)
       case 'Run':
         return walk(expression.subject)
       case 'EffectCatch':
-        return walk(expression.protected)
+        return walk(expression.protected) || walk(expression.handler)
       case 'EffectRetry':
         return walk(expression.protected) || walk(expression.retries)
+      case 'EffectTransform':
+        return walk(expression.protected) || walk(expression.callback)
       case 'EffectProvide':
         return walk(expression.protected)
       case 'EffectProvideWith':
@@ -650,12 +725,30 @@ export const firstUnavailable = (
         }
         return undefined
       }
+      case 'CallableSection': {
+        for (const capture of expression.captures) {
+          const found = walk(capture.value)
+          if (found !== undefined) return found
+        }
+        return undefined
+      }
+      case 'CallableApply': {
+        const callee = walk(expression.callee)
+        if (callee !== undefined) return callee
+        for (const argument of expression.arguments) {
+          const found = walk(argument)
+          if (found !== undefined) return found
+        }
+        return undefined
+      }
       case 'Run':
         return walk(expression.subject)
       case 'EffectCatch':
-        return walk(expression.protected)
+        return walk(expression.protected) ?? walk(expression.handler)
       case 'EffectRetry':
         return walk(expression.protected) ?? walk(expression.retries)
+      case 'EffectTransform':
+        return walk(expression.protected) ?? walk(expression.callback)
       case 'EffectProvide':
         return walk(expression.protected)
       case 'EffectProvideWith':
@@ -939,14 +1032,21 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'EffectCatch':
       return [
-        `${indent}effect-catch ${Type.encode(expression.handled)} handler=${expression.handler.module}.${expression.handler.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-catch ${Type.encode(expression.handled)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
+        encodeExpression(expression.handler, depth + 1),
       ].join('\n')
     case 'EffectRetry':
       return [
         `${indent}effect-retry : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.protected, depth + 1),
         encodeExpression(expression.retries, depth + 1),
+      ].join('\n')
+    case 'EffectTransform':
+      return [
+        `${indent}effect-${expression.operation.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.protected, depth + 1),
+        encodeExpression(expression.callback, depth + 1),
       ].join('\n')
     case 'EffectProvide':
       return [
@@ -1033,6 +1133,45 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.slice, depth + 1),
         encodeExpression(expression.index, depth + 1),
+      ].join('\n')
+    case 'FunctionItem':
+      return `${indent}function-item ${
+        expression.target._tag === 'DeclarationCallableTarget'
+          ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
+          : `${expression.target.actor}.${expression.target.operation}`
+      } : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'CallableSection':
+      return [
+        `${indent}callable-section site=fn${expression.site.function.ordinal}@${expression.site.span.start} mode=${expression.mode.toLowerCase()} omitted=p0 target=${
+          expression.target._tag === 'DeclarationCallableTarget'
+            ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
+            : `${expression.target.actor}.${expression.target.operation}`
+        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        ...expression.captures.map(
+          (capture) =>
+            `${indent}  capture #${capture.ordinal}->p${capture.parameterOrdinal} ${capture.access.toLowerCase()}\n${encodeExpression(capture.value, depth + 2)}`,
+        ),
+      ].join('\n')
+    case 'CallableApply':
+      return [
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization} substitution=${[...expression.substitution.entries()].map(([parameter, type]) => `${parameter}=${Type.encode(type)}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        ...(expression.evaluation === 'LeftThenCallable'
+          ? [
+              ...expression.arguments.map(
+                (argument, ordinal) =>
+                  `${indent}  argument #${ordinal}\n${encodeExpression(argument, depth + 2)}`,
+              ),
+              `${indent}  callee`,
+              encodeExpression(expression.callee, depth + 2),
+            ]
+          : [
+              `${indent}  callee`,
+              encodeExpression(expression.callee, depth + 2),
+              ...expression.arguments.map(
+                (argument, ordinal) =>
+                  `${indent}  argument #${ordinal}\n${encodeExpression(argument, depth + 2)}`,
+              ),
+            ]),
       ].join('\n')
     case 'Call':
     case 'EffectConstruct':

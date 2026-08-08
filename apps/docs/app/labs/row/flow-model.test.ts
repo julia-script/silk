@@ -84,7 +84,7 @@ pub fn main() -> I32 { return identity(uncertain(42)) }`,
 
     expect(flow.status).toBe('Incomplete')
     expect(flow.groups).toHaveLength(2)
-    expect(flow.nodes.some((item) => item.label === 'Flow stops: Unavailable')).toBe(true)
+    expect(flow.nodes.some((item) => item.label === 'Data flow stops: Unavailable')).toBe(true)
     expect(flow.nodes.some((item) => item.kind === 'FunctionReturn')).toBe(false)
   })
 
@@ -98,7 +98,7 @@ pub fn main() -> I32 { return identity(identity()) }`,
     )
 
     expect(flow.status).toBe('Incomplete')
-    expect(flow.nodes.some((item) => item.label === 'Flow stops: ArityMismatch')).toBe(true)
+    expect(flow.nodes.some((item) => item.label === 'Data flow stops: ArityMismatch')).toBe(true)
     expect(
       flow.nodes.some(
         (item) => item.kind === 'Parameter' && item.state === 'Unmatched',

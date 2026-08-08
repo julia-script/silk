@@ -58,6 +58,15 @@ class FunctionLowering {
   readonly bindingLocals = new Map<number, Mir.LocalId>()
   readonly parameterLocals = new Map<number, Mir.LocalId>()
   readonly effectRecipes = new Map<number, Hir.Expression>()
+  readonly effectTransforms = new Map<
+    number,
+    {
+      readonly expression: Extract<Hir.Expression, { readonly _tag: 'EffectTransform' }>
+      readonly protected: Mir.LocalId
+      readonly callback: Mir.LocalId
+      readonly loanEnds: ReadonlyArray<Hir.BorrowId>
+    }
+  >()
   readonly patternLocals = new Map<string, Mir.LocalId>()
   readonly loanLocals = new Map<string, Mir.LocalId>()
   private operations: Array<Mir.Operation> = []
@@ -161,6 +170,53 @@ const effectValueType = (
   })
 }
 
+const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
+  left.function.sourceId === right.function.sourceId &&
+  left.function.ordinal === right.function.ordinal &&
+  left.span.start === right.span.start &&
+  left.span.end === right.span.end
+
+const callableValueType = (
+  fn: FunctionLowering,
+  section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  applicationSubstitution: ReadonlyMap<string, Type.Type> = new Map(),
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  const expected = Type.substitute(
+    Type.substitute(section.type, fn.substitution),
+    new Map([...section.substitution, ...applicationSubstitution]),
+  )
+  const candidates = fn.layout.callableEnvironments.filter(
+    (
+      candidate,
+    ): candidate is Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+      candidate._tag === 'CallableEnvironment' &&
+      instanceText(candidate.callable.owner.declaration, candidate.callable.owner.typeArguments) ===
+        instanceText(fn.owner.key.declaration, fn.owner.key.typeArguments) &&
+      sameSite(candidate.callable.site, section.site) &&
+      (!Type.isConcrete(expected) || Type.equals(candidate.callable.type, expected)),
+  )
+  const environment = candidates.length === 1 ? candidates.at(0) : undefined
+  if (environment === undefined) return undefined
+  return Object.freeze({
+    _tag: 'CallableValue',
+    type: environment.callable.type,
+    target: environment.callable.target,
+    site: section.site,
+    environment,
+  })
+}
+
+const functionItemValueType = (
+  fn: FunctionLowering,
+  item: Extract<Hir.Expression, { readonly _tag: 'FunctionItem' }>,
+  applicationSubstitution: ReadonlyMap<string, Type.Type> = new Map(),
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  const type = Type.substitute(Type.substitute(item.type, fn.substitution), applicationSubstitution)
+  return Type.isCallable(type) && Type.isConcrete(type)
+    ? Object.freeze({ _tag: 'CallableValue', type, target: item.target })
+    : undefined
+}
+
 interface LoweredExpression {
   readonly result: Mir.LocalId
 }
@@ -168,6 +224,97 @@ interface LoweredExpression {
 interface LoweredPlace {
   readonly root: Mir.LocalId
   readonly selectors: ReadonlyArray<Mir.PlaceSelector>
+}
+
+const lowerRunEffectValue = (
+  fn: FunctionLowering,
+  effect: Mir.LocalId,
+  effectType: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
+  success: Type.Type,
+  span: SourceSpan.SourceSpan,
+): LoweredExpression | undefined => {
+  const successType = fn.type(success)
+  if (
+    successType === undefined ||
+    successType._tag === 'EffectOutcome' ||
+    successType._tag === 'EffectValue'
+  )
+    return undefined
+  const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+    _tag: 'EffectOutcome',
+    type: effectType.type,
+  })
+  const outcome = fn.alloc(outcomeType)
+  const destination = fn.alloc(successType)
+  const propagationType =
+    effectType.type.failures.length === 0 || fn.effectOutcome === undefined
+      ? undefined
+      : fn.type(fn.effectOutcome)
+  if (propagationType !== undefined && propagationType._tag !== 'EffectOutcome') return undefined
+  const tagMappings = effectType.type.failures.flatMap((failure, sourceOrdinal) => {
+    const target = propagationType?.type.failures.findIndex((candidate) =>
+      Type.equals(candidate, failure),
+    )
+    return target === undefined || target < 0
+      ? []
+      : [Object.freeze({ source: sourceOrdinal + 1, target: target + 1 })]
+  })
+  if (tagMappings.length !== effectType.type.failures.length) return undefined
+  const propagationShape =
+    propagationType === undefined ? undefined : Layout.callingShape(fn.layout, propagationType.type)
+  fn.emit(
+    Object.freeze({
+      _tag: 'RunEffectValue',
+      destination,
+      outcome,
+      effect,
+      runner: runnerId(effectType.environment.instance, effectType.site),
+      runnerTypeArguments: effectType.environment.instance.typeArguments,
+      outcomeType,
+      ...(propagationType === undefined ? {} : { propagationType }),
+      tagMappings: Object.freeze(tagMappings),
+      propagationLaneCount: propagationShape?.laneCount ?? 0,
+      type: successType,
+      provenance: authored(span),
+    }),
+  )
+  return Object.freeze({ result: destination })
+}
+
+const lowerCallableLocalApplication = (
+  fn: FunctionLowering,
+  callable: Mir.LocalId,
+  argument: Mir.LocalId,
+  callableType: Type.Callable,
+  span: SourceSpan.SourceSpan,
+): LoweredExpression | undefined => {
+  const stored = fn.localTypes.at(callable.ordinal)
+  if (stored?._tag !== 'CallableValue') return undefined
+  const typeArguments = stored.environment?.callable.typeArguments ?? Object.freeze([])
+  const semanticResult = fn.semantic(callableType.result)
+  const resultType =
+    Type.isEffect(semanticResult) && stored.target._tag === 'DeclarationCallableTarget'
+      ? fn.effectResults.get(instanceText(stored.target.declaration, typeArguments))
+      : fn.type(semanticResult)
+  if (resultType === undefined) return undefined
+  const destination = fn.alloc(resultType)
+  fn.emit(
+    Object.freeze({
+      _tag: 'ApplyCallable',
+      destination,
+      callable,
+      typeArguments,
+      captures: Object.freeze([]),
+      arguments: Object.freeze([argument]),
+      callableType,
+      access: callableType.mode,
+      evaluation: 'CalleeThenArguments',
+      realization: 'Environment',
+      type: resultType,
+      provenance: authored(span),
+    }),
+  )
+  return Object.freeze({ result: destination })
 }
 
 const lowerPlacePath = (
@@ -313,6 +460,163 @@ function lowerExpression(
     }
     case 'Move':
       return lowerExpression(fn, expression.subject)
+    case 'FunctionItem': {
+      const type = functionItemValueType(fn, expression)
+      if (type === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'MakeCallable',
+          destination,
+          target: expression.target,
+          typeArguments: Object.freeze([]),
+          captures: Object.freeze([]),
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'CallableSection': {
+      const type = callableValueType(fn, expression)
+      if (type === undefined || type.environment === undefined) return undefined
+      const captures: Array<{
+        readonly ordinal: number
+        readonly parameterOrdinal: number
+        readonly source: Mir.LocalId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }> = []
+      for (const capture of expression.captures) {
+        const lowered = lowerExpression(fn, capture.value)
+        if (lowered === undefined) return undefined
+        captures.push(
+          Object.freeze({
+            ordinal: capture.ordinal,
+            parameterOrdinal: capture.parameterOrdinal,
+            source: lowered.result,
+            access: capture.access,
+          }),
+        )
+      }
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'MakeCallable',
+          destination,
+          target: expression.target,
+          typeArguments: type.environment.callable.typeArguments,
+          captures: Object.freeze(captures),
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'CallableApply': {
+      const directSection =
+        expression.realization === 'DirectErasedSection' &&
+        expression.callee._tag === 'CallableSection'
+          ? expression.callee
+          : undefined
+      const directItem = expression.callee._tag === 'FunctionItem' ? expression.callee : undefined
+      const directType =
+        directSection !== undefined
+          ? callableValueType(fn, directSection, expression.substitution)
+          : directItem !== undefined
+            ? functionItemValueType(fn, directItem, expression.substitution)
+            : undefined
+      const arguments_: Array<Mir.LocalId> = []
+      const captures: Array<{
+        readonly ordinal: number
+        readonly parameterOrdinal: number
+        readonly source: Mir.LocalId
+        readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+      }> = []
+      let callable: Mir.LocalId | undefined
+      let callableType: Type.Callable | undefined
+      let target: Hir.CallableTarget | undefined
+      let typeArguments: ReadonlyArray<Type.Type> = Object.freeze([])
+      const lowerArguments = (): boolean => {
+        for (const argument of expression.arguments) {
+          const lowered = lowerExpression(fn, argument)
+          if (lowered === undefined) return false
+          arguments_.push(lowered.result)
+        }
+        return true
+      }
+      const lowerCallee = (): boolean => {
+        if (directSection !== undefined || directItem !== undefined) {
+          if (directType === undefined) return false
+          callableType = directType.type
+          target = directType.target
+          typeArguments =
+            directType.environment?.callable.typeArguments ??
+            Object.freeze([...expression.substitution.values()].map((type) => fn.semantic(type)))
+          if (directSection !== undefined) {
+            for (const capture of directSection.captures) {
+              const lowered = lowerExpression(fn, capture.value)
+              if (lowered === undefined) return false
+              captures.push(
+                Object.freeze({
+                  ordinal: capture.ordinal,
+                  parameterOrdinal: capture.parameterOrdinal,
+                  source: lowered.result,
+                  access: capture.access,
+                }),
+              )
+            }
+          }
+          return true
+        }
+        const lowered = lowerExpression(fn, expression.callee)
+        const loweredType =
+          lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
+        if (lowered === undefined || loweredType?._tag !== 'CallableValue') return false
+        callable = lowered.result
+        callableType = loweredType.type
+        typeArguments = loweredType.environment?.callable.typeArguments ?? Object.freeze([])
+        return true
+      }
+      const lowered =
+        expression.evaluation === 'LeftThenCallable'
+          ? lowerArguments() && lowerCallee()
+          : lowerCallee() && lowerArguments()
+      const type = fn.type(expression.type)
+      if (!lowered || type === undefined || callableType === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ApplyCallable',
+          destination,
+          ...(callable === undefined ? {} : { callable }),
+          ...(target === undefined ? {} : { target }),
+          typeArguments,
+          captures: Object.freeze(captures),
+          arguments: Object.freeze(arguments_),
+          callableType,
+          access: expression.access,
+          evaluation: expression.evaluation,
+          realization: callable === undefined ? 'DirectErasedSection' : expression.realization,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      for (const capture of directSection?.captures ?? []) {
+        if (capture.value._tag !== 'SliceBorrow') continue
+        const slice = fn.loanLocals.get(borrowKey(capture.value.borrow))
+        if (slice === undefined) return undefined
+        fn.emit(
+          Object.freeze({
+            _tag: 'EndLoan',
+            borrow: capture.value.borrow,
+            slice,
+            provenance: generated(expression.span),
+          }),
+        )
+        fn.loanLocals.delete(borrowKey(capture.value.borrow))
+      }
+      return Object.freeze({ result: destination })
+    }
     case 'EffectConstruct': {
       const resultType = fn.effectResults.get(
         instanceText(
@@ -391,6 +695,8 @@ function lowerExpression(
       }
       return Object.freeze({ result: destination })
     }
+    case 'EffectTransform':
+      return undefined
     case 'Run': {
       const loweredSubject = lowerExpression(fn, expression.subject)
       const effectValueType =
@@ -450,6 +756,61 @@ function lowerExpression(
         expression.subject._tag === 'BindingReference'
           ? fn.effectRecipes.get(expression.subject.binding.ordinal)
           : expression.subject
+      const storedTransform =
+        expression.subject._tag === 'BindingReference'
+          ? fn.effectTransforms.get(expression.subject.binding.ordinal)
+          : undefined
+      const transform =
+        storedTransform?.expression ??
+        (expression.subject._tag === 'EffectTransform' ? expression.subject : undefined)
+      if (transform !== undefined) {
+        const protected_ =
+          storedTransform === undefined
+            ? lowerExpression(fn, transform.protected)?.result
+            : storedTransform.protected
+        const callback =
+          storedTransform === undefined
+            ? lowerExpression(fn, transform.callback)?.result
+            : storedTransform.callback
+        const protectedType =
+          protected_ === undefined ? undefined : fn.localTypes.at(protected_.ordinal)
+        const callbackValueType =
+          callback === undefined ? undefined : fn.localTypes.at(callback.ordinal)
+        if (
+          protected_ === undefined ||
+          callback === undefined ||
+          protectedType?._tag !== 'EffectValue' ||
+          callbackValueType?._tag !== 'CallableValue'
+        )
+          return undefined
+        const protectedSuccess = lowerRunEffectValue(
+          fn,
+          protected_,
+          protectedType,
+          protectedType.type.success,
+          transform.span,
+        )
+        if (protectedSuccess === undefined) return undefined
+        const transformed = lowerCallableLocalApplication(
+          fn,
+          callback,
+          protectedSuccess.result,
+          callbackValueType.type,
+          transform.span,
+        )
+        if (transformed === undefined) return undefined
+        if (transform.operation === 'Map') return transformed
+        const transformedType = fn.localTypes.at(transformed.result.ordinal)
+        if (transformedType?._tag !== 'EffectValue') return undefined
+        const callbackSuccess = lowerRunEffectValue(
+          fn,
+          transformed.result,
+          transformedType,
+          transformedType.type.success,
+          transform.span,
+        )
+        return transform.operation === 'Tap' ? protectedSuccess : callbackSuccess
+      }
       if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'AllocatorAllocate') {
         const [layoutExpression] = recipe.arguments
         if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
@@ -597,9 +958,24 @@ function lowerExpression(
         return Object.freeze({ result: destination })
       }
       if (recipe?._tag === 'EffectCatch') {
+        const loweredHandler = lowerExpression(fn, recipe.handler)
+        const handlerCallableType =
+          loweredHandler === undefined ? undefined : fn.localTypes.at(loweredHandler.result.ordinal)
+        const handlerTarget =
+          handlerCallableType?._tag === 'CallableValue' &&
+          handlerCallableType.target._tag === 'DeclarationCallableTarget'
+            ? handlerCallableType.target.declaration
+            : undefined
+        const handlerTypeArguments =
+          handlerCallableType?._tag === 'CallableValue'
+            ? (handlerCallableType.environment?.callable.typeArguments ?? Object.freeze([]))
+            : Object.freeze([])
         if (
           recipe.type.failures.length !== 0 ||
-          recipe.handlerFailures.length !== 0 ||
+          recipe.handlerEffect.failures.length !== 0 ||
+          loweredHandler === undefined ||
+          handlerCallableType?._tag !== 'CallableValue' ||
+          handlerTarget === undefined ||
           recipe.protected._tag !== 'EffectConstruct'
         )
           return undefined
@@ -616,7 +992,9 @@ function lowerExpression(
         const protectedValueType = fn.effectResults.get(
           instanceText(protectedRecipe.target, protectedTypeArguments),
         )
-        const handlerValueType = fn.effectResults.get(instanceText(recipe.handler, []))
+        const handlerValueType = fn.effectResults.get(
+          instanceText(handlerTarget, handlerTypeArguments),
+        )
         const protectedType =
           protectedValueType === undefined
             ? undefined
@@ -666,7 +1044,10 @@ function lowerExpression(
             protectedType,
             handledTag: handledTag + 1,
             handledLaneCount: handledShape.laneCount,
-            handlerTarget: recipe.handler,
+            handlerCallable: loweredHandler.result,
+            handlerCallableType,
+            handlerTarget,
+            handlerTypeArguments,
             handlerValueType,
             handlerRunner: runnerId(handlerValueType.environment.instance, handlerValueType.site),
             handlerType,
@@ -1242,6 +1623,7 @@ const concreteCleanup = (
       ),
     })
   }
+  if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
   const entry = Layout.entry(fn.layout, type)
@@ -1266,7 +1648,86 @@ const specializedCleanup = (
 ): Ownership.CleanupPlan =>
   Ownership.specializeCleanup(cleanup, fn.substitution, (type) => concreteCleanup(fn, type))
 
+const cleanupForLocal = (
+  fn: FunctionLowering,
+  cleanup: Ownership.CleanupPlan,
+  localType: Mir.Type,
+): Ownership.CleanupPlan => {
+  const specialized = specializedCleanup(fn, cleanup)
+  if (specialized._tag !== 'CallableCleanup' || localType._tag !== 'CallableValue') {
+    return specialized
+  }
+  const fields = localType.environment?.fields ?? []
+  return Object.freeze({
+    _tag: 'CallableCleanup',
+    type: localType.type,
+    site: specialized.site,
+    slots: Object.freeze(
+      specialized.slots.flatMap((slot) => {
+        const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
+        return field === undefined
+          ? []
+          : [Object.freeze({ ordinal: slot.ordinal, cleanup: concreteCleanup(fn, field.type) })]
+      }),
+    ),
+  })
+}
+
+const callableLocalCleanup = (
+  fn: FunctionLowering,
+  localType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+): Ownership.CleanupPlan => {
+  const environment = localType.environment
+  if (environment === undefined || localType.site === undefined)
+    return Object.freeze({ _tag: 'NoCleanup', type: localType.type })
+  return Object.freeze({
+    _tag: 'CallableCleanup',
+    type: localType.type,
+    site: localType.site,
+    slots: Object.freeze(
+      [...environment.fields]
+        .reverse()
+        .flatMap((field) =>
+          field.access === 'Take' && !copyType(field.type)
+            ? [Object.freeze({ ordinal: field.ordinal, cleanup: concreteCleanup(fn, field.type) })]
+            : [],
+        ),
+    ),
+  })
+}
+
 const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined): void => {
+  for (const borrow of exit?.loanEnds ?? []) {
+    const slice = fn.loanLocals.get(borrowKey(borrow))
+    if (slice === undefined) continue
+    fn.emit(
+      Object.freeze({
+        _tag: 'EndLoan',
+        borrow,
+        slice,
+        provenance: generated(exit?.span ?? borrow.callSpan),
+      }),
+    )
+    fn.loanLocals.delete(borrowKey(borrow))
+  }
+  for (const release of exit?.releases ?? []) {
+    if (release.binding.site._tag !== 'Let') continue
+    const transform = fn.effectTransforms.get(release.binding.site.binding.ordinal)
+    if (transform === undefined) continue
+    for (const borrow of transform.loanEnds) {
+      const slice = fn.loanLocals.get(borrowKey(borrow))
+      if (slice === undefined) continue
+      fn.emit(
+        Object.freeze({
+          _tag: 'EndLoan',
+          borrow,
+          slice,
+          provenance: generated(exit?.span ?? borrow.callSpan),
+        }),
+      )
+      fn.loanLocals.delete(borrowKey(borrow))
+    }
+  }
   for (const release of exit?.releases ?? []) {
     const site = release.binding.site
     const dropped =
@@ -1274,11 +1735,13 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
         ? local(site.parameter.ordinal)
         : fn.bindingLocals.get(site.binding.ordinal)
     if (dropped === undefined) continue
+    const localType = fn.localTypes.at(dropped.ordinal)
+    if (localType === undefined) continue
     fn.emit(
       Object.freeze({
         _tag: 'Drop',
         local: dropped,
-        cleanup: specializedCleanup(fn, release.cleanup),
+        cleanup: cleanupForLocal(fn, release.cleanup, localType),
         provenance: Object.freeze({ span: release.binding.liveFrom, generated: true }),
       }),
     )
@@ -1385,7 +1848,9 @@ const lowerSequence = (
           id,
           ...ownerFields(ownerLoop),
           releases: Object.freeze(
-            releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+            releases.flatMap((operation) =>
+              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+            ),
           ),
           outcome: terminal,
         }),
@@ -1422,6 +1887,64 @@ const lowerSequence = (
   }
 
   if (statement._tag === 'Bind') {
+    if (statement.initializer._tag === 'EffectTransform') {
+      const transform = statement.initializer
+      const [[protected_, callback], operations] = fn.capture(
+        () =>
+          [
+            lowerExpression(fn, transform.protected),
+            lowerExpression(fn, transform.callback),
+          ] as const,
+      )
+      if (protected_ === undefined || callback === undefined) {
+        fn.publish(
+          Object.freeze({
+            _tag: 'OperationRegion',
+            id,
+            ...ownerFields(ownerLoop),
+            operations,
+            outcome: Object.freeze({
+              _tag: 'Trap',
+              reason: 'unavailable Effect transform',
+              provenance: generated(statement.span),
+            }),
+          }),
+        )
+        return id
+      }
+      fn.effectTransforms.set(
+        statement.binding.ordinal,
+        Object.freeze({
+          expression: transform,
+          protected: protected_.result,
+          callback: callback.result,
+          loanEnds: Object.freeze(
+            transform.callback._tag === 'CallableSection'
+              ? transform.callback.captures.flatMap((capture) =>
+                  capture.value._tag === 'SliceBorrow' ? [capture.value.borrow] : [],
+                )
+              : [],
+          ),
+        }),
+      )
+      const following = fn.reserve()
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations,
+          outcome: Object.freeze({
+            _tag: 'Forward',
+            target: following,
+            provenance: generated(statement.span),
+          }),
+        }),
+      )
+      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+        ? undefined
+        : id
+    }
     if (
       (statement.initializer._tag === 'EffectConstruct' &&
         fn.effectResults.get(
@@ -1553,10 +2076,103 @@ const lowerSequence = (
   }
 
   if (statement._tag === 'Drop') {
+    const droppedExpression =
+      statement.expression._tag === 'Move' ? statement.expression.subject : statement.expression
+    const transformedBindingOrdinal =
+      droppedExpression._tag === 'BindingReference' ? droppedExpression.binding.ordinal : undefined
+    const transformedBinding =
+      transformedBindingOrdinal === undefined
+        ? undefined
+        : fn.effectTransforms.get(transformedBindingOrdinal)
+    if (transformedBinding !== undefined && transformedBindingOrdinal !== undefined) {
+      const callbackType = fn.localTypes.at(transformedBinding.callback.ordinal)
+      if (callbackType?._tag !== 'CallableValue') return undefined
+      const releases: Array<Extract<Mir.Operation, { readonly _tag: 'Drop' | 'EndLoan' }>> = []
+      for (const borrow of transformedBinding.loanEnds) {
+        const slice = fn.loanLocals.get(borrowKey(borrow))
+        if (slice === undefined) continue
+        releases.push(
+          Object.freeze({
+            _tag: 'EndLoan',
+            borrow,
+            slice,
+            provenance: generated(statement.span),
+          }),
+        )
+        fn.loanLocals.delete(borrowKey(borrow))
+      }
+      releases.push(
+        Object.freeze({
+          _tag: 'Drop',
+          local: transformedBinding.callback,
+          cleanup: callableLocalCleanup(fn, callbackType),
+          provenance: authored(statement.span),
+        }),
+      )
+      fn.effectTransforms.delete(transformedBindingOrdinal)
+      const cleanup = fn.reserve()
+      const following = fn.reserve()
+      fn.publish(
+        Object.freeze({
+          _tag: 'OperationRegion',
+          id,
+          ...ownerFields(ownerLoop),
+          operations: Object.freeze([]),
+          outcome: Object.freeze({
+            _tag: 'Forward',
+            target: cleanup,
+            provenance: generated(statement.span),
+          }),
+        }),
+      )
+      fn.publish(
+        Object.freeze({
+          _tag: 'CleanupRegion',
+          id: cleanup,
+          ...ownerFields(ownerLoop),
+          releases: Object.freeze(releases),
+          outcome: Object.freeze({
+            _tag: 'Forward',
+            target: following,
+            provenance: generated(statement.span),
+          }),
+        }),
+      )
+      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+        ? undefined
+        : id
+    }
     const [lowered, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
     if (lowered === undefined) return undefined
     const localType = fn.localTypes.at(lowered.result.ordinal)
     if (localType === undefined) return undefined
+    const droppedBinding =
+      statement.expression._tag === 'BindingReference'
+        ? statement.expression.binding.ordinal
+        : undefined
+    const bindingFact =
+      droppedBinding !== undefined
+        ? fn.ownership?.bindings.find(
+            (binding) =>
+              binding.site._tag === 'Let' && binding.site.binding.ordinal === droppedBinding,
+          )
+        : undefined
+    const loanReleases = (fn.ownership?.loans ?? []).flatMap((loan) => {
+      if (loan.endSpan.start !== statement.span.start || loan.endSpan.end !== statement.span.end) {
+        return []
+      }
+      const slice = fn.loanLocals.get(borrowKey(loan.id))
+      if (slice === undefined) return []
+      fn.loanLocals.delete(borrowKey(loan.id))
+      return [
+        Object.freeze({
+          _tag: 'EndLoan' as const,
+          borrow: loan.id,
+          slice,
+          provenance: generated(statement.span),
+        }),
+      ]
+    })
     const cleanup = fn.reserve()
     const following = fn.reserve()
     fn.publish(
@@ -1578,10 +2194,14 @@ const lowerSequence = (
         id: cleanup,
         ...ownerFields(ownerLoop),
         releases: Object.freeze([
+          ...loanReleases,
           Object.freeze({
             _tag: 'Drop',
             local: lowered.result,
-            cleanup: concreteCleanup(fn, Mir.semanticType(localType)),
+            cleanup:
+              bindingFact === undefined
+                ? concreteCleanup(fn, Mir.semanticType(localType))
+                : cleanupForLocal(fn, bindingFact.cleanup, localType),
             provenance: authored(statement.span),
           }),
         ]),
@@ -1755,7 +2375,9 @@ const lowerSequence = (
           id: cleanup,
           ...ownerFields(ownerLoop),
           releases: Object.freeze(
-            releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+            releases.flatMap((operation) =>
+              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+            ),
           ),
           outcome,
         }),
@@ -1832,7 +2454,9 @@ const lowerSequence = (
           id: cleanup,
           ...ownerFields(ownerLoop),
           releases: Object.freeze(
-            releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+            releases.flatMap((operation) =>
+              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+            ),
           ),
           outcome: failureOutcome,
         }),
@@ -1900,7 +2524,9 @@ const lowerSequence = (
         id: cleanup,
         ...ownerFields(ownerLoop),
         releases: Object.freeze(
-          releases.flatMap((operation) => (operation._tag === 'Drop' ? [operation] : [])),
+          releases.flatMap((operation) =>
+            operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+          ),
         ),
         outcome: returnOutcome,
       }),

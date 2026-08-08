@@ -41,6 +41,15 @@ const layoutPreset = presets.find((preset) => preset.label === 'ok · Validated 
 const allocationPreset = presets.find(
   (preset) => preset.label === 'ok · Self-contained Allocation contract',
 )
+const callablePreset = presets.find(
+  (preset) => preset.label === 'Named function and stored section',
+)
+const ungroupedRunPreset = presets.find(
+  (preset) => preset.label === 'Ungrouped run composes first',
+)
+const groupedRunPreset = presets.find(
+  (preset) => preset.label === 'Grouped run transforms result',
+)
 
 const acceptanceContext = (
   preset: (typeof presets)[number],
@@ -136,6 +145,7 @@ describe('preset catalog', () => {
         'backend',
         'effects',
         'allocation',
+        'callables',
       ]),
     )
   })
@@ -226,6 +236,21 @@ describe('preset catalog', () => {
       const evaluation = Analysis.evaluate(snapshot)
       expect(evaluation._tag, preset.label).toBe('Completed')
       if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(expected)
+    }
+  })
+
+  it('exposes callable environments and both run groupings through the unified inspector', () => {
+    for (const preset of [callablePreset, ungroupedRunPreset, groupedRunPreset]) {
+      expect(preset).toBeDefined()
+      if (preset === undefined) continue
+      const snapshot = snapshotOf(preset, 'aarch64-apple-darwin')
+      expect(Analysis.diagnostics(snapshot), preset.label).toEqual([])
+      const evaluation = Analysis.evaluate(snapshot)
+      expect(evaluation._tag, preset.label).toBe('Completed')
+      if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42)
+      for (const id of ['hir', 'ownership', 'instances', 'layout', 'mir', 'evaluation', 'backend']) {
+        expect(viewById(id)?.id, `${preset.label} · ${id}`).toBe(id)
+      }
     }
   })
 

@@ -125,6 +125,16 @@ it('recognizes drop only as a complete keyword', () => {
   )
 })
 
+it('recognizes once only as a complete callable-mode keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://once-keyword.silk', ascii('once fn onceOnly once_more dual')),
+  )
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['OnceKeyword', 'FnKeyword', 'Identifier', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes requirement-row and role punctuation', () => {
   const result = Lexer.lex(
     SourceFile.make('memory://effect-requirements.silk', ascii('? &Allocator@Scratch')),

@@ -27,6 +27,25 @@ export interface Instance {
   readonly substitution: ReadonlyMap<string, Type.Type>
 }
 
+/** One concrete hidden callable-section construction reachable from an instance. */
+export interface CallableInstance {
+  readonly _tag: 'CallableInstance'
+  readonly owner: InstanceKey
+  readonly site: Hir.CallableSiteId
+  readonly target: Hir.CallableTarget
+  readonly typeArguments: ReadonlyArray<Type.Type>
+  readonly substitution: ReadonlyMap<string, Type.Type>
+  readonly captureTypes: ReadonlyArray<Type.Type>
+  readonly captures: ReadonlyArray<{
+    readonly ordinal: number
+    readonly parameterOrdinal: number
+    readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+    readonly type: Type.Type
+  }>
+  readonly type: Type.Callable
+  readonly mode: Type.CallableMode
+}
+
 /** The resolved or explicitly unavailable user entry. */
 export type Entry =
   | { readonly _tag: 'Resolved'; readonly key: InstanceKey }
@@ -47,6 +66,7 @@ export interface Discovery {
   readonly rootModule: string
   readonly entry: Entry
   readonly instances: ReadonlyArray<Instance>
+  readonly callables: ReadonlyArray<CallableInstance>
   readonly violations: ReadonlyArray<PolymorphicRecursion>
 }
 
@@ -88,6 +108,7 @@ export const invalid = (rootModule: string): Discovery =>
     rootModule,
     entry: Object.freeze({ _tag: 'Unavailable', reason: 'InvalidSource' }),
     instances: Object.freeze([]),
+    callables: Object.freeze([]),
     violations: Object.freeze([]),
   })
 
@@ -164,13 +185,30 @@ interface CallTarget {
 
 const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   if (expression._tag === 'Run') return callTargets(expression.subject)
-  if (expression._tag === 'EffectCatch')
+  if (expression._tag === 'EffectCatch') {
+    const handler =
+      expression.handler._tag === 'FunctionItem' || expression.handler._tag === 'CallableSection'
+        ? expression.handler
+        : undefined
+    const target = handler?.target
     return [
       ...callTargets(expression.protected),
-      Object.freeze({ declaration: expression.handler, typeArguments: Object.freeze([]) }),
+      ...(target?._tag === 'DeclarationCallableTarget'
+        ? [
+            Object.freeze({
+              declaration: target.declaration,
+              typeArguments:
+                handler?._tag === 'CallableSection' ? handler.typeArguments : Object.freeze([]),
+            }),
+          ]
+        : []),
+      ...callTargets(expression.handler),
     ]
+  }
   if (expression._tag === 'EffectRetry')
     return [...callTargets(expression.protected), ...callTargets(expression.retries)]
+  if (expression._tag === 'EffectTransform')
+    return [...callTargets(expression.protected), ...callTargets(expression.callback)]
   if (expression._tag === 'EffectProvide') return callTargets(expression.protected)
   if (expression._tag === 'EffectProvideWith')
     return [...callTargets(expression.protected), ...callTargets(expression.acquisition)]
@@ -192,6 +230,16 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
   }
   if (expression._tag === 'BuiltinCall') {
     return expression.arguments.flatMap((argument) => callTargets(argument))
+  }
+  if (expression._tag === 'FunctionItem') return []
+  if (expression._tag === 'CallableSection') {
+    return expression.captures.flatMap((capture) => callTargets(capture.value))
+  }
+  if (expression._tag === 'CallableApply') {
+    return [
+      ...callTargets(expression.callee),
+      ...expression.arguments.flatMap((argument) => callTargets(argument)),
+    ]
   }
   if (expression._tag === 'Match') {
     return [
@@ -217,6 +265,194 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
 
 const bodyCallTargets = (fn: Hir.HirFunction): ReadonlyArray<CallTarget> =>
   fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(callTargets))
+
+const callableBindings = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
+  const bindings = new Map<number, Hir.Expression>()
+  const statements = (body: ReadonlyArray<Hir.Statement>): void => {
+    for (const statement of body) {
+      if (statement._tag === 'Bind') bindings.set(statement.binding.ordinal, statement.initializer)
+      if (statement._tag === 'If') {
+        statements(statement.taken)
+        statements(statement.otherwise)
+      } else if (statement._tag === 'While') statements(statement.body)
+    }
+  }
+  statements(fn.statements)
+  return bindings
+}
+
+const callableValue = (
+  expression: Hir.Expression,
+  bindings: ReadonlyMap<number, Hir.Expression>,
+): Extract<Hir.Expression, { readonly _tag: 'FunctionItem' | 'CallableSection' }> | undefined => {
+  if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') return expression
+  if (expression._tag === 'BindingReference') {
+    const initializer = bindings.get(expression.binding.ordinal)
+    return initializer === undefined ? undefined : callableValue(initializer, bindings)
+  }
+  if (expression._tag === 'Move') return callableValue(expression.subject, bindings)
+  return undefined
+}
+
+const mergeSubstitution = (
+  first: ReadonlyMap<string, Type.Type>,
+  second: ReadonlyMap<string, Type.Type>,
+): ReadonlyMap<string, Type.Type> => new Map([...first, ...second])
+
+const callableExpressions = (fn: Hir.HirFunction): ReadonlyArray<Hir.Expression> =>
+  fn.statements.flatMap((statement) =>
+    Hir.statementExpressions(statement).flatMap(Hir.expressionTree),
+  )
+
+const declarationTarget = (target: Hir.CallableTarget): DeclarationIndex.CanonicalId | undefined =>
+  target._tag === 'DeclarationCallableTarget' ? target.declaration : undefined
+
+const targetFunction = (
+  results: ReadonlyMap<string, Elaboration.Result>,
+  target: DeclarationIndex.CanonicalId,
+): Hir.HirFunction | undefined =>
+  results
+    .get(target.module)
+    ?.hir.functions.find(
+      (candidate) =>
+        candidate.declaration.canonical._tag === 'Canonical' &&
+        candidate.declaration.canonical.id.name === target.name,
+    )
+
+const targetArguments = (
+  target: Hir.CallableTarget,
+  substitution: ReadonlyMap<string, Type.Type>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+): ReadonlyArray<Type.Type> | undefined => {
+  const declaration = declarationTarget(target)
+  if (declaration === undefined) return Object.freeze([])
+  const fn = targetFunction(results, declaration)
+  if (fn === undefined) return undefined
+  const arguments_ = fn.declaration.typeParameters.flatMap((parameter) => {
+    const type = substitution.get(Type.key(parameter.type))
+    return type === undefined ? [] : [type]
+  })
+  return arguments_.length === fn.declaration.typeParameters.length
+    ? Object.freeze(arguments_)
+    : undefined
+}
+
+const callableCallTargets = (
+  fn: Hir.HirFunction,
+  results: ReadonlyMap<string, Elaboration.Result>,
+): ReadonlyArray<CallTarget> => {
+  const bindings = callableBindings(fn)
+  const targets: Array<CallTarget> = []
+  for (const expression of callableExpressions(fn)) {
+    const value =
+      expression._tag === 'CallableApply'
+        ? callableValue(expression.callee, bindings)
+        : expression._tag === 'FunctionItem' || expression._tag === 'CallableSection'
+          ? expression
+          : undefined
+    if (value === undefined) continue
+    const declaration = declarationTarget(value.target)
+    if (declaration === undefined) continue
+    const substitution =
+      value._tag === 'CallableSection'
+        ? mergeSubstitution(
+            value.substitution,
+            expression._tag === 'CallableApply' ? expression.substitution : new Map(),
+          )
+        : expression._tag === 'CallableApply'
+          ? expression.substitution
+          : new Map()
+    const arguments_ = targetArguments(value.target, substitution, results)
+    if (arguments_ !== undefined) {
+      targets.push(Object.freeze({ declaration, typeArguments: arguments_ }))
+    }
+  }
+  return Object.freeze(targets)
+}
+
+const callableKeyText = (self: CallableInstance): string =>
+  `${keyText(self.owner)}\u0001${self.site.function.sourceId}:${self.site.function.ordinal}:${self.site.span.start}:${self.site.span.end}\u0001${self.typeArguments.map(Type.key).join('\u0000')}`
+
+const concreteCallables = (
+  fn: Hir.HirFunction,
+  owner: InstanceKey,
+  ownerSubstitution: ReadonlyMap<string, Type.Type>,
+  results: ReadonlyMap<string, Elaboration.Result>,
+): ReadonlyArray<CallableInstance> => {
+  const expressions = callableExpressions(fn)
+  const bindings = callableBindings(fn)
+  const sections = expressions.flatMap((expression) =>
+    expression._tag === 'CallableSection' ? [expression] : [],
+  )
+  const seen = new Set<string>()
+  const instances: Array<CallableInstance> = []
+  for (const section of sections) {
+    const site = `${section.site.function.sourceId}:${section.site.function.ordinal}:${section.site.span.start}:${section.site.span.end}`
+    if (seen.has(site)) continue
+    seen.add(site)
+    const applications = expressions.flatMap((expression) =>
+      expression._tag === 'CallableApply' && callableValue(expression.callee, bindings) === section
+        ? [expression]
+        : [],
+    )
+    const candidates: ReadonlyArray<ReadonlyMap<string, Type.Type>> =
+      applications.length === 0
+        ? [new Map()]
+        : applications.map((application) => application.substitution)
+    for (const applicationSubstitution of candidates) {
+      const raw = mergeSubstitution(section.substitution, applicationSubstitution)
+      const substitution = new Map(
+        [...raw].map(([parameter, type]) => [parameter, Type.substitute(type, ownerSubstitution)]),
+      )
+      const type = Type.substitute(Type.substitute(section.type, ownerSubstitution), substitution)
+      const arguments_ = targetArguments(section.target, substitution, results)
+      const captureTypes = section.captures.flatMap((capture) =>
+        capture.value._tag === 'Unavailable'
+          ? []
+          : [Type.substitute(Type.substitute(capture.value.type, ownerSubstitution), substitution)],
+      )
+      if (
+        !Type.isCallable(type) ||
+        !Type.isConcrete(type) ||
+        arguments_ === undefined ||
+        arguments_.some((argument) => !Type.isConcrete(argument)) ||
+        captureTypes.length !== section.captures.length ||
+        captureTypes.some((capture) => !Type.isConcrete(capture))
+      ) {
+        continue
+      }
+      instances.push(
+        Object.freeze({
+          _tag: 'CallableInstance',
+          owner,
+          site: section.site,
+          target: section.target,
+          typeArguments: arguments_,
+          substitution,
+          captureTypes: Object.freeze(captureTypes),
+          captures: Object.freeze(
+            section.captures.flatMap((capture, ordinal) => {
+              const type_ = captureTypes.at(ordinal)
+              return type_ === undefined
+                ? []
+                : [
+                    Object.freeze({
+                      ordinal: capture.ordinal,
+                      parameterOrdinal: capture.parameterOrdinal,
+                      access: capture.access,
+                      type: type_,
+                    }),
+                  ]
+            }),
+          ),
+          type,
+          mode: section.mode,
+        }),
+      )
+    }
+  }
+  return Object.freeze(instances)
+}
 
 const functionByKey = (
   results: ReadonlyMap<string, Elaboration.Result>,
@@ -249,11 +485,13 @@ export const discover = (
       rootModule,
       entry,
       instances: Object.freeze([]),
+      callables: Object.freeze([]),
       violations: Object.freeze([]),
     })
   }
 
   const recorded = new Map<string, Instance>()
+  const recordedCallables = new Map<string, CallableInstance>()
   const scannedContexts = new Set<string>()
   interface WorkItem {
     readonly key: InstanceKey
@@ -297,7 +535,15 @@ export const discover = (
         Object.freeze({ _tag: 'Instance', key, function: fn, substitution }),
       )
     }
-    for (const call of bodyCallTargets(fn)) {
+    for (const callable of concreteCallables(fn, key, substitution, results)) {
+      recordedCallables.set(callableKeyText(callable), callable)
+    }
+    const calls = new Map<string, CallTarget>()
+    for (const call of [...bodyCallTargets(fn), ...callableCallTargets(fn, results)]) {
+      const identity = `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.key).join('\u0000')}`
+      if (!calls.has(identity)) calls.set(identity, call)
+    }
+    for (const call of calls.values()) {
       const target = call.declaration
       const targetFunction = results
         .get(target.module)
@@ -337,6 +583,7 @@ export const discover = (
     rootModule,
     entry,
     instances: Object.freeze([...recorded.values()]),
+    callables: Object.freeze([...recordedCallables.values()]),
     violations: Object.freeze(violations),
   })
 }

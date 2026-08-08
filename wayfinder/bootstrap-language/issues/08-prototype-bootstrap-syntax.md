@@ -10,8 +10,9 @@ What concrete syntax makes the settled bootstrap semantics direct, constrained, 
 for humans and AI tools to produce—especially function contracts, service provision, allocation,
 lifetimes, structs, runtime type unions, generics, matching, modules, and unsafe boundaries?
 Ownership and borrowing syntax must make access modes and lexical boundaries intuitive without
-assuming familiarity with Rust's notation. Prototype both qualified calls and first-argument
-pipeline insertion for actor-module functions without introducing import-dependent method lookup.
+assuming familiarity with Rust's notation. Prototype qualified calls, first-class callable values,
+automatic leading-argument sections, and unary pipeline application without introducing import-
+dependent method lookup.
 
 ## Answer
 
@@ -42,27 +43,31 @@ owned abortive failure types. `?` introduces the normalized set of capability re
 role. `pub role Scratch` declares such a role. Omitting `@Role` selects `DefaultRole`; roles are
 never strings or runtime lookup keys.
 
-Actor operations remain qualified and data-first. Every eligible multi-argument actor operation has
-compiler-supported dual calling forms: a complete call supplies the first argument normally, while
-a partial call in a pipeline receives the piped value as argument one. No placeholder is required
-when later arguments are already present.
+Actor operations remain qualified and data-first. Named functions are ordinary values. For every
+function of arity `N >= 2`, supplying exactly the trailing `N - 1` arguments constructs an automatic
+unary callable awaiting parameter zero; supplying all `N` arguments calls it. Pipelines evaluate
+their left value first, then their callable right expression, and invoke the callable once. No
+`dual` marker or placeholder is required.
 
 ```silk
 let direct = Math.sum(2, 3)
-let piped = 2 |> Math.sum(3)
+let plusThree = Math.sum(3)
+let piped = 2 |> plusThree
 let disabled = flag |> Bool.not
 ```
 
-This is static elaboration of the same actor operation, not import-dependent method lookup. Actor
-names therefore remain visible in both forms. Language behavior should prefer ordinary pipeable
+This is ordinary callable construction and application, not import-dependent method lookup or
+pipeline-only insertion. `Math.sum(3)(2)` is therefore equivalent to the piped form, and stored or
+user-authored callables compose through higher-order APIs. Actor names remain visible in both forms.
+Language behavior should prefer ordinary pipeable
 actor operations such as `Effect.flatMap`, `Effect.catch`, and `FileSystem.provide` over additional
 keywords.
 
 Effect nesting is valid and never flattened implicitly. Returning an effect preserves the nested
 layer; `run` evaluates one layer; `Effect.flatten` removes one layer explicitly; and
 `Effect.flatMap` composes with the same one-layer flattening rule. The bootstrap Effect actor needs
-`map`, `flatMap`, `flatten`, `tap`, `catch`, and `retry`. Their data-first forms are pipeable through
-the same dual-call rule.
+`map`, `flatMap`, `flatten`, `tap`, `catch`, and `retry`. Their data-first forms produce automatic
+sections through the same callable rule.
 
 The explicit expression form isolates eager setup from delayed work:
 
@@ -89,17 +94,16 @@ capability-role entry from the effect's requirement row. Because the open functi
 callers can branch and specialize it before supplying affine inputs.
 
 ```silk
-let withScratch = Compiler.compile
+let fsCompilation = Compiler.compile(move diskRequest)
   |> Allocator.provide(&mut scratch, @Scratch)
-
-let fsCompilation = withScratch
   |> FileSystem.provide(&fileSystem)
 
-let memoryCompilation = withScratch
+let memoryCompilation = Compiler.compile(move memoryRequest)
+  |> Allocator.provide(&mut scratch, @Scratch)
   |> FileSystem.provide(&virtualFileSystem)
 
-let diskArtifact = run fsCompilation(move diskRequest)
-return run memoryCompilation(move memoryRequest)
+let diskArtifact = run fsCompilation
+return run memoryCompilation
 ```
 
 A borrowed provider constrains the specialized effect's lifetime. A moved provider is owned by the
@@ -149,13 +153,16 @@ pub effect fn depth(node: &Node) -> U32 {
     return 1
   }
 
-  return run (
-    depth(&node.child)
-      |> Effect.suspend
-      |> Effect.map(Math.add(1))
-  )
+  return run depth(&node.child)
+    |> Effect.suspend
+    |> Effect.map(Math.add(1))
 }
 ```
+
+`run` owns the complete following expression through its enclosing delimiter or statement boundary.
+Thus `run effect |> Effect.map(callback)` composes before execution. Parentheses explicitly move
+the pipeline outside execution: `(run effect) |> Math.add(1)` transforms the eager success value.
+`run` still evaluates exactly one Effect layer.
 
 Statically known non-recursive compositions elaborate directly to MIR and need no generic runtime
 Effect objects, vtables, or per-combinator allocation. Tail recursion becomes a loop. A stored or

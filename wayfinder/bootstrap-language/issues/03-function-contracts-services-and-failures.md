@@ -111,15 +111,20 @@ take-once. `Effect.retry` accepts only an effect whose captures allow repetition
 are reconstructed per attempt, while captured mutable state persists. Providers acquired inside the
 retried effect are reacquired; captured providers are reused.
 
-Function and effect values retain complete parameter, success, failure, and requirement contracts.
-Referencing an open `effect fn` captures nothing. Supplying arguments or providers creates a closed or
-specialized effect with a compiler-shaped environment. General-purpose owned closures remain
-deferred; this is the narrow owned-environment facility required by Effect itself.
+Ordinary callable values retain ordered parameter and result contracts plus shared, exclusive, or
+consuming invocation mode. Effect values retain success, failure, requirement, and run-access
+contracts. Referencing an open `effect fn` captures nothing; supplying its arguments constructs a
+closed effect. Supplying trailing arguments to an ordinary multi-argument function instead creates
+an automatic unary callable section. Both use compiler-shaped environments, but only the Effect body
+is lazy.
 
-Reusable higher-order functions may quantify over failure and access-qualified requirement rows so
-callbacks preserve their contracts. These row parameters are inferred from callback values, appear
-only in function-contract positions, and are concretized during finite monomorphization. They are not
-runtime values or general row-level programming.
+Reusable higher-order functions accept ordinary callable contracts. Effect combinators such as
+`map`, `flatMap`, `tap`, and `catch` store those callables and derive the resulting Effect run access
+from both input Effect and callback: an exclusive callback makes the composition exclusively
+reusable, while a consuming callback makes it take-once and therefore ineligible for retry. Such
+contracts may quantify over failure and access-qualified requirement rows so effectful callbacks
+preserve their rows through finite monomorphization. The rows are not runtime values or general
+row-level programming.
 
 Service requirements lower to hidden slots in canonical capability-and-role order. Each slot is a
 non-owning opaque implementation pointer plus compiler-shaped conformance witness table. Capability

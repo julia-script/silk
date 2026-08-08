@@ -396,21 +396,21 @@ trap semantics and MUST NOT pretend that normal cleanup ran.
 - **WHEN** a callee replaces a move-only element through an exclusive slice and returns early
 - **THEN** the displaced element and eventual backing array elements are each cleaned exactly once after the relevant loans end
 
-### Requirement: Flow capture and failure transfer obey ordinary ownership
+### Requirement: Effect capture and failure transfer obey ordinary ownership
 
-Flow construction SHALL retain moved and borrowed capture obligations without executing the body.
+Effect construction SHALL retain moved and borrowed capture obligations without executing the body.
 Running transfers or borrows captures according to the original call, `fail move` consumes its
 payload, propagation transfers it once, and recovery gives one owned payload to the matching
 handler. Cleanup SHALL occur exactly once for values in every region actually exited.
 
 #### Scenario: Reject a second run after a taken capture
 
-- **WHEN** a closed flow captures an affine argument by move and is run twice
+- **WHEN** a closed Effect captures an affine argument by move and is run twice
 - **THEN** ownership rejects the second run and identifies the consumed capture
 
 #### Scenario: Clean before propagation
 
-- **WHEN** a flow fails after constructing a live affine local
+- **WHEN** an Effect fails after constructing a live affine local
 - **THEN** cleanup leaves the exited region before the owned failure reaches its caller
 
 ### Requirement: Ownership unifies Effect captures allocation and Drop
@@ -425,3 +425,38 @@ trap.
 
 - **WHEN** a Vector is moved into a repeatable-ineligible Effect that may fail before consuming it
 - **THEN** each reachable path has exactly one owner and cleanup plan, and a second run is rejected
+
+### Requirement: Callable environments obey ordinary affine ownership
+
+Ownership SHALL derive callable invocation mode from how its environment is accessed: read-only
+captures permit shared reusable calls, mutated or exclusively borrowed captures require exclusive
+reusable calls, and an invocation that consumes any captured owner is take-once. Callable moves,
+borrows, aggregate storage, returns, and drops SHALL use the same ownership and dependency rules as
+other values. A provider or owner retained by a callable MUST remain immovable and live as required
+until the callable releases that dependency.
+
+#### Scenario: Reject a second taking call
+
+- **WHEN** one invocation consumes an owned capture and the same callable is invoked again
+- **THEN** ownership rejects the second invocation and identifies the consumed environment slot
+
+#### Scenario: Release captures on callable drop
+
+- **WHEN** a callable with owned and borrowed captures is dropped without invocation
+- **THEN** owned captures clean exactly once and every capture loan ends at that drop
+
+#### Scenario: Reject provider movement while retained
+
+- **WHEN** a callable retains a borrow from a provider and code attempts to move or drop that provider
+- **THEN** ownership rejects the provider operation while permitting valid shared capability use
+
+### Requirement: Pipeline application preserves ownership order
+
+Ownership SHALL analyze the pipeline left value before constructing or accessing the right callable,
+then transfer or borrow the left value according to the callable's leading parameter. Failures in
+callable construction or invocation MUST NOT duplicate the left value or any capture.
+
+#### Scenario: Pipe an affine value once
+
+- **WHEN** an affine value is piped into a callable whose leading parameter consumes it
+- **THEN** the source binding becomes moved exactly once before the callable result is available
