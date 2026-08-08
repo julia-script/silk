@@ -5,7 +5,8 @@
  *
  * There are ~70 presets and the set grows with every phase, so the button bar the labs used does
  * not survive the consolidation. A filter box plus keyboard navigation keeps the ones you know by
- * name one query away, and keeps the rest browsable by phase.
+ * name one query away, and keeps the rest browsable by phase. Labels carry an `ok ·` / `fail ·` /
+ * `trap ·` prefix so damaged diagnostic cases are not mistaken for working programs.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
