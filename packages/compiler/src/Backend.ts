@@ -3435,7 +3435,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     throw new RangeError('Backend cannot resolve Effect value runner')
                   const outcomeValues = yield* callValues(
                     target,
-                    [...readLocal(operation.effect)],
+                    [
+                      ...readLocal(operation.effect),
+                      ...operation.arguments.flatMap((argument) => [...readLocal(argument)]),
+                    ],
                     `effect_value_run${operation.destination.ordinal}`,
                   )
                   locals.set(operation.outcome.ordinal, outcomeValues)
@@ -3764,13 +3767,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
                 case 'CatchEffect': {
-                  const protectedTarget = declared.find((candidate) =>
-                    Mir.matchesInstance(
-                      candidate.fn,
-                      operation.protectedTarget,
-                      operation.protectedTypeArguments,
-                    ),
-                  )
+                  const protectedTargetId = operation.protectedTarget
+                  const protectedTarget =
+                    protectedTargetId === undefined
+                      ? undefined
+                      : declared.find((candidate) =>
+                          Mir.matchesInstance(
+                            candidate.fn,
+                            protectedTargetId,
+                            operation.protectedTypeArguments,
+                          ),
+                        )
                   const protectedRunner = declared.find((candidate) =>
                     Mir.matchesInstance(
                       candidate.fn,
@@ -3793,21 +3800,31 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     ),
                   )
                   if (
-                    protectedTarget === undefined ||
+                    (protectedTargetId !== undefined && protectedTarget === undefined) ||
                     protectedRunner === undefined ||
                     handlerTarget === undefined ||
                     handlerRunner === undefined
                   )
                     throw new RangeError('Backend cannot resolve effect catch target')
-                  const protectedEnvironment = yield* callValues(
-                    protectedTarget,
-                    operation.protectedArguments.flatMap((argument) => [...readLocal(argument)]),
-                    `effect_protected_factory${operation.destination.ordinal}`,
-                  )
+                  const protectedEnvironment =
+                    protectedTarget === undefined
+                      ? readLocal(operation.protectedValue)
+                      : yield* callValues(
+                          protectedTarget,
+                          operation.protectedArguments.flatMap((argument) => [
+                            ...readLocal(argument),
+                          ]),
+                          `effect_protected_factory${operation.destination.ordinal}`,
+                        )
                   locals.set(operation.protectedValue.ordinal, protectedEnvironment)
                   const protectedValues = yield* callValues(
                     protectedRunner,
-                    protectedEnvironment,
+                    Object.freeze([
+                      ...protectedEnvironment,
+                      ...operation.protectedRunnerArguments.flatMap((argument) => [
+                        ...readLocal(argument),
+                      ]),
+                    ]),
                     `effect_protected${operation.destination.ordinal}`,
                   )
                   locals.set(operation.protectedOutcome.ordinal, protectedValues)

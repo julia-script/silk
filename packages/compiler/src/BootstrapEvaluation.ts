@@ -2332,57 +2332,64 @@ function executeFunction(
             break
           }
           case 'CatchEffect': {
-            const protectedTarget = functionFor(
-              program,
-              operation.protectedTarget,
-              operation.protectedTypeArguments,
-            )
-            if (protectedTarget === undefined)
+            const protectedTargetId = operation.protectedTarget
+            const protectedTarget =
+              protectedTargetId === undefined
+                ? undefined
+                : functionFor(program, protectedTargetId, operation.protectedTypeArguments)
+            if (protectedTargetId !== undefined && protectedTarget === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
-                target: operation.protectedTarget,
+                target: protectedTargetId,
                 span: operation.provenance.span,
               })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                caller: fn.id,
-                target: operation.protectedTarget,
-                callerInstance: fn.instance,
-                targetInstance: protectedTarget.instance,
-                span: operation.provenance.span,
-              }),
-            )
             const protectedArguments = operation.protectedArguments.map((argument) =>
               read(argument),
             )
-            protectedArguments.forEach((argument, ordinal) => {
+            if (protectedTarget !== undefined && protectedTargetId !== undefined) {
               trace.push(
                 Object.freeze({
-                  _tag: 'Binding',
-                  target: operation.protectedTarget,
+                  _tag: 'Call',
+                  caller: fn.id,
+                  target: protectedTargetId,
+                  callerInstance: fn.instance,
                   targetInstance: protectedTarget.instance,
-                  callSpan: operation.provenance.span,
-                  argumentOrdinal: ordinal,
-                  parameterOrdinal: ordinal,
-                  value: argument.value,
-                  fromCall: argument.fromCall,
                   span: operation.provenance.span,
                 }),
               )
-            })
-            const protectedResult = executeFunction(
-              program,
-              protectedTarget,
-              protectedArguments.map((argument) => argument.value),
-              Object.freeze([...active, protectedTarget.instance]),
-              trace,
-              state,
-            )
-            if (protectedResult._tag === 'Blocked') return protectedResult
-            if (protectedResult.value._tag !== 'EffectValue')
+              protectedArguments.forEach((argument, ordinal) => {
+                trace.push(
+                  Object.freeze({
+                    _tag: 'Binding',
+                    target: protectedTargetId,
+                    targetInstance: protectedTarget.instance,
+                    callSpan: operation.provenance.span,
+                    argumentOrdinal: ordinal,
+                    parameterOrdinal: ordinal,
+                    value: argument.value,
+                    fromCall: argument.fromCall,
+                    span: operation.provenance.span,
+                  }),
+                )
+              })
+            }
+            const protectedValue =
+              protectedTarget === undefined
+                ? read(operation.protectedValue).value
+                : executeFunction(
+                    program,
+                    protectedTarget,
+                    protectedArguments.map((argument) => argument.value),
+                    Object.freeze([...active, protectedTarget.instance]),
+                    trace,
+                    state,
+                  )
+            if (protectedValue._tag === 'Blocked') return protectedValue
+            const protectedEffect =
+              protectedValue._tag === 'Value' ? protectedValue.value : protectedValue
+            if (protectedEffect._tag !== 'EffectValue')
               throw new RangeError('MIR effect catch factory returned a non-Effect value')
-            write(operation.protectedValue, { value: protectedResult.value, fromCall: true })
+            write(operation.protectedValue, { value: protectedEffect, fromCall: true })
             const protectedRunner = functionFor(
               program,
               operation.protectedRunner,
@@ -2397,7 +2404,10 @@ function executeFunction(
             const protectedExecution = executeFunction(
               program,
               protectedRunner,
-              protectedResult.value.captures,
+              Object.freeze([
+                ...protectedEffect.captures,
+                ...operation.protectedRunnerArguments.map((argument) => read(argument).value),
+              ]),
               Object.freeze([...active, protectedRunner.instance]),
               trace,
               state,
@@ -2670,7 +2680,10 @@ function executeFunction(
             const result = executeFunction(
               program,
               target,
-              effect.captures,
+              Object.freeze([
+                ...effect.captures,
+                ...operation.arguments.map((argument) => read(argument).value),
+              ]),
               Object.freeze([...active, target.instance]),
               trace,
               state,

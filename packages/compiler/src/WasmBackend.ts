@@ -1519,12 +1519,19 @@ const emitOperation = (
         ...copy(handlerSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
       ]
       return [
-        ...operation.protectedArguments.flatMap((argument) =>
+        ...(operation.protectedTarget === undefined
+          ? []
+          : [
+              ...operation.protectedArguments.flatMap((argument) =>
+                slots(argument).map((slot) => Instr.localGet(slot)),
+              ),
+              Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
+              ...[...protectedValueSlots].reverse().map((slot) => Instr.localSet(slot)),
+            ]),
+        ...protectedValueSlots.map((slot) => Instr.localGet(slot)),
+        ...operation.protectedRunnerArguments.flatMap((argument) =>
           slots(argument).map((slot) => Instr.localGet(slot)),
         ),
-        Instr.call(resolve(operation.protectedTarget, operation.protectedTypeArguments)),
-        ...[...protectedValueSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...protectedValueSlots.map((slot) => Instr.localGet(slot)),
         Instr.call(resolve(operation.protectedRunner, operation.protectedTypeArguments)),
         ...[...protectedSlots].reverse().map((slot) => Instr.localSet(slot)),
         Instr.localGet(tag),
@@ -1666,6 +1673,9 @@ const emitOperation = (
       if (tag === undefined) throw new RangeError('Wasm Effect value lost its outcome tag lane')
       const invoke = [
         ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+        ...operation.arguments.flatMap((argument) =>
+          slots(argument).map((slot) => Instr.localGet(slot)),
+        ),
         Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
         ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
         ...[...(memory?.frame.roots.keys() ?? [])]

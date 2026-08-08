@@ -295,3 +295,75 @@ it.effect('runs a counted quota allocator identically on all three engines', () 
     }
   }),
 )
+
+const forwardedProvider = `struct CountingAllocator { hits: I32 }
+
+effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  self.hits = self.hits + 1
+  let mut inner = SystemAllocator.make()
+  let pending = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let block = run pending
+  return move block
+}
+
+impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
+
+effect fn allocateForwarded(layout: Layout) -> Allocation ! OutOfMemory ? &mut Allocator {
+  let pending = Allocator.allocate(move layout)
+  let block = run pending
+  return move block
+}
+
+effect fn build() -> I32 ! OutOfMemory {
+  let mut allocator = CountingAllocator { hits: 0 }
+  let layout = Layout.of<[I32; 2]>()
+  let pending = allocateForwarded(move layout) |> Allocator.provide(&mut allocator)
+  let block = run pending
+  drop block
+  return allocator.hits
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(build(), recover)
+}`
+
+it.effect('writes forwarded exclusive provider mutations back on all three engines', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'owned-allocation-dispatch/forwarded-provider',
+      ascii(forwardedProvider),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 1)
+    assert.deepEqual(
+      Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      ['AllocationAcquire', 'AllocationRelease'],
+    )
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 1)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make(
+          'owned-allocation-dispatch/forwarded-provider',
+          ascii(forwardedProvider),
+        ),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'forwarded-provider'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    assert.strictEqual(run.status, 1, run.stderr)
+  }),
+)

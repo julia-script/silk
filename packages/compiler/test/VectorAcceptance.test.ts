@@ -98,3 +98,89 @@ it.effect('grows, reads, and releases a Silk-written vector on all three engines
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
+
+const failedGrowth = `import silk.vector { Vector, make, append, get, length, capacity }
+
+struct QuotaAllocator { remaining: I32 }
+
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  if self.remaining == 0 { fail OutOfMemory {} }
+  self.remaining = self.remaining - 1
+  let mut inner = SystemAllocator.make()
+  let pending = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let block = run pending
+  return move block
+}
+
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+
+effect fn grow(values: &mut Vector<I32>) -> I32 ! OutOfMemory ? &mut Allocator {
+  let appended = run append<I32>(move values, 14)
+  return 1
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+
+effect fn build() -> I32 ! OutOfMemory {
+  let mut allocator = QuotaAllocator { remaining: 1 }
+  let mut values = make<I32>()
+  let pending0 = append<I32>(&mut values, 10) |> Allocator.provide(&mut allocator)
+  let appended0 = run pending0
+  let pending1 = append<I32>(&mut values, 11) |> Allocator.provide(&mut allocator)
+  let appended1 = run pending1
+  let pending2 = append<I32>(&mut values, 12) |> Allocator.provide(&mut allocator)
+  let appended2 = run pending2
+  let pending3 = append<I32>(&mut values, 13) |> Allocator.provide(&mut allocator)
+  let appended3 = run pending3
+  let marker = run Effect.catch<OutOfMemory>(
+    grow(&mut values) |> Allocator.provide(&mut allocator),
+    recover,
+  )
+  if marker == 7 {} else { return 0 }
+  if length<I32>(&values) == 4 {} else { return 1 }
+  if capacity<I32>(&values) == 4 {} else { return 2 }
+  let first = get<I32>(&mut values, 0)
+  let last = get<I32>(&mut values, 3)
+  return first + last + 19
+}
+
+effect fn outerRecover(error: OutOfMemory) -> I32 { return 0 }
+
+pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), outerRecover) }`
+
+it.effect('preserves the original vector when replacement allocation fails', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'vector-acceptance/failed-growth',
+      ascii(failedGrowth),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42)
+    const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
+    const releases = evaluated.trace.filter((event) => event._tag === 'AllocationRelease')
+    assert.strictEqual(acquires.length, 1)
+    assert.strictEqual(releases.length, 1)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make('vector-acceptance/failed-growth', ascii(failedGrowth)),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'failed-growth'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    assert.strictEqual(run.status, 42, run.stderr)
+  }),
+)

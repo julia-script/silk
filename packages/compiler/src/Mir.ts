@@ -388,11 +388,12 @@ export type Operation =
       readonly protectedOutcome: LocalId
       readonly handlerValue: LocalId
       readonly handlerOutcome: LocalId
-      readonly protectedTarget: DeclarationIndex.CanonicalId
+      readonly protectedTarget?: DeclarationIndex.CanonicalId
       readonly protectedTypeArguments: ReadonlyArray<SilkType.Type>
       readonly protectedArguments: ReadonlyArray<LocalId>
       readonly protectedValueType: Extract<Type, { readonly _tag: 'EffectValue' }>
       readonly protectedRunner: DeclarationIndex.CanonicalId
+      readonly protectedRunnerArguments: ReadonlyArray<LocalId>
       readonly protectedType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly handledTag: number
       readonly handledLaneCount: number
@@ -455,6 +456,8 @@ export type Operation =
       readonly effect: LocalId
       readonly runner: DeclarationIndex.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.Type>
+      /** Statically selected service-provider references appended after the Effect captures. */
+      readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{
@@ -881,6 +884,7 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
         operation.handlerValue,
         operation.handlerOutcome,
         ...operation.protectedArguments,
+        ...operation.protectedRunnerArguments,
       ]
     case 'RetryEffect':
       return [
@@ -893,7 +897,7 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
-      return [operation.destination, operation.outcome, operation.effect]
+      return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
     case 'Construct':
       return [operation.destination, ...operation.fields.map((field) => field.value)]
     case 'ConstructArray':
@@ -1234,7 +1238,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
-      return [operation.effect]
+      return [operation.effect, ...operation.arguments]
     case 'Construct':
       return operation.fields.map((field) => field.value)
     case 'ConstructArray':
@@ -2558,9 +2562,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
         }
         if (operation._tag === 'CatchEffect') {
-          const protectedTarget = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.protectedTarget, operation.protectedTypeArguments),
-          )
+          const protectedTargetId = operation.protectedTarget
+          const protectedTarget =
+            protectedTargetId === undefined
+              ? undefined
+              : self.functions.find((candidate) =>
+                  matchesInstance(candidate, protectedTargetId, operation.protectedTypeArguments),
+                )
           const protectedRunner = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.protectedRunner, operation.protectedTypeArguments),
           )
@@ -2572,11 +2580,16 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           )
           const handlerCallable = fn.localTypes.at(operation.handlerCallable.ordinal)
           if (
-            protectedTarget?.result._tag !== 'EffectValue' ||
+            (protectedTargetId !== undefined && protectedTarget === undefined) ||
             protectedRunner?.result._tag !== 'EffectOutcome' ||
             handlerTarget?.result._tag !== 'EffectValue' ||
             handlerRunner?.result._tag !== 'EffectOutcome' ||
-            !SilkType.equals(protectedTarget.result.type, operation.protectedValueType.type) ||
+            (protectedTarget !== undefined &&
+              (protectedTarget.result._tag !== 'EffectValue' ||
+                !SilkType.equals(
+                  protectedTarget.result.type,
+                  operation.protectedValueType.type,
+                ))) ||
             !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
             !SilkType.equals(handlerTarget.result.type, operation.handlerValueType.type) ||
             !SilkType.equals(handlerRunner.result.type, operation.handlerType.type) ||
@@ -2710,13 +2723,13 @@ const operationText = (operation: Operation): string => {
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect-success ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CatchEffect':
-      return `${localText(operation.destination)} = effect-catch tag=${operation.handledTag} ${targetText(operation.protectedTarget)} -> ${targetText(operation.handlerTarget)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = effect-catch tag=${operation.handledTag} ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} runner=${targetText(operation.protectedRunner)} arguments=${operation.protectedRunnerArguments.map(localText).join(',') || 'none'} -> ${targetText(operation.handlerTarget)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RetryEffect':
       return `${localText(operation.destination)} = effect-retry ${operation.protectedTarget === undefined ? localText(operation.protectedValue) : targetText(operation.protectedTarget)} retries=${localText(operation.retries)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffect':
       return `${localText(operation.destination)} = run-effect ${targetText(operation.target)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'RunEffectValue':
-      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = run-effect-value ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
