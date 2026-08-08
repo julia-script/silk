@@ -2511,7 +2511,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   if (sourceType === undefined) {
                     throw new RangeError('Backend place read lost its root type')
                   }
-                  if (sourceType._tag === 'Reference') {
+                  const sourceSemantic = Mir.semanticType(sourceType)
+                  if (SilkType.isReference(sourceSemantic)) {
                     // The place lives on the referenced target: static field offsets off the
                     // borrow's address, one load per lane of the projected value.
                     const address = readLocal(operation.root).at(0)
@@ -2530,7 +2531,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         throw new RangeError('LLVM reference place supports only field selectors')
                       staticSelectors.push(candidate.field)
                     }
-                    const target = sourceType.type.target
+                    const target = sourceSemantic.target
                     const values: Array<Value.Input> = []
                     for (const [ordinal, lane] of lanesFor(operation.type).entries()) {
                       const offset = Layout.laneOffset(program.layout, target, [
@@ -2555,7 +2556,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     locals.set(operation.destination.ordinal, Object.freeze(values))
                     break
                   }
-                  if (sourceType._tag === 'Slice') {
+                  if (SilkType.isSlice(sourceSemantic)) {
                     const [selector, ...suffixSelectors] = operation.selectors
                     if (selector?._tag !== 'SliceElementSelector') {
                       throw new RangeError('LLVM slice read lost its runtime element selector')
@@ -2580,7 +2581,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const continueBlock = yield* LlvmBlock.make(body, `slice${checkOrdinal}_ok`)
                     yield* FunctionBody.conditionalBranch(body, inBounds, continueBlock, trapBlock)
                     yield* LlvmBlock.setInsertionPoint(body, continueBlock)
-                    const sliceLayout = Layout.entry(program.layout, sourceType.type)
+                    const sliceLayout = Layout.entry(program.layout, sourceSemantic)
                     if (sliceLayout?.representation._tag !== 'Slice') {
                       throw new RangeError('LLVM slice read lost its compiler layout')
                     }
@@ -2618,7 +2619,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     for (const [laneOrdinal, lane] of lanesFor(operation.type).entries()) {
                       const staticOffset = Layout.laneOffset(
                         program.layout,
-                        sourceType.type.element,
+                        sourceSemantic.element,
                         Object.freeze([...staticSelectors, ...lane.path]),
                       )
                       if (staticOffset === undefined) {
@@ -3295,8 +3296,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 case 'MakeEffect':
                 case 'MakeCallable': {
                   const captured: Array<Value.Input> = []
-                  for (const capture of operation.captures) {
-                    if (capture.access === 'Copy' || capture.access === 'Take') {
+                  const fields =
+                    operation._tag === 'MakeEffect'
+                      ? operation.type.environment.fields
+                      : (operation.type.environment?.fields ?? Object.freeze([]))
+                  for (const [ordinal, capture] of operation.captures.entries()) {
+                    const field = fields.at(ordinal)
+                    if (field === undefined)
+                      throw new RangeError('Effect capture lost its environment field')
+                    if (field.representation === 'Value') {
                       captured.push(...readLocal(capture.source))
                       continue
                     }

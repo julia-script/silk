@@ -69,6 +69,24 @@ const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 const isCopyType = (type: DeclarationIndex.SemanticType): boolean =>
   SilkType.isBuiltin(type) || (SilkType.isFixedArray(type) && isCopyType(type.element))
 
+const isStructurallyCopyType = (
+  layout: Layout.Plan,
+  type: DeclarationIndex.SemanticType,
+  visiting = new Set<string>(),
+): boolean => {
+  if (SilkType.isBuiltin(type) || SilkType.isReference(type) || SilkType.isSlice(type)) return true
+  if (SilkType.isFixedArray(type)) return isStructurallyCopyType(layout, type.element, visiting)
+  if (!SilkType.isNominal(type) || SilkType.isIntrinsicNominal(type)) return false
+  const key = SilkType.key(type)
+  if (visiting.has(key)) return false
+  const entry = Layout.entry(layout, type)
+  if (entry?.representation._tag !== 'Aggregate') return false
+  const next = new Set(visiting).add(key)
+  return entry.representation.fields.every((field) =>
+    isStructurallyCopyType(layout, field.type, next),
+  )
+}
+
 const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingScalar): boolean =>
   typeof left === 'string'
     ? left === right
@@ -1874,7 +1892,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !(operation._tag === 'SlotTake' || operation._tag === 'SlotCopy') ||
             (destination !== undefined &&
               SilkType.equals(semanticType(destination), operation.element) &&
-              (operation._tag !== 'SlotCopy' || isCopyType(operation.element)))
+              (operation._tag !== 'SlotCopy' ||
+                isStructurallyCopyType(self.layout, operation.element)))
           const writeValue =
             operation._tag !== 'SlotWrite' ||
             (() => {
@@ -1901,7 +1920,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         if (operation._tag === 'SliceLength') {
           const slice = fn.localTypes.at(operation.slice.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
-          if (slice?._tag !== 'Slice' || destination?._tag !== 'I32') {
+          if (
+            slice === undefined ||
+            !SilkType.isSlice(semanticType(slice)) ||
+            destination?._tag !== 'I32'
+          ) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
@@ -2285,7 +2308,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
-            (operation._tag === 'ReadPlace' && !isCopyType(selected) && operation.consume !== true)
+            (operation._tag === 'ReadPlace' &&
+              !isStructurallyCopyType(self.layout, selected) &&
+              operation.consume !== true)
           ) {
             violations.push(
               Object.freeze({

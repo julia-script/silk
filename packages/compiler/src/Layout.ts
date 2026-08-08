@@ -1113,7 +1113,13 @@ const effectEnvironments = (
           break
         }
         const specialized = Type.substitute(type, instance.substitution)
-        const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+        // Slice and reference values are already stable borrow descriptors. Capturing their
+        // descriptor inline preserves the underlying loan without retaining a pointer to the
+        // effect factory's short-lived stack slot.
+        const borrowed =
+          (capture.access === 'Shared' || capture.access === 'Exclusive') &&
+          !Type.isSlice(specialized) &&
+          !Type.isReference(specialized)
         const valueLayout = borrowed ? undefined : layouts.get(Type.key(specialized))
         if (!borrowed && valueLayout === undefined) {
           unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`

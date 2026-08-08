@@ -1149,10 +1149,11 @@ const emitOperation = (
     }
     case 'ReadPlace': {
       const rootType = layout.types.at(operation.root.ordinal)
-      if (rootType?._tag === 'Reference') {
+      const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+      if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
         // The place lives on the referenced target: static field offsets off the address.
         const address = scalar(operation.root)
-        const target = rootType.type.target
+        const target = rootSemantic.target
         const staticSelectors: Array<LayoutPlan.Selector> = []
         for (const candidate of operation.selectors) {
           if (candidate._tag !== 'FieldSelector')
@@ -1169,7 +1170,7 @@ const emitOperation = (
           return [...loadAt(address, offset), Instr.localSet(destination)]
         })
       }
-      if (rootType?._tag === 'Slice') {
+      if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
         if (memory === undefined) throw new RangeError('Wasm slice read has no private memory')
         const [selector, ...suffixSelectors] = operation.selectors
         const [base, length] = slots(operation.root)
@@ -1180,7 +1181,7 @@ const emitOperation = (
         ) {
           throw new RangeError('Wasm slice read lost its canonical lanes')
         }
-        const sliceLayout = LayoutPlan.entry(memory.plan, rootType.type)
+        const sliceLayout = LayoutPlan.entry(memory.plan, rootSemantic)
         if (sliceLayout?.representation._tag !== 'Slice') {
           throw new RangeError('Wasm slice read lost its compiler layout')
         }
@@ -1207,7 +1208,7 @@ const emitOperation = (
         for (const [ordinal, lane] of destinationLanes.entries()) {
           const staticOffset = LayoutPlan.laneOffset(
             memory.plan,
-            rootType.type.element,
+            rootSemantic.element,
             Object.freeze([...staticSelectors, ...lane.path]),
           )
           const destination = destinationSlots.at(ordinal)
@@ -1495,8 +1496,14 @@ const emitOperation = (
       const destination = slots(operation.destination)
       const instructions: Array<Instr.Instr> = []
       let cursor = 0
-      for (const capture of operation.captures) {
-        if (capture.access === 'Copy' || capture.access === 'Take') {
+      const fields =
+        operation._tag === 'MakeEffect'
+          ? operation.type.environment.fields
+          : (operation.type.environment?.fields ?? Object.freeze([]))
+      for (const [ordinal, capture] of operation.captures.entries()) {
+        const field = fields.at(ordinal)
+        if (field === undefined) throw new RangeError('Wasm Effect capture lost its field')
+        if (field.representation === 'Value') {
           const source = slots(capture.source)
           instructions.push(...copy(source, destination.slice(cursor, cursor + source.length)))
           cursor += source.length

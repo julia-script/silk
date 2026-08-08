@@ -1032,6 +1032,8 @@ function lowerExpression(
           }),
         )
         endRunLoans(fn, expression.span)
+        if (expression.subject._tag === 'EffectConstruct')
+          endLoans(fn, expression.subject.loanEnds, expression.span)
         return Object.freeze({ result: destination })
       }
       const recipe =
@@ -1297,7 +1299,11 @@ function lowerExpression(
             expression.span,
             Object.freeze([...fn.providedRequirements, selectedProvider]),
           )
-          if (result !== undefined) endRunLoans(fn, expression.span)
+          if (result !== undefined) {
+            endRunLoans(fn, expression.span)
+            if (recipe.protected._tag === 'EffectConstruct')
+              endLoans(fn, recipe.protected.loanEnds, expression.span)
+          }
           return result
         }
         const providerType = fn.type(recipe.provider.providerType)
@@ -1350,6 +1356,8 @@ function lowerExpression(
         )
         if (result === undefined) return undefined
         endRunLoans(fn, expression.span)
+        if (recipe.protected._tag === 'EffectConstruct')
+          endLoans(fn, recipe.protected.loanEnds, expression.span)
         fn.emit(
           Object.freeze({
             _tag: 'EndLoan',
@@ -2122,7 +2130,12 @@ function lowerExpression(
     }
     case 'SliceLength': {
       const slice = lowerExpression(fn, expression.slice)
-      if (slice === undefined || fn.localTypes.at(slice.result.ordinal)?._tag !== 'Slice') {
+      const sliceType = slice === undefined ? undefined : fn.localTypes.at(slice.result.ordinal)
+      if (
+        slice === undefined ||
+        sliceType === undefined ||
+        !Type.isSlice(Mir.semanticType(sliceType))
+      ) {
         return undefined
       }
       const destination = fn.alloc(i32)
@@ -3711,10 +3724,10 @@ const lowerEffectRunner = (
   const captureParameterTypes = type.environment.fields.flatMap((field) => {
     const lowered = mirType(field.type)
     if (lowered === undefined) return []
+    if (field.representation === 'Value') return [lowered]
+    if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
     return [
-      field.access === 'Shared' || field.access === 'Exclusive'
-        ? Object.freeze({ _tag: 'EffectBorrow' as const, type: field.type, access: field.access })
-        : lowered,
+      Object.freeze({ _tag: 'EffectBorrow' as const, type: field.type, access: field.access }),
     ]
   })
   if (captureParameterTypes.length !== block.captures.length) return undefined
