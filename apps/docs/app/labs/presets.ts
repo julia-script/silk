@@ -245,18 +245,123 @@ pub fn main() -> I32 {
   one(
     'allocation',
     'ok · Self-contained Allocation contract',
-    `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
-  return Allocator.allocate(move layout)
+    `effect fn store() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[I32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 42)
+    let result = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    drop buffer
+    return result
+  }
+  return 0
 }
 
-fn consume(allocation: Allocation) -> I32 {
-  drop allocation
-  return 42
-}
+effect fn recover(error: OutOfMemory) -> I32 { return 0 }
 
 pub fn main() -> I32 {
-  let allocator = SystemAllocator.make()
+  return run Effect.catch<OutOfMemory>(store(), recover)
+}
+`,
+  ),
+  one(
+    'allocation',
+    'Early drop releases the buffer once',
+    `effect fn store() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[I32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+    drop buffer
+    return 42
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(store(), recover)
+}
+`,
+  ),
+  one(
+    'allocation',
+    'Zero-sized elements keep distinct owners',
+    `struct Empty {}
+
+effect fn store() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[Empty; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<Empty>(move allocation, 2)
+    drop buffer
+    return 42
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(store(), recover)
+}
+`,
+  ),
+  one(
+    'allocation',
+    'Raw storage outside unsafe is rejected',
+    `effect fn store() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[I32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+  drop buffer
   return 42
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(store(), recover)
+}
+`,
+  ),
+  one(
+    'allocation',
+    'Drop hook runs before field cleanup',
+    `struct Guard { buffer: RawBuffer<I32> }
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> Unit { return Unit.make() }
+}
+
+effect fn store() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[I32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let buffer = RawBuffer.from<I32>(move allocation, 2)
+    let guard = Guard { buffer: move buffer }
+    drop guard
+    return 42
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(store(), recover)
 }
 `,
   ),

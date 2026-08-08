@@ -272,6 +272,43 @@ describe('preset catalog', () => {
     expect(Analysis.layoutOf(allocation)._tag).toBe('Available')
   })
 
+  // The allocation presets are the workbench's only view of the raw storage substrate, so each
+  // one has to keep demonstrating the case its label claims — on both an address width where
+  // Usize is 64 bits and one where it is 32.
+  it('runs every accepted allocation preset to completion on both target widths', () => {
+    for (const label of [
+      'Self-contained Allocation contract',
+      'Early drop releases the buffer once',
+      'Zero-sized elements keep distinct owners',
+      'Drop hook runs before field cleanup',
+    ]) {
+      const preset = presets.find((candidate) => candidate.label === label)
+      expect(preset, label).toBeDefined()
+      if (preset === undefined) continue
+      for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown']) {
+        const snapshot = snapshotOf(preset, target)
+        expect(Analysis.diagnostics(snapshot), `${label} · ${target}`).toEqual([])
+        const evaluation = Analysis.evaluate(snapshot)
+        expect(evaluation._tag, `${label} · ${target}`).toBe('Completed')
+        if (evaluation._tag === 'Completed')
+          expect(evaluation.result.value, `${label} · ${target}`).toBe(42)
+      }
+    }
+  })
+
+  // The boundary is the point of the substrate: raw storage outside `unsafe` has to stay a
+  // frontend rejection rather than something the evaluator quietly runs.
+  it('keeps raw storage outside an unsafe block rejected before evaluation', () => {
+    const preset = presets.find(
+      (candidate) => candidate.label === 'Raw storage outside unsafe is rejected',
+    )
+    expect(preset).toBeDefined()
+    if (preset === undefined) return
+    const snapshot = snapshotOf(preset, 'aarch64-apple-darwin')
+    expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toEqual(['SEM0082'])
+    expect(Analysis.evaluate(snapshot)._tag).toBe('Blocked')
+  })
+
   it('keeps an unhandled Effect residual visibly stopped in the unified inspector', () => {
     expect(residualEffectPreset).toBeDefined()
     if (residualEffectPreset === undefined) return
