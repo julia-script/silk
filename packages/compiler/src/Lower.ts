@@ -86,6 +86,7 @@ class FunctionLowering {
 
   constructor(
     readonly layout: Layout.Plan,
+    readonly index: DeclarationIndex.Index,
     parameterTypes: ReadonlyArray<Mir.Type>,
     readonly ownership: Ownership.FunctionOwnership | undefined,
     readonly substitution: ReadonlyMap<string, Type.Type>,
@@ -2571,66 +2572,7 @@ const concreteCleanup = (
   fn: FunctionLowering,
   type: Type.Type,
   seen = new Set<string>(),
-): Ownership.CleanupPlan => {
-  if (Type.isBuiltin(type) || Type.isNever(type) || Type.isParameter(type)) {
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  }
-  if (Type.isSlice(type) || Type.isReference(type))
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.equals(type, Type.allocation))
-    return Object.freeze({
-      _tag: 'AllocationCleanup',
-      type: Type.allocation,
-      ticket: 'ActiveReclaimTicket',
-    })
-  if (Type.isRawBuffer(type))
-    return Object.freeze({
-      _tag: 'RawBufferCleanup',
-      type,
-      allocation: Object.freeze({
-        _tag: 'AllocationCleanup',
-        type: Type.allocation,
-        ticket: 'ActiveReclaimTicket',
-      }),
-    })
-  if (Type.isFixedArray(type)) {
-    return Object.freeze({
-      _tag: 'ArrayCleanup',
-      type,
-      length: type.length,
-      element: concreteCleanup(fn, type.element, seen),
-    })
-  }
-  if (Type.isUnion(type)) {
-    return Object.freeze({
-      _tag: 'UnionCleanup',
-      type,
-      cases: Object.freeze(
-        type.members.map((member, ordinal) =>
-          Object.freeze({ member, ordinal, cleanup: concreteCleanup(fn, member, seen) }),
-        ),
-      ),
-    })
-  }
-  if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  const key = Type.key(type)
-  if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
-  const entry = Layout.entry(fn.layout, type)
-  if (entry?.representation._tag !== 'Aggregate') {
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  }
-  const next = new Set(seen).add(key)
-  return Object.freeze({
-    _tag: 'StructCleanup',
-    type,
-    fields: Object.freeze(
-      entry.representation.fields.map((field) =>
-        Object.freeze({ field: field.id, cleanup: concreteCleanup(fn, field.type, next) }),
-      ),
-    ),
-  })
-}
+): Ownership.CleanupPlan => Ownership.cleanupPlan(fn.index, type, seen)
 
 const specializedCleanup = (
   fn: FunctionLowering,
@@ -3664,6 +3606,7 @@ const lowerInstance = (
   instance: Instances.Instance,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
+  index: DeclarationIndex.Index,
   effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
   generatedRunners: Array<GeneratedEffectRunner>,
 ): Mir.MirFunction => {
@@ -3711,6 +3654,7 @@ const lowerInstance = (
 
   const lowering = new FunctionLowering(
     layout,
+    index,
     parameterTypes,
     plan,
     instance.substitution,
@@ -3749,6 +3693,7 @@ const lowerEffectRunner = (
   spec: GeneratedEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
+  index: DeclarationIndex.Index,
   effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
   generatedRunners: Array<GeneratedEffectRunner>,
 ): Mir.MirFunction | undefined => {
@@ -3792,6 +3737,7 @@ const lowerEffectRunner = (
   const plan = planFor(ownership, owner.function)
   const lowering = new FunctionLowering(
     layout,
+    index,
     parameterTypes,
     plan,
     owner.substitution,
@@ -3848,6 +3794,7 @@ export const lowerProgram = (
   discovery: Instances.Discovery,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   layout: Layout.Plan,
+  index: DeclarationIndex.Index,
 ): Mir.Module => {
   const effectResults = new Map<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>()
   const generatedRunners: Array<GeneratedEffectRunner> = []
@@ -3874,6 +3821,7 @@ export const lowerProgram = (
       instance,
       ownership.get(instance.key.declaration.module),
       layout,
+      index,
       effectResults,
       generatedRunners,
     ),
@@ -3885,6 +3833,7 @@ export const lowerProgram = (
       generated,
       ownership.get(generated.owner.key.declaration.module),
       layout,
+      index,
       effectResults,
       generatedRunners,
     )

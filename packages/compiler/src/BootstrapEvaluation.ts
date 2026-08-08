@@ -1766,6 +1766,13 @@ function executeFunction(
                 span: operation.provenance.span,
               })
             }
+            const blocked = releaseThroughPlan(
+              operation.cleanup,
+              selected,
+              operation.provenance,
+              operation.slot.ordinal,
+            )
+            if (blocked !== undefined) return blocked
             allocation.values.delete(key)
             write(operation.destination, {
               value: Object.freeze({

@@ -1456,7 +1456,7 @@ const cleanupFields = (
   )
 }
 
-const cleanupPlan = (
+export const cleanupPlan = (
   index: DeclarationIndex.Index,
   type: DeclarationIndex.SemanticType,
   seen = new Set<string>(),

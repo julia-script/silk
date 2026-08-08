@@ -123,7 +123,7 @@ export const make = Effect.fn('Analysis.make')(function* (
     hasInvalidGenericBody(index, frontendDiagnostics)
   const instances = frontendSpecializationInvalid
     ? Instances.invalid(request.root.id)
-    : Instances.discover(request.root.id, results, ownership)
+    : Instances.discover(request.root.id, results, ownership, index)
   const baseDiagnostics = Diagnostic.merge(
     frontendDiagnostics,
     Instances.violationDiagnostics(instances),
@@ -167,7 +167,7 @@ export const make = Effect.fn('Analysis.make')(function* (
       : layout._tag === 'Available'
         ? Object.freeze({
             _tag: 'Available',
-            value: Lower.lowerProgram(instances, ownership, layout.value),
+            value: Lower.lowerProgram(instances, ownership, layout.value, index),
           })
         : layout
   return Object.freeze({

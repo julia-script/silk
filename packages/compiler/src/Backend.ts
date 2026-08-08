@@ -1367,7 +1367,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               yield* FunctionBody.store(
                 body,
                 stored,
-                yield* constantBytePointer(base, offset, `addr${root.ordinal}_${ordinal}_${materializeId}`),
+                yield* constantBytePointer(
+                  base,
+                  offset,
+                  `addr${root.ordinal}_${ordinal}_${materializeId}`,
+                ),
               )
             }
             materializedAddressRoots.add(root.ordinal)
@@ -1412,7 +1416,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 yield* FunctionBody.load(
                   body,
                   laneType(lane),
-                  yield* constantBytePointer(base, offset, `reload${root}_${ordinal}_${reloadId}_ptr`),
+                  yield* constantBytePointer(
+                    base,
+                    offset,
+                    `reload${root}_${ordinal}_${reloadId}_ptr`,
+                  ),
                   `reload${root}_${ordinal}_${reloadId}`,
                 ),
               )
@@ -1505,8 +1513,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               case 'StructCleanup': {
                 const lanes = semanticLanesOf(plan.type)
                 for (const [fieldOrdinal, field] of plan.fields.entries()) {
-                  if (!planReclaims(field.cleanup) && field.cleanup._tag !== 'HookCleanup')
-                    continue
+                  if (!planReclaims(field.cleanup) && field.cleanup._tag !== 'HookCleanup') continue
                   const fieldValues = lanes.flatMap((lane, index) => {
                     const first = lane.path.at(0)
                     const value = values.at(index)
@@ -2295,9 +2302,45 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
-                case 'SlotDrop':
+                case 'SlotDrop': {
+                  const address = readLocal(operation.slot).at(0)
+                  if (address === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM Slot.drop lost its address')
+                  }
+                  const base = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    address,
+                    pointer,
+                    `slot_drop${operation.destination.ordinal}_base`,
+                  )
+                  const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
+                  if (lanes === undefined) throw new RangeError('LLVM Slot.drop lost its shape')
+                  const values: Array<Value.Input> = []
+                  for (const [ordinal, lane] of lanes.entries()) {
+                    const offset = Layout.laneOffset(program.layout, operation.element, lane.path)
+                    if (offset === undefined) throw new RangeError('LLVM Slot.drop lost a lane')
+                    values.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(lane),
+                        yield* constantBytePointer(
+                          base,
+                          offset,
+                          `slot_drop${operation.destination.ordinal}_${ordinal}_ptr`,
+                        ),
+                        `slot_drop${operation.destination.ordinal}_${ordinal}`,
+                      ),
+                    )
+                  }
+                  yield* dropThroughPlan(
+                    operation.cleanup,
+                    Object.freeze(values),
+                    `slot_drop${operation.destination.ordinal}`,
+                  )
                   locals.set(operation.destination.ordinal, Object.freeze([]))
                   break
+                }
                 case 'Move':
                   locals.set(operation.destination.ordinal, readLocal(operation.source))
                   break

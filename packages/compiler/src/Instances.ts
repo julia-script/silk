@@ -329,6 +329,34 @@ const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
 const bodyCallTargets = (fn: Hir.HirFunction): ReadonlyArray<CallTarget> =>
   fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(callTargets))
 
+const slotDropHookTargets = (
+  fn: Hir.HirFunction,
+  index: DeclarationIndex.Index,
+  substitution: ReadonlyMap<string, Type.Type>,
+): ReadonlyArray<CallTarget> => {
+  const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
+    const own =
+      expression._tag === 'BuiltinCall' && expression.operation === 'SlotDrop'
+        ? expression.typeArguments.flatMap((argument) =>
+            hookCalls(Ownership.cleanupPlan(index, Type.substitute(argument, substitution))),
+          )
+        : []
+    if (expression._tag === 'Match') {
+      return [
+        ...own,
+        ...walk(expression.scrutinee),
+        ...expression.arms.flatMap((arm) =>
+          arm.reachable
+            ? [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+            : [],
+        ),
+      ]
+    }
+    return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
+  }
+  return fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(walk))
+}
+
 const callableBindings = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
   const bindings = new Map<number, Hir.Expression>()
   const statements = (body: ReadonlyArray<Hir.Statement>): void => {
@@ -537,7 +565,8 @@ const functionByKey = (
 export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
-  ownership?: ReadonlyMap<string, Ownership.ModuleOwnership>,
+  ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
+  index: DeclarationIndex.Index,
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {
@@ -617,10 +646,19 @@ export const discover = (
         exit.releases.map((release) => release.cleanup),
       ) ?? []),
     ]
-      .map((cleanup) => Ownership.specializeCleanup(cleanup, substitution))
+      .map((cleanup) =>
+        Ownership.specializeCleanup(cleanup, substitution, (type) =>
+          Ownership.cleanupPlan(index, type),
+        ),
+      )
       .flatMap(hookCalls)
     const calls = new Map<string, CallTarget>()
-    for (const call of [...bodyCallTargets(fn), ...callableCallTargets(fn, results), ...cleanupHooks]) {
+    for (const call of [
+      ...bodyCallTargets(fn),
+      ...slotDropHookTargets(fn, index, substitution),
+      ...callableCallTargets(fn, results),
+      ...cleanupHooks,
+    ]) {
       const identity = `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.key).join('\u0000')}`
       if (!calls.has(identity)) calls.set(identity, call)
     }

@@ -235,7 +235,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const discovery = phase(
     'instance-discovery',
     results.size,
-    () => Instances.discover(request.compilation.root.id, results, ownership),
+    () => Instances.discover(request.compilation.root.id, results, ownership, index),
     (result) => result.instances.length,
     (result) => result.violations.length,
   )
@@ -309,7 +309,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const program = phase(
     'mir-lowering',
     discovery.instances.length,
-    () => Lower.lowerProgram(discovery, ownership, targetAndLayout.layout),
+    () => Lower.lowerProgram(discovery, ownership, targetAndLayout.layout, index),
     (result) => result.functions.length,
   )
   // The backend follows from the resolved target unless the request names one; defaulting to

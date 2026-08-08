@@ -518,10 +518,7 @@ const emitOperation = (
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
     const planned = memory.frame.roots.get(local.ordinal)
     if (planned === undefined) throw new RangeError('Wasm hook cleanup lost its frame root')
-    const walk = (
-      plan_: Ownership.CleanupPlan,
-      byteOffset: number,
-    ): ReadonlyArray<Instr.Instr> => {
+    const walk = (plan_: Ownership.CleanupPlan, byteOffset: number): ReadonlyArray<Instr.Instr> => {
       switch (plan_._tag) {
         case 'HookCleanup':
           return [
@@ -563,6 +560,59 @@ const emitOperation = (
       }
     }
     return [...materializeRoot(local), ...walk(cleanup, 0), ...reloadRoot(local.ordinal)]
+  }
+  const hookReleaseAtAddress = (
+    cleanup: Ownership.CleanupPlan,
+    address: number,
+  ): ReadonlyArray<Instr.Instr> => {
+    if (!planHasHook(cleanup)) return []
+    if (memory === undefined) throw new RangeError('Wasm slot cleanup has no private memory')
+    const addressAt = (byteOffset: number): ReadonlyArray<Instr.Instr> => [
+      Instr.localGet(address),
+      ...(byteOffset === 0 ? [] : [Instr.i32Const(byteOffset), Instr.op('i32.add')]),
+    ]
+    const walk = (plan_: Ownership.CleanupPlan, byteOffset: number): ReadonlyArray<Instr.Instr> => {
+      switch (plan_._tag) {
+        case 'HookCleanup':
+          return [
+            ...addressAt(byteOffset),
+            Instr.call(resolve(plan_.hook, plan_.typeArguments)),
+            ...walk(plan_.inner, byteOffset),
+          ]
+        case 'StructCleanup': {
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Aggregate') return []
+          return plan_.fields.flatMap((field) => {
+            if (!planHasHook(field.cleanup)) return []
+            const layoutField = representation.fields.find(
+              (candidate) =>
+                candidate.id.ordinal === field.field.ordinal &&
+                candidate.id.struct.ordinal === field.field.struct.ordinal &&
+                candidate.id.struct.sourceId === field.field.struct.sourceId,
+            )
+            return layoutField === undefined
+              ? []
+              : walk(field.cleanup, byteOffset + layoutField.offset)
+          })
+        }
+        case 'ArrayCleanup': {
+          if (!planHasHook(plan_.element)) return []
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Repeated') return []
+          return Array.from({ length: plan_.length }, (_, index) =>
+            walk(plan_.element, byteOffset + index * representation.stride),
+          ).flat()
+        }
+        case 'UnionCleanup':
+          if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
+          throw new RangeError('Wasm slot cleanup does not yet lower hook-bearing union cases')
+        default:
+          return []
+      }
+    }
+    return walk(cleanup, 0)
   }
   const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     const pointer = layout.borrowPointers.get(root.ordinal)
@@ -915,7 +965,7 @@ const emitOperation = (
       })
     }
     case 'SlotDrop':
-      return []
+      return hookReleaseAtAddress(operation.cleanup, scalar(operation.slot))
     case 'Match': {
       const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
         operations.flatMap((nested) => emitOperation(nested, layout, plan, resolve, memory))

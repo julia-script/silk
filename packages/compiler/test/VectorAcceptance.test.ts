@@ -184,3 +184,89 @@ it.effect('preserves the original vector when replacement allocation fails', () 
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
+
+const elementReleaseOrder = `import silk.vector { Vector, make, append, capacity }
+
+struct Entry {
+  value: I32
+  marker: Vector<I32>
+}
+
+fn record(value: I32) -> Unit { return Unit.make() }
+
+impl Drop for Entry {
+  fn drop(self: &mut Entry) -> Unit {
+    return record(self.value)
+  }
+}
+
+effect fn build() -> I32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Entry>()
+  let entry0 = Entry { value: 3, marker: make<I32>() }
+  let pending0 = append<Entry>(&mut values, move entry0) |> Allocator.provide(&mut allocator)
+  let appended0 = run pending0
+  let entry1 = Entry { value: 5, marker: make<I32>() }
+  let pending1 = append<Entry>(&mut values, move entry1) |> Allocator.provide(&mut allocator)
+  let appended1 = run pending1
+  let entry2 = Entry { value: 7, marker: make<I32>() }
+  let pending2 = append<Entry>(&mut values, move entry2) |> Allocator.provide(&mut allocator)
+  let appended2 = run pending2
+  if capacity<Entry>(&values) == 4 {} else { return 0 }
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+
+pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+
+it.effect('drops initialized elements in order before releasing vector storage', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'vector-acceptance/element-release-order',
+      ascii(elementReleaseOrder),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42)
+    const recorded = evaluated.trace.flatMap((event) =>
+      event._tag === 'Binding' && event.target.name === 'record' && event.value._tag === 'I32Value'
+        ? [event.value.value]
+        : [],
+    )
+    // Capacity is four, but only the three initialized slots run Entry.drop, in index order.
+    assert.deepEqual(recorded, [3, 5, 7])
+    const lastRecord = evaluated.trace.findLastIndex(
+      (event) => event._tag === 'Call' && event.target.name === 'record',
+    )
+    const releases = evaluated.trace
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event._tag === 'AllocationRelease')
+    assert.strictEqual(releases.length, 1)
+    assert.isBelow(lastRecord, releases[0]?.index ?? -1)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make(
+          'vector-acceptance/element-release-order',
+          ascii(elementReleaseOrder),
+        ),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'element-release-order'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+    assert.strictEqual(run.status, 42, run.stderr)
+  }),
+)
