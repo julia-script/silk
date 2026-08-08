@@ -532,3 +532,70 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> I32 { return 0 } }`,
     )
   }),
 )
+
+it.effect('indexes parametric conformances with bound parameters', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('parametric', [
+      [
+        'parametric',
+        `struct Vector<T> { storage: Allocation }
+impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }
+pub fn main() -> I32 { return 0 }`,
+      ],
+    ])
+    assert.deepEqual(index.diagnostics, [])
+    const conformance = index.modules.at(0)?.conformances.at(0)
+    assert.strictEqual(conformance?.typeParameters.length, 1)
+    assert.strictEqual(conformance?.provider._tag, 'Resolved')
+    if (conformance?.provider._tag === 'Resolved' && Type.isNominal(conformance.provider.type)) {
+      const argument = conformance.provider.type.arguments.at(0)
+      assert.isTrue(argument !== undefined && Type.isParameter(argument))
+    }
+  }),
+)
+
+it.effect('rejects unbound, duplicate, and overlapping parametric conformances', () =>
+  Effect.gen(function* () {
+    const details = (index: DeclarationIndex.Index, code: string) =>
+      index.diagnostics
+        .filter((diagnostic) => diagnostic.code === code)
+        .map((diagnostic) =>
+          'detail' in diagnostic.reason ? diagnostic.reason.detail : diagnostic.reason._tag,
+        )
+
+    const unbound = yield* collect('parametric-unbound', [
+      [
+        'parametric-unbound',
+        `struct Vector<T> { storage: Allocation }
+impl<T, U> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }`,
+      ],
+    ])
+    assert.deepEqual(details(unbound, 'SEM0083'), [
+      'impl type parameter U is not used by the provider type',
+    ])
+
+    const duplicate = yield* collect('parametric-duplicate', [
+      [
+        'parametric-duplicate',
+        `struct Vector<T> { storage: Allocation }
+impl<T, T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }`,
+      ],
+    ])
+    assert.deepEqual(
+      duplicate.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0050'],
+    )
+
+    const overlapping = yield* collect('parametric-overlap', [
+      [
+        'parametric-overlap',
+        `struct Vector<T> { storage: Allocation }
+impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }
+impl<U> Drop for Vector<U> { fn drop(self: &mut Vector<U>) -> Unit { return Unit.make() } }`,
+      ],
+    ])
+    assert.deepEqual(details(overlapping, 'SEM0083'), [
+      'duplicate Drop implementation for parametric-overlap.Vector<U>',
+    ])
+  }),
+)

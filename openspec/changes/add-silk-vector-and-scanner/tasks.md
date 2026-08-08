@@ -8,11 +8,16 @@
 
 ## 2. Parametric conformance semantics
 
-- [ ] 2.1 Index parametric conformances with bound parameter lists; validate Drop hook shape with parameters in scope; defer the Copy prohibition to instantiation for parametric impls only
-- [ ] 2.2 Reject unbound, duplicate, and undeclared impl parameters with deterministic diagnostics; add DeclarationIndex/Elaboration tests for each rejection and for parameter binding across hook signatures
+- [x] 2.1 Index parametric conformances with bound parameter lists; validate Drop hook shape with parameters in scope; defer the Copy prohibition to instantiation for parametric impls only
+- [x] 2.2 Reject unbound, duplicate, and undeclared impl parameters with deterministic diagnostics; add DeclarationIndex/Elaboration tests for each rejection and for parameter binding across hook signatures
 - [ ] 2.3 Substitute concrete arguments into parametric conformances during instance discovery so each reachable instantiation yields one normalized concrete witness or hook instance; add Instances tests covering two element types under one impl
 - [ ] 2.4 Fire the Copy-cannot-Drop rejection at instantiation with the instantiated type in the message; test with an element type that makes the provider Copy
 - [ ] 2.5 Verify witness dispatch and Drop cleanup through a parametric conformance execute identically to a hand-written concrete conformance on all three engines
+- [ ] 2.6 Elaborate Drop hook bodies as ordinary functions with canonical identities and the impl's type parameters in scope (discovered gap: hook bodies were never elaborated, so hooks never executed despite the archived spec requiring it)
+- [ ] 2.7 Add a hook-bearing cleanup plan variant in Ownership that runs the hook before field cleanup
+- [ ] 2.8 Discover reachable Drop hooks in Instances and plan their layouts and calling shapes
+- [ ] 2.9 Execute hook-bearing cleanup in the evaluator, LLVM, and Wasm, including run-propagation releases
+- [ ] 2.10 Pin hook-before-fields, exactly-once, on fallthrough, typed failure, and early drop across all three engines
 
 ## 3. Standard-library mechanism
 

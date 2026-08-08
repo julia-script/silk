@@ -285,6 +285,7 @@ export interface ConformanceFact {
   readonly _tag: 'ConformanceDeclaration'
   readonly module: string
   readonly ordinal: number
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly capability: DeclaredTypeFact
   readonly provider: DeclaredTypeFact
   readonly operations: ReadonlyArray<{
@@ -1250,17 +1251,20 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
     )
     .map((node, ordinal): ConformanceFact => {
+      const collected = collectTypeParameters(source, node, `impl#${ordinal}`)
+      diagnostics.push(...collected.diagnostics)
+      const environment = collected.environment
       const types = node.children.filter(isDeclaredTypeNode)
       const capabilitySyntax = types.at(0)
       const providerSyntax = types.at(1)
       const capability =
         capabilitySyntax === undefined
           ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
-          : analyzeDeclaredType(source, capabilitySyntax).fact
+          : analyzeDeclaredType(source, capabilitySyntax, environment).fact
       const provider =
         providerSyntax === undefined
           ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
-          : analyzeDeclaredType(source, providerSyntax).fact
+          : analyzeDeclaredType(source, providerSyntax, environment).fact
       const operations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
         const name = presentName(source, operation)
         const targetSyntax = SyntaxTree.directNode(operation, 'TypePath')
@@ -1307,8 +1311,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
               const returnTypeSyntax = returnSyntax?.children.find(
                 (element): element is SyntaxTree.Node => isDeclaredTypeNode(element),
               )
-              const failure = collectFailureRow(source, hookSyntax, new Map())
-              const requirements = collectRequirementRow(source, hookSyntax, new Map())
+              const failure = collectFailureRow(source, hookSyntax, environment)
+              const requirements = collectRequirementRow(source, hookSyntax, environment)
               const hookNameToken = SyntaxTree.directToken(hookSyntax, 'DropKeyword')
               diagnostics.push(...failure.diagnostics, ...requirements.diagnostics)
               return Object.freeze({
@@ -1343,14 +1347,14 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
                         _tag: 'Unavailable' as const,
                         syntax: parameter ?? hookSyntax,
                       })
-                    : analyzeDeclaredType(source, parameterTypeSyntax).fact,
+                    : analyzeDeclaredType(source, parameterTypeSyntax, environment).fact,
                 returnType:
                   returnTypeSyntax === undefined
                     ? Object.freeze({
                         _tag: 'Unavailable' as const,
                         syntax: returnSyntax ?? hookSyntax,
                       })
-                    : analyzeDeclaredType(source, returnTypeSyntax).fact,
+                    : analyzeDeclaredType(source, returnTypeSyntax, environment).fact,
                 failureRow: failure.fact,
                 requirementRow: requirements.fact,
                 syntax: hookSyntax,
@@ -1360,6 +1364,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         _tag: 'ConformanceDeclaration',
         module: source.id,
         ordinal,
+        typeParameters: collected.facts,
         capability,
         provider,
         operations: Object.freeze(operations),
@@ -2238,7 +2243,43 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       }
       const capability = conformance.capability.type
       const provider = conformance.provider.type
-      const key = `${Type.key(capability)}\0${Type.key(provider)}`
+      if (!Type.isConcrete(capability)) {
+        diagnostics.push(
+          Diagnostic.invalidConformance(
+            'the capability must be concrete; impl type parameters may only bind the provider',
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
+      const declaredParameters = conformance.typeParameters
+        .filter((parameter) => parameter.duplicateOf === undefined)
+        .map((parameter) => parameter.type)
+      const usedParameterKeys = new Set(
+        Type.parameters(provider).map((parameter) => Type.key(parameter)),
+      )
+      const unused = declaredParameters.filter(
+        (parameter) => !usedParameterKeys.has(Type.key(parameter)),
+      )
+      if (unused.length > 0) {
+        diagnostics.push(
+          Diagnostic.invalidConformance(
+            `impl type parameter ${unused.map((parameter) => parameter.name).join(', ')} is not used by the provider type`,
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
+      // Parametric impls collide when they cover the same provider shape, so the dedup key
+      // normalizes parameter identities positionally.
+      const normalization = new Map<string, Type.Type>(
+        declaredParameters.map((parameter, position) => [
+          Type.key(parameter),
+          Type.parameter({ module: '', name: 'impl' }, position, `%${position}`),
+        ]),
+      )
+      const normalizedProvider = Type.substitute(provider, normalization)
+      const key = `${Type.key(capability)}\0${Type.key(normalizedProvider)}`
       const original = conformanceKeys.get(key)
       if (original !== undefined) {
         diagnostics.push(
@@ -2257,6 +2298,15 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       conformanceKeys.set(key, conformance.syntax.span)
 
       if (Type.equals(capability, Type.allocator)) {
+        if (conformance.typeParameters.length > 0) {
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              'Allocator implementations must be concrete; type parameters are not supported here',
+              conformance.syntax.span,
+            ),
+          )
+          continue
+        }
         if (conformance.hook !== undefined) {
           diagnostics.push(
             Diagnostic.invalidConformance(
@@ -2371,7 +2421,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
               hook.syntax.span,
             ),
           )
-        } else if (isCopyType(provider)) {
+        } else if (Type.isConcrete(provider) && isCopyType(provider)) {
+          // A parametric provider's Copy-ness depends on its arguments, so the prohibition is
+          // enforced per instantiation during monomorphization instead of at the header.
           diagnostics.push(
             Diagnostic.invalidDropHook(
               `Copy type ${Type.encode(provider)} cannot implement Drop`,
@@ -2589,14 +2641,23 @@ export const witness = (
     })
   }
   const matches = self.modules.flatMap((module) =>
-    module.conformances.flatMap((conformance) =>
-      conformance.capability._tag === 'Resolved' &&
-      Type.equals(conformance.capability.type, capability) &&
-      conformance.provider._tag === 'Resolved' &&
-      Type.equals(conformance.provider.type, provider)
+    module.conformances.flatMap((conformance) => {
+      if (
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.equals(conformance.capability.type, capability) ||
+        conformance.provider._tag !== 'Resolved'
+      )
+        return []
+      if (conformance.typeParameters.length === 0) {
+        return Type.equals(conformance.provider.type, provider)
+          ? [Object.freeze({ module, conformance })]
+          : []
+      }
+      // A parametric conformance matches any provider its pattern infers against.
+      return Type.infer(conformance.provider.type, provider, new Map())
         ? [Object.freeze({ module, conformance })]
-        : [],
-    ),
+        : []
+    }),
   )
   if (matches.length !== 1) return undefined
   const selected = matches.at(0)
