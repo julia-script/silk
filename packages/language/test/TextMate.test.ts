@@ -5,6 +5,12 @@ import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import { assert, it } from 'vitest'
 import * as TextMate from '../src/TextMate.js'
 
+const keywordScopeNames = new Set([
+  'keyword.control.silk',
+  'storage.type.silk',
+  'constant.language.boolean.silk',
+])
+
 const lexKinds = (text: string): ReadonlyArray<string> =>
   Lexer.lex(SourceFile.make('test', new TextEncoder().encode(text)))
     .tokens.filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
@@ -13,11 +19,17 @@ const lexKinds = (text: string): ReadonlyArray<string> =>
 /** The keyword spellings the grammar actually matches, parsed back out of its regexes. */
 const grammarKeywordSpellings = (): ReadonlyArray<string> =>
   TextMate.grammar.patterns
-    .filter(
-      (pattern) =>
-        pattern.name === 'keyword.other.silk' || pattern.name === 'constant.language.boolean.silk',
-    )
+    .filter((pattern) => {
+      if (pattern.name !== undefined && keywordScopeNames.has(pattern.name)) {
+        return true
+      }
+      // `fn` is matched via captures on the function-declaration rule.
+      return pattern.captures?.['1']?.name === 'storage.type.silk'
+    })
     .flatMap((pattern) => {
+      if (pattern.captures?.['1']?.name === 'storage.type.silk') {
+        return ['fn']
+      }
       const alternation = pattern.match.match(/\(\?:([^)]*)\)/)
       assert.isNotNull(alternation, `keyword pattern has no alternation: ${pattern.match}`)
       return (alternation?.[1] ?? '').split('|')
@@ -72,27 +84,39 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   }
 
   const program = 'pub fn main() -> I32 { return 42 }'
-  assert.include(scopesAt(program, 'pub'), 'keyword.other.silk')
-  assert.include(scopesAt(program, 'return'), 'keyword.other.silk')
-  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'impl'), 'keyword.other.silk')
-  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'for'), 'keyword.other.silk')
-  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'unsafe'), 'keyword.other.silk')
+  assert.include(scopesAt(program, 'pub'), 'storage.type.silk')
+  assert.include(scopesAt(program, 'fn'), 'storage.type.silk')
+  assert.include(scopesAt(program, 'main'), 'entity.name.function.silk')
+  assert.include(scopesAt(program, 'return'), 'keyword.control.silk')
+  assert.include(scopesAt(program, 'I32'), 'support.type.builtin.silk')
+  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'impl'), 'storage.type.silk')
+  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'for'), 'storage.type.silk')
+  assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'unsafe'), 'storage.type.silk')
+  assert.include(
+    scopesAt('impl Allocator for Mine { unsafe {} }', 'Allocator'),
+    'entity.name.type.silk',
+  )
   assert.include(scopesAt(program, '42'), 'constant.numeric.integer.silk')
   assert.include(scopesAt('let ok = true', 'true'), 'constant.language.boolean.silk')
   assert.include(scopesAt('fn stop() -> Never', 'Never'), 'support.type.builtin.silk')
+  assert.include(scopesAt('fn id(x: Point) -> Point', 'Point'), 'entity.name.type.silk')
   assert.include(scopesAt('/// doc', '/// doc'), 'comment.line.documentation.silk')
   assert.include(scopesAt('// plain', '// plain'), 'comment.line.double-slash.silk')
   assert.notInclude(scopesAt('// plain', '// plain'), 'comment.line.documentation.silk')
+  const control = 'pub fn main() -> I32 { if true { return 1 } else { return 0 } }'
+  assert.include(scopesAt(control, 'if'), 'keyword.control.silk')
+  assert.include(scopesAt(control, 'else'), 'keyword.control.silk')
   const match = 'match &mut event { Token { kind, .. } if true => kind _ => 0 }'
-  assert.include(scopesAt(match, 'match'), 'keyword.other.silk')
+  assert.include(scopesAt(match, 'match'), 'keyword.control.silk')
   assert.include(scopesAt(match, '&'), 'keyword.operator.silk')
   assert.include(scopesAt(match, '=>'), 'keyword.operator.silk')
   assert.include(scopesAt(match, '..'), 'punctuation.definition.pattern.rest.silk')
-  assert.include(scopesAt(match, 'Token'), 'entity.name.type.pattern.silk')
+  assert.include(scopesAt(match, 'Token'), 'entity.name.type.silk')
   assert.include(scopesAt(match, '_'), 'variable.language.wildcard.silk')
   const generic = 'fn keep<T>(value: Box<T>) -> Box<T> { return keep<I32>(value) }'
   assert.include(scopesAt(generic, '<'), 'punctuation.definition.type-arguments.begin.silk')
   assert.include(scopesAt(generic, '>'), 'punctuation.definition.type-arguments.end.silk')
+  assert.include(scopesAt(generic, 'Box'), 'entity.name.type.silk')
   const nested = 'fn keep<value>(input: Box<Box<I32>>) -> Box<Box<I32>> { return input }'
   assert.include(scopesAt(nested, '<'), 'punctuation.definition.type-arguments.begin.silk')
   assert.include(scopesAt(nested, '>'), 'punctuation.definition.type-arguments.end.silk')

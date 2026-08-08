@@ -1,9 +1,7 @@
 {
   "name": "silk",
   "scopeName": "source.silk",
-  "fileTypes": [
-    "silk"
-  ],
+  "fileTypes": ["silk"],
   "patterns": [
     {
       "name": "comment.line.documentation.silk",
@@ -14,8 +12,23 @@
       "match": "//[^\\n]*"
     },
     {
-      "name": "keyword.other.silk",
-      "match": "\\b(?:pub|struct|fn|effect|run|fail|drop|unsafe|impl|for|return|import|as|let|mut|once|move|match|if|else|while|break|continue)\\b"
+      "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "storage.type.silk"
+        },
+        "2": {
+          "name": "entity.name.function.silk"
+        }
+      }
+    },
+    {
+      "name": "keyword.control.silk",
+      "match": "\\b(?:if|else|while|break|continue|return|match)\\b"
+    },
+    {
+      "name": "storage.type.silk",
+      "match": "\\b(?:pub|struct|effect|run|fail|drop|unsafe|impl|for|import|as|let|mut|once|move)\\b"
     },
     {
       "name": "constant.language.boolean.silk",
@@ -26,8 +39,8 @@
       "match": "\\b(?:I32|Bool|Never)\\b"
     },
     {
-      "name": "entity.name.type.pattern.silk",
-      "match": "\\b[A-Z][A-Za-z0-9_]*(?=\\s*\\{)"
+      "name": "entity.name.type.silk",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
     },
     {
       "name": "variable.language.wildcard.silk",

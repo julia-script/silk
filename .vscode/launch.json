@@ -7,6 +7,18 @@
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "command": "out=$(mktemp -t silk-run) && node \"${workspaceFolder}/packages/compiler-cli/dist/bin.js\" build-exe \"${file}\" --source-root \"${fileDirname}\" --output \"$out\" && \"$out\"; echo \"exit: $?\"; rm -f \"$out\""
+    },
+    {
+      "name": "Silk: Extension Development Host",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/vscode"],
+      "preLaunchTask": "Silk: Build extension host deps",
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.js",
+        "${workspaceFolder}/packages/lsp/dist/**/*.js"
+      ]
     }
   ]
 }

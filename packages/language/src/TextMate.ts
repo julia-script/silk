@@ -35,15 +35,33 @@ export const keywords: Record<KeywordKind, string> = {
   FalseKeyword: 'false',
 }
 
+/** Control-flow keyword kinds (theme: `keyword.control`). */
+const controlKeywordKinds = [
+  'IfKeyword',
+  'ElseKeyword',
+  'WhileKeyword',
+  'BreakKeyword',
+  'ContinueKeyword',
+  'ReturnKeyword',
+  'MatchKeyword',
+] as const satisfies ReadonlyArray<KeywordKind>
+
 const booleanSpellings = [keywords.TrueKeyword, keywords.FalseKeyword]
-const plainSpellings = Object.values(keywords).filter(
-  (spelling) => !booleanSpellings.includes(spelling),
+const controlSpellings: ReadonlyArray<string> = controlKeywordKinds.map((kind) => keywords[kind])
+const controlSpellingSet = new Set(controlSpellings)
+// `fn` is matched by the function-declaration capture rule, not the storage alternation.
+const declarationSpellings = Object.values(keywords).filter(
+  (spelling) =>
+    !booleanSpellings.includes(spelling) &&
+    !controlSpellingSet.has(spelling) &&
+    spelling !== keywords.FnKeyword,
 )
 
-/** One TextMate match rule. */
+/** One TextMate match rule (optional top-level name when using captures). */
 export interface GrammarPattern {
-  readonly name: string
+  readonly name?: string
   readonly match: string
+  readonly captures?: { readonly [group: string]: { readonly name: string } }
 }
 
 /** The subset of the TextMate grammar shape Silk needs. */
@@ -65,10 +83,26 @@ export const grammar: Grammar = {
   patterns: [
     { name: 'comment.line.documentation.silk', match: '///[^\\n]*' },
     { name: 'comment.line.double-slash.silk', match: '//[^\\n]*' },
-    { name: 'keyword.other.silk', match: `\\b(?:${plainSpellings.join('|')})\\b` },
+    {
+      // Color `fn` and the declaration name together so themes can style entity.name.function.
+      match: '\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)',
+      captures: {
+        '1': { name: 'storage.type.silk' },
+        '2': { name: 'entity.name.function.silk' },
+      },
+    },
+    {
+      name: 'keyword.control.silk',
+      match: `\\b(?:${controlSpellings.join('|')})\\b`,
+    },
+    {
+      name: 'storage.type.silk',
+      match: `\\b(?:${declarationSpellings.join('|')})\\b`,
+    },
     { name: 'constant.language.boolean.silk', match: `\\b(?:${booleanSpellings.join('|')})\\b` },
     { name: 'support.type.builtin.silk', match: '\\b(?:I32|Bool|Never)\\b' },
-    { name: 'entity.name.type.pattern.silk', match: '\\b[A-Z][A-Za-z0-9_]*(?=\\s*\\{)' },
+    // PascalCase identifiers are types by Silk convention (patterns, signatures, generics).
+    { name: 'entity.name.type.silk', match: '\\b[A-Z][A-Za-z0-9_]*\\b' },
     { name: 'variable.language.wildcard.silk', match: '\\b_\\b' },
     { name: 'constant.numeric.integer.silk', match: '\\b[0-9]+\\b' },
     {

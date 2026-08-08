@@ -47,6 +47,8 @@
     "build": "pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "install:cursor": "node scripts/install-local.mjs",
+    "install:code": "node scripts/install-local.mjs --vscode-only",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

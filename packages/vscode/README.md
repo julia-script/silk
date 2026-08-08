@@ -15,14 +15,50 @@ Two parts:
   supports standard dynamic watched-file registration, so no duplicate extension-owned watcher is
   installed.
 
-## Install (local, symlink)
+## Which workflow?
+
+| Goal | Use |
+| --- | --- |
+| Edit `.silk` in your normal Cursor window | [Install (local)](#install-local) |
+| Develop the extension or language server | [Extension Development Host](#extension-development-host) |
+
+## Install (local)
+
+From the repo root (or this package), retarget the editor symlink to **this** checkout and build
+the extension plus language server:
 
 ```sh
-pnpm build
-ln -s "$(pwd)/packages/vscode" ~/.cursor/extensions/silk-effect.silk-language-0.0.0
+pnpm --filter silk-language install:cursor
 ```
 
-Reload Cursor (`Developer: Reload Window`) and open a `.silk` file. For VS Code, use
-`~/.vscode/extensions` instead. The symlinked extension resolves `@silk-effect/lsp` through the
-workspace's `node_modules`, so it needs a built checkout (`pnpm install && pnpm build`) — after
-changing server code, rebuild and reload the window.
+For VS Code instead of Cursor:
+
+```sh
+pnpm --filter silk-language install:code
+```
+
+Both: `pnpm --filter silk-language exec node scripts/install-local.mjs --vscode`.
+
+Then reload the editor (`Developer: Reload Window`) and open a `.silk` file. The symlink lives at
+`~/.cursor/extensions/silk-effect.silk-language-0.0.0` (or `~/.vscode/extensions/...`) and always
+points at the checkout where you ran the command — re-run it after switching git worktrees.
+
+The extension resolves `@silk-effect/lsp` through the workspace `node_modules`, so the checkout
+must stay installed and built.
+
+## Extension Development Host
+
+To iterate on the extension or LSP without touching the global extensions directory, launch
+**Silk: Extension Development Host** from the Run and Debug view (F5). That opens a guest window
+with `--extensionDevelopmentPath` set to this package; a pre-launch task builds `@silk-effect/lsp`
+and `silk-language` first.
+
+Optional watch tasks (**Silk: Watch language server**, **Silk: Watch extension**) rebuild on save
+while the host is open.
+
+## Reload vs restart
+
+| Change | Action |
+| --- | --- |
+| Retargeted install, grammar (`sync:vscode`), or `extension.ts` / `package.json` contributions | **Developer: Reload Window** (main Cursor or the EDH guest) |
+| Rebuilt `@silk-effect/lsp` only, same extension path | **Silk: Restart Language Server** — picks up the new `dist` without a window reload |
