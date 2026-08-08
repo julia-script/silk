@@ -7,6 +7,12 @@
  *
  * Everything is modelled as a module map even when there is only one module, so the multi-module
  * presets are not a special case: `modules` plus a `root` is what the driver takes.
+ *
+ * Labels are prefixed so the picker shows intent at a glance:
+ * - `ok ·`   — compiles clean and evaluates successfully (or is a declaration-only sample)
+ * - `fail ·` — intentionally damaged; expected to surface diagnostics
+ * - `trap ·` — compiles clean but is meant to block or trap at evaluation (cycles, missing
+ *              entry, runtime overflow / bounds traps)
  */
 
 export interface Preset {
@@ -32,7 +38,7 @@ const identity = 'pub fn identity(value: I32) -> I32 { return value }'
 export const presets: ReadonlyArray<Preset> = [
   one(
     'generics',
-    'Inferred and explicit specializations',
+    'ok · Inferred and explicit specializations',
     `struct Box<T> { value: T }
 fn identity<T>(value: T) -> T { return move value }
 pub fn main() -> I32 {
@@ -43,7 +49,7 @@ pub fn main() -> I32 {
   ),
   // ---- first composed acceptance slice -------------------------------------------------
   {
-    label: 'Algorithmic coverage fold',
+    label: 'ok · Algorithmic coverage fold',
     group: 'acceptance',
     root: 'app/Main',
     modules: {
@@ -141,7 +147,7 @@ pub fn fold(codes: &[I32]) -> I32 {
   },
   one(
     'acceptance',
-    'Exclusive runtime slice',
+    'ok · Exclusive runtime slice',
     `struct Token { value: I32 }
 
 fn replace(values: &mut [Token], index: I32) -> I32 {
@@ -161,7 +167,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Eager setup, lazy Effect body',
+    'ok · Eager setup, lazy Effect body',
     `pub fn main() -> I32 {
   let eager = I32.add(20, 1)
   let delayed = effect {
@@ -173,7 +179,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Reusable exclusive capture',
+    'ok · Reusable exclusive capture',
     `pub fn main() -> I32 {
   let mut counter = 10
   let increment = effect {
@@ -187,7 +193,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Retry with persistent capture',
+    'ok · Retry with persistent capture',
     `struct Problem { code: I32 }
 
 effect fn retrying() -> I32 ! Problem {
@@ -209,7 +215,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Existing provider capture',
+    'ok · Existing provider capture',
     `struct Clock {}
 
 effect fn read() -> I32 ? &Clock@Primary {
@@ -226,7 +232,7 @@ pub fn main() -> I32 {
   ),
   one(
     'allocation',
-    'Validated target Layout',
+    'ok · Validated target Layout',
     `pub fn main() -> I32 {
   let candidate = Layout.make(64, 32)
   return match move candidate {
@@ -238,7 +244,7 @@ pub fn main() -> I32 {
   ),
   one(
     'allocation',
-    'Self-contained Allocation contract',
+    'ok · Self-contained Allocation contract',
     `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
@@ -256,7 +262,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Typed Effect recovery',
+    'ok · Typed Effect recovery',
     `struct Problem { code: I32 }
 
 effect fn risky<T>(value: T, selector: I32) -> T ! Problem {
@@ -282,7 +288,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Unhandled Effect residual',
+    'fail · Unhandled Effect residual',
     `struct Problem { code: I32 }
 
 effect fn risky() -> I32 ! Problem {
@@ -296,209 +302,209 @@ pub fn main() -> I32 {
   ),
 
   // ---- syntax ---------------------------------------------------------------------------
-  one('syntax', 'Literal result', 'pub fn main() -> I32 { return 42 }'),
+  one('syntax', 'ok · Literal result', 'pub fn main() -> I32 { return 42 }'),
   one(
     'syntax',
-    'Two functions',
+    'ok · Two functions',
     `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return 0 }`,
   ),
   one(
     'syntax',
-    'Three functions',
+    'ok · Three functions',
     `pub fn one() -> I32 { return 1 }
 pub fn two() -> I32 { return 2 }
 pub fn three() -> I32 { return 3 }`,
   ),
   one(
     'syntax',
-    'Resolved backward',
+    'ok · Resolved backward',
     `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return answer() }`,
   ),
   one(
     'syntax',
-    'Resolved forward',
+    'ok · Resolved forward',
     `pub fn main() -> I32 { return answer() }
 pub fn answer() -> I32 { return 42 }`,
   ),
-  one('syntax', 'Direct cycle', 'pub fn main() -> I32 { return main() }'),
-  one('syntax', 'Unknown call', 'pub fn main() -> I32 { return missing() }'),
+  one('syntax', 'trap · Direct cycle', 'pub fn main() -> I32 { return main() }'),
+  one('syntax', 'fail · Unknown call', 'pub fn main() -> I32 { return missing() }'),
   one(
     'syntax',
-    'Ambiguous call',
+    'fail · Ambiguous call',
     `pub fn same() -> I32 { return 1 }
 pub fn same() -> I32 { return 2 }
 pub fn main() -> I32 { return same() }`,
   ),
-  one('syntax', 'Missing callee', 'pub fn main() -> I32 { return () }'),
+  one('syntax', 'fail · Missing callee', 'pub fn main() -> I32 { return () }'),
   one(
     'syntax',
-    'Missing call )',
+    'fail · Missing call )',
     `pub fn answer() -> I32 { return 42 }
 pub fn main() -> I32 { return answer( }`,
   ),
   one(
     'syntax',
-    'Resolved parameter',
+    'ok · Resolved parameter',
     `${identity}
 pub fn main() -> I32 { return identity(42) }`,
   ),
   one(
     'syntax',
-    'Effect unknown reference',
+    'fail · Effect unknown reference',
     `pub fn identity(value: I32) -> I32 { return missing }
 pub fn main() -> I32 { return identity(42) }`,
   ),
   one(
     'syntax',
-    'Effect ambiguous reference',
+    'fail · Effect ambiguous reference',
     `pub fn choose(value: I32, value: I32) -> I32 { return value }
 pub fn main() -> I32 { return choose(1, 2) }`,
   ),
   one(
     'syntax',
-    'Effect damaged syntax',
+    'fail · Effect damaged syntax',
     `${identity}
 pub fn main() -> I32 { return identity(@) }`,
   ),
   one(
     'syntax',
-    'Wrong arity',
+    'fail · Wrong arity',
     `pub fn choose(left: I32, right: I32) -> I32 { return left }
 pub fn main() -> I32 { return choose(1) }`,
   ),
   one(
     'syntax',
-    'Too many arguments',
+    'fail · Too many arguments',
     `${identity}
 pub fn main() -> I32 { return identity(1, 2) }`,
   ),
   one(
     'syntax',
-    'Unavailable evaluation',
+    'fail · Unavailable evaluation',
     `pub fn identity(value: Mystery) -> I32 { return 0 }
 pub fn main() -> I32 { return identity(42) }`,
   ),
   one(
     'syntax',
-    'Second argument result',
+    'ok · Second argument result',
     `pub fn second(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return second(10, 42) }`,
   ),
-  one('syntax', 'Missing entry', 'pub fn answer() -> I32 { return 42 }'),
+  one('syntax', 'trap · Missing entry', 'pub fn answer() -> I32 { return 42 }'),
   one(
     'syntax',
-    'Mutual cycle',
+    'trap · Mutual cycle',
     `pub fn main() -> I32 { return other() }
 pub fn other() -> I32 { return main() }`,
   ),
-  one('syntax', 'Unresolved contract call', 'pub fn main() -> I32 { return missing(42) }'),
-  one('syntax', 'Unknown parameter', 'pub fn main() -> I32 { return missing }'),
+  one('syntax', 'fail · Unresolved contract call', 'pub fn main() -> I32 { return missing(42) }'),
+  one('syntax', 'fail · Unknown parameter', 'pub fn main() -> I32 { return missing }'),
   one(
     'syntax',
-    'Duplicate parameter',
+    'fail · Duplicate parameter',
     'pub fn choose(value: I32, value: I32) -> I32 { return value }',
   ),
   one(
     'syntax',
-    'Cross-function parameter',
+    'fail · Cross-function parameter',
     `pub fn owner(value: I32) -> I32 { return value }
 pub fn other() -> I32 { return value }`,
   ),
-  one('syntax', 'Recovered reference', 'pub fn identity(value: I32) -> I32 { return @ value }'),
-  one('syntax', 'Two parameters', 'pub fn choose(left: I32, right: I32) -> I32 { return left }'),
+  one('syntax', 'fail · Recovered reference', 'pub fn identity(value: I32) -> I32 { return @ value }'),
+  one('syntax', 'ok · Two parameters', 'pub fn choose(left: I32, right: I32) -> I32 { return left }'),
   one(
     'syntax',
-    'Identifier argument',
+    'ok · Identifier argument',
     `${identity}
 pub fn forward(value: I32) -> I32 { return identity(value) }`,
   ),
   one(
     'syntax',
-    'Nested flow · complete',
+    'ok · Nested flow · complete',
     `${identity}
 pub fn main() -> I32 { return identity(identity(42)) }`,
   ),
   one(
     'syntax',
-    'Nested flow · siblings',
+    'ok · Nested flow · siblings',
     `${identity}
 pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(identity(1), identity(2)) }`,
   ),
   one(
     'syntax',
-    'Nested flow · unavailable',
+    'fail · Nested flow · unavailable',
     `${identity}
 pub fn uncertain(value: Mystery) -> I32 { return 0 }
 pub fn main() -> I32 { return identity(uncertain(42)) }`,
   ),
   one(
     'syntax',
-    'Nested flow · wrong arity',
+    'fail · Nested flow · wrong arity',
     `${identity}
 pub fn main() -> I32 { return identity(identity()) }`,
   ),
   one(
     'syntax',
-    'Damaged nested call',
+    'fail · Damaged nested call',
     `${identity}
 pub fn main() -> I32 { return identity(identity(@)) }`,
   ),
   one(
     'syntax',
-    'Nested flow · inner blocked',
+    'fail · Nested flow · inner blocked',
     `${identity}
 pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(identity(1), missing(2)) }`,
   ),
   one(
     'syntax',
-    'Nested flow · cycle',
+    'trap · Nested flow · cycle',
     `${identity}
 pub fn main() -> I32 { return identity(main()) }`,
   ),
-  one('syntax', 'Missing parameter type', 'pub fn identity(value:) -> I32 { return value }'),
+  one('syntax', 'fail · Missing parameter type', 'pub fn identity(value:) -> I32 { return value }'),
   one(
     'syntax',
-    'Missing parameter comma',
+    'fail · Missing parameter comma',
     'pub fn choose(left: I32 right: I32) -> I32 { return left }',
   ),
-  one('syntax', 'Malformed argument', 'pub fn main(value: I32) -> I32 { return missing(@, value) }'),
+  one('syntax', 'fail · Malformed argument', 'pub fn main(value: I32) -> I32 { return missing(@, value) }'),
   one(
     'syntax',
-    'Missing name',
+    'fail · Missing name',
     `pub fn answer() -> I32 { return 42 }
 pub fn () -> I32 { return 0 }`,
   ),
   one(
     'syntax',
-    'Duplicate names',
+    'fail · Duplicate names',
     `pub fn same() -> I32 { return 1 }
 pub fn same() -> I32 { return 2 }`,
   ),
   one(
     'syntax',
-    'Mixed damage',
+    'fail · Mixed damage',
     `pub fn main() -> I32 { return 42 }
 pub fn damaged() -> Mystery { return 2147483648 }`,
   ),
   one(
     'syntax',
-    'Missing first }',
+    'fail · Missing first }',
     `pub fn answer() -> I32 { return 42
 pub fn main() -> I32 { return 0 }`,
   ),
-  one('syntax', 'Missing }', 'pub fn main() -> I32 { return 42'),
-  one('syntax', 'Unexpected @', 'pub fn @ main() -> I32 { return 42 }'),
-  one('syntax', 'Unknown type', 'pub fn main() -> Mystery { return 42 }'),
-  one('syntax', 'I32 overflow', 'pub fn main() -> I32 { return 2147483648 }'),
-  one('syntax', 'UTF-8', 'pub fn café() -> I32 { return 42 }'),
+  one('syntax', 'fail · Missing }', 'pub fn main() -> I32 { return 42'),
+  one('syntax', 'fail · Unexpected @', 'pub fn @ main() -> I32 { return 42 }'),
+  one('syntax', 'fail · Unknown type', 'pub fn main() -> Mystery { return 42 }'),
+  one('syntax', 'fail · I32 overflow', 'pub fn main() -> I32 { return 2147483648 }'),
+  one('syntax', 'fail · UTF-8', 'pub fn café() -> I32 { return 42 }'),
 
   // ---- modules --------------------------------------------------------------------------
   {
-    label: 'Diamond',
+    label: 'ok · Diamond',
     group: 'modules',
     root: 'root',
     modules: {
@@ -509,7 +515,7 @@ pub fn main() -> I32 { return 0 }`,
     },
   },
   {
-    label: 'Mutual cycle (imports)',
+    label: 'ok · Mutual cycle (imports)',
     group: 'modules',
     root: 'root',
     modules: {
@@ -519,19 +525,19 @@ pub fn main() -> I32 { return 0 }`,
     },
   },
   {
-    label: 'Unknown import',
+    label: 'fail · Unknown import',
     group: 'modules',
     root: 'root',
     modules: { root: `import missing\n${mainFn}` },
   },
   {
-    label: 'Self import',
+    label: 'fail · Self import',
     group: 'modules',
     root: 'root',
     modules: { root: `import root\n${mainFn}` },
   },
   {
-    label: 'Unreachable island',
+    label: 'ok · Unreachable island',
     group: 'modules',
     root: 'root',
     modules: {
@@ -543,7 +549,7 @@ pub fn main() -> I32 { return 0 }`,
 
   // ---- headers --------------------------------------------------------------------------
   {
-    label: 'Two modules',
+    label: 'ok · Two modules',
     group: 'headers',
     root: 'root',
     modules: {
@@ -552,7 +558,7 @@ pub fn main() -> I32 { return 0 }`,
     },
   },
   {
-    label: 'Same name twice across modules',
+    label: 'ok · Same name twice across modules',
     group: 'headers',
     root: 'root',
     modules: {
@@ -561,33 +567,33 @@ pub fn main() -> I32 { return 0 }`,
     },
   },
   {
-    label: 'Duplicate in one module',
+    label: 'fail · Duplicate in one module',
     group: 'headers',
     root: 'root',
     modules: { root: 'pub fn same() -> I32 { return 1 }\npub fn same() -> I32 { return 2 }' },
   },
   {
-    label: 'Missing name (header)',
+    label: 'fail · Missing name (header)',
     group: 'headers',
     root: 'root',
     modules: { root: 'pub fn () -> I32 { return 0 }' },
   },
   {
-    label: 'Unknown types',
+    label: 'fail · Unknown types',
     group: 'headers',
     root: 'root',
     modules: { root: 'pub fn puzzle(value: Mystery) -> Enigma { return 0 }' },
   },
 
   // ---- structs --------------------------------------------------------------------------
-  one('structs', 'Empty struct', 'struct Marker {}\npub fn main() -> I32 { return 42 }'),
+  one('structs', 'ok · Empty struct', 'struct Marker {}\npub fn main() -> I32 { return 42 }'),
   one(
     'structs',
-    'Nested physical layout',
+    'ok · Nested physical layout',
     'struct Pair { left: I32 right: Bool }\nstruct Outer { pair: Pair value: I32 }\npub fn main() -> I32 { return 42 }',
   ),
   {
-    label: 'Imported nominal type',
+    label: 'ok · Imported nominal type',
     group: 'structs',
     root: 'app/Main',
     modules: {
@@ -598,29 +604,29 @@ pub fn main() -> I32 { return 0 }`,
   },
   one(
     'structs',
-    'Private type exposure',
+    'fail · Private type exposure',
     'struct Hidden { value: I32 }\npub struct Visible { pub hidden: Hidden }\npub fn main() -> I32 { return 42 }',
   ),
   one(
     'structs',
-    'Damaged field',
+    'fail · Damaged field',
     'struct Broken { value: Missing next: I32 }\npub fn main() -> I32 { return 42 }',
   ),
   one(
     'structs',
-    'Recursive structs',
+    'fail · Recursive structs',
     'struct Left { right: Right }\nstruct Right { left: Left }\npub fn main() -> I32 { return 42 }',
   ),
   one(
     'structs',
-    'Construct and project fields',
+    'ok · Construct and project fields',
     `struct Pair { left: I32 right: I32 }
 fn make() -> Pair { return Pair { right: 2, left: 1 } }
 pub fn main() -> I32 { let pair = make() return pair.right }`,
   ),
   one(
     'structs',
-    'Nested projections',
+    'ok · Nested projections',
     `struct Inner { value: I32 }
 struct Outer { inner: Inner }
 fn make() -> Outer { return Outer { inner: Inner { value: 42 } } }
@@ -628,20 +634,20 @@ pub fn main() -> I32 { let outer = make() return outer.inner.value }`,
   ),
   one(
     'structs',
-    'Zero-lane struct value',
+    'ok · Zero-lane struct value',
     `struct Marker {}
 fn marker() -> Marker { return Marker {} }
 pub fn main() -> I32 { let value = marker() return 42 }`,
   ),
   one(
     'structs',
-    'Invalid struct literal',
+    'fail · Invalid struct literal',
     `struct Pair { left: I32 right: I32 }
 fn broken() -> Pair { return Pair { left: true, left: 2, extra: 3 } }
 pub fn main() -> I32 { return 42 }`,
   ),
   {
-    label: 'Public struct factory',
+    label: 'ok · Public struct factory',
     group: 'structs',
     root: 'app/Main',
     modules: {
@@ -656,7 +662,7 @@ pub fn main() -> I32 { return 42 }`,
   // Namespaced imports, aliases, and selective member lists: every binding form the resolver
   // has to answer for, plus the ways one can fail to bind.
   {
-    label: 'Namespace import',
+    label: 'ok · Namespace import',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -665,7 +671,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Selective alias',
+    label: 'ok · Selective alias',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -675,7 +681,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Hybrid alias',
+    label: 'ok · Hybrid alias',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -685,7 +691,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Private member',
+    label: 'fail · Private member',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -694,7 +700,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Unknown member',
+    label: 'fail · Unknown member',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -704,7 +710,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Damaged alias',
+    label: 'fail · Damaged alias',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -713,7 +719,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Import collision',
+    label: 'fail · Import collision',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -723,7 +729,7 @@ pub fn main() -> I32 { return 42 }`,
     },
   },
   {
-    label: 'Import cycle (names)',
+    label: 'trap · Import cycle (names)',
     group: 'names',
     root: 'app/Main',
     modules: {
@@ -734,18 +740,18 @@ pub fn main() -> I32 { return 42 }`,
   },
 
   // ---- operators ------------------------------------------------------------------------
-  one('operators', 'Operator precedence', 'pub fn main() -> I32 { return 2 + 5 * 8 }'),
-  one('operators', 'Pipeline', 'pub fn main() -> I32 { return 2 |> I32.add(40) }'),
+  one('operators', 'ok · Operator precedence', 'pub fn main() -> I32 { return 2 + 5 * 8 }'),
+  one('operators', 'ok · Pipeline', 'pub fn main() -> I32 { return 2 |> I32.add(40) }'),
   one(
     'operators',
-    'Unary bool pipeline',
+    'ok · Unary bool pipeline',
     'pub fn main() -> I32 { if true |> Bool.not { return 0 } return 42 }',
   ),
-  one('operators', 'Bool not', 'pub fn main() -> I32 { if !(1 == 2) { return 42 } return 0 }'),
-  one('operators', 'Negation overflow traps', 'pub fn main() -> I32 { return -(-2147483648) }'),
+  one('operators', 'ok · Bool not', 'pub fn main() -> I32 { if !(1 == 2) { return 42 } return 0 }'),
+  one('operators', 'trap · Negation overflow traps', 'pub fn main() -> I32 { return -(-2147483648) }'),
   one(
     'operators',
-    'Closed operator surface',
+    'ok · Closed operator surface',
     `pub fn main() -> I32 {
 if 6 * 7 != 42 { return 0 }
 if 84 / 2 != 42 { return 0 }
@@ -763,7 +769,7 @@ return (40 + 2) * 1
   ),
   one(
     'backend',
-    'Target-sized Usize boundary',
+    'ok · Target-sized Usize boundary',
     `fn nativeBoundary() -> Usize { return 4294967296 }
 pub fn main() -> I32 {
   if nativeBoundary() > 4294967295 { return 42 }
@@ -772,90 +778,90 @@ pub fn main() -> I32 {
   ),
 
   // ---- arrays ---------------------------------------------------------------------------
-  one('arrays', 'Array inferred', 'pub fn main() -> I32 { let values = [10, 42] return values[1] }'),
+  one('arrays', 'ok · Array inferred', 'pub fn main() -> I32 { let values = [10, 42] return values[1] }'),
   one(
     'arrays',
-    'Array contextual',
+    'ok · Array contextual',
     `fn values() -> [I32; 2] { return [10, 42] }
 pub fn main() -> I32 { return values()[1] }`,
   ),
   one(
     'arrays',
-    'Array empty',
+    'ok · Array empty',
     `fn empty() -> [I32; 0] { return [] }
 fn consume(values: [I32; 0]) -> I32 { return 42 }
 pub fn main() -> I32 { return consume(empty()) }`,
   ),
   one(
     'arrays',
-    'Array nested',
+    'ok · Array nested',
     `fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 { return values[outer][inner] }
 pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
   ),
   one(
     'arrays',
-    'Array struct elements',
+    'ok · Array struct elements',
     `struct Pair { left: I32 right: I32 }
 pub fn main() -> I32 { let values = [Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }] return values[1].left }`,
   ),
   one(
     'arrays',
-    'Array evaluation order',
+    'ok · Array evaluation order',
     `fn first() -> I32 { return 10 }
 fn second() -> I32 { return 42 }
 pub fn main() -> I32 { let values = [first(), second()] return values[1] }`,
   ),
   one(
     'arrays',
-    'Array whole moved',
+    'ok · Array whole moved',
     `struct Token { value: I32 }
 pub fn main() -> I32 { let values = [Token { value: 10 }, Token { value: 42 }] let moved = move values return moved[1].value }`,
   ),
   one(
     'arrays',
-    'Array Copy read',
+    'ok · Array Copy read',
     `fn choose(values: [I32; 2], index: I32) -> I32 { let selected = values[index] return selected }
 pub fn main() -> I32 { return choose([10, 42], 1) }`,
   ),
   one(
     'arrays',
-    'Array indexed field',
+    'ok · Array indexed field',
     `struct Pair { left: I32 right: I32 }
 fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
 pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
   ),
   one(
     'arrays',
-    'Array constant out of bounds',
+    'fail · Array constant out of bounds',
     'pub fn main() -> I32 { let values = [10, 42] return values[2] }',
   ),
   one(
     'arrays',
-    'Array dynamic trap',
+    'trap · Array dynamic trap',
     `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
 pub fn main() -> I32 { return choose([10, 42], -1) }`,
   ),
   one(
     'arrays',
-    'Array type mismatch',
+    'fail · Array type mismatch',
     'pub fn main() -> I32 { let values = [1, true] return 0 }',
   ),
   one(
     'arrays',
-    'Array length mismatch',
+    'fail · Array length mismatch',
     `fn values() -> [I32; 3] { return [10, 42] }
 pub fn main() -> I32 { return 0 }`,
   ),
   one(
     'arrays',
-    'Array partial move',
+    'fail · Array partial move',
     `struct Token { value: I32 }
 fn take(values: [Token; 2]) -> Token { return move values[0] }
 pub fn main() -> I32 { return 42 }`,
   ),
   one(
     'arrays',
-    'Array unavailable layout',
+    'trap · Array unavailable layout',
     `fn consume(values: [[[I32; 2147483647]; 2147483647]; 0]) -> I32 { return 42 }
 pub fn main() -> I32 { return consume([]) }`,
   ),
@@ -863,35 +869,35 @@ pub fn main() -> I32 { return consume([]) }`,
   // ---- ownership ------------------------------------------------------------------------
   one(
     'ownership',
-    'Let bindings',
+    'ok · Let bindings',
     `${identity}
 pub fn main() -> I32 { let value = identity(42) let extra = 1 return value }`,
   ),
   one(
     'ownership',
-    'Moved binding',
+    'ok · Moved binding',
     `${identity}
 pub fn main() -> I32 { let value = 42 return identity(move value) }`,
   ),
   one(
     'ownership',
-    'Use after move',
+    'fail · Use after move',
     `pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
   ),
   one(
     'ownership',
-    'Two parameters (ownership)',
+    'ok · Two parameters (ownership)',
     `pub fn choose(left: I32, right: I32) -> I32 { return left }
 pub fn main() -> I32 { return choose(1, 2) }`,
   ),
-  one('ownership', 'Damaged body', 'pub fn main() -> I32 { return missing() }'),
-  one('ownership', 'Unknown parameter type', 'pub fn puzzle(value: Mystery) -> I32 { return value }'),
+  one('ownership', 'fail · Damaged body', 'pub fn main() -> I32 { return missing() }'),
+  one('ownership', 'fail · Unknown parameter type', 'pub fn puzzle(value: Mystery) -> I32 { return value }'),
 
   // ---- exhaustive matching --------------------------------------------------------------
   one(
     'matching',
-    'Guarded union match',
+    'ok · Guarded union match',
     `struct Left { value: I32 }
 struct Right { value: I32 }
 fn inspect(input: Left | Right) -> I32 {
@@ -905,7 +911,7 @@ pub fn main() -> I32 { return inspect(Left { value: 41 }) }`,
   ),
   one(
     'matching',
-    'Nested renamed patterns',
+    'ok · Nested renamed patterns',
     `struct Token { kind: I32 }
 struct Box { token: Token extra: I32 }
 pub fn main() -> I32 {
@@ -915,7 +921,7 @@ pub fn main() -> I32 {
   ),
   one(
     'matching',
-    'Universal fallback',
+    'ok · Universal fallback',
     `struct Left { value: I32 }
 struct Right { value: I32 }
 fn inspect(input: Left | Right) -> I32 { return match &input { Left { value } => value _ => 0 } }
@@ -923,13 +929,13 @@ pub fn main() -> I32 { return inspect(Right { value: 42 }) }`,
   ),
   one(
     'matching',
-    'Exclusive mutable match',
+    'ok · Exclusive mutable match',
     `struct Token { kind: I32 }
 pub fn main() -> I32 { let mut token = Token { kind: 42 } return match &mut token { Token { kind } => kind } }`,
   ),
   one(
     'matching',
-    'Incomplete match',
+    'fail · Incomplete match',
     `struct Left {}
 struct Right {}
 fn inspect(input: Left | Right) -> I32 { return match &input { Left {} => 1 } }
@@ -937,14 +943,14 @@ pub fn main() -> I32 { return 0 }`,
   ),
   one(
     'matching',
-    'Unreachable match arm',
+    'fail · Unreachable match arm',
     `struct Token { value: I32 }
 fn inspect(input: Token) -> I32 { return match &input { Token { value } => value Token { value: other } => other } }
 pub fn main() -> I32 { return 0 }`,
   ),
   one(
     'matching',
-    'Invalid guard and join',
+    'fail · Invalid guard and join',
     `struct Left {}
 struct Right {}
 fn inspect(input: Left | Right) -> I32 { return match &input { Left {} if 1 => 1 Left {} => 1 Right {} => true } }
@@ -952,7 +958,7 @@ pub fn main() -> I32 { return 0 }`,
   ),
   one(
     'matching',
-    'Borrow escape and immutable exclusive',
+    'fail · Borrow escape and immutable exclusive',
     `struct Token { value: Token }
 fn escape(input: Token) -> Token { return match &input { Token { value } => value } }
 fn exclusive(input: Token) -> I32 { return match &mut input { Token { .. } => 0 } }
@@ -962,44 +968,44 @@ pub fn main() -> I32 { return 0 }`,
   // ---- mutation and structured loops ----------------------------------------------------
   one(
     'control',
-    'Immutable write rejection',
+    'fail · Immutable write rejection',
     `pub fn main() -> I32 { let value = 1 value = 2 return value }`,
   ),
   one(
     'control',
-    'Scalar mutation',
+    'ok · Scalar mutation',
     `pub fn main() -> I32 { let mut value = 40 value = value + 2 return value }`,
   ),
   one(
     'control',
-    'Field mutation',
+    'ok · Field mutation',
     `struct Pair { left: I32 right: I32 }
 pub fn main() -> I32 { let mut pair = Pair { left: 1, right: 42 } pair.left = 40 return pair.left + 2 }`,
   ),
   one(
     'control',
-    'Indexed mutation',
+    'ok · Indexed mutation',
     `pub fn main() -> I32 { let mut values = [1, 2, 3] let index = 1 values[index] = 42 return values[1] }`,
   ),
   one(
     'control',
-    'Move-only replacement',
+    'ok · Move-only replacement',
     `struct Token { value: I32 }
 pub fn main() -> I32 { let mut token = Token { value: 1 } token = Token { value: 42 } return token.value }`,
   ),
   one(
     'control',
-    'Zero-iteration loop',
+    'ok · Zero-iteration loop',
     `pub fn main() -> I32 { let mut value = 42 while false { value = 0 } return value }`,
   ),
   one(
     'control',
-    'Counting loop',
+    'ok · Counting loop',
     `pub fn main() -> I32 { let mut value = 0 while value < 42 { value = value + 1 } return value }`,
   ),
   one(
     'control',
-    'Nested loops',
+    'ok · Nested loops',
     `pub fn main() -> I32 {
   let mut outer = 0
   let mut total = 0
@@ -1013,29 +1019,29 @@ pub fn main() -> I32 { let mut token = Token { value: 1 } token = Token { value:
   ),
   one(
     'control',
-    'Conditional break',
+    'ok · Conditional break',
     `pub fn main() -> I32 { let mut value = 0 while true { if value == 42 { break } value = value + 1 } return value }`,
   ),
   one(
     'control',
-    'Continue',
+    'ok · Continue',
     `pub fn main() -> I32 { let mut value = 0 while value < 42 { value = value + 1 if value < 42 { continue } } return value }`,
   ),
   one(
     'control',
-    'Early loop return',
+    'ok · Early loop return',
     `pub fn main() -> I32 { while true { return 42 } return 0 }`,
   ),
   one(
     'control',
-    'Write bounds trap',
+    'trap · Write bounds trap',
     `pub fn main() -> I32 { let mut values = [1, 2] let index = 2 values[index] = 42 return 0 }`,
   ),
-  one('control', 'Invalid loop condition', 'pub fn main() -> I32 { while 1 { break } return 42 }'),
-  one('control', 'Invalid transfer', 'pub fn main() -> I32 { continue return 42 }'),
+  one('control', 'fail · Invalid loop condition', 'pub fn main() -> I32 { while 1 { break } return 42 }'),
+  one('control', 'fail · Invalid transfer', 'pub fn main() -> I32 { continue return 42 }'),
   one(
     'control',
-    'Incompatible loop owner',
+    'fail · Incompatible loop owner',
     `struct Token { value: I32 }
 pub fn main() -> I32 {
   let mut token = Token { value: 1 }
@@ -1051,49 +1057,49 @@ pub fn main() -> I32 {
   // ---- discovery ------------------------------------------------------------------------
   one(
     'discovery',
-    'Nested calls (discovery)',
+    'ok · Nested calls (discovery)',
     `${identity}
 pub fn main() -> I32 { return identity(identity(42)) }`,
   ),
   one(
     'discovery',
-    'Mutual recursion',
+    'trap · Mutual recursion',
     `pub fn main() -> I32 { return other() }
 pub fn other() -> I32 { return main() }`,
   ),
   one(
     'discovery',
-    'Unreachable declaration',
+    'ok · Unreachable declaration',
     `pub fn unused() -> I32 { return 1 }
 pub fn main() -> I32 { return 42 }`,
   ),
-  one('discovery', 'Missing entry (discovery)', 'pub fn answer() -> I32 { return 42 }'),
+  one('discovery', 'trap · Missing entry (discovery)', 'pub fn answer() -> I32 { return 42 }'),
 
   // ---- backend --------------------------------------------------------------------------
   one(
     'backend',
-    'Nested calls',
+    'ok · Nested calls',
     `${identity}
 pub fn main() -> I32 { return identity(identity(42)) }`,
   ),
   one(
     'backend',
-    'Two parameters (backend)',
+    'ok · Two parameters (backend)',
     `pub fn choose(left: I32, right: I32) -> I32 { return right }
 pub fn main() -> I32 { return choose(1, 42) }`,
   ),
-  one('backend', 'Trap body', 'pub fn main() -> I32 { return missing() }'),
+  one('backend', 'fail · Trap body', 'pub fn main() -> I32 { return missing() }'),
   one(
     'backend',
-    'Branch diamond',
+    'ok · Branch diamond',
     'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }',
   ),
-  one('backend', 'Checked arithmetic', 'pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
-  one('backend', 'Overflow traps', 'pub fn main() -> I32 { return I32.add(2147483647, 1) }'),
-  one('backend', 'Divide by zero traps', 'pub fn main() -> I32 { return I32.divide(1, 0) }'),
+  one('backend', 'ok · Checked arithmetic', 'pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'),
+  one('backend', 'trap · Overflow traps', 'pub fn main() -> I32 { return I32.add(2147483647, 1) }'),
+  one('backend', 'trap · Divide by zero traps', 'pub fn main() -> I32 { return I32.divide(1, 0) }'),
   one(
     'syntax',
-    'Union normalization + Never',
+    'fail · Union normalization + Never',
     `struct A {}
 struct B {}
 fn normalized(value: B | (A | B)) -> A | B { return value }
@@ -1102,7 +1108,7 @@ pub fn main() -> I32 { return 42 }`,
   ),
   one(
     'structs',
-    'Union injection + widening',
+    'ok · Union injection + widening',
     `struct A {}
 struct B { value: I32 }
 struct C { left: I32 right: I32 }
@@ -1112,7 +1118,7 @@ pub fn main() -> I32 { return widen(A {}) }`,
   ),
   one(
     'arrays',
-    'Union array containment',
+    'ok · Union array containment',
     `struct A {}
 struct B {}
 fn accept(values: [A | B; 2]) -> I32 { return 42 }
@@ -1120,7 +1126,7 @@ pub fn main() -> I32 { return accept([A {}, B {}]) }`,
   ),
   one(
     'ownership',
-    'Union field replacement',
+    'ok · Union field replacement',
     `struct A {}
 struct B { value: I32 }
 struct Box { value: A | B }
@@ -1132,12 +1138,12 @@ pub fn main() -> I32 {
   ),
   one(
     'syntax',
-    'Invalid union member',
+    'fail · Invalid union member',
     'fn broken(value: I32 | Never) -> I32 { return 0 }\npub fn main() -> I32 { return 42 }',
   ),
   one(
     'syntax',
-    'Unavailable union member',
+    'fail · Unavailable union member',
     'fn broken(value: Missing | Never) -> I32 { return 0 }\npub fn main() -> I32 { return 42 }',
   ),
 ]

@@ -17,17 +17,29 @@ const snapshotOf = (preset: (typeof presets)[number], target?: string): Analysis
     ...(target === undefined ? {} : { target }),
   })
 
-const acceptancePreset = presets.find((preset) => preset.label === 'Algorithmic coverage fold')
-const exclusiveSlicePreset = presets.find((preset) => preset.label === 'Exclusive runtime slice')
-const typedEffectPreset = presets.find((preset) => preset.label === 'Typed Effect recovery')
-const residualEffectPreset = presets.find((preset) => preset.label === 'Unhandled Effect residual')
-const eagerEffectPreset = presets.find((preset) => preset.label === 'Eager setup, lazy Effect body')
-const captureEffectPreset = presets.find((preset) => preset.label === 'Reusable exclusive capture')
-const retryEffectPreset = presets.find((preset) => preset.label === 'Retry with persistent capture')
-const providerEffectPreset = presets.find((preset) => preset.label === 'Existing provider capture')
-const layoutPreset = presets.find((preset) => preset.label === 'Validated target Layout')
+const acceptancePreset = presets.find((preset) => preset.label === 'ok · Algorithmic coverage fold')
+const exclusiveSlicePreset = presets.find(
+  (preset) => preset.label === 'ok · Exclusive runtime slice',
+)
+const typedEffectPreset = presets.find((preset) => preset.label === 'ok · Typed Effect recovery')
+const residualEffectPreset = presets.find(
+  (preset) => preset.label === 'fail · Unhandled Effect residual',
+)
+const eagerEffectPreset = presets.find(
+  (preset) => preset.label === 'ok · Eager setup, lazy Effect body',
+)
+const captureEffectPreset = presets.find(
+  (preset) => preset.label === 'ok · Reusable exclusive capture',
+)
+const retryEffectPreset = presets.find(
+  (preset) => preset.label === 'ok · Retry with persistent capture',
+)
+const providerEffectPreset = presets.find(
+  (preset) => preset.label === 'ok · Existing provider capture',
+)
+const layoutPreset = presets.find((preset) => preset.label === 'ok · Validated target Layout')
 const allocationPreset = presets.find(
-  (preset) => preset.label === 'Self-contained Allocation contract',
+  (preset) => preset.label === 'ok · Self-contained Allocation contract',
 )
 
 const acceptanceContext = (
@@ -51,6 +63,27 @@ describe('preset catalog', () => {
   it('has a unique label per preset, so the picker can key on it', () => {
     const labels = presets.map((preset) => preset.label)
     expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it('prefixes every label with ok, fail, or trap so intent is visible in the picker', () => {
+    for (const preset of presets) {
+      expect(preset.label, preset.label).toMatch(/^(ok|fail|trap) · /)
+    }
+    expect(presets.some((preset) => preset.label.startsWith('ok · '))).toBe(true)
+    expect(presets.some((preset) => preset.label.startsWith('fail · '))).toBe(true)
+    expect(presets.some((preset) => preset.label.startsWith('trap · '))).toBe(true)
+  })
+
+  it('keeps fail-prefixed presets as the ones that surface diagnostics', () => {
+    for (const preset of presets) {
+      const snapshot = snapshotOf(preset)
+      const hasDiagnostics = Analysis.diagnostics(snapshot).length > 0
+      if (preset.label.startsWith('fail · ')) {
+        expect(hasDiagnostics, preset.label).toBe(true)
+      } else if (preset.label.startsWith('ok · ')) {
+        expect(hasDiagnostics, preset.label).toBe(false)
+      }
+    }
   })
 
   it('roots every preset at a module it actually defines', () => {
