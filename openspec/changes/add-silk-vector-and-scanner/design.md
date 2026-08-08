@@ -133,21 +133,24 @@ no vector-shaped MIR. Landing it surfaced and fixed more latent machinery:
   (`mut*_load`, `return_value`, reload/addr sequences) are now suffixed uniquely; address roots
   persist through mutable-root storage.
 
-**Open gaps found and not yet fixed** (each has a minimal repro in the session log):
+### Checkpoint 3 findings (scanner and closure gates landed)
 
-- `Effect.catch` over a provided effect (`x |> provide |> catch`, or catch of a stored provided
-  binding) fails MIR verification ("effect catch target, handler, or handled tag is
-  inconsistent") or leaks loans across statements. Blocks in-source observation of a vector
-  surviving a failed growth; the atomicity test currently proves leak-freedom and element
-  retention through the propagation-release trace instead.
-- Provider state mutations are lost when a requirement is *forwarded*: a `? &mut Allocator`
-  effect fn run under `provide(&mut counter)` calls the witness, but `self` mutations inside the
-  witness do not write back to the caller's value (repro: counting allocator through a nested
-  requirement returns 0 hits). Blocks quota-driven failure-ordinal sweeps over `append`.
+The remaining substrate gaps were fixed rather than worked around:
 
-## Open Questions
+- `Effect.catch` now accepts provided and stored Effect values, ends their captured loans at the
+  consuming run, and preserves the vector across failed growth so source code can observe its
+  original contents and capacity.
+- Forwarded exclusive capability providers now write witness mutations back through nested
+  requirements. The scanner reuses the allocation harness to fail each allocation ordinal, with
+  equal acquire/release counts and a successful run once quota covers all three allocations.
+- Effect environments and backend runner parameters represent shared and exclusive slice/reference
+  captures by their semantic layouts. The evaluator, native backend, and direct Wasm backend all
+  execute the same runtime-sized scanner borrow and observe token kinds `1,2,3,1,2,3,1,2,3,1`.
+- Fresh-process scanner determinism covers the imported stdlib closure, HIR, ownership, instances,
+  layout, MIR, evaluation trace, symbols, and both backend artifacts. Five `/labs` presets expose
+  vector growth, failed growth preservation, destruction order, early drop, and the exact scanner
+  acceptance source.
 
-- Exact stdlib module naming (`silk.vector` vs `std.vector`) — cosmetic, decide at implementation
-  with the formatter goldens.
-- Whether the scanner's token grammar covers identifiers+integers only or adds punctuation —
-  decide by what most cheaply forces ≥2 reallocations and a mid-token failure ordinal.
+The implementation settled the remaining cosmetic choices: the reserved module is `silk.vector`,
+and the scanner's small identifier/integer/punctuation grammar produces ten tokens, forcing two
+reallocations without adding a bulk-memory primitive.

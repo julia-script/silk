@@ -13,13 +13,14 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** implement growable compiler output in Silk. The accepted baseline now includes
+**Current objective:** supply the compiler's minimum native platform. The accepted baseline now includes
 target-aware layouts, runtime-sized borrowed input, typed Effects, capability requirements and
 provision, first-class callables, automatic data-first sections, affine ownership, deterministic
 cleanup, and — as of 2026-08-08 — the self-contained owned-allocation substrate: general `Allocator`
 dispatch through user-authored conformances, affine `Allocation`, unsafe typed `RawBuffer`/`Slot`
-storage, and compiler-sealed `Drop`. The next missing piece is a useful owned sequence written
-entirely in Silk over that substrate, proven by a real scanner pass.
+storage, compiler-sealed `Drop`, and an ordinary Silk-written `Vector<T>` proven by a scanner that
+borrows runtime-sized input and returns owned tokens. The next missing piece is the minimum runtime,
+standard library, host-service surface, and private C shim required by a real compiler module.
 
 ## Column rules
 
@@ -162,23 +163,43 @@ nothing, and owners live at a failing run site release before the failure propag
   [compiler pipeline](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
   [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
 
-## Next
-
 ### Implement growable compiler output in Silk
 
-- **Problem:** Raw allocation only proves the boundary. The bootstrap language needs a useful owned
-  sequence, but collection policy belongs in Silk rather than the compiler.
-- **Outcome & done-when:** Implement `Vector<T>` entirely in Silk over `Allocator`, `Allocation`,
-  restricted `Drop`, and unsafe typed storage. Prove it with a scanner that borrows runtime-sized
-  source bytes and returns an owned `Vector<Token>`, including growth, typed out-of-memory failure,
-  partial-initialization rollback, early drop, and deterministic cleanup in every backend.
-- **Boundary:** No compiler-known vector behavior and no mandatory iterable abstraction. Add bulk
-  byte-memory primitives only when this workload demonstrates a concrete need.
+**Status: complete (2026-08-08).** `add-silk-vector-and-scanner` ships the first importable Silk
+standard-library module and implements `Vector<T>` entirely in `silk.vector` over `Allocator`,
+`Allocation`, `RawBuffer<T>`, `Slot<T>`, and parametric `Drop`. Empty vectors allocate nothing;
+append grows 0 → 4 → ×2; failed replacement allocation preserves the original vector; initialized
+elements drop before storage release; and move-out plus early drop retain exactly-once ownership.
+
+- **Outcome:** The acceptance scanner borrows `&[U8]`, produces ten tokens in an owned
+  `Vector<Token>`, and crosses three allocation ordinals. Evaluator, native LLVM, and direct Wasm
+  all return `42` with identical token observations; quota sweeps fail each growth ordinal without
+  leaks and succeed once the quota covers all allocations. Two fresh processes produce identical
+  closure, HIR, ownership, instances, layout, MIR, traces, symbols, and backend artifacts.
+- **Boundary held:** No compiler phase recognizes `Vector`, no vector-shaped MIR or backend
+  primitive was added, and the scanner demonstrated no need for a bulk byte-memory or iterable
+  abstraction. The generic collection and its cleanup policy remain ordinary Silk source.
+- **Evidence:** `VectorAcceptance.test.ts`, `ScannerAcceptance.test.ts`, and
+  `ScannerDeterminism.test.ts` cover growth, rollback, early and lexical destruction, failure
+  ordinals, three-engine parity, and fresh-process determinism. Five coordinated `/labs` presets
+  expose the same sources and facts, with the scanner preset byte-identical to its acceptance
+  fixture.
+
+## Next
+
+### Supply the compiler's native platform
+
+- **Problem:** Silk can now express a source-to-owned-token pass, but the bootstrap compiler still
+  depends on its TypeScript host for runtime entry, filesystem/process boundaries, and the native
+  services that turn those tokens into a usable compiler pipeline.
+- **Outcome & done-when:** Add only the runtime, standard-library actors, host services, and private
+  C shim demanded by the first real Silk compiler module, preserving typed failures, scoped external
+  resources, deterministic artifacts, and the existing evaluator/native/Wasm semantic oracle.
+- **Boundary:** Shape the platform from demonstrated compiler needs. Do not introduce a broad FFI,
+  package ecosystem, ambient services, or public runtime surface speculatively.
 
 ## Later
 
-- **Supply the compiler's native platform** — add the minimum runtime, standard library, host
-  services, and private C shim in response to real self-hosting compiler needs.
 - **Make Silk capable of expressing its own compiler** — progressively replace the TypeScript seed
   implementation with Silk modules while preserving reference equivalence; revisit the exact port
   boundaries once the frontend, MIR, and runtime interfaces have survived real use.
@@ -219,11 +240,19 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 - Should Silk compiler modules replace their TypeScript counterparts continuously as capabilities
   land, or should the first port begin after the stage-0 subset is feature-complete?
-- Which smallest real pass best distinguishes the required memory semantics: byte-to-token
-  lexing, token-to-syntax grouping, or another source-dependent transform?
 
 ## Changelog
 
+- 2026-08-08: Completed `add-silk-vector-and-scanner` and promoted the minimum native compiler
+  platform to Next. `silk.vector` is the first embedded, explicitly imported standard-library
+  module; its generic `Vector<T>` grows, rolls back failed growth atomically, moves out values, and
+  destroys initialized elements before storage release without compiler-known collection behavior.
+  A Silk scanner now borrows runtime-sized bytes and returns ten owned tokens through three
+  allocation ordinals with evaluator/native/Wasm parity, typed quota-failure sweeps, fresh-process
+  artifact determinism, and coordinated `/labs` evidence. The shipped outcome answers the prior
+  pass-selection question: byte-to-token scanning was sufficient to expose and close the remaining
+  generic ownership, provider-forwarding, effect-capture, and backend representation gaps without
+  requiring bulk memory primitives.
 - 2026-08-08: Completed the self-contained owned-allocation substrate and promoted the Silk-written
   `Vector<T>` and scanner change to the current objective. `unsafe` blocks, `impl` conformances,
   nominal `SystemAllocator`, affine `Allocation`, generic `RawBuffer<T>`, lexical `Slot<T>`, and
