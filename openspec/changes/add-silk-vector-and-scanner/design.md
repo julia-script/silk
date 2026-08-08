@@ -93,6 +93,28 @@ reuses it verbatim over a larger ordinal range; no new injection mechanism.
   → accepted: uninstantiated generic code is unchecked in exactly the same way uninstantiated
   generic functions already are.
 
+## Implementation findings (running log)
+
+Probing during apply surfaced substrate gaps the archived specs promised but never implemented,
+plus expressiveness gaps Vector needs. State as of the last checkpoint:
+
+- **Fixed and shipped**: user `Drop` hooks never executed (bodies were never elaborated); nested
+  cleanup plans released nothing below the top level in any engine; automatic cleanup inside
+  deferred effect bodies emitted no Drops at all. All three now work on all three engines
+  (`DropHookExecution.test.ts`).
+- **Added and shipped**: `Place.replace` atomic place swap (`PlaceReplace.test.ts`) and unsafe
+  `Slot.copy` for Copy elements (`SlotCopy.test.ts`) — the machinery an `&mut self` Vector needs
+  because unions cannot be projected through references.
+- **Open gap blocking Vector growth**: match patterns bind member *fields* only; there is no
+  whole-member binding (`Layout value => move value`). A bare `Layout` therefore cannot be
+  extracted from `Layout.repeat`'s `Layout | LayoutOverflow` result, and `Layout` cannot be
+  reconstructed from its fields — so runtime-count allocation is inexpressible in Silk today.
+  The planned fix is whole-member match bindings (pattern grammar through elaboration, match
+  analysis, and all three engines); it also removes the rewrap dance `get`/`append` would need
+  for `Vector`'s `Empty | Full<T>` storage union.
+- Match arms are single expressions (no statement blocks), so Vector helpers thread affine
+  values through call/return pairs (`Taken<T>`-style structs) rather than arm bodies.
+
 ## Open Questions
 
 - Exact stdlib module naming (`silk.vector` vs `std.vector`) — cosmetic, decide at implementation

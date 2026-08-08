@@ -30,11 +30,12 @@
 
 - [x] 4.1 Add a compiler-known place-swap operation (read old value, write replacement, one statement, place stays initialized) through elaboration, ownership, and lowering onto existing ReadPlace/WritePlace ops; delta-spec it
 - [x] 4.2 Add unsafe non-consuming Slot.copy for Copy element types through all three engines, rejected at instantiation for non-Copy elements; delta-spec it
-- [ ] 4.3 Write the vector stdlib module: empty construction without allocation, append with geometric growth and commit-after-success, checked get, length, capacity, parametric Drop destroying initialized elements before the buffer
-- [ ] 4.4 Prove growth atomicity: acceptance test where injected failure at the replacement-allocation ordinal leaves the original vector observable and leak-free
-- [ ] 4.5 Prove release order: Drop-bearing element type records destruction order; elements before buffer, uninitialized capacity untouched
-- [ ] 4.6 Prove ownership transfer and early drop across all three engines
-- [ ] 4.7 Verify no vector-shaped operation appears in MIR, evaluator traces, or backend output for a vector-using program
+- [ ] 4.3 Add whole-member match bindings (`Member name => ...`) through pattern syntax, match analysis, ownership, and all three engines, so union members and `Layout | LayoutOverflow` results are extractable; delta-spec it (discovered gap: runtime-count allocation is otherwise inexpressible)
+- [ ] 4.4 Write the vector stdlib module: empty construction without allocation, append with geometric growth and commit-after-success, checked get, length, capacity, parametric Drop destroying initialized elements before the buffer
+- [ ] 4.5 Prove growth atomicity: acceptance test where injected failure at the replacement-allocation ordinal leaves the original vector observable and leak-free
+- [ ] 4.6 Prove release order: Drop-bearing element type records destruction order; elements before buffer, uninitialized capacity untouched
+- [ ] 4.7 Prove ownership transfer and early drop across all three engines
+- [ ] 4.8 Verify no vector-shaped operation appears in MIR, evaluator traces, or backend output for a vector-using program
 
 ## 5. Scanner acceptance
 
