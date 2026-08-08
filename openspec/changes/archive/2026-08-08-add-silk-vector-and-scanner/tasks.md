@@ -54,4 +54,4 @@
 - [x] 7.1 `pnpm typecheck`, `pnpm test`, `pnpm lint` clean at repo root
 - [x] 7.2 `openspec validate add-silk-vector-and-scanner --strict` passes
 - [x] 7.3 Update `roadmaps/project.md`: move this item to Now/complete with evidence, promote the next item
-- [ ] 7.4 Sync delta specs and archive the change
+- [x] 7.4 Sync delta specs and archive the change
