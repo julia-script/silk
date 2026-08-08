@@ -28,7 +28,7 @@
 
 ## 4. Vector in Silk
 
-- [ ] 4.1 Add a compiler-known place-swap operation (read old value, write replacement, one statement, place stays initialized) through elaboration, ownership, and lowering onto existing ReadPlace/WritePlace ops; delta-spec it
+- [x] 4.1 Add a compiler-known place-swap operation (read old value, write replacement, one statement, place stays initialized) through elaboration, ownership, and lowering onto existing ReadPlace/WritePlace ops; delta-spec it
 - [ ] 4.2 Add unsafe non-consuming Slot.copy for Copy element types through all three engines, rejected at instantiation for non-Copy elements; delta-spec it
 - [ ] 4.3 Write the vector stdlib module: empty construction without allocation, append with geometric growth and commit-after-success, checked get, length, capacity, parametric Drop destroying initialized elements before the buffer
 - [ ] 4.4 Prove growth atomicity: acceptance test where injected failure at the replacement-allocation ordinal leaves the original vector observable and leak-free

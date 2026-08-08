@@ -3267,6 +3267,13 @@ const builtinActors: Readonly<
       result: rawElement,
       unsafe: true,
     }),
+    copy: Object.freeze({
+      operation: 'SlotCopy' as const,
+      typeParameters: rawTypeParameters,
+      parameters: Object.freeze([Type.slot(rawElement)]),
+      result: rawElement,
+      unsafe: true,
+    }),
     drop: Object.freeze({
       operation: 'SlotDrop' as const,
       typeParameters: rawTypeParameters,

@@ -106,6 +106,7 @@ export type BuiltinOperation =
   | 'RawBufferCount'
   | 'SlotWrite'
   | 'SlotTake'
+  | 'SlotCopy'
   | 'SlotDrop'
 
 export type BoundsMode =

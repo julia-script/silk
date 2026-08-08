@@ -248,6 +248,15 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Non-consuming read of an initialized slot; verified for Copy element types only. */
+      readonly _tag: 'SlotCopy'
+      readonly destination: LocalId
+      readonly slot: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'SlotDrop'
       readonly destination: LocalId
       readonly slot: LocalId
@@ -834,6 +843,7 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'SlotWrite':
       return [operation.destination, operation.slot, operation.value]
     case 'SlotTake':
+    case 'SlotCopy':
       return [operation.destination, operation.slot]
     case 'SlotDrop':
       return [operation.destination, operation.slot]
@@ -1085,6 +1095,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'RawBufferSlot':
     case 'SlotWrite':
     case 'SlotTake':
+    case 'SlotCopy':
       return [semanticType(operation.type), operation.element]
     case 'SlotDrop':
       return [semanticType(operation.type), operation.element, ...cleanupTypes(operation.cleanup)]
@@ -1194,6 +1205,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'SlotWrite':
       return [operation.slot, operation.value]
     case 'SlotTake':
+    case 'SlotCopy':
     case 'SlotDrop':
       return [operation.slot]
     case 'Move':
@@ -1841,6 +1853,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         if (
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotCopy' ||
           operation._tag === 'SlotDrop'
         ) {
           const slot = fn.localTypes.at(operation.slot.ordinal)
@@ -1850,13 +1863,14 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               ? slot.type.arguments[0]
               : undefined
           const unitResult =
-            operation._tag === 'SlotTake'
+            operation._tag === 'SlotTake' || operation._tag === 'SlotCopy'
               ? true
               : destination?._tag === 'Nominal' && SilkType.equals(destination.type, SilkType.unit)
           const takeResult =
-            operation._tag !== 'SlotTake' ||
+            !(operation._tag === 'SlotTake' || operation._tag === 'SlotCopy') ||
             (destination !== undefined &&
-              SilkType.equals(semanticType(destination), operation.element))
+              SilkType.equals(semanticType(destination), operation.element) &&
+              (operation._tag !== 'SlotCopy' || isCopyType(operation.element)))
           const writeValue =
             operation._tag !== 'SlotWrite' ||
             (() => {
@@ -2665,6 +2679,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = slot-write ${localText(operation.slot)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotTake':
       return `${localText(operation.destination)} = slot-take ${localText(operation.slot)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SlotCopy':
+      return `${localText(operation.destination)} = slot-copy ${localText(operation.slot)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotDrop':
       return `${localText(operation.destination)} = slot-drop ${localText(operation.slot)} element=${SilkType.encode(operation.element)} cleanup=${operation.cleanup._tag} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Move':

@@ -1904,6 +1904,23 @@ function lowerExpression(
         )
         return finishBuiltin(destination)
       }
+      if (expression.operation === 'SlotCopy') {
+        const [slot] = argumentLocals
+        const type = fn.type(expression.type)
+        if (slot === undefined || type === undefined) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'SlotCopy' as const,
+            destination,
+            slot,
+            element: expression.type,
+            type,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
       if (expression.operation === 'SlotDrop') {
         const [slot] = argumentLocals
         const slotArgument = expression.arguments.at(0)
