@@ -557,6 +557,16 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      /** `Place.replace(place, value)`: swap one writable place, yielding its old value. */
+      readonly _tag: 'PlaceReplace'
+      readonly destination: ExpressionFact
+      readonly root?: AssignmentRootFact
+      readonly value: ExpressionFact
+      readonly compatible: boolean
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'EffectCatch'
       readonly protected: ExpressionFact
       readonly handled?: Type.Nominal
@@ -676,6 +686,20 @@ export type CallContractFact =
 export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _tag: 'Unavailable' }
 
 export type AssignmentRootFact = BindingDeclarationFact | ParameterFact
+
+/** Resolves the mutable root a writable-place expression is anchored to, if any. */
+const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undefined => {
+  if (fact._tag === 'Identifier') {
+    if (fact.reference._tag === 'ResolvedBinding') return fact.reference.binding
+    if (fact.reference._tag === 'Resolved') return fact.reference.parameter
+    return undefined
+  }
+  if (fact._tag === 'FieldProjection' || fact._tag === 'IndexProjection') {
+    return assignmentRoot(fact.subject)
+  }
+  if (fact._tag === 'Grouped') return assignmentRoot(fact.expression)
+  return undefined
+}
 
 /** One public function declaration and its syntax-owned semantic facts. */
 export type DeclarationFact = DeclarationIndex.DeclarationFact
@@ -3732,6 +3756,136 @@ const finishCallableApplication = (
   })
 }
 
+/**
+ * `Place.replace(place, value)`: the first argument resolves as a writable place under the same
+ * rules as assignment, the second as a value of the place's type, and the whole expression
+ * yields the place's previous value. The place stays initialized, so affine owners can leave a
+ * struct field behind a reference without a partial move.
+ */
+const unavailableIdentifierFact = (node: SyntaxTree.Node): ExpressionFact =>
+  Object.freeze({
+    _tag: 'Identifier',
+    reference: Object.freeze({
+      _tag: 'Unavailable' as const,
+      syntax: unavailableSyntax(node, 'Identifier'),
+    }),
+    type: unavailableExpressionType,
+    syntax: node,
+  })
+
+function analyzePlaceReplace(
+  source: SourceFile.SourceFile,
+  call: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult {
+  const argumentList = SyntaxTree.directNode(call, 'ArgumentList')
+  const nodes =
+    argumentList === undefined ? [] : argumentList.children.filter(isRecursiveArgumentNode)
+  const destinationNode = nodes.at(0)
+  const valueNode = nodes.at(1)
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  if (destinationNode === undefined || valueNode === undefined || nodes.length !== 2) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'PlaceReplace' as const,
+        destination: unavailableIdentifierFact(call),
+        value: unavailableIdentifierFact(call),
+        compatible: false,
+        type: unavailableExpressionType,
+        syntax: call,
+      }),
+      diagnostics: Object.freeze([
+        Diagnostic.wrongCallArity(
+          Object.freeze({ _tag: 'BuiltinTarget', actor: 'Place', operation: 'replace' }),
+          2,
+          nodes.length,
+          call.span,
+        ),
+      ]),
+      type: undefined,
+    })
+  }
+  const destination = analyzeExpression(
+    source,
+    destinationNode,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+  )
+  if (destination === undefined) {
+    throw new RangeError(`Semantic analysis cannot analyze ${destinationNode.kind}`)
+  }
+  diagnostics.push(...destination.diagnostics)
+  const value = analyzeExpression(
+    source,
+    valueNode,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    destination.type,
+  )
+  if (value === undefined) {
+    throw new RangeError(`Semantic analysis cannot analyze ${valueNode.kind}`)
+  }
+  diagnostics.push(...value.diagnostics)
+  const root = assignmentRoot(destination.fact)
+  if (root === undefined) {
+    diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+  } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
+    diagnostics.push(
+      Diagnostic.immutableAssignment(
+        root.name._tag === 'Present' ? root.name.spelling : '?',
+        destinationNode.span,
+      ),
+    )
+  } else if (
+    root._tag === 'ParameterDeclaration' &&
+    (root.declaredType._tag !== 'Resolved' ||
+      !(
+        (Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) &&
+        root.declaredType.type.access === 'Exclusive'
+      ) ||
+      (destination.fact._tag !== 'IndexProjection' && destination.fact._tag !== 'FieldProjection'))
+  ) {
+    diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+  }
+  const compatible =
+    destination.type !== undefined &&
+    value.type !== undefined &&
+    typesCompatible(value.type, destination.type)
+  if (destination.type !== undefined && value.type !== undefined && !compatible) {
+    diagnostics.push(
+      unionConversionDiagnostic(value.type, destination.type, valueNode.span) ??
+        Diagnostic.assignmentTypeMismatch(
+          Type.encode(destination.type),
+          Type.encode(value.type),
+          valueNode.span,
+        ),
+    )
+  }
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'PlaceReplace' as const,
+      destination: destination.fact,
+      ...(root === undefined ? {} : { root }),
+      value: value.fact,
+      compatible,
+      type:
+        destination.type === undefined
+          ? unavailableExpressionType
+          : Object.freeze({ _tag: 'Available' as const, type: destination.type }),
+      syntax: call,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: destination.type,
+  })
+}
+
 function analyzeBuiltinCall(
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
@@ -5304,6 +5458,9 @@ function analyzeExpression(
       return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
     const qualifier = spelling(source, qualifierToken)
     const member = spelling(source, memberToken)
+    if (qualifier === 'Place' && member === 'replace') {
+      return analyzePlaceReplace(source, node, declarations, declaration, scope, resolution)
+    }
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag === 'Intrinsic')
       return analyzeBuiltinCall(source, node, argumentsResult, callTypeArguments, resolution)
@@ -5676,19 +5833,6 @@ const analyzeStatements = (
     })
     context.regions.push(region)
     return region
-  }
-
-  const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undefined => {
-    if (fact._tag === 'Identifier') {
-      if (fact.reference._tag === 'ResolvedBinding') return fact.reference.binding
-      if (fact.reference._tag === 'Resolved') return fact.reference.parameter
-      return undefined
-    }
-    if (fact._tag === 'FieldProjection' || fact._tag === 'IndexProjection') {
-      return assignmentRoot(fact.subject)
-    }
-    if (fact._tag === 'Grouped') return assignmentRoot(fact.expression)
-    return undefined
   }
 
   for (const element of blockNode.children) {
@@ -6406,6 +6550,29 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         subject._tag === 'Project' || subject._tag === 'IndexPlace'
           ? Object.freeze({ ...subject, access: 'ConsumeRequested' as const })
           : subject,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'PlaceReplace') {
+    const place =
+      fact.root?._tag === 'BindingFact'
+        ? hirWritePlace(fact.destination, fact.root)
+        : fact.root?._tag === 'ParameterDeclaration'
+          ? hirBorrowedWritePlace(fact.destination, fact.root)
+          : undefined
+    if (
+      place === undefined ||
+      (fact.root?._tag === 'BindingFact' && fact.root.mutability !== 'Mutable') ||
+      !fact.compatible ||
+      fact.type._tag !== 'Available'
+    ) {
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    }
+    return Object.freeze({
+      _tag: 'Replace',
+      place,
+      value: hirExpectedExpression(fact.value, place.type, 'Assignment', place.span),
       type: fact.type.type,
       span: fact.syntax.span,
     })

@@ -463,6 +463,61 @@ function lowerExpression(
     }
     case 'Move':
       return lowerExpression(fn, expression.subject)
+    case 'Replace': {
+      // Swap one writable place: the old value reads out before the replacement commits, and
+      // both halves ride the existing checked place operations.
+      const place = expression.place
+      const root =
+        place._tag === 'BorrowedWritePlace'
+          ? local(place.root.ordinal)
+          : fn.bindingLocals.get(place.root.ordinal)
+      const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
+      const type = fn.type(place.type)
+      if (root === undefined || rootType === undefined || type === undefined) return undefined
+      const selectors =
+        place._tag === 'BorrowedWritePlace'
+          ? lowerBorrowedWriteSelectors(fn, place.selectors)
+          : lowerWriteSelectors(fn, place.selectors)
+      if (selectors === undefined) return undefined
+      fn.emit(
+        Object.freeze({
+          _tag: 'CheckPlace',
+          root,
+          selectors,
+          type,
+          provenance: authored(place.span),
+        }),
+      )
+      const value = lowerExpression(fn, expression.value)
+      if (value === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ReadPlace',
+          destination,
+          root,
+          selectors,
+          type,
+          consume: true,
+          provenance: authored(expression.span),
+        }),
+      )
+      fn.emit(
+        Object.freeze({
+          _tag: 'WritePlace',
+          root,
+          selectors,
+          source: value.result,
+          rootType,
+          type,
+          mutable: true,
+          replacement: 'Copy',
+          commit: 'AfterCleanup',
+          provenance: authored(expression.span),
+        }),
+      )
+      return { result: destination }
+    }
     case 'FunctionItem': {
       const type = functionItemValueType(fn, expression)
       if (type === undefined) return undefined

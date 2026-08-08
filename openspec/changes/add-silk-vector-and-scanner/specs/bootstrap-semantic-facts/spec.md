@@ -1,5 +1,23 @@
 ## ADDED Requirements
 
+### Requirement: Place replacement swaps one writable place atomically
+
+The compiler SHALL provide `Place.replace(place, value)`: the first argument resolves as a
+writable place under the same rules as assignment, the second as a value of the place's type, and
+the expression yields the place's previous value. The place SHALL remain initialized throughout,
+so an affine owner can leave a struct field behind an exclusive reference without a partial move.
+Invalid places SHALL be rejected with the existing assignment diagnostics.
+
+#### Scenario: Swap an affine union field through an exclusive reference
+
+- **WHEN** a function swaps `self.state` for a replacement member through `&mut self` and consumes the returned old value
+- **THEN** the program compiles without partial-move diagnostics and all three engines observe the old value exactly once and the replacement thereafter
+
+#### Scenario: Reject an unwritable place
+
+- **WHEN** the first argument is rooted in an immutable binding or a shared reference
+- **THEN** the compiler reports the same deterministic diagnostic the equivalent assignment would receive
+
 ### Requirement: Conformance facts bind impl type parameters
 
 Semantic analysis SHALL publish conformance facts for parametric conformances in which the impl's

@@ -489,6 +489,8 @@ export type Operation =
       readonly root: LocalId
       readonly selectors: ReadonlyArray<PlaceSelector>
       readonly type: Type
+      /** Set when a paired same-place write licenses reading a non-Copy value out. */
+      readonly consume?: boolean
       readonly provenance: Provenance
     }
   | {
@@ -2265,7 +2267,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
-            (operation._tag === 'ReadPlace' && !isCopyType(selected))
+            (operation._tag === 'ReadPlace' && !isCopyType(selected) && operation.consume !== true)
           ) {
             violations.push(
               Object.freeze({
@@ -2706,7 +2708,7 @@ const operationText = (operation: Operation): string => {
     case 'Project':
       return `${localText(operation.destination)} = project ${localText(operation.source)}.#${operation.field.ordinal} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ReadPlace':
-      return `${localText(operation.destination)} = read-place ${localText(operation.root)}${selectorText(operation.selectors)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = read-place${operation.consume === true ? ' consume' : ''} ${localText(operation.root)}${selectorText(operation.selectors)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CheckPlace':
       return `check-place ${localText(operation.root)}${selectorText(operation.selectors)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'WritePlace':

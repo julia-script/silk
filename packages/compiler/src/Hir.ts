@@ -206,6 +206,14 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      /** Atomically reads one writable place and stores a replacement, yielding the old value. */
+      readonly _tag: 'Replace'
+      readonly place: WritePlace
+      readonly value: Expression
+      readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'UnionConvert'
       readonly source: Expression
       readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Never
@@ -605,6 +613,8 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'Project':
       case 'UnionConvert':
         return [expression._tag === 'UnionConvert' ? expression.source : expression.subject]
+      case 'Replace':
+        return [expression.value]
       case 'IndexPlace':
         return [expression.subject, expression.index]
       case 'SliceLength':
@@ -667,6 +677,8 @@ export const hasUnavailable = (self: HirFunction): boolean => {
       case 'Move':
       case 'Project':
         return walk(expression.subject)
+      case 'Replace':
+        return walk(expression.value)
       case 'UnionConvert':
         return walk(expression.source)
       case 'IndexPlace':
@@ -726,6 +738,8 @@ export const firstUnavailable = (
       case 'Move':
       case 'Project':
         return walk(expression.subject)
+      case 'Replace':
+        return walk(expression.value)
       case 'UnionConvert':
         return walk(expression.source)
       case 'IndexPlace':
@@ -1081,6 +1095,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return [
         `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
+    case 'Replace':
+      return [
+        `${indent}replace : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.value, depth + 1),
       ].join('\n')
     case 'Run':
       return [

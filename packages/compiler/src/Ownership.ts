@@ -738,6 +738,31 @@ const checkExpression = (
       )
       return
     }
+    case 'Replace': {
+      // The write half mirrors assignment: index selectors evaluate, a projected root must be
+      // usable, and a value consuming the root itself is an overlapping assignment. The place
+      // stays initialized throughout, so no partial move is recorded.
+      for (const selector of expression.place.selectors) {
+        if (selector._tag === 'Index' || selector._tag === 'SliceIndex') {
+          checkExpression(state, live, selector.index, false)
+        }
+      }
+      const rootSite: BindingSite =
+        expression.place._tag === 'WritePlace'
+          ? Object.freeze({ _tag: 'Let', binding: expression.place.root })
+          : Object.freeze({ _tag: 'Parameter', parameter: expression.place.root })
+      const rootKey = siteKey(rootSite)
+      const root = state.bindings.get(rootKey)
+      const wasLive = live.has(rootKey)
+      if (!wasLive && expression.place.selectors.length > 0 && root !== undefined) {
+        checkUse(state, live, rootSite, expression.place.span, false)
+      }
+      checkExpression(state, live, expression.value, true)
+      if (wasLive && !live.has(rootKey)) {
+        state.diagnostics.push(Diagnostic.overlappingAssignment(root?.name ?? '?', expression.span))
+      }
+      return
+    }
     default:
       return
   }
