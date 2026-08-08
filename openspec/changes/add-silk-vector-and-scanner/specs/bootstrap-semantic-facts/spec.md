@@ -18,6 +18,23 @@ Invalid places SHALL be rejected with the existing assignment diagnostics.
 - **WHEN** the first argument is rooted in an immutable binding or a shared reference
 - **THEN** the compiler reports the same deterministic diagnostic the equivalent assignment would receive
 
+### Requirement: Slot copy reads Copy elements without consuming them
+
+The unsafe storage vocabulary SHALL include `Slot.copy`: a qualified unsafe operation that reads
+one initialized slot's value without ending its initialization, valid only for Copy element
+types. A copy of a non-Copy element SHALL be rejected when the concrete instantiation is
+verified, and initializedness remains the unsafe caller's obligation exactly as for `Slot.take`.
+
+#### Scenario: Copy twice then take once
+
+- **WHEN** unsafe code copies the same initialized Copy slot twice and then takes it
+- **THEN** both copies observe the stored value, the take still succeeds, and all three engines agree on the result
+
+#### Scenario: Reject a non-Copy element copy
+
+- **WHEN** unsafe code copies a slot whose concrete element type owns cleanup obligations
+- **THEN** the instantiation is rejected before any engine executes it
+
 ### Requirement: Conformance facts bind impl type parameters
 
 Semantic analysis SHALL publish conformance facts for parametric conformances in which the impl's

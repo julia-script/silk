@@ -310,6 +310,7 @@ export interface AllocationTraceEvent {
     | 'SlotProject'
     | 'SlotWrite'
     | 'SlotTake'
+    | 'SlotCopy'
     | 'SlotDrop'
     | 'AllocationRelease'
   readonly function: DeclarationIndex.CanonicalId
@@ -1711,6 +1712,35 @@ function executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'SlotTake',
+                function: fn.id,
+                ticket: slot.ticket,
+                index: slot.index,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'SlotCopy': {
+            const slot = read(operation.slot).value
+            if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed Slot.copy with mismatched provenance')
+            }
+            const allocation = state.allocations.get(slot.ticket)
+            const key = slot.index.toString()
+            const selected = allocation?.values.get(key)
+            if (allocation === undefined || !allocation.active || selected === undefined) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Slot.copy requires live initialized storage',
+                span: operation.provenance.span,
+              })
+            }
+            write(operation.destination, { value: selected, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'SlotCopy',
                 function: fn.id,
                 ticket: slot.ticket,
                 index: slot.index,

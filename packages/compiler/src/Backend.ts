@@ -672,6 +672,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             operation._tag === 'RawBufferSlot' ||
             operation._tag === 'SlotWrite' ||
             operation._tag === 'SlotTake' ||
+            operation._tag === 'SlotCopy' ||
             operation._tag === 'SlotDrop',
         ),
       ) ||
@@ -743,6 +744,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotCopy' ||
           operation._tag === 'SlotDrop' ||
           // A witness-dispatched allocation can arrive without any local Allocate operation,
           // and its cleanup still calls the release shim — at any nesting depth of the plan.
@@ -1906,7 +1908,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze([]))
                   break
                 }
-                case 'SlotTake': {
+                case 'SlotTake':
+                case 'SlotCopy': {
                   const address = readLocal(operation.slot).at(0)
                   if (address === undefined || usizeType === undefined) {
                     throw new RangeError('LLVM Slot.take lost its address')

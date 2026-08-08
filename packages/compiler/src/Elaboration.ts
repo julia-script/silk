@@ -7070,6 +7070,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
     const nestedSlotLoanEnds =
       fact.reference.operation === 'SlotWrite' ||
       fact.reference.operation === 'SlotTake' ||
+      fact.reference.operation === 'SlotCopy' ||
       fact.reference.operation === 'SlotDrop'
         ? fact.arguments.flatMap((argument): ReadonlyArray<Hir.BorrowId> => {
             const nested = argument.expression

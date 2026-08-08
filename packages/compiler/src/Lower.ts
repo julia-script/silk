@@ -1676,6 +1676,7 @@ function lowerExpression(
         const inherited =
           expression.operation === 'SlotWrite' ||
           expression.operation === 'SlotTake' ||
+          expression.operation === 'SlotCopy' ||
           expression.operation === 'SlotDrop'
             ? slot === undefined
               ? []

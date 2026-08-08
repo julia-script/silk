@@ -1191,6 +1191,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           expression.reference._tag === 'ResolvedBuiltin' &&
           (expression.reference.operation === 'SlotWrite' ||
             expression.reference.operation === 'SlotTake' ||
+            expression.reference.operation === 'SlotCopy' ||
             expression.reference.operation === 'SlotDrop')
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
           const candidate = argument.expression

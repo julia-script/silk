@@ -755,7 +755,8 @@ const emitOperation = (
         return storeAt(address, value, offset)
       })
     }
-    case 'SlotTake': {
+    case 'SlotTake':
+    case 'SlotCopy': {
       const address = scalar(operation.slot)
       const shape = LayoutPlan.callingShape(plan, operation.element)
       if (shape === undefined) throw new RangeError('Wasm Slot.take lost its element shape')
@@ -2006,6 +2007,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
+          operation._tag === 'SlotCopy' ||
           operation._tag === 'SlotDrop',
       ),
     )
