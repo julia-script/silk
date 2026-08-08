@@ -10,8 +10,12 @@
 - [x] 2.1 Add canonical nominal `SystemAllocator`, generic `RawBuffer<T>`, lexical `Slot<T>`, and private reclaim-entry identities with deterministic equality, substitution, ordering, traversal, and encoding.
 - [x] 2.2 Replace the provisional implementation-erased `SystemAllocator.make() -> Allocator` shortcut with nominal `SystemAllocator` construction and an ordinary `Allocator` conformance witness.
 - [x] 2.3 Index `impl Allocator for Provider` mappings and validate that the selected qualified actor operation has exclusive provider access, validated `Layout` input, `Allocation` success, and only allocation-free `OutOfMemory` failure.
-- [x] 2.4 Extend capability provision to accept a concrete nominal provider plus its conformance witness while keeping the requirement keyed by capability and role and the provider borrow call-scoped.
-- [x] 2.5 Add a user-authored deterministic quota allocator fixture through the same conformance path and reject missing, duplicate, foreign-module, or contract-incompatible implementations.
+> **Open:** 2.4 and 2.5 are not implemented. `Lower.ts` discards the provider in the
+> `EffectProvide` branch and always emits the builtin `Allocate`, so a user-authored
+> `impl Allocator for X` is indexed and typechecked but never dispatched to. 11.3 depends on 2.5.
+
+- [ ] 2.4 Extend capability provision to accept a concrete nominal provider plus its conformance witness while keeping the requirement keyed by capability and role and the provider borrow call-scoped.
+- [ ] 2.5 Add a user-authored deterministic quota allocator fixture through the same conformance path and reject missing, duplicate, foreign-module, or contract-incompatible implementations.
 - [x] 2.6 Add semantic and requirement-row tests for default and named roles, two simultaneous allocator providers, nominal provider retention in facts, and zero allocator-kind branches.
 
 ## 3. Self-contained Allocation authority
@@ -97,5 +101,5 @@
 
 - [x] 12.1 Run focused compiler, runtime-shim, native, Wasm, language-highlighting, and Labs tests throughout implementation and resolve every in-scope failure.
 - [x] 12.2 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; report any failure with its exact command and provenance.
-- [ ] 12.3 Run `pnpm release:candidate` because compiler/runtime contents, language syntax, public artifacts, and package exports change.
-- [ ] 12.4 Run strict OpenSpec validation and inspect the final diff for named scopes, retained provider dependencies, allocator-kind branches, ambient/default allocation, public free, implicit zeroing, runtime initialization bitmaps, collection behavior, general finalizers, or unrelated changes.
+- [x] 12.3 Run `pnpm release:candidate` because compiler/runtime contents, language syntax, public artifacts, and package exports change.
+- [x] 12.4 Run strict OpenSpec validation and inspect the final diff for named scopes, retained provider dependencies, allocator-kind branches, ambient/default allocation, public free, implicit zeroing, runtime initialization bitmaps, collection behavior, general finalizers, or unrelated changes.
