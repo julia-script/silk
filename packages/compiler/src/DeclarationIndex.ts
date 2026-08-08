@@ -2864,6 +2864,36 @@ export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefine
     : undefined
 }
 
+/** Tests whether every value of this concrete type copies freely (no affine obligation). */
+export const copyType = (
+  self: Index,
+  type: Type.Type,
+  visiting: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
+  if (Type.isFixedArray(type)) return copyType(self, type.element, visiting)
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
+  const key = Type.key(type)
+  if (visiting.has(key)) return false
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return false
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const next = new Set(visiting).add(key)
+  return declaration.fields.every(
+    (field) =>
+      field.declaredType._tag === 'Resolved' &&
+      copyType(self, Type.substitute(field.declaredType.type, substitution), next),
+  )
+}
+
 /** Tests whether a value of this type can retain lexical storage through its fields. */
 export const containsLexicalBorrow = (
   self: Index,

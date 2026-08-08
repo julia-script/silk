@@ -127,6 +127,7 @@ export const make = Effect.fn('Analysis.make')(function* (
   const baseDiagnostics = Diagnostic.merge(
     frontendDiagnostics,
     Instances.violationDiagnostics(instances),
+    Instances.copyDropViolations(instances, index),
   )
   const target = Target.select(request.target)
   const specializationError =

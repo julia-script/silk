@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
@@ -77,6 +77,35 @@ export interface PolymorphicRecursion {
   readonly caller: InstanceKey
   readonly target: InstanceKey
 }
+
+/**
+ * Rejects reachable Drop hook instantiations whose concrete provider is Copy. A parametric
+ * conformance defers the header-time Copy prohibition here, where the arguments are known.
+ */
+export const copyDropViolations = (
+  self: Discovery,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  Object.freeze(
+    self.instances.flatMap((instance) => {
+      // Hook members carry the compiler-reserved canonical name shape `drop@impl#<ordinal>`.
+      if (!instance.key.declaration.name.startsWith('drop@impl#')) return []
+      if (instance.key.typeArguments.length === 0) return []
+      const parameter = instance.function.declaration.parameters.at(0)
+      if (parameter?.declaredType._tag !== 'Resolved') return []
+      const self_ = Type.substitute(parameter.declaredType.type, instance.substitution)
+      if (!Type.isReference(self_)) return []
+      const provider = self_.target
+      return DeclarationIndex.copyType(index, provider)
+        ? [
+            Diagnostic.invalidDropHook(
+              `Copy type ${Type.encode(provider)} cannot implement Drop`,
+              instance.function.declaration.syntax.span,
+            ),
+          ]
+        : []
+    }),
+  )
 
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (self: Discovery): ReadonlyArray<Diagnostic.Diagnostic> =>

@@ -11,7 +11,7 @@
 - [x] 2.1 Index parametric conformances with bound parameter lists; validate Drop hook shape with parameters in scope; defer the Copy prohibition to instantiation for parametric impls only
 - [x] 2.2 Reject unbound, duplicate, and undeclared impl parameters with deterministic diagnostics; add DeclarationIndex/Elaboration tests for each rejection and for parameter binding across hook signatures
 - [x] 2.3 Substitute concrete arguments into parametric conformances during instance discovery so each reachable instantiation yields one normalized concrete witness or hook instance; add Instances tests covering two element types under one impl
-- [ ] 2.4 Fire the Copy-cannot-Drop rejection at instantiation with the instantiated type in the message; test with an element type that makes the provider Copy
+- [x] 2.4 Fire the Copy-cannot-Drop rejection at instantiation with the instantiated type in the message; test with an element type that makes the provider Copy
 - [x] 2.5 Verify witness dispatch and Drop cleanup through a parametric conformance execute identically to a hand-written concrete conformance on all three engines
 - [x] 2.6 Elaborate Drop hook bodies as ordinary functions with canonical identities and the impl's type parameters in scope (discovered gap: hook bodies were never elaborated, so hooks never executed despite the archived spec requiring it)
 - [x] 2.7 Add a hook-bearing cleanup plan variant in Ownership that runs the hook before field cleanup

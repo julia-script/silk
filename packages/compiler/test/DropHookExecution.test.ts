@@ -177,6 +177,36 @@ pub fn main() -> I32 {
   return first + second
 }`
 
+/** A parametric Drop over a struct that is all-Copy at some instantiation. */
+const copyInstantiation = `struct Holder<T> {
+  value: T
+}
+
+impl<T> Drop for Holder<T> {
+  fn drop(self: &mut Holder<T>) -> Unit { return Unit.make() }
+}
+
+fn keep<T>(value: T) -> I32 {
+  let held = Holder<T> { value: move value }
+  return 1
+}
+
+pub fn main() -> I32 { return keep<I32>(41) + 1 }`
+
+it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'drop-hook/copy-instantiation',
+      ascii(copyInstantiation),
+      'wasm32-unknown-unknown',
+    )
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message),
+      'Invalid Drop hook: Copy type drop-hook/copy-instantiation.Holder<I32> cannot implement Drop',
+    )
+  }),
+)
+
 it.effect('monomorphizes one parametric Drop conformance per reachable instantiation', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(

@@ -242,6 +242,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const diagnostics = Diagnostic.merge(
     frontendDiagnostics,
     Instances.violationDiagnostics(discovery),
+    Instances.copyDropViolations(discovery, index),
   )
   if (Diagnostic.hasErrors(diagnostics)) {
     return Object.freeze({
