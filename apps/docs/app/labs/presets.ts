@@ -269,7 +269,7 @@ pub fn main() -> I32 {
   ),
   one(
     'allocation',
-    'Early drop releases the buffer once',
+    'ok · Early drop releases the buffer once',
     `effect fn store() -> I32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[I32; 2]>()
@@ -292,7 +292,7 @@ pub fn main() -> I32 {
   ),
   one(
     'allocation',
-    'Zero-sized elements keep distinct owners',
+    'ok · Zero-sized elements keep distinct owners',
     `struct Empty {}
 
 effect fn store() -> I32 ! OutOfMemory {
@@ -317,7 +317,7 @@ pub fn main() -> I32 {
   ),
   one(
     'allocation',
-    'Raw storage outside unsafe is rejected',
+    'fail · Raw storage outside unsafe is rejected',
     `effect fn store() -> I32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[I32; 2]>()
@@ -337,7 +337,7 @@ pub fn main() -> I32 {
   ),
   one(
     'allocation',
-    'Drop hook runs before field cleanup',
+    'ok · Drop hook runs before field cleanup',
     `struct Guard { buffer: RawBuffer<I32> }
 
 impl Drop for Guard {
@@ -409,7 +409,7 @@ pub fn main() -> I32 {
   // ---- first-class callables -----------------------------------------------------------
   one(
     'callables',
-    'Named function and stored section',
+    'ok · Named function and stored section',
     `fn identity(value: I32) -> I32 { return value }
 pub fn main() -> I32 {
   let named = identity
@@ -420,7 +420,7 @@ pub fn main() -> I32 {
   ),
   one(
     'callables',
-    'Shared reusable section',
+    'trap · Shared reusable section',
     `fn read(value: I32, values: &[I32]) -> I32 { return value + values[0] }
 pub fn main() -> I32 {
   let values = [1]
@@ -431,7 +431,7 @@ pub fn main() -> I32 {
   ),
   one(
     'callables',
-    'Exclusive reusable section',
+    'ok · Exclusive reusable section',
     `fn write(value: I32, values: &mut [I32]) -> I32 {
   values[0] = value
   return values[0]
@@ -448,7 +448,7 @@ pub fn main() -> I32 {
   ),
   one(
     'callables',
-    'Consuming section',
+    'ok · Consuming section',
     `struct Token { value: I32 }
 fn consume(value: I32, token: Token) -> I32 { return value + token.value }
 pub fn main() -> I32 {
@@ -460,7 +460,7 @@ pub fn main() -> I32 {
   ),
   one(
     'callables',
-    'Invalid consuming reuse',
+    'fail · Invalid consuming reuse',
     `struct Token { value: I32 }
 fn consume(value: I32, token: Token) -> I32 { return value + token.value }
 pub fn main() -> I32 {
@@ -473,7 +473,7 @@ pub fn main() -> I32 {
   ),
   one(
     'callables',
-    'Generic stored section',
+    'ok · Generic stored section',
     `fn choose<T>(value: T, fallback: T) -> T { return move value }
 pub fn main() -> I32 {
   let chosen = choose<I32>(0)
@@ -483,7 +483,7 @@ pub fn main() -> I32 {
   ),
   one(
     'callables',
-    'Dropped uninvoked section',
+    'ok · Dropped uninvoked section',
     `struct Token { value: I32 }
 fn consume(value: I32, token: Token) -> I32 { return value + token.value }
 pub fn main() -> I32 {
@@ -496,14 +496,14 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Callable map section',
+    'ok · Callable map section',
     `effect fn succeed(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return run succeed(2) |> Effect.map(I32.add(40)) }
 `,
   ),
   one(
     'effects',
-    'Effectful Logger tap',
+    'ok · Effectful Logger tap',
     `struct Logger {}
 effect fn succeed(value: I32) -> I32 { return value }
 effect fn log(value: I32) -> I32 ? &Logger { return value }
@@ -517,7 +517,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Mutable mapped callback',
+    'ok · Mutable mapped callback',
     `effect fn succeed(value: I32) -> I32 { return value }
 fn increment(value: I32, state: &mut [I32]) -> I32 {
   state[0] = state[0] + 1
@@ -535,7 +535,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Take-once retry rejection',
+    'fail · Take-once retry rejection',
     `struct Payload { value: I32 }
 effect fn succeed(value: I32) -> I32 { return value }
 fn consume(value: I32, payload: Payload) -> I32 { return value + payload.value }
@@ -549,7 +549,7 @@ pub fn main() -> I32 {
   ),
   one(
     'effects',
-    'Nested map result',
+    'ok · Nested map result',
     `effect fn succeed(value: I32) -> I32 { return value }
 effect fn double(value: I32) -> I32 { return value * 2 }
 pub fn main() -> I32 { return run run succeed(21) |> Effect.map(double) }
@@ -557,14 +557,14 @@ pub fn main() -> I32 { return run run succeed(21) |> Effect.map(double) }
   ),
   one(
     'effects',
-    'Ungrouped run composes first',
+    'ok · Ungrouped run composes first',
     `effect fn succeed(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return run succeed(2) |> Effect.map(I32.add(40)) }
 `,
   ),
   one(
     'effects',
-    'Grouped run transforms result',
+    'ok · Grouped run transforms result',
     `effect fn succeed(value: I32) -> I32 { return value }
 pub fn main() -> I32 { return (run succeed(2)) |> I32.add(40) }
 `,
@@ -641,7 +641,7 @@ pub fn main() -> I32 { return identity(@) }`,
     'syntax',
     'fail · Wrong arity',
     `pub fn choose(left: I32, right: I32) -> I32 { return left }
-pub fn main() -> I32 { return choose(1) }`,
+pub fn main() -> I32 { return choose(1, 2, 3) }`,
   ),
   one(
     'syntax',

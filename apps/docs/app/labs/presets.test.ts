@@ -42,13 +42,13 @@ const allocationPreset = presets.find(
   (preset) => preset.label === 'ok · Self-contained Allocation contract',
 )
 const callablePreset = presets.find(
-  (preset) => preset.label === 'Named function and stored section',
+  (preset) => preset.label === 'ok · Named function and stored section',
 )
 const ungroupedRunPreset = presets.find(
-  (preset) => preset.label === 'Ungrouped run composes first',
+  (preset) => preset.label === 'ok · Ungrouped run composes first',
 )
 const groupedRunPreset = presets.find(
-  (preset) => preset.label === 'Grouped run transforms result',
+  (preset) => preset.label === 'ok · Grouped run transforms result',
 )
 
 const acceptanceContext = (
@@ -277,10 +277,10 @@ describe('preset catalog', () => {
   // Usize is 64 bits and one where it is 32.
   it('runs every accepted allocation preset to completion on both target widths', () => {
     for (const label of [
-      'Self-contained Allocation contract',
-      'Early drop releases the buffer once',
-      'Zero-sized elements keep distinct owners',
-      'Drop hook runs before field cleanup',
+      'ok · Self-contained Allocation contract',
+      'ok · Early drop releases the buffer once',
+      'ok · Zero-sized elements keep distinct owners',
+      'ok · Drop hook runs before field cleanup',
     ]) {
       const preset = presets.find((candidate) => candidate.label === label)
       expect(preset, label).toBeDefined()
@@ -300,7 +300,7 @@ describe('preset catalog', () => {
   // frontend rejection rather than something the evaluator quietly runs.
   it('keeps raw storage outside an unsafe block rejected before evaluation', () => {
     const preset = presets.find(
-      (candidate) => candidate.label === 'Raw storage outside unsafe is rejected',
+      (candidate) => candidate.label === 'fail · Raw storage outside unsafe is rejected',
     )
     expect(preset).toBeDefined()
     if (preset === undefined) return
