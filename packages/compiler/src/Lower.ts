@@ -7,6 +7,7 @@ import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
  * Lowering preserves source control as canonical acyclic regions. Repetition is represented by a
@@ -810,6 +811,27 @@ function lowerExpression(
             provenance: authored(expression.span),
           }),
         )
+        // A constructed effect holds its argument borrows until the run that consumes it: the
+        // ownership facts record that end site, so the loans release here.
+        for (const loan of fn.ownership?.loans ?? []) {
+          if (loan.origin !== 'EffectCapture' && loan.origin !== 'ValueBorrow') continue
+          if (
+            loan.endSpan.start !== expression.span.start ||
+            loan.endSpan.end !== expression.span.end
+          )
+            continue
+          const held = fn.loanLocals.get(borrowKey(loan.id))
+          if (held === undefined) continue
+          fn.emit(
+            Object.freeze({
+              _tag: 'EndLoan',
+              borrow: loan.id,
+              slice: held,
+              provenance: generated(expression.span),
+            }),
+          )
+          fn.loanLocals.delete(borrowKey(loan.id))
+        }
         return Object.freeze({ result: destination })
       }
       const recipe =
@@ -1288,6 +1310,20 @@ function lowerExpression(
             provenance: authored(expression.span),
           }),
         )
+        // The effect held its argument borrows for exactly this run; end them here.
+        for (const borrow of recipe.loanEnds) {
+          const held = fn.loanLocals.get(borrowKey(borrow))
+          if (held === undefined) continue
+          fn.emit(
+            Object.freeze({
+              _tag: 'EndLoan',
+              borrow,
+              slice: held,
+              provenance: generated(expression.span),
+            }),
+          )
+          fn.loanLocals.delete(borrowKey(borrow))
+        }
         return Object.freeze({ result: destination })
       }
       fn.emit(
@@ -1303,6 +1339,19 @@ function lowerExpression(
           provenance: authored(expression.span),
         }),
       )
+      for (const borrow of recipe.loanEnds) {
+        const held = fn.loanLocals.get(borrowKey(borrow))
+        if (held === undefined) continue
+        fn.emit(
+          Object.freeze({
+            _tag: 'EndLoan',
+            borrow,
+            slice: held,
+            provenance: generated(expression.span),
+          }),
+        )
+        fn.loanLocals.delete(borrowKey(borrow))
+      }
       fn.emit(
         Object.freeze({
           _tag: 'UnpackEffectSuccess',
@@ -1330,6 +1379,16 @@ function lowerExpression(
         return undefined
       }
       const destination = fn.alloc(targetType)
+      // Canonical union member order can change under substitution (parameter keys sort
+      // differently from concrete keys), so the mapping recomputes at the instantiation.
+      const substituted = TypeCompatibility.check(
+        fn.semantic(expression.sourceType),
+        fn.semantic(expression.target),
+      )
+      const mappings =
+        substituted._tag === 'Inject' || substituted._tag === 'Widen'
+          ? substituted.mappings
+          : expression.mappings
       fn.emit(
         Object.freeze({
           _tag: 'ConvertUnion',
@@ -1338,7 +1397,7 @@ function lowerExpression(
           sourceType,
           targetType,
           conversion: expression.conversion,
-          mappings: expression.mappings,
+          mappings,
           sourceShape,
           targetShape,
           access: expression.access,
@@ -1702,7 +1761,8 @@ function lowerExpression(
         return Object.freeze({ result })
       }
       if (expression.operation === 'LayoutOf') {
-        const [element] = expression.typeArguments
+        const raw = expression.typeArguments.at(0)
+        const element = raw === undefined ? undefined : fn.semantic(raw)
         const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
         const layoutEntry = Layout.entry(fn.layout, Type.layout)
         const type = fn.type(Type.layout)
@@ -1787,9 +1847,8 @@ function lowerExpression(
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
         const type = fn.type(expression.type)
-        const element = Type.isRawBuffer(expression.type)
-          ? expression.type.arguments.at(0)
-          : undefined
+        const raw = Type.isRawBuffer(expression.type) ? expression.type.arguments.at(0) : undefined
+        const element = raw === undefined ? undefined : fn.semantic(raw)
         const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
         if (
           allocation === undefined ||
@@ -1851,7 +1910,7 @@ function lowerExpression(
             destination,
             buffer,
             index,
-            element,
+            element: fn.semantic(element),
             type,
             provenance: authored(expression.span),
           }),
@@ -1881,7 +1940,7 @@ function lowerExpression(
             destination,
             slot,
             value,
-            element: slotElement,
+            element: fn.semantic(slotElement),
             type,
             provenance: authored(expression.span),
           }),
@@ -1898,7 +1957,7 @@ function lowerExpression(
             _tag: 'SlotTake' as const,
             destination,
             slot,
-            element: expression.type,
+            element: fn.semantic(expression.type),
             type,
             provenance: authored(expression.span),
           }),
@@ -1915,7 +1974,7 @@ function lowerExpression(
             _tag: 'SlotCopy' as const,
             destination,
             slot,
-            element: expression.type,
+            element: fn.semantic(expression.type),
             type,
             provenance: authored(expression.span),
           }),
@@ -1942,8 +2001,8 @@ function lowerExpression(
             _tag: 'SlotDrop' as const,
             destination,
             slot,
-            element,
-            cleanup: concreteCleanup(fn, element),
+            element: fn.semantic(element),
+            cleanup: concreteCleanup(fn, fn.semantic(element)),
             type,
             provenance: authored(expression.span),
           }),

@@ -264,6 +264,8 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'ConvertUnion':
     case 'Call':
     case 'MakeEffect':
+    case 'MakeCallable':
+    case 'ApplyCallable':
     case 'PackEffectOutcome':
     case 'UnpackEffectSuccess':
     case 'CatchEffect':
@@ -274,6 +276,16 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'ConstructArray':
     case 'Project':
     case 'ReadPlace':
+    case 'ValidateLayout':
+    case 'RepeatLayout':
+    case 'Allocate':
+    case 'RawBufferFrom':
+    case 'RawBufferCount':
+    case 'RawBufferSlot':
+    case 'SlotWrite':
+    case 'SlotTake':
+    case 'SlotCopy':
+    case 'SlotDrop':
       return operation.destination
     case 'BindMatch':
       return operation.binding.destination

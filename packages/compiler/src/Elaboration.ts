@@ -912,7 +912,7 @@ const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> 
   }
   if (callee.kind !== 'FieldProjectionExpression') return Object.freeze([])
   const subject = callee.children.find(isExpressionNode)
-  const member = directToken(callee, 'Identifier')
+  const member = directToken(callee, 'Identifier') ?? directToken(callee, 'DropKeyword')
   const qualifier = subject === undefined ? undefined : callReferenceTokens(subject).at(-1)
   return qualifier === undefined || member === undefined
     ? Object.freeze([])

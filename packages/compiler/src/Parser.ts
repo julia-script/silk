@@ -532,7 +532,12 @@ function parseCallExpression(initial: State, reservedForEnclosingCalls: number):
   let state = callee.state
   if (nextSignificantKind(state) === 'Dot') {
     const dot = expect(state, 'Dot', ['Identifier', 'LeftParenthesis'])
-    const operation = expect(dot.state, 'Identifier', ['LeftParenthesis'])
+    // `drop` stays a statement keyword, but as an operation name after a dot it is ordinary.
+    const operation = expect(
+      dot.state,
+      nextSignificantKind(dot.state) === 'DropKeyword' ? 'DropKeyword' : 'Identifier',
+      ['LeftParenthesis'],
+    )
     state = operation.state
     callee = Object.freeze({
       state,
@@ -1027,7 +1032,11 @@ function parseProjectionChain(initial: NodeResult): NodeResult {
     }
     if (nextSignificantKind(result.state) === 'Dot') {
       const dot = expect(result.state, 'Dot', ['Identifier', ...expressionFollowing])
-      const field = expect(dot.state, 'Identifier', expressionFollowing)
+      const field = expect(
+        dot.state,
+        nextSignificantKind(dot.state) === 'DropKeyword' ? 'DropKeyword' : 'Identifier',
+        expressionFollowing,
+      )
       result = Object.freeze({
         state: field.state,
         node: syntaxNode(field.state, 'FieldProjectionExpression', [
