@@ -719,10 +719,7 @@ export const selfImport = (module: string, span: SourceSpan.SourceSpan): Diagnos
     span,
   })
 
-export const reservedModuleIdentity = (
-  module: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const reservedModuleIdentity = (module: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'module',

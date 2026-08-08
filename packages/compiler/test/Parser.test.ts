@@ -294,7 +294,8 @@ fn take(state: Empty | Full) -> I32 {
 })
 
 it('recovers from a malformed impl type-parameter list inside the declaration', () => {
-  const source = 'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } } fn after() -> I32 { return 7 }'
+  const source =
+    'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } } fn after() -> I32 { return 7 }'
   const result = parseText('memory://damaged-parametric-conformance.silk', source)
   assert.isAbove(result.parserDiagnostics.length, 0)
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)

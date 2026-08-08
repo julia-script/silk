@@ -49,10 +49,7 @@ it.effect('copies initialized Copy slots without consuming them on all three eng
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42)
-    assert.strictEqual(
-      evaluated.trace.filter((event) => event._tag === 'SlotCopy').length,
-      2,
-    )
+    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'SlotCopy').length, 2)
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})

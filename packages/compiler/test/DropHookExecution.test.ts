@@ -219,10 +219,10 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
       instance.key.declaration.name.startsWith('drop@impl'),
     )
     assert.strictEqual(instances.length, 2)
-    assert.deepEqual(
-      instances.map((instance) => instance.key.typeArguments).sort(),
-      [['Bool'], ['I32']],
-    )
+    assert.deepEqual(instances.map((instance) => instance.key.typeArguments).sort(), [
+      ['Bool'],
+      ['I32'],
+    ])
 
     const run = Analysis.evaluate(snapshot)
     assert.strictEqual(run._tag, 'Completed')

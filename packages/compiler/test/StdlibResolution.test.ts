@@ -30,11 +30,9 @@ it.effect('resolves standard-library imports without vendoring source', () =>
     const library = index.modules.find((module) => module.module === 'silk/vector')
     assert.isDefined(library)
     assert.isTrue(
-      library !== undefined &&
-        library.structs.some(
-          (struct) =>
-            struct.canonical._tag === 'Canonical' && struct.canonical.id.name === 'Vector',
-        ),
+      library?.structs.some(
+        (struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === 'Vector',
+      ),
     )
   }),
 )

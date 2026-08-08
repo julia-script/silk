@@ -7,15 +7,19 @@ const ascii = (value: string): Uint8Array =>
 
 const run = (label: string, text: string) =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(`probe/${label}`, ascii(text), 'wasm32-unknown-unknown')
+    const snapshot = yield* Analysis.ofSource(
+      `probe/${label}`,
+      ascii(text),
+      'wasm32-unknown-unknown',
+    )
     const diagnostics = snapshot.diagnostics.map((d) => `${d.code}: ${d.message}`)
     const evaluation = Analysis.evaluate(snapshot)
     const wasm = yield* Effect.exit(Analysis.codegenWasm(snapshot, { mode: 'release' }))
     const wasmResult =
       wasm._tag === 'Success'
         ? (
-            new WebAssembly.Instance(new WebAssembly.Module(wasm.value.bitcode.slice()), {})
-              .exports.silk_main as () => number
+            new WebAssembly.Instance(new WebAssembly.Module(wasm.value.bitcode.slice()), {}).exports
+              .silk_main as () => number
           )()
         : String(wasm.cause).slice(0, 260)
     const native = yield* Analysis.ofSource(`probe/${label}`, ascii(text), 'aarch64-apple-darwin')
