@@ -2,7 +2,7 @@
 
 > Direction, not commitment — Now is committed; Next is planned; Later is exploration.
 > Only Now items may be promised to anyone. This document changes as we learn.
-> Last reviewed: 2026-08-07 · Review cadence: after each OpenSpec archive, or monthly when no
+> Last reviewed: 2026-08-08 · Review cadence: after each OpenSpec archive, or monthly when no
 > change ships · Scope: whole project
 
 ## Vision
@@ -13,12 +13,13 @@ tooling-friendly semantics. The first destination is the smallest coherent langu
 compiling its own compiler; broader language and ecosystem work follows evidence from that
 self-hosting core.
 
-**Current objective:** complete the self-contained owned-allocation substrate that lets a real
-compiler pass consume source-dependent input and produce source-dependent output. The accepted
-baseline now includes target-aware layouts, runtime-sized borrowed input, typed Effects, capability
-requirements and provision, first-class callables, automatic data-first sections, affine ownership,
-and deterministic cleanup. The next missing boundary is executable allocation and unsafe typed
-storage sufficient to implement growable output entirely in Silk.
+**Current objective:** implement growable compiler output in Silk. The accepted baseline now includes
+target-aware layouts, runtime-sized borrowed input, typed Effects, capability requirements and
+provision, first-class callables, automatic data-first sections, affine ownership, deterministic
+cleanup, and — as of 2026-08-08 — the self-contained owned-allocation substrate: general `Allocator`
+dispatch through user-authored conformances, affine `Allocation`, unsafe typed `RawBuffer`/`Slot`
+storage, and compiler-sealed `Drop`. The next missing piece is a useful owned sequence written
+entirely in Silk over that substrate, proven by a real scanner pass.
 
 ## Column rules
 
@@ -122,9 +123,15 @@ control remains a DAG until each backend converts it to its required target form
   one slice-taking instance and symbol; the exclusive fixture observes caller-visible replacement
   with exactly-once displaced cleanup.
 
-## Next
-
 ### Complete the self-contained owned-allocation substrate
+
+**Status: complete (2026-08-08).** `unsafe` blocks, `impl` conformances, nominal `SystemAllocator`,
+affine `Allocation`, generic `RawBuffer<T>`, lexical `Slot<T>`, and compiler-sealed `Drop` hooks run
+through every phase and all three engines. A user-authored `impl Allocator for X` dispatches to its
+own operation through an exclusive call-scoped provider loan, so a counted quota allocator — state
+decremented through `&mut self` — exhausts identically on the evaluator, Wasm, and native
+executables. Allocation failure stays typed and allocation-free, a rejected request acquires
+nothing, and owners live at a failing run site release before the failure propagates.
 
 - **Problem:** Slices can borrow source-dependent input, but a compiler pass still cannot own an
   output whose size emerges at runtime. The general prerequisites are now executable: target-sized
@@ -145,10 +152,17 @@ control remains a DAG until each backend converts it to its required target form
   1. General allocator dispatch, `SystemAllocator`, affine `Allocation`, and typed `OutOfMemory`
   2. Restricted `Drop` and unsafe typed storage operations with deterministic rollback
   3. Differential allocation and cleanup evidence across evaluator, LLVM, Wasm, and `/labs`
+- **Evidence:** A construction guard carrying runtime-counted move-only elements on the substrate
+  alone — no `Vector` or collection intrinsic — returns `42` from the evaluator, an instantiated Wasm
+  module, and a linked native executable, with one acquire and one release around ordered `Slot`
+  writes and takes. The failure-ordinal sweep proves atomic rejection, release-once, unchanged
+  `OutOfMemory`, and a successful subsequent run; MIR and Wasm bytes are identical across analyses.
 - **Links:** [ownership and scoped allocation](../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md) ·
   [types and values](../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md) ·
   [compiler pipeline](../wayfinder/bootstrap-language/issues/06-bootstrap-compiler-pipeline.md) ·
   [bootstrap syntax](../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md)
+
+## Next
 
 ### Implement growable compiler output in Silk
 
@@ -210,6 +224,17 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-08: Completed the self-contained owned-allocation substrate and promoted the Silk-written
+  `Vector<T>` and scanner change to the current objective. `unsafe` blocks, `impl` conformances,
+  nominal `SystemAllocator`, affine `Allocation`, generic `RawBuffer<T>`, lexical `Slot<T>`, and
+  compiler-sealed `Drop` hooks run through every phase and all three engines, with no named scope,
+  allocator-kind branch, ambient allocator, public `free`, implicit zeroing, or initialization
+  bitmap. Provision dispatches to user-authored allocator witnesses through an exclusive
+  call-scoped loan, and field projection through nominal references — the prerequisite for a
+  witness reading its own provider state — landed with it, making a counted quota allocator
+  expressible. Two pre-existing defects surfaced and were fixed on the way: ownership never
+  descended into lazy `effect` bodies, so use-after-move inside them went unreported, and failed
+  run propagation returned past every cleanup region, leaking owners live at the run site.
 - 2026-08-07: Settled the defining execution model around `Effect`, `effect {}`, and `effect fn`;
   rejected named lifetime scopes and allocator privilege in favor of affine self-contained owners
   with deterministic `Drop`. Shipped first-class callable values and automatic data-first sections,
