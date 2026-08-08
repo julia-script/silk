@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -15,75 +15,20 @@ const ascii = (value: string): Uint8Array =>
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-scanner-acceptance-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
-const scannerProgram = (allocator: string, allocatorSupport = ''): string =>
-  `import silk.vector { Vector, make, append, get, length, capacity }
-
-${allocatorSupport}
-
-struct U8 { value: I32 }
-struct Token { kind: I32 }
-
-fn observe(kind: I32) -> I32 { return kind }
-
-effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemory ? &mut Allocator {
-  let mut tokens = make<Token>()
-  let mut index = 0
-  while index < source.length {
-    let byte = source[index].value
-    let mut kind = 3
-    if byte == 1 { kind = 1 }
-    if byte == 2 { kind = 2 }
-    let token = Token { kind: kind }
-    let appended = run append<Token>(&mut tokens, move token)
-    index = index + 1
-  }
-  return move tokens
-}
-
-effect fn build() -> I32 ! OutOfMemory {
-  let mut allocator = ${allocator}
-  let source = [
-    U8 { value: 1 }, U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 },
-    U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 }, U8 { value: 2 },
-    U8 { value: 3 }, U8 { value: 1 }
-  ]
-  let pending = scan(&source) |> Allocator.provide(&mut allocator)
-  let mut tokens = run pending
-  if length<Token>(&tokens) == 10 {} else { return 0 }
-  if capacity<Token>(&tokens) == 16 {} else { return 1 }
-  let token0 = get<Token>(&mut tokens, 0)
-  let token1 = get<Token>(&mut tokens, 1)
-  let token2 = get<Token>(&mut tokens, 2)
-  let token3 = get<Token>(&mut tokens, 3)
-  let token4 = get<Token>(&mut tokens, 4)
-  let token5 = get<Token>(&mut tokens, 5)
-  let token6 = get<Token>(&mut tokens, 6)
-  let token7 = get<Token>(&mut tokens, 7)
-  let token8 = get<Token>(&mut tokens, 8)
-  let token9 = get<Token>(&mut tokens, 9)
-  let kind0 = observe(token0.kind)
-  let kind1 = observe(token1.kind)
-  let kind2 = observe(token2.kind)
-  let kind3 = observe(token3.kind)
-  let kind4 = observe(token4.kind)
-  let kind5 = observe(token5.kind)
-  let kind6 = observe(token6.kind)
-  let kind7 = observe(token7.kind)
-  let kind8 = observe(token8.kind)
-  let kind9 = observe(token9.kind)
-  return kind0 + kind1 + kind2 + kind3 + kind4 + kind5 + kind6 + kind7 + kind8 + kind9 + 23
-}
-
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
-
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
-
-export const scannerSource = scannerProgram('SystemAllocator.make()')
+export const scannerSource = readFileSync(
+  new URL('./fixtures/scanner-acceptance/Main.silk', import.meta.url),
+  'utf8',
+)
 
 const quotaScannerSource = (quota: number): string =>
-  scannerProgram(
-    `QuotaAllocator { remaining: ${quota} }`,
-    `struct QuotaAllocator { remaining: I32 }
+  scannerSource
+    .replace(
+      'let mut allocator = SystemAllocator.make()',
+      `let mut allocator = QuotaAllocator { remaining: ${quota} }`,
+    )
+    .replace(
+      'struct U8 { value: I32 }',
+      `struct QuotaAllocator { remaining: I32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
   if self.remaining == 0 { fail OutOfMemory {} }
@@ -94,8 +39,10 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
   return move allocation
 }
 
-impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }`,
-  )
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+
+struct U8 { value: I32 }`,
+    )
 
 it.effect(
   'returns an owned token vector through two reallocations on all three engines',
