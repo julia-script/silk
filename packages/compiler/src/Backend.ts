@@ -960,6 +960,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             ),
             ...borrowedCaptureRoots,
           ])
+          // Address roots reload after any call that could mutate them; those reloads must not
+          // leak SSA values across blocks, so they persist through the mutable-root storage.
+          for (const root of addressRoots) mutableRoots.add(root)
           const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
           for (const root of [...mutableRoots].sort((left, right) => left - right)) {
             const logicalType = entry.fn.localTypes.at(root)
@@ -1340,7 +1343,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               ),
             )
           })
+          let materializeSequence = 0
           const materializeAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
+            const materializeId = materializeSequence++
             const base = addressStorage.get(root.ordinal)
             const logicalType = entry.fn.localTypes.at(root.ordinal)
             if (base === undefined || logicalType === undefined) {
@@ -1362,7 +1367,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               yield* FunctionBody.store(
                 body,
                 stored,
-                yield* constantBytePointer(base, offset, `addr${root.ordinal}_${ordinal}`),
+                yield* constantBytePointer(base, offset, `addr${root.ordinal}_${ordinal}_${materializeId}`),
               )
             }
             materializedAddressRoots.add(root.ordinal)
@@ -1386,8 +1391,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
             yield* materializeAddressRoot(root)
           })
+          let reloadSequence = 0
           const reloadAddressRoot = Effect.fnUntraced(function* (root: number) {
             if (!materializedAddressRoots.has(root)) return
+            const reloadId = reloadSequence++
             const base = addressStorage.get(root)
             const logicalType = entry.fn.localTypes.at(root)
             if (base === undefined || logicalType === undefined) {
@@ -1405,8 +1412,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 yield* FunctionBody.load(
                   body,
                   laneType(lane),
-                  yield* constantBytePointer(base, offset, `reload${root}_${ordinal}_ptr`),
-                  `reload${root}_${ordinal}`,
+                  yield* constantBytePointer(base, offset, `reload${root}_${ordinal}_${reloadId}_ptr`),
+                  `reload${root}_${ordinal}_${reloadId}`,
                 ),
               )
             }
@@ -1618,7 +1625,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       body,
                       laneType(callingLane),
                       pointer,
-                      `mut${root}_${lane}_load`,
+                      `mut${root}_${lane}_load_b${block.id.ordinal}`,
                     ),
                   )
                 }
@@ -4093,7 +4100,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                             body,
                             entry.resultType,
                             returned,
-                            'return_value',
+                            `return_value_b${block.id.ordinal}`,
                           ),
                         )
                 yield* locate(terminator.provenance.span, instruction)
