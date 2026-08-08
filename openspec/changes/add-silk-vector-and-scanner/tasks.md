@@ -41,7 +41,7 @@
 
 - [x] 5.1 Write the scanner acceptance program: borrow `&[U8]` source, return owned `Vector<Token>`, sized to force at least two reallocations
 - [x] 5.2 Differential gate: identical token sequences and exit values in evaluator, native, and Wasm
-- [ ] 5.3 Failure-ordinal sweep over every scanner allocation: typed `OutOfMemory`, rollback, zero leaks at each ordinal (reuse the dispatch-change sweep harness)
+- [x] 5.3 Failure-ordinal sweep over every scanner allocation: typed `OutOfMemory`, rollback, zero leaks at each ordinal (reuse the dispatch-change sweep harness)
 - [ ] 5.4 Fresh-process determinism over the scanner and its stdlib imports
 
 ## 6. Inspector
