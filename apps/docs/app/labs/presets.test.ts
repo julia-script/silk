@@ -50,6 +50,17 @@ const ungroupedRunPreset = presets.find(
 const groupedRunPreset = presets.find(
   (preset) => preset.label === 'ok · Grouped run transforms result',
 )
+const ownedSequenceLabels = [
+  'ok · Vector growing append',
+  'ok · Vector failed growth preserves contents',
+  'ok · Vector destruction order',
+  'ok · Vector early drop',
+  'ok · Scanner returns owned tokens',
+] as const
+const ownedSequencePresets = ownedSequenceLabels.map((label) =>
+  presets.find((preset) => preset.label === label),
+)
+const scannerPreset = ownedSequencePresets.at(-1)
 
 const acceptanceContext = (
   preset: (typeof presets)[number],
@@ -294,6 +305,89 @@ describe('preset catalog', () => {
           expect(evaluation.result.value, `${label} · ${target}`).toBe(42)
       }
     }
+  })
+
+  it('keeps the scanner preset byte-identical to the acceptance fixture', () => {
+    expect(scannerPreset).toBeDefined()
+    if (scannerPreset === undefined) return
+    const fixture = readFileSync(
+      new URL(
+        '../../../../packages/compiler/test/fixtures/scanner-acceptance/Main.silk',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+    expect(scannerPreset.modules.main).toBe(fixture)
+  })
+
+  it('projects every owned-sequence preset through the coordinated analysis panes', () => {
+    for (const [index, label] of ownedSequenceLabels.entries()) {
+      const preset = ownedSequencePresets.at(index)
+      expect(preset, label).toBeDefined()
+      if (preset === undefined) continue
+      for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown']) {
+        const snapshot = snapshotOf(preset, target)
+        expect(Analysis.diagnostics(snapshot), `${label} · ${target}`).toEqual([])
+        const context = acceptanceContext(preset, snapshot)
+        for (const viewId of ['ownership', 'mir', 'evaluation']) {
+          const view = viewById(viewId)
+          expect(view, `${label} · ${viewId}`).toBeDefined()
+          expect(view?.project(context).rows.length, `${label} · ${viewId}`).toBeGreaterThan(0)
+        }
+        const evaluated = Analysis.evaluate(snapshot)
+        expect(evaluated._tag, `${label} · ${target}`).toBe('Completed')
+        if (evaluated._tag === 'Completed')
+          expect(evaluated.result.value, `${label} · ${target}`).toBe(42)
+      }
+    }
+  })
+
+  it('projects the parametric Vector Drop conformance and its hook', () => {
+    const preset = ownedSequencePresets.at(0)
+    expect(preset).toBeDefined()
+    if (preset === undefined) return
+    const snapshot = snapshotOf(preset, 'wasm32-unknown-unknown')
+    const view = viewById('index')
+    expect(view).toBeDefined()
+    const rows = view?.project(acceptanceContext(preset, snapshot)).rows ?? []
+    expect(
+      rows.some((row) => row.label.startsWith('impl<T>') && row.label.includes('Vector<T>')),
+    ).toBe(true)
+    expect(rows.some((row) => row.detail?.includes('drop hook'))).toBe(true)
+  })
+
+  it('shows growth, rollback, destruction, early drop, and scanner tokens in evaluation', () => {
+    const outcomes = new Map(
+      ownedSequencePresets.flatMap((preset) => {
+        if (preset === undefined) return []
+        const evaluated = Analysis.evaluate(snapshotOf(preset, 'wasm32-unknown-unknown'))
+        return evaluated._tag === 'Completed' ? [[preset.label, evaluated.trace] as const] : []
+      }),
+    )
+    const tags = (label: (typeof ownedSequenceLabels)[number]) =>
+      (outcomes.get(label) ?? []).map((event) => event._tag)
+    expect(tags('ok · Vector growing append')).toEqual(
+      expect.arrayContaining(['AllocationAcquire', 'SlotTake', 'SlotWrite', 'AllocationRelease']),
+    )
+    expect(tags('ok · Vector failed growth preserves contents')).toEqual(
+      expect.arrayContaining(['EffectFailure', 'AllocationAcquire', 'AllocationRelease']),
+    )
+    expect(tags('ok · Vector destruction order')).toEqual(
+      expect.arrayContaining(['SlotDrop', 'AllocationRelease']),
+    )
+    expect(tags('ok · Vector early drop')).toEqual(
+      expect.arrayContaining(['SlotDrop', 'AllocationRelease']),
+    )
+    const scannerTrace = outcomes.get('ok · Scanner returns owned tokens') ?? []
+    expect(
+      scannerTrace.flatMap((event) =>
+        event._tag === 'Binding' &&
+        event.target.name === 'observe' &&
+        event.value._tag === 'I32Value'
+          ? [event.value.value]
+          : [],
+      ),
+    ).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3, 1])
   })
 
   // The boundary is the point of the substrate: raw storage outside `unsafe` has to stay a

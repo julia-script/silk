@@ -144,6 +144,17 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
 const memberName = (member: DeclarationIndex.MemberFact): string =>
   member.name._tag === 'Present' ? member.name.spelling : 'unavailable name'
 
+const declaredName = (name: DeclarationIndex.DeclaredName): string =>
+  name._tag === 'Present' ? name.spelling : 'unavailable name'
+
+const conformanceLabel = (conformance: DeclarationIndex.ConformanceFact): string => {
+  const parameters =
+    conformance.typeParameters.length === 0
+      ? ''
+      : `<${conformance.typeParameters.map((parameter) => declaredName(parameter.name)).join(', ')}>`
+  return `impl${parameters} ${declaredTypeText(conformance.capability)} for ${declaredTypeText(conformance.provider)}`
+}
+
 export const indexRows = (
   index: DeclarationIndex.Index,
   onPick: (span: Span) => void,
@@ -161,6 +172,8 @@ export const indexRows = (
       label: module.module,
       detail: `${module.members.length} declaration${
         module.members.length === 1 ? '' : 's'
+      } · ${module.conformances.length} conformance${
+        module.conformances.length === 1 ? '' : 's'
       } · ${duplicates} conflict${duplicates === 1 ? '' : 's'}`,
       head: true,
       ...(duplicates === 0 ? {} : { tone: 'warning' as const }),
@@ -178,6 +191,46 @@ export const indexRows = (
         span,
         onActivate: () => onPick(span),
       })
+    }
+
+    for (const conformance of module.conformances) {
+      const span = asSpan(conformance.syntax.span)
+      rows.push({
+        key: `idx-${module.module}-conformance-${conformance.ordinal}`,
+        depth: 1,
+        dot: 'symbol',
+        label: conformanceLabel(conformance),
+        detail: `${conformance.operations.length} operation${
+          conformance.operations.length === 1 ? '' : 's'
+        }${conformance.hook === undefined ? '' : ' · drop hook'}`,
+        span,
+        onActivate: () => onPick(span),
+      })
+      for (const [ordinal, operation] of conformance.operations.entries()) {
+        const operationSpan = asSpan(operation.syntax.span)
+        rows.push({
+          key: `idx-${module.module}-conformance-${conformance.ordinal}-operation-${ordinal}`,
+          depth: 2,
+          label: declaredName(operation.name),
+          detail:
+            operation.target._tag === 'Unavailable'
+              ? 'unavailable target'
+              : operation.target.spelling,
+          span: operationSpan,
+          onActivate: () => onPick(operationSpan),
+        })
+      }
+      if (conformance.hook !== undefined) {
+        const hookSpan = asSpan(conformance.hook.syntax.span)
+        rows.push({
+          key: `idx-${module.module}-conformance-${conformance.ordinal}-drop-hook`,
+          depth: 2,
+          label: declaredName(conformance.hook.name),
+          detail: `${conformance.hook.functionKind.toLowerCase()} drop hook · ${declaredTypeText(conformance.hook.parameterType)}`,
+          span: hookSpan,
+          onActivate: () => onPick(hookSpan),
+        })
+      }
     }
   }
 
@@ -278,6 +331,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} · active reclaim ticket`
     case 'RawBufferCleanup':
       return `${typeText(cleanup.type)} · ${cleanupText(cleanup.allocation)}`
+    case 'HookCleanup':
+      return `${typeText(cleanup.type)} · drop hook ${cleanup.hook.module}.${cleanup.hook.name} · ${cleanupText(cleanup.inner)}`
     case 'StructCleanup':
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
@@ -684,7 +739,7 @@ const operationLabel = (operation: Mir.Operation): string => {
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect success ${localText(operation.source)}`
     case 'CatchEffect':
-      return `${localText(operation.destination)} = catch tag ${operation.handledTag} from ${operation.protectedTarget.name} with ${operation.handlerTarget.name}`
+      return `${localText(operation.destination)} = catch tag ${operation.handledTag} from ${operation.protectedTarget?.name ?? localText(operation.protectedValue)} with ${operation.handlerTarget.name}`
     case 'RetryEffect':
       return `${localText(operation.destination)} = retry ${operation.protectedRunner.name} using ${localText(operation.retries)}`
     case 'RunEffect':
@@ -727,6 +782,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
     case 'SlotTake':
       return `${localText(operation.destination)} = take ${localText(operation.slot)}`
+    case 'SlotCopy':
+      return `${localText(operation.destination)} = copy ${localText(operation.slot)}`
     case 'SlotDrop':
       return `${localText(operation.destination)} = drop in place ${localText(operation.slot)} · ${cleanupText(operation.cleanup)}`
   }
@@ -1046,6 +1103,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `write slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'SlotTake':
       return `take slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'SlotCopy':
+      return `copy slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'SlotDrop':
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
@@ -1094,6 +1153,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotProject':
     case 'SlotWrite':
     case 'SlotTake':
+    case 'SlotCopy':
     case 'SlotDrop':
     case 'AllocationRelease':
       return 2

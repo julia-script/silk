@@ -15,6 +15,14 @@
  *              entry, runtime overflow / bounds traps)
  */
 
+import {
+  scannerSource,
+  vectorDestructionOrderSource,
+  vectorEarlyDropSource,
+  vectorFailedGrowthSource,
+  vectorGrowthSource,
+} from './owned-sequence-presets'
+
 export interface Preset {
   readonly label: string
   /** Which phase this program was written to exercise; used to group the picker. */
@@ -365,6 +373,11 @@ pub fn main() -> I32 {
 }
 `,
   ),
+  one('allocation', 'ok · Vector growing append', vectorGrowthSource),
+  one('allocation', 'ok · Vector failed growth preserves contents', vectorFailedGrowthSource),
+  one('allocation', 'ok · Vector destruction order', vectorDestructionOrderSource),
+  one('allocation', 'ok · Vector early drop', vectorEarlyDropSource),
+  one('allocation', 'ok · Scanner returns owned tokens', scannerSource),
   one(
     'effects',
     'ok · Typed Effect recovery',

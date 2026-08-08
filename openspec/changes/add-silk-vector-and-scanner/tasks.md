@@ -46,8 +46,8 @@
 
 ## 6. Inspector
 
-- [ ] 6.1 Add `/labs` presets: growing append, failed growth with preserved vector, destruction order, early drop, and the scanner program (source identical to the tested acceptance program)
-- [ ] 6.2 Extend labs projections for any new canonical fact forms (parametric conformance facts); update presets tests
+- [x] 6.1 Add `/labs` presets: growing append, failed growth with preserved vector, destruction order, early drop, and the scanner program (source identical to the tested acceptance program)
+- [x] 6.2 Extend labs projections for any new canonical fact forms (parametric conformance facts); update presets tests
 
 ## 7. Gates and closure
 
