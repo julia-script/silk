@@ -15,8 +15,18 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import type * as Ownership from './Ownership.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
+
+/** Tests whether one cleanup plan invokes a Drop hook at any nesting depth. */
+const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
+  plan._tag === 'HookCleanup' ||
+  (plan._tag === 'StructCleanup' && plan.fields.some((field) => planHasHook(field.cleanup))) ||
+  (plan._tag === 'ArrayCleanup' && planHasHook(plan.element)) ||
+  (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planHasHook(entry.cleanup))) ||
+  (plan._tag === 'CallableCleanup' && plan.slots.some((slot) => planHasHook(slot.cleanup))) ||
+  (plan._tag === 'RawBufferCleanup' && planHasHook(plan.allocation))
 
 /**
  * A second `Backend` implementation emitting WebAssembly through the Silk wasm builder, for the
@@ -72,6 +82,20 @@ const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
           )
         : [],
     ),
+    // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
+    ...Mir.operations(fn).flatMap((operation) => {
+      const dropped =
+        operation._tag === 'Drop'
+          ? [operation]
+          : operation._tag === 'RunEffect' ||
+              operation._tag === 'RunEffectValue' ||
+              operation._tag === 'RetryEffect'
+            ? (operation.releases ?? [])
+            : []
+      return dropped.flatMap((release) =>
+        planHasHook(release.cleanup) ? [release.local.ordinal] : [],
+      )
+    }),
   ])
   const roots = new Map<number, FrameRoot>()
   let cursor = 0
@@ -480,6 +504,65 @@ const emitOperation = (
         Instr.localSet(destination),
       ]
     })
+  }
+  /**
+   * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
+   * each hook receives the address of its (possibly nested) value, and the owner's slots
+   * reload afterward. Allocation and raw-buffer releases stay no-ops on the bump allocator.
+   */
+  const hookReleaseInstructions = (
+    cleanup: Ownership.CleanupPlan,
+    local: Mir.LocalId,
+  ): ReadonlyArray<Instr.Instr> => {
+    if (!planHasHook(cleanup)) return []
+    if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
+    const planned = memory.frame.roots.get(local.ordinal)
+    if (planned === undefined) throw new RangeError('Wasm hook cleanup lost its frame root')
+    const walk = (
+      plan_: Ownership.CleanupPlan,
+      byteOffset: number,
+    ): ReadonlyArray<Instr.Instr> => {
+      switch (plan_._tag) {
+        case 'HookCleanup':
+          return [
+            ...frameAddress(planned.offset + byteOffset),
+            Instr.call(resolve(plan_.hook, plan_.typeArguments)),
+            ...walk(plan_.inner, byteOffset),
+          ]
+        case 'StructCleanup': {
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Aggregate') return []
+          return plan_.fields.flatMap((field) => {
+            if (!planHasHook(field.cleanup)) return []
+            const layoutField = representation.fields.find(
+              (candidate) =>
+                candidate.id.ordinal === field.field.ordinal &&
+                candidate.id.struct.ordinal === field.field.struct.ordinal &&
+                candidate.id.struct.sourceId === field.field.struct.sourceId,
+            )
+            return layoutField === undefined
+              ? []
+              : walk(field.cleanup, byteOffset + layoutField.offset)
+          })
+        }
+        case 'ArrayCleanup': {
+          if (!planHasHook(plan_.element)) return []
+          const entry = LayoutPlan.entry(memory.plan, plan_.type)
+          const representation = entry?.representation
+          if (representation?._tag !== 'Repeated') return []
+          return Array.from({ length: plan_.length }, (_, index) =>
+            walk(plan_.element, byteOffset + index * representation.stride),
+          ).flat()
+        }
+        case 'UnionCleanup':
+          if (plan_.cases.every((entry) => !planHasHook(entry.cleanup))) return []
+          throw new RangeError('Wasm cleanup does not yet lower hook-bearing union cases')
+        default:
+          return []
+      }
+    }
+    return [...materializeRoot(local), ...walk(cleanup, 0), ...reloadRoot(local.ordinal)]
   }
   const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     const pointer = layout.borrowPointers.get(root.ordinal)
@@ -1209,8 +1292,8 @@ const emitOperation = (
       return [...instructions, ...flushBorrowRoot(operation.root)]
     }
     case 'Drop':
-      // MIR drops are ownership bookkeeping over `I32` locals, which own nothing to release.
-      return []
+      // The bump allocator owns no host resources, so only Drop hooks have a Wasm effect.
+      return hookReleaseInstructions(operation.cleanup, operation.local)
     case 'MakeEffect':
     case 'MakeCallable': {
       const destination = slots(operation.destination)
@@ -1341,6 +1424,10 @@ const emitOperation = (
         operation.propagationType === undefined
           ? [Instr.op('unreachable')]
           : [
+              // Owners still live at this site run their Drop hooks before the failure leaves.
+              ...(operation.releases ?? []).flatMap((release) =>
+                hookReleaseInstructions(release.cleanup, release.local),
+              ),
               Instr.i32Const(-1),
               Instr.localSet(layout.scratch),
               ...operation.tagMappings.flatMap((mapping) => [
@@ -1399,6 +1486,10 @@ const emitOperation = (
       ]
       const propagationPayloadCount = operation.propagationLaneCount - 1
       const failure = [
+        // Owners still live at this site run their Drop hooks before the failure leaves.
+        ...(operation.releases ?? []).flatMap((release) =>
+          hookReleaseInstructions(release.cleanup, release.local),
+        ),
         ...mapTag,
         Instr.localGet(layout.scratch),
         ...Array.from({ length: propagationPayloadCount }, (_, index) => {
@@ -1453,6 +1544,10 @@ const emitOperation = (
       ]
       const propagationPayloadCount = operation.propagationLaneCount - 1
       const failure = [
+        // Owners still live at this site run their Drop hooks before the failure leaves.
+        ...(operation.releases ?? []).flatMap((release) =>
+          hookReleaseInstructions(release.cleanup, release.local),
+        ),
         ...mapTag,
         Instr.localGet(layout.scratch),
         ...Array.from({ length: propagationPayloadCount }, (_, index) => {

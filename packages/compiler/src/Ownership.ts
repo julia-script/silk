@@ -198,6 +198,11 @@ export interface FunctionOwnership {
   readonly _tag: 'FunctionOwnership'
   readonly declaration: DeclarationIndex.DeclarationFact
   readonly bindings: ReadonlyArray<BindingFact>
+  /**
+   * Bindings owned by deferred effect bodies: published separately because their releases lower
+   * through the body's compiled runner, not through the enclosing function's statements.
+   */
+  readonly deferredBindings: ReadonlyArray<BindingFact>
   readonly exits: ReadonlyArray<ExitPlan>
   readonly fixedPoints: ReadonlyArray<LoopFixedPoint>
   readonly matches: ReadonlyArray<MatchOwnership>
@@ -2083,12 +2088,9 @@ const checkFunction = (
       ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
     })
   const bindings = Object.freeze(state.order.map(bindingFactOf))
-  // Deferred-body bindings stay out of the published facts, but their Propagation releases
-  // must still resolve when the body's compiled function is lowered.
+  const deferredBindings = Object.freeze(deferredReleaseOrder.map(bindingFactOf))
   const bindingBySite = new Map(
-    [...bindings, ...deferredReleaseOrder.map(bindingFactOf)].map(
-      (binding) => [siteKey(binding.site), binding] as const,
-    ),
+    [...bindings, ...deferredBindings].map((binding) => [siteKey(binding.site), binding] as const),
   )
 
   const exitPlans = Object.freeze(
@@ -2152,6 +2154,7 @@ const checkFunction = (
       _tag: 'FunctionOwnership' as const,
       declaration,
       bindings,
+      deferredBindings,
       exits: exitPlans,
       fixedPoints: Object.freeze(
         fixedPoints.map((point) => {

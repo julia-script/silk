@@ -8,6 +8,7 @@ import * as FunctionActor from '@silk-effect/llvm/Function'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import * as Intrinsic from '@silk-effect/llvm/Intrinsic'
 import * as IrText from '@silk-effect/llvm/IrText'
+import type * as LlvmError from '@silk-effect/llvm/LlvmError'
 import * as LlvmMetadata from '@silk-effect/llvm/Metadata'
 import * as LlvmType from '@silk-effect/llvm/Type'
 import * as Value from '@silk-effect/llvm/Value'
@@ -17,9 +18,20 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
+
+/** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
+const planReclaims = (plan: Ownership.CleanupPlan): boolean =>
+  plan._tag === 'AllocationCleanup' ||
+  plan._tag === 'RawBufferCleanup' ||
+  (plan._tag === 'HookCleanup' && planReclaims(plan.inner)) ||
+  (plan._tag === 'StructCleanup' && plan.fields.some((field) => planReclaims(field.cleanup))) ||
+  (plan._tag === 'ArrayCleanup' && planReclaims(plan.element)) ||
+  (plan._tag === 'UnionCleanup' && plan.cases.some((entry) => planReclaims(entry.cleanup))) ||
+  (plan._tag === 'CallableCleanup' && plan.slots.some((slot) => planReclaims(slot.cleanup)))
 
 /**
  * Code generation as a nominal `Backend` service: one operation consuming the whole
@@ -733,10 +745,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotDrop' ||
           // A witness-dispatched allocation can arrive without any local Allocate operation,
-          // and its cleanup still calls the release shim.
-          (operation._tag === 'Drop' &&
-            (operation.cleanup._tag === 'AllocationCleanup' ||
-              operation.cleanup._tag === 'RawBufferCleanup')),
+          // and its cleanup still calls the release shim — at any nesting depth of the plan.
+          (operation._tag === 'Drop' && planReclaims(operation.cleanup)),
       ),
     )
     const malloc =
@@ -1360,6 +1370,140 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             const frozen = Object.freeze(values)
             locals.set(root, frozen)
             yield* storeMutable(Object.freeze({ _tag: 'Local', ordinal: root }), frozen)
+          })
+
+          const semanticLanesOf = (type: SilkType.Type): ReadonlyArray<Layout.CallingLane> => {
+            const shape = Layout.callingShape(program.layout, type)
+            if (shape === undefined)
+              throw new RangeError(`LLVM cleanup lost calling shape for ${SilkType.encode(type)}`)
+            return shape.lanes
+          }
+
+          /**
+           * Releases one owned value's lanes through its complete cleanup plan: hooks run
+           * against a stack materialization before their inner cleanup sees the (possibly
+           * mutated) lanes, struct fields release in declaration order, and every ticket-backed
+           * lane calls the release shim exactly once.
+           */
+          const dropThroughPlan: (
+            plan: Ownership.CleanupPlan,
+            values: ReadonlyArray<Value.Input>,
+            tag: string,
+          ) => Effect.Effect<void, LlvmError.LlvmError> = Effect.fnUntraced(function* (
+            plan: Ownership.CleanupPlan,
+            values: ReadonlyArray<Value.Input>,
+            tag: string,
+          ) {
+            switch (plan._tag) {
+              case 'NoCleanup':
+              case 'ParameterCleanup':
+              case 'CallableCleanup':
+                return
+              case 'AllocationCleanup':
+              case 'RawBufferCleanup': {
+                const context = values.at(4)
+                if (context === undefined || free === undefined)
+                  throw new RangeError('LLVM allocation cleanup lost its reclaim context')
+                yield* FunctionBody.callDirect(body, free, [
+                  yield* FunctionBody.cast(body, 'inttoptr', context, pointer, `${tag}_context`),
+                ])
+                return
+              }
+              case 'HookCleanup': {
+                const target = declared.find((candidate) =>
+                  Mir.matchesInstance(candidate.fn, plan.hook, plan.typeArguments),
+                )
+                if (target === undefined)
+                  throw new RangeError('LLVM cleanup cannot resolve its Drop hook instance')
+                const layoutEntry = Layout.entry(program.layout, plan.type)
+                if (layoutEntry === undefined || usizeType === undefined)
+                  throw new RangeError('LLVM hook cleanup lost its layout')
+                const base = yield* FunctionBody.alloca(body, i8, `${tag}_hook_storage`, {
+                  count: yield* Constant.integerUnsigned(builder, i32, BigInt(layoutEntry.size)),
+                  alignment: yield* Alignment.fromByteUnits(layoutEntry.alignment),
+                })
+                const lanes = semanticLanesOf(plan.type)
+                for (const [ordinal, lane] of lanes.entries()) {
+                  const offset = Layout.laneOffset(program.layout, plan.type, lane.path)
+                  const stored = values.at(ordinal)
+                  if (offset === undefined || stored === undefined)
+                    throw new RangeError('LLVM hook cleanup lost a lane')
+                  yield* FunctionBody.store(
+                    body,
+                    stored,
+                    yield* constantBytePointer(base, offset, `${tag}_store${ordinal}`),
+                  )
+                }
+                yield* callValues(target, [base], `${tag}_hook`)
+                const reloaded: Array<Value.Input> = []
+                for (const [ordinal, lane] of lanes.entries()) {
+                  const offset = Layout.laneOffset(program.layout, plan.type, lane.path)
+                  if (offset === undefined)
+                    throw new RangeError('LLVM hook cleanup lost a lane offset')
+                  reloaded.push(
+                    yield* FunctionBody.load(
+                      body,
+                      laneType(lane),
+                      yield* constantBytePointer(base, offset, `${tag}_reload${ordinal}_ptr`),
+                      `${tag}_reload${ordinal}`,
+                    ),
+                  )
+                }
+                yield* dropThroughPlan(plan.inner, Object.freeze(reloaded), `${tag}_inner`)
+                return
+              }
+              case 'StructCleanup': {
+                const lanes = semanticLanesOf(plan.type)
+                for (const [fieldOrdinal, field] of plan.fields.entries()) {
+                  if (!planReclaims(field.cleanup) && field.cleanup._tag !== 'HookCleanup')
+                    continue
+                  const fieldValues = lanes.flatMap((lane, index) => {
+                    const first = lane.path.at(0)
+                    const value = values.at(index)
+                    return first !== undefined &&
+                      first._tag === 'FieldId' &&
+                      value !== undefined &&
+                      first.ordinal === field.field.ordinal &&
+                      first.struct.ordinal === field.field.struct.ordinal &&
+                      first.struct.sourceId === field.field.struct.sourceId
+                      ? [value]
+                      : []
+                  })
+                  yield* dropThroughPlan(
+                    field.cleanup,
+                    Object.freeze(fieldValues),
+                    `${tag}_f${fieldOrdinal}`,
+                  )
+                }
+                return
+              }
+              case 'ArrayCleanup': {
+                if (!planReclaims(plan.element) && plan.element._tag !== 'HookCleanup') return
+                const lanes = semanticLanesOf(plan.type)
+                for (let index = 0; index < plan.length; index += 1) {
+                  const elementValues = lanes.flatMap((lane, ordinal) => {
+                    const first = lane.path.at(0)
+                    const value = values.at(ordinal)
+                    return first !== undefined &&
+                      first._tag === 'ElementSelector' &&
+                      first.index === index &&
+                      value !== undefined
+                      ? [value]
+                      : []
+                  })
+                  yield* dropThroughPlan(
+                    plan.element,
+                    Object.freeze(elementValues),
+                    `${tag}_e${index}`,
+                  )
+                }
+                return
+              }
+              case 'UnionCleanup': {
+                if (plan.cases.every((entry) => !planReclaims(entry.cleanup))) return
+                throw new RangeError('LLVM cleanup does not yet lower owning union cases')
+              }
+            }
           })
 
           for (const [blockOrdinal, block] of entry.linear.entries()) {
@@ -2741,24 +2885,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
                 case 'Drop': {
-                  if (
-                    operation.cleanup._tag === 'AllocationCleanup' ||
-                    operation.cleanup._tag === 'RawBufferCleanup'
-                  ) {
-                    const values = readLocal(operation.local)
-                    const context = values.at(4)
-                    if (context === undefined || free === undefined || usizeType === undefined) {
-                      throw new RangeError('LLVM allocation cleanup lost its reclaim context')
-                    }
-                    yield* FunctionBody.callDirect(body, free, [
-                      yield* FunctionBody.cast(
-                        body,
-                        'inttoptr',
-                        context,
-                        pointer,
-                        `allocation_cleanup${operation.local.ordinal}_context`,
-                      ),
-                    ])
+                  if (planReclaims(operation.cleanup) || operation.cleanup._tag === 'HookCleanup') {
+                    yield* dropThroughPlan(
+                      operation.cleanup,
+                      readLocal(operation.local),
+                      `drop${operation.local.ordinal}`,
+                    )
                   }
                   break
                 }
@@ -2874,30 +3006,16 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   // positionally type-identical lanes survive the copy; past the shared failure
                   // member the payload is dead on this path, and zeros keep the aggregate typed.
                   const outcomeLanes = lanesFor(operation.outcomeType)
-                  // Owners still live at this site release before the failure leaves the function;
-                  // only ticket-backed cleanups have a native effect, matching the Drop lowering.
+                  // Owners still live at this site release before the failure leaves the function
+                  // through their complete cleanup plans, matching the Drop lowering.
                   for (const release of operation.releases ?? []) {
-                    if (
-                      release.cleanup._tag !== 'AllocationCleanup' &&
-                      release.cleanup._tag !== 'RawBufferCleanup'
-                    )
+                    if (!planReclaims(release.cleanup) && release.cleanup._tag !== 'HookCleanup')
                       continue
-                    const releasedContext = readLocal(release.local).at(4)
-                    if (
-                      releasedContext === undefined ||
-                      free === undefined ||
-                      usizeType === undefined
+                    yield* dropThroughPlan(
+                      release.cleanup,
+                      readLocal(release.local),
+                      `propagation_release${release.local.ordinal}`,
                     )
-                      throw new RangeError('LLVM propagation cleanup lost its reclaim context')
-                    yield* FunctionBody.callDirect(body, free, [
-                      yield* FunctionBody.cast(
-                        body,
-                        'inttoptr',
-                        releasedContext,
-                        pointer,
-                        `propagation_release${release.local.ordinal}_context`,
-                      ),
-                    ])
                   }
                   const returned: Array<Value.Input> = [mappedTag]
                   while (returned.length < operation.propagationLaneCount) {
@@ -3029,30 +3147,16 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const propagationLanes = lanesFor(operation.propagationType)
                   // See RunEffect: only positionally type-identical payload lanes are copied.
                   const outcomeLanes = lanesFor(operation.outcomeType)
-                  // Owners still live at this site release before the failure leaves the function;
-                  // only ticket-backed cleanups have a native effect, matching the Drop lowering.
+                  // Owners still live at this site release before the failure leaves the function
+                  // through their complete cleanup plans, matching the Drop lowering.
                   for (const release of operation.releases ?? []) {
-                    if (
-                      release.cleanup._tag !== 'AllocationCleanup' &&
-                      release.cleanup._tag !== 'RawBufferCleanup'
-                    )
+                    if (!planReclaims(release.cleanup) && release.cleanup._tag !== 'HookCleanup')
                       continue
-                    const releasedContext = readLocal(release.local).at(4)
-                    if (
-                      releasedContext === undefined ||
-                      free === undefined ||
-                      usizeType === undefined
+                    yield* dropThroughPlan(
+                      release.cleanup,
+                      readLocal(release.local),
+                      `propagation_release${release.local.ordinal}`,
                     )
-                      throw new RangeError('LLVM propagation cleanup lost its reclaim context')
-                    yield* FunctionBody.callDirect(body, free, [
-                      yield* FunctionBody.cast(
-                        body,
-                        'inttoptr',
-                        releasedContext,
-                        pointer,
-                        `propagation_release${release.local.ordinal}_context`,
-                      ),
-                    ])
                   }
                   const returned: Array<Value.Input> = [mappedTag]
                   while (returned.length < operation.propagationLaneCount) {
@@ -3247,30 +3351,16 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     const propagationLanes = lanesFor(operation.propagationType)
                     // See RunEffect: only positionally type-identical payload lanes are copied.
                     const outcomeLanes = lanesFor(operation.protectedType)
-                    // Owners still live at this site release before the failure leaves the function;
-                    // only ticket-backed cleanups have a native effect, matching the Drop lowering.
+                    // Owners still live at this site release before the failure leaves the function
+                    // through their complete cleanup plans, matching the Drop lowering.
                     for (const release of operation.releases ?? []) {
-                      if (
-                        release.cleanup._tag !== 'AllocationCleanup' &&
-                        release.cleanup._tag !== 'RawBufferCleanup'
-                      )
+                      if (!planReclaims(release.cleanup) && release.cleanup._tag !== 'HookCleanup')
                         continue
-                      const releasedContext = readLocal(release.local).at(4)
-                      if (
-                        releasedContext === undefined ||
-                        free === undefined ||
-                        usizeType === undefined
+                      yield* dropThroughPlan(
+                        release.cleanup,
+                        readLocal(release.local),
+                        `propagation_release${release.local.ordinal}`,
                       )
-                        throw new RangeError('LLVM propagation cleanup lost its reclaim context')
-                      yield* FunctionBody.callDirect(body, free, [
-                        yield* FunctionBody.cast(
-                          body,
-                          'inttoptr',
-                          releasedContext,
-                          pointer,
-                          `propagation_release${release.local.ordinal}_context`,
-                        ),
-                      ])
                     }
                     const returned: Array<Value.Input> = [mappedTag]
                     while (returned.length < operation.propagationLaneCount) {

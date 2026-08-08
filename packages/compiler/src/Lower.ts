@@ -2596,12 +2596,10 @@ const lowerSequence = (
     const localType = fn.localTypes.at(lowered.result.ordinal)
     if (localType === undefined) return undefined
     const droppedBinding =
-      statement.expression._tag === 'BindingReference'
-        ? statement.expression.binding.ordinal
-        : undefined
+      droppedExpression._tag === 'BindingReference' ? droppedExpression.binding.ordinal : undefined
     const bindingFact =
       droppedBinding !== undefined
-        ? fn.ownership?.bindings.find(
+        ? [...(fn.ownership?.bindings ?? []), ...(fn.ownership?.deferredBindings ?? [])].find(
             (binding) =>
               binding.site._tag === 'Let' && binding.site.binding.ordinal === droppedBinding,
           )

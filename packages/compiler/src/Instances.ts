@@ -583,6 +583,7 @@ export const discover = (
     // feed hook reachability.
     const cleanupHooks = [
       ...(functionOwnership?.bindings.map((binding) => binding.cleanup) ?? []),
+      ...(functionOwnership?.deferredBindings.map((binding) => binding.cleanup) ?? []),
       ...(functionOwnership?.exits.flatMap((exit) =>
         exit.releases.map((release) => release.cleanup),
       ) ?? []),
