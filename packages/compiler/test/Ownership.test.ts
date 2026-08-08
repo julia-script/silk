@@ -534,3 +534,44 @@ it('keeps a Slot loan active until the lexical Slot is consumed', () => {
   )
   assert.strictEqual(facts.functions.at(0)?.loans.at(0)?.origin, 'ValueBorrow')
 })
+
+it('reports moves and double drops inside lazy effect bodies', () => {
+  const doubled = check(
+    'ownership://effect-body-double-drop.silk',
+    `struct Token { value: I32 }
+struct Problem { code: I32 }
+effect fn store() -> I32 ! Problem {
+  let token = Token { value: 1 }
+  drop token
+  drop token
+  return 1
+}
+effect fn recover(error: Problem) -> I32 { return 0 }
+pub fn main() -> I32 { return run Effect.catch<Problem>(store(), recover) }`,
+  )
+  assert.deepEqual(
+    doubled.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+
+  // A healthy body stays clean, and the deferred walk publishes no facts for it: the body's
+  // exits and bindings belong to its own compiled function, not to the enclosing one.
+  const healthy = check(
+    'ownership://effect-body-healthy.silk',
+    `struct Token { value: I32 }
+struct Problem { code: I32 }
+effect fn store() -> I32 ! Problem {
+  let token = Token { value: 1 }
+  drop token
+  return 1
+}
+effect fn recover(error: Problem) -> I32 { return 0 }
+pub fn main() -> I32 { return run Effect.catch<Problem>(store(), recover) }`,
+  )
+  assert.deepEqual(healthy.diagnostics, [])
+  const store = healthy.functions.at(0)
+  assert.deepEqual(
+    store?.bindings.filter((binding) => binding.site._tag === 'Let'),
+    [],
+  )
+})

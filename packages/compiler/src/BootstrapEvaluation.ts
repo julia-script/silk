@@ -1882,8 +1882,16 @@ function executeFunction(
               if (dropped._tag !== 'AllocationValue')
                 throw new RangeError('Allocation cleanup lost its private reclaim ticket')
               const ticket = state.allocations.get(dropped.ticket)
-              if (ticket === undefined || !ticket.active)
-                throw new RangeError('Allocation reclaim ticket was consumed more than once')
+              if (ticket === undefined || !ticket.active) {
+                // A caller obligation, not a compiler invariant: unsafe code can reach a second
+                // release, and the run must stop as a trap rather than take down the host.
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'Allocation reclaim ticket was consumed more than once',
+                  span: operation.provenance.span,
+                })
+              }
               ticket.active = false
               trace.push(
                 Object.freeze({
@@ -1898,8 +1906,14 @@ function executeFunction(
               if (dropped._tag !== 'RawBufferValue')
                 throw new RangeError('RawBuffer cleanup lost its private reclaim ticket')
               const ticket = state.allocations.get(dropped.ticket)
-              if (ticket === undefined || !ticket.active)
-                throw new RangeError('RawBuffer reclaim ticket was consumed more than once')
+              if (ticket === undefined || !ticket.active) {
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'RawBuffer reclaim ticket was consumed more than once',
+                  span: operation.provenance.span,
+                })
+              }
               ticket.active = false
               ticket.values.clear()
               trace.push(

@@ -721,6 +721,42 @@ const checkExpression = (
   }
 }
 
+/**
+ * The expressions one statement evaluates in its own scope: control-flow bodies are excluded
+ * because the statement walker recurses into them itself, and would otherwise observe the same
+ * expression twice.
+ */
+const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.Expression> => {
+  switch (statement._tag) {
+    case 'Bind':
+      return [statement.initializer]
+    case 'Return':
+    case 'Fail':
+    case 'Drop':
+      return [statement.expression]
+    case 'Write':
+      return [
+        ...statement.place.selectors.flatMap((selector) =>
+          selector._tag === 'Index' || selector._tag === 'SliceIndex' ? [selector.index] : [],
+        ),
+        statement.value,
+      ]
+    case 'If':
+    case 'While':
+      return [statement.condition]
+    default:
+      return []
+  }
+}
+
+/** Effect blocks owned by this expression, stopping at each block: nested blocks belong to it. */
+const deferredBlocks = (
+  expression: Hir.Expression,
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>> =>
+  expression._tag === 'EffectBlock'
+    ? [expression]
+    : Hir.expressionChildren(expression).flatMap(deferredBlocks)
+
 interface LoanAnalysis {
   readonly loans: ReadonlyArray<LoanFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1678,6 +1714,34 @@ const checkFunction = (
   ): { readonly returned: boolean; readonly live: Set<string> } => {
     let live = initial
     for (const statement of statements) {
+      // A lazy effect body is walked for diagnostics only: its execution is deferred, so its
+      // moves never feed the enclosing flow, and its exits, loops, and binding facts are
+      // published by lowering through its own compiled body rather than through these facts.
+      for (const block of statementRootExpressions(statement).flatMap(deferredBlocks)) {
+        const bodyLive = new Set(live)
+        for (const capture of block.captures) {
+          const site: BindingSite | undefined =
+            capture.binding !== undefined
+              ? Object.freeze({ _tag: 'Let', binding: capture.binding })
+              : capture.parameter !== undefined
+                ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
+                : undefined
+          if (site !== undefined) bodyLive.add(siteKey(site))
+        }
+        const marks = {
+          exits: exits.length,
+          fixedPoints: fixedPoints.length,
+          order: state.order.length,
+          matches: state.matches.length,
+          callables: state.callables.length,
+        }
+        walkStatements(block.statements, block.span, bodyLive, [[]])
+        exits.length = marks.exits
+        fixedPoints.length = marks.fixedPoints
+        state.order.length = marks.order
+        state.matches.length = marks.matches
+        state.callables.length = marks.callables
+      }
       if (statement._tag === 'Unsafe') {
         const scopeFrames = [...frames.map((frame) => [...frame]), []]
         const result = walkStatements(

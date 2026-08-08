@@ -596,7 +596,8 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
   }
 }
 
-const expressionChildren = (expression: Expression): ReadonlyArray<Expression> =>
+/** The semantic children of one expression, including a lazy block's statement expressions. */
+export const expressionChildren = (expression: Expression): ReadonlyArray<Expression> =>
   (() => {
     switch (expression._tag) {
       case 'Move':
