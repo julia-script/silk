@@ -2391,8 +2391,20 @@ const analyzeProjection = (
   const diagnostics: Array<Diagnostic.Diagnostic> = [...subject.diagnostics]
   const fieldToken = directToken(node, 'Identifier')
   const fieldName = fieldToken === undefined ? undefined : spelling(source, fieldToken)
+  // A reference projects the fields of its target: the read happens through the borrow, so
+  // the projected value is typed by the target while consumption stays a partial-move error.
+  const reference =
+    subject.type !== undefined &&
+    Type.isReference(subject.type) &&
+    Type.isNominal(subject.type.target)
+      ? subject.type
+      : undefined
   const nominal =
-    subject.type !== undefined && Type.isNominal(subject.type) ? subject.type : undefined
+    subject.type !== undefined && Type.isNominal(subject.type)
+      ? subject.type
+      : reference !== undefined && Type.isNominal(reference.target)
+        ? reference.target
+        : undefined
   const slice = subject.type !== undefined && Type.isSlice(subject.type) ? subject.type : undefined
   const borrowAccess =
     subject.fact._tag === 'IndexProjection' || subject.fact._tag === 'FieldProjection'
@@ -2453,12 +2465,13 @@ const analyzeProjection = (
     }
   }
   const typeFact = type === undefined ? unavailableExpressionType : availableExpressionType(type)
+  const projectionAccess = borrowAccess ?? reference?.access
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FieldProjection',
       subject: subject.fact,
       ...(nominal === undefined ? {} : { nominal }),
-      ...(borrowAccess === undefined ? {} : { borrowAccess }),
+      ...(projectionAccess === undefined ? {} : { borrowAccess: projectionAccess }),
       fieldName,
       state,
       type: typeFact,
@@ -5852,8 +5865,10 @@ const analyzeStatements = (
       } else if (
         root._tag === 'ParameterDeclaration' &&
         (root.declaredType._tag !== 'Resolved' ||
-          !Type.isSlice(root.declaredType.type) ||
-          root.declaredType.type.access !== 'Exclusive' ||
+          !(
+            (Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) &&
+            root.declaredType.type.access === 'Exclusive'
+          ) ||
           (destination.fact._tag !== 'IndexProjection' &&
             destination.fact._tag !== 'FieldProjection'))
       ) {
@@ -7114,7 +7129,7 @@ const hirBorrowedWritePlace = (
 ): Hir.BorrowedWritePlace | undefined => {
   if (
     root.declaredType._tag !== 'Resolved' ||
-    !Type.isSlice(root.declaredType.type) ||
+    !(Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) ||
     root.declaredType.type.access !== 'Exclusive'
   ) {
     return undefined

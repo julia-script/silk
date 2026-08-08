@@ -209,3 +209,89 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
     }
   }),
 )
+
+const countedQuota = (quota: number): string => `struct QuotaAllocator { remaining: I32 }
+
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+  if self.remaining == 0 { fail OutOfMemory {} }
+  self.remaining = self.remaining - 1
+  let mut inner = SystemAllocator.make()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut inner)
+  let block = run recipe
+  return move block
+}
+
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+
+effect fn build() -> I32 ! OutOfMemory {
+  let mut allocator = QuotaAllocator { remaining: ${quota} }
+  let first = Layout.of<[I32; 2]>()
+  let recipeA = Allocator.allocate(move first) |> Allocator.provide(&mut allocator)
+  let a = run recipeA
+  let second = Layout.of<[I32; 2]>()
+  let recipeB = Allocator.allocate(move second) |> Allocator.provide(&mut allocator)
+  let b = run recipeB
+  drop a
+  drop b
+  return 42
+}
+
+effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(build(), recover)
+}`
+
+/**
+ * The counted quota allocator is the change's canonical user-authored provider: its state
+ * decrements through the exclusive self reference, so exhaustion is a property of the provider
+ * value rather than of the call site. Every quota agrees across all three engines.
+ */
+it.effect('runs a counted quota allocator identically on all three engines', () =>
+  Effect.gen(function* () {
+    for (const [quota, expected] of [
+      [0, 7],
+      [1, 7],
+      [2, 42],
+    ] as const) {
+      const snapshot = yield* Analysis.ofSource(
+        `owned-allocation-quota/q${quota}`,
+        ascii(countedQuota(quota)),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], `q${quota}`)
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', `q${quota}`)
+      if (evaluated._tag !== 'Completed') continue
+      assert.strictEqual(evaluated.result.value, expected, `q${quota}`)
+      const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
+      assert.strictEqual(
+        events.filter((event) => event === 'AllocationAcquire').length,
+        Math.min(quota, 2),
+        `q${quota}`,
+      )
+      assert.strictEqual(
+        events.filter((event) => event === 'AllocationRelease').length,
+        Math.min(quota, 2),
+        `q${quota}`,
+      )
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bitcode.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `q${quota}`)
+
+      const compiled = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make(`owned-allocation-quota/q${quota}`, ascii(countedQuota(quota))),
+        },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, `quota${quota}`),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled', `q${quota}`)
+      if (compiled._tag !== 'Compiled') continue
+      const run = spawnSync(compiled.executable, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, expected, `q${quota}: ${run.stderr}`)
+    }
+  }),
+)

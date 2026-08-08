@@ -1969,6 +1969,50 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   if (sourceType === undefined) {
                     throw new RangeError('Backend place read lost its root type')
                   }
+                  if (sourceType._tag === 'Reference') {
+                    // The place lives on the referenced target: static field offsets off the
+                    // borrow's address, one load per lane of the projected value.
+                    const address = readLocal(operation.root).at(0)
+                    if (address === undefined)
+                      throw new RangeError('LLVM reference read lost its address')
+                    const base = yield* FunctionBody.cast(
+                      body,
+                      'inttoptr',
+                      address,
+                      pointer,
+                      `reference_read${operation.destination.ordinal}_base`,
+                    )
+                    const staticSelectors: Array<Layout.Selector> = []
+                    for (const candidate of operation.selectors) {
+                      if (candidate._tag !== 'FieldSelector')
+                        throw new RangeError('LLVM reference place supports only field selectors')
+                      staticSelectors.push(candidate.field)
+                    }
+                    const target = sourceType.type.target
+                    const values: Array<Value.Input> = []
+                    for (const [ordinal, lane] of lanesFor(operation.type).entries()) {
+                      const offset = Layout.laneOffset(program.layout, target, [
+                        ...staticSelectors,
+                        ...lane.path,
+                      ])
+                      if (offset === undefined)
+                        throw new RangeError('LLVM reference read lost a lane offset')
+                      values.push(
+                        yield* FunctionBody.load(
+                          body,
+                          laneType(lane),
+                          yield* constantBytePointer(
+                            base,
+                            offset,
+                            `reference_read${operation.destination.ordinal}_${ordinal}_ptr`,
+                          ),
+                          `reference_read${operation.destination.ordinal}_${ordinal}`,
+                        ),
+                      )
+                    }
+                    locals.set(operation.destination.ordinal, Object.freeze(values))
+                    break
+                  }
                   if (sourceType._tag === 'Slice') {
                     const [selector, ...suffixSelectors] = operation.selectors
                     if (selector?._tag !== 'SliceElementSelector') {
@@ -2284,6 +2328,46 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   break
                 }
                 case 'WritePlace': {
+                  if (operation.rootType._tag === 'Reference') {
+                    // Writing through the borrow stores each value lane at its target offset.
+                    const address = readLocal(operation.root).at(0)
+                    if (address === undefined)
+                      throw new RangeError('LLVM reference write lost its address')
+                    const base = yield* FunctionBody.cast(
+                      body,
+                      'inttoptr',
+                      address,
+                      pointer,
+                      `reference_write${operation.source.ordinal}_base`,
+                    )
+                    const staticSelectors: Array<Layout.Selector> = []
+                    for (const candidate of operation.selectors) {
+                      if (candidate._tag !== 'FieldSelector')
+                        throw new RangeError('LLVM reference place supports only field selectors')
+                      staticSelectors.push(candidate.field)
+                    }
+                    const target = operation.rootType.type.target
+                    const values = readLocal(operation.source)
+                    for (const [ordinal, lane] of lanesFor(operation.type).entries()) {
+                      const value = values.at(ordinal)
+                      const offset = Layout.laneOffset(program.layout, target, [
+                        ...staticSelectors,
+                        ...lane.path,
+                      ])
+                      if (value === undefined || offset === undefined)
+                        throw new RangeError('LLVM reference write lost a lane offset')
+                      yield* FunctionBody.store(
+                        body,
+                        value,
+                        yield* constantBytePointer(
+                          base,
+                          offset,
+                          `reference_write${operation.source.ordinal}_${ordinal}_ptr`,
+                        ),
+                      )
+                    }
+                    break
+                  }
                   if (operation.rootType._tag === 'Slice') {
                     const [selector, ...suffixSelectors] = operation.selectors
                     const [base] = readLocal(operation.root)

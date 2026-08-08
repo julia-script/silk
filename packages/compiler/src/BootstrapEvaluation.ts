@@ -816,6 +816,13 @@ function executeFunction(
     | { readonly _tag: 'Blocked'; readonly step: Step } => {
     let selected = read(root).value
     const indexes: Array<number> = []
+    // A reference root reads through the borrow: the place lives on the referenced cell.
+    if (selected._tag === 'ReferenceValue' && selectors.length > 0) {
+      const target = state.cells.get(cellKey(selected.frame, selected.cell))
+      if (target === undefined)
+        throw new RangeError('MIR reference points at a missing evaluator cell')
+      selected = target.value
+    }
     for (const selector of selectors) {
       if (selector._tag === 'FieldSelector') {
         if (selected._tag !== 'AggregateValue') {
@@ -1724,6 +1731,12 @@ function executeFunction(
           case 'ReadPlace': {
             let selected = read(operation.root).value
             const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
+            if (selected._tag === 'ReferenceValue' && operation.selectors.length > 0) {
+              const target = state.cells.get(cellKey(selected.frame, selected.cell))
+              if (target === undefined)
+                throw new RangeError('MIR reference points at a missing evaluator cell')
+              selected = target.value
+            }
             for (const selector of operation.selectors) {
               if (selector._tag === 'FieldSelector') {
                 if (selected._tag !== 'AggregateValue') {
@@ -1842,6 +1855,29 @@ function executeFunction(
               throw new RangeError('MIR write executed without its precheck')
             const root = read(operation.root)
             const replacement = read(operation.source)
+            // A reference root writes through the borrow: replace within the referenced cell
+            // and store it back where the loan began, leaving the reference local untouched.
+            if (root.value._tag === 'ReferenceValue' && operation.selectors.length > 0) {
+              const key = cellKey(root.value.frame, root.value.cell)
+              const target = state.cells.get(key)
+              if (target === undefined)
+                throw new RangeError('MIR reference points at a missing evaluator cell')
+              state.cells.set(key, {
+                value: replacePlace(target.value, operation.selectors, indexes, replacement.value),
+                fromCall: replacement.fromCall,
+              })
+              checkedPlaces.delete(operation.selectors)
+              trace.push(
+                Object.freeze({
+                  _tag: 'Replacement',
+                  function: fn.id,
+                  region: region.id.ordinal,
+                  ...(region.ownerLoop === undefined ? {} : { loop: region.ownerLoop.ordinal }),
+                  span: operation.provenance.span,
+                }),
+              )
+              break
+            }
             if (operation.replacement === 'Owned') {
               const previous = resolvePlace(operation.root, operation.selectors)
               if (previous._tag === 'Blocked') return previous.step

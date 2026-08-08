@@ -935,6 +935,10 @@ const placeType = (
 ): DeclarationIndex.SemanticType | undefined => {
   const rootType = fn.localTypes.at(root.ordinal)
   let current = rootType === undefined ? undefined : semanticType(rootType)
+  // A reference root reads and writes through the borrow, so the place is on its target.
+  if (current !== undefined && SilkType.isReference(current) && selectors.length > 0) {
+    current = current.target
+  }
   for (const selector of selectors) {
     if (selector._tag === 'FieldSelector') {
       const entry =

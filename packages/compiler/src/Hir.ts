@@ -158,7 +158,8 @@ export type BorrowedWriteSelector =
 export interface BorrowedWritePlace {
   readonly _tag: 'BorrowedWritePlace'
   readonly root: DeclarationIndex.ParameterId
-  readonly slice: Type.Slice
+  /** The borrowed root: an exclusive slice, or an exclusive reference written through. */
+  readonly slice: Type.Slice | Type.Reference
   readonly selectors: ReadonlyArray<BorrowedWriteSelector>
   readonly type: DeclarationIndex.SemanticType
   readonly span: SourceSpan.SourceSpan
@@ -879,12 +880,18 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       }
     }
     if (expression._tag === 'Project' && expression.borrowAccess !== undefined) {
+      const subjectType =
+        'type' in expression.subject && typeof expression.subject.type === 'object'
+          ? expression.subject.type
+          : undefined
       const inherited =
         expression.subject._tag === 'SliceIndexPlace'
           ? expression.subject.access
           : expression.subject._tag === 'Project'
             ? expression.subject.borrowAccess
-            : undefined
+            : subjectType !== undefined && Type.isReference(subjectType)
+              ? subjectType.access
+              : undefined
       if (inherited !== expression.borrowAccess) {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
       }
@@ -970,12 +977,15 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       for (const statement of body) {
         if (statement._tag === 'Write' && statement.place._tag === 'BorrowedWritePlace') {
           const [first, ...rest] = statement.place.selectors
-          if (
-            statement.place.slice.access !== 'Exclusive' ||
-            first?._tag !== 'SliceIndex' ||
-            !Type.equals(first.slice, statement.place.slice) ||
-            rest.some((selector) => selector._tag !== 'Field')
-          ) {
+          const wellFormed = Type.isReference(statement.place.slice)
+            ? statement.place.slice.access === 'Exclusive' &&
+              statement.place.selectors.length > 0 &&
+              statement.place.selectors.every((selector) => selector._tag === 'Field')
+            : statement.place.slice.access === 'Exclusive' &&
+              first?._tag === 'SliceIndex' &&
+              Type.equals(first.slice, statement.place.slice) &&
+              !rest.some((selector) => selector._tag !== 'Field')
+          if (!wellFormed) {
             issues.push(Object.freeze({ _tag: 'InvalidBorrowedWrite', span: statement.place.span }))
           }
         }

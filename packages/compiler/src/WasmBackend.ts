@@ -870,6 +870,26 @@ const emitOperation = (
     }
     case 'ReadPlace': {
       const rootType = layout.types.at(operation.root.ordinal)
+      if (rootType?._tag === 'Reference') {
+        // The place lives on the referenced target: static field offsets off the address.
+        const address = scalar(operation.root)
+        const target = rootType.type.target
+        const staticSelectors: Array<LayoutPlan.Selector> = []
+        for (const candidate of operation.selectors) {
+          if (candidate._tag !== 'FieldSelector')
+            throw new RangeError('Wasm reference place supports only field selectors')
+          staticSelectors.push(candidate.field)
+        }
+        const destinationSlots = slots(operation.destination)
+        const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
+        return destinationLanes.flatMap((lane, ordinal) => {
+          const destination = destinationSlots.at(ordinal)
+          const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+          if (destination === undefined || offset === undefined)
+            throw new RangeError('Wasm reference read lost a lane offset')
+          return [...loadAt(address, offset), Instr.localSet(destination)]
+        })
+      }
       if (rootType?._tag === 'Slice') {
         if (memory === undefined) throw new RangeError('Wasm slice read has no private memory')
         const [selector, ...suffixSelectors] = operation.selectors
@@ -1044,6 +1064,26 @@ const emitOperation = (
       return instructions
     }
     case 'WritePlace': {
+      if (operation.rootType._tag === 'Reference') {
+        // Writing through the borrow stores each value lane at its offset on the target.
+        const address = scalar(operation.root)
+        const target = operation.rootType.type.target
+        const staticSelectors: Array<LayoutPlan.Selector> = []
+        for (const candidate of operation.selectors) {
+          if (candidate._tag !== 'FieldSelector')
+            throw new RangeError('Wasm reference place supports only field selectors')
+          staticSelectors.push(candidate.field)
+        }
+        const sourceSlots = slots(operation.source)
+        const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+        return sourceLanes.flatMap((lane, ordinal) => {
+          const value = sourceSlots.at(ordinal)
+          const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+          if (value === undefined || offset === undefined)
+            throw new RangeError('Wasm reference write lost a lane offset')
+          return storeAt(address, value, offset)
+        })
+      }
       if (operation.rootType._tag === 'Slice') {
         if (memory === undefined) throw new RangeError('Wasm slice write has no private memory')
         const [selector, ...suffixSelectors] = operation.selectors
