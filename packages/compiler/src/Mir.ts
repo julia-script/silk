@@ -1764,7 +1764,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidRawStorageOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'RawBuffer construction lost allocation, count, element, or layout provenance',
+                detail:
+                  'RawBuffer construction lost allocation, count, element, or layout provenance',
               }),
             )
           }
@@ -1811,7 +1812,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidRawStorageOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'Slot projection lost its exclusive buffer, bounds operand, or element provenance',
+                detail:
+                  'Slot projection lost its exclusive buffer, bounds operand, or element provenance',
               }),
             )
         }
@@ -1826,7 +1828,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             slot?._tag === 'Nominal' && SilkType.isSlot(slot.type)
               ? slot.type.arguments[0]
               : undefined
-          const unitResult = operation._tag === 'SlotTake' ? true : destination?._tag === 'Nominal' && SilkType.equals(destination.type, SilkType.unit)
+          const unitResult =
+            operation._tag === 'SlotTake'
+              ? true
+              : destination?._tag === 'Nominal' && SilkType.equals(destination.type, SilkType.unit)
           const takeResult =
             operation._tag !== 'SlotTake' ||
             (destination !== undefined &&

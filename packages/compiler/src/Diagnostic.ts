@@ -1719,10 +1719,7 @@ export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =
     span,
   })
 
-export const missingUnsafeBoundary = (
-  operation: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const missingUnsafeBoundary = (operation: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -1733,10 +1730,7 @@ export const missingUnsafeBoundary = (
     span,
   })
 
-export const invalidConformance = (
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',

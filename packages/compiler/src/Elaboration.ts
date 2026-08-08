@@ -3211,9 +3211,7 @@ const builtinActors: Readonly<
     count: Object.freeze({
       operation: 'RawBufferCount' as const,
       typeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        Type.reference('Shared', Type.rawBuffer(rawElement)),
-      ]),
+      parameters: Object.freeze([Type.reference('Shared', Type.rawBuffer(rawElement))]),
       result: 'Usize' as const,
     }),
   }),
@@ -3762,7 +3760,8 @@ function analyzeBuiltinCall(
   const declaredTypeParameters = signature?.typeParameters ?? Object.freeze([])
   const specializationDiagnostic =
     typeArguments.explicit &&
-    (typeArguments.types === undefined || typeArguments.types.length !== declaredTypeParameters.length)
+    (typeArguments.types === undefined ||
+      typeArguments.types.length !== declaredTypeParameters.length)
       ? Diagnostic.typeArgumentArity(
           `${actorSpelling}.${operationSpelling}`,
           declaredTypeParameters.length,
@@ -3783,7 +3782,8 @@ function analyzeBuiltinCall(
   } else if (!typeArguments.explicit && signature !== undefined) {
     for (const [ordinal, parameter] of signature.parameters.entries()) {
       const argument = argumentsResult.facts.at(ordinal)
-      if (argument?.type._tag === 'Available') Type.infer(parameter, argument.type.type, substitution)
+      if (argument?.type._tag === 'Available')
+        Type.infer(parameter, argument.type.type, substitution)
     }
   }
   const missingInference = declaredTypeParameters.find(
@@ -3801,13 +3801,18 @@ function analyzeBuiltinCall(
   const instantiatedParameters =
     signature === undefined
       ? Object.freeze([])
-      : Object.freeze(signature.parameters.map((parameter) => Type.substitute(parameter, substitution)))
+      : Object.freeze(
+          signature.parameters.map((parameter) => Type.substitute(parameter, substitution)),
+        )
   const instantiatedResult =
     signature === undefined ? undefined : Type.substitute(signature.result, substitution)
   const unsafeAuthorized =
     signature?.unsafe !== true ||
     (resolution.unsafeSpans ?? []).some(
-      (span) => span.sourceId === call.span.sourceId && span.start <= call.span.start && span.end >= call.span.end,
+      (span) =>
+        span.sourceId === call.span.sourceId &&
+        span.start <= call.span.start &&
+        span.end >= call.span.end,
     )
   const unsafeDiagnostic =
     unsafeAuthorized || signature === undefined
@@ -6931,9 +6936,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
           ? []
           : [...directLoanEnds, ...nestedSlotLoanEnds],
       ),
-      heldLoans: Object.freeze(
-        fact.reference.operation === 'RawBufferSlot' ? directLoanEnds : [],
-      ),
+      heldLoans: Object.freeze(fact.reference.operation === 'RawBufferSlot' ? directLoanEnds : []),
       type: fact.type.type,
       span: fact.syntax.span,
     })

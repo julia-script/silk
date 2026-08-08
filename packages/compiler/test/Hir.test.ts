@@ -451,7 +451,10 @@ it('retains explicit unsafe boundaries as typed HIR regions', () => {
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(statement?._tag, 'Unsafe')
   if (statement?._tag !== 'Unsafe') return
-  assert.deepEqual(statement.statements.map((nested) => nested._tag), ['Bind', 'Drop'])
+  assert.deepEqual(
+    statement.statements.map((nested) => nested._tag),
+    ['Bind', 'Drop'],
+  )
   assert.include(Hir.encode(result.hir), 'unsafe r')
   assert.deepEqual(Hir.verify(result.hir), [])
 })

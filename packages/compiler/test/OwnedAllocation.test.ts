@@ -26,7 +26,10 @@ pub fn main() -> I32 {
   return run recipe
 }`
 
-const unsafeProgram = (body: string, layout = '[I32; 2]'): string => `effect fn store() -> I32 ! OutOfMemory {
+const unsafeProgram = (
+  body: string,
+  layout = '[I32; 2]',
+): string => `effect fn store() -> I32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
@@ -63,10 +66,22 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
     const mir = Analysis.loweredMir(snapshot)
     assert.deepEqual(Mir.verify(mir), [])
     const operations = mir.functions.flatMap(Mir.operations)
-    assert.include(operations.map((operation) => operation._tag), 'RawBufferFrom')
-    assert.include(operations.map((operation) => operation._tag), 'RawBufferSlot')
-    assert.include(operations.map((operation) => operation._tag), 'SlotWrite')
-    assert.include(operations.map((operation) => operation._tag), 'SlotTake')
+    assert.include(
+      operations.map((operation) => operation._tag),
+      'RawBufferFrom',
+    )
+    assert.include(
+      operations.map((operation) => operation._tag),
+      'RawBufferSlot',
+    )
+    assert.include(
+      operations.map((operation) => operation._tag),
+      'SlotWrite',
+    )
+    assert.include(
+      operations.map((operation) => operation._tag),
+      'SlotTake',
+    )
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 41)
@@ -83,10 +98,7 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
       ],
     )
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(artifact.bitcode.slice()),
-      {},
-    )
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bitcode.slice()), {})
     const main = instance.exports.silk_main as () => number
     assert.strictEqual(main(), 41)
     const nativeSnapshot = yield* Analysis.ofSource(

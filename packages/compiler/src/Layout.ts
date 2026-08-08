@@ -533,10 +533,7 @@ export const catalog = (
         sourceId: type.module,
         ordinal,
       })
-      const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(
-        type,
-        Type.layout,
-      )
+      const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(type, Type.layout)
         ? Object.freeze([
             Object.freeze(['bytes', 'Usize'] as const),
             Object.freeze(['alignment', 'Usize'] as const),
@@ -559,7 +556,7 @@ export const catalog = (
                 ])
               : Type.isSlot(type)
                 ? Object.freeze([Object.freeze(['$address', 'Usize'] as const)])
-            : Object.freeze([])
+                : Object.freeze([])
       let cursor = 0
       const fields: Array<Field> = []
       for (const [fieldOrdinal, [name, fieldType]] of fieldTypes.entries()) {
@@ -581,16 +578,18 @@ export const catalog = (
         const previous = cursor
         const offset = alignUp(cursor, fieldLayout.alignment)
         cursor = offset + fieldLayout.size
-        fields.push(Object.freeze({
-          _tag: 'LayoutField',
-          id: Object.freeze({ _tag: 'FieldId', struct: structId, ordinal: fieldOrdinal }),
-          name,
-          type: fieldType,
-          offset,
-          size: fieldLayout.size,
-          alignment: fieldLayout.alignment,
-          padding: offset - previous,
-        }))
+        fields.push(
+          Object.freeze({
+            _tag: 'LayoutField',
+            id: Object.freeze({ _tag: 'FieldId', struct: structId, ordinal: fieldOrdinal }),
+            name,
+            type: fieldType,
+            offset,
+            size: fieldLayout.size,
+            alignment: fieldLayout.alignment,
+            padding: offset - previous,
+          }),
+        )
       }
       const alignment = fields.reduce((maximum, field) => Math.max(maximum, field.alignment), 1)
       const size = alignUp(cursor, alignment)
@@ -2346,9 +2345,9 @@ const representationText = (representation: Representation): string =>
             ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=I32@${representation.length.offset}/4 address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
             : representation._tag === 'Reference'
               ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-            : representation._tag === 'Union'
-              ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-              : `aggregate tail-padding=${representation.tailPadding}`
+              : representation._tag === 'Union'
+                ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+                : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,
@@ -2370,12 +2369,12 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
           ? [
               `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
             ]
-        : candidate.representation._tag === 'Union'
-          ? candidate.representation.members.map(
-              (member) =>
-                `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-            )
-          : []),
+          : candidate.representation._tag === 'Union'
+            ? candidate.representation.members.map(
+                (member) =>
+                  `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+              )
+            : []),
 ]
 
 /** Deterministic textual encoding of a complete runtime layout plan. */

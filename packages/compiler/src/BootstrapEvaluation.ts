@@ -489,7 +489,8 @@ function executeFunction(
       throw new RangeError('MIR raw storage operation lost its whole-value reference')
     }
     const found = state.cells.get(cellKey(reference.frame, reference.cell))
-    if (found === undefined) throw new RangeError('MIR reference points at a missing evaluator cell')
+    if (found === undefined)
+      throw new RangeError('MIR reference points at a missing evaluator cell')
     return found
   }
 
@@ -1492,7 +1493,11 @@ function executeFunction(
             }
             allocation.values.set(key, read(operation.value).value)
             write(operation.destination, {
-              value: Object.freeze({ _tag: 'AggregateValue', type: Type.unit, fields: Object.freeze([]) }),
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
               fromCall: false,
             })
             trace.push(
@@ -1555,7 +1560,11 @@ function executeFunction(
             }
             allocation.values.delete(key)
             write(operation.destination, {
-              value: Object.freeze({ _tag: 'AggregateValue', type: Type.unit, fields: Object.freeze([]) }),
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
               fromCall: false,
             })
             trace.push(

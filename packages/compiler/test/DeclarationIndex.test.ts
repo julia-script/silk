@@ -520,9 +520,7 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> I32 { return 0 } }`,
         .map((diagnostic) =>
           diagnostic.reason._tag === 'InvalidDropHook' ? diagnostic.reason.detail : undefined,
         ),
-      [
-        'Copy type drop-hooks.CopyValue cannot implement Drop',
-      ],
+      ['Copy type drop-hooks.CopyValue cannot implement Drop'],
     )
     assert.include(
       index.diagnostics

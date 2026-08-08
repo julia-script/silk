@@ -21,7 +21,9 @@ const typeText = (type: Type.Type): string =>
             }> ${type.access.toLowerCase()}`
           : type._tag === 'CallableType'
             ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-            : type.members.map(typeText).join(' | ')
+            : type._tag === 'ReferenceType'
+              ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+              : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'

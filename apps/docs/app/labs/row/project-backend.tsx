@@ -45,7 +45,9 @@ const typeText = (type: Type.Type): string =>
             }> ${type.access.toLowerCase()}`
           : type._tag === 'CallableType'
             ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-            : type.members.map(typeText).join(' | ')
+            : type._tag === 'ReferenceType'
+              ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+              : type.members.map(typeText).join(' | ')
 
 const asSpan = (span: { readonly start: number; readonly end: number }): Span => ({
   start: span.start,
@@ -274,6 +276,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} · symbolic cleanup`
     case 'AllocationCleanup':
       return `${typeText(cleanup.type)} · active reclaim ticket`
+    case 'RawBufferCleanup':
+      return `${typeText(cleanup.type)} · ${cleanupText(cleanup.allocation)}`
     case 'StructCleanup':
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
@@ -556,6 +560,8 @@ export const layoutRows = (
                 ? `address i${entry.representation.address.bits} + length I32 · stride ${entry.representation.stride}`
               : entry.representation._tag === 'Union'
                 ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
+              : entry.representation._tag === 'Reference'
+                ? `reference · address i${entry.representation.address.bits}`
                 : `i${entry.representation.bits}`
         }`,
       })
@@ -705,6 +711,24 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `drop ${localText(operation.local)}`
     case 'Match':
       return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
+    case 'ValidateLayout':
+      return `${localText(operation.destination)} = validate layout ${localText(operation.bytes)} bytes, align ${localText(operation.alignment)}`
+    case 'RepeatLayout':
+      return `${localText(operation.destination)} = repeat layout ${localText(operation.layout)} × ${localText(operation.count)}`
+    case 'Allocate':
+      return `${localText(operation.destination)} = allocate ${localText(operation.layout)} ! ${operation.failure.name}`
+    case 'RawBufferFrom':
+      return `${localText(operation.destination)} = raw buffer from ${localText(operation.allocation)} × ${localText(operation.count)} · stride ${operation.stride}`
+    case 'RawBufferCount':
+      return `${localText(operation.destination)} = count ${localText(operation.buffer)}`
+    case 'RawBufferSlot':
+      return `${localText(operation.destination)} = slot ${localText(operation.buffer)}[${localText(operation.index)}]`
+    case 'SlotWrite':
+      return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
+    case 'SlotTake':
+      return `${localText(operation.destination)} = take ${localText(operation.slot)}`
+    case 'SlotDrop':
+      return `${localText(operation.destination)} = drop in place ${localText(operation.slot)} · ${cleanupText(operation.cleanup)}`
   }
 }
 
@@ -930,6 +954,12 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                 ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
             : value._tag === 'AllocationValue'
               ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
+            : value._tag === 'RawBufferValue'
+              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
+            : value._tag === 'SlotValue'
+              ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
+            : value._tag === 'ReferenceValue'
+              ? `borrow f${value.frame}.c${value.cell}`
               : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
@@ -1006,6 +1036,20 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `cleanup callable #${event.ticket}`
     case 'CallableRejected':
       return `reject callable #${event.ticket} · ${event.mode.toLowerCase()}`
+    case 'AllocationAcquire':
+      return `acquire allocation #${event.ticket}`
+    case 'RawBufferForm':
+      return `form raw buffer #${event.ticket} × ${event.count?.toString() ?? '?'}`
+    case 'SlotProject':
+      return `project slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'SlotWrite':
+      return `write slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'SlotTake':
+      return `take slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'SlotDrop':
+      return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'AllocationRelease':
+      return `release allocation #${event.ticket}`
   }
 }
 
@@ -1045,6 +1089,13 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'CallableApply':
     case 'CallableCleanup':
     case 'CallableRejected':
+    case 'AllocationAcquire':
+    case 'RawBufferForm':
+    case 'SlotProject':
+    case 'SlotWrite':
+    case 'SlotTake':
+    case 'SlotDrop':
+    case 'AllocationRelease':
       return 2
   }
 }

@@ -1300,8 +1300,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
               const parameterTypeSyntax =
                 parameter === undefined
                   ? undefined
-                  : parameter.children.find(
-                      (element): element is SyntaxTree.Node => isDeclaredTypeNode(element),
+                  : parameter.children.find((element): element is SyntaxTree.Node =>
+                      isDeclaredTypeNode(element),
                     )
               const returnSyntax = SyntaxTree.directNode(hookSyntax, 'ReturnType')
               const returnTypeSyntax = returnSyntax?.children.find(
@@ -1339,11 +1339,17 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
                     : presentName(source, parameter),
                 parameterType:
                   parameterTypeSyntax === undefined
-                    ? Object.freeze({ _tag: 'Unavailable' as const, syntax: parameter ?? hookSyntax })
+                    ? Object.freeze({
+                        _tag: 'Unavailable' as const,
+                        syntax: parameter ?? hookSyntax,
+                      })
                     : analyzeDeclaredType(source, parameterTypeSyntax).fact,
                 returnType:
                   returnTypeSyntax === undefined
-                    ? Object.freeze({ _tag: 'Unavailable' as const, syntax: returnSyntax ?? hookSyntax })
+                    ? Object.freeze({
+                        _tag: 'Unavailable' as const,
+                        syntax: returnSyntax ?? hookSyntax,
+                      })
                     : analyzeDeclaredType(source, returnTypeSyntax).fact,
                 failureRow: failure.fact,
                 requirementRow: requirements.fact,
@@ -1492,12 +1498,7 @@ const resolveDeclaredType = (
     const expected =
       declaration?.typeParameters.length ?? Type.intrinsicNominalArity(resolved.fact.type)
     if (expected === 0) return resolved
-    const diagnostic = Diagnostic.typeArgumentArity(
-      fact.spelling,
-      expected,
-      0,
-      fact.token.span,
-    )
+    const diagnostic = Diagnostic.typeArgumentArity(fact.spelling, expected, 0, fact.token.span)
     return Object.freeze({
       fact: Object.freeze({
         ...fact,
@@ -1652,7 +1653,8 @@ const resolveDeclaredType = (
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
       const declaration = memberByNominal(modules, target.fact.type)
-      const expected = declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
+      const expected =
+        declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
       const available = arguments_.map((argument) =>
         argument.fact._tag === 'Resolved' ? argument.fact.type : undefined,
       )
@@ -2212,8 +2214,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
     const next = new Set(visiting).add(key)
     const result = declaration.fields.every(
       (field) =>
-        field.declaredType._tag === 'Resolved' &&
-        isCopyType(field.declaredType.type, next),
+        field.declaredType._tag === 'Resolved' && isCopyType(field.declaredType.type, next),
     )
     copyMemo.set(key, result)
     return result
@@ -2265,7 +2266,8 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           )
         }
         const allocations = conformance.operations.filter(
-          (operation) => operation.name._tag === 'Present' && operation.name.spelling === 'allocate',
+          (operation) =>
+            operation.name._tag === 'Present' && operation.name.spelling === 'allocate',
         )
         if (conformance.operations.length !== 1 || allocations.length !== 1) {
           diagnostics.push(
@@ -2396,8 +2398,10 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
           if (
             parameter.declaredType._tag === 'Resolved' &&
             Type.containsBorrow(parameter.declaredType.type) &&
-            (!(Type.isSlice(parameter.declaredType.type) ||
-              Type.isReference(parameter.declaredType.type)) ||
+            (!(
+              Type.isSlice(parameter.declaredType.type) ||
+              Type.isReference(parameter.declaredType.type)
+            ) ||
               Type.containsBorrow(
                 Type.isSlice(parameter.declaredType.type)
                   ? parameter.declaredType.type.element
@@ -2610,16 +2614,19 @@ export const witness = (
       : undefined
   }
   const mapping = conformance.operations.at(0)
-  if (!(
-    conformance.hook === undefined &&
-    conformance.operations.length === 1 &&
-    mapping?.name._tag === 'Present' &&
-    mapping.name.spelling === 'allocate' &&
-    mapping.target._tag === 'TypePath' &&
-    mapping.target.segments.length === 2 &&
-    mapping.target.segments.at(0)?.spelling === provider.name &&
-    mapping.target.segments.at(1)?.spelling === 'allocate'
-  )) return undefined
+  if (
+    !(
+      conformance.hook === undefined &&
+      conformance.operations.length === 1 &&
+      mapping?.name._tag === 'Present' &&
+      mapping.name.spelling === 'allocate' &&
+      mapping.target._tag === 'TypePath' &&
+      mapping.target.segments.length === 2 &&
+      mapping.target.segments.at(0)?.spelling === provider.name &&
+      mapping.target.segments.at(1)?.spelling === 'allocate'
+    )
+  )
+    return undefined
   const operation = selected.module.declarations.find(
     (declaration) =>
       declaration.name._tag === 'Present' &&

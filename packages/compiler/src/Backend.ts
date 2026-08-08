@@ -742,18 +742,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             yield* LlvmType.functionType(builder, pointer, [usizeType]),
           )
         : undefined
-    const free =
-      needsAllocation
-        ? yield* FunctionActor.declare(
-            builder,
-            'free',
-            yield* LlvmType.functionType(
-              builder,
-              voidType ?? (yield* LlvmType.voidType(builder)),
-              [pointer],
-            ),
-          )
-        : undefined
+    const free = needsAllocation
+      ? yield* FunctionActor.declare(
+          builder,
+          'free',
+          yield* LlvmType.functionType(builder, voidType ?? (yield* LlvmType.voidType(builder)), [
+            pointer,
+          ]),
+        )
+      : undefined
 
     const declared: Array<{
       readonly fn: Mir.MirFunction
@@ -1248,9 +1245,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             if (planned?.representation._tag !== 'Aggregate') {
               throw new RangeError(`LLVM raw storage lost aggregate ${SilkType.encode(type)}`)
             }
-            const field = planned.representation.fields.find(
-              (candidate) => candidate.name === name,
-            )
+            const field = planned.representation.fields.find((candidate) => candidate.name === name)
             if (field === undefined) throw new RangeError(`LLVM raw storage lost field ${name}`)
             return field.offset
           }
@@ -1600,11 +1595,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     body,
                     'mul',
                     count,
-                    yield* Constant.integerUnsigned(
-                      builder,
-                      usizeType,
-                      BigInt(operation.stride),
-                    ),
+                    yield* Constant.integerUnsigned(builder, usizeType, BigInt(operation.stride)),
                     `raw_buffer${operation.destination.ordinal}_bytes`,
                   )
                   const bytesMismatch = yield* FunctionBody.integerCompare(
@@ -1639,10 +1630,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   )
                   yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
                   yield* LlvmBlock.setInsertionPoint(body, accepted)
-                  locals.set(
-                    operation.destination.ordinal,
-                    Object.freeze([...allocation, count]),
-                  )
+                  locals.set(operation.destination.ordinal, Object.freeze([...allocation, count]))
                   break
                 }
                 case 'RawBufferCount': {
@@ -1816,7 +1804,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   }
                   yield* materializeAddressRoot(operation.root)
                   const base = addressStorage.get(operation.root.ordinal)
-                  if (base === undefined) throw new RangeError('LLVM borrow formation lost its root')
+                  if (base === undefined)
+                    throw new RangeError('LLVM borrow formation lost its root')
                   if (operation.type._tag === 'Reference') {
                     locals.set(operation.destination.ordinal, Object.freeze([base]))
                     break
@@ -2672,19 +2661,15 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     if (context === undefined || free === undefined || usizeType === undefined) {
                       throw new RangeError('LLVM allocation cleanup lost its reclaim context')
                     }
-                    yield* FunctionBody.callDirect(
-                      body,
-                      free,
-                      [
-                        yield* FunctionBody.cast(
-                          body,
-                          'inttoptr',
-                          context,
-                          pointer,
-                          `allocation_cleanup${operation.local.ordinal}_context`,
-                        ),
-                      ],
-                    )
+                    yield* FunctionBody.callDirect(body, free, [
+                      yield* FunctionBody.cast(
+                        body,
+                        'inttoptr',
+                        context,
+                        pointer,
+                        `allocation_cleanup${operation.local.ordinal}_context`,
+                      ),
+                    ])
                   }
                   break
                 }

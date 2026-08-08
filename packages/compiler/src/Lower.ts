@@ -39,11 +39,11 @@ const mirType = (
           ? Object.freeze({ _tag: 'Slice', type: specialized })
           : Type.isReference(specialized)
             ? Object.freeze({ _tag: 'Reference', type: specialized })
-          : Type.isUnion(specialized)
-            ? Object.freeze({ _tag: 'Union', type: specialized })
-            : Type.isEffect(specialized)
-              ? Object.freeze({ _tag: 'EffectOutcome', type: specialized })
-              : undefined
+            : Type.isUnion(specialized)
+              ? Object.freeze({ _tag: 'Union', type: specialized })
+              : Type.isEffect(specialized)
+                ? Object.freeze({ _tag: 'EffectOutcome', type: specialized })
+                : undefined
 }
 
 const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
@@ -1500,7 +1500,9 @@ function lowerExpression(
           expression.operation === 'SlotWrite' ||
           expression.operation === 'SlotTake' ||
           expression.operation === 'SlotDrop'
-            ? (slot === undefined ? [] : (fn.slotLoans.get(slot.ordinal) ?? []))
+            ? slot === undefined
+              ? []
+              : (fn.slotLoans.get(slot.ordinal) ?? [])
             : []
         const endings = new Map(
           [...expression.loanEnds, ...inherited].map((borrow) => [borrowKey(borrow), borrow]),
@@ -1532,7 +1534,10 @@ function lowerExpression(
           type?._tag !== 'Nominal'
         )
           return undefined
-        const fields: Array<{ readonly field: DeclarationIndex.FieldId; readonly value: Mir.LocalId }> = []
+        const fields: Array<{
+          readonly field: DeclarationIndex.FieldId
+          readonly value: Mir.LocalId
+        }> = []
         for (const field of layoutEntry.representation.fields) {
           const value = fn.alloc(usize)
           fn.emit(
@@ -1604,7 +1609,9 @@ function lowerExpression(
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
         const type = fn.type(expression.type)
-        const element = Type.isRawBuffer(expression.type) ? expression.type.arguments.at(0) : undefined
+        const element = Type.isRawBuffer(expression.type)
+          ? expression.type.arguments.at(0)
+          : undefined
         const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
         if (
           allocation === undefined ||
@@ -1623,7 +1630,8 @@ function lowerExpression(
             allocation,
             count,
             element,
-            stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+            stride:
+              Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
             elementAlignment: elementLayout.alignment,
             type,
             provenance: authored(expression.span),

@@ -433,16 +433,9 @@ const emitOperation = (
   }
   const loadAt = (address: number, offset = 0): ReadonlyArray<Instr.Instr> => {
     const context = requireMemory()
-    return [
-      Instr.localGet(address),
-      Instr.memoryAccess('i32.load', context.memory, { offset }),
-    ]
+    return [Instr.localGet(address), Instr.memoryAccess('i32.load', context.memory, { offset })]
   }
-  const storeAt = (
-    address: number,
-    value: number,
-    offset = 0,
-  ): ReadonlyArray<Instr.Instr> => {
+  const storeAt = (address: number, value: number, offset = 0): ReadonlyArray<Instr.Instr> => {
     const context = requireMemory()
     return [
       Instr.localGet(address),
@@ -516,8 +509,9 @@ const emitOperation = (
     case 'Allocate': {
       const context = requireMemory()
       const [bytes, alignment] = slots(operation.layout)
-      const [base, destinationBytes, destinationAlignment, reclaim, rawContext, active] =
-        slots(operation.destination)
+      const [base, destinationBytes, destinationAlignment, reclaim, rawContext, active] = slots(
+        operation.destination,
+      )
       if (
         bytes === undefined ||
         alignment === undefined ||
@@ -646,11 +640,11 @@ const emitOperation = (
       const index = scalar(operation.index)
       const rawBuffer = SilkType.rawBuffer(operation.element)
       const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
-      const baseOffset =
-        allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
       const countOffset = aggregateFieldOffset(rawBuffer, 'count')
       const elementLayout = LayoutPlan.entry(plan, operation.element)
-      if (elementLayout === undefined) throw new RangeError('Wasm RawBuffer.slot lost element layout')
+      if (elementLayout === undefined)
+        throw new RangeError('Wasm RawBuffer.slot lost element layout')
       const stride = alignUp(elementLayout.size, elementLayout.alignment)
       return [
         Instr.localGet(index),

@@ -231,15 +231,15 @@ const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipC
         ? type.access === 'Shared'
           ? copyable
           : Object.freeze({ _tag: 'MoveOnly', type })
-      : Type.isFixedArray(type)
-        ? categoryOf(type.element)._tag === 'Copyable'
-          ? copyable
-          : Object.freeze({ _tag: 'MoveOnly', type })
-        : Type.isEffect(type) && type.access === 'Shared'
-          ? copyable
-          : Type.isCallable(type) && type.mode === 'Shared'
+        : Type.isFixedArray(type)
+          ? categoryOf(type.element)._tag === 'Copyable'
             ? copyable
             : Object.freeze({ _tag: 'MoveOnly', type })
+          : Type.isEffect(type) && type.access === 'Shared'
+            ? copyable
+            : Type.isCallable(type) && type.mode === 'Shared'
+              ? copyable
+              : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
@@ -1098,9 +1098,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
               region,
               callActive,
               naturalAccess(candidate),
-              consumesSlot
-                ? Object.freeze({ region, span: expression.syntax.span })
-                : undefined,
+              consumesSlot ? Object.freeze({ region, span: expression.syntax.span }) : undefined,
             )
             continue
           }
@@ -1277,7 +1275,7 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
                       region: statement.region,
                       span: fn.declaration.syntax.span,
                     })
-                : undefined,
+                  : undefined,
           )
           break
         }

@@ -212,7 +212,9 @@ const hirTypeText = (type: Type.Type): string =>
             }> ${type.access.toLowerCase()}`
           : type._tag === 'CallableType'
             ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
-            : type.members.map(hirTypeText).join(' | ')
+            : type._tag === 'ReferenceType'
+              ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
+              : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -465,6 +467,18 @@ export const hirRows = (
         onActivate: () => onPick(span),
       })
       expression(node.expression, depth + 1, `${path}.f`)
+      return
+    }
+    if (node._tag === 'Unsafe') {
+      rows.push({
+        key: `${path}-unsafe-${span.start}`,
+        depth,
+        label: 'unsafe',
+        detail: `r${node.region.ordinal}`,
+        span,
+        onActivate: () => onPick(span),
+      })
+      node.statements.forEach((inner, index) => statement(inner, depth + 1, `${path}.u${index}`))
       return
     }
     if (node._tag === 'UnavailableStatement') {

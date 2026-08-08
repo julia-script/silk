@@ -137,7 +137,10 @@ export const isRawBuffer = (
   readonly name: 'RawBuffer'
   readonly arguments: readonly [Type]
 } =>
-  isNominal(self) && self.module === 'silk/core' && self.name === 'RawBuffer' && self.arguments.length === 1
+  isNominal(self) &&
+  self.module === 'silk/core' &&
+  self.name === 'RawBuffer' &&
+  self.arguments.length === 1
 
 export const isSlot = (
   self: Type,
@@ -146,7 +149,10 @@ export const isSlot = (
   readonly name: 'Slot'
   readonly arguments: readonly [Type]
 } =>
-  isNominal(self) && self.module === 'silk/core' && self.name === 'Slot' && self.arguments.length === 1
+  isNominal(self) &&
+  self.module === 'silk/core' &&
+  self.name === 'Slot' &&
+  self.arguments.length === 1
 
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [outOfMemory.name, outOfMemory],
@@ -405,17 +411,17 @@ export const nominals = (self: Type): ReadonlyArray<Nominal> =>
         ? nominals(self.element)
         : isReference(self)
           ? nominals(self.target)
-        : isCallable(self)
-          ? Object.freeze([...self.parameters.flatMap(nominals), ...nominals(self.result)])
-          : isEffect(self)
-            ? Object.freeze([
-                ...nominals(self.success),
-                ...self.failures.flatMap(nominals),
-                ...self.requirements.flatMap((requirement) => nominals(requirement.capability)),
-              ])
-            : isUnion(self)
-              ? Object.freeze(self.members.flatMap(nominals))
-              : []
+          : isCallable(self)
+            ? Object.freeze([...self.parameters.flatMap(nominals), ...nominals(self.result)])
+            : isEffect(self)
+              ? Object.freeze([
+                  ...nominals(self.success),
+                  ...self.failures.flatMap(nominals),
+                  ...self.requirements.flatMap((requirement) => nominals(requirement.capability)),
+                ])
+              : isUnion(self)
+                ? Object.freeze(self.members.flatMap(nominals))
+                : []
 
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
