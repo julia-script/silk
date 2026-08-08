@@ -2012,7 +2012,11 @@ const parseImplOperation = (initial: State): NodeResult => {
 
 const parseImplDeclaration = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ImplKeyword', ['Identifier', 'ForKeyword', ...topLevelFollowing])
-  const capability = parseTypePath(keyword.state, [
+  const typeParameters =
+    nextSignificantKind(keyword.state) === 'Less'
+      ? parseTypeParameterList(keyword.state, ['ForKeyword', ...topLevelFollowing])
+      : undefined
+  const capability = parseTypePath(typeParameters?.state ?? keyword.state, [
     'ForKeyword',
     'Identifier',
     ...topLevelFollowing,
@@ -2033,6 +2037,7 @@ const parseImplDeclaration = (initial: State): NodeResult => {
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
     ...keyword.elements,
+    ...(typeParameters === undefined ? [] : [typeParameters.node]),
     capability.node,
     ...forKeyword.elements,
     target.node,

@@ -2,9 +2,9 @@
 
 ## 1. Parametric conformance syntax
 
-- [ ] 1.1 Parse an optional contextual type-parameter list on `impl` declarations with local recovery; extend Parser tests for lossless round-trip and malformed-list recovery
-- [ ] 1.2 Format parametric conformances canonically; extend Formatter goldens
-- [ ] 1.3 Extend TextMate/CodeMirror highlighting for the impl parameter list; update language tests and the VS Code grammar
+- [x] 1.1 Parse an optional contextual type-parameter list on `impl` declarations with local recovery; extend Parser tests for lossless round-trip and malformed-list recovery
+- [x] 1.2 Format parametric conformances canonically; extend Formatter goldens
+- [x] 1.3 Extend TextMate/CodeMirror highlighting for the impl parameter list; update language tests and the VS Code grammar
 
 ## 2. Parametric conformance semantics
 

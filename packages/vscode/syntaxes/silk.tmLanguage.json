@@ -1,7 +1,9 @@
 {
   "name": "silk",
   "scopeName": "source.silk",
-  "fileTypes": ["silk"],
+  "fileTypes": [
+    "silk"
+  ],
   "patterns": [
     {
       "name": "comment.line.documentation.silk",
@@ -41,7 +43,7 @@
     },
     {
       "name": "punctuation.definition.type-arguments.end.silk",
-      "match": "(?<=[A-Za-z0-9_>\\]\\)])>(?=\\s*(?:>|\\(|\\{|\\[|,|\\)|->))"
+      "match": "(?<=[A-Za-z0-9_>\\]\\)])>(?=\\s*(?:>|\\(|\\{|\\[|,|\\)|->|[A-Z][A-Za-z0-9_]*\\b))"
     },
     {
       "name": "keyword.operator.silk",

@@ -246,6 +246,26 @@ impl Drop for Guard<Token> {
   }),
 )
 
+it.effect('formats parametric conformances canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'impl < T >Drop for Vector<T>{fn drop(self:&mut Vector<T>)->Unit{return Unit.make()}}'
+    const first = yield* Formatter.format(parse('memory://parametric-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `impl<T> Drop for Vector<T> {
+  fn drop(self: &mut Vector<T>) -> Unit {
+    return Unit.make()
+  }
+}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://parametric-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
 it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
     const source = `fn later()->Effect<I32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}

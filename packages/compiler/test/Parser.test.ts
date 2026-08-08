@@ -255,6 +255,34 @@ fn main() -> I32 { unsafe { let allocation = Allocator.allocate(Layout.make(4, 4
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
 })
 
+it('parses a parametric conformance losslessly', () => {
+  const source = `struct Vector<T> { count: Usize }
+impl<T> Drop for Vector<T> {
+  fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() }
+}
+fn main() -> I32 { return 42 }`
+  const result = parseText('memory://parametric-conformance.silk', source)
+  assert.deepEqual(result.parserDiagnostics, [])
+  const impl = descendants(result.root)
+    .filter(SyntaxTree.isNode)
+    .find((node) => node.kind === 'ImplDeclaration')
+  assert.isDefined(impl)
+  const implKinds = descendants(impl ?? result.root)
+    .filter(SyntaxTree.isNode)
+    .map((node) => node.kind)
+  assert.include(implKinds, 'TypeParameterList')
+  assert.include(implKinds, 'TypeParameter')
+  assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
+it('recovers from a malformed impl type-parameter list inside the declaration', () => {
+  const source = 'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } } fn after() -> I32 { return 7 }'
+  const result = parseText('memory://damaged-parametric-conformance.silk', source)
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('bounds damaged conformance recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-conformance.silk',

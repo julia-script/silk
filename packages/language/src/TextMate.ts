@@ -77,7 +77,7 @@ export const grammar: Grammar = {
     },
     {
       name: 'punctuation.definition.type-arguments.end.silk',
-      match: '(?<=[A-Za-z0-9_>\\]\\)])>(?=\\s*(?:>|\\(|\\{|\\[|,|\\)|->))',
+      match: '(?<=[A-Za-z0-9_>\\]\\)])>(?=\\s*(?:>|\\(|\\{|\\[|,|\\)|->|[A-Z][A-Za-z0-9_]*\\b))',
     },
     { name: 'keyword.operator.silk', match: '=>|->|\\|>|\\||[=!<>]=|[-+*/%!<>=&]' },
     { name: 'punctuation.definition.pattern.rest.silk', match: '\\.\\.' },

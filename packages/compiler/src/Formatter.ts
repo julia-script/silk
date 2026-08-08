@@ -369,13 +369,16 @@ const printImplDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const nodes = directNodes(node)
-  const capability = nodes[0] ?? nodeOf(node, 'TypePath')
-  const target = nodes[1] ?? nodeOf(node, 'TypePath', 1)
-  const members = nodes.slice(2)
+  const typeParameters = nodes[0]?.kind === 'TypeParameterList' ? nodes[0] : undefined
+  const positional = typeParameters === undefined ? nodes : nodes.slice(1)
+  const capability = positional[0] ?? nodeOf(node, 'TypePath')
+  const target = positional[1] ?? nodeOf(node, 'TypePath', 1)
+  const members = positional.slice(2)
   const open = tokenOf(node, 'LeftBrace')
   const close = tokenOf(node, 'RightBrace')
   const head = FormatDocument.concat(
     printToken(context, tokenOf(node, 'ImplKeyword'), prefix),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, capability, FormatDocument.text(' ')),
     printToken(context, tokenOf(node, 'ForKeyword'), FormatDocument.text(' ')),
     printNode(context, target, FormatDocument.text(' ')),
