@@ -21,10 +21,10 @@
 
 ## 3. Standard-library mechanism
 
-- [ ] 3.1 Embed stdlib `.silk` sources in the compiler package and resolve their imports through module closure with a reserved canonical namespace
-- [ ] 3.2 Report a deterministic collision diagnostic when a user module shadows a stdlib identity
-- [ ] 3.3 Gate stdlib-importing artifacts through fresh-process determinism; extend Driver tests
-- [ ] 3.4 Confirm stdlib source compiles with zero privilege: an injected library defect surfaces as an ordinary diagnostic attributed to the library module (test with a temporarily broken fixture copy)
+- [x] 3.1 Embed stdlib `.silk` sources in the compiler package and resolve their imports through module closure with a reserved canonical namespace
+- [x] 3.2 Report a deterministic collision diagnostic when a user module shadows a stdlib identity
+- [x] 3.3 Gate stdlib-importing artifacts through fresh-process determinism; extend Driver tests
+- [x] 3.4 Confirm stdlib source compiles with zero privilege: an injected library defect surfaces as an ordinary diagnostic attributed to the library module (test with a temporarily broken fixture copy)
 
 ## 4. Vector in Silk
 

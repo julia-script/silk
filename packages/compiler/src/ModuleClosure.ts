@@ -6,6 +6,8 @@ import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
+import * as SourceSpan from './SourceSpan.js'
+import * as Stdlib from './Stdlib.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -310,6 +312,10 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
   const rootModule = request.root.id
   const loaded = new Map<string, Module>()
   const diagnostics: Array<ReadonlyArray<Diagnostic.Diagnostic>> = []
+  if (Stdlib.isReserved(rootModule)) {
+    const span = Option.getOrThrow(SourceSpan.make(request.root, 0, 0))
+    diagnostics.push(Object.freeze([Diagnostic.reservedModuleIdentity(rootModule, span)]))
+  }
   const resolutions = new Map<string, Resolution>([
     [rootModule, Object.freeze({ _tag: 'Found', bytes: SourceFile.toUint8Array(request.root) })],
   ])
@@ -320,6 +326,17 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
   ): Effect.fn.Return<Resolution, never, SourceResolver.SourceResolver> {
     const cached = resolutions.get(module)
     if (cached !== undefined) return cached
+    // Standard-library identities resolve from the compiler-shipped sources exclusively; a
+    // user resolver is never consulted inside the reserved namespace.
+    if (Stdlib.isReserved(module)) {
+      const embedded = Stdlib.sources.get(module)
+      const resolution: Resolution =
+        embedded === undefined
+          ? Object.freeze({ _tag: 'Absent' as const })
+          : Object.freeze({ _tag: 'Found' as const, bytes: Uint8Array.from(embedded) })
+      resolutions.set(module, resolution)
+      return resolution
+    }
     const attempted = yield* Effect.result(SourceResolver.resolve(module))
     const resolution: Resolution = Result.isFailure(attempted)
       ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
