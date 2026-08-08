@@ -23,6 +23,35 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
 
+/**
+ * Field paths to every reclaim context inside one plan, or undefined when the plan holds
+ * shapes (hooks, arrays, nested unions, callables) that conditional union cleanup cannot lower.
+ */
+const reclaimContextPaths = (
+  plan: Ownership.CleanupPlan,
+  prefix: ReadonlyArray<DeclarationIndex.FieldId> = [],
+): ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>> | undefined => {
+  switch (plan._tag) {
+    case 'NoCleanup':
+    case 'ParameterCleanup':
+      return []
+    case 'AllocationCleanup':
+    case 'RawBufferCleanup':
+      return [prefix]
+    case 'StructCleanup': {
+      const collected: Array<ReadonlyArray<DeclarationIndex.FieldId>> = []
+      for (const field of plan.fields) {
+        const nested = reclaimContextPaths(field.cleanup, [...prefix, field.field])
+        if (nested === undefined) return undefined
+        collected.push(...nested)
+      }
+      return collected
+    }
+    default:
+      return undefined
+  }
+}
+
 /** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
 const planReclaims = (plan: Ownership.CleanupPlan): boolean =>
   plan._tag === 'AllocationCleanup' ||
@@ -1503,7 +1532,57 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               }
               case 'UnionCleanup': {
                 if (plan.cases.every((entry) => !planReclaims(entry.cleanup))) return
-                throw new RangeError('LLVM cleanup does not yet lower owning union cases')
+                // Conditional release without new blocks: every reclaim context selects to null
+                // unless the live tag matches its member, and libc free ignores null.
+                const shape = Layout.callingShape(program.layout, plan.type)
+                const tagValue = values.at(0)
+                if (
+                  shape === undefined ||
+                  tagValue === undefined ||
+                  free === undefined ||
+                  usizeType === undefined
+                ) {
+                  throw new RangeError('LLVM union cleanup lost its shape')
+                }
+                const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
+                for (const entry of plan.cases) {
+                  const paths = reclaimContextPaths(entry.cleanup)
+                  if (paths === undefined) {
+                    throw new RangeError('LLVM cleanup does not yet lower this union case shape')
+                  }
+                  for (const [pathOrdinal, path] of paths.entries()) {
+                    const slots = Layout.memberFieldSlots(shape, entry.member, path)
+                    const contextSlot = slots?.at(4)
+                    const context = contextSlot === undefined ? undefined : values.at(contextSlot)
+                    if (context === undefined) {
+                      throw new RangeError('LLVM union cleanup lost a reclaim lane')
+                    }
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      tagValue,
+                      yield* Constant.integerSigned(builder, i32, BigInt(entry.ordinal)),
+                      `${tag}_u${entry.ordinal}_${pathOrdinal}_is`,
+                    )
+                    const guarded = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      context,
+                      zero,
+                      `${tag}_u${entry.ordinal}_${pathOrdinal}_context`,
+                    )
+                    yield* FunctionBody.callDirect(body, free, [
+                      yield* FunctionBody.cast(
+                        body,
+                        'inttoptr',
+                        guarded,
+                        pointer,
+                        `${tag}_u${entry.ordinal}_${pathOrdinal}_pointer`,
+                      ),
+                    ])
+                  }
+                }
+                return
               }
             }
           })
@@ -1906,6 +1985,260 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     )
                   }
                   locals.set(operation.destination.ordinal, Object.freeze([]))
+                  break
+                }
+                case 'ValidateLayout': {
+                  const bytes = readLocal(operation.bytes).at(0)
+                  const alignment = readLocal(operation.alignment).at(0)
+                  if (bytes === undefined || alignment === undefined || usizeType === undefined) {
+                    throw new RangeError('LLVM layout validation lost its operands')
+                  }
+                  const name = `validate${operation.destination.ordinal}`
+                  const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
+                  const one = yield* Constant.integerUnsigned(builder, usizeType, 1n)
+                  const nonZero = yield* FunctionBody.integerCompare(
+                    body,
+                    'ne',
+                    alignment,
+                    zero,
+                    `${name}_nonzero`,
+                  )
+                  const decremented = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    alignment,
+                    one,
+                    `${name}_decrement`,
+                  )
+                  const masked = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    alignment,
+                    decremented,
+                    `${name}_mask`,
+                  )
+                  const powerOfTwo = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    masked,
+                    zero,
+                    `${name}_pow2`,
+                  )
+                  const valid = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    nonZero,
+                    powerOfTwo,
+                    `${name}_valid`,
+                  )
+                  const members = operation.type.type.members
+                  const layoutOrdinal = members.findIndex((member) =>
+                    SilkType.equals(member, SilkType.layout),
+                  )
+                  const invalidOrdinal = members.findIndex((member) =>
+                    SilkType.equals(member, SilkType.invalidAlignment),
+                  )
+                  if (layoutOrdinal < 0 || invalidOrdinal < 0) {
+                    throw new RangeError('LLVM layout validation lost its union members')
+                  }
+                  const tag = yield* FunctionBody.select(
+                    body,
+                    valid,
+                    yield* Constant.integerSigned(builder, i32, BigInt(layoutOrdinal)),
+                    yield* Constant.integerSigned(builder, i32, BigInt(invalidOrdinal)),
+                    `${name}_tag`,
+                  )
+                  // Layout packs {bytes, alignment}; InvalidAlignment packs {alignment} at slot 0.
+                  const first = yield* FunctionBody.select(
+                    body,
+                    valid,
+                    bytes,
+                    alignment,
+                    `${name}_slot0`,
+                  )
+                  const second = yield* FunctionBody.select(
+                    body,
+                    valid,
+                    alignment,
+                    zero,
+                    `${name}_slot1`,
+                  )
+                  const lanes = lanesFor(operation.type)
+                  const values: Array<Value.Input> = [tag, first, second]
+                  while (values.length < lanes.length) {
+                    const lane = lanes.at(values.length)
+                    if (lane === undefined) break
+                    values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
+                  break
+                }
+                case 'RepeatLayout': {
+                  const layoutValues = readLocal(operation.layout)
+                  const bytes = layoutValues.at(0)
+                  const alignment = layoutValues.at(1)
+                  const count = readLocal(operation.count).at(0)
+                  if (
+                    bytes === undefined ||
+                    alignment === undefined ||
+                    count === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM repeated layout lost its operands')
+                  }
+                  const name = `repeat${operation.destination.ordinal}`
+                  const zero = yield* Constant.integerUnsigned(builder, usizeType, 0n)
+                  const one = yield* Constant.integerUnsigned(builder, usizeType, 1n)
+                  const maximum = yield* Constant.integerUnsigned(
+                    builder,
+                    usizeType,
+                    program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n,
+                  )
+                  const alignmentZero = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    alignment,
+                    zero,
+                    `${name}_alignment_zero`,
+                  )
+                  const safeAlignment = yield* FunctionBody.select(
+                    body,
+                    alignmentZero,
+                    one,
+                    alignment,
+                    `${name}_safe_alignment`,
+                  )
+                  const summed = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    bytes,
+                    yield* FunctionBody.binary(body, 'sub', safeAlignment, one, `${name}_pad`),
+                    `${name}_summed`,
+                  )
+                  const quotient = yield* FunctionBody.binary(
+                    body,
+                    'udiv',
+                    summed,
+                    safeAlignment,
+                    `${name}_quotient`,
+                  )
+                  const rounded = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    quotient,
+                    safeAlignment,
+                    `${name}_rounded`,
+                  )
+                  const stride = yield* FunctionBody.select(
+                    body,
+                    alignmentZero,
+                    zero,
+                    rounded,
+                    `${name}_stride`,
+                  )
+                  const countZero = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    count,
+                    zero,
+                    `${name}_count_zero`,
+                  )
+                  const safeCount = yield* FunctionBody.select(
+                    body,
+                    countZero,
+                    one,
+                    count,
+                    `${name}_safe_count`,
+                  )
+                  const budget = yield* FunctionBody.binary(
+                    body,
+                    'udiv',
+                    maximum,
+                    safeCount,
+                    `${name}_budget`,
+                  )
+                  const exceeds = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    stride,
+                    budget,
+                    `${name}_exceeds`,
+                  )
+                  const countPositive = yield* FunctionBody.integerCompare(
+                    body,
+                    'ne',
+                    count,
+                    zero,
+                    `${name}_count_positive`,
+                  )
+                  // Rounding up can wrap the integer itself; classify that as overflow directly.
+                  const headroom = yield* FunctionBody.binary(
+                    body,
+                    'sub',
+                    maximum,
+                    yield* FunctionBody.binary(body, 'sub', safeAlignment, one, `${name}_pad2`),
+                    `${name}_headroom`,
+                  )
+                  const huge = yield* FunctionBody.integerCompare(
+                    body,
+                    'ugt',
+                    bytes,
+                    headroom,
+                    `${name}_huge`,
+                  )
+                  const exceedsOrHuge = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    exceeds,
+                    huge,
+                    `${name}_exceeds_or_huge`,
+                  )
+                  const overflow = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    countPositive,
+                    exceedsOrHuge,
+                    `${name}_overflow`,
+                  )
+                  const total = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    stride,
+                    count,
+                    `${name}_total`,
+                  )
+                  const members = operation.type.type.members
+                  const layoutOrdinal = members.findIndex((member) =>
+                    SilkType.equals(member, SilkType.layout),
+                  )
+                  const overflowOrdinal = members.findIndex((member) =>
+                    SilkType.equals(member, SilkType.layoutOverflow),
+                  )
+                  if (layoutOrdinal < 0 || overflowOrdinal < 0) {
+                    throw new RangeError('LLVM repeated layout lost its union members')
+                  }
+                  const tag = yield* FunctionBody.select(
+                    body,
+                    overflow,
+                    yield* Constant.integerSigned(builder, i32, BigInt(overflowOrdinal)),
+                    yield* Constant.integerSigned(builder, i32, BigInt(layoutOrdinal)),
+                    `${name}_tag`,
+                  )
+                  const totalOut = yield* FunctionBody.select(
+                    body,
+                    overflow,
+                    zero,
+                    total,
+                    `${name}_bytes`,
+                  )
+                  const lanes = lanesFor(operation.type)
+                  const values: Array<Value.Input> = [tag, totalOut, alignment]
+                  while (values.length < lanes.length) {
+                    const lane = lanes.at(values.length)
+                    if (lane === undefined) break
+                    values.push(yield* Constant.integerUnsigned(builder, laneType(lane), 0n))
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
                 case 'SlotTake':

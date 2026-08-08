@@ -877,6 +877,13 @@ const printNode = (
         printNode(context, result, FormatDocument.text(' ')),
       )
     }
+    case 'BindingPattern': {
+      const nodes = directNodes(node)
+      return FormatDocument.concat(
+        printNode(context, nodes[0] ?? nodeOf(node, 'TypePath'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+      )
+    }
     case 'NominalPattern': {
       const nodes = directNodes(node)
       return FormatDocument.concat(

@@ -275,6 +275,24 @@ fn main() -> I32 { return 42 }`
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
 })
 
+it('parses whole-member binding patterns losslessly', () => {
+  const source = `struct Empty {}
+struct Full { value: I32 }
+fn take(state: Empty | Full) -> I32 {
+  return match move state {
+    Empty nothing => 0
+    Full full => 1
+  }
+}`
+  const result = parseText('memory://binding-pattern.silk', source)
+  assert.deepEqual(result.parserDiagnostics, [])
+  const kinds = descendants(result.root)
+    .filter(SyntaxTree.isNode)
+    .map((node) => node.kind)
+  assert.strictEqual(kinds.filter((kind) => kind === 'BindingPattern').length, 2)
+  assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
 it('recovers from a malformed impl type-parameter list inside the declaration', () => {
   const source = 'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } } fn after() -> I32 { return 7 }'
   const result = parseText('memory://damaged-parametric-conformance.silk', source)

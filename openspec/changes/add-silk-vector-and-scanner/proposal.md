@@ -63,6 +63,10 @@ Two prerequisites are missing and were confirmed by probing the current compiler
   whose self type is a generic instantiation.
 - `bootstrap-compiler-driver`: Gate the sequence and scanner through differential execution across
   all three engines, fresh-process determinism, and failure-ordinal sweeps over growth and rollback.
+- `bootstrap-exhaustive-matching`: Accept whole-member bindings (`Member name`) so union payloads
+  are extractable as single values.
+- `bootstrap-backend`: Lower runtime layout validation and repetition natively, and release owning
+  union members conditionally by tag.
 - `bootstrap-syntax-inspector`: Add scanner and vector presets — growth, exhaustion, rollback, and
   early drop — to the unified `/labs` workbench.
 

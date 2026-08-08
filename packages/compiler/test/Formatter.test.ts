@@ -246,6 +246,27 @@ impl Drop for Guard<Token> {
   }),
 )
 
+it.effect('formats whole-member binding patterns canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'fn take(state: Empty | Full) -> I32 { return match move state { Empty   nothing => 0 Full   full => 1 } }'
+    const first = yield* Formatter.format(parse('memory://binding-pattern-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn take(state: Empty | Full) -> I32 {
+  return match move state {
+    Empty nothing => 0
+    Full full => 1
+  }
+}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://binding-pattern-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
 it.effect('formats parametric conformances canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =

@@ -56,6 +56,7 @@ export type NodeKind =
   | 'MatchAccess'
   | 'MatchArm'
   | 'NominalPattern'
+  | 'BindingPattern'
   | 'UniversalPattern'
   | 'PatternField'
   | 'RestPattern'

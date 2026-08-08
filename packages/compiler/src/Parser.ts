@@ -719,6 +719,14 @@ function parsePattern(initial: State): NodeResult {
 
 function parseNominalPattern(initial: State): NodeResult {
   const target = parseTypePrimary(initial, ['LeftBrace', 'IfKeyword', 'FatArrow', 'RightBrace'])
+  // `Member name` binds the whole member value instead of destructuring its fields.
+  if (nextSignificantKind(target.state) === 'Identifier') {
+    const binding = expect(target.state, 'Identifier', ['IfKeyword', 'FatArrow', 'RightBrace'])
+    return Object.freeze({
+      state: binding.state,
+      node: syntaxNode(binding.state, 'BindingPattern', [target.node, ...binding.elements]),
+    })
+  }
   const left = expect(target.state, 'LeftBrace', [
     'Identifier',
     'DotDot',

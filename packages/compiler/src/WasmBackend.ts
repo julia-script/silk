@@ -586,9 +586,154 @@ const emitOperation = (
     })
   }
   switch (operation._tag) {
-    case 'ValidateLayout':
-    case 'RepeatLayout':
-      throw new RangeError('Wasm layout validation lowering is not available yet')
+    case 'ValidateLayout': {
+      const bytes = scalar(operation.bytes)
+      const alignment = scalar(operation.alignment)
+      const destination = slots(operation.destination)
+      const tag = destination.at(0)
+      const first = destination.at(1)
+      const second = destination.at(2)
+      if (tag === undefined || first === undefined || second === undefined) {
+        throw new RangeError('Wasm layout validation lost its destination lanes')
+      }
+      const members = operation.type.type.members
+      const layoutOrdinal = members.findIndex((member) => SilkType.equals(member, SilkType.layout))
+      const invalidOrdinal = members.findIndex((member) =>
+        SilkType.equals(member, SilkType.invalidAlignment),
+      )
+      if (layoutOrdinal < 0 || invalidOrdinal < 0) {
+        throw new RangeError('Wasm layout validation lost its union members')
+      }
+      return [
+        // valid = (alignment != 0) & ((alignment & (alignment - 1)) == 0), kept in scratch
+        Instr.localGet(alignment),
+        Instr.op('i32.eqz'),
+        Instr.op('i32.eqz'),
+        Instr.localGet(alignment),
+        Instr.localGet(alignment),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.op('i32.and'),
+        Instr.op('i32.eqz'),
+        Instr.op('i32.and'),
+        Instr.localSet(layout.scratch),
+        // tag = valid ? Layout : InvalidAlignment
+        Instr.i32Const(layoutOrdinal),
+        Instr.i32Const(invalidOrdinal),
+        Instr.localGet(layout.scratch),
+        Instr.op('select'),
+        Instr.localSet(tag),
+        // Layout packs {bytes, alignment}; InvalidAlignment packs {alignment} at slot 0.
+        Instr.localGet(bytes),
+        Instr.localGet(alignment),
+        Instr.localGet(layout.scratch),
+        Instr.op('select'),
+        Instr.localSet(first),
+        Instr.localGet(alignment),
+        Instr.i32Const(0),
+        Instr.localGet(layout.scratch),
+        Instr.op('select'),
+        Instr.localSet(second),
+        ...destination.slice(3).flatMap((slot) => [Instr.i32Const(0), Instr.localSet(slot)]),
+      ]
+    }
+    case 'RepeatLayout': {
+      const layoutSlots = slots(operation.layout)
+      const bytes = layoutSlots.at(0)
+      const alignment = layoutSlots.at(1)
+      const count = scalar(operation.count)
+      const destination = slots(operation.destination)
+      const tag = destination.at(0)
+      const first = destination.at(1)
+      const second = destination.at(2)
+      if (
+        bytes === undefined ||
+        alignment === undefined ||
+        tag === undefined ||
+        first === undefined ||
+        second === undefined
+      ) {
+        throw new RangeError('Wasm repeated layout lost its lanes')
+      }
+      const members = operation.type.type.members
+      const layoutOrdinal = members.findIndex((member) => SilkType.equals(member, SilkType.layout))
+      const overflowOrdinal = members.findIndex((member) =>
+        SilkType.equals(member, SilkType.layoutOverflow),
+      )
+      if (layoutOrdinal < 0 || overflowOrdinal < 0) {
+        throw new RangeError('Wasm repeated layout lost its union members')
+      }
+      const maximum = -1 // 0xFFFFFFFF as a signed i32 constant
+      return [
+        // safeAlignment (temporarily in the tag slot) = alignment == 0 ? 1 : alignment
+        Instr.i32Const(1),
+        Instr.localGet(alignment),
+        Instr.localGet(alignment),
+        Instr.op('i32.eqz'),
+        Instr.op('select'),
+        Instr.localSet(tag),
+        // stride (temporarily in the bytes slot): roundUp(bytes, safeAlignment), 0 when alignment == 0
+        Instr.i32Const(0),
+        Instr.localGet(bytes),
+        Instr.localGet(tag),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.op('i32.add'),
+        Instr.localGet(tag),
+        Instr.op('i32.div_u'),
+        Instr.localGet(tag),
+        Instr.op('i32.mul'),
+        Instr.localGet(alignment),
+        Instr.op('i32.eqz'),
+        Instr.op('select'),
+        Instr.localSet(first),
+        // overflow (in scratch) = count != 0 & (bytes > max - (safeAlignment-1) | stride > max / safeCount)
+        Instr.i32Const(maximum),
+        Instr.localGet(tag),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.op('i32.sub'),
+        Instr.localGet(bytes),
+        Instr.op('i32.lt_u'),
+        Instr.localSet(layout.scratch),
+        // safeCount reuses the tag slot now that safeAlignment is no longer needed
+        Instr.i32Const(1),
+        Instr.localGet(count),
+        Instr.localGet(count),
+        Instr.op('i32.eqz'),
+        Instr.op('select'),
+        Instr.localSet(tag),
+        Instr.localGet(first),
+        Instr.i32Const(maximum),
+        Instr.localGet(tag),
+        Instr.op('i32.div_u'),
+        Instr.op('i32.gt_u'),
+        Instr.localGet(layout.scratch),
+        Instr.op('i32.or'),
+        Instr.localGet(count),
+        Instr.op('i32.eqz'),
+        Instr.op('i32.eqz'),
+        Instr.op('i32.and'),
+        Instr.localSet(layout.scratch),
+        // bytes out = overflow ? 0 : stride * count
+        Instr.i32Const(0),
+        Instr.localGet(first),
+        Instr.localGet(count),
+        Instr.op('i32.mul'),
+        Instr.localGet(layout.scratch),
+        Instr.op('select'),
+        Instr.localSet(first),
+        // final tag and passthrough alignment
+        Instr.i32Const(overflowOrdinal),
+        Instr.i32Const(layoutOrdinal),
+        Instr.localGet(layout.scratch),
+        Instr.op('select'),
+        Instr.localSet(tag),
+        Instr.localGet(alignment),
+        Instr.localSet(second),
+        ...destination.slice(3).flatMap((slot) => [Instr.i32Const(0), Instr.localSet(slot)]),
+      ]
+    }
     case 'Allocate': {
       const context = requireMemory()
       const [bytes, alignment] = slots(operation.layout)

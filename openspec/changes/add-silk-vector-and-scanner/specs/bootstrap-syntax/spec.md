@@ -17,3 +17,13 @@ still parses.
 
 - **WHEN** an impl type-parameter list is unclosed or contains an unexpected token
 - **THEN** the parser reports deterministic diagnostics inside the impl declaration and the next top-level declaration parses normally
+
+### Requirement: Whole-member binding patterns parse losslessly
+
+Match patterns SHALL accept `Member name` alongside field destructuring, parsing losslessly with
+canonical formatting and local recovery inside the containing arm.
+
+#### Scenario: Parse and format a binding pattern
+
+- **WHEN** source matches with arms `Empty nothing => 0` and `Full full => 1`
+- **THEN** the syntax tree retains both binding patterns with full-fidelity reproduction and the formatter prints them canonically

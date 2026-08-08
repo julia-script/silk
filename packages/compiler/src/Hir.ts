@@ -246,7 +246,8 @@ export type Expression =
         readonly bindings: ReadonlyArray<{
           readonly id: Match.BindingId
           readonly name?: string
-          readonly field: DeclarationIndex.FieldId
+          /** Absent for a whole-member binding, which owns the entire payload. */
+          readonly field?: DeclarationIndex.FieldId
           readonly path: ReadonlyArray<DeclarationIndex.FieldId>
           readonly type: DeclarationIndex.SemanticType
           readonly access: Match.Access

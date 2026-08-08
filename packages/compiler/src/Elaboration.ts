@@ -207,7 +207,8 @@ export interface PatternBindingFact {
   readonly _tag: 'PatternBinding'
   readonly id: Match.BindingId
   readonly name: DeclaredName
-  readonly field: DeclarationIndex.FieldFact
+  /** Absent for a whole-member binding, which owns the entire matched payload. */
+  readonly field?: DeclarationIndex.FieldFact
   readonly path: ReadonlyArray<DeclarationIndex.FieldId>
   readonly type: ExpressionTypeFact
   readonly access: Match.Access
@@ -1613,6 +1614,68 @@ const analyzePattern = (
     })
   }
 
+  if (node.kind === 'BindingPattern') {
+    // `Member name` binds the entire member payload: no field destructuring, nothing omitted.
+    const bindingTargetSyntax =
+      SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+    const bindingTarget = resolveStructTarget(source, bindingTargetSyntax, resolution, declaration)
+    const bindingDiagnostics: Array<Diagnostic.Diagnostic> = [...bindingTarget.diagnostics]
+    const member = bindingTarget.fact._tag === 'Resolved' ? bindingTarget.fact.type : undefined
+    const bindingToken = node.children.find(
+      (element): element is Token.Token =>
+        SyntaxTree.isToken(element) && element.kind === 'Identifier',
+    )
+    const declaredName: DeclaredName =
+      bindingToken === undefined
+        ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
+        : Object.freeze({
+            _tag: 'Present' as const,
+            spelling: spelling(source, bindingToken),
+            token: bindingToken,
+          })
+    if (declaredName._tag === 'Present') {
+      const original =
+        scopeSpanFor(scope, declaredName.spelling) ?? localNames.get(declaredName.spelling)
+      if (original === undefined) localNames.set(declaredName.spelling, declaredName.token.span)
+      else {
+        counters.invalid = true
+        bindingDiagnostics.push(
+          Diagnostic.patternBindingConflict(
+            declaredName.spelling,
+            original,
+            declaredName.token.span,
+          ),
+        )
+      }
+    }
+    const wholeBinding: PatternBindingFact = Object.freeze({
+      _tag: 'PatternBinding',
+      id: Object.freeze({ _tag: 'PatternBindingId' as const, arm, ordinal: counters.binding }),
+      name: declaredName,
+      path: prefix,
+      type: member === undefined ? unavailableExpressionType : availableExpressionType(member),
+      access,
+      syntax: node,
+    })
+    counters.binding += 1
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'NominalPattern',
+        id,
+        target: bindingTarget.fact,
+        ...(member === undefined ? {} : { member }),
+        fields: Object.freeze([]),
+        bindings: Object.freeze([wholeBinding]),
+        omitted: Object.freeze([]),
+        rest: false,
+        complete:
+          bindingTarget.fact._tag === 'Resolved' && !counters.invalid && isAvailableSyntax(node),
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(bindingDiagnostics),
+    })
+  }
+
   const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
   const target = resolveStructTarget(source, targetSyntax, resolution, declaration)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
@@ -1853,6 +1916,7 @@ const analyzeMatch = (
     const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
     const patternNode =
       SyntaxTree.directNode(armNode, 'NominalPattern') ??
+      SyntaxTree.directNode(armNode, 'BindingPattern') ??
       SyntaxTree.directNode(armNode, 'UniversalPattern')
     if (patternNode === undefined) throw new RangeError('Match arm requires a pattern')
     const pattern = analyzePattern(
@@ -6751,7 +6815,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
                       Object.freeze({
                         id: binding.id,
                         ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
-                        field: binding.field.id,
+                        ...(binding.field === undefined ? {} : { field: binding.field.id }),
                         path: binding.path,
                         type: binding.type.type,
                         access: binding.access,
