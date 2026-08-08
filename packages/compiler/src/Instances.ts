@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
+import * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
 
 /**
@@ -181,6 +182,29 @@ const resolveEntry = (root: Elaboration.Result): Entry => {
 interface CallTarget {
   readonly declaration: DeclarationIndex.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.Type>
+}
+
+/** Collects every Drop hook a cleanup plan will invoke, so cleanup reaches hook instances. */
+const hookCalls = (cleanup: Ownership.CleanupPlan): ReadonlyArray<CallTarget> => {
+  switch (cleanup._tag) {
+    case 'HookCleanup':
+      return [
+        Object.freeze({ declaration: cleanup.hook, typeArguments: cleanup.typeArguments }),
+        ...hookCalls(cleanup.inner),
+      ]
+    case 'StructCleanup':
+      return cleanup.fields.flatMap((field) => hookCalls(field.cleanup))
+    case 'ArrayCleanup':
+      return hookCalls(cleanup.element)
+    case 'UnionCleanup':
+      return cleanup.cases.flatMap((entry) => hookCalls(entry.cleanup))
+    case 'RawBufferCleanup':
+      return hookCalls(cleanup.allocation)
+    case 'CallableCleanup':
+      return cleanup.slots.flatMap((slot) => hookCalls(slot.cleanup))
+    default:
+      return []
+  }
 }
 
 const callTargets = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
@@ -484,6 +508,7 @@ const functionByKey = (
 export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
+  ownership?: ReadonlyMap<string, Ownership.ModuleOwnership>,
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {
@@ -549,8 +574,23 @@ export const discover = (
     for (const callable of concreteCallables(fn, key, substitution, results)) {
       recordedCallables.set(callableKeyText(callable), callable)
     }
+    const functionOwnership = ownership
+      ?.get(key.declaration.module)
+      ?.functions.find(
+        (candidate) => candidate.declaration.id.ordinal === fn.declaration.id.ordinal,
+      )
+    // Deferred effect-body bindings publish only through exit releases, so both fact sources
+    // feed hook reachability.
+    const cleanupHooks = [
+      ...(functionOwnership?.bindings.map((binding) => binding.cleanup) ?? []),
+      ...(functionOwnership?.exits.flatMap((exit) =>
+        exit.releases.map((release) => release.cleanup),
+      ) ?? []),
+    ]
+      .map((cleanup) => Ownership.specializeCleanup(cleanup, substitution))
+      .flatMap(hookCalls)
     const calls = new Map<string, CallTarget>()
-    for (const call of [...bodyCallTargets(fn), ...callableCallTargets(fn, results)]) {
+    for (const call of [...bodyCallTargets(fn), ...callableCallTargets(fn, results), ...cleanupHooks]) {
       const identity = `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.key).join('\u0000')}`
       if (!calls.has(identity)) calls.set(identity, call)
     }

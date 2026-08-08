@@ -235,7 +235,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const discovery = phase(
     'instance-discovery',
     results.size,
-    () => Instances.discover(request.compilation.root.id, results),
+    () => Instances.discover(request.compilation.root.id, results, ownership),
     (result) => result.instances.length,
     (result) => result.violations.length,
   )

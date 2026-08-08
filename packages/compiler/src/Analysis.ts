@@ -123,7 +123,7 @@ export const make = Effect.fn('Analysis.make')(function* (
     hasInvalidGenericBody(index, frontendDiagnostics)
   const instances = frontendSpecializationInvalid
     ? Instances.invalid(request.root.id)
-    : Instances.discover(request.root.id, results)
+    : Instances.discover(request.root.id, results, ownership)
   const baseDiagnostics = Diagnostic.merge(
     frontendDiagnostics,
     Instances.violationDiagnostics(instances),

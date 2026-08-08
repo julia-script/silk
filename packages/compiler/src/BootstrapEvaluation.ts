@@ -3,6 +3,7 @@ import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -510,6 +511,175 @@ function executeFunction(
     return found
   }
 
+  /**
+   * Releases one owned value through its complete cleanup plan: hooks run before their field
+   * cleanup, struct fields release in declaration order, and every reclaim ticket is consumed
+   * exactly once. Returns a blocked step when a hook call blocks or unsafe code already
+   * consumed a ticket this plan still owns.
+   */
+  const releaseThroughPlan = (
+    cleanup: Ownership.CleanupPlan,
+    owner: Value,
+    provenance: Mir.Provenance,
+    localOrdinal: number,
+  ): Step | undefined => {
+    switch (cleanup._tag) {
+      case 'NoCleanup':
+      case 'ParameterCleanup':
+        return undefined
+      case 'AllocationCleanup': {
+        if (owner._tag !== 'AllocationValue')
+          throw new RangeError('Allocation cleanup lost its private reclaim ticket')
+        const ticket = state.allocations.get(owner.ticket)
+        if (ticket === undefined || !ticket.active) {
+          // A caller obligation, not a compiler invariant: unsafe code can reach a second
+          // release, and the run must stop as a trap rather than take down the host.
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Allocation reclaim ticket was consumed more than once',
+            span: provenance.span,
+          })
+        }
+        ticket.active = false
+        trace.push(
+          Object.freeze({
+            _tag: 'AllocationRelease',
+            function: fn.id,
+            ticket: owner.ticket,
+            span: provenance.span,
+          }),
+        )
+        return undefined
+      }
+      case 'RawBufferCleanup': {
+        if (owner._tag !== 'RawBufferValue')
+          throw new RangeError('RawBuffer cleanup lost its private reclaim ticket')
+        const ticket = state.allocations.get(owner.ticket)
+        if (ticket === undefined || !ticket.active) {
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'RawBuffer reclaim ticket was consumed more than once',
+            span: provenance.span,
+          })
+        }
+        ticket.active = false
+        ticket.values.clear()
+        trace.push(
+          Object.freeze({
+            _tag: 'AllocationRelease',
+            function: fn.id,
+            ticket: owner.ticket,
+            span: provenance.span,
+          }),
+        )
+        return undefined
+      }
+      case 'CallableCleanup': {
+        if (owner._tag !== 'CallableValue')
+          throw new RangeError('Callable cleanup lost its evaluator identity')
+        const callable = state.callables.get(owner.ticket)
+        if (callable === undefined)
+          throw new RangeError('Callable cleanup referenced a missing evaluator identity')
+        const wasAvailable = callable.state === 'Available'
+        if (callable.state !== 'Consumed') callable.state = 'Released'
+        trace.push(
+          Object.freeze({
+            _tag: 'CallableCleanup',
+            function: fn.id,
+            ticket: owner.ticket,
+            mode: owner.type.mode,
+            span: provenance.span,
+          }),
+        )
+        if (!wasAvailable) return undefined
+        for (const slot of cleanup.slots) {
+          const capture = owner.captures.find((candidate) => candidate.ordinal === slot.ordinal)
+          if (capture === undefined) continue
+          const blocked = releaseThroughPlan(slot.cleanup, capture.value, provenance, localOrdinal)
+          if (blocked !== undefined) return blocked
+        }
+        return undefined
+      }
+      case 'HookCleanup': {
+        const target = functionFor(program, cleanup.hook, cleanup.typeArguments)
+        if (target === undefined) {
+          return blockedStep({
+            _tag: 'MissingFunction',
+            target: cleanup.hook,
+            span: provenance.span,
+          })
+        }
+        const cycleStart = active.findIndex((candidate) => sameInstance(candidate, target.instance))
+        if (cycleStart >= 0) {
+          return blockedStep({
+            _tag: 'RecursiveCycle',
+            cycle: Object.freeze([...active.slice(cycleStart), target.instance]),
+            closingCallSpan: provenance.span,
+          })
+        }
+        const key = cellKey(frame, localOrdinal)
+        state.cells.set(key, { value: owner, fromCall: false })
+        trace.push(
+          Object.freeze({
+            _tag: 'Call',
+            caller: fn.id,
+            target: cleanup.hook,
+            callerInstance: fn.instance,
+            targetInstance: target.instance,
+            span: provenance.span,
+          }),
+        )
+        const reference: Value = Object.freeze({
+          _tag: 'ReferenceValue' as const,
+          frame,
+          cell: localOrdinal,
+        })
+        const result = executeFunction(
+          program,
+          target,
+          [reference],
+          Object.freeze([...active, target.instance]),
+          trace,
+          state,
+        )
+        if (result._tag === 'Blocked') return result
+        const updated = state.cells.get(key)?.value ?? owner
+        return releaseThroughPlan(cleanup.inner, updated, provenance, localOrdinal)
+      }
+      case 'StructCleanup': {
+        if (owner._tag !== 'AggregateValue') return undefined
+        for (const field of cleanup.fields) {
+          const entry = owner.fields.find(
+            (candidate) => candidate.field.ordinal === field.field.ordinal,
+          )
+          if (entry === undefined) continue
+          const blocked = releaseThroughPlan(field.cleanup, entry.value, provenance, localOrdinal)
+          if (blocked !== undefined) return blocked
+        }
+        return undefined
+      }
+      case 'ArrayCleanup': {
+        if (owner._tag !== 'ArrayValue') return undefined
+        for (const element of owner.elements) {
+          const blocked = releaseThroughPlan(cleanup.element, element, provenance, localOrdinal)
+          if (blocked !== undefined) return blocked
+        }
+        return undefined
+      }
+      case 'UnionCleanup': {
+        if (owner._tag !== 'UnionValue') return undefined
+        const activeCase = cleanup.cases.find((candidate) =>
+          Type.equals(candidate.member, owner.member),
+        )
+        return activeCase === undefined
+          ? undefined
+          : releaseThroughPlan(activeCase.cleanup, owner.payload, provenance, localOrdinal)
+      }
+    }
+  }
+
   const regions = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
   const loops = new Map(
     fn.regions.flatMap((region) =>
@@ -770,6 +940,7 @@ function executeFunction(
       )
     }
     if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
+    if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
     if (owner._tag !== 'AggregateValue') return Object.freeze([])
     return Object.freeze(
       cleanup.fields.flatMap((field) => {
@@ -1914,70 +2085,13 @@ function executeFunction(
           }
           case 'Drop': {
             const dropped = read(operation.local).value
-            if (operation.cleanup._tag === 'AllocationCleanup') {
-              if (dropped._tag !== 'AllocationValue')
-                throw new RangeError('Allocation cleanup lost its private reclaim ticket')
-              const ticket = state.allocations.get(dropped.ticket)
-              if (ticket === undefined || !ticket.active) {
-                // A caller obligation, not a compiler invariant: unsafe code can reach a second
-                // release, and the run must stop as a trap rather than take down the host.
-                return blockedStep({
-                  _tag: 'Trap',
-                  function: fn.id,
-                  reason: 'Allocation reclaim ticket was consumed more than once',
-                  span: operation.provenance.span,
-                })
-              }
-              ticket.active = false
-              trace.push(
-                Object.freeze({
-                  _tag: 'AllocationRelease',
-                  function: fn.id,
-                  ticket: dropped.ticket,
-                  span: operation.provenance.span,
-                }),
-              )
-            }
-            if (operation.cleanup._tag === 'RawBufferCleanup') {
-              if (dropped._tag !== 'RawBufferValue')
-                throw new RangeError('RawBuffer cleanup lost its private reclaim ticket')
-              const ticket = state.allocations.get(dropped.ticket)
-              if (ticket === undefined || !ticket.active) {
-                return blockedStep({
-                  _tag: 'Trap',
-                  function: fn.id,
-                  reason: 'RawBuffer reclaim ticket was consumed more than once',
-                  span: operation.provenance.span,
-                })
-              }
-              ticket.active = false
-              ticket.values.clear()
-              trace.push(
-                Object.freeze({
-                  _tag: 'AllocationRelease',
-                  function: fn.id,
-                  ticket: dropped.ticket,
-                  span: operation.provenance.span,
-                }),
-              )
-            }
-            if (operation.cleanup._tag === 'CallableCleanup') {
-              if (dropped._tag !== 'CallableValue')
-                throw new RangeError('Callable cleanup lost its evaluator identity')
-              const callable = state.callables.get(dropped.ticket)
-              if (callable === undefined)
-                throw new RangeError('Callable cleanup referenced a missing evaluator identity')
-              if (callable.state !== 'Consumed') callable.state = 'Released'
-              trace.push(
-                Object.freeze({
-                  _tag: 'CallableCleanup',
-                  function: fn.id,
-                  ticket: dropped.ticket,
-                  mode: dropped.type.mode,
-                  span: operation.provenance.span,
-                }),
-              )
-            }
+            const blocked = releaseThroughPlan(
+              operation.cleanup,
+              dropped,
+              operation.provenance,
+              operation.local.ordinal,
+            )
+            if (blocked !== undefined) return blocked
             const members = cleanupMembers(operation.cleanup, dropped)
             trace.push(
               Object.freeze({

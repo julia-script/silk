@@ -113,6 +113,16 @@ export type CleanupPlan =
       readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
     }
   | {
+      readonly _tag: 'HookCleanup'
+      readonly type: Type.Nominal
+      /** The hidden hook function synthesized from the owning Drop conformance. */
+      readonly hook: DeclarationIndex.CanonicalId
+      /** Concrete arguments for the impl's type parameters at this instantiation. */
+      readonly typeArguments: ReadonlyArray<Type.Type>
+      /** Field cleanup runs after the hook returns. */
+      readonly inner: CleanupPlan
+    }
+  | {
       readonly _tag: 'StructCleanup'
       readonly type: Type.Nominal
       readonly fields: ReadonlyArray<{
@@ -1482,7 +1492,7 @@ const cleanupPlan = (
       type.arguments,
     ) ?? new Map()
   const nextSeen = new Set(seen).add(key)
-  return Object.freeze({
+  const structPlan: CleanupPlan = Object.freeze({
     _tag: 'StructCleanup',
     type,
     fields: Object.freeze(
@@ -1496,6 +1506,30 @@ const cleanupPlan = (
         }),
       ),
     ),
+  })
+  // A source Drop conformance runs its hook before automatic field cleanup.
+  const witness = DeclarationIndex.witness(index, type, Type.dropCapability)
+  if (witness?._tag !== 'SourceConformanceWitness') return structPlan
+  const conformance = index.modules
+    .find((module) => module.module === witness.module)
+    ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
+  if (conformance?.provider._tag !== 'Resolved') return structPlan
+  const inferred = new Map<string, Type.Type>()
+  if (!Type.infer(conformance.provider.type, type, inferred)) return structPlan
+  return Object.freeze({
+    _tag: 'HookCleanup',
+    type,
+    hook: Object.freeze({
+      _tag: 'CanonicalDeclarationId' as const,
+      module: witness.module,
+      name: `drop@impl#${witness.ordinal}`,
+    }),
+    typeArguments: Object.freeze(
+      conformance.typeParameters.map(
+        (parameter) => inferred.get(Type.key(parameter.type)) ?? parameter.type,
+      ),
+    ),
+    inner: structPlan,
   })
 }
 
@@ -1561,6 +1595,17 @@ export const specializeCleanup = (
             allocation: cleanup.allocation,
           })
         : Object.freeze({ _tag: 'NoCleanup', type })
+    case 'HookCleanup':
+      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'HookCleanup',
+        type,
+        hook: cleanup.hook,
+        typeArguments: Object.freeze(
+          cleanup.typeArguments.map((argument) => Type.substitute(argument, substitution)),
+        ),
+        inner: specializeCleanup(cleanup.inner, substitution, resolveConcrete),
+      })
     case 'StructCleanup':
       if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
       return Object.freeze({
@@ -1754,11 +1799,11 @@ const checkFunction = (
           }),
         )
       }
-      // A lazy effect body is walked for diagnostics only: its execution is deferred, so its
-      // moves never feed the enclosing flow, and its exits, loops, and binding facts are
-      // published by lowering through its own compiled body rather than through these facts.
-      // Only its Propagation exits survive — the runs inside the body propagate out of the
-      // body's own compiled function, whose lowering reuses this function's exit plans.
+      // A lazy effect body is walked with its execution deferred: its moves never feed the
+      // enclosing flow, and its loop, match, and binding facts are published by lowering
+      // through its own compiled body rather than through these facts. Its exit plans DO
+      // survive — the body's compiled runner reuses this function's span-keyed exit plans to
+      // emit automatic cleanup, and the outer body never looks up a body-statement span.
       for (const block of statementRootExpressions(statement).flatMap(deferredBlocks)) {
         const bodyLive = new Set(live)
         const bodyFrame: Array<string> = []
@@ -1782,8 +1827,6 @@ const checkFunction = (
           callables: state.callables.length,
         }
         walkStatements(block.statements, block.span, bodyLive, [bodyFrame])
-        const kept = exits.splice(marks.exits).filter((exit) => exit.kind === 'Propagation')
-        exits.push(...kept)
         deferredReleaseOrder.push(...state.order.slice(marks.order))
         fixedPoints.length = marks.fixedPoints
         state.order.length = marks.order
@@ -2207,6 +2250,13 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   }
   if (cleanup._tag === 'CallableCleanup') {
     return `callable:${Type.encode(cleanup.type)} site=${cleanup.site.function.ordinal}@${cleanup.site.span.start} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+  }
+  if (cleanup._tag === 'HookCleanup') {
+    return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${
+      cleanup.typeArguments.length === 0
+        ? ''
+        : `<${cleanup.typeArguments.map(Type.encode).join(',')}>`
+    } inner=(${cleanupText(cleanup.inner)})`
   }
   return `struct:${Type.encode(cleanup.type)} fields=${cleanup.fields
     .map((field) => `#${field.field.ordinal}(${cleanupText(field.cleanup)})`)

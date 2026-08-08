@@ -1372,7 +1372,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         syntax: node,
       })
     })
-  const members = nodes.map((node, ordinal): MemberFact => {
+  const ownMembers = nodes.map((node, ordinal): MemberFact => {
     const id: DeclarationId = Object.freeze({ _tag: 'DeclarationId', sourceId: source.id, ordinal })
     const name = presentName(source, node)
     let canonical: CanonicalState
@@ -1464,6 +1464,62 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       syntax: node,
     })
   })
+  // Drop hook bodies elaborate as hidden generic functions: each accepted hook joins the member
+  // list under a non-identifier canonical name, carrying the impl's type parameters, so ordinary
+  // elaboration, ownership, and lowering machinery compile it without a hook-shaped special case.
+  const hookMembers = conformances.flatMap((conformance, hookIndex): ReadonlyArray<MemberFact> => {
+    const hook = conformance.hook
+    if (hook === undefined) return []
+    const node = hook.syntax
+    const id: DeclarationId = Object.freeze({
+      _tag: 'DeclarationId',
+      sourceId: source.id,
+      ordinal: nodes.length + hookIndex,
+    })
+    const environment = new Map<string, Type.Parameter>(
+      conformance.typeParameters.flatMap((parameter) =>
+        parameter.duplicateOf === undefined && parameter.name._tag === 'Present'
+          ? [[parameter.name.spelling, parameter.type] as const]
+          : [],
+      ),
+    )
+    const parameterList = childNode(node, 'ParameterList')
+    const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
+      (parameter, parameterOrdinal) =>
+        analyzeParameter(source, parameter, id, parameterOrdinal, environment),
+    )
+    const returnType = analyzeDeclaredType(
+      source,
+      declaredTypeNode(childNode(node, 'ReturnType')),
+      environment,
+    )
+    const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
+    return [
+      Object.freeze({
+        _tag: 'FunctionDeclaration' as const,
+        id,
+        canonical: Object.freeze({
+          _tag: 'Canonical' as const,
+          id: Object.freeze({
+            _tag: 'CanonicalDeclarationId' as const,
+            module: source.id,
+            name: `drop@impl#${conformance.ordinal}`,
+          }),
+        }),
+        visibility: 'Private' as const,
+        functionKind: 'Ordinary' as const,
+        typeParameters: conformance.typeParameters,
+        parameterCount: facts.length,
+        parameters: facts,
+        name: hook.name,
+        returnType: returnType.fact,
+        failureRow: hook.failureRow,
+        requirementRow: hook.requirementRow,
+        syntax: node,
+      }),
+    ]
+  })
+  const members = [...ownMembers, ...hookMembers]
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,

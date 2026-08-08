@@ -1052,6 +1052,8 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
       return [cleanup.type]
     case 'RawBufferCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
+    case 'HookCleanup':
+      return [cleanup.type, ...cleanupTypes(cleanup.inner)]
     case 'StructCleanup':
       return [cleanup.type, ...cleanup.fields.flatMap((field) => cleanupTypes(field.cleanup))]
     case 'ArrayCleanup':
