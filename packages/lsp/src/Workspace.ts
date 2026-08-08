@@ -11,6 +11,20 @@ import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
 import * as Document from './Document.js'
 
+export interface Identity {
+  readonly workspace: string
+  readonly sourceRoot: string
+}
+
+const virtualModule = (uri: string): string => {
+  let hash = 2166136261
+  for (const character of uri) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 16777619)
+  }
+  return `virtual/${(hash >>> 0).toString(16)}`
+}
+
 /** Locates one document's project source root, falling back to its own directory. */
 export const sourceRootOf = Effect.fn('Workspace.sourceRootOf')(function* (
   documentPath: string,
@@ -19,6 +33,21 @@ export const sourceRootOf = Effect.fn('Workspace.sourceRootOf')(function* (
   const directory = path.dirname(documentPath)
   const project = yield* Effect.result(Project.load({ workingDirectory: directory }))
   return Result.isSuccess(project) ? project.success.entry.sourceRoot : directory
+})
+
+/** Discovers the stable project or standalone workspace identity for one filesystem path. */
+export const identityOf = Effect.fn('Workspace.identityOf')(function* (
+  documentPath: string,
+): Effect.fn.Return<Identity, never, FileSystem.FileSystem | Path.Path> {
+  const path = yield* Path.Path
+  const directory = path.dirname(documentPath)
+  const project = yield* Effect.result(Project.load({ workingDirectory: directory }))
+  return Result.isSuccess(project)
+    ? Object.freeze({
+        workspace: `project:${project.success.manifestPath}`,
+        sourceRoot: project.success.entry.sourceRoot,
+      })
+    : Object.freeze({ workspace: `standalone:${directory}`, sourceRoot: directory })
 })
 
 /** Derives the canonical module identity of one document path under a source root. */
@@ -39,15 +68,38 @@ export const moduleOf = Effect.fn('Workspace.moduleOf')(function* (
 /** Opens one synchronized document with its discovered project identity. */
 export const open = Effect.fn('Workspace.open')(function* (options: {
   readonly uri: string
+  readonly version: number
   readonly bytes: Uint8Array
 }): Effect.fn.Return<Document.Document, never, FileSystem.FileSystem | Path.Path> {
   const path = yield* Path.Path
-  const documentPath = yield* path
-    .fromFileUrl(new URL(options.uri))
-    .pipe(Effect.orElseSucceed(() => options.uri))
-  const sourceRoot = yield* sourceRootOf(documentPath)
-  const module = yield* moduleOf(sourceRoot, documentPath)
-  return Document.make({ uri: options.uri, module, sourceRoot, bytes: options.bytes })
+  const parsedUrl = yield* Effect.try({
+    try: () => new URL(options.uri),
+    catch: (cause) => cause,
+  }).pipe(Effect.option)
+  const documentPath =
+    Option.isNone(parsedUrl) || parsedUrl.value.protocol !== 'file:'
+      ? Option.none<string>()
+      : yield* path.fromFileUrl(parsedUrl.value).pipe(Effect.option)
+  if (Option.isNone(documentPath)) {
+    return Document.make({
+      uri: options.uri,
+      version: options.version,
+      workspace: `virtual:${options.uri}`,
+      module: virtualModule(options.uri),
+      sourceRoot: options.uri,
+      bytes: options.bytes,
+    })
+  }
+  const identity = yield* identityOf(documentPath.value)
+  const module = yield* moduleOf(identity.sourceRoot, documentPath.value)
+  return Document.make({
+    uri: options.uri,
+    version: options.version,
+    workspace: identity.workspace,
+    module,
+    sourceRoot: identity.sourceRoot,
+    bytes: options.bytes,
+  })
 })
 
 /** A resolver serving open-document overlays first, then rooted `.silk` files. */
@@ -76,7 +128,7 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
 ): Effect.fn.Return<Analysis.Snapshot, never, FileSystem.FileSystem | Path.Path> {
   const overlays = new Map<string, Uint8Array>()
   for (const open of openDocuments) {
-    if (open.sourceRoot === document.sourceRoot && open.uri !== document.uri) {
+    if (open.workspace === document.workspace && open.uri !== document.uri) {
       overlays.set(open.module, open.bytes)
     }
   }

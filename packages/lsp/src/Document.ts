@@ -13,6 +13,7 @@ import {
   DiagnosticSeverity,
   type DocumentSymbol,
   type Hover,
+  type LocationLink,
   type Diagnostic as LspDiagnostic,
   type Position,
   SymbolKind,
@@ -26,6 +27,8 @@ const decoder = new TextDecoder()
 export interface Document {
   readonly _tag: 'Document'
   readonly uri: string
+  readonly version: number
+  readonly workspace: string
   readonly module: string
   readonly sourceRoot: string
   readonly bytes: Uint8Array
@@ -35,6 +38,8 @@ export interface Document {
 /** Creates an immutable document snapshot from one text synchronization state. */
 export const make = (options: {
   readonly uri: string
+  readonly version: number
+  readonly workspace: string
   readonly module: string
   readonly sourceRoot: string
   readonly bytes: Uint8Array
@@ -42,6 +47,8 @@ export const make = (options: {
   Object.freeze({
     _tag: 'Document',
     uri: options.uri,
+    version: options.version,
+    workspace: options.workspace,
     module: options.module,
     sourceRoot: options.sourceRoot,
     bytes: Uint8Array.from(options.bytes),
@@ -152,6 +159,35 @@ export const hover = (
   return {
     contents: { kind: 'markdown', value: `\`\`\`silk\n${Type.encode(typed.type)}\n\`\`\`` },
     range: LineIndex.rangeOf(self.index, typed.span),
+  }
+}
+
+/** Converts one semantic target into an exact snapshot-owned definition link. */
+export const definition = (
+  self: Document,
+  snapshot: Analysis.Snapshot,
+  position: Position,
+  uriOf: (module: string) => string | undefined,
+): LocationLink | undefined => {
+  const offset = LineIndex.offsetOf(self.index, position)
+  const target = Analysis.semanticTargetAt(snapshot, self.module, offset)
+  if (target?.resolution._tag !== 'Available') return undefined
+  const location = target.resolution.declaration
+  const uri = location.module === self.module ? self.uri : uriOf(location.module)
+  if (uri === undefined) return undefined
+  const targetIndex =
+    location.module === self.module
+      ? self.index
+      : (() => {
+          const source = Analysis.sources(snapshot).get(location.module)
+          return source === undefined ? undefined : LineIndex.make(SourceFile.toUint8Array(source))
+        })()
+  if (targetIndex === undefined) return undefined
+  return {
+    originSelectionRange: LineIndex.rangeOf(self.index, target.origin),
+    targetUri: uri,
+    targetRange: LineIndex.rangeOf(targetIndex, location.span),
+    targetSelectionRange: LineIndex.rangeOf(targetIndex, location.selectionSpan),
   }
 }
 

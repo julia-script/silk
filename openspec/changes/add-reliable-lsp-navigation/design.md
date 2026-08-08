@@ -25,6 +25,8 @@ derived inside that facade.
 - Keep synchronized text, line indexes, module identities, and semantic facts revision-coherent.
 - Give the analysis facade one deterministic position-to-semantic-target query.
 - Implement precise local and cross-file go-to-definition from that query.
+- Legalize lexical shadowing across nested body blocks so semantic identity can select the nearest
+  local declaration required by navigation.
 - Keep scheduling and semantic query actors independently testable without a protocol process.
 - Preserve the thin VS Code extension and generic stdio-client support.
 
@@ -35,7 +37,7 @@ derived inside that facade.
 - Find references, rename, completion, semantic tokens, signature help, document highlights, code
   actions, or range formatting.
 - Guessing a definition from spelling when compiler analysis does not select one.
-- Changing compiler resolution, visibility, recovery, or diagnostic semantics.
+- Changing module resolution, visibility, or unrelated recovery and diagnostic semantics.
 - Turning the private VS Code extension into the owner of language behavior.
 
 ## Decisions
@@ -241,6 +243,17 @@ callbacks settle. Tests use `@effect/vitest`; protocol tests continue to drive t
 entry point.
 
 No new runtime dependency is required beyond the existing LSP and Effect packages.
+
+### 7. Legalize nested lexical shadowing in compiler value resolution
+
+Bindings declared in a nested body block may reuse a parameter, pattern, or local spelling from an
+enclosing scope. Value lookup selects the nearest completed local binding, then the nearest pattern
+binding, then a parameter. Repeating a binding name within the same block remains `SEM0008`, and a
+binding initializer continues to resolve before the new binding enters scope.
+
+This compiler semantic change is necessary for the navigation requirement that a shadowed
+reference follows the compiler-selected nearer declaration. The LSP remains a pure consumer of
+that identity and does not implement a separate shadowing rule.
 
 ## Risks / Trade-offs
 

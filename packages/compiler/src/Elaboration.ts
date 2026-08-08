@@ -980,6 +980,36 @@ const resolveValueName = (
   tokenSpelling: string,
   token: Token.Token,
 ): ValueResolution => {
+  const binding = scope.bindings.findLast(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === tokenSpelling,
+  )
+  if (binding !== undefined) {
+    return Object.freeze({
+      reference: Object.freeze({
+        _tag: 'ResolvedBinding' as const,
+        spelling: tokenSpelling,
+        token,
+        binding,
+      }),
+      type: binding.inferredType,
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const patternBinding = scope.patternBindings.findLast(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === tokenSpelling,
+  )
+  if (patternBinding !== undefined) {
+    return Object.freeze({
+      reference: Object.freeze({
+        _tag: 'ResolvedPattern' as const,
+        spelling: tokenSpelling,
+        token,
+        binding: patternBinding,
+      }),
+      type: patternBinding.type,
+      diagnostics: Object.freeze([]),
+    })
+  }
   const lookup = lookupParameter(scope.parameters, tokenSpelling)
   if (lookup._tag === 'Resolved') {
     return Object.freeze({
@@ -1005,36 +1035,6 @@ const resolveValueName = (
         parameters: lookup.parameters,
       }),
       type: unavailableExpressionType,
-      diagnostics: Object.freeze([]),
-    })
-  }
-  const binding = scope.bindings.find(
-    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === tokenSpelling,
-  )
-  if (binding !== undefined) {
-    return Object.freeze({
-      reference: Object.freeze({
-        _tag: 'ResolvedBinding' as const,
-        spelling: tokenSpelling,
-        token,
-        binding,
-      }),
-      type: binding.inferredType,
-      diagnostics: Object.freeze([]),
-    })
-  }
-  const patternBinding = scope.patternBindings.find(
-    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === tokenSpelling,
-  )
-  if (patternBinding !== undefined) {
-    return Object.freeze({
-      reference: Object.freeze({
-        _tag: 'ResolvedPattern' as const,
-        spelling: tokenSpelling,
-        token,
-        binding: patternBinding,
-      }),
-      type: patternBinding.type,
       diagnostics: Object.freeze([]),
     })
   }
@@ -4775,22 +4775,18 @@ const bindingName = (
 }
 
 const scopeSpanFor = (scope: Scope, spellingText: string): SourceSpan.SourceSpan | undefined => {
-  for (const parameter of scope.parameters) {
-    if (parameter.name._tag === 'Present' && parameter.name.spelling === spellingText) {
-      return parameter.name.token.span
-    }
-  }
-  for (const binding of scope.bindings) {
-    if (binding.name._tag === 'Present' && binding.name.spelling === spellingText) {
-      return binding.name.token.span
-    }
-  }
-  for (const binding of scope.patternBindings) {
-    if (binding.name._tag === 'Present' && binding.name.spelling === spellingText) {
-      return binding.name.token.span
-    }
-  }
-  return undefined
+  const binding = scope.bindings.findLast(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spellingText,
+  )
+  if (binding?.name._tag === 'Present') return binding.name.token.span
+  const patternBinding = scope.patternBindings.findLast(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spellingText,
+  )
+  if (patternBinding?.name._tag === 'Present') return patternBinding.name.token.span
+  const parameter = scope.parameters.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spellingText,
+  )
+  return parameter?.name._tag === 'Present' ? parameter.name.token.span : undefined
 }
 
 interface BodyContext {
@@ -4820,6 +4816,7 @@ const analyzeStatements = (
 ): ReadonlyArray<StatementFact> => {
   const facts: Array<StatementFact> = []
   let scope = initialScope
+  const blockBindings = new Map<string, SourceSpan.SourceSpan>()
 
   const nextRegion = (): Hir.RegionId => {
     const region = Object.freeze({
@@ -4889,8 +4886,9 @@ const analyzeStatements = (
       facts.push(Object.freeze({ _tag: 'BindStatement', binding, region }))
 
       if (name._tag === 'Present') {
-        const originalSpan = scopeSpanFor(scope, name.spelling)
+        const originalSpan = blockBindings.get(name.spelling)
         if (originalSpan === undefined) {
+          blockBindings.set(name.spelling, name.token.span)
           scope = Object.freeze({
             parameters: scope.parameters,
             bindings: Object.freeze([...scope.bindings, binding]),

@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -18,6 +18,19 @@ const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
 const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
+
+const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
+  const result = spawnSync(
+    'pnpm',
+    ['install', '--ignore-scripts', ...(ignoreWorkspace ? ['--ignore-workspace'] : [])],
+    {
+      cwd,
+      encoding: 'utf8',
+    },
+  )
+  if (result.status === 0) return
+  throw new Error(`pnpm install failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`)
+}
 
 test('the llvm release candidate is a self-contained ESM package', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-release-candidate-'))
@@ -112,10 +125,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/llvm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    installConsumer(consumerRoot, true)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -257,6 +267,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Operator',
       './Ownership',
       './Parser',
+      './SemanticTarget',
       './SourceFile',
       './SourceResolver',
       './SourceSpan',
@@ -303,10 +314,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
     )
-    execFileSync('pnpm', ['install', '--offline'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    installConsumer(consumerRoot)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -620,6 +628,7 @@ console.log(
       'Operator',
       'Ownership',
       'Parser',
+      'SemanticTarget',
       'SourceFile',
       'SourceResolver',
       'SourceSpan',
@@ -857,9 +866,9 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
-    execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
+    installConsumer(consumerRoot)
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk')
     const help = execFileSync(executable, ['--help'], { cwd: consumerRoot, encoding: 'utf8' })
@@ -986,10 +995,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    installConsumer(consumerRoot, true)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -1122,9 +1128,9 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': 24.10.1\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
-    execFileSync('pnpm', ['install', '--offline'], { cwd: consumerRoot, stdio: 'pipe' })
+    installConsumer(consumerRoot)
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk-lsp')
     const initialize = JSON.stringify({

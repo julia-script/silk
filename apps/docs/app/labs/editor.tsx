@@ -116,6 +116,8 @@ export function SilkEditor(props: {
     () => ({
       document: LspDocument.make({
         uri: props.module,
+        version: 0,
+        workspace: `labs:${props.module}`,
         module: props.module,
         sourceRoot: '/',
         bytes: encoder.encode(props.value),

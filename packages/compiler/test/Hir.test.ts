@@ -100,6 +100,32 @@ it('rejects rebinding a name while references keep resolving to the original', (
   assert.strictEqual(returned.binding.ordinal, 0)
 })
 
+it('resolves a nested lexical shadow to the nearest local binding', () => {
+  const result = elaborate(
+    'golden://shadow.silk',
+    `pub fn main() -> I32 {
+      let value = 1
+      if true {
+        let value = 2
+        return value
+      }
+      return value
+    }`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  const main = result.hir.functions.at(0)
+  const conditional = main?.statements.at(1)
+  assert.strictEqual(conditional?._tag, 'If')
+  if (conditional?._tag !== 'If') return
+  const returned = conditional.taken.at(-1)
+  assert.strictEqual(returned?._tag, 'Return')
+  if (returned?._tag !== 'Return') return
+  assert.strictEqual(returned.expression._tag, 'BindingReference')
+  if (returned.expression._tag !== 'BindingReference') return
+  assert.strictEqual(returned.expression.binding.ordinal, 1)
+})
+
 it('reports an unknown name and a use before its binding as missing references', () => {
   const result = elaborate(
     'golden://forward.silk',

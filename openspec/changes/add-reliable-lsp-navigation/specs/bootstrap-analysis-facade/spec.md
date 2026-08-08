@@ -66,3 +66,20 @@ recovered semantic facts and diagnostic causes exposed by its existing query sur
 
 - **WHEN** one module is damaged while an imported module remains analyzable
 - **THEN** position and declaration-location queries for the analyzable module remain complete
+
+### Requirement: Nested lexical bindings shadow enclosing value declarations
+
+Compiler value resolution SHALL permit a binding in a nested body block to reuse a spelling from
+an enclosing local, pattern binding, or parameter and SHALL select the nearest completed binding
+for references in that nested scope. Repeating a binding spelling in the same body block SHALL
+remain a rebinding error.
+
+#### Scenario: Query a nested shadowing reference
+
+- **WHEN** a nested block declares a local with the same spelling as an enclosing local
+- **THEN** the reference resolves to the nested local identity and its declaration-name span
+
+#### Scenario: Repeat a binding in one block
+
+- **WHEN** one body block declares the same binding spelling twice
+- **THEN** the compiler retains the rebinding diagnostic and references keep the first declaration

@@ -28,6 +28,7 @@ it.effect('derives module identities from the discovered project source root', (
     const root = project()
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Util.silk')).href,
+      version: 1,
       bytes: encoder.encode('pub fn answer() -> I32 { return 7 }'),
     })
     assert.strictEqual(document.module, 'Util')
@@ -39,10 +40,54 @@ it.effect('falls back to the document directory without a manifest', () =>
   Effect.gen(function* () {
     const document = yield* Workspace.open({
       uri: 'file:///definitely/missing/standalone.silk',
+      version: 1,
       bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
     })
     assert.strictEqual(document.module, 'standalone')
     assert.strictEqual(document.sourceRoot, '/definitely/missing')
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('keeps same-named modules isolated by discovered project identity', () =>
+  Effect.gen(function* () {
+    const left = project()
+    const right = project()
+    const leftDocument = yield* Workspace.open({
+      uri: pathToFileURL(join(left, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
+    })
+    const rightDocument = yield* Workspace.open({
+      uri: pathToFileURL(join(right, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode('pub fn main() -> I32 { return 2 }'),
+    })
+    assert.strictEqual(leftDocument.module, rightDocument.module)
+    assert.notStrictEqual(leftDocument.workspace, rightDocument.workspace)
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('assigns stable non-colliding identities to virtual documents', () =>
+  Effect.gen(function* () {
+    const first = yield* Workspace.open({
+      uri: 'untitled:First.silk',
+      version: 1,
+      bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
+    })
+    const repeated = yield* Workspace.open({
+      uri: 'untitled:First.silk',
+      version: 2,
+      bytes: encoder.encode('pub fn main() -> I32 { return 2 }'),
+    })
+    const second = yield* Workspace.open({
+      uri: 'untitled:Second.silk',
+      version: 1,
+      bytes: encoder.encode('pub fn main() -> I32 { return 3 }'),
+    })
+    assert.strictEqual(first.workspace, repeated.workspace)
+    assert.strictEqual(first.module, repeated.module)
+    assert.notStrictEqual(first.workspace, second.workspace)
+    assert.notStrictEqual(first.module, second.module)
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
@@ -70,6 +115,7 @@ it.effect('analyzes imports against sibling files on disk', () =>
     const source = 'import Util\npub fn main() -> I32 { return Util.answer() }'
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
       bytes: encoder.encode(source),
     })
     const snapshot = yield* Workspace.analyze(document, [])

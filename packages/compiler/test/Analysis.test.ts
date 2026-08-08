@@ -323,3 +323,84 @@ it.effect('keeps invalid match corpus failures phase-owned and downstream facts 
     }
   }),
 )
+
+it.effect('answers local, parameter, callable, field, and half-open semantic target queries', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair { left: I32 right: I32 }
+fn identity(value: I32) -> I32 {
+  let local = value
+  let pair = Pair { left: local, right: 0 }
+  return pair.left
+}
+pub fn main() -> I32 { return identity(42) }`
+    const self = yield* Analysis.ofSource('main', ascii(source))
+    const targetAt = (spelling: string, occurrence = 0) => {
+      let offset = -1
+      for (let index = 0; index <= occurrence; index += 1)
+        offset = source.indexOf(spelling, offset + 1)
+      return Analysis.semanticTargetAt(self, 'main', offset)
+    }
+
+    assert.strictEqual(targetAt('value', 1)?.resolution._tag, 'Available')
+    assert.strictEqual(targetAt('local', 1)?.resolution._tag, 'Available')
+    assert.strictEqual(targetAt('Pair', 1)?.resolution._tag, 'Available')
+    assert.strictEqual(targetAt('left', 2)?.resolution._tag, 'Available')
+    assert.strictEqual(targetAt('identity', 1)?.resolution._tag, 'Available')
+
+    const localReference = source.indexOf('local right')
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'main', localReference + 'local'.length),
+      undefined,
+    )
+    assert.strictEqual(
+      Analysis.semanticTargetAt(self, 'main', source.indexOf('return pair') - 1),
+      undefined,
+    )
+  }),
+)
+
+it.effect('resolves imported and qualified declarations without spelling lookup', () =>
+  Effect.gen(function* () {
+    const root = `import lib { answer }
+import other as tools
+pub fn main() -> I32 { return answer() + tools.answer() }`
+    const self = yield* snapshot('root', [
+      ['root', root],
+      ['lib', 'pub fn answer() -> I32 { return 42 }'],
+      ['other', 'pub fn answer() -> I32 { return 7 }'],
+    ])
+    const selected = [
+      Analysis.semanticTargetAt(self, 'root', root.indexOf('answer()')),
+      Analysis.semanticTargetAt(self, 'root', root.lastIndexOf('answer()')),
+    ]
+    for (const [index, target] of selected.entries()) {
+      assert.strictEqual(target?.resolution._tag, 'Available')
+      if (target?.resolution._tag !== 'Available') continue
+      assert.strictEqual(target.resolution.declaration.module, index === 0 ? 'lib' : 'other')
+      assert.strictEqual(target.resolution.declaration.selectionSpan.start, 'pub fn '.length)
+    }
+  }),
+)
+
+it.effect('keeps unavailable and damaged semantic targets isolated and deterministic', () =>
+  Effect.gen(function* () {
+    const source =
+      'fn valid(value: I32) -> I32 { return value }\nfn damaged( -> I32 { return missing() }'
+    const first = yield* Analysis.ofSource('main', ascii(source))
+    const second = yield* Analysis.ofSource('main', ascii(source))
+    const availableOffset = source.indexOf('value }')
+    const missingOffset = source.indexOf('missing')
+    assert.deepEqual(
+      Analysis.semanticTargetAt(first, 'main', availableOffset),
+      Analysis.semanticTargetAt(second, 'main', availableOffset),
+    )
+    assert.strictEqual(
+      Analysis.semanticTargetAt(first, 'main', availableOffset)?.resolution._tag,
+      'Available',
+    )
+    assert.strictEqual(
+      Analysis.semanticTargetAt(first, 'main', missingOffset)?.resolution._tag,
+      'Missing',
+    )
+  }),
+)
