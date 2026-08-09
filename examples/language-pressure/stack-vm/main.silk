@@ -2,6 +2,23 @@ import silk.vector { Vector, make, append }
 
 impl Report for OutOfMemory {}
 
+const opcodeHalt: u8 = 0
+const opcodePush: u8 = 1
+const opcodeAdd: u8 = 2
+const opcodeSubtract: u8 = 3
+const opcodeMultiply: u8 = 4
+const opcodeDuplicate: u8 = 5
+const opcodeJumpIfNonZero: u8 = 6
+const opcodeJump: u8 = 7
+const diagnosticUnknownOpcode: usize = 1
+const diagnosticTruncatedOperand: usize = 2
+const diagnosticStackUnderflow: usize = 3
+const diagnosticInvalidJump: usize = 4
+const diagnosticStepLimit: usize = 5
+const diagnosticStackOverflow: usize = 6
+const stackLimit: usize = 16
+const stepLimit: usize = 64
+
 struct Step {
   pc: usize
   opcode: u8
@@ -76,28 +93,28 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
   let mut events = make<Step | VmDiagnostic>()
 
   while pc < bytecode.length {
-    if attempted >= 64 {
-      fingerprint = run pushDiagnostic(&mut events, pc, 5, fingerprint)
+    if attempted >= stepLimit {
+      fingerprint = run pushDiagnostic(&mut events, pc, diagnosticStepLimit, fingerprint)
       return finish(currentTop, move events, fingerprint)
     }
     attempted = attempted + 1
     let instructionPc = pc
     let opcode = bytecode[instructionPc]
 
-    if opcode == 0 {
+    if opcode == opcodeHalt {
       pc = pc + 1
       fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
       return finish(currentTop, move events, fingerprint)
     }
 
-    if opcode == 1 {
+    if opcode == opcodePush {
       if instructionPc + 1 >= bytecode.length {
-        fingerprint = run pushDiagnostic(&mut events, instructionPc, 2, fingerprint)
+        fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticTruncatedOperand, fingerprint)
         return finish(currentTop, move events, fingerprint)
       }
       let value = bytecode[instructionPc + 1] |> u8.toI32
-      if depth >= 16 {
-        fingerprint = run pushDiagnostic(&mut events, instructionPc, 6, fingerprint)
+      if depth >= stackLimit {
+        fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackOverflow, fingerprint)
         return finish(currentTop, move events, fingerprint)
       }
       stack[depth] = value
@@ -106,9 +123,9 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
       pc = pc + 2
       fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
     } else {
-      if opcode == 2 {
+      if opcode == opcodeAdd {
         if depth < 2 {
-          fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+          fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
           pc = pc + 1
         } else {
           depth = depth - 1
@@ -123,9 +140,9 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
           fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
         }
       } else {
-        if opcode == 3 {
+        if opcode == opcodeSubtract {
           if depth < 2 {
-            fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+            fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
             pc = pc + 1
           } else {
             depth = depth - 1
@@ -140,9 +157,9 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
             fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
           }
         } else {
-          if opcode == 4 {
+          if opcode == opcodeMultiply {
             if depth < 2 {
-              fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+              fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
               pc = pc + 1
             } else {
               depth = depth - 1
@@ -157,14 +174,14 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
               fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
             }
           } else {
-            if opcode == 5 {
+            if opcode == opcodeDuplicate {
               if depth == 0 {
-                fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+                fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
                 pc = pc + 1
               } else {
                 let value = currentTop
-                if depth >= 16 {
-                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 6, fingerprint)
+                if depth >= stackLimit {
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackOverflow, fingerprint)
                   return finish(currentTop, move events, fingerprint)
                 }
                 stack[depth] = value
@@ -173,18 +190,18 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
                 fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
               }
             } else {
-              if opcode == 6 {
+              if opcode == opcodeJumpIfNonZero {
                 if instructionPc + 1 >= bytecode.length {
-                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 2, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticTruncatedOperand, fingerprint)
                   return finish(currentTop, move events, fingerprint)
                 }
                 if depth == 0 {
-                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
                   pc = pc + 2
                 } else {
                   let target = bytecode[instructionPc + 1] |> u8.toUsize
                   if target >= bytecode.length {
-                    fingerprint = run pushDiagnostic(&mut events, instructionPc, 4, fingerprint)
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticInvalidJump, fingerprint)
                     return finish(currentTop, move events, fingerprint)
                   }
                   depth = depth - 1
@@ -202,20 +219,20 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
                   fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
                 }
               } else {
-                if opcode == 7 {
+                if opcode == opcodeJump {
                   if instructionPc + 1 >= bytecode.length {
-                    fingerprint = run pushDiagnostic(&mut events, instructionPc, 2, fingerprint)
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticTruncatedOperand, fingerprint)
                     return finish(currentTop, move events, fingerprint)
                   }
                   let target = bytecode[instructionPc + 1] |> u8.toUsize
                   if target >= bytecode.length {
-                    fingerprint = run pushDiagnostic(&mut events, instructionPc, 4, fingerprint)
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticInvalidJump, fingerprint)
                     return finish(currentTop, move events, fingerprint)
                   }
                   pc = target
                   fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
                 } else {
-                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 1, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticUnknownOpcode, fingerprint)
                   pc = pc + 1
                 }
               }

@@ -55,7 +55,11 @@ const separateSource = pressureSource
 
 const snapshot = (input, target) =>
   Effect.runPromise(
-    Analysis.ofSource('stack-vm-pressure/determinism', new TextEncoder().encode(input), target),
+    Analysis.ofSourceRealized(
+      'stack-vm-pressure/determinism',
+      new TextEncoder().encode(input),
+      target,
+    ),
   )
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const json = (value) =>

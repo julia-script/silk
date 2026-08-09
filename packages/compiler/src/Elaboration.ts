@@ -464,6 +464,24 @@ export interface BooleanExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One reference to a typed compile-time scalar declaration. */
+export interface ConstantExpressionFact {
+  readonly _tag: 'Constant'
+  readonly declaration: DeclarationIndex.ConstantFact
+  readonly token: Token.Token
+  readonly value?:
+    | { readonly _tag: 'Boolean'; readonly value: boolean }
+    | { readonly _tag: 'Integer'; readonly value: bigint; readonly type: SemanticType }
+    | {
+        readonly _tag: 'Floating'
+        readonly bits: bigint
+        readonly spelling: string
+        readonly type: 'f32' | 'f64'
+      }
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One parenthesized expression retaining its concrete grouping. */
 export interface GroupedExpressionFact {
   readonly _tag: 'Grouped'
@@ -604,6 +622,7 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | BooleanExpressionFact
+  | ConstantExpressionFact
   | IdentifierExpressionFact
   | MoveExpressionFact
   | BorrowExpressionFact
@@ -1196,6 +1215,73 @@ const analyzeFloating = (
       })
 }
 
+const analyzeConstant = (
+  declaration: DeclarationIndex.ConstantFact,
+  token: Token.Token,
+  syntax: SyntaxTree.Node,
+  reportDiagnostic: boolean,
+): ExpressionResult => {
+  const declared = declaration.declaredType
+  const literal = declaration.literal
+  let value: ConstantExpressionFact['value']
+  let type: SemanticType | undefined
+  let detail: string | undefined
+
+  if (declared._tag !== 'Resolved' || typeof declared.type !== 'string') {
+    detail = 'the declared type must be one primitive scalar'
+  } else if (declared.type === 'bool' && literal._tag === 'BooleanLiteral') {
+    type = 'bool'
+    value = Object.freeze({ _tag: 'Boolean', value: literal.value })
+  } else if (Scalar.isIntegerSpelling(declared.type) && literal._tag === 'IntegerLiteral') {
+    const scalar = Scalar.find(declared.type)
+    if (scalar === undefined || scalar.category !== 'Integer') {
+      detail = `unknown integer type ${declared.type}`
+    } else {
+      const range = Scalar.range(scalar, 64)
+      if (literal.value < range.minimum || literal.value > range.maximum) {
+        detail = `${literal.spelling} does not fit ${declared.type}`
+      } else {
+        type = declared.type
+        value = Object.freeze({ _tag: 'Integer', value: literal.value, type })
+      }
+    }
+  } else if (Scalar.isFloatSpelling(declared.type) && literal._tag === 'FloatingLiteral') {
+    const selected = declared.type
+    const encoded = FloatingPoint.fromDecimal(literal.spelling, selected === 'f32' ? 32 : 64)
+    if (encoded === undefined) detail = `${literal.spelling} is not a valid ${selected} literal`
+    else {
+      type = selected
+      value = Object.freeze({
+        _tag: 'Floating',
+        bits: encoded.bits,
+        spelling: literal.spelling,
+        type: selected,
+      })
+    }
+  } else {
+    detail = `the literal kind does not match ${declared._tag === 'Resolved' ? Type.encode(declared.type) : 'the declared type'}`
+  }
+
+  const diagnostic =
+    detail === undefined
+      ? undefined
+      : Diagnostic.invalidConstant(detail, declaration.initializer.span)
+  const expressionType =
+    type === undefined ? unavailableExpressionType : availableExpressionType(type)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Constant',
+      declaration,
+      token,
+      ...(value === undefined ? {} : { value }),
+      type: expressionType,
+      syntax,
+    }),
+    diagnostics: Object.freeze(reportDiagnostic && diagnostic !== undefined ? [diagnostic] : []),
+    type,
+  })
+}
+
 /** The value names visible at one body position: parameters plus completed bindings. */
 interface Scope {
   readonly parameters: ReadonlyArray<ParameterFact>
@@ -1325,6 +1411,30 @@ const analyzeIdentifier = (
   })
 }
 
+const analyzeConstantReference = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): ExpressionResult | undefined => {
+  const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
+  const first = identifiers.at(0)
+  const second = identifiers.at(1)
+  if (first === undefined || identifiers.length > 2) return undefined
+  const lookup =
+    second === undefined
+      ? NameResolution.lookup(resolution.scope, resolution.index, spelling(source, first))
+      : NameResolution.lookupQualified(
+          resolution.scope,
+          resolution.index,
+          spelling(source, first),
+          spelling(source, second),
+          second,
+        )
+  return lookup._tag === 'Resolved' && lookup.declaration._tag === 'ConstantDeclaration'
+    ? analyzeConstant(lookup.declaration, second ?? first, node, false)
+    : undefined
+}
+
 interface MoveResult {
   readonly fact: MoveExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1345,6 +1455,10 @@ const analyzeMove = (
       ? undefined
       : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
   if (subject === undefined) throw new RangeError('Move expression requires a subject expression')
+  const invalidMove =
+    subject.fact._tag === 'Constant'
+      ? Diagnostic.invalidConstant('constants are immediate values and cannot be moved', node.span)
+      : undefined
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Move',
@@ -1352,8 +1466,10 @@ const analyzeMove = (
       type: subject.fact.type,
       syntax: node,
     }),
-    diagnostics: subject.diagnostics,
-    type: subject.type,
+    diagnostics: Object.freeze(
+      invalidMove === undefined ? subject.diagnostics : [...subject.diagnostics, invalidMove],
+    ),
+    type: invalidMove === undefined ? subject.type : undefined,
   })
 }
 
@@ -5162,6 +5278,7 @@ const effectCaptureFacts = (
         return
       case 'Integer':
       case 'Boolean':
+      case 'Constant':
         return
     }
   }
@@ -5394,7 +5511,11 @@ function analyzeExpression(
         value.fact.reference._tag === 'ResolvedPattern')
     )
       return value
-    return analyzeFunctionItem(source, node, declarations, resolution) ?? value
+    return (
+      analyzeConstantReference(source, node, resolution) ??
+      analyzeFunctionItem(source, node, declarations, resolution) ??
+      value
+    )
   }
 
   if (node.kind === 'RunExpression') {
@@ -5486,6 +5607,7 @@ function analyzeExpression(
 
   if (node.kind === 'FieldProjectionExpression') {
     return (
+      analyzeConstantReference(source, node, resolution) ??
       analyzeFunctionItem(source, node, declarations, resolution) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
     )
@@ -5577,7 +5699,8 @@ function analyzeExpression(
     calleeResult.fact._tag !== 'FunctionItem' &&
     ((calleeResult.type !== undefined && Type.isCallable(calleeResult.type)) ||
       (calleeResult.type !== undefined && calleeNode.kind !== 'IdentifierExpression') ||
-      resolvedValueCallee)
+      resolvedValueCallee ||
+      calleeResult.fact._tag === 'Constant')
   ) {
     return finishCallableApplication(node, calleeResult, argumentsResult, callTypeArguments)
   }
@@ -6699,6 +6822,34 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'Constant') {
+    if (fact.value?._tag === 'Boolean')
+      return Object.freeze({
+        _tag: 'BooleanLiteral',
+        value: fact.value.value,
+        type: 'bool',
+        span: fact.syntax.span,
+      })
+    if (fact.value?._tag === 'Integer')
+      return Object.freeze({
+        _tag: 'IntegerLiteral',
+        value: fact.value.value,
+        type: fact.value.type,
+        ...(fact.declaration.canonical._tag === 'Canonical'
+          ? { constant: fact.declaration.canonical.id }
+          : {}),
+        span: fact.syntax.span,
+      })
+    if (fact.value?._tag === 'Floating')
+      return Object.freeze({
+        _tag: 'FloatingLiteral',
+        bits: fact.value.bits,
+        spelling: fact.value.spelling,
+        type: fact.value.type,
+        span: fact.syntax.span,
+      })
+    return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
   if (fact._tag === 'Identifier') {
     return hirReference(fact.reference, fact.type, fact.syntax.span)
   }
@@ -7599,6 +7750,7 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
     case 'StaticText':
     case 'Unit':
     case 'Boolean':
+    case 'Constant':
     case 'Identifier':
     case 'FunctionItem':
       return Object.freeze([])
@@ -7722,9 +7874,15 @@ export const elaborateModule = (input: Input): Result => {
   const analyzed = declarations.map((declaration) =>
     analyzeFunctionBody(source, declaration, declarations, Object.freeze({ scope, index })),
   )
+  const constantDiagnostics = headers.constants.flatMap((constant) =>
+    constant.name._tag === 'Present'
+      ? analyzeConstant(constant, constant.name.token, constant.initializer, true).diagnostics
+      : [],
+  )
   const functions = Object.freeze(analyzed.map((result) => result.fact))
   const diagnostics = [
     ...headers.diagnostics,
+    ...constantDiagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
   ].sort(compareDiagnostics)
   const hirStatements = (

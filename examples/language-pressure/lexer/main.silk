@@ -2,6 +2,13 @@ import silk.vector { Vector, make, append, get, length }
 
 impl Report for OutOfMemory {}
 
+const asciiSpace: u8 = 32
+const asciiTab: u8 = 9
+const asciiLineFeed: u8 = 10
+const asciiCarriageReturn: u8 = 13
+const tokenIdentifier: u8 = 4
+const tokenConst: u8 = 67
+
 struct Token {
   kind: u8
   start: usize
@@ -25,10 +32,10 @@ struct Decision {
 }
 
 fn isWhitespace(byte: u8) -> bool {
-  if byte == 32 { return true }
-  if byte == 9 { return true }
-  if byte == 10 { return true }
-  return byte == 13
+  if byte == asciiSpace { return true }
+  if byte == asciiTab { return true }
+  if byte == asciiLineFeed { return true }
+  return byte == asciiCarriageReturn
 }
 
 fn isAsciiLetter(byte: u8) -> bool {
@@ -159,7 +166,8 @@ fn keywordKind(source: &[u8], start: usize, end: usize) -> u8 {
   if matches(source, start, end, b"continue") { return 31 }
   if matches(source, start, end, b"true") { return 32 }
   if matches(source, start, end, b"false") { return 33 }
-  return 4
+  if matches(source, start, end, b"const") { return tokenConst }
+  return tokenIdentifier
 }
 
 fn punctuationKind(byte: u8) -> u8 {

@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** choose between typed named values and a shared Vector read surface after the
-completed stack VM and native address-root repair, using the two pressure programs' combined
-evidence rather than a self-hosting sequence.
+**Current objective:** shape a shared read surface for `Vector<T>` from the lexer and stack VM's
+combined evidence, keeping ordinary Copy reads separate from the unresolved structural-union copy
+repair and from any self-hosting sequence.
 
 ## Column rules
 
@@ -23,6 +23,16 @@ evidence rather than a self-hosting sequence.
 - **Later** — problem worth solving, no solution chosen. Options, not a queue.
 
 ## Now
+
+### Name reusable scalar values without runtime storage
+
+**Status: complete (2026-08-09).** Literal-only `[pub] const name: primitive = literal`
+declarations cover boolean, integer, `usize`, and floating scalars. Local, selected-import, and
+qualified references share declaration identity with hover, completion, occurrences, and
+go-to-definition, then lower directly to existing typed immediates. The lexer and VM now name token
+codes, opcodes, limits, and diagnostic codes with evaluator/native/Wasm and fresh-process parity;
+computed values, aggregate constants, addressability, inference, and enums remain deliberately
+outside this feature.
 
 ### Exercise a bounded stack bytecode VM
 
@@ -44,10 +54,10 @@ determinism parity.
 
 ## Next
 
-The apparent composite-return defect is repaired and reclassified: native emission had allowed an
-exclusive borrow emitted on one branch to mark address storage as initialized on every runtime path.
-Select either typed named values or shared Vector reads as the next focused improvement; do not
-automatically port another compiler module.
+Add a shared Vector read surface for ordinary Copy elements. Preserve the existing exclusive path
+where mutation or move-out requires it, and keep structural-union reads explicitly blocked until
+their independent `Slot.copy` provenance defect is repaired. Do not automatically port another
+compiler module.
 
 ## Later
 
@@ -84,6 +94,11 @@ and editor tooling together with the language surface so no second vocabulary su
   than remaining local ergonomics?
 
 ## Changelog
+
+- 2026-08-09: Completed `add-typed-constants`. Explicit scalar declarations resolve locally and
+  across both import forms, integrate with editor semantics, and inline into existing HIR/MIR
+  immediates without storage or initialization. The lexer and stack VM replaced representative raw
+  codes and limits while retaining all allocator, three-engine, and determinism evidence.
 
 - 2026-08-09: Completed `fix-native-multi-affine-returns` after characterization corrected the
   initial ABI diagnosis. LLVM now seeds and synchronizes address-root storage independently of

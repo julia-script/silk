@@ -124,6 +124,8 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
       : `<${member.typeParameters.map((parameter) => typeText(parameter.type)).join(', ')}>`
   if (member._tag === 'StructDeclaration')
     return `struct${parameters} · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
+  if (member._tag === 'ConstantDeclaration')
+    return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
   const values = member.parameters
     .map(
       (parameter) =>

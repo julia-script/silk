@@ -8,6 +8,7 @@ import * as Document from './Document.js'
 export type ItemKind =
   | 'Function'
   | 'Struct'
+  | 'Constant'
   | 'Parameter'
   | 'TypeParameter'
   | 'Field'
@@ -88,7 +89,12 @@ const targetOf = (
     id: declarationId(targetModule, lookup.declaration),
     module: targetModule,
     name: targetName,
-    kind: lookup.declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Struct',
+    kind:
+      lookup.declaration._tag === 'FunctionDeclaration'
+        ? 'Function'
+        : lookup.declaration._tag === 'StructDeclaration'
+          ? 'Struct'
+          : 'Constant',
   })
 }
 
@@ -188,7 +194,9 @@ const memberItem = (
   const presentation =
     member._tag === 'FunctionDeclaration'
       ? Presentation.functionDeclaration(member)
-      : Presentation.structDeclaration(member)
+      : member._tag === 'StructDeclaration'
+        ? Presentation.structDeclaration(member)
+        : Presentation.constantDeclaration(member)
   const documentation = resolveDocumentation(
     snapshot,
     module,
@@ -200,12 +208,19 @@ const memberItem = (
   const ownedChildren =
     member._tag === 'FunctionDeclaration'
       ? member.parameters.map((parameter) => parameterItem(snapshot, module, source, id, parameter))
-      : member.fields
-          .filter((field) => options.includePrivate === true || field.visibility === 'Public')
-          .map((field) => fieldItem(snapshot, module, source, id, field))
+      : member._tag === 'StructDeclaration'
+        ? member.fields
+            .filter((field) => options.includePrivate === true || field.visibility === 'Public')
+            .map((field) => fieldItem(snapshot, module, source, id, field))
+        : []
   return Object.freeze({
     id,
-    kind: member._tag === 'FunctionDeclaration' ? 'Function' : 'Struct',
+    kind:
+      member._tag === 'FunctionDeclaration'
+        ? 'Function'
+        : member._tag === 'StructDeclaration'
+          ? 'Struct'
+          : 'Constant',
     name: nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),

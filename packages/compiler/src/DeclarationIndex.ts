@@ -243,6 +243,36 @@ export interface DeclarationFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** The source-retained literal carried by one compile-time constant header. */
+export type ConstantLiteralFact =
+  | { readonly _tag: 'BooleanLiteral'; readonly value: boolean; readonly token: Token.Token }
+  | {
+      readonly _tag: 'IntegerLiteral'
+      readonly value: bigint
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | {
+      readonly _tag: 'FloatingLiteral'
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+
+/** One explicitly typed, compile-time scalar declaration. */
+export interface ConstantFact {
+  readonly _tag: 'ConstantDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Public' | 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
+  readonly declaredType: DeclaredTypeFact
+  readonly literal: ConstantLiteralFact
+  readonly initializer: SyntaxTree.Node
+  readonly syntax: SyntaxTree.Node
+}
+
 /** The unique, duplicate, or unidentified state of one field name. */
 export type FieldState =
   | { readonly _tag: 'Unique'; readonly id: FieldId }
@@ -338,7 +368,7 @@ export type ConformanceWitness =
     }
 
 /** Any declaration kind occupying the shared module-level namespace. */
-export type MemberFact = DeclarationFact | StructFact
+export type MemberFact = DeclarationFact | StructFact | ConstantFact
 
 export type ParameterLookup =
   | { readonly _tag: 'Resolved'; readonly spelling: string; readonly parameter: ParameterFact }
@@ -392,6 +422,7 @@ export interface ModuleHeaders {
   readonly members: ReadonlyArray<MemberFact>
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly structs: ReadonlyArray<StructFact>
+  readonly constants: ReadonlyArray<ConstantFact>
   readonly conformances: ReadonlyArray<ConformanceFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -452,6 +483,43 @@ const presentName = (source: SourceFile.SourceFile, node: SyntaxTree.Node): Decl
         syntax: SyntaxTree.unavailableChild(node, 'Identifier'),
       })
     : Object.freeze({ _tag: 'Present', spelling: spelling(source, token), token })
+}
+
+const constantLiteral = (
+  source: SourceFile.SourceFile,
+  initializer: SyntaxTree.Node,
+): ConstantLiteralFact => {
+  if (initializer.kind === 'BooleanLiteralExpression') {
+    const token =
+      SyntaxTree.directToken(initializer, 'TrueKeyword') ??
+      SyntaxTree.directToken(initializer, 'FalseKeyword')
+    return token === undefined
+      ? Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+      : Object.freeze({ _tag: 'BooleanLiteral', value: token.kind === 'TrueKeyword', token })
+  }
+  if (initializer.kind === 'IntegerLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'DecimalInteger')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const digits = spelling(source, token)
+    const negative = SyntaxTree.directToken(initializer, 'Minus') !== undefined
+    return Object.freeze({
+      _tag: 'IntegerLiteral',
+      value: BigInt(`${negative ? '-' : ''}${digits}`),
+      spelling: `${negative ? '-' : ''}${digits}`,
+      token,
+    })
+  }
+  if (initializer.kind === 'FloatingLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'DecimalFloat')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const literal = spelling(source, token)
+    return Object.freeze({
+      _tag: 'FloatingLiteral',
+      spelling: `${SyntaxTree.directToken(initializer, 'Minus') === undefined ? '' : '-'}${literal}`,
+      token,
+    })
+  }
+  return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
 }
 
 /** Retains and initially resolves one concrete type path against built-in types only. */
@@ -1274,7 +1342,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const nodes = syntax.root.children.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
-      (element.kind === 'FunctionDeclaration' || element.kind === 'StructDeclaration'),
+      (element.kind === 'FunctionDeclaration' ||
+        element.kind === 'StructDeclaration' ||
+        element.kind === 'ConstantDeclaration'),
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
@@ -1442,6 +1512,27 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       name._tag === 'Present' ? name.spelling : `#${ordinal}`,
     )
     diagnostics.push(...typeParameters.diagnostics)
+    if (node.kind === 'ConstantDeclaration') {
+      const initializer =
+        node.children.find(
+          (element): element is SyntaxTree.Node =>
+            SyntaxTree.isNode(element) && !isDeclaredTypeNode(element),
+        ) ?? node
+      const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
+      diagnostics.push(...declaredType.diagnostics)
+      return Object.freeze({
+        _tag: 'ConstantDeclaration',
+        id,
+        canonical,
+        visibility,
+        typeParameters: Object.freeze([]),
+        name,
+        declaredType: declaredType.fact,
+        literal: constantLiteral(source, initializer),
+        initializer,
+        syntax: node,
+      })
+    }
     if (node.kind === 'StructDeclaration') {
       const collected = collectFields(source, node, id, typeParameters.environment)
       diagnostics.push(...collected.diagnostics)
@@ -1583,6 +1674,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     ),
     structs: Object.freeze(
       members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+    ),
+    constants: Object.freeze(
+      members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
     ),
     conformances: Object.freeze(conformances),
     diagnostics: Object.freeze(diagnostics.sort(compareDiagnostics)),
@@ -2202,6 +2296,16 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
   let modules = self.modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
+      if (member._tag === 'ConstantDeclaration') {
+        const resolved = resolveDeclaredType(
+          module.module,
+          member.declaredType,
+          resolver,
+          self.modules,
+        )
+        diagnostics.push(...resolved.diagnostics)
+        return Object.freeze({ ...member, declaredType: resolved.fact })
+      }
       if (member._tag === 'FunctionDeclaration') {
         const parameters = member.parameters.map((parameter) => {
           const resolved = resolveDeclaredType(
@@ -2322,6 +2426,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       ),
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      constants: Object.freeze(
+        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
       ),
       conformances: Object.freeze(conformances),
     })
@@ -2588,6 +2695,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
 
   for (const module of modules) {
     for (const member of module.members) {
+      if (member._tag === 'ConstantDeclaration') continue
       if (member._tag === 'FunctionDeclaration') {
         for (const parameter of member.parameters) {
           if (
@@ -2627,6 +2735,12 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   modules = modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
       if (member.visibility !== 'Public') return member
+      if (member._tag === 'ConstantDeclaration') {
+        return Object.freeze({
+          ...member,
+          declaredType: attachExposure(member.declaredType, modules, diagnostics),
+        })
+      }
       if (member._tag === 'FunctionDeclaration') {
         const parameters = member.parameters.map((parameter) =>
           Object.freeze({
@@ -2668,6 +2782,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       ),
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      constants: Object.freeze(
+        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
       ),
     })
   })
@@ -2748,6 +2865,9 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
       ),
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      constants: Object.freeze(
+        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
       ),
       diagnostics: Diagnostic.merge(moduleDiagnostics),
     })

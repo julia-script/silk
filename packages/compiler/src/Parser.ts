@@ -163,6 +163,7 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Equals',
   'FatArrow',
   'LetKeyword',
+  'ConstKeyword',
   'IfKeyword',
   'WhileKeyword',
   'BreakKeyword',
@@ -1949,6 +1950,7 @@ const parseParameterList = (initial: State): NodeResult => {
 const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ImportKeyword',
   'PubKeyword',
+  'ConstKeyword',
   'StructKeyword',
   'FnKeyword',
   'EffectKeyword',
@@ -2059,6 +2061,7 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
   if (
     kind === 'ImportKeyword' ||
+    kind === 'ConstKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'EffectKeyword' ||
     kind === 'StructKeyword' ||
@@ -2067,7 +2070,41 @@ const beginsTopLevelDeclaration = (state: State): boolean => {
     return true
   if (kind !== 'PubKeyword') return false
   const following = significantKindAfter(state, 1)
-  return following === 'FnKeyword' || following === 'EffectKeyword' || following === 'StructKeyword'
+  return (
+    following === 'FnKeyword' ||
+    following === 'EffectKeyword' ||
+    following === 'StructKeyword' ||
+    following === 'ConstKeyword'
+  )
+}
+
+const parseConstantDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['ConstKeyword', 'Identifier', ...topLevelFollowing])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'ConstKeyword', [
+    'Identifier',
+    'Colon',
+    ...topLevelFollowing,
+  ])
+  const name = expect(keyword.state, 'Identifier', ['Colon', ...typeStarts, ...topLevelFollowing])
+  const colon = expect(name.state, 'Colon', [...typeStarts, 'Equals', ...topLevelFollowing])
+  const type = parseType(colon.state, ['Equals', ...topLevelFollowing])
+  const equals = expect(type.state, 'Equals', [...expressionStarts, ...topLevelFollowing])
+  const initializer = parseExpression(equals.state, 0, 'Integer', false)
+  return Object.freeze({
+    state: initializer.state,
+    node: syntaxNode(initializer.state, 'ConstantDeclaration', [
+      ...pubKeyword.elements,
+      ...keyword.elements,
+      ...name.elements,
+      ...colon.elements,
+      type.node,
+      ...equals.elements,
+      initializer.node,
+    ]),
+  })
 }
 
 const parseStructField = (initial: State): NodeResult => {
@@ -2202,13 +2239,17 @@ const parseImplDeclaration = (initial: State): NodeResult => {
 const parseTopLevelDeclaration = (state: State): NodeResult =>
   nextSignificantKind(state) === 'ImportKeyword'
     ? parseImportDeclaration(state)
-    : nextSignificantKind(state) === 'ImplKeyword'
-      ? parseImplDeclaration(state)
-      : nextSignificantKind(state) === 'StructKeyword' ||
-          (nextSignificantKind(state) === 'PubKeyword' &&
-            significantKindAfter(state, 1) === 'StructKeyword')
-        ? parseStructDeclaration(state)
-        : parseFunctionDeclaration(state)
+    : nextSignificantKind(state) === 'ConstKeyword' ||
+        (nextSignificantKind(state) === 'PubKeyword' &&
+          significantKindAfter(state, 1) === 'ConstKeyword')
+      ? parseConstantDeclaration(state)
+      : nextSignificantKind(state) === 'ImplKeyword'
+        ? parseImplDeclaration(state)
+        : nextSignificantKind(state) === 'StructKeyword' ||
+            (nextSignificantKind(state) === 'PubKeyword' &&
+              significantKindAfter(state, 1) === 'StructKeyword')
+          ? parseStructDeclaration(state)
+          : parseFunctionDeclaration(state)
 
 const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeResult => {
   let lookahead = initial.index
@@ -2219,6 +2260,7 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
     lookaheadToken.kind !== 'FnKeyword' &&
     lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
+    lookaheadToken.kind !== 'ConstKeyword' &&
     lookaheadToken.kind !== 'EndOfFile'
   ) {
     if (lookaheadToken.kind === 'PubKeyword') {

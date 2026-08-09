@@ -166,6 +166,7 @@ export type Expression =
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
       readonly type: DeclarationIndex.SemanticType
+      readonly constant?: DeclarationIndex.CanonicalId
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -1098,7 +1099,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
     case 'IntegerLiteral':
-      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
     case 'FloatingLiteral':
       return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
     case 'StaticTextLiteral':

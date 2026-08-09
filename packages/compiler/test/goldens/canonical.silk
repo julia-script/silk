@@ -1,5 +1,7 @@
 import Core.Math as Math {add as plus, subtract}
 
+pub const limit: i32 = 2
+
 pub struct Pair {
   pub left: [i32; 2]
   right: bool

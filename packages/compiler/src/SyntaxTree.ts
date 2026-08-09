@@ -12,6 +12,7 @@ export type NodeKind =
   | 'ImportMemberList'
   | 'ImportMember'
   | 'StructDeclaration'
+  | 'ConstantDeclaration'
   | 'StructField'
   | 'ImplDeclaration'
   | 'ImplOperation'

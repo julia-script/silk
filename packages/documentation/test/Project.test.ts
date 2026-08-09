@@ -10,6 +10,9 @@ it.effect('builds public-first project JSON with first-class child documentation
   Effect.gen(function* () {
     const source = `//! Recovery utilities.
 
+/// Default recovery code.
+pub const defaultCode: i32 = 7
+
 /// Public recovery.
 pub fn recover(
   /// The failure to inspect.
@@ -33,8 +36,12 @@ pub struct Problem {
     assert.strictEqual(module.documentation?.markdown, 'Recovery utilities.')
     assert.deepStrictEqual(
       module.items.filter((item) => item.kind !== 'Implementation').map((item) => item.name),
-      ['recover', 'Problem'],
+      ['defaultCode', 'recover', 'Problem'],
     )
+    const defaultCode = module.items.find((item) => item.name === 'defaultCode')
+    assert.strictEqual(defaultCode?.kind, 'Constant')
+    assert.strictEqual(defaultCode?.signature.text, 'pub const defaultCode: i32')
+    assert.strictEqual(defaultCode?.documentation?.markdown, 'Default recovery code.')
     const recover = module.items.find((item) => item.name === 'recover')
     assert.strictEqual(recover?.children.at(0)?.documentation?.markdown, 'The failure to inspect.')
     const problem = module.items.find((item) => item.name === 'Problem')

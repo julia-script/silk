@@ -16,6 +16,7 @@ export type Presentation =
       readonly functionKind: DeclarationIndex.DeclarationFact['functionKind']
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'ConstantPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ParameterPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'TypeParameterPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'FieldPresentation'; readonly name: string })
@@ -88,6 +89,17 @@ export const structDeclaration = (self: DeclarationIndex.StructFact): Presentati
     _tag: 'StructPresentation',
     name,
     text: `${visibility}struct ${name}${typeParameters}`,
+  })
+}
+
+/** Renders one typed compile-time scalar declaration. */
+export const constantDeclaration = (self: DeclarationIndex.ConstantFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  return Object.freeze({
+    _tag: 'ConstantPresentation',
+    name,
+    text: `${visibility}const ${name}: ${declaredType(self.declaredType)}`,
   })
 }
 

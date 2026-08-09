@@ -150,7 +150,7 @@ it.effect(
   'keeps ordinary multi-affine Effect transport in evaluator, native, and Wasm parity',
   () =>
     Effect.gen(function* () {
-      const wasmSnapshot = yield* Analysis.ofSource(
+      const wasmSnapshot = yield* Analysis.ofSourceRealized(
         'multi-affine-return/allocated',
         ascii(allocated),
         'wasm32-unknown-unknown',
@@ -183,7 +183,7 @@ it.effect(
   'preserves the stack VM diagnostic root when its exclusive branch is untaken',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'multi-affine-return/stack-vm',
         ascii(stackVmWithSeparateVectors),
         'aarch64-apple-darwin',
@@ -197,7 +197,7 @@ it.effect(
       assert.isAbove(acquires.length, 0)
       assert.strictEqual(releases.length, acquires.length)
 
-      const wasmSnapshot = yield* Analysis.ofSource(
+      const wasmSnapshot = yield* Analysis.ofSourceRealized(
         'multi-affine-return/stack-vm',
         ascii(stackVmWithSeparateVectors),
         'wasm32-unknown-unknown',

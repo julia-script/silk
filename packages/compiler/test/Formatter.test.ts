@@ -76,6 +76,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallExpression',
   'ConditionalStatement',
   'ContinueStatement',
+  'ConstantDeclaration',
   'DropStatement',
   'EffectExpression',
   'FieldProjectionExpression',
@@ -590,6 +591,7 @@ pub fn inspect(event: Token) -> i32 {
 it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
     const source = `import Core.Math as Math { add as plus, subtract }
+pub const limit:i32=2
 pub struct Pair {
   pub left: [i32; 2]
   right: bool

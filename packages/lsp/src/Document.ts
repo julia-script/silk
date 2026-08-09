@@ -239,7 +239,7 @@ export const completion = (
   return { isIncomplete: false, items: [...items] }
 }
 
-/** Returns the document's top-level function and struct declarations as symbols. */
+/** Returns the document's top-level declarations as symbols. */
 export const symbols = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
@@ -257,6 +257,16 @@ export const symbols = (
         {
           name: member.name.spelling,
           kind: SymbolKind.Function,
+          range,
+          selectionRange,
+        },
+      ]
+    }
+    if (member._tag === 'ConstantDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Constant,
           range,
           selectionRange,
         },

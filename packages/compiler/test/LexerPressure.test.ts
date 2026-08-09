@@ -88,6 +88,7 @@ const tokenKinds = [
   'Arrow',
   'Invalid',
   'EndOfFile',
+  'ConstKeyword',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -158,6 +159,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   Arrow: 64,
   Invalid: 65,
   EndOfFile: 66,
+  ConstKeyword: 67,
 })
 
 interface ExpectedToken {
@@ -252,7 +254,7 @@ const corpus = [
   Object.freeze({
     id: 'keywords',
     input:
-      'pub struct effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false name _x2',
+      'pub struct effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
   Object.freeze({ id: 'literals', input: '"text\\"tail" b"\\x41" "unterminated\nnext' }),

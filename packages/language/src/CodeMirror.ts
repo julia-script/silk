@@ -50,6 +50,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   ImportKeyword: keyword,
   AsKeyword: keyword,
   LetKeyword: keyword,
+  ConstKeyword: keyword,
   MutKeyword: keyword,
   OnceKeyword: keyword,
   MoveKeyword: keyword,
