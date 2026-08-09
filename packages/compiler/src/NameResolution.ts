@@ -133,7 +133,7 @@ const canonicalDeclaration = (
 }
 
 export const resolve = (
-  closure: ModuleClosure.Closure,
+  closure: ModuleClosure.Facts,
   index: DeclarationIndex.Index,
 ): Resolution => {
   const scopes: Array<ModuleScope> = []
@@ -560,7 +560,7 @@ export const resolveType = (
 
 /** Runs identity collection, scope construction, and declared-type completion in phase order. */
 export const analyze = (
-  closure: ModuleClosure.Closure,
+  closure: ModuleClosure.Facts,
 ): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
   const collected = DeclarationIndex.collect(closure)
   const preliminary = resolve(closure, collected)

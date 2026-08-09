@@ -58,6 +58,10 @@
       "types": "./dist/PhaseReport.d.ts",
       "import": "./dist/PhaseReport.js"
     },
+    "./ProjectAnalysis": {
+      "types": "./dist/ProjectAnalysis.d.ts",
+      "import": "./dist/ProjectAnalysis.js"
+    },
     "./NativeToolchain": {
       "types": "./dist/NativeToolchain.d.ts",
       "import": "./dist/NativeToolchain.js"

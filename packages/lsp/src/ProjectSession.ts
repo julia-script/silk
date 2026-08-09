@@ -17,9 +17,8 @@ export interface Options<R> {
   readonly sourceRoot: string
   readonly debounce?: Duration.Input
   readonly analyze: (
-    document: Document.Document,
     documents: ReadonlyArray<Document.Document>,
-  ) => Effect.Effect<AnalyzedDocument, never, R>
+  ) => Effect.Effect<ReadonlyMap<string, AnalyzedDocument>, never, R>
   readonly publish: (session: AnalyzedDocument) => Effect.Effect<void, never, R>
 }
 
@@ -90,18 +89,16 @@ export const make = <R>(options: Options<R>): ProjectSession<R> => {
             ...work.documents.filter((document) => document.uri === work.priority),
             ...work.documents.filter((document) => document.uri !== work.priority),
           ])
-    const analyzed = new Map<string, AnalyzedDocument>()
-    for (const document of ordered) {
-      analyzed.set(document.uri, yield* options.analyze(document, work.documents))
-    }
+    const analyzed =
+      ordered.length === 0 ? new Map<string, AnalyzedDocument>() : yield* options.analyze(ordered)
     if (closed || work.revision !== revision) return
-    committed = analyzed
+    committed = new Map(analyzed)
     committedRevision = work.revision
-    for (const session of analyzed.values()) yield* options.publish(session)
+    for (const session of committed.values()) yield* options.publish(session)
     yield* completeWaiters((waiter) => {
       const document = synchronized.get(waiter.uri)
       if (document === undefined || document.version !== waiter.version) return Option.none()
-      const session = analyzed.get(waiter.uri)
+      const session = committed.get(waiter.uri)
       return session?.document.version === waiter.version ? Option.some(session) : Option.none()
     })
   })

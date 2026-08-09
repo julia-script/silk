@@ -41,6 +41,26 @@ derives a new immutable snapshot without changing the frontend input. `Analysis.
 `Driver.compile` are strict boundaries: they refuse any snapshot containing
 an error diagnostic or resolver failure before invoking a backend or toolchain.
 
+## Shared project analysis
+
+Editor hosts with several synchronized roots can analyze their union closure once through
+`ProjectAnalysis`. Each requested root receives an immutable `Analysis.FrontendSnapshot` view with
+its own root identity while source, syntax, declaration, resolution, elaboration, ownership,
+tooling-index, diagnostic, and phase-report values remain structurally shared.
+
+```ts
+import { ProjectAnalysis, SourceFile } from '@silk-effect/compiler'
+
+const project = yield* ProjectAnalysis.make([
+  SourceFile.make('app/Main', mainBytes),
+  SourceFile.make('app/Tool', toolBytes),
+])
+const main = ProjectAnalysis.view(project, 'app/Main')
+```
+
+Project analysis is frontend-only. Cross-revision caching and runtime realization remain explicit,
+separate concerns.
+
 ## The facade is the supported consumer surface
 
 Tooling consumes compiler phases exclusively through `Analysis`: build a frontend snapshot from a

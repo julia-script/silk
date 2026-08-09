@@ -18,7 +18,11 @@ const source = pressureSource.replace(
 
 const snapshot = (target) =>
   Effect.runPromise(
-    Analysis.ofSource('stack-vm-pressure/determinism', new TextEncoder().encode(source), target),
+    Analysis.ofSourceRealized(
+      'stack-vm-pressure/determinism',
+      new TextEncoder().encode(source),
+      target,
+    ),
   )
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const json = (value) =>
