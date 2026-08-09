@@ -383,13 +383,11 @@ fn observeTokenEnd(value: usize) -> usize { return value }
 fn observeDiagnosticStart(value: usize) -> usize { return value }
 fn observeDiagnosticEnd(value: usize) -> usize { return value }
 
-fn fingerprintVectors(tokens: Vector<Token>, diagnostics: Vector<LexicalDiagnostic>) -> i32 {
-  let mut tokenValues = move tokens
-  let mut diagnosticValues = move diagnostics
+fn fingerprintVectors(tokens: &Vector<Token>, diagnostics: &Vector<LexicalDiagnostic>) -> i32 {
   let mut value = 0
   let mut index = usize.add(0, 0)
-  while index < length<Token>(&tokenValues) {
-    let token = get<Token>(&mut tokenValues, index)
+  while index < length<Token>(tokens) {
+    let token = get<Token>(tokens, index)
     let kind = observeTokenKind(token.kind)
     let start = observeTokenStart(token.start)
     let end = observeTokenEnd(token.end)
@@ -397,8 +395,8 @@ fn fingerprintVectors(tokens: Vector<Token>, diagnostics: Vector<LexicalDiagnost
     index = index + 1
   }
   index = usize.add(0, 0)
-  while index < length<LexicalDiagnostic>(&diagnosticValues) {
-    let diagnostic = get<LexicalDiagnostic>(&mut diagnosticValues, index)
+  while index < length<LexicalDiagnostic>(diagnostics) {
+    let diagnostic = get<LexicalDiagnostic>(diagnostics, index)
     let start = observeDiagnosticStart(diagnostic.start)
     let end = observeDiagnosticEnd(diagnostic.end)
     value = (value * 19 + usize.toI32(start) * 7 + usize.toI32(end) * 11) % 197
@@ -408,8 +406,8 @@ fn fingerprintVectors(tokens: Vector<Token>, diagnostics: Vector<LexicalDiagnost
 }
 
 fn fingerprint(result: Lexed) -> i32 {
-  return match move result {
-    Lexed { tokens, diagnostics } => fingerprintVectors(move tokens, move diagnostics)
+  return match &result {
+    Lexed { tokens, diagnostics } => fingerprintVectors(&tokens, &diagnostics)
   }
 }
 

@@ -54,8 +54,8 @@ effect fn build() -> i32 ! OutOfMemory {
   let appended5 = run pending5
   if length<i32>(&values) == 6 {} else { return 0 }
   if capacity<i32>(&values) == 8 {} else { return 1 }
-  let first = get<i32>(&mut values, 0)
-  let last = get<i32>(&mut values, 5)
+  let first = get<i32>(&values, 0)
+  let last = get<i32>(&values, 5)
   return first + last + 17
 }
 
@@ -172,8 +172,8 @@ effect fn build() -> i32 ! OutOfMemory {
   if marker == 7 {} else { return 0 }
   if length<i32>(&values) == 4 {} else { return 1 }
   if capacity<i32>(&values) == 4 {} else { return 2 }
-  let first = get<i32>(&mut values, 0)
-  let last = get<i32>(&mut values, 3)
+  let first = get<i32>(&values, 0)
+  let last = get<i32>(&values, 3)
   return first + last + 19
 }
 
@@ -383,6 +383,50 @@ it.effect('transfers vector ownership and drops it early on all three engines', 
       toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
       profile: 'release',
       destination: join(destinationRoot, 'transferred-early-drop'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag !== 'Compiled') return
+    const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+    assert.strictEqual(run.status, 42, run.stderr)
+  }),
+)
+
+it.effect('reads a zero-sized Copy element through a shared vector on all three engines', () =>
+  Effect.gen(function* () {
+    const source = `import silk.vector { Vector, make, append, get }
+struct Marker {}
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut values = make<Marker>()
+  let pending = append<Marker>(&mut values, Marker {}) |> Allocator.provide(&mut allocator)
+  let appended = run pending
+  let observed = get<Marker>(&values, 0)
+  return 42
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'vector-acceptance/zero-sized-read',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length, 1)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make('vector-acceptance/zero-sized-read', ascii(source)),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'zero-sized-read'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return

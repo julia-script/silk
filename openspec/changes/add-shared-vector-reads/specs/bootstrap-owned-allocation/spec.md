@@ -36,5 +36,4 @@ initialization bitmap.
 #### Scenario: Reject a shared read of an unsupported element
 
 - **WHEN** unsafe code requests a shared raw-buffer read for a move-only or structural-union element type
-- **THEN** semantic validation rejects the intrinsic instance before MIR emission
-
+- **THEN** compiler verification rejects the intrinsic instance before evaluation or backend emission

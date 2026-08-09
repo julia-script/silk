@@ -96,6 +96,7 @@ export type BuiltinOperation =
   | 'RawBufferFrom'
   | 'RawBufferSlot'
   | 'RawBufferCount'
+  | 'RawBufferRead'
   | 'SlotWrite'
   | 'SlotTake'
   | 'SlotCopy'
@@ -111,6 +112,7 @@ export type SliceRoot =
       readonly _tag: 'ParameterSliceRoot'
       readonly parameter: DeclarationIndex.ParameterId
     }
+  | { readonly _tag: 'PatternSliceRoot'; readonly binding: Match.BindingId }
 
 /** One selector in a writable place, retained in source evaluation order. */
 export type WriteSelector =
@@ -1221,9 +1223,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'SliceBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : `p${expression.root.parameter.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : expression.root._tag === 'ParameterSliceRoot' ? `p${expression.root.parameter.ordinal}` : `a${expression.root.binding.arm.ordinal}.b${expression.root.binding.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'ValueBorrow':
-      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : `p${expression.root.parameter.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : expression.root._tag === 'ParameterSliceRoot' ? `p${expression.root.parameter.ordinal}` : `a${expression.root.binding.arm.ordinal}.b${expression.root.binding.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
         `${indent}slice-length : i32 ${spanText(expression.span)}`,

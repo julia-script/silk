@@ -356,6 +356,7 @@ export interface AllocationTraceEvent {
     | 'SlotWrite'
     | 'SlotTake'
     | 'SlotCopy'
+    | 'RawBufferRead'
     | 'SlotDrop'
     | 'AllocationRelease'
   readonly function: DeclarationIndex.CanonicalId
@@ -2247,6 +2248,46 @@ function* executeFunction(
               throw new RangeError('MIR verifier allowed RawBuffer.count on another value')
             }
             write(operation.destination, { value: usizeValue(buffer.count), fromCall: false })
+            break
+          }
+          case 'RawBufferRead': {
+            const buffer = referenced(operation.buffer).value
+            const index = readInteger(operation.index)
+            if (buffer._tag !== 'RawBufferValue' || index._tag !== 'UsizeValue') {
+              throw new RangeError('MIR verifier allowed invalid RawBuffer.read operands')
+            }
+            if (index.value >= buffer.count) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer read index is out of bounds',
+                span: operation.provenance.span,
+              })
+            }
+            if (!Type.equals(buffer.element, operation.element)) {
+              throw new RangeError('MIR verifier allowed mismatched RawBuffer read provenance')
+            }
+            const allocation = state.allocations.get(buffer.ticket)
+            const selected = allocation?.values.get(index.value.toString())
+            if (allocation === undefined || !allocation.active || selected === undefined) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'RawBuffer.read requires live initialized storage',
+                span: operation.provenance.span,
+              })
+            }
+            write(operation.destination, { value: selected, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'RawBufferRead',
+                function: fn.id,
+                ticket: buffer.ticket,
+                index: index.value,
+                element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
             break
           }
           case 'RawBufferSlot': {

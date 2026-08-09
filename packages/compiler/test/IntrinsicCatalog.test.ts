@@ -78,11 +78,12 @@ const acceptedSources = Object.freeze([
     let count = RawBuffer.count(&buffer)
     let firstWrite = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
     let secondWrite = Slot.write(RawBuffer.slot(&mut buffer, 1), 21)
+    let read = RawBuffer.read<i32>(&buffer, 0)
     let copied = Slot.copy(RawBuffer.slot(&mut buffer, 0))
     let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
     let dropped = Slot.drop(RawBuffer.slot(&mut buffer, 1))
     drop buffer
-    return copied + taken
+    return read + copied + taken
   }
   return 0
 }

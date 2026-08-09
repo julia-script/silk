@@ -22,7 +22,7 @@ effect fn search() -> usize ! OutOfMemory ? &mut Allocator {
   let mut cursor = usize.add(0, 0)
 
   while cursor < length<QueueEntry>(&queue) {
-    let current = get<QueueEntry>(&mut queue, cursor)
+    let current = get<QueueEntry>(&queue, cursor)
     cursor = cursor + 1
     if current.cell == 24 {
       return current.distance

@@ -487,11 +487,14 @@ const checkExpression = (
       }
       return
     }
-    case 'SliceBorrow': {
+    case 'SliceBorrow':
+    case 'ValueBorrow': {
       const site: BindingSite =
         expression.root._tag === 'BindingSliceRoot'
           ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
-          : Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
+          : expression.root._tag === 'ParameterSliceRoot'
+            ? Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
+            : Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
       checkUse(state, live, site, expression.span, false)
       return
     }
@@ -831,7 +834,9 @@ interface LoanAnalysis {
 const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite =>
   root._tag === 'BindingRoot'
     ? Object.freeze({ _tag: 'Let', binding: root.binding.id })
-    : Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
+    : root._tag === 'ParameterRoot'
+      ? Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
+      : Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
 
 const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)

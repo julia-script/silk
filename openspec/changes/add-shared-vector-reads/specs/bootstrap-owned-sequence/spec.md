@@ -26,5 +26,4 @@ SHALL be rejected before element storage is read.
 #### Scenario: Reject an unsupported element type
 
 - **WHEN** `Vector.get` is instantiated for a move-only or structural-union element type
-- **THEN** semantic validation rejects the read without changing the vector
-
+- **THEN** compiler verification rejects the read before evaluation or backend emission without changing the vector

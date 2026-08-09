@@ -49,12 +49,12 @@ new raw read on the `Full<T>.buffer` binding. The compiler still knows only raw 
 Vector operation, layout, or growth rule. The old `Taken<T>`, `copyAt`, and `copySlot` restoration path
 is deleted.
 
-### Reject structural unions at intrinsic instantiation
+### Reject structural unions during compiler verification
 
 The initial supported boundary is a Copy type whose canonical form is not a structural union. This
 includes the nominal Copy records used by the lexer and the VM's separated step and diagnostic
-vectors. The compiler emits the normal invalid-intrinsic-instance diagnostic for move-only and union
-elements before lowering.
+vectors. The MIR verifier emits the normal invalid-intrinsic-instance diagnostic for move-only and
+union elements before evaluation or backend emission.
 
 Allowing unions opportunistically was rejected: current `Slot.copy` loses result provenance for
 structural unions, and bypassing that defect in a new operation would create inconsistent Copy
@@ -74,8 +74,9 @@ the vector afterward.
   through Vector's length invariant; do not add a bitmap or runtime branch.
 - **A new intrinsic duplicates part of `Slot.copy` lowering.** → Share internal layout/load helpers
   where they remain actor-local, while keeping the public capability distinction explicit.
-- **The temporary union exclusion is visible at generic instantiation.** → Diagnose it before MIR,
-  document it as a focused boundary, and remove it only with the structural-union provenance repair.
+- **The temporary union exclusion is visible when the compiler verifies the instantiated read.** →
+  Diagnose it before execution or backend emission, document it as a focused boundary, and remove it
+  only with the structural-union provenance repair.
 - **Shared pattern lowering may expose a latent nested-borrow defect.** → Add a focused shared-field
   raw-buffer test before rewriting Vector and repair only general shared-pattern provenance if needed.
 
