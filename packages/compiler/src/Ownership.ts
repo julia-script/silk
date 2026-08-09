@@ -2214,9 +2214,12 @@ const checkFunction = (
 }
 
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
-export const checkModule = (result: Elaboration.Result): ModuleOwnership => {
+export const checkModule = (
+  result: Elaboration.Result,
+  index: DeclarationIndex.Index,
+): ModuleOwnership => {
   const checked = result.hir.functions.map((fn, ordinal) =>
-    checkFunction(fn, result.index, result.functions.at(ordinal)),
+    checkFunction(fn, index, result.functions.at(ordinal)),
   )
   return Object.freeze({
     _tag: 'OwnershipFacts',

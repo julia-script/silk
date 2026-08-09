@@ -28,6 +28,15 @@ const deterministicReport = (self: ProjectAnalysis.ProjectAnalysis) =>
     diagnostics,
   }))
 
+const projectViewIsNotSingleRoot: ProjectAnalysis.View extends Analysis.SingleRootFrontendSnapshot
+  ? false
+  : true = true
+
+const assertProjectViewNotRealizable = (view: ProjectAnalysis.View): void => {
+  assert.strictEqual(view.realization, 'ProjectView')
+  assert.isTrue(projectViewIsNotSingleRoot)
+}
+
 it.effect('analyzes a shared dependency once and derives structurally shared root views', () =>
   Effect.gen(function* () {
     const project = yield* make()
@@ -37,6 +46,7 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     assert.isDefined(left)
     assert.isDefined(right)
     if (left === undefined || right === undefined) return
+    assertProjectViewNotRealizable(left)
     assert.deepEqual(project.roots, ['app/A', 'app/B'])
     assert.strictEqual(project.semanticInvalidation.totals.modules, 3)
     assert.strictEqual(project.semanticInvalidation.totals.recomputed, 3)
@@ -49,6 +59,8 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     assert.strictEqual(left.resolution, right.resolution)
     assert.strictEqual(left.surfaces, right.surfaces)
     assert.strictEqual(left.surfaces, project.surfaces)
+    assert.strictEqual(left.semantics, right.semantics)
+    assert.strictEqual(left.semantics, project.semantics)
     assert.strictEqual(left.results, right.results)
     assert.strictEqual(left.ownership, right.ownership)
     assert.strictEqual(left.semanticOccurrences, right.semanticOccurrences)
@@ -70,11 +82,11 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
         'declaration-index',
         'name-resolution',
         'module-surface',
+        'semantic-invalidation',
         'elaboration',
         'ownership',
         'semantic-occurrences',
         'anonymous-expressions',
-        'semantic-invalidation',
       ],
     )
     assert.deepEqual(deterministicReport(project).at(0), {
@@ -116,7 +128,7 @@ it.effect('rejects conflicting source bytes for one canonical root', () =>
   }),
 )
 
-it.effect('reuses exact unchanged syntax while rebuilding one coherent semantic frontend', () =>
+it.effect('reuses exact unchanged syntax and module semantics inside one coherent frontend', () =>
   Effect.gen(function* () {
     const previous = yield* make()
     const revisedRoots = Object.freeze([
@@ -158,6 +170,7 @@ it.effect('reuses exact unchanged syntax while rebuilding one coherent semantic 
     assert.notStrictEqual(currentView.resolution, previousView.resolution)
     assert.notStrictEqual(currentView.results, previousView.results)
     assert.notStrictEqual(currentView.ownership, previousView.ownership)
+    assert.notStrictEqual(currentView.semantics, previousView.semantics)
     assert.notStrictEqual(currentView.semanticOccurrences, previousView.semanticOccurrences)
     assert.notStrictEqual(currentView.surfaces, previousView.surfaces)
     assert.strictEqual(currentView.semanticInvalidation, current.semanticInvalidation)
@@ -172,19 +185,38 @@ it.effect('reuses exact unchanged syntax while rebuilding one coherent semantic 
       { _tag: 'Reusable', module: 'app/B', surfaceChanged: false },
       { _tag: 'Reusable', module: 'shared/Core', surfaceChanged: false },
     ])
-    assert.deepEqual(current.report.at(-1)?.counters, {
-      _tag: 'SemanticInvalidationCounters',
-      reusable: 2,
+    assert.deepEqual(
+      current.report.find(({ phase }) => phase === 'semantic-invalidation')?.counters,
+      {
+        _tag: 'SemanticInvalidationCounters',
+        reusable: 2,
+        recomputed: 1,
+        fresh: 0,
+        localChange: 1,
+        dependencySurfaceChange: 0,
+        cyclicPeerChange: 0,
+        environmentChange: 0,
+        surfaceChange: 0,
+      },
+    )
+    assert.notStrictEqual(currentView.semantics.get('app/A'), previousView.semantics.get('app/A'))
+    assert.strictEqual(currentView.semantics.get('app/B'), previousView.semantics.get('app/B'))
+    assert.strictEqual(
+      currentView.semantics.get('shared/Core'),
+      previousView.semantics.get('shared/Core'),
+    )
+    assert.strictEqual(currentView.results.get('app/B'), previousView.results.get('app/B'))
+    assert.strictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
+    assert.deepEqual(current.report.find(({ phase }) => phase === 'elaboration')?.counters, {
+      _tag: 'ModuleReuseCounters',
+      reused: 2,
       recomputed: 1,
-      fresh: 0,
-      localChange: 1,
-      dependencySurfaceChange: 0,
-      cyclicPeerChange: 0,
-      environmentChange: 0,
-      surfaceChange: 0,
     })
-    assert.notStrictEqual(currentView.results.get('app/B'), previousView.results.get('app/B'))
-    assert.notStrictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
+    assert.deepEqual(current.report.find(({ phase }) => phase === 'ownership')?.counters, {
+      _tag: 'ModuleReuseCounters',
+      reused: 2,
+      recomputed: 1,
+    })
     assert.notStrictEqual(
       currentView.semanticOccurrences.modules.get('app/B'),
       previousView.semanticOccurrences.modules.get('app/B'),
@@ -229,5 +261,28 @@ it.effect('reports fresh and removed modules and refuses reuse across source ori
       changedOrigin.closure.modules.at(0)?.syntax,
       previous.closure.modules.at(0)?.syntax,
     )
+  }),
+)
+
+it.effect('recomputes conservatively when a reusable prior artifact is missing', () =>
+  Effect.gen(function* () {
+    const previous = yield* make()
+    const incomplete = Object.freeze({
+      ...previous,
+      semantics: new Map([...previous.semantics].filter(([module]) => module !== 'app/B')),
+    })
+    const current = yield* ProjectAnalysis.revise(incomplete, roots).pipe(
+      Effect.provide(SourceResolver.memory(sources)),
+    )
+
+    assert.strictEqual(current.semanticInvalidation.totals.reusable, 3)
+    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+    assert.notStrictEqual(current.semantics.get('app/B'), previous.semantics.get('app/B'))
+    assert.strictEqual(current.semantics.get('shared/Core'), previous.semantics.get('shared/Core'))
+    assert.deepEqual(current.report.find(({ phase }) => phase === 'elaboration')?.counters, {
+      _tag: 'ModuleReuseCounters',
+      reused: 2,
+      recomputed: 1,
+    })
   }),
 )

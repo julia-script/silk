@@ -98,6 +98,7 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
       readonly reasons: ReadonlyArray<string>
     }> = []
     const publishedVersions: Array<number> = []
+    const semanticArtifacts = new Map<number, unknown>()
     let active = 0
     let maximumActive = 0
     const project = ProjectSession.make({
@@ -126,6 +127,8 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
             tag: observation._tag,
             reasons: observation._tag === 'Recomputed' ? observation.reasons : [],
           })
+        const artifact = result.values().next().value?.project.semantics.get('Main')
+        if (artifact !== undefined) semanticArtifacts.set(self.version, artifact)
         active -= 1
         return result
       }),
@@ -167,6 +170,8 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
       { version: 3, tag: 'Recomputed', reasons: ['LocalChange'] },
     ])
     assert.deepEqual(publishedVersions, [2, 3])
+    assert.notStrictEqual(semanticArtifacts.get(3), semanticArtifacts.get(1))
+    assert.notStrictEqual(semanticArtifacts.get(3), semanticArtifacts.get(2))
   }),
 )
 

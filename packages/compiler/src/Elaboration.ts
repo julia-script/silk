@@ -907,7 +907,6 @@ export type DeclarationLookup = DeclarationIndex.DeclarationLookup
 export interface Result {
   readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
-  readonly index: DeclarationIndex.Index
   readonly functions: ReadonlyArray<FunctionFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly hir: Hir.Module
@@ -8147,7 +8146,6 @@ export const elaborateModule = (input: Input): Result => {
   return Object.freeze({
     _tag: 'Elaboration',
     syntax,
-    index,
     functions,
     lexicalScopes: lexicalScopesOf(syntax.source, functions),
     hir,
