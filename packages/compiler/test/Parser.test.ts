@@ -121,12 +121,12 @@ const diagnosticView = (result: SyntaxFile.SyntaxFile) =>
 it('parses effect declarations, failure rows, delayed run, and consuming fail losslessly', () => {
   const result = parseText(
     'memory://effect.silk',
-    `struct Problem { code: I32 }
-effect fn work(problem: Problem) -> I32 ! Problem | Problem {
+    `struct Problem { code: i32 }
+effect fn work(problem: Problem) -> i32 ! Problem | Problem {
   if true { fail move problem }
   return 42
 }
-fn main() -> I32 { let pending = work(Problem { code: 1 }) return run pending }`,
+fn main() -> i32 { let pending = work(Problem { code: 1 }) return run pending }`,
   )
   const effect = directFunctionDeclarations(result.root).at(0)
   assert.strictEqual(
@@ -153,7 +153,7 @@ fn main() -> I32 { let pending = work(Problem { code: 1 }) return run pending }`
 it('recovers a missing failure-row member without consuming the effect body or next function', () => {
   const result = parseText(
     'memory://damaged-effect.silk',
-    'effect fn work() -> I32 ! { return 1 } fn after() -> I32 { return 2 }',
+    'effect fn work() -> i32 ! { return 1 } fn after() -> i32 { return 2 }',
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
   const first = directFunctionDeclarations(result.root).at(0)
@@ -168,7 +168,7 @@ it('recovers a missing failure-row member without consuming the effect body or n
 it('parses an effect block as a primary lazy expression and retains Copy fail syntax', () => {
   const result = parseText(
     'memory://effect-expression.silk',
-    'fn later() -> I32 { let pending = effect { fail Problem { code: 1 } } return 0 }',
+    'fn later() -> i32 { let pending = effect { fail Problem { code: 1 } } return 0 }',
   )
   const kinds = descendants(result.root)
     .filter(SyntaxTree.isNode)
@@ -189,7 +189,7 @@ it('parses an effect block as a primary lazy expression and retains Copy fail sy
 it('bounds damaged effect-block recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-effect-expression.silk',
-    'fn make() -> I32 { let pending = effect { return broken( } return 0 } fn after() -> I32 { return 2 }',
+    'fn make() -> i32 { let pending = effect { return broken( } return 0 } fn after() -> i32 { return 2 }',
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
   assert.include(
@@ -203,7 +203,7 @@ it('bounds damaged effect-block recovery before the following declaration', () =
 it('parses Effect.retry in direct and pipeline insertion forms', () => {
   const result = parseText(
     'memory://effect-retry.silk',
-    `fn main() -> I32 {
+    `fn main() -> i32 {
   let direct = Effect.retry(work(), policy)
   let piped = work() |> Effect.retry(policy)
   return 0
@@ -226,7 +226,7 @@ it('parses Effect.retry in direct and pipeline insertion forms', () => {
 it('parses explicit drop as a statement without making the block terminal', () => {
   const result = parseText(
     'memory://drop-statement.silk',
-    'struct Token { value: I32 } fn main() -> I32 { let token = Token { value: 1 } drop token return 42 }',
+    'struct Token { value: i32 } fn main() -> i32 { let token = Token { value: 1 } drop token return 42 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
@@ -241,9 +241,9 @@ it('parses unsafe blocks and allocator and Drop conformances losslessly', () => 
   const source = `struct Guard<T> { value: T }
 impl Allocator for SystemAllocator { allocate: SystemAllocator.allocate }
 impl Drop for Guard<Token> {
-  fn drop(self: &mut Guard<Token>) -> Unit { unsafe { drop self.value } return Unit.make() }
+  fn drop(self: &mut Guard<Token>) -> () { unsafe { drop self.value } return () }
 }
-fn main() -> I32 { unsafe { let allocation = Allocator.allocate(Layout.make(4, 4)) drop allocation } return 42 }`
+fn main() -> i32 { unsafe { let allocation = Allocator.allocate(Layout.make(4, 4)) drop allocation } return 42 }`
   const result = parseText('memory://unsafe-conformance.silk', source)
   assert.deepEqual(result.parserDiagnostics, [])
   const kinds = descendants(result.root)
@@ -256,11 +256,11 @@ fn main() -> I32 { unsafe { let allocation = Allocator.allocate(Layout.make(4, 4
 })
 
 it('parses a parametric conformance losslessly', () => {
-  const source = `struct Vector<T> { count: Usize }
+  const source = `struct Vector<T> { count: usize }
 impl<T> Drop for Vector<T> {
-  fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() }
+  fn drop(self: &mut Vector<T>) -> () { return () }
 }
-fn main() -> I32 { return 42 }`
+fn main() -> i32 { return 42 }`
   const result = parseText('memory://parametric-conformance.silk', source)
   assert.deepEqual(result.parserDiagnostics, [])
   const impl = descendants(result.root)
@@ -277,8 +277,8 @@ fn main() -> I32 { return 42 }`
 
 it('parses whole-member binding patterns losslessly', () => {
   const source = `struct Empty {}
-struct Full { value: I32 }
-fn take(state: Empty | Full) -> I32 {
+struct Full { value: i32 }
+fn take(state: Empty | Full) -> i32 {
   return match move state {
     Empty nothing => 0
     Full full => 1
@@ -295,7 +295,7 @@ fn take(state: Empty | Full) -> I32 {
 
 it('recovers from a malformed impl type-parameter list inside the declaration', () => {
   const source =
-    'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } } fn after() -> I32 { return 7 }'
+    'impl<T Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } } fn after() -> i32 { return 7 }'
   const result = parseText('memory://damaged-parametric-conformance.silk', source)
   assert.isAbove(result.parserDiagnostics.length, 0)
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
@@ -305,7 +305,7 @@ it('recovers from a malformed impl type-parameter list inside the declaration', 
 it('bounds damaged conformance recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-conformance.silk',
-    'impl Allocator for Broken fn after() -> I32 { return 42 }',
+    'impl Allocator for Broken fn after() -> i32 { return 42 }',
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
   assert.include(
@@ -320,7 +320,7 @@ it('bounds damaged conformance recovery before the following declaration', () =>
 
 it('bounds a damaged unsafe call before the following statement and declaration', () => {
   const source =
-    'fn main() -> I32 { unsafe { let value = Slot.take( return 42 } } fn after() -> I32 { return 7 }'
+    'fn main() -> i32 { unsafe { let value = Slot.take( return 42 } } fn after() -> i32 { return 7 }'
   const result = parseText('memory://damaged-unsafe-call.silk', source)
   const functions = directFunctionDeclarations(result.root)
 
@@ -337,7 +337,7 @@ it('bounds a damaged unsafe call before the following statement and declaration'
 it('parses an explicit provider role in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'fn main() -> I32 { let recipe = work() |> Clock.provide(&clock, @Scratch) return 0 }',
+    'fn main() -> i32 { let recipe = work() |> Clock.provide(&clock, @Scratch) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
@@ -351,10 +351,10 @@ it('parses an explicit provider role in a provision pipeline', () => {
 it('parses explicit Effect contracts and declaration requirement rows', () => {
   const result = parseText(
     'memory://effect-contract-rows.silk',
-    `fn later() -> Effect<I32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+    `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
   return effect { return 1 }
 }
-effect fn work() -> I32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
   )
   assert.deepEqual(result.parserDiagnostics, [])
   const kinds = descendants(result.root)
@@ -509,37 +509,19 @@ it('retains trivia between every concrete call element', () => {
   assert.deepEqual(reconstructedBytes(result), ascii(triviaCallSource))
 })
 
-it('recovers a missing call callee without inventing a name', () => {
+it('parses empty parentheses as the unit value', () => {
   const result = parseText('fixture://missing-call-callee.silk', missingCallCalleeSource)
-  const call = descendants(result.root).find(
+  const unit = descendants(result.root).find(
     (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) && element.kind === 'CallExpression',
+      SyntaxTree.isNode(element) && element.kind === 'UnitExpression',
   )
 
-  assert.notStrictEqual(call, undefined)
-  if (call === undefined) return
+  assert.notStrictEqual(unit, undefined)
   assert.deepEqual(
-    missingLeaves(call).map((leaf) => ({
-      expected: leaf.expected,
-      start: leaf.span.start,
-      end: leaf.span.end,
-    })),
-    [
-      {
-        expected: 'Identifier',
-        start: missingCallCalleeSource.lastIndexOf('()'),
-        end: missingCallCalleeSource.lastIndexOf('()'),
-      },
-    ],
-  )
-  assert.deepEqual(
-    SyntaxTree.tokens(call).map((token) => token.kind),
+    SyntaxTree.tokens(unit ?? result.root).map((token) => token.kind),
     ['Whitespace', 'LeftParenthesis', 'RightParenthesis'],
   )
-  assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0001'],
-  )
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
 })
 
@@ -779,7 +761,7 @@ it('bounds nested recovery before the following declaration', () => {
 it('parses representative deep nested calls deterministically', () => {
   const depth = 64
   const expression = `${'identity('.repeat(depth)}42${')'.repeat(depth)}`
-  const source = `pub fn identity(value: I32) -> I32 { return value }\npub fn main() -> I32 { return ${expression} }`
+  const source = `pub fn identity(value: i32) -> i32 { return value }\npub fn main() -> i32 { return ${expression} }`
   const first = parseText('fixture://deep-nested-call.silk', source)
   const second = parseText('fixture://deep-nested-call.silk', source)
 
@@ -1067,18 +1049,7 @@ it('reports one diagnostic for an incomplete declaration prefix at end-of-file',
 
   assert.deepEqual(
     missingLeaves(result.root).map((leaf) => leaf.expected),
-    [
-      'FnKeyword',
-      'Identifier',
-      'LeftParenthesis',
-      'RightParenthesis',
-      'Arrow',
-      'Identifier',
-      'LeftBrace',
-      'ReturnKeyword',
-      'DecimalInteger',
-      'RightBrace',
-    ],
+    ['FnKeyword', 'Identifier', 'LeftParenthesis', 'RightParenthesis', 'LeftBrace', 'RightBrace'],
   )
   assert.deepEqual(
     result.parserDiagnostics.map(({ code, message }) => ({ code, message })),
@@ -1088,18 +1059,15 @@ it('reports one diagnostic for an incomplete declaration prefix at end-of-file',
 })
 
 it('reports a later independent mistake after consuming a recovery anchor', () => {
-  const result = parseText('fixture://synchronized-recovery.silk', 'pub () -> I32 { return }')
+  const result = parseText('fixture://synchronized-recovery.silk', 'pub () -> i32 { return }')
 
   assert.deepEqual(
     missingLeaves(result.root).map((leaf) => leaf.expected),
-    ['FnKeyword', 'Identifier', 'DecimalInteger'],
+    ['FnKeyword', 'Identifier'],
   )
   assert.deepEqual(
     result.parserDiagnostics.map(({ code, message }) => ({ code, message })),
-    [
-      { code: 'PAR0001', message: 'Expected `fn`' },
-      { code: 'PAR0001', message: 'Expected decimal integer' },
-    ],
+    [{ code: 'PAR0001', message: 'Expected `fn`' }],
   )
   assertOriginalTokenTraversal(result)
 })
@@ -1111,7 +1079,7 @@ it('terminates on wholly unrelated input and retains it in one error region', ()
   assert.strictEqual(errors.length, 1)
   assert.strictEqual(errors.at(0)?.span.start, 0)
   assert.strictEqual(errors.at(0)?.span.end, whollyUnrelatedSource.length)
-  assert.strictEqual(missingLeaves(result.root).length, 10)
+  assert.strictEqual(missingLeaves(result.root).length, 6)
   assert.strictEqual(result.parserDiagnostics.at(0)?.code, 'PAR0002')
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(whollyUnrelatedSource))
@@ -1150,7 +1118,7 @@ it('is deterministic across repeated fresh lexical results', () => {
 it('parses import declarations before functions as separate lossless branches', () => {
   const result = parseText(
     'fixture://imports.silk',
-    'import math\nimport io\npub fn main() -> I32 { return 42 }',
+    'import math\nimport io\npub fn main() -> i32 { return 42 }',
   )
   const kinds = result.root.children.flatMap((element) =>
     SyntaxTree.isNode(element) ? [element.kind] : [],
@@ -1161,14 +1129,14 @@ it('parses import declarations before functions as separate lossless branches', 
   assertOriginalTokenTraversal(result)
   assert.deepEqual(
     reconstructedBytes(result),
-    ascii('import math\nimport io\npub fn main() -> I32 { return 42 }'),
+    ascii('import math\nimport io\npub fn main() -> i32 { return 42 }'),
   )
 })
 
 it('recovers a missing import name and keeps the following function parseable', () => {
   const result = parseText(
     'fixture://missing-import-name.silk',
-    'import\npub fn main() -> I32 { return 42 }',
+    'import\npub fn main() -> i32 { return 42 }',
   )
   const importNode = result.root.children.find(
     (element): element is SyntaxTree.Node =>
@@ -1210,7 +1178,7 @@ it('parses namespace, selective, member-alias, and hybrid imports losslessly', (
 import compiler.Tree as Ast
 import compiler.Parse { Node, parse, encode as encodeSyntax }
 import compiler.Hir as Ir { lower, inspect as show }
-pub fn main() -> I32 { return 42 }`
+pub fn main() -> i32 { return 42 }`
   const result = parseText('fixture://full-imports.silk', source)
   const imports = SyntaxTree.directNodes(result.root, 'ImportDeclaration')
   assert.strictEqual(imports.length, 4)
@@ -1226,7 +1194,7 @@ pub fn main() -> I32 { return 42 }`
 })
 
 it('parses private functions without fabricating a public modifier', () => {
-  const result = parseText('fixture://private.silk', 'fn helper() -> I32 { return 42 }')
+  const result = parseText('fixture://private.silk', 'fn helper() -> i32 { return 42 }')
   const declaration = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
   assert.notStrictEqual(declaration, undefined)
   assert.strictEqual(
@@ -1238,11 +1206,11 @@ it('parses private functions without fabricating a public modifier', () => {
 
 it('bounds import recovery and preserves the following declaration', () => {
   const cases = [
-    'import compiler. as Tree\nfn helper() -> I32 { return 1 }',
-    'import compiler.Syntax as\nfn helper() -> I32 { return 1 }',
-    'import compiler.Syntax { Node, , parse }\nfn helper() -> I32 { return 1 }',
-    'import compiler.Syntax { Node parse }\nfn helper() -> I32 { return 1 }',
-    'import compiler.Syntax { Node\nfn helper() -> I32 { return 1 }',
+    'import compiler. as Tree\nfn helper() -> i32 { return 1 }',
+    'import compiler.Syntax as\nfn helper() -> i32 { return 1 }',
+    'import compiler.Syntax { Node, , parse }\nfn helper() -> i32 { return 1 }',
+    'import compiler.Syntax { Node parse }\nfn helper() -> i32 { return 1 }',
+    'import compiler.Syntax { Node\nfn helper() -> i32 { return 1 }',
   ]
   for (const [ordinal, source] of cases.entries()) {
     const result = parseText(`fixture://damaged-import-${ordinal}.silk`, source)
@@ -1256,7 +1224,7 @@ it('bounds import recovery and preserves the following declaration', () => {
 it('parses a binding sequence as ordered statement branches', () => {
   const result = parseText(
     'fixture://bindings.silk',
-    'pub fn main() -> I32 { let value = 42 return value }',
+    'pub fn main() -> i32 { let value = 42 return value }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1275,14 +1243,14 @@ it('parses a binding sequence as ordered statement branches', () => {
   assertOriginalTokenTraversal(result)
   assert.deepEqual(
     reconstructedBytes(result),
-    ascii('pub fn main() -> I32 { let value = 42 return value }'),
+    ascii('pub fn main() -> i32 { let value = 42 return value }'),
   )
 })
 
 it('parses a move operand with its keyword and name', () => {
   const result = parseText(
     'fixture://move.silk',
-    'pub fn main() -> I32 { let value = 42 return move value }',
+    'pub fn main() -> i32 { let value = 42 return move value }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1306,7 +1274,7 @@ it('parses a move operand with its keyword and name', () => {
 it('recovers a missing initializer at the return boundary', () => {
   const result = parseText(
     'fixture://missing-initializer.silk',
-    'pub fn main() -> I32 { let value = return 42 }',
+    'pub fn main() -> i32 { let value = return 42 }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1328,7 +1296,7 @@ it('recovers a missing initializer at the return boundary', () => {
 it('recovers a missing binding name before the equals token', () => {
   const result = parseText(
     'fixture://missing-binding-name.silk',
-    'pub fn main() -> I32 { let = 42 return 0 }',
+    'pub fn main() -> i32 { let = 42 return 0 }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1350,7 +1318,7 @@ it('recovers a missing binding name before the equals token', () => {
 it('recovers a block with only bindings by inserting the missing return', () => {
   const result = parseText(
     'fixture://missing-return.silk',
-    'pub fn main() -> I32 { let value = 42 }',
+    'pub fn main() -> i32 { let value = 42 }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1381,7 +1349,7 @@ it('recovers a block with only bindings by inserting the missing return', () => 
 })
 
 it('recovers a final identifier as a return expression instead of an assignment', () => {
-  const result = parseText('fixture://missing-return-keyword.silk', 'pub fn main() -> I32 { foo }')
+  const result = parseText('fixture://missing-return-keyword.silk', 'pub fn main() -> i32 { foo }')
   const declaration = directFunctionDeclarations(result.root).at(0)
   const block = declaration === undefined ? undefined : SyntaxTree.directNode(declaration, 'Block')
   const returned = block === undefined ? undefined : SyntaxTree.directNode(block, 'ReturnStatement')
@@ -1407,7 +1375,7 @@ it('recovers a final identifier as a return expression instead of an assignment'
 it('recovers a bare move with a missing identifier', () => {
   const result = parseText(
     'fixture://bare-move.silk',
-    'pub fn main() -> I32 { let value = move return 0 }',
+    'pub fn main() -> i32 { let value = move return 0 }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1430,7 +1398,7 @@ it('recovers a bare move with a missing identifier', () => {
 it('keeps statements after the return statement as concrete branches', () => {
   const result = parseText(
     'fixture://trailing-statement.silk',
-    'pub fn main() -> I32 { return 0 let late = 1 }',
+    'pub fn main() -> i32 { return 0 let late = 1 }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1442,14 +1410,14 @@ it('keeps statements after the return statement as concrete branches', () => {
   assertOriginalTokenTraversal(result)
   assert.deepEqual(
     reconstructedBytes(result),
-    ascii('pub fn main() -> I32 { return 0 let late = 1 }'),
+    ascii('pub fn main() -> i32 { return 0 let late = 1 }'),
   )
 })
 
 it('parses signed literals and qualified callees', () => {
   const result = parseText(
     'fixture://arith.silk',
-    'pub fn main() -> I32 { return I32.add(-8, 50) }',
+    'pub fn main() -> i32 { return i32.add(-8, 50) }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1485,7 +1453,7 @@ it('parses signed literals and qualified callees', () => {
 it('recovers a missing operation name after the dot', () => {
   const result = parseText(
     'fixture://missing-operation.silk',
-    'pub fn main() -> I32 { return I32.(1, 2) }',
+    'pub fn main() -> i32 { return i32.(1, 2) }',
   )
 
   assert.deepEqual(
@@ -1496,7 +1464,7 @@ it('recovers a missing operation name after the dot', () => {
 })
 
 it('recovers a dangling minus before the closing brace', () => {
-  const result = parseText('fixture://dangling-minus.silk', 'pub fn main() -> I32 { return - }')
+  const result = parseText('fixture://dangling-minus.silk', 'pub fn main() -> i32 { return - }')
 
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => diagnostic.code),
@@ -1508,7 +1476,7 @@ it('recovers a dangling minus before the closing brace', () => {
 it('parses conditionals with both arms and boolean literals', () => {
   const result = parseText(
     'fixture://conditional.silk',
-    'pub fn main() -> I32 { if flag { return 1 } else { return 2 } return 0 }',
+    'pub fn main() -> i32 { if flag { return 1 } else { return 2 } return 0 }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -1528,7 +1496,7 @@ it('parses conditionals with both arms and boolean literals', () => {
 
   const booleans = parseText(
     'fixture://booleans.silk',
-    'pub fn main() -> I32 { let flag = false return true }',
+    'pub fn main() -> i32 { let flag = false return true }',
   )
   const boolFn = directFunctionDeclarations(booleans.root).at(0)
   const boolBlock = boolFn === undefined ? undefined : SyntaxTree.directNode(boolFn, 'Block')
@@ -1544,7 +1512,7 @@ it('parses conditionals with both arms and boolean literals', () => {
 it('recovers a missing condition before the arm brace', () => {
   const result = parseText(
     'fixture://missing-condition.silk',
-    'pub fn main() -> I32 { if { return 1 } return 0 }',
+    'pub fn main() -> i32 { if { return 1 } return 0 }',
   )
 
   assert.deepEqual(
@@ -1557,7 +1525,7 @@ it('recovers a missing condition before the arm brace', () => {
 it('recovers an arm missing its closing brace before the trailing return', () => {
   const result = parseText(
     'fixture://missing-arm-brace.silk',
-    'pub fn main() -> I32 { if flag { return 1 return 0 }',
+    'pub fn main() -> i32 { if flag { return 1 return 0 }',
   )
 
   assert.strictEqual(
@@ -1570,7 +1538,7 @@ it('recovers an arm missing its closing brace before the trailing return', () =>
 })
 
 it('parses arithmetic and equality by the closed precedence table', () => {
-  const source = 'pub fn main() -> Bool { return 1 + 2 * 3 == 7 }'
+  const source = 'pub fn main() -> bool { return 1 + 2 * 3 == 7 }'
   const result = parseText('memory/operators-precedence', source)
   const expressions = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1593,9 +1561,9 @@ it('parses arithmetic and equality by the closed precedence table', () => {
 
 it('reserves template element and fragment starts without consuming following syntax', () => {
   const source =
-    'pub fn element() -> I32 { return <Button /> return 1 }\n' +
-    'pub fn fragment() -> I32 { return <> return 2 }\n' +
-    'pub fn after() -> I32 { return 3 }'
+    'pub fn element() -> i32 { return <Button /> return 1 }\n' +
+    'pub fn fragment() -> i32 { return <> return 2 }\n' +
+    'pub fn after() -> i32 { return 3 }'
   const result = parseText('memory/reserved-template-starts', source)
   const declarations = directFunctionDeclarations(result.root)
 
@@ -1621,10 +1589,10 @@ it('reserves template element and fragment starts without consuming following sy
 
 it('preserves every relational operator after an existing left operand', () => {
   const source =
-    'fn less() -> Bool { return 1 < 2 }\n' +
-    'fn lessEqual() -> Bool { return 1 <= 2 }\n' +
-    'fn greater() -> Bool { return 2 > 1 }\n' +
-    'fn greaterEqual() -> Bool { return 2 >= 1 }'
+    'fn less() -> bool { return 1 < 2 }\n' +
+    'fn lessEqual() -> bool { return 1 <= 2 }\n' +
+    'fn greater() -> bool { return 2 > 1 }\n' +
+    'fn greaterEqual() -> bool { return 2 >= 1 }'
   const result = parseText('memory/relational-reservation-boundary', source)
   const expressions = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1648,7 +1616,7 @@ it('preserves every relational operator after an existing left operand', () => {
 })
 
 it('parses grouping and right-associative prefix expressions losslessly', () => {
-  const source = 'pub fn main(value: I32) -> I32 { return -(-(value + 1)) }'
+  const source = 'pub fn main(value: i32) -> i32 { return -(-(value + 1)) }'
   const result = parseText('memory/operator-prefix', source)
   const prefixes = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1672,9 +1640,9 @@ it('parses grouping and right-associative prefix expressions losslessly', () => 
 
 it('parses complete callable pipelines left-to-right', () => {
   const source =
-    'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }\n' +
-    'pub fn flag() -> Bool { return true |> Bool.not }\n' +
-    'pub fn recover() -> I32 { return risky() |> Effect.catch<Problem>(handler) }'
+    'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
+    'pub fn flag() -> bool { return true |> bool.not }\n' +
+    'pub fn recover() -> i32 { return risky() |> Effect.catch<Problem>(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1707,7 +1675,7 @@ it('parses complete callable pipelines left-to-right', () => {
 
 it('parses callable contracts with ordered parameters and all invocation modes', () => {
   const source =
-    'fn use(shared: fn(I32, Bool) -> I32, exclusive: mut fn(I32) -> Bool, consuming: once fn() -> I32) -> I32 { return 0 }'
+    'fn use(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 { return 0 }'
   const result = parseText('memory/callable-types', source)
   const callableTypes = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1733,15 +1701,15 @@ it('parses callable contracts with ordered parameters and all invocation modes',
 
 it('recovers every callable type boundary without crossing the next declaration', () => {
   const cases = [
-    ['mut (I32) -> I32', 'FnKeyword'],
-    ['once fn I32) -> I32', 'LeftParenthesis'],
-    ['fn(I32 -> I32', 'RightParenthesis'],
-    ['fn(I32) I32', 'Arrow'],
-    ['fn(I32) ->', 'Identifier'],
+    ['mut (i32) -> i32', 'FnKeyword'],
+    ['once fn i32) -> i32', 'LeftParenthesis'],
+    ['fn(i32 -> i32', 'RightParenthesis'],
+    ['fn(i32) i32', 'Arrow'],
+    ['fn(i32) ->', 'Identifier'],
   ] as const
 
   for (const [damaged, expected] of cases) {
-    const source = `fn damaged(callback: ${damaged}) -> I32 { return 0 } fn after() -> I32 { return 1 }`
+    const source = `fn damaged(callback: ${damaged}) -> i32 { return 0 } fn after() -> i32 { return 1 }`
     const result = parseText(`memory/callable-recovery-${expected}`, source)
     const first = directFunctionDeclarations(result.root).at(0)
     const second = directFunctionDeclarations(result.root).at(1)
@@ -1760,10 +1728,10 @@ it('recovers every callable type boundary without crossing the next declaration'
 })
 
 it('parses repeated postfix application over every callable-producing expression', () => {
-  const source = `fn use(operation: fn(I32) -> I32, value: I32) -> I32 {
-  let bound = I32.add(2)
+  const source = `fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
+  let bound = i32.add(2)
   let named = operation(value)
-  let qualified = I32.add(2)(value)
+  let qualified = i32.add(2)(value)
   let grouped = (operation)(value)
   return choose(true)(value)
 }`
@@ -1787,7 +1755,7 @@ it('parses repeated postfix application over every callable-producing expression
 })
 
 it('gives pipelines a complete callable expression and run the complete following expression', () => {
-  const source = `fn use(attempt: Effect<I32>, operation: fn(I32) -> I32) -> I32 {
+  const source = `fn use(attempt: Effect<i32>, operation: fn(i32) -> i32) -> i32 {
   let a = 1 |> operation
   let b = 2 |> (operation)
   let c = 3 |> choose(true)
@@ -1826,10 +1794,10 @@ it('gives pipelines a complete callable expression and run the complete followin
 })
 
 it('bounds run at commas, delimiters, blocks, and following statements', () => {
-  const source = `fn comma(first: Effect<I32>, second: I32) -> I32 { return pair(run first, second) }
-fn delimiter(first: Effect<I32>) -> I32 { return (run first) }
-fn block(first: Effect<I32>) -> I32 { if true { return run first } return 0 }
-fn statement(first: Effect<I32>) -> I32 { let value = run first return value }`
+  const source = `fn comma(first: Effect<i32>, second: i32) -> i32 { return pair(run first, second) }
+fn delimiter(first: Effect<i32>) -> i32 { return (run first) }
+fn block(first: Effect<i32>) -> i32 { if true { return run first } return 0 }
+fn statement(first: Effect<i32>) -> i32 { let value = run first return value }`
   const result = parseText('memory/run-boundaries', source)
 
   assert.strictEqual(directFunctionDeclarations(result.root).length, 4)
@@ -1845,10 +1813,10 @@ fn statement(first: Effect<I32>) -> I32 { let value = run first return value }`
 
 it('bounds operator recovery at expression and declaration boundaries', () => {
   const source =
-    'pub fn missingOperand() -> I32 { return 1 + }\n' +
-    'pub fn missingGroup() -> I32 { return (1 + 2 }\n' +
-    'pub fn chained() -> Bool { return 1 < 2 < 3 }\n' +
-    'pub fn after() -> I32 { return 4 }'
+    'pub fn missingOperand() -> i32 { return 1 + }\n' +
+    'pub fn missingGroup() -> i32 { return (1 + 2 }\n' +
+    'pub fn chained() -> bool { return 1 < 2 < 3 }\n' +
+    'pub fn after() -> i32 { return 4 }'
   const result = parseText('memory/operator-recovery', source)
   const declarations = directFunctionDeclarations(result.root)
   const after = declarations.at(-1)
@@ -1922,10 +1890,10 @@ it('keeps damaged struct fields and following declarations separate', () => {
 })
 
 it('parses mode-aware match expressions and nested patterns losslessly', () => {
-  const source = `pub struct Span { start: I32 end: I32 }
-pub struct Token { kind: I32 span: Span }
+  const source = `pub struct Span { start: i32 end: i32 }
+pub struct Token { kind: i32 span: Span }
 pub struct End {}
-pub fn inspect(event: Token | End) -> I32 {
+pub fn inspect(event: Token | End) -> i32 {
   let code = match move event {
     Token { kind, span: Span { start: offset, .. } } if true => offset
     End {} => 0
@@ -1960,10 +1928,10 @@ pub fn inspect(event: Token | End) -> I32 {
 })
 
 it('parses bare, shared, and exclusive matches in expression positions', () => {
-  const source = `pub struct Token { kind: I32 }
-pub fn bare(event: Token) -> I32 { return match event { Token { kind } => kind } }
-pub fn shared(event: Token) -> I32 { return I32.add(match &event { Token { kind } => kind }, 1) }
-pub fn exclusive(event: Token) -> I32 { let value = match &mut event { _ => 0 } return value }`
+  const source = `pub struct Token { kind: i32 }
+pub fn bare(event: Token) -> i32 { return match event { Token { kind } => kind } }
+pub fn shared(event: Token) -> i32 { return i32.add(match &event { Token { kind } => kind }, 1) }
+pub fn exclusive(event: Token) -> i32 { let value = match &mut event { _ => 0 } return value }`
   const result = parseText('memory/match-modes', source)
   const matches = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -1985,9 +1953,9 @@ pub fn exclusive(event: Token) -> I32 { let value = match &mut event { _ => 0 } 
 })
 
 it('keeps a missing match arm arrow local to its arm', () => {
-  const source = `pub struct Token { kind: I32 }
+  const source = `pub struct Token { kind: i32 }
 pub struct End {}
-pub fn inspect(event: Token | End) -> I32 {
+pub fn inspect(event: Token | End) -> i32 {
   return match event {
     Token { kind } kind
     End {} => 0
@@ -2022,15 +1990,15 @@ it('bounds damaged pattern fields, nesting, braces, and guards at their arm', ()
 
   for (const [name, damagedArm, expected] of cases) {
     const source = `pub struct Inner {}
-pub struct Token { kind: I32 other: I32 child: Inner }
+pub struct Token { kind: i32 other: i32 child: Inner }
 pub struct End {}
-pub fn inspect(event: Token | End) -> I32 {
+pub fn inspect(event: Token | End) -> i32 {
   return match event {
     ${damagedArm}
     End {} => 0
   }
 }
-pub fn after() -> I32 { return 2 }`
+pub fn after() -> i32 { return 2 }`
     const result = parseText(`memory/${name}`, source)
     const match = descendants(result.root).find(
       (element): element is SyntaxTree.Node =>

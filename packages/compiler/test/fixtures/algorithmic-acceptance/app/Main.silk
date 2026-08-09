@@ -1,6 +1,6 @@
 import compiler.Coverage
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let short = [1, 2, 3]
   let long = [1, 2, 1, 3, 2, 1]
   let shortScore = Coverage.fold(&short)

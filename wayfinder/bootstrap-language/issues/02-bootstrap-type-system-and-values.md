@@ -25,7 +25,7 @@ Value unions are unordered, duplicate-free structural sets such as `A | B`. Each
 nominal type, and the active member's type is the only case identity; users do not define a second
 tag name. Union order and nesting normalize away, transparent aliases with the same members denote
 the same type, and compiler-known intersection and difference operations provide finite set
-algebra. `Never` is the empty union and uninhabited bottom type. General conditional types,
+algebra. `never` is the empty union and uninhabited bottom type. General conditional types,
 reflection over types, and user-defined type-level computation are excluded. Absence is explicit:
 `Option<T>` is the union `Some<T> | None`, using a nominal `Some<T>` wrapper so nested options do
 not collapse.
@@ -42,17 +42,17 @@ its largest member. Canonical nominal type identity, not alias spelling order, d
 internal member order. Numeric tag values are not observable and the layout has no stable external
 ABI or serialization promise. Niche optimization is deferred with automatic layout optimization.
 
-The complete scalar set is `Bool`, `Unit`, `Never`, `U8`, `U16`, `U32`, `U64`, `Usize`, `I8`,
-`I16`, `I32`, `I64`, `Isize`, `F32`, and `F64`. `Usize` and `Isize` follow the target pointer width;
+The complete scalar set is `bool`, `()`, `never`, `u8`, `u16`, `u32`, `u64`, `usize`, `i8`,
+`i16`, `i32`, `i64`, `isize`, `f32`, and `f64`. `usize` and `isize` follow the target pointer width;
 stable data formats use fixed-width types. Numeric literals receive a type from their immediate
 context and are range-checked, but existing numeric values never convert implicitly. Ordinary
 integer overflow traps in every build mode; checked, wrapping, and saturating operations are
-explicit. `F32` and `F64` map directly to conservative LLVM floating semantics with explicit
+explicit. `f32` and `f64` map directly to conservative LLVM floating semantics with explicit
 conversions and no implicit fast-math. Ordinary floating comparisons follow IEEE behavior;
 total-order and bitwise comparisons are named operations. Wider integers and arbitrary-precision
 numbers are deferred.
 
-Only `Bool` controls ordinary conditionals, loops, and guards. There is no truthiness. An `if` may
+Only `bool` controls ordinary conditionals, loops, and guards. There is no truthiness. An `if` may
 instead use an explicit shared or exclusive refutable pattern, bind the successful member within
 that branch, and refine an unguarded `else` branch by structural union subtraction. A guarded
 pattern does not subtract its member because the guard may reject a value of that type.
@@ -140,7 +140,7 @@ nested binding. Consuming destructuring consumes the whole aggregate and cleans 
 borrowed destructuring cannot move fields out. A match is exhaustive when it enumerates all remaining
 members or uses an explicit universal `_` branch. Guards run in source order, never count toward
 exhaustiveness, and cannot follow an already exhaustive member branch. The result type of a match is
-the normalized union of reachable branch result types, with `Never` contributing no member.
+the normalized union of reachable branch result types, with `never` contributing no member.
 
 Safe values are fully initialized when they come into existence. Bindings, structs, arrays, and
 owned allocations cannot expose partial or uninitialized state. Low-level construction may later

@@ -7,18 +7,18 @@ const ascii = (value: string): Uint8Array =>
 
 it.effect('reads and writes fields through nominal references on both targets', () =>
   Effect.gen(function* () {
-    const source = `struct Counter { value: I32 }
+    const source = `struct Counter { value: i32 }
 
-fn bump(self: &mut Counter) -> I32 {
+fn bump(self: &mut Counter) -> i32 {
   self.value = self.value + 1
   return self.value
 }
 
-fn peek(self: &Counter) -> I32 {
+fn peek(self: &Counter) -> i32 {
   return self.value
 }
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut counter = Counter { value: 40 }
   let bumped = bump(&mut counter)
   let again = bump(&mut counter)
@@ -54,8 +54,8 @@ it.effect('keeps reference projection inside the borrow contract', () =>
     // Writing through a shared reference is not a writable place.
     const shared = yield* Analysis.ofSource(
       'reference-projection/shared-write',
-      ascii(`struct Counter { value: I32 }
-fn bump(self: &Counter) -> I32 {
+      ascii(`struct Counter { value: i32 }
+fn bump(self: &Counter) -> i32 {
   self.value = 1
   return self.value
 }`),
@@ -69,7 +69,7 @@ fn bump(self: &Counter) -> I32 {
     // Consuming a field through a reference stays a partial move.
     const stolen = yield* Analysis.ofSource(
       'reference-projection/steal',
-      ascii(`struct Token { value: I32 }
+      ascii(`struct Token { value: i32 }
 struct Holder { token: Token }
 fn steal(self: &mut Holder) -> Token {
   return move self.token

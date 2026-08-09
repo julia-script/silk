@@ -11,7 +11,7 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const fn = 'pub fn main() -> I32 { return 42 }'
+const fn = 'pub fn main() -> i32 { return 42 }'
 
 const fixture = (
   rootModule: string,
@@ -157,7 +157,7 @@ it.effect('records cycles and exact dotted-to-canonical import provenance', () =
   Effect.gen(function* () {
     const closure = yield* fixture('app/Main', [
       ['app/Main', `import compiler.Syntax as Tree { parse }\n${fn}`],
-      ['compiler/Syntax', `import cycle.Other\npub fn parse() -> I32 { return 42 }`],
+      ['compiler/Syntax', `import cycle.Other\npub fn parse() -> i32 { return 42 }`],
       ['cycle/Other', `import compiler.Syntax\n${fn}`],
     ])
     const imported = closure.modules.find((module) => module.name === 'app/Main')?.imports.at(0)

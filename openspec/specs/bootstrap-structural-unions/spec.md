@@ -10,7 +10,7 @@ Define canonical closed runtime alternatives and their contextual conversions be
 
 A value union SHALL be an unordered, duplicate-free set of canonical nominal types. Nested unions
 SHALL flatten, spelling order and duplicate members SHALL not affect identity, a one-member union
-SHALL normalize to that member, and `Never` SHALL denote the empty uninhabited union. Transparent
+SHALL normalize to that member, and `never` SHALL denote the empty uninhabited union. Transparent
 alias spelling MUST NOT affect normalized identity when aliases become available. Scalars, arrays,
 borrows, and other non-nominal types SHALL NOT be direct union members.
 
@@ -21,7 +21,7 @@ borrows, and other non-nominal types SHALL NOT be direct union members.
 
 #### Scenario: Normalize the empty and singleton cases
 
-- **WHEN** normalization receives `Never | Token` or `Token | Token`
+- **WHEN** normalization receives `never | Token` or `Token | Token`
 - **THEN** each normalizes to the precise nominal `Token` type
 
 #### Scenario: Reject a non-nominal member

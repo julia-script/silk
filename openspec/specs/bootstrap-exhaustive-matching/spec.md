@@ -93,7 +93,7 @@ selected arm.
 
 The result of a match SHALL join only reachable arm expression types. Equal types SHALL remain that
 precise type. Nominal and structural-union results SHALL normalize into one canonical union, with
-`Never` contributing no member. Distinct built-in scalars, arrays with different types or lengths,
+`never` contributing no member. Distinct built-in scalars, arrays with different types or lengths,
 or another mixture that cannot form a valid structural union SHALL make the match result
 unavailable rather than introducing an implicit conversion or non-nominal union member.
 
@@ -104,12 +104,12 @@ unavailable rather than introducing an implicit conversion or non-nominal union 
 
 #### Scenario: Keep one scalar result
 
-- **WHEN** every reachable arm produces `I32`
-- **THEN** the match result remains precise `I32`
+- **WHEN** every reachable arm produces `i32`
+- **THEN** the match result remains precise `i32`
 
 #### Scenario: Reject incompatible scalar results
 
-- **WHEN** one reachable arm produces `I32` and another produces `Bool`
+- **WHEN** one reachable arm produces `i32` and another produces `bool`
 - **THEN** the match result is unavailable with a deterministic incompatible-arm diagnostic
 
 ### Requirement: Whole-member bindings extract union payloads

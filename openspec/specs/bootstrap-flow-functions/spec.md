@@ -33,7 +33,7 @@ erase different construction sites merely because their public contracts match.
 ### Requirement: Effect failure rows are normalized owned contracts
 
 The `!` row SHALL be a deterministic normalized set of canonical nominal types. `fail` SHALL stop
-the current Effect execution with success type `Never`, copying a Copy payload or consuming an
+the current Effect execution with success type `never`, copying a Copy payload or consuming an
 explicitly moved affine payload. Failure payloads MUST be detached owned values with no lexical or
 provider borrow.
 
@@ -107,7 +107,7 @@ returned Effect as a nested success value, while `flatMap` and the Effect-specif
 
 #### Scenario: Map with an arithmetic section
 
-- **WHEN** `succeed(2) |> Effect.map(I32.add(2))` is run
+- **WHEN** `succeed(2) |> Effect.map(i32.add(2))` is run
 - **THEN** the section maps the success to `4` without pipeline-specific callback syntax
 
 #### Scenario: Keep effectful logging out of map

@@ -17,13 +17,13 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** Swap a scalar field through an exclusive reference and observe both halves. */
 const scalarSwap = `struct Counter {
-  value: I32
+  value: i32
 }
-fn bump(self: &mut Counter) -> I32 {
+fn bump(self: &mut Counter) -> i32 {
   let old = Place.replace(self.value, 42)
   return old
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut counter = Counter { value: 41 }
   let old = bump(&mut counter)
   return old + counter.value - 41
@@ -34,18 +34,18 @@ pub fn main() -> I32 {
  * swap while the place stays initialized, so no partial move exists at any point.
  */
 const unionSwap = `struct Empty {}
-struct Full { value: I32 }
+struct Full { value: i32 }
 struct Cell {
   state: Empty | Full
 }
-fn take(self: &mut Cell) -> I32 {
+fn take(self: &mut Cell) -> i32 {
   let old = Place.replace(self.state, Empty {})
   return match move old {
     Empty {} => 0
     Full { value } => value
   }
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut cell = Cell { state: Full { value: 42 } }
   let first = take(&mut cell)
   let second = take(&mut cell)
@@ -91,7 +91,7 @@ it.effect('rejects invalid replace places with assignment diagnostics', () =>
   Effect.gen(function* () {
     const immutable = yield* Analysis.ofSource(
       'place-replace/immutable',
-      ascii(`pub fn main() -> I32 {
+      ascii(`pub fn main() -> i32 {
   let value = 1
   let old = Place.replace(value, 2)
   return old
@@ -105,13 +105,13 @@ it.effect('rejects invalid replace places with assignment diagnostics', () =>
     const sharedRoot = yield* Analysis.ofSource(
       'place-replace/shared',
       ascii(`struct Counter {
-  value: I32
+  value: i32
 }
-fn peek(self: &Counter) -> I32 {
+fn peek(self: &Counter) -> i32 {
   let old = Place.replace(self.value, 2)
   return old
 }
-pub fn main() -> I32 { return 0 }`),
+pub fn main() -> i32 { return 0 }`),
     )
     assert.include(
       Analysis.diagnostics(sharedRoot).map((diagnostic) => diagnostic.code),
@@ -120,7 +120,7 @@ pub fn main() -> I32 { return 0 }`),
 
     const missingRoot = yield* Analysis.ofSource(
       'place-replace/missing',
-      ascii(`pub fn main() -> I32 {
+      ascii(`pub fn main() -> i32 {
   let old = Place.replace(missing, 2)
   return old
 }`),
@@ -132,7 +132,7 @@ pub fn main() -> I32 { return 0 }`),
 
     const arity = yield* Analysis.ofSource(
       'place-replace/arity',
-      ascii(`pub fn main() -> I32 {
+      ascii(`pub fn main() -> i32 {
   let mut value = 1
   let old = Place.replace(value)
   return old

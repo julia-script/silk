@@ -13,12 +13,12 @@ pub struct Full<T> {
 
 pub struct Vector<T> {
   storage: Empty | Full<T>
-  length: Usize
-  capacity: Usize
+  length: usize
+  capacity: usize
 }
 
-// A Usize-typed literal anchor: parameters drive literal typing, so bare counts stay explicit.
-fn counted(value: Usize) -> Usize {
+// A usize-typed literal anchor: parameters drive literal typing, so bare counts stay explicit.
+fn counted(value: usize) -> usize {
   return value
 }
 
@@ -32,32 +32,32 @@ pub fn make<T>() -> Vector<T> {
   return Vector<T> { storage: Empty {}, length: counted(0), capacity: counted(0) }
 }
 
-pub fn length<T>(self: &Vector<T>) -> Usize {
+pub fn length<T>(self: &Vector<T>) -> usize {
   return self.length
 }
 
-pub fn capacity<T>(self: &Vector<T>) -> Usize {
+pub fn capacity<T>(self: &Vector<T>) -> usize {
   return self.capacity
 }
 
 impl<T> Drop for Vector<T> {
-  fn drop(self: &mut Vector<T>) -> Unit {
+  fn drop(self: &mut Vector<T>) -> () {
     let storage = Place.replace(self.storage, Empty {})
     let count = Place.replace(self.length, counted(0))
     return match move storage {
-      Empty nothing => Unit.make()
+      Empty nothing => ()
       Full<T> full => releaseFull<T>(move full, count)
     }
   }
 }
 
-fn releaseFull<T>(full: Full<T>, length: Usize) -> Unit {
+fn releaseFull<T>(full: Full<T>, length: usize) -> () {
   return match move full {
     Full<T> { buffer } => releaseBuffer<T>(move buffer, length)
   }
 }
 
-fn releaseBuffer<T>(buffer: RawBuffer<T>, length: Usize) -> Unit {
+fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
   unsafe {
     let mut owned = move buffer
     let mut index = counted(0)
@@ -67,12 +67,12 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: Usize) -> Unit {
     }
     drop owned
   }
-  return Unit.make()
+  return ()
 }
 
 // Growth is atomic: the replacement buffer exists and holds every element before the vector's
 // storage commits, so a failed allocation leaves the original untouched.
-pub effect fn append<T>(self: &mut Vector<T>, value: T) -> Unit ! OutOfMemory ? &mut Allocator {
+pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
     if self.capacity == counted(0) {
@@ -101,14 +101,14 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> Unit ! OutOfMemory ? 
   }
   self.storage = move stored
   self.length = self.length + counted(1)
-  return Unit.make()
+  return ()
 }
 
 effect fn overflowed() -> Layout ! OutOfMemory {
   fail OutOfMemory {}
 }
 
-fn freshBuffer<T>(allocation: Allocation, count: Usize) -> RawBuffer<T> {
+fn freshBuffer<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
   unsafe {
     let made = RawBuffer.from<T>(move allocation, count)
     return move made
@@ -116,13 +116,13 @@ fn freshBuffer<T>(allocation: Allocation, count: Usize) -> RawBuffer<T> {
   return absurd<RawBuffer<T>>()
 }
 
-fn migrate<T>(full: Full<T>, allocation: Allocation, length: Usize, count: Usize) -> RawBuffer<T> {
+fn migrate<T>(full: Full<T>, allocation: Allocation, length: usize, count: usize) -> RawBuffer<T> {
   return match move full {
     Full<T> { buffer } => migrateBuffer<T>(move buffer, move allocation, length, count)
   }
 }
 
-fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: Usize, count: Usize) -> RawBuffer<T> {
+fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, count: usize) -> RawBuffer<T> {
   let mut target = freshBuffer<T>(move allocation, count)
   unsafe {
     let mut source = move old
@@ -137,13 +137,13 @@ fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: Usize, co
   return move target
 }
 
-fn writeAt<T>(full: Full<T>, index: Usize, value: T) -> Full<T> {
+fn writeAt<T>(full: Full<T>, index: usize, value: T) -> Full<T> {
   return match move full {
     Full<T> { buffer } => Full<T> { buffer: writeSlot<T>(move buffer, index, move value) }
   }
 }
 
-fn writeSlot<T>(buffer: RawBuffer<T>, index: Usize, value: T) -> RawBuffer<T> {
+fn writeSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> {
   unsafe {
     let mut owned = move buffer
     let written = Slot.write(RawBuffer.slot(&mut owned, index), move value)
@@ -158,7 +158,7 @@ struct Taken<T> {
 }
 
 // Checked read for Copy element types: out-of-range access traps identically on every engine.
-pub fn get<T>(self: &mut Vector<T>, index: Usize) -> T {
+pub fn get<T>(self: &mut Vector<T>, index: usize) -> T {
   if self.length <= index {
     let boom = 1 / 0
   }
@@ -174,13 +174,13 @@ pub fn get<T>(self: &mut Vector<T>, index: Usize) -> T {
   }
 }
 
-fn copyAt<T>(full: Full<T>, index: Usize) -> Taken<T> {
+fn copyAt<T>(full: Full<T>, index: usize) -> Taken<T> {
   return match move full {
     Full<T> { buffer } => copySlot<T>(move buffer, index)
   }
 }
 
-fn copySlot<T>(buffer: RawBuffer<T>, index: Usize) -> Taken<T> {
+fn copySlot<T>(buffer: RawBuffer<T>, index: usize) -> Taken<T> {
   unsafe {
     let mut owned = move buffer
     let element = Slot.copy(RawBuffer.slot(&mut owned, index))

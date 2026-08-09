@@ -6,8 +6,8 @@ import * as Result from 'effect/Result'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from '../src/Cli.js'
 
-const compact = 'pub fn main() -> I32 { return 42 }'
-const canonical = 'pub fn main() -> I32 {\n  return 42\n}\n'
+const compact = 'pub fn main() -> i32 { return 42 }'
+const canonical = 'pub fn main() -> i32 {\n  return 42\n}\n'
 
 const makeProject = Effect.fnUntraced(function* (root: string, source = compact) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -61,7 +61,7 @@ it.effect('continues writing complete files but exits one for damaged syntax', (
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
-    const broken = 'pub fn broken() -> I32 { return 1'
+    const broken = 'pub fn broken() -> i32 { return 1'
     yield* makeProject(root)
     yield* fileSystem.writeFileString(`${root}/src/Broken.silk`, broken)
 

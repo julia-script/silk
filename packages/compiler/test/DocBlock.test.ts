@@ -38,13 +38,13 @@ it('attaches raw module and declaration documentation at every declaration level
 /// A problem.
 pub struct Problem {
   /// Numeric code.
-  pub code: I32
+  pub code: i32
 }
 /// Recovers a problem.
 pub effect fn recover(
   /// Problem to inspect.
   problem: Problem,
-) -> I32 {
+) -> i32 {
   return problem.code
 }
 impl Allocator for SystemAllocator {
@@ -81,8 +81,8 @@ impl Allocator for SystemAllocator {
 })
 
 it('does not attach across blank lines or ordinary comments', () => {
-  const blank = parse('/// separated\n\nfn answer() -> I32 { return 42 }')
-  const ordinary = parse('/// separated\n// note\nfn answer() -> I32 { return 42 }')
+  const blank = parse('/// separated\n\nfn answer() -> i32 { return 42 }')
+  const ordinary = parse('/// separated\n// note\nfn answer() -> i32 { return 42 }')
 
   assert.isUndefined(DocBlock.ofNode(blank, requiredNode(blank, 'FunctionDeclaration')))
   assert.isUndefined(DocBlock.ofNode(ordinary, requiredNode(ordinary, 'FunctionDeclaration')))

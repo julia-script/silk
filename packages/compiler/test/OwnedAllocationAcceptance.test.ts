@@ -78,19 +78,19 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** The accepted shape every negative below deviates from in exactly one way. */
-const guarded = (body: string): string => `effect fn store() -> I32 ! OutOfMemory {
+const guarded = (body: string): string => `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
-    let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+    let mut buffer = RawBuffer.from<i32>(move allocation, 2)
 ${body}
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> I32 { return 0 }
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
 
 /**
  * The substrate is only sound if the frontend keeps rejecting the programs that would violate
@@ -103,17 +103,17 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
     const cases: ReadonlyArray<readonly [string, string, string]> = [
       [
         'raw-storage-outside-unsafe',
-        `effect fn store() -> I32 ! OutOfMemory {
+        `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
-  let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+  let mut buffer = RawBuffer.from<i32>(move allocation, 2)
   drop buffer
   return 1
 }
-effect fn recover(error: OutOfMemory) -> I32 { return 0 }
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(store(), recover) }`,
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`,
         'SEM0082',
       ],
       [
@@ -134,16 +134,16 @@ pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
       ],
       [
         'foreign-allocator-conformance',
-        `struct TestAllocator { remaining: I32 }
+        `struct TestAllocator { remaining: i32 }
 impl Allocator for TestAllocator { allocate: Foreign.allocate }
-pub fn main() -> I32 { return 0 }`,
+pub fn main() -> i32 { return 0 }`,
         'SEM0083',
       ],
       [
         'drop-hook-on-a-copy-type',
-        `struct CopyValue { value: I32 }
-impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> Unit { return Unit.make() } }
-pub fn main() -> I32 { return 0 }`,
+        `struct CopyValue { value: i32 }
+impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> () { return () } }
+pub fn main() -> i32 { return 0 }`,
         'SEM0084',
       ],
     ]

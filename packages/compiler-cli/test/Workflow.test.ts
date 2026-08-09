@@ -8,7 +8,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Project from '../src/Project.js'
 import * as Workflow from '../src/Workflow.js'
 
-const source = 'pub fn main() -> I32 { return 42 }'
+const source = 'pub fn main() -> i32 { return 42 }'
 
 const wasmClang =
   process.env.SILK_TEST_CLANG ??
@@ -43,10 +43,10 @@ it.effect('checks a whole project without creating build artifacts', () =>
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(root)
-    yield* writeFile(`${root}/src/library/Answer.silk`, 'pub fn answer() -> I32 { return 42 }')
+    yield* writeFile(`${root}/src/library/Answer.silk`, 'pub fn answer() -> i32 { return 42 }')
     yield* writeFile(
       `${root}/src/Main.silk`,
-      'import library.Answer { answer }\npub fn main() -> I32 { return answer() }',
+      'import library.Answer { answer }\npub fn main() -> i32 { return answer() }',
     )
 
     const status = yield* Workflow.check(options(root))
@@ -65,7 +65,7 @@ it.effect('separates source diagnostics from operational resolver failures durin
 
     yield* writeFile(
       `${root}/src/Main.silk`,
-      'import unreadable\npub fn main() -> I32 { return 42 }',
+      'import unreadable\npub fn main() -> i32 { return 42 }',
     )
     yield* fileSystem.makeDirectory(`${root}/src/unreadable.silk`)
     assert.strictEqual(yield* Workflow.check(options(root)), 2)
@@ -116,8 +116,8 @@ it.effect('retains a successful sibling when another target rejects target-depen
     const root = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(
       root,
-      `fn exact() -> Usize { return 9007199254740993 }
-pub fn main() -> I32 {
+      `fn exact() -> usize { return 9007199254740993 }
+pub fn main() -> i32 {
   if exact() == 9007199254740993 { return 42 }
   return 0
 }`,
@@ -142,8 +142,8 @@ it.effect('attempts a source rejection and operational failure, preferring exit 
     const root = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(
       root,
-      `fn exact() -> Usize { return 9007199254740993 }
-pub fn main() -> I32 {
+      `fn exact() -> usize { return 9007199254740993 }
+pub fn main() -> i32 {
   if exact() == 9007199254740993 { return 42 }
   return 0
 }`,

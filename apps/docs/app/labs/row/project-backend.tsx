@@ -612,7 +612,7 @@ export const layoutRows = (
             : entry.representation._tag === 'Repeated'
               ? `${entry.representation.length} × ${typeText(entry.representation.element)} · stride ${entry.representation.stride}`
               : entry.representation._tag === 'Slice'
-                ? `address i${entry.representation.address.bits} + length I32 · stride ${entry.representation.stride}`
+                ? `address i${entry.representation.address.bits} + length i32 · stride ${entry.representation.stride}`
               : entry.representation._tag === 'Union'
                 ? `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
               : entry.representation._tag === 'Reference'
@@ -640,7 +640,7 @@ export const layoutRows = (
       rows.push({
         key: 'plan-usize-literals',
         depth: 1,
-        label: 'Usize literal verdicts',
+        label: 'usize literal verdicts',
         detail: `${plan.literalVerdicts.length} target-checked`,
         head: true,
       })
@@ -708,6 +708,10 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(
         operation.left,
       )}, ${localText(operation.right)}`
+    case 'ConvertInteger':
+      return `${localText(operation.destination)} = convert ${localText(operation.source)} → ${operation.type._tag}`
+    case 'CheckedInteger':
+      return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')}`
     case 'ValidateLayout':
       return `${localText(operation.destination)} = layout ${localText(operation.bytes)} bytes · align ${localText(operation.alignment)}`
     case 'RepeatLayout':
@@ -995,6 +999,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
     ? String(value.value)
     : value._tag === 'UsizeValue'
       ? `${value.value.toString()}usize`
+      : value._tag === 'ScalarIntegerValue'
+        ? `${value.value.toString()}${value.type}`
     : value._tag === 'ArrayValue'
       ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
       : value._tag === 'SliceValue'

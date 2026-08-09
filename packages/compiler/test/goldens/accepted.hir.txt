@@ -1,9 +1,9 @@
 hir-module golden://accepted.silk
-fn golden://accepted.silk.identity (I32) -> I32 entry=r0 regions=r0
+fn golden://accepted.silk.identity (i32) -> i32 entry=r0 regions=r0
   return r0 [43, 49)
-    param fn0.p0 : I32 [43, 49)
-fn golden://accepted.silk.main () -> I32 entry=r0 regions=r0
+    param fn0.p0 : i32 [43, 49)
+fn golden://accepted.silk.main () -> i32 entry=r0 regions=r0
   return r0 [81, 104)
-    call golden://accepted.silk.identity : I32 loan-ends=none [81, 104)
-      call golden://accepted.silk.identity : I32 loan-ends=none [91, 103)
-        literal 42 : I32 [100, 102)
+    call golden://accepted.silk.identity : i32 loan-ends=none [81, 104)
+      call golden://accepted.silk.identity : i32 loan-ends=none [91, 103)
+        literal 42 : i32 [100, 102)

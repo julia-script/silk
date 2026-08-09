@@ -15,7 +15,7 @@ an immutable, moved, unavailable, or non-writable place SHALL be rejected withou
 #### Scenario: Update a mutable scalar
 
 - **WHEN** `let mut count = 0` is followed by `count = count + 1`
-- **THEN** the assignment replaces the live `I32` value and later reads observe `1`
+- **THEN** the assignment replaces the live `i32` value and later reads observe `1`
 
 #### Scenario: Reject an immutable update
 
@@ -48,7 +48,7 @@ right-hand evaluation SHALL leave the old value live and unchanged.
 ### Requirement: While repeats under a strict boolean condition
 
 A `while` statement SHALL evaluate its condition before every iteration and enter the body only when
-the result is `Bool.true`. A false initial condition SHALL execute zero iterations. Body fallthrough
+the result is `bool.true`. A false initial condition SHALL execute zero iterations. Body fallthrough
 and `continue` SHALL begin the next condition evaluation; `break` SHALL continue after the loop.
 
 #### Scenario: Mutate across several iterations

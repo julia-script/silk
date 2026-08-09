@@ -7,6 +7,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Operator from './Operator.js'
+import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -92,7 +93,7 @@ export type IntegerExpressionFact =
   | {
       readonly _tag: 'Available'
       readonly type: SemanticType
-      readonly value: number | bigint
+      readonly value: bigint
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Node
     }
@@ -570,6 +571,11 @@ export type ExpressionFact =
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
+  | {
+      readonly _tag: 'Unit'
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
   | BooleanExpressionFact
   | IdentifierExpressionFact
   | MoveExpressionFact
@@ -862,27 +868,26 @@ export interface Result {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const i32Maximum = 2147483647
 const compatible: ReturnCompatibility = Object.freeze({ _tag: 'Compatible' })
 const unavailableCompatibility: ReturnCompatibility = Object.freeze({ _tag: 'Unavailable' })
 const availableI32ExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
-  type: 'I32',
+  type: 'i32',
 })
 const availableUsizeExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
-  type: 'Usize',
+  type: 'usize',
 })
 const availableBoolExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
-  type: 'Bool',
+  type: 'bool',
 })
 const availableExpressionType = (type: SemanticType): ExpressionTypeFact =>
-  type === 'I32'
+  type === 'i32'
     ? availableI32ExpressionType
-    : type === 'Usize'
+    : type === 'usize'
       ? availableUsizeExpressionType
-      : type === 'Bool'
+      : type === 'bool'
         ? availableBoolExpressionType
         : Object.freeze({ _tag: 'Available', type })
 const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
@@ -909,6 +914,7 @@ const unionConversionDiagnostic = (
 
 const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IntegerLiteralExpression',
+  'UnitExpression',
   'BooleanLiteralExpression',
   'IdentifierExpression',
   'MoveExpression',
@@ -1015,17 +1021,6 @@ const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
     () => new RangeError(`Semantic token span does not belong to source ${source.id}`),
   )
 
-const signedI32Value = (bytes: Uint8Array, negative: boolean): Option.Option<number> => {
-  const limit = negative ? 2147483648 : i32Maximum
-  let value = 0
-  for (const byte of bytes) {
-    const digit = byte - 0x30
-    if (value > Math.floor((limit - digit) / 10)) return Option.none()
-    value = value * 10 + digit
-  }
-  return Option.some(negative ? -value : value)
-}
-
 const unsignedMagnitude = (bytes: Uint8Array): bigint => {
   let value = 0n
   for (const byte of bytes) value = value * 10n + BigInt(byte - 0x30)
@@ -1103,39 +1098,23 @@ const analyzeInteger = (
     SourceFile.slice(source, token.span),
     () => new RangeError(`Semantic integer span does not belong to source ${source.id}`),
   )
-  if (expected === 'Usize') {
-    const digits = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
-    if (negative) {
-      const tokenSpelling = `-${digits}`
-      return Object.freeze({
-        fact: Object.freeze({
-          _tag: 'OutOfRange',
-          type: 'Usize',
-          spelling: tokenSpelling,
-          token,
-          syntax: node,
-        }),
-        diagnostics: Object.freeze([Diagnostic.usizeNegative(tokenSpelling, literalSpan)]),
-      })
-    }
+  const selected =
+    typeof expected === 'string' && Scalar.isIntegerSpelling(expected)
+      ? Scalar.find(expected)
+      : Scalar.defaultInteger
+  if (selected === undefined || selected.category !== 'Integer')
+    throw new RangeError('The scalar catalog lost its default integer')
+  const magnitude = unsignedMagnitude(bytes)
+  const value = negative ? -magnitude : magnitude
+  // Target-width integers are retained against the widest admitted target here. The concrete
+  // target validates its selected 32- or 64-bit range before MIR is committed.
+  const range = Scalar.range(selected, 64)
+  if (value >= range.minimum && value <= range.maximum) {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Available',
-        type: 'Usize',
-        value: unsignedMagnitude(bytes),
-        token,
-        syntax: node,
-      }),
-      diagnostics: Object.freeze([]),
-    })
-  }
-  const value = signedI32Value(bytes, negative)
-  if (Option.isSome(value)) {
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Available',
-        type: 'I32',
-        value: value.value,
+        type: selected.spelling,
+        value,
         token,
         syntax: node,
       }),
@@ -1148,12 +1127,16 @@ const analyzeInteger = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'OutOfRange',
-      type: 'I32',
+      type: selected.spelling,
       spelling: tokenSpelling,
       token,
       syntax: node,
     }),
-    diagnostics: Object.freeze([Diagnostic.integerOutOfRange(tokenSpelling, literalSpan)]),
+    diagnostics: Object.freeze([
+      selected.spelling === 'usize' && negative
+        ? Diagnostic.usizeNegative(tokenSpelling, literalSpan)
+        : Diagnostic.integerOutOfRange(tokenSpelling, literalSpan),
+    ]),
   })
 }
 
@@ -1531,11 +1514,11 @@ const intrinsicStruct = (
   })
   const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(type, Type.layout)
     ? Object.freeze([
-        Object.freeze(['bytes', 'Usize'] as const),
-        Object.freeze(['alignment', 'Usize'] as const),
+        Object.freeze(['bytes', 'usize'] as const),
+        Object.freeze(['alignment', 'usize'] as const),
       ])
     : Type.equals(type, Type.invalidAlignment)
-      ? Object.freeze([Object.freeze(['alignment', 'Usize'] as const)])
+      ? Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
       : Object.freeze([])
   return Object.freeze({
     _tag: 'StructDeclaration',
@@ -2078,7 +2061,7 @@ const analyzeMatch = (
         : analyzeExpression(source, guardNode, declarations, declaration, armScope, resolution)
     if (guard !== undefined) {
       diagnostics.push(...guard.diagnostics)
-      if (guard.type !== undefined && guard.type !== 'Bool') {
+      if (guard.type !== undefined && guard.type !== 'bool') {
         diagnostics.push(
           Diagnostic.matchGuardNotBool(Type.encode(guard.type), guardNode?.span ?? armNode.span),
         )
@@ -2127,7 +2110,7 @@ const analyzeMatch = (
     (arm) =>
       arm.guard !== undefined &&
       arm.guard.type._tag === 'Available' &&
-      arm.guard.type.type !== 'Bool',
+      arm.guard.type.type !== 'bool',
   )
   const effectSites = arms.flatMap((arm) =>
     arm.reachable && arm.result._tag === 'EffectBlock'
@@ -2478,7 +2461,7 @@ const analyzeIndexProjection = (
     declaration,
     scope,
     resolution,
-    'I32',
+    'usize',
   )
   if (subject === undefined || index === undefined) {
     throw new RangeError('Cannot analyze index projection operands')
@@ -2490,16 +2473,16 @@ const analyzeIndexProjection = (
   if (subject.type !== undefined && array === undefined && slice === undefined) {
     diagnostics.push(Diagnostic.indexOnNonArray(Type.encode(subject.type), subjectNode.span))
   }
-  if (index.type !== undefined && index.type !== 'I32') {
-    diagnostics.push(Diagnostic.indexNotI32(Type.encode(index.type), indexNode.span))
+  if (index.type !== undefined && index.type !== 'usize') {
+    diagnostics.push(Diagnostic.indexNotUsize(Type.encode(index.type), indexNode.span))
   }
   let bounds: BoundsFact = Object.freeze({ _tag: 'Unavailable' })
-  if (array !== undefined && index.type === 'I32') {
+  if (array !== undefined && index.type === 'usize') {
     const literal =
       index.fact._tag === 'Integer' && index.fact.integer._tag === 'Available'
-        ? typeof index.fact.integer.value === 'number'
-          ? index.fact.integer.value
-          : undefined
+        ? index.fact.integer.value <= BigInt(Number.MAX_SAFE_INTEGER)
+          ? Number(index.fact.integer.value)
+          : Number.POSITIVE_INFINITY
         : undefined
     if (literal === undefined) bounds = Object.freeze({ _tag: 'Runtime', length: array.length })
     else if (literal < 0 || literal >= array.length) {
@@ -2512,12 +2495,12 @@ const analyzeIndexProjection = (
         cause: Diagnostic.identity(diagnostic),
       })
     } else bounds = Object.freeze({ _tag: 'Proven', index: literal, length: array.length })
-  } else if (slice !== undefined && index.type === 'I32') {
+  } else if (slice !== undefined && index.type === 'usize') {
     bounds = Object.freeze({ _tag: 'RuntimeSlice' })
   }
   const available =
     (array !== undefined || slice !== undefined) &&
-    index.type === 'I32' &&
+    index.type === 'usize' &&
     bounds._tag !== 'Invalid' &&
     bounds._tag !== 'Unavailable' &&
     SyntaxTree.isAvailableSyntax(node)
@@ -2590,7 +2573,7 @@ const analyzeProjection = (
   let type: SemanticType | undefined
   if (slice !== undefined && fieldName === 'length') {
     state = Object.freeze({ _tag: 'SliceLength' })
-    type = 'I32'
+    type = 'usize'
   } else if (slice !== undefined && fieldName !== undefined && fieldToken !== undefined) {
     const diagnostic = Diagnostic.unknownProjectedField(
       Type.encode(slice),
@@ -4110,8 +4093,10 @@ const analyzeOperatorExpression = (
         : Operator.infix(operatorToken.kind)?.operator
   const operandNodes = node.children.filter(isExpressionNode)
   const initialExpected =
-    expected === 'Usize' && node.kind === 'InfixExpression'
-      ? Object.freeze(operandNodes.map(() => 'Usize' as const))
+    typeof expected === 'string' &&
+    (Scalar.isIntegerSpelling(expected) || expected === Scalar.boolean.spelling) &&
+    node.kind === 'InfixExpression'
+      ? Object.freeze(operandNodes.map(() => expected))
       : Object.freeze([])
   let argumentsResult = analyzeArgumentNodes(
     source,
@@ -4151,7 +4136,8 @@ const analyzeOperatorExpression = (
   if (
     initialExpected.length === 0 &&
     firstType?._tag === 'Available' &&
-    (firstType.type === 'Usize' || firstType.type === 'Bool') &&
+    typeof firstType.type === 'string' &&
+    (Scalar.isIntegerSpelling(firstType.type) || firstType.type === Scalar.boolean.spelling) &&
     operandNodes.length > 1
   ) {
     argumentsResult = analyzeArgumentNodes(
@@ -4166,13 +4152,11 @@ const analyzeOperatorExpression = (
     )
   }
   const selectedFirstType = argumentsResult.facts.at(0)?.type
-  const equalityActor: Operator.Actor =
-    selectedFirstType?._tag === 'Available' && selectedFirstType.type === 'Bool'
-      ? 'Bool'
-      : selectedFirstType?._tag === 'Available' && selectedFirstType.type === 'Usize'
-        ? 'Usize'
-        : 'I32'
-  const target = Operator.target(operator, equalityActor)
+  const selectedActor: Operator.Actor =
+    selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)
+      ? selectedFirstType.type
+      : Scalar.defaultInteger.spelling
+  const target = Operator.target(operator, selectedActor)
   const signature = builtinSignature(target.actor, target.operation)
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
   const reference: CallReferenceFact = Object.freeze({
@@ -4977,7 +4961,7 @@ const analyzeEffectRetry = (
   const retriesResult =
     retriesNode === undefined
       ? undefined
-      : analyzeExpression(source, retriesNode, declarations, declaration, scope, resolution, 'I32')
+      : analyzeExpression(source, retriesNode, declarations, declaration, scope, resolution, 'i32')
   const effect =
     protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
       ? protectedResult.type
@@ -4992,10 +4976,10 @@ const analyzeEffectRetry = (
     valid = false
   }
   if (arguments_.length !== (pipelined ? 1 : 2))
-    reject('retry requires one Effect and one I32 retry count')
+    reject('retry requires one Effect and one i32 retry count')
   if (effect === undefined) reject('the protected argument is not an Effect', protectedNode?.span)
   if (effect?.access === 'Take') reject('a take-once Effect cannot be retried', protectedNode?.span)
-  if (retriesResult?.type !== 'I32') reject('the retry count must be I32', retriesNode?.span)
+  if (retriesResult?.type !== 'i32') reject('the retry count must be i32', retriesNode?.span)
   const type =
     valid && effect !== undefined ? availableExpressionType(effect) : unavailableExpressionType
   return Object.freeze({
@@ -5290,6 +5274,18 @@ function analyzeExpression(
       }),
       diagnostics: integer.diagnostics,
       type: integer.fact._tag === 'Available' ? integer.fact.type : undefined,
+    })
+  }
+
+  if (node.kind === 'UnitExpression') {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Unit',
+        type: availableExpressionType(Type.unit),
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+      type: Type.unit,
     })
   }
 
@@ -5973,7 +5969,7 @@ const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
       }
       context.diagnostics.push(...condition.diagnostics)
-      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'Bool') {
+      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
         context.diagnostics.push(
           Diagnostic.conditionNotBool(
             Type.encode(condition.fact.type.type),
@@ -6112,7 +6108,7 @@ const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
       }
       context.diagnostics.push(...condition.diagnostics)
-      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'Bool') {
+      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
         context.diagnostics.push(
           Diagnostic.conditionNotBool(Type.encode(condition.fact.type.type), conditionNode.span),
         )
@@ -6569,6 +6565,13 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'Unit') {
+    return Object.freeze({
+      _tag: 'UnitLiteral',
+      type: Type.unit,
+      span: fact.syntax.span,
+    })
+  }
   if (fact._tag === 'Boolean') {
     return fact.type._tag === 'Available'
       ? Object.freeze({
@@ -6890,7 +6893,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
         : Object.freeze({
             _tag: 'SliceLength',
             slice,
-            type: 'I32',
+            type: 'usize',
             span: fact.syntax.span,
           })
     }
@@ -7252,6 +7255,7 @@ const hirExpectedExpression = (
   const compatibility = TypeCompatibility.check(source.type, target)
   if (compatibility._tag === 'Exact') return source
   if (compatibility._tag === 'CallableMode') return source
+  if (compatibility._tag === 'Bottom') return source
   if (compatibility._tag === 'Incompatible') {
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
@@ -7474,6 +7478,7 @@ const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<Exp
     case 'EffectBlock':
     case 'Match':
     case 'Integer':
+    case 'Unit':
     case 'Boolean':
     case 'Identifier':
     case 'FunctionItem':

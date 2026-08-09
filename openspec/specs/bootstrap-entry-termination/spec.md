@@ -7,22 +7,22 @@ failure, releases its owned payload, and converts the closed outcome to a platfo
 
 ## Requirements
 
-### Requirement: Executables accept an effectful Unit entry
+### Requirement: Executables accept an effectful unit entry
 
 A root module SHALL be executable when it declares exactly one public, non-generic,
-zero-parameter `effect fn main() -> Unit ! E` whose requirement row is empty and whose failure row
+zero-parameter `effect fn main() -> () ! E` whose requirement row is empty and whose failure row
 is closed. Calling the entry SHALL construct its lazy Effect, and the generated host adapter SHALL
 run exactly that Effect exactly once. The existing public, non-generic, zero-parameter ordinary
-`main() -> I32` form SHALL retain its direct exit-status behavior.
+`main() -> i32` form SHALL retain its direct exit-status behavior.
 
 #### Scenario: Complete an effectful entry
 
-- **WHEN** `pub effect fn main() -> Unit` returns `Unit.make()`
+- **WHEN** `pub effect fn main() -> ()` returns `()`
 - **THEN** the generated adapter runs the Effect once and the executable exits with status `0`
 
 #### Scenario: Preserve an ordinary status entry
 
-- **WHEN** `pub fn main() -> I32` returns `42`
+- **WHEN** `pub fn main() -> i32` returns `42`
 - **THEN** the executable exits with status `42` without applying effectful termination semantics
 
 #### Scenario: Reject unresolved entry requirements

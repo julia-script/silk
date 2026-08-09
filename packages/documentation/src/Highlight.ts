@@ -1,4 +1,5 @@
 import * as Lexer from '@silk-effect/compiler/Lexer'
+import * as Scalar from '@silk-effect/compiler/Scalar'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as Token from '@silk-effect/compiler/Token'
 
@@ -29,7 +30,9 @@ const silkCategory = (kind: Token.TokenKind, spelling: string): string | undefin
   if (kind.endsWith('Keyword')) return 'doc-code-keyword'
   switch (kind) {
     case 'Identifier':
-      return /^[A-Z]/.test(spelling) ? 'doc-code-type' : 'doc-code-identifier'
+      return /^[A-Z]/.test(spelling) || Scalar.find(spelling) !== undefined || spelling === 'never'
+        ? 'doc-code-type'
+        : 'doc-code-identifier'
     case 'DecimalInteger':
       return 'doc-code-number'
     case 'LineComment':

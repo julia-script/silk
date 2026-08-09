@@ -12,15 +12,15 @@ it.effect('plans only concrete types reached through discovered instances', () =
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'layout/program',
-      ascii(`pub fn unused(value: Bool) -> Bool { return value }
-pub fn main() -> I32 { return 42 }`),
+      ascii(`pub fn unused(value: bool) -> bool { return value }
+pub fn main() -> i32 { return 42 }`),
     )
     const catalog = Layout.catalog(Target.aarch64AppleDarwin, Analysis.declarationIndex(snapshot))
     const plan = Layout.plan(catalog, Analysis.instancesOf(snapshot))
 
     assert.deepEqual(
       plan.entries.map((candidate) => candidate.type),
-      ['I32'],
+      ['i32'],
     )
     assert.deepEqual(Layout.verify(plan), [])
   }),
@@ -31,7 +31,7 @@ it.effect('plans hidden Effect capture environments by construction site and tar
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
       const snapshot = yield* Analysis.ofSource(
         'layout/effect-environment',
-        ascii(`pub fn main() -> I32 {
+        ascii(`pub fn main() -> i32 {
   let mut counter = 0
   let pending = effect { counter = counter + 1 return counter }
   return 0
@@ -60,9 +60,9 @@ it.effect('plans target-aware callable environments and ephemeral code/environme
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
       const snapshot = yield* Analysis.ofSource(
         'layout/callable-environment',
-        ascii(`struct Token { value: I32 }
-fn choose(value: I32, values: &mut [I32], token: Token) -> I32 { return value }
-pub fn main() -> I32 {
+        ascii(`struct Token { value: i32 }
+fn choose(value: i32, values: &mut [i32], token: Token) -> i32 { return value }
+pub fn main() -> i32 {
   let mut values = [1]
   let token = Token { value: 2 }
   let callback = choose(&mut values, move token)
@@ -105,11 +105,11 @@ pub fn main() -> I32 {
 
 it('orders and encodes canonical scalar entries identically on every target', () => {
   for (const target of Target.all) {
-    const first = Layout.make(target, ['I32', 'Bool', 'I32'])
-    const second = Layout.make(target, ['Bool', 'I32'])
+    const first = Layout.make(target, ['i32', 'bool', 'i32'])
+    const second = Layout.make(target, ['bool', 'i32'])
     assert.deepEqual(
       first.entries.map((candidate) => candidate.type),
-      ['Bool', 'I32'],
+      ['bool', 'i32'],
     )
     assert.strictEqual(Layout.encode(first), Layout.encode(second))
     assert.deepEqual(Layout.verify(first), [])
@@ -121,10 +121,10 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = `struct Empty {}
-struct Problem { position: Usize }
+struct Problem { position: usize }
 effect fn risky() -> Empty ! Problem { fail move Problem { position: 1 } }
 effect fn recover(problem: Problem) -> Empty { return Empty {} }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let recipe = Effect.catch<Problem>(risky(), recover)
   let ignored = run recipe
   return 42
@@ -141,8 +141,8 @@ pub fn main() -> I32 {
         assert.isAbove(outcomes.length, 0)
         for (const outcome of outcomes) {
           assert.strictEqual(outcome.tree._tag, 'OutcomeShape')
-          assert.strictEqual(outcome.lanes.at(0)?.type, 'I32')
-          assert.strictEqual(outcome.lanes.at(1)?.type, 'Usize')
+          assert.strictEqual(outcome.lanes.at(0)?.type, 'i32')
+          assert.strictEqual(outcome.lanes.at(1)?.type, 'usize')
         }
         assert.deepEqual(Layout.verify(planned.value), [])
       }
@@ -150,7 +150,7 @@ pub fn main() -> I32 {
 )
 
 it('reports malformed target, order, duplicates, and scalar facts as data', () => {
-  const canonical = Layout.make(Target.aarch64AppleDarwin, ['Bool', 'I32'])
+  const canonical = Layout.make(Target.aarch64AppleDarwin, ['bool', 'i32'])
   const bool = canonical.entries.at(0)
   const i32 = canonical.entries.at(1)
   if (bool === undefined || i32 === undefined) throw new Error('expected scalar layouts')
@@ -179,11 +179,11 @@ it.effect(
       const snapshot = yield* Analysis.ofSource(
         'layout/catalog',
         ascii(`struct Empty {}
-struct Pair { left: I32 right: Bool }
+struct Pair { left: i32 right: bool }
 struct Outer { marker: Empty pair: Pair }
-struct Unused { value: I32 }
+struct Unused { value: i32 }
 fn make() -> Outer { return Outer { marker: Empty {}, pair: Pair { right: true, left: 42 } } }
-pub fn main() -> I32 { let outer = make() return outer.pair.left }`),
+pub fn main() -> i32 { let outer = make() return outer.pair.left }`),
         'wasm32-unknown-unknown',
       )
       const catalog = Analysis.layoutCatalogOf(snapshot)
@@ -247,12 +247,12 @@ it.effect(
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSource(
         'layout/unavailable',
-        ascii(`struct Good { value: I32 }
+        ascii(`struct Good { value: i32 }
 struct Broken { value: Missing }
 struct Outer { broken: Broken }
 struct Left { right: Right }
 struct Right { left: Left }
-pub fn main() -> I32 { return 42 }`),
+pub fn main() -> i32 { return 42 }`),
         'aarch64-apple-darwin',
       )
       const selected = Analysis.layoutCatalogOf(snapshot)
@@ -292,7 +292,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = ascii(
-        'struct Pair { left: I32 right: Bool }\npub fn main() -> I32 { return 42 }',
+        'struct Pair { left: i32 right: bool }\npub fn main() -> i32 { return 42 }',
       )
       const first = yield* Analysis.ofSource('layout/repeat', source, 'aarch64-apple-darwin')
       const second = yield* Analysis.ofSource('layout/repeat', source, 'aarch64-apple-darwin')
@@ -324,7 +324,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'layout/verify-aggregate',
-      ascii('struct Pair { left: I32 right: Bool }\npub fn main() -> Pair { return 42 }'),
+      ascii('struct Pair { left: i32 right: bool }\npub fn main() -> Pair { return 42 }'),
       'aarch64-apple-darwin',
     )
     const selected = Analysis.layoutCatalogOf(snapshot)

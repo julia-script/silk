@@ -1,3 +1,4 @@
+import * as Scalar from './Scalar.js'
 import type * as Token from './Token.js'
 
 /** Prefix operators supported by the bootstrap expression grammar. */
@@ -29,7 +30,7 @@ export interface InfixInfo {
 }
 
 /** A compiler-known actor selected by operator elaboration. */
-export type Actor = 'I32' | 'Usize' | 'Bool'
+export type Actor = Scalar.Spelling
 
 /** The canonical actor operation represented by one surface operator. */
 export interface Target {
@@ -114,33 +115,43 @@ export const infix = (kind: Token.TokenKind): InfixInfo | undefined => infixByTo
 /** Returns the canonical source spelling of one prefix operator. */
 export const prefixSpelling = (self: Prefix): string => (self === 'Negate' ? '-' : '!')
 
-const fixedTargets: Readonly<Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, Target>> =
-  Object.freeze({
-    Negate: Object.freeze({ actor: 'I32', operation: 'negate' }),
-    Not: Object.freeze({ actor: 'Bool', operation: 'not' }),
-    Multiply: Object.freeze({ actor: 'I32', operation: 'multiply' }),
-    Divide: Object.freeze({ actor: 'I32', operation: 'divide' }),
-    Remainder: Object.freeze({ actor: 'I32', operation: 'remainder' }),
-    Add: Object.freeze({ actor: 'I32', operation: 'add' }),
-    Subtract: Object.freeze({ actor: 'I32', operation: 'subtract' }),
-    LessThan: Object.freeze({ actor: 'I32', operation: 'lessThan' }),
-    LessOrEqual: Object.freeze({ actor: 'I32', operation: 'lessOrEqual' }),
-    GreaterThan: Object.freeze({ actor: 'I32', operation: 'greaterThan' }),
-    GreaterOrEqual: Object.freeze({ actor: 'I32', operation: 'greaterOrEqual' }),
-  })
+const operationByOperator: Readonly<
+  Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, string>
+> = Object.freeze({
+  Negate: 'negate',
+  Not: 'not',
+  Multiply: 'multiply',
+  Divide: 'divide',
+  Remainder: 'remainder',
+  Add: 'add',
+  Subtract: 'subtract',
+  LessThan: 'lessThan',
+  LessOrEqual: 'lessOrEqual',
+  GreaterThan: 'greaterThan',
+  GreaterOrEqual: 'greaterOrEqual',
+})
 
 /** Returns the canonical actor operation for an operator and its selected equality actor. */
-export const target = (self: Prefix | Infix, equalityActor: Actor = 'I32'): Target => {
+export const target = (
+  self: Prefix | Infix,
+  equalityActor: Actor = Scalar.defaultInteger.spelling,
+): Target => {
   if (self === 'Equals' || self === 'NotEquals') {
     return Object.freeze({
       actor: equalityActor,
       operation: self === 'Equals' ? 'equals' : 'notEquals',
     })
   }
-  const fixed = fixedTargets[self]
-  return equalityActor === 'Usize' && fixed.actor === 'I32' && self !== 'Negate'
-    ? Object.freeze({ actor: 'Usize', operation: fixed.operation })
-    : fixed
+  return Object.freeze({
+    actor:
+      self === 'Not'
+        ? Scalar.boolean.spelling
+        : Scalar.find(equalityActor)?.category !== 'Integer' ||
+            (self === 'Negate' && Scalar.find(equalityActor)?.signedness !== 'Signed')
+          ? Scalar.defaultInteger.spelling
+          : equalityActor,
+    operation: operationByOperator[self],
+  })
 }
 
 /** The binding power of prefix operators. */

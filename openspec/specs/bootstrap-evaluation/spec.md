@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Evaluate the first closed, semantically checked Silk program to an exact `I32` result while retaining a deterministic explanation of every call and value binding.
+Evaluate the first closed, semantically checked Silk program to an exact `i32` result while retaining a deterministic explanation of every call and value binding.
 ## Requirements
 ### Requirement: First bootstrap entry point
 
 Bootstrap evaluation SHALL execute the snapshot's lowered MIR program from the entry that instance
-discovery resolved. An ordinary `main() -> I32` SHALL retain its exact completed value. An effectful
-`main() -> Unit ! E` SHALL be constructed and run once by the lowered entry adapter, producing
+discovery resolved. An ordinary `main() -> i32` SHALL retain its exact completed value. An effectful
+`main() -> () ! E` SHALL be constructed and run once by the lowered entry adapter, producing
 either completed status `0` or deterministic unhandled-failure termination data retaining the
 normalized failure tag and canonical identity. When discovery reports an unavailable entry,
 evaluation SHALL return a closed `Blocked` outcome carrying that explicit entry reason rather than
@@ -16,12 +16,12 @@ throw, fail, or choose a declaration.
 
 #### Scenario: Select one ordinary main
 
-- **WHEN** discovery resolves exactly one zero-parameter ordinary `main` declaring `I32`
+- **WHEN** discovery resolves exactly one zero-parameter ordinary `main` declaring `i32`
 - **THEN** evaluation enters that instance's lowered function and preserves its exact result
 
 #### Scenario: Select one effectful main
 
-- **WHEN** discovery resolves exactly one zero-parameter effectful `main` succeeding with `Unit`
+- **WHEN** discovery resolves exactly one zero-parameter effectful `main` succeeding with `()`
 - **THEN** evaluation enters the generated adapter and runs the entry Effect exactly once
 
 #### Scenario: Retain an unhandled entry failure
@@ -49,7 +49,7 @@ throw, fail, or choose a declaration.
 Evaluation SHALL interpret the lowered MIR control-flow graph: literals define locals, moves copy
 them, calls evaluate their already-computed argument locals bound positionally to the target's
 parameter locals, drops execute as explicit no-release events for the copyable slice, and each
-function returns its terminator's value, publishing the exact `I32` result on completion.
+function returns its terminator's value, publishing the exact `i32` result on completion.
 Unavailable facts and ownership violations reach evaluation as the explicit generated traps
 lowering inserted; executing a trap SHALL produce a `Blocked` outcome carrying the trap's
 function identity, reason, and provenance rather than a guessed value. Functions absent from the
@@ -58,11 +58,11 @@ lowered program MUST NOT affect the outcome.
 #### Scenario: Evaluate a literal main
 
 - **WHEN** `main` returns the available literal `42`
-- **THEN** evaluation completes with exact `I32` result `42`
+- **THEN** evaluation completes with exact `i32` result `42`
 
 #### Scenario: Evaluate through one parameter
 
-- **WHEN** `identity(value: I32)` returns `value` and `main` returns the compatible call `identity(42)`
+- **WHEN** `identity(value: i32)` returns `value` and `main` returns the compatible call `identity(42)`
 - **THEN** argument `42` binds to `identity`'s parameter local and evaluation completes with `42`
 
 #### Scenario: Evaluate two positional bindings
@@ -181,33 +181,17 @@ depending on object identity, wall-clock time, random state, I/O, or process-glo
 
 ### Requirement: Arithmetic evaluates exactly and traps on the pinned conditions
 
-The interpreter SHALL execute binary operations with exact signed 32-bit results. Signed
-overflow, division by zero, and `-2147483648` divided or remaindered by `-1` SHALL produce a
-`Blocked` trap outcome carrying the operation's function identity, an arithmetic reason, and the
-operation's provenance — never a wrapped or guessed value. Division SHALL truncate toward zero
-and remainder SHALL take the dividend's sign. These outcomes SHALL agree with native execution
-across the corpus: matching results for completing programs and matching abnormal termination for
-trapping programs.
+The evaluator SHALL execute every admitted integer width and mode without host-number precision loss. Checked overflow, invalid division/remainder, and invalid shift counts SHALL block with operation identity, reason, and provenance; wrapping, saturating, bitwise, comparison, and conversion behavior SHALL match both backends.
 
-#### Scenario: Evaluate arithmetic exactly
+#### Scenario: Evaluate wide arithmetic
 
-- **WHEN** `main` returns `I32.subtract(I32.multiply(6, 7), 0)`
-- **THEN** evaluation completes with exact result `42`
+- **WHEN** `u64` uses values above JavaScript's exact integer range
+- **THEN** evaluation returns the exact result or pinned trap without rounding
 
-#### Scenario: Trap on signed overflow
+#### Scenario: Evaluate checked recovery
 
-- **WHEN** `main` returns `I32.add(2147483647, 1)`
-- **THEN** evaluation blocks at that operation with an arithmetic trap reason and its provenance
-
-#### Scenario: Trap on division by zero
-
-- **WHEN** `main` returns `I32.divide(1, 0)`
-- **THEN** evaluation blocks at that operation rather than producing a value
-
-#### Scenario: Truncate division toward zero
-
-- **WHEN** `main` returns `I32.divide(-7, 2)`
-- **THEN** evaluation completes with exact result `-3`
+- **WHEN** a recoverable checked operation overflows
+- **THEN** evaluation constructs `None` rather than trapping
 
 ### Requirement: Conditionals evaluate exactly one arm
 
@@ -219,7 +203,7 @@ the corpus, including programs whose two arms produce different results.
 
 #### Scenario: Take the true arm
 
-- **WHEN** `main` returns `1` under `if I32.equals(1, 1)` and `0` otherwise
+- **WHEN** `main` returns `1` under `if i32.equals(1, 1)` and `0` otherwise
 - **THEN** evaluation completes with `1` and the trace shows only the taken path's work
 
 #### Scenario: Take the otherwise path
@@ -236,7 +220,7 @@ values; the layout table does not require simulation of raw bytes when no operat
 
 #### Scenario: Evaluate with the shared scalar plan
 
-- **WHEN** a branching program is evaluated from a snapshot using the canonical `I32` and `Bool` entries
+- **WHEN** a branching program is evaluated from a snapshot using the canonical `i32` and `bool` entries
 - **THEN** evaluation uses that MIR program and completes with its logical result without creating an interpreter-specific layout
 
 #### Scenario: Block malformed target-aware MIR before execution
@@ -311,7 +295,7 @@ realization.
 
 ### Requirement: Evaluation checks every dynamic index
 
-Evaluation SHALL compare a dynamic `I32` index against zero and the canonical length before reading
+Evaluation SHALL compare a dynamic `i32` index against zero and the canonical length before reading
 the selected element or continuing a place chain. Failure SHALL produce a deterministic trap with the
 index, length, function identity, and exact projection provenance.
 
@@ -424,7 +408,7 @@ concrete MIR types, layouts, and instance identities. It MUST NOT introduce inte
 arguments, runtime dictionaries, or alternate generic layout decisions.
 
 #### Scenario: Evaluate two identity instances
-- **WHEN** one program calls concrete I32 and nominal-struct specializations
+- **WHEN** one program calls concrete i32 and nominal-struct specializations
 - **THEN** evaluation preserves each concrete value and traces the two canonical instance identities
 
 ### Requirement: Evaluation preserves borrowed backing identity
@@ -455,16 +439,14 @@ backing place and clean the displaced value exactly once.
 - **WHEN** an exclusive slice write is out of bounds and its replacement would otherwise produce an observable trace event
 - **THEN** evaluation traps at the bounds check and records no replacement event or write
 
-### Requirement: Evaluation preserves exact Usize semantics
+### Requirement: Evaluation preserves exact usize semantics
 
-The evaluator SHALL represent `Usize` exactly across the selected 32- or 64-bit range and SHALL
-evaluate checked arithmetic, unsigned comparisons, and traps without host-number precision loss.
-Deterministic value and trace encodings SHALL use one canonical unsigned decimal form.
+The evaluator SHALL represent target-selected `usize` exactly and use canonical unsigned decimal encoding.
 
-#### Scenario: Evaluate the native maximum exactly
+#### Scenario: Evaluate native maximum
 
-- **WHEN** a native-target function evaluates the maximum `Usize` value without overflowing
-- **THEN** the evaluator returns and encodes `18446744073709551615` exactly
+- **WHEN** native `usize` evaluates its maximum value
+- **THEN** evaluation returns `18446744073709551615` exactly
 
 ### Requirement: Evaluation is the flow and failure oracle
 

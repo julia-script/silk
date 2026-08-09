@@ -6,17 +6,17 @@ import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
 import * as Ownership from '../../dist/Ownership.js'
 
-const source = `struct Problem { code: I32 }
-effect fn risky<T>(value: T, selector: I32) -> T ! Problem {
+const source = `struct Problem { code: i32 }
+effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
   if selector == 0 { fail move Problem { code: 41 } }
   return move value
 }
-effect fn relay(value: I32) -> I32 ! Problem {
-  let pending = risky<I32>(value, value)
+effect fn relay(value: i32) -> i32 ! Problem {
+  let pending = risky<i32>(value, value)
   return run pending
 }
-effect fn recover(problem: Problem) -> I32 { return problem.code |> I32.add(1) }
-pub fn main() -> I32 {
+effect fn recover(problem: Problem) -> i32 { return problem.code |> i32.add(1) }
+pub fn main() -> i32 {
   let recipe = relay(0) |> Effect.catch<Problem>(recover)
   return run recipe
 }`

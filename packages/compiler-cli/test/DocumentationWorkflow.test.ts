@@ -23,9 +23,9 @@ it.effect(
       const fileSystem = yield* FileSystem.FileSystem
       const fixture = yield* project(`//! Module docs.
 /// Public docs.
-pub fn recover() -> I32 { return 1 }
+pub fn recover() -> i32 { return 1 }
 /// Private docs.
-fn helper() -> I32 { return 0 }
+fn helper() -> i32 { return 0 }
 `)
       const publicPath = `${fixture.root}/public.json`
       const privatePath = `${fixture.root}/private.json`

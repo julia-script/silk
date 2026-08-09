@@ -17,7 +17,7 @@ MUST NOT depend on field shape, import spelling, declaration traversal order, or
 
 #### Scenario: Distinguish equal shapes in different modules
 
-- **WHEN** two modules each declare `pub struct Position { x: I32 }`
+- **WHEN** two modules each declare `pub struct Position { x: i32 }`
 - **THEN** the compiler records two distinct nominal types even though their names and fields match
 
 #### Scenario: Declare a zero-field marker
@@ -39,12 +39,12 @@ missing types, and unknown types SHALL remain unavailable without fabricating fi
 
 #### Scenario: Resolve scalar fields
 
-- **WHEN** a struct declares `count: I32` and `ready: Bool`
+- **WHEN** a struct declares `count: i32` and `ready: bool`
 - **THEN** both fields resolve to their exact scalar types in declaration order
 
 #### Scenario: Reject a duplicate field
 
-- **WHEN** a struct declares `value: I32` twice
+- **WHEN** a struct declares `value: i32` twice
 - **THEN** the first field remains available and the second remains an explicit duplicate caused by one semantic diagnostic
 
 #### Scenario: Preserve a damaged field

@@ -17,8 +17,8 @@ slice.
 
 #### Scenario: Declare shared and exclusive slice parameters
 
-- **WHEN** ordinary functions declare `values: &[I32]` and `values: &mut [I32]`
-- **THEN** both parameter types resolve with canonical element `I32`, distinct access modes, and no fixed length
+- **WHEN** ordinary functions declare `values: &[i32]` and `values: &mut [i32]`
+- **THEN** both parameter types resolve with canonical element `i32`, distinct access modes, and no fixed length
 
 #### Scenario: Reject a slice on a lazy function boundary
 
@@ -58,7 +58,7 @@ exclusive slice MUST NOT be copied or forwarded as an independent alias.
 
 #### Scenario: Reborrow exclusive storage through a helper
 
-- **WHEN** a function holding `values: &mut [I32]` invokes an ordinary helper with a compatible exclusive reborrow
+- **WHEN** a function holding `values: &mut [i32]` invokes an ordinary helper with a compatible exclusive reborrow
 - **THEN** the helper writes the same backing array, the parent slice is inaccessible during the call, and parent access resumes afterward
 
 #### Scenario: Refuse an access-strengthening reborrow
@@ -68,21 +68,17 @@ exclusive slice MUST NOT be copied or forwarded as an independent alias.
 
 ### Requirement: Slice length and indexing are safe runtime operations
 
-The logical `length` of a slice SHALL be a non-negative `I32` in this bootstrap capability. Forming
-a slice MUST reject a fixed-array length that is not representable as non-negative `I32`. A slice
-index SHALL require `I32`, SHALL check `0 <= index < length` at runtime, and SHALL trap before
-projecting or evaluating an assignment replacement when the check fails. Zero-length slices and
-nonzero slices of zero-sized elements SHALL retain their logical lengths.
+Slice `length` and indices SHALL use target-selected `usize`. Access SHALL check `index < length` and trap before projection or replacement evaluation. Zero-length and zero-sized-element slices SHALL retain their logical lengths.
 
-#### Scenario: Traverse a runtime-length shared slice
+#### Scenario: Traverse a slice
 
-- **WHEN** a loop compares an `I32` cursor with `values.length` and reads `values[cursor]`
-- **THEN** each in-range access selects the corresponding logical element and the loop does not depend on the source array length in its type
+- **WHEN** a `usize` cursor indexes a runtime-length slice
+- **THEN** each in-range access selects the corresponding element without signed bounds logic
 
-#### Scenario: Trap before an out-of-bounds replacement
+#### Scenario: Trap before replacement
 
-- **WHEN** an exclusive slice assignment uses a negative index or an index equal to its runtime length
-- **THEN** execution traps before evaluating or committing the replacement value
+- **WHEN** an exclusive index equals or exceeds length
+- **THEN** execution traps before evaluating the replacement
 
 ### Requirement: Borrowed element access preserves ownership
 
@@ -94,7 +90,7 @@ MUST be rejected because it would leave borrowed storage partially initialized.
 
 #### Scenario: Inspect a Copy field of a move-only element
 
-- **WHEN** a shared `&[Token]` indexes one `Token` and projects its `I32` kind field
+- **WHEN** a shared `&[Token]` indexes one `Token` and projects its `i32` kind field
 - **THEN** the field is copied without copying or moving the borrowed `Token`
 
 #### Scenario: Replace through an exclusive slice

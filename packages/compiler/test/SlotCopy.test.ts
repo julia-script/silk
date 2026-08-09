@@ -16,13 +16,13 @@ const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-slot-copy-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** Copy reads the same initialized slot twice without consuming it; take still works after. */
-const copyRead = `effect fn store() -> I32 ! OutOfMemory {
+const copyRead = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
-    let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+    let mut buffer = RawBuffer.from<i32>(move allocation, 2)
     let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
     let first = Slot.copy(RawBuffer.slot(&mut buffer, 0))
     let second = Slot.copy(RawBuffer.slot(&mut buffer, 0))
@@ -33,9 +33,9 @@ const copyRead = `effect fn store() -> I32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
 
 it.effect('copies initialized Copy slots without consuming them on all three engines', () =>
   Effect.gen(function* () {
@@ -70,12 +70,12 @@ it.effect('copies initialized Copy slots without consuming them on all three eng
 
 /** Copying a non-Copy element is rejected when the concrete instantiation is verified. */
 const nonCopy = `struct Guard { storage: Allocation }
-effect fn store() -> I32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
-  let inner = Layout.of<[I32; 1]>()
+  let inner = Layout.of<[i32; 1]>()
   let innerRecipe = Allocator.allocate(move inner) |> Allocator.provide(&mut allocator)
   let payload = run innerRecipe
   unsafe {
@@ -92,9 +92,9 @@ effect fn store() -> I32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
 
 it.effect('rejects copying a non-Copy element at MIR verification', () =>
   Effect.gen(function* () {

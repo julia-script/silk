@@ -1,16 +1,16 @@
 mir-module golden/operator
 entry ordinary target=golden/operator.main machine=golden/operator.main
 target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
-layout I32 size=4 align=4 repr=signed-i32
+layout i32 size=4 align=4 repr=signed-i32
 callable-environment golden/operator.main@42 mode=shared size=4 align=4 fields=capture0->p1:copy:value@0 view=code@0,env@8,size=16
-calling I32 lanes=1 I32[]
-fn golden/operator.main params=0 locals=7 -> I32 entry=r0
+calling i32 lanes=1 i32[]
+fn golden/operator.main params=0 locals=7 -> i32 entry=r0
   r0 operation:
-    %0 = literal 2 : I32 [29, 31)
-    %1 = literal 3 : I32 [33, 35)
-    %2 = literal 4 : I32 [37, 39)
-    %3 = multiply %1, %2 : I32 [33, 39)
-    %4 = add %0, %3 : I32 [29, 39)
-    %5 = literal 1 : I32 [51, 52)
-    %6 = apply-callable I32.Add(%4) captures=#0:%5 access=shared evaluation=LeftThenCallable realization=DirectErasedSection : I32 [29, 53)
+    %0 = literal 2 : i32 [29, 31)
+    %1 = literal 3 : i32 [33, 35)
+    %2 = literal 4 : i32 [37, 39)
+    %3 = multiply %1, %2 : i32 [33, 39)
+    %4 = add %0, %3 : i32 [29, 39)
+    %5 = literal 1 : i32 [51, 52)
+    %6 = apply-callable i32.Add(%4) captures=#0:%5 access=shared evaluation=LeftThenCallable realization=DirectErasedSection : i32 [29, 53)
     return %6 [29, 53)

@@ -13,23 +13,23 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const failureSource = `pub struct SomeError { code: I32 }
+const failureSource = `pub struct SomeError { code: i32 }
 impl Report for SomeError {}
-pub effect fn main() -> Unit ! SomeError { fail SomeError { code: 42 } }`
+pub effect fn main() -> () ! SomeError { fail SomeError { code: 42 } }`
 
-const successSource = `pub struct SomeError { code: I32 }
+const successSource = `pub struct SomeError { code: i32 }
 impl Report for SomeError {}
-pub effect fn main() -> Unit ! SomeError { return Unit.make() }`
+pub effect fn main() -> () ! SomeError { return () }`
 
 const cleanupSource = `pub struct SomeError { storage: Allocation }
 impl Report for SomeError {}
 impl Report for OutOfMemory {}
 impl Drop for SomeError {
-  fn drop(self: &mut SomeError) -> Unit { return Unit.make() }
+  fn drop(self: &mut SomeError) -> () { return () }
 }
-pub effect fn main() -> Unit ! SomeError | OutOfMemory {
+pub effect fn main() -> () ! SomeError | OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let storage = run recipe
   fail SomeError { storage: move storage }

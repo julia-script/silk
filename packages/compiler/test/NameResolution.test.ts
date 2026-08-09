@@ -31,8 +31,8 @@ const snapshot = (
 it.effect('binds namespace aliases and selected members to canonical calls', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('app/Main', {
-      'app/Main': 'import compiler.Syntax as Tree\npub fn main() -> I32 { return Tree.parse() }',
-      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }\nfn hidden() -> I32 { return 0 }',
+      'app/Main': 'import compiler.Syntax as Tree\npub fn main() -> i32 { return Tree.parse() }',
+      'compiler/Syntax': 'pub fn parse() -> i32 { return 42 }\nfn hidden() -> i32 { return 0 }',
     })
     const returned = Analysis.hirOf(self, 'app/Main')?.functions.at(0)
     const expression = returned === undefined ? undefined : Hir.returned(returned)
@@ -47,8 +47,8 @@ it.effect('binds namespace aliases and selected members to canonical calls', () 
 
     const selected = yield* snapshot('app/Main', {
       'app/Main':
-        'import compiler.Syntax { parse as read, hidden }\npub fn main() -> I32 { return hidden() }',
-      'compiler/Syntax': 'pub fn parse() -> I32 { return 42 }\nfn hidden() -> I32 { return 0 }',
+        'import compiler.Syntax { parse as read, hidden }\npub fn main() -> i32 { return hidden() }',
+      'compiler/Syntax': 'pub fn parse() -> i32 { return 42 }\nfn hidden() -> i32 { return 0 }',
     })
     assert.strictEqual(Analysis.lookupName(selected, 'app/Main', 'read')._tag, 'Resolved')
     assert.strictEqual(Analysis.lookupName(selected, 'app/Main', 'hidden')._tag, 'Unavailable')
@@ -63,8 +63,8 @@ it.effect('resolves imported pipelines identically across targets and repeated s
   Effect.gen(function* () {
     const sources = {
       'app/Main':
-        'import compiler.Syntax as Tree\npub fn main() -> I32 { return 40 |> Tree.add(2) }',
-      'compiler/Syntax': 'pub fn add(left: I32, right: I32) -> I32 { return left + right }',
+        'import compiler.Syntax as Tree\npub fn main() -> i32 { return 40 |> Tree.add(2) }',
+      'compiler/Syntax': 'pub fn add(left: i32, right: i32) -> i32 { return left + right }',
     }
     const first = yield* snapshot('app/Main', sources, 'aarch64-apple-darwin')
     const second = yield* snapshot('app/Main', sources, 'aarch64-apple-darwin')
@@ -83,9 +83,9 @@ it.effect('resolves imported pipelines identically across targets and repeated s
 it.effect('keeps cyclic cross-module calls finite and canonical', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('app/Main', {
-      'app/Main': 'import cycle.A { a }\npub fn main() -> I32 { return a() }',
-      'cycle/A': 'import cycle.B { b }\npub fn a() -> I32 { return b() }',
-      'cycle/B': 'import cycle.A { a }\npub fn b() -> I32 { return a() }',
+      'app/Main': 'import cycle.A { a }\npub fn main() -> i32 { return a() }',
+      'cycle/A': 'import cycle.B { b }\npub fn a() -> i32 { return b() }',
+      'cycle/B': 'import cycle.A { a }\npub fn b() -> i32 { return a() }',
     })
     assert.deepEqual(self.closure.cycles, [['cycle/A', 'cycle/B']])
     assert.deepEqual(
@@ -96,10 +96,10 @@ it.effect('keeps cyclic cross-module calls finite and canonical', () =>
 )
 
 const threeModuleSources = {
-  'app/Main': 'import library.Answer { answer }\npub fn main() -> I32 { return answer() }',
+  'app/Main': 'import library.Answer { answer }\npub fn main() -> i32 { return answer() }',
   'library/Answer':
-    'import values.Number\nfn local() -> I32 { return 40 }\npub fn answer() -> I32 { return I32.add(local(), Number.two()) }',
-  'values/Number': 'pub fn two() -> I32 { return 2 }',
+    'import values.Number\nfn local() -> i32 { return 40 }\npub fn answer() -> i32 { return i32.add(local(), Number.two()) }',
+  'values/Number': 'pub fn two() -> i32 { return 2 }',
 }
 
 it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh snapshots', () =>
@@ -126,12 +126,12 @@ it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh
 it.effect('diagnoses import binding conflicts stably without parser cascades', () =>
   Effect.gen(function* () {
     const duplicate = yield* snapshot('root', {
-      root: 'import library.One\nimport library.One as Again\npub fn main() -> I32 { return 0 }',
-      'library/One': 'pub fn one() -> I32 { return 1 }',
+      root: 'import library.One\nimport library.One as Again\npub fn main() -> i32 { return 0 }',
+      'library/One': 'pub fn one() -> i32 { return 1 }',
     })
     const recovered = yield* snapshot('root', {
-      root: 'import library.One as\npub fn main() -> I32 { return 0 }',
-      'library/One': 'pub fn one() -> I32 { return 1 }',
+      root: 'import library.One as\npub fn main() -> i32 { return 0 }',
+      'library/One': 'pub fn one() -> i32 { return 1 }',
     })
     assert.deepEqual(
       duplicate.diagnostics.map((diagnostic) => diagnostic.code),
@@ -150,11 +150,11 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const self = yield* snapshot('root', {
-        root: 'import left.Api { left }\nimport right.Api { right }\npub fn main() -> I32 { return I32.add(left(), right()) }',
+        root: 'import left.Api { left }\nimport right.Api { right }\npub fn main() -> i32 { return i32.add(left(), right()) }',
         'left/Api':
-          'import shared.Value { value }\npub fn left() -> I32 { return value() }\npub fn unused() -> I32 { return 0 }',
-        'right/Api': 'import shared.Value { value }\npub fn right() -> I32 { return value() }',
-        'shared/Value': 'pub fn value() -> I32 { return 21 }',
+          'import shared.Value { value }\npub fn left() -> i32 { return value() }\npub fn unused() -> i32 { return 0 }',
+        'right/Api': 'import shared.Value { value }\npub fn right() -> i32 { return value() }',
+        'shared/Value': 'pub fn value() -> i32 { return 21 }',
       })
       assert.deepEqual(
         self.instances.instances.map(
@@ -176,8 +176,8 @@ it.effect('resolves local, selected, and qualified nominal types in declaration 
         'import syntax.Tree as Ast { Node }\n' +
         'struct Local { node: Node qualified: Ast.Node }\n' +
         'fn identity(value: Local) -> Local { return move value }\n' +
-        'pub fn main() -> I32 { return 0 }',
-      'syntax/Tree': 'pub struct Node { value: I32 }',
+        'pub fn main() -> i32 { return 0 }',
+      'syntax/Tree': 'pub struct Node { value: i32 }',
     })
     const local = self.index.modules.find((module) => module.module === 'app/Main')?.structs.at(0)
     const identity = self.index.modules
@@ -211,9 +211,9 @@ it.effect('keeps type-kind and imported visibility failures explicit without fal
   Effect.gen(function* () {
     const wrongKind = yield* snapshot('root', {
       root:
-        'fn Value() -> I32 { return 0 }\n' +
+        'fn Value() -> i32 { return 0 }\n' +
         'struct Box { value: Value }\n' +
-        'pub fn main() -> I32 { return 0 }',
+        'pub fn main() -> i32 { return 0 }',
     })
     assert.deepEqual(
       wrongKind.diagnostics.map((diagnostic) => diagnostic.code),
@@ -231,10 +231,10 @@ it.effect('keeps type-kind and imported visibility failures explicit without fal
     const privateRoot =
       'import types.Secret { Secret }\n' +
       'struct Box { secret: Secret }\n' +
-      'pub fn main() -> I32 { return 0 }'
+      'pub fn main() -> i32 { return 0 }'
     const privateImport = yield* snapshot('root', {
       root: privateRoot,
-      'types/Secret': 'struct Secret { value: I32 }',
+      'types/Secret': 'struct Secret { value: i32 }',
     })
     const field = privateImport.index.modules
       .find((module) => module.module === 'root')
@@ -267,8 +267,8 @@ it.effect('keeps type-kind and imported visibility failures explicit without fal
 it.effect('distinguishes harmless import cycles from inline nominal dependency cycles', () =>
   Effect.gen(function* () {
     const harmless = yield* snapshot('a/A', {
-      'a/A': 'import b.B\npub struct A { value: I32 }\npub fn main() -> I32 { return 0 }',
-      'b/B': 'import a.A\npub struct B { value: Bool }',
+      'a/A': 'import b.B\npub struct A { value: i32 }\npub fn main() -> i32 { return 0 }',
+      'b/B': 'import a.A\npub struct B { value: bool }',
     })
     assert.deepEqual(harmless.closure.cycles, [['a/A', 'b/B']])
     assert.deepEqual(harmless.diagnostics, [])

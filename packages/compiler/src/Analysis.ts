@@ -185,7 +185,7 @@ export const make = Effect.fn('Analysis.make')(function* (
     layout._tag === 'Available' && Diagnostic.hasErrors(layout.value.diagnostics)
       ? new AnalysisUnavailable({
           operation: 'Analysis.make',
-          message: 'MIR is unavailable because a Usize literal exceeds the selected target',
+          message: 'MIR is unavailable because a usize literal exceeds the selected target',
         })
       : undefined
   const mir: Targeted<Mir.Module> =

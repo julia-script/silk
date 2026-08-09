@@ -1,14 +1,14 @@
 import Core.Math as Math {add as plus, subtract}
 
 pub struct Pair {
-  pub left: [I32; 2]
-  right: Bool
+  pub left: [i32; 2]
+  right: bool
   choice: Alpha | (Beta | Alpha)
 }
 
 pub struct Span {
-  start: I32
-  end: I32
+  start: i32
+  end: i32
 }
 
 pub struct Token {
@@ -17,7 +17,7 @@ pub struct Token {
 
 pub struct End {}
 
-fn helper(value: I32, other: I32) -> I32 {
+fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   while moved < other {
     if false {
@@ -35,26 +35,26 @@ fn helper(value: I32, other: I32) -> I32 {
   return moved
 }
 
-fn inspect(event: Token | End) -> I32 {
+fn inspect(event: Token | End) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset
     _ => 0
   }
 }
 
-fn scan(values: &[I32], output: &mut [I32]) -> I32 {
-  return helper(values.length, output[0])
+fn scan(values: &[i32], output: &mut [i32]) -> i32 {
+  return helper(usize.toI32(values.length), output[0])
 }
 
 fn callbacks(
-  shared: fn(I32, Bool) -> I32,
-  exclusive: mut fn(I32) -> Bool,
-  consuming: once fn() -> I32,
-) -> I32 {
+  shared: fn(i32, bool) -> i32,
+  exclusive: mut fn(i32) -> bool,
+  consuming: once fn() -> i32,
+) -> i32 {
   return shared(1, true)
 }
 
-effect fn delayed(problem: Token) -> I32
+effect fn delayed(problem: Token) -> i32
 ! Token {
   if false {
     fail move problem
@@ -62,12 +62,12 @@ effect fn delayed(problem: Token) -> I32
   return 1
 }
 
-effect fn timed() -> I32
+effect fn timed() -> i32
 ? &End@Clock {
   return 1
 }
 
-fn execute(problem: Token) -> I32 {
+fn execute(problem: Token) -> i32 {
   let local = effect {
     return 2
   }
@@ -78,12 +78,12 @@ fn execute(problem: Token) -> I32 {
   return run pending
 }
 
-fn borrow(values: [I32; 2], output: [I32; 2]) -> I32 {
+fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output
   return scan(&values, &mut target)
 }
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   return helper(-1, 2)
     |> Core.finish()
 }

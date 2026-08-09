@@ -49,13 +49,13 @@ it('treats an unguarded universal decision as terminal coverage', () => {
 })
 
 it('joins equal types precisely and nominal results canonically', () => {
-  assert.deepEqual(Match.join(['I32', 'I32']), { _tag: 'Joined', type: 'I32' })
-  const joined = Match.join([token, 'Never', end])
+  assert.deepEqual(Match.join(['i32', 'i32']), { _tag: 'Joined', type: 'i32' })
+  const joined = Match.join([token, 'never', end])
   assert.strictEqual(joined._tag, 'Joined')
   if (joined._tag === 'Joined')
     assert.strictEqual(Type.encode(joined.type), 'main.End | main.Token')
-  assert.deepEqual(Match.join(['I32', 'Bool']), {
+  assert.deepEqual(Match.join(['i32', 'bool']), {
     _tag: 'Incompatible',
-    types: ['I32', 'Bool'],
+    types: ['i32', 'bool'],
   })
 })

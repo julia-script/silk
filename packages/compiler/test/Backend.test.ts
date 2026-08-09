@@ -8,8 +8,8 @@ import type * as Backend from '../src/Backend.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
 
 const emit = Effect.fnUntraced(function* (text: string, request: Backend.CodegenRequest) {
   const snapshot = yield* Analysis.ofSource('golden/program', ascii(text), 'aarch64-apple-darwin')
@@ -28,7 +28,7 @@ it.effect('emits one artifact per program with deterministic symbols', () =>
       artifact.symbols.map((entry) => entry.symbol),
       [
         'silk_main',
-        'silk_golden_program_identity__14_676f6c64656e2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a493332_18_726573756c743a6275696c74696e3a493332',
+        'silk_golden_program_identity__14_676f6c64656e2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a693332_18_726573756c743a6275696c74696e3a693332',
       ],
     )
     assert.strictEqual(artifact.symbols.at(0)?.declaration.name, 'main')
@@ -61,7 +61,7 @@ it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_mai
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'golden/llvm-wasm',
-      ascii('pub fn main() -> I32 { return 42 }'),
+      ascii('pub fn main() -> i32 { return 42 }'),
       'wasm32-unknown-unknown',
     )
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
@@ -76,9 +76,9 @@ it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_mai
 it.effect('realizes stored declaration and builtin callable sections in LLVM and Wasm', () =>
   Effect.gen(function* () {
     const programs = [
-      `fn add(value: I32, adjustment: I32) -> I32 { return value + adjustment }
-pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`,
-      'pub fn main() -> I32 { let plusTwo = I32.add(2) return plusTwo(40) }',
+      `fn add(value: i32, adjustment: i32) -> i32 { return value + adjustment }
+pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
+      'pub fn main() -> i32 { let plusTwo = i32.add(2) return plusTwo(40) }',
     ]
     for (const [ordinal, source] of programs.entries()) {
       const native = yield* Analysis.ofSource(
@@ -112,8 +112,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const programs = [
-        `fn write(value: I32, values: &mut [I32]) -> I32 { values[0] = value return values[0] }
-pub fn main() -> I32 {
+        `fn write(value: i32, values: &mut [i32]) -> i32 { values[0] = value return values[0] }
+pub fn main() -> i32 {
   let mut values = [0]
   let mut callback = write(&mut values)
   let first = callback(40)
@@ -121,18 +121,18 @@ pub fn main() -> I32 {
   drop callback
   return second
 }`,
-        `struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value + token.value }
-pub fn main() -> I32 {
+        `struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
   let token = Token { value: 2 }
   let callback = consume(move token)
   return callback(40)
 }`,
         `fn choose<T>(value: T, fallback: T) -> T { return move value }
-pub fn main() -> I32 { let chosen = choose<I32>(0) return chosen(42) }`,
-        `struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value + token.value }
-pub fn main() -> I32 {
+pub fn main() -> i32 { let chosen = choose<i32>(0) return chosen(42) }`,
+        `struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
   let token = Token { value: 2 }
   let callback = consume(move token)
   drop callback
@@ -171,7 +171,7 @@ pub fn main() -> I32 {
 it.effect('emits deterministic callable layouts, MIR, LLVM, and Wasm artifacts', () =>
   Effect.gen(function* () {
     const source = `fn add<T>(value: T, fallback: T) -> T { return move value }
-pub fn main() -> I32 { let callback = add<I32>(2) return callback(42) }`
+pub fn main() -> i32 { let callback = add<i32>(2) return callback(42) }`
     const nativeFirst = yield* Analysis.ofSource(
       'callable-determinism/native',
       ascii(source),
@@ -208,7 +208,7 @@ pub fn main() -> I32 { let callback = add<I32>(2) return callback(42) }`
 it.effect('refuses diagnosed trap bodies before backend emission', () =>
   Effect.gen(function* () {
     const result = yield* Effect.result(
-      emit('pub fn main() -> I32 { return missing() }', { mode: 'release' }),
+      emit('pub fn main() -> i32 { return missing() }', { mode: 'release' }),
     )
     assert.strictEqual(result._tag, 'Failure')
     if (result._tag === 'Failure') assert.strictEqual(result.failure._tag, 'CodegenUnavailable')
@@ -231,23 +231,23 @@ it.effect('emits native debug metadata only for debug requests', () =>
   }),
 )
 
-const arithmeticSource = 'pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }'
+const arithmeticSource = 'pub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
 
-const matchSource = `pub struct Left { value: I32 }
-pub struct Right { value: I32 }
-pub fn inspect(input: Left | Right) -> I32 {
+const matchSource = `pub struct Left { value: i32 }
+pub struct Right { value: i32 }
+pub fn inspect(input: Left | Right) -> i32 {
   return match &input {
     Left { value } if false => 0
-    Left { value: answer } => I32.add(answer, 1)
+    Left { value: answer } => i32.add(answer, 1)
     Right { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(Left { value: 41 }) }`
+pub fn main() -> i32 { return inspect(Left { value: 41 }) }`
 
 it.effect('emits checked arithmetic through overflow intrinsics and guarded division', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(arithmeticSource, { mode: 'release' })
-    const division = yield* emit('pub fn main() -> I32 { return I32.divide(1, 0) }', {
+    const division = yield* emit('pub fn main() -> i32 { return i32.divide(1, 0) }', {
       mode: 'release',
     })
 
@@ -273,7 +273,7 @@ it.effect('matches the arithmetic IR golden and stays deterministic', () =>
 it.effect('emits comparisons as icmp with zero-extension and branches natively', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'pub fn main() -> I32 { if I32.lessThan(1, 2) { return 42 } return 0 }',
+      'pub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }',
       {
         mode: 'release',
       },
@@ -300,9 +300,9 @@ it.effect('privately flattens structured match regions with deterministic member
 
 it.effect('realizes fixed arrays and checked mixed place reads from compiler-owned lanes', () =>
   Effect.gen(function* () {
-    const source = `struct Pair { left: I32 right: I32 }
-fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
-pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`
+    const source = `struct Pair { left: i32 right: i32 }
+fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
+pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`
     const first = yield* emit(source, { mode: 'release' })
     const second = yield* emit(source, { mode: 'release' })
 
@@ -319,17 +319,17 @@ it.effect('orders checked array reads before private match blocks', () =>
     const artifact = yield* emit(
       `struct A {}
 struct B {}
-fn decode(code: I32) -> A | B { if code == 1 { return A {} } return B {} }
-pub fn main() -> I32 {
+fn decode(code: i32) -> A | B { if code == 1 { return A {} } return B {} }
+pub fn main() -> i32 {
   let codes = [1, 2]
-  let index = 0
+  let index = usize.add(0, 0)
   let candidate = decode(codes[index])
   return match move candidate { A {} => 42 B {} => 0 }
 }`,
       { mode: 'release' },
     )
 
-    assert.include(artifact.ir, 'index0_0_ok')
+    assert.match(artifact.ir, /index\d+_0_ok/)
     assert.include(artifact.ir, 'match')
   }),
 )
@@ -337,7 +337,7 @@ pub fn main() -> I32 {
 it.effect('publishes native branch provenance back to canonical loop regions', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'pub fn main() -> I32 { let mut value = 0 while value < 2 { value = value + 1 } return value }',
+      'pub fn main() -> i32 { let mut value = 0 while value < 2 { value = value + 1 } return value }',
       { mode: 'release' },
     )
     assert.strictEqual(

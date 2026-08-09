@@ -38,7 +38,7 @@ const positionOf = (source: string, spelling: string, occurrence = 0) => {
 
 it.effect('publishes compiler errors as protocol diagnostics', () =>
   Effect.gen(function* () {
-    const source = 'pub fn main() -> I32 { return missing() }'
+    const source = 'pub fn main() -> i32 { return missing() }'
     const { document, snapshot } = yield* open(source)
     const diagnostics = Document.diagnostics(document, snapshot, () => undefined)
     assert.strictEqual(diagnostics.length, 1)
@@ -52,7 +52,7 @@ it.effect('publishes compiler errors as protocol diagnostics', () =>
 
 it.effect('keeps recovered return diagnostics off leading indentation', () =>
   Effect.gen(function* () {
-    const source = 'pub fn foo() -> I32 {\n          a\n}'
+    const source = 'pub fn foo() -> i32 {\n          a\n}'
     const { document, snapshot } = yield* open(source)
 
     assert.deepEqual(
@@ -85,7 +85,7 @@ it.effect('keeps recovered return diagnostics off leading indentation', () =>
 
 it.effect('reports no diagnostics for a valid program', () =>
   Effect.gen(function* () {
-    const { document, snapshot } = yield* open('pub fn main() -> I32 { return 42 }')
+    const { document, snapshot } = yield* open('pub fn main() -> i32 { return 42 }')
     assert.deepEqual(
       Document.diagnostics(document, snapshot, () => undefined),
       [],
@@ -95,27 +95,27 @@ it.effect('reports no diagnostics for a valid program', () =>
 
 it.effect('hovers the type of the smallest enclosing expression', () =>
   Effect.gen(function* () {
-    const source = 'pub fn main() -> I32 { return 42 }'
+    const source = 'pub fn main() -> i32 { return 42 }'
     const { document, snapshot } = yield* open(source)
     const hover = Document.hover(document, snapshot, {
       line: 0,
       character: source.indexOf('42'),
     })
     assert.isDefined(hover)
-    assert.deepEqual(hover?.contents, { kind: 'markdown', value: '```silk\nI32\n```' })
+    assert.deepEqual(hover?.contents, { kind: 'markdown', value: '```silk\ni32\n```' })
   }),
 )
 
 it.effect('hovers nothing outside typed expressions', () =>
   Effect.gen(function* () {
-    const { document, snapshot } = yield* open('pub fn main() -> I32 { return 42 }')
+    const { document, snapshot } = yield* open('pub fn main() -> i32 { return 42 }')
     assert.isUndefined(Document.hover(document, snapshot, { line: 0, character: 0 }))
   }),
 )
 
 it.effect('maps hover and definition positions after non-ASCII recovery bytes', () =>
   Effect.gen(function* () {
-    const source = `🙂 pub fn main() -> I32 { return 42 }`
+    const source = `🙂 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
     const position = positionOf(source, 'main')
     const hover = Document.hover(document, snapshot, position)
@@ -130,7 +130,7 @@ it.effect('maps hover and definition positions after non-ASCII recovery bytes', 
 
 it.effect('distinguishes a binding, intrinsic actor, and operation hover', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> I32 {
+    const source = `pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }`
@@ -152,8 +152,8 @@ it.effect('distinguishes a binding, intrinsic actor, and operation hover', () =>
 
 it.effect('uses one source-like effect function hover at declarations and references', () =>
   Effect.gen(function* () {
-    const source = `effect fn recover(error: OutOfMemory) -> I32 { return 0 }
-pub fn main() -> I32 {
+    const source = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
   return run Effect.catch<OutOfMemory>(store(), recover)
 }`
     const { document, snapshot } = yield* open(source)
@@ -161,7 +161,7 @@ pub fn main() -> I32 {
     const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
     assert.deepEqual(declaration?.contents, {
       kind: 'markdown',
-      value: '```silk\neffect fn recover(error: OutOfMemory) -> I32\n```',
+      value: '```silk\neffect fn recover(error: OutOfMemory) -> i32\n```',
     })
     assert.deepEqual(reference?.contents, declaration?.contents)
   }),
@@ -175,15 +175,15 @@ it.effect('appends full declaration documentation to definition and reference ho
 /// \`\`\`silk
 /// recover(problem)
 /// \`\`\`
-effect fn recover(problem: Problem) -> I32 { return problem.code }
-pub fn main() -> I32 { return recover(Problem { code: 1 }) }
-pub struct Problem { pub code: I32 }
+effect fn recover(problem: Problem) -> i32 { return problem.code }
+pub fn main() -> i32 { return recover(Problem { code: 1 }) }
+pub struct Problem { pub code: i32 }
 `
     const { document, snapshot } = yield* open(source)
     const definition = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
     const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 2))
     const expected = `\`\`\`silk
-effect fn recover(problem: Problem) -> I32
+effect fn recover(problem: Problem) -> i32
 \`\`\`
 
 Recovers a problem.
@@ -201,8 +201,8 @@ recover(problem)
 it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
   Effect.gen(function* () {
     const source = `struct Problem {}
-effect fn recover(error: Problem) -> I32 { return 0 }
-pub fn main() -> I32 {
+effect fn recover(error: Problem) -> i32 { return 0 }
+pub fn main() -> i32 {
   let recipe = relay(0)
     |> Effect.catch<Problem>(recover)
   return run recipe
@@ -222,7 +222,7 @@ pub fn main() -> I32 {
 
 it.effect('returns inferred local type inlay hints in the requested range', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> I32 {
+    const source = `pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }`
@@ -247,7 +247,7 @@ it.effect('returns inferred local type inlay hints in the requested range', () =
 
 it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode snapshots', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> I32 {
+    const source = `pub fn main() -> i32 {
   let broken = missing()
   // π🙂
   let mut allocator = SystemAllocator.make()
@@ -281,7 +281,7 @@ it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode sn
 
 it.effect('completes intrinsic operations after actor member access', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> I32 {
+    const source = `pub fn main() -> i32 {
   return Effect.
 }`
     const { document, snapshot } = yield* open(source)
@@ -298,7 +298,7 @@ it.effect('completes intrinsic operations after actor member access', () =>
       'fn Effect.catch<E>',
     )
 
-    const allocatorSource = `pub fn main() -> I32 {
+    const allocatorSource = `pub fn main() -> i32 {
   return SystemAllocator.
 }`
     const allocator = yield* open(allocatorSource)
@@ -319,8 +319,8 @@ it.effect('completes intrinsic operations after actor member access', () =>
 
 it.effect('completes visible values through a partial identifier replacement', () =>
   Effect.gen(function* () {
-    const source = `fn recover(value: I32) -> I32 { return value }
-pub fn main() -> I32 {
+    const source = `fn recover(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
   return rec
 }`
     const { document, snapshot } = yield* open(source)
@@ -342,8 +342,8 @@ pub fn main() -> I32 {
 
 it.effect('completes fields from an inferred local subject type', () =>
   Effect.gen(function* () {
-    const source = `struct Pair { left: I32 }
-pub fn main() -> I32 {
+    const source = `struct Pair { left: i32 }
+pub fn main() -> i32 {
   let pair = Pair { left: 1 }
   return pair.
 }`
@@ -361,8 +361,8 @@ pub fn main() -> I32 {
 
 it.effect('uses semantic qualifier lookup and lets a local shadow an intrinsic actor', () =>
   Effect.gen(function* () {
-    const source = `struct Pair { left: I32 }
-pub fn main() -> I32 {
+    const source = `struct Pair { left: i32 }
+pub fn main() -> i32 {
   let Effect = Pair { left: 1 }
   return Effect.
 }`
@@ -385,7 +385,7 @@ pub fn main() -> I32 {
 it.effect('completes types in damaged parameter and generic-argument positions', () =>
   Effect.gen(function* () {
     const parameterSource = `struct Problem {}
-fn identity<T>(value: ) -> I32 { return 0 }`
+fn identity<T>(value: ) -> i32 { return 0 }`
     const parameter = yield* open(parameterSource)
     const parameterCompletion = Document.completion(parameter.document, parameter.snapshot, {
       line: 1,
@@ -401,11 +401,11 @@ fn identity<T>(value: ) -> I32 { return 0 }`
     )
 
     const argumentSource = `struct Problem {}
-pub fn main() -> I32 { return Effect.catch< }`
+pub fn main() -> i32 { return Effect.catch< }`
     const argument = yield* open(argumentSource)
     const argumentCompletion = Document.completion(argument.document, argument.snapshot, {
       line: 1,
-      character: 'pub fn main() -> I32 { return Effect.catch<'.length,
+      character: 'pub fn main() -> i32 { return Effect.catch<'.length,
     })
     assert.include(
       argumentCompletion.items.map((item) => item.label),
@@ -420,8 +420,8 @@ pub fn main() -> I32 { return Effect.catch< }`
 
 it.effect('lists functions and structs with fields as document symbols', () =>
   Effect.gen(function* () {
-    const source = `pub struct Box { answer: I32 }
-pub fn main() -> I32 { return 42 }`
+    const source = `pub struct Box { answer: i32 }
+pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
     const symbols = Document.symbols(document, snapshot)
     assert.deepEqual(
@@ -440,7 +440,7 @@ pub fn main() -> I32 { return 42 }`
 
 it.effect('formats a non-canonical document with one whole-document edit', () =>
   Effect.gen(function* () {
-    const { document, snapshot } = yield* open('pub fn main() -> I32 { return   42 }')
+    const { document, snapshot } = yield* open('pub fn main() -> i32 { return   42 }')
     const edits = yield* Document.format(document, snapshot)
     assert.strictEqual(edits.length, 1)
     assert.include(edits[0]?.newText, 'return 42')
@@ -456,12 +456,12 @@ it.effect('formats a damaged document with no edits', () =>
 
 it.effect('converts local, parameter, callable, and field targets into definition links', () =>
   Effect.gen(function* () {
-    const source = `struct Pair { left: I32 }
-fn identity(value: I32) -> I32 {
+    const source = `struct Pair { left: i32 }
+fn identity(value: i32) -> i32 {
   let pair = Pair { left: value }
   return pair.left
 }
-pub fn main() -> I32 { return identity(42) }`
+pub fn main() -> i32 { return identity(42) }`
     const { document, snapshot } = yield* open(source)
     const definitionAt = (spelling: string, occurrence: number) => {
       let character = -1
@@ -489,9 +489,9 @@ it.effect('navigates declaration names and nominal/generic types but not intrins
   Effect.gen(function* () {
     const source = `struct Problem {}
 fn recover<T>(error: Problem, value: T) -> T { return value }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let allocator = SystemAllocator.make()
-  return recover<I32>(0, 0)
+  return recover<i32>(0, 0)
 }`
     const { document, snapshot } = yield* open(source)
     const definitionAt = (spelling: string, occurrence = 0) =>
@@ -520,14 +520,14 @@ pub fn main() -> I32 {
     })
     assert.isUndefined(definitionAt('SystemAllocator'))
     assert.isUndefined(definitionAt('make'))
-    assert.isUndefined(definitionAt('I32', 1))
+    assert.isUndefined(definitionAt('i32', 1))
   }),
 )
 
 it.effect('uses exact cross-module snapshot sources for qualified definition links', () =>
   Effect.gen(function* () {
-    const root = 'import lib\npub fn main() -> I32 { return lib.answer() }'
-    const lib = 'pub fn answer() -> I32 { return 42 }'
+    const root = 'import lib\npub fn main() -> i32 { return lib.answer() }'
+    const lib = 'pub fn answer() -> i32 { return 42 }'
     const snapshot = yield* Analysis.make({
       root: SourceFile.make('root', encoder.encode(root)),
     }).pipe(Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(lib)]]))))
@@ -565,7 +565,7 @@ it.effect('uses exact cross-module snapshot sources for qualified definition lin
 
 it.effect('returns no definition for unavailable targets and trivia', () =>
   Effect.gen(function* () {
-    const source = 'pub fn main() -> I32 { return missing() }'
+    const source = 'pub fn main() -> i32 { return missing() }'
     const { document, snapshot } = yield* open(source)
     assert.isUndefined(
       Document.definition(

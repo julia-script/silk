@@ -1,8 +1,10 @@
+import * as Scalar from './Scalar.js'
+
 /** The built-in scalar types implemented by the current executable bootstrap surface. */
-export type Builtin = 'I32' | 'Usize' | 'Bool'
+export type Builtin = Scalar.Spelling
 
 /** The empty structural union and uninhabited bottom type. */
-export type Never = 'Never'
+export type Bottom = 'never'
 
 /** One canonical nominal struct type, independent of import or source spelling. */
 export interface Nominal {
@@ -82,7 +84,7 @@ export interface StructuralUnion {
 /** The closed semantic type vocabulary accepted by declaration analysis. */
 export type Type =
   | Builtin
-  | Never
+  | Bottom
   | Nominal
   | Parameter
   | FixedArray
@@ -131,6 +133,15 @@ export const unit: Nominal = nominal('silk/core', 'Unit')
 export const rawBuffer = (element: Type): Nominal => nominal('silk/core', 'RawBuffer', [element])
 /** A lexical exclusive projection into one RawBuffer element. */
 export const slot = (element: Type): Nominal => nominal('silk/core', 'Slot', [element])
+/** Canonical recoverable success and failure members shipped by silk/option. */
+export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
+export const none: Nominal = nominal('silk/option', 'None')
+
+/** Canonical transparent Option<T> identity, represented as the ordinary structural union. */
+export const option = (element: Type): Type => {
+  const normalized = union([some(element), none])
+  return normalized._tag === 'Normalized' ? normalized.type : 'never'
+}
 
 export const isRawBuffer = (
   self: Type,
@@ -166,7 +177,6 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [dropCapability.name, dropCapability],
   [reportCapability.name, reportCapability],
   [systemAllocator.name, systemAllocator],
-  [unit.name, unit],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],
   ['Slot', nominal('silk/core', 'Slot')],
 ])
@@ -279,7 +289,7 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
   const members = new Map<string, Nominal>()
   const invalid: Array<Type> = []
   const visit = (input: Type): void => {
-    if (input === 'Never') return
+    if (input === 'never') return
     if (isNominal(input)) {
       members.set(key(input), input)
       return
@@ -294,7 +304,7 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
   if (invalid.length > 0)
     return Object.freeze({ _tag: 'InvalidMembers', members: Object.freeze(invalid) })
   const normalized = Object.freeze([...members.values()].sort(compare))
-  if (normalized.length === 0) return Object.freeze({ _tag: 'Normalized', type: 'Never' })
+  if (normalized.length === 0) return Object.freeze({ _tag: 'Normalized', type: 'never' })
   const singleton = normalized.at(0)
   if (normalized.length === 1 && singleton !== undefined)
     return Object.freeze({ _tag: 'Normalized', type: singleton })
@@ -309,11 +319,10 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
 }
 
 /** Tests whether a semantic type is one of the executable built-in scalars. */
-export const isBuiltin = (self: Type): self is Builtin =>
-  self === 'I32' || self === 'Usize' || self === 'Bool'
+export const isBuiltin = (self: unknown): self is Builtin => Scalar.isSpelling(self)
 
 /** Tests whether a semantic type is the empty structural union. */
-export const isNever = (self: Type): self is Never => self === 'Never'
+export const isNever = (self: Type): self is Bottom => self === 'never'
 
 /** Tests whether a semantic type is a canonical nominal struct. */
 export const isNominal = (self: Type): self is Nominal =>
@@ -373,6 +382,7 @@ export const compare = (left: Type, right: Type): number => compareText(key(left
 /** Encodes one type for deterministic compiler facts and diagnostics. */
 export const encode = (self: Type): string => {
   if (typeof self === 'string') return self
+  if (equals(self, unit)) return '()'
   if (isNominal(self)) {
     const arguments_ =
       self.arguments.length === 0 ? '' : `<${self.arguments.map(encode).join(', ')}>`
@@ -401,6 +411,15 @@ export const encode = (self: Type): string => {
             .join(' | ')}`
     return `Effect<${encode(self.success)}${row}${requirements}>`
   }
+  const someMember = self.members.find(
+    (member) =>
+      member.module === 'silk/option' && member.name === 'Some' && member.arguments.length === 1,
+  )
+  const noneMember = self.members.find(
+    (member) => member.module === 'silk/option' && member.name === 'None',
+  )
+  if (self.members.length === 2 && someMember !== undefined && noneMember !== undefined)
+    return `Option<${encode(someMember.arguments.at(0) ?? 'never')}>`
   return self.members.map(encode).join(' | ')
 }
 

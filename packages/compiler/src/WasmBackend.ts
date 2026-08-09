@@ -16,6 +16,7 @@ import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
+import * as Scalar from './Scalar.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
 
@@ -44,8 +45,16 @@ const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
  * never reconstructs source structure from a CFG and never introduces a dispatch loop.
  */
 
-/** The wasm value type every MIR `I32` and `Bool` local lowers to. */
+/** The wasm value type every MIR `i32` and `bool` local lowers to. */
 const i32 = ValType.i32
+const i64 = ValType.i64
+
+const laneValueType = (plan: LayoutPlan.Plan, lane: LayoutPlan.CallingLane): ValType.ValType => {
+  if (typeof lane.type !== 'string') return i32
+  const scalar = Scalar.find(lane.type)
+  if (scalar === undefined) return i32
+  return Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64) === 64 ? i64 : i32
+}
 
 const alignUp = (value: number, alignment: number): number =>
   Math.ceil(value / alignment) * alignment
@@ -169,6 +178,32 @@ const divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic
 const unsignedDivisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
   Object.freeze({ Divide: 'i32.div_u', Remainder: 'i32.rem_u' })
 
+const i64Comparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
+  Object.freeze({
+    Equals: 'i64.eq',
+    NotEquals: 'i64.ne',
+    LessThan: 'i64.lt_s',
+    LessOrEqual: 'i64.le_s',
+    GreaterThan: 'i64.gt_s',
+    GreaterOrEqual: 'i64.ge_s',
+  })
+
+const unsignedI64Comparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
+  Object.freeze({
+    Equals: 'i64.eq',
+    NotEquals: 'i64.ne',
+    LessThan: 'i64.lt_u',
+    LessOrEqual: 'i64.le_u',
+    GreaterThan: 'i64.gt_u',
+    GreaterOrEqual: 'i64.ge_u',
+  })
+
+const i64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
+  Object.freeze({ Divide: 'i64.div_s', Remainder: 'i64.rem_s' })
+
+const unsignedI64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
+  Object.freeze({ Divide: 'i64.div_u', Remainder: 'i64.rem_u' })
+
 /**
  * Wasm's `i32.add`, `i32.sub`, and `i32.mul` wrap on overflow, but MIR specifies that signed
  * overflow traps. Each is emitted as the wrapping operation followed by an inline overflow check
@@ -194,9 +229,13 @@ const checkedArithmetic = (
   left: number,
   right: number,
   scratch: number,
+  bits: 32 | 64 = 32,
 ): ReadonlyArray<Instr.Instr> => {
+  const prefix = bits === 64 ? 'i64' : 'i32'
+  const constant = (input: bigint): Instr.Instr =>
+    bits === 64 ? Instr.i64Const(input) : Instr.i32Const(Number(input))
   const wrapped: Instr.PlainMnemonic =
-    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
   const compute = [
     Instr.localGet(left),
     Instr.localGet(right),
@@ -211,17 +250,17 @@ const checkedArithmetic = (
           // r == 0 can never overflow; otherwise l == MIN && r == -1 overflows, and every other
           // case overflows exactly when dividing the result back does not recover `l`.
           Instr.localGet(right),
-          Instr.op('i32.eqz'),
+          Instr.op(`${prefix}.eqz`),
           Instr.ifElse(
             Instr.valueBlockType(i32),
             [Instr.i32Const(0)],
             [
               Instr.localGet(left),
-              Instr.i32Const(-2147483648),
-              Instr.op('i32.eq'),
+              constant(bits === 64 ? -9223372036854775808n : -2147483648n),
+              Instr.op(`${prefix}.eq`),
               Instr.localGet(right),
-              Instr.i32Const(-1),
-              Instr.op('i32.eq'),
+              constant(-1n),
+              Instr.op(`${prefix}.eq`),
               Instr.op('i32.and'),
               Instr.ifElse(
                 Instr.valueBlockType(i32),
@@ -229,9 +268,9 @@ const checkedArithmetic = (
                 [
                   Instr.localGet(scratch),
                   Instr.localGet(right),
-                  Instr.op('i32.div_s'),
+                  Instr.op(`${prefix}.div_s`),
                   Instr.localGet(left),
-                  Instr.op('i32.ne'),
+                  Instr.op(`${prefix}.ne`),
                 ],
               ),
             ],
@@ -242,14 +281,14 @@ const checkedArithmetic = (
           // relative to the left operand.
           Instr.localGet(left),
           Instr.localGet(right),
-          Instr.op('i32.xor'),
-          Instr.i32Const(0),
-          ...(shape === 'Add' ? [Instr.op('i32.ge_s')] : [Instr.op('i32.lt_s')]),
+          Instr.op(`${prefix}.xor`),
+          constant(0n),
+          ...(shape === 'Add' ? [Instr.op(`${prefix}.ge_s`)] : [Instr.op(`${prefix}.lt_s`)]),
           Instr.localGet(left),
           Instr.localGet(scratch),
-          Instr.op('i32.xor'),
-          Instr.i32Const(0),
-          Instr.op('i32.lt_s'),
+          Instr.op(`${prefix}.xor`),
+          constant(0n),
+          Instr.op(`${prefix}.lt_s`),
           Instr.op('i32.and'),
         ]
 
@@ -261,15 +300,17 @@ const checkedArithmetic = (
   ]
 }
 
-/** Emits checked unsigned i32 arithmetic for the target-word `Usize` lane. */
+/** Emits checked unsigned i32 arithmetic for the target-word `usize` lane. */
 const checkedUnsignedArithmetic = (
   shape: OverflowShape,
   left: number,
   right: number,
   scratch: number,
+  bits: 32 | 64 = 32,
 ): ReadonlyArray<Instr.Instr> => {
+  const prefix = bits === 64 ? 'i64' : 'i32'
   const wrapped: Instr.PlainMnemonic =
-    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
   const compute = [
     Instr.localGet(left),
     Instr.localGet(right),
@@ -278,21 +319,21 @@ const checkedUnsignedArithmetic = (
   ]
   const overflowed: ReadonlyArray<Instr.Instr> =
     shape === 'Add'
-      ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op('i32.lt_u')]
+      ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
       : shape === 'Subtract'
-        ? [Instr.localGet(left), Instr.localGet(right), Instr.op('i32.lt_u')]
+        ? [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
         : [
             Instr.localGet(right),
-            Instr.op('i32.eqz'),
+            Instr.op(`${prefix}.eqz`),
             Instr.ifElse(
               Instr.valueBlockType(i32),
               [Instr.i32Const(0)],
               [
                 Instr.localGet(scratch),
                 Instr.localGet(right),
-                Instr.op('i32.div_u'),
+                Instr.op(`${prefix}.div_u`),
                 Instr.localGet(left),
-                Instr.op('i32.ne'),
+                Instr.op(`${prefix}.ne`),
               ],
             ),
           ]
@@ -304,6 +345,279 @@ const checkedUnsignedArithmetic = (
   ]
 }
 
+/** Checks an i32-lane result against a narrower logical integer range. */
+const checkedSubwordArithmetic = (
+  shape: OverflowShape,
+  left: number,
+  right: number,
+  scratch: number,
+  minimum: bigint,
+  maximum: bigint,
+  unsigned: boolean,
+): ReadonlyArray<Instr.Instr> => {
+  const wrapped: Instr.PlainMnemonic =
+    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+  const below = unsigned
+    ? [Instr.localGet(scratch), Instr.i32Const(Number(minimum)), Instr.op('i32.lt_u')]
+    : [Instr.localGet(scratch), Instr.i32Const(Number(minimum)), Instr.op('i32.lt_s')]
+  const above = unsigned
+    ? [Instr.localGet(scratch), Instr.i32Const(Number(maximum)), Instr.op('i32.gt_u')]
+    : [Instr.localGet(scratch), Instr.i32Const(Number(maximum)), Instr.op('i32.gt_s')]
+  return [
+    Instr.localGet(left),
+    Instr.localGet(right),
+    Instr.op(wrapped),
+    Instr.localSet(scratch),
+    ...below,
+    ...above,
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.localGet(scratch),
+  ]
+}
+
+/** Computes a wrapping arithmetic result into scratch and leaves an i32 overflow flag. */
+const checkedArithmeticOutcome = (
+  shape: OverflowShape,
+  integer: Scalar.IntegerScalar,
+  left: number,
+  right: number,
+  scratch: number,
+  pointerBits: 32 | 64,
+): ReadonlyArray<Instr.Instr> => {
+  const bits = Scalar.bits(integer, pointerBits)
+  const laneBits = bits === 64 ? 64 : 32
+  const prefix = laneBits === 64 ? 'i64' : 'i32'
+  const unsigned = integer.signedness === 'Unsigned'
+  const constant = (value: bigint): Instr.Instr =>
+    laneBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+  const operation: Instr.PlainMnemonic =
+    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
+  const compute = [
+    Instr.localGet(left),
+    Instr.localGet(right),
+    Instr.op(operation),
+    Instr.localSet(scratch),
+  ]
+  if (bits < 32) {
+    const range = Scalar.range(integer, pointerBits)
+    return [
+      ...compute,
+      Instr.localGet(scratch),
+      Instr.i32Const(Number(range.minimum)),
+      Instr.op(unsigned ? 'i32.lt_u' : 'i32.lt_s'),
+      Instr.localGet(scratch),
+      Instr.i32Const(Number(range.maximum)),
+      Instr.op(unsigned ? 'i32.gt_u' : 'i32.gt_s'),
+      Instr.op('i32.or'),
+    ]
+  }
+  if (unsigned) {
+    return [
+      ...compute,
+      ...(shape === 'Add'
+        ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
+        : shape === 'Subtract'
+          ? [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
+          : [
+              Instr.localGet(right),
+              Instr.op(`${prefix}.eqz`),
+              Instr.ifElse(
+                Instr.valueBlockType(i32),
+                [Instr.i32Const(0)],
+                [
+                  Instr.localGet(scratch),
+                  Instr.localGet(right),
+                  Instr.op(`${prefix}.div_u`),
+                  Instr.localGet(left),
+                  Instr.op(`${prefix}.ne`),
+                ],
+              ),
+            ]),
+    ]
+  }
+  const minimum = -(1n << BigInt(laneBits - 1))
+  return [
+    ...compute,
+    ...(shape === 'Multiply'
+      ? [
+          Instr.localGet(right),
+          Instr.op(`${prefix}.eqz`),
+          Instr.ifElse(
+            Instr.valueBlockType(i32),
+            [Instr.i32Const(0)],
+            [
+              Instr.localGet(left),
+              constant(minimum),
+              Instr.op(`${prefix}.eq`),
+              Instr.localGet(right),
+              constant(-1n),
+              Instr.op(`${prefix}.eq`),
+              Instr.op('i32.and'),
+              Instr.ifElse(
+                Instr.valueBlockType(i32),
+                [Instr.i32Const(1)],
+                [
+                  Instr.localGet(scratch),
+                  Instr.localGet(right),
+                  Instr.op(`${prefix}.div_s`),
+                  Instr.localGet(left),
+                  Instr.op(`${prefix}.ne`),
+                ],
+              ),
+            ],
+          ),
+        ]
+      : [
+          Instr.localGet(left),
+          Instr.localGet(right),
+          Instr.op(`${prefix}.xor`),
+          constant(0n),
+          Instr.op(shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`),
+          Instr.localGet(left),
+          Instr.localGet(scratch),
+          Instr.op(`${prefix}.xor`),
+          constant(0n),
+          Instr.op(`${prefix}.lt_s`),
+          Instr.op('i32.and'),
+        ]),
+  ]
+}
+
+const normalizeSubword = (bits: number, signed: boolean): ReadonlyArray<Instr.Instr> => {
+  if (bits >= 32) return []
+  if (!signed) return [Instr.i32Const(2 ** bits - 1), Instr.op('i32.and')]
+  const shift = 32 - bits
+  return [Instr.i32Const(shift), Instr.op('i32.shl'), Instr.i32Const(shift), Instr.op('i32.shr_s')]
+}
+
+const saturatingSubwordArithmetic = (
+  shape: OverflowShape,
+  left: number,
+  right: number,
+  scratch: number,
+  minimum: bigint,
+  maximum: bigint,
+  unsigned: boolean,
+): ReadonlyArray<Instr.Instr> => {
+  const operation: Instr.PlainMnemonic =
+    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+  const lessThan: Instr.PlainMnemonic = unsigned ? 'i32.lt_u' : 'i32.lt_s'
+  const greaterThan: Instr.PlainMnemonic = unsigned ? 'i32.gt_u' : 'i32.gt_s'
+  return [
+    Instr.localGet(left),
+    Instr.localGet(right),
+    Instr.op(operation),
+    Instr.localSet(scratch),
+    Instr.i32Const(Number(minimum)),
+    Instr.localGet(scratch),
+    Instr.localGet(scratch),
+    Instr.i32Const(Number(minimum)),
+    Instr.op(lessThan),
+    Instr.op('select'),
+    Instr.localSet(scratch),
+    Instr.i32Const(Number(maximum)),
+    Instr.localGet(scratch),
+    Instr.localGet(scratch),
+    Instr.i32Const(Number(maximum)),
+    Instr.op(greaterThan),
+    Instr.op('select'),
+  ]
+}
+
+const wrappingOrBitwise = (
+  operator: Mir.BinaryOperator,
+  left: number,
+  right: number,
+  bits: number,
+  signed: boolean,
+): ReadonlyArray<Instr.Instr> | undefined => {
+  const prefix = bits === 64 ? 'i64' : 'i32'
+  const operation: Instr.PlainMnemonic | undefined =
+    operator === 'BitAnd'
+      ? `${prefix}.and`
+      : operator === 'BitOr'
+        ? `${prefix}.or`
+        : operator === 'BitXor'
+          ? `${prefix}.xor`
+          : operator === 'WrappingAdd'
+            ? `${prefix}.add`
+            : operator === 'WrappingSubtract'
+              ? `${prefix}.sub`
+              : operator === 'WrappingMultiply'
+                ? `${prefix}.mul`
+                : undefined
+  if (operation === undefined) return undefined
+  return [
+    Instr.localGet(left),
+    Instr.localGet(right),
+    Instr.op(operation),
+    ...normalizeSubword(bits, signed),
+  ]
+}
+
+const shiftOrRotate = (
+  operator: Mir.BinaryOperator,
+  left: number,
+  right: number,
+  bits: number,
+  signed: boolean,
+): ReadonlyArray<Instr.Instr> | undefined => {
+  if (
+    operator !== 'ShiftLeft' &&
+    operator !== 'ShiftRight' &&
+    operator !== 'RotateLeft' &&
+    operator !== 'RotateRight'
+  )
+    return undefined
+  const prefix = bits === 64 ? 'i64' : 'i32'
+  const constant = (value: number): Instr.Instr =>
+    bits === 64 ? Instr.i64Const(BigInt(value)) : Instr.i32Const(value)
+  const validate = [
+    Instr.localGet(right),
+    constant(bits),
+    Instr.op(`${prefix}.ge_u`),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+  ]
+  if (operator === 'ShiftLeft' || operator === 'ShiftRight') {
+    return [
+      ...validate,
+      Instr.localGet(left),
+      Instr.localGet(right),
+      Instr.op(operator === 'ShiftLeft' ? `${prefix}.shl` : `${prefix}.shr_${signed ? 's' : 'u'}`),
+      ...(operator === 'ShiftLeft' ? normalizeSubword(bits, signed) : []),
+    ]
+  }
+  if (bits >= 32) {
+    return [
+      ...validate,
+      Instr.localGet(left),
+      Instr.localGet(right),
+      Instr.op(`${prefix}.${operator === 'RotateLeft' ? 'rotl' : 'rotr'}`),
+    ]
+  }
+  const mask = 2 ** bits - 1
+  const leftShift = operator === 'RotateLeft' ? 'i32.shl' : 'i32.shr_u'
+  const rightShift = operator === 'RotateLeft' ? 'i32.shr_u' : 'i32.shl'
+  return [
+    ...validate,
+    Instr.localGet(left),
+    Instr.i32Const(mask),
+    Instr.op('i32.and'),
+    Instr.localGet(right),
+    Instr.op(leftShift),
+    Instr.localGet(left),
+    Instr.i32Const(mask),
+    Instr.op('i32.and'),
+    Instr.i32Const(bits),
+    Instr.localGet(right),
+    Instr.op('i32.sub'),
+    Instr.op(rightShift),
+    Instr.op('i32.or'),
+    ...normalizeSubword(bits, signed),
+  ]
+}
+
 /**
  * The wasm local layout of one lowered function. MIR locals occupy the first slots — parameters
  * bind to the leading ones, exactly as in MIR — followed by the emission's own scratch slot.
@@ -311,6 +625,8 @@ const checkedUnsignedArithmetic = (
 interface Layout {
   /** Holds a checked arithmetic operation's wrapped result while it is being verified. */
   readonly scratch: number
+  /** The corresponding scratch lane for 64-bit integer operations. */
+  readonly scratch64: number
   readonly frameBase?: number
   readonly frameEnd?: number
   readonly framePages?: number
@@ -322,6 +638,237 @@ interface Layout {
   /** Incoming address parameter for each capture represented internally by its loaded value lanes. */
   readonly borrowPointers: ReadonlyMap<number, number>
   readonly types: ReadonlyArray<Mir.Type>
+}
+
+const saturatingWideArithmetic = (
+  shape: OverflowShape,
+  left: number,
+  right: number,
+  scratch: number,
+  bits: 32 | 64,
+  unsigned: boolean,
+): ReadonlyArray<Instr.Instr> => {
+  const prefix = bits === 64 ? 'i64' : 'i32'
+  const constant = (value: bigint): Instr.Instr =>
+    bits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+  const minimum = unsigned ? 0n : -(1n << BigInt(bits - 1))
+  const maximum = unsigned ? (1n << BigInt(bits)) - 1n : (1n << BigInt(bits - 1)) - 1n
+  const operation: Instr.PlainMnemonic =
+    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
+  const compute = [
+    Instr.localGet(left),
+    Instr.localGet(right),
+    Instr.op(operation),
+    Instr.localSet(scratch),
+  ]
+  const overflowed: ReadonlyArray<Instr.Instr> = unsigned
+    ? shape === 'Add'
+      ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
+      : shape === 'Subtract'
+        ? [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
+        : [
+            Instr.localGet(right),
+            Instr.op(`${prefix}.eqz`),
+            Instr.ifElse(
+              Instr.valueBlockType(i32),
+              [Instr.i32Const(0)],
+              [
+                Instr.localGet(scratch),
+                Instr.localGet(right),
+                Instr.op(`${prefix}.div_u`),
+                Instr.localGet(left),
+                Instr.op(`${prefix}.ne`),
+              ],
+            ),
+          ]
+    : shape === 'Multiply'
+      ? [
+          Instr.localGet(right),
+          Instr.op(`${prefix}.eqz`),
+          Instr.ifElse(
+            Instr.valueBlockType(i32),
+            [Instr.i32Const(0)],
+            [
+              Instr.localGet(left),
+              constant(minimum),
+              Instr.op(`${prefix}.eq`),
+              Instr.localGet(right),
+              constant(-1n),
+              Instr.op(`${prefix}.eq`),
+              Instr.op('i32.and'),
+              Instr.ifElse(
+                Instr.valueBlockType(i32),
+                [Instr.i32Const(1)],
+                [
+                  Instr.localGet(scratch),
+                  Instr.localGet(right),
+                  Instr.op(`${prefix}.div_s`),
+                  Instr.localGet(left),
+                  Instr.op(`${prefix}.ne`),
+                ],
+              ),
+            ],
+          ),
+        ]
+      : [
+          Instr.localGet(left),
+          Instr.localGet(right),
+          Instr.op(`${prefix}.xor`),
+          constant(0n),
+          Instr.op(shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`),
+          Instr.localGet(left),
+          Instr.localGet(scratch),
+          Instr.op(`${prefix}.xor`),
+          constant(0n),
+          Instr.op(`${prefix}.lt_s`),
+          Instr.op('i32.and'),
+        ]
+  const saturation = unsigned
+    ? [constant(shape === 'Subtract' ? minimum : maximum)]
+    : [
+        constant(minimum),
+        constant(maximum),
+        Instr.localGet(left),
+        ...(shape === 'Multiply' ? [Instr.localGet(right), Instr.op(`${prefix}.xor`)] : []),
+        constant(0n),
+        Instr.op(`${prefix}.lt_s`),
+        Instr.op('select'),
+      ]
+  return [...compute, ...saturation, Instr.localGet(scratch), ...overflowed, Instr.op('select')]
+}
+
+const emitIntegerBinaryValue = (
+  operator: Mir.BinaryOperator,
+  integer: Scalar.IntegerScalar,
+  left: number,
+  right: number,
+  layout: Layout,
+  pointerBits: 32 | 64,
+): ReadonlyArray<Instr.Instr> => {
+  const bits = Scalar.bits(integer, pointerBits)
+  const unsigned = integer.signedness === 'Unsigned'
+  const comparison =
+    bits === 64
+      ? (unsigned ? unsignedI64Comparisons : i64Comparisons)[operator]
+      : (unsigned ? unsignedComparisons : comparisons)[operator]
+  if (comparison !== undefined)
+    return [Instr.localGet(left), Instr.localGet(right), Instr.op(comparison)]
+
+  const division =
+    bits === 64
+      ? (unsigned ? unsignedI64Divisions : i64Divisions)[operator]
+      : (unsigned ? unsignedDivisions : divisions)[operator]
+  if (division !== undefined) {
+    const result = [Instr.localGet(left), Instr.localGet(right), Instr.op(division)]
+    if (bits >= 32 || operator !== 'Divide') return result
+    const range = Scalar.range(integer, pointerBits)
+    return [
+      ...result,
+      Instr.localSet(layout.scratch),
+      Instr.localGet(layout.scratch),
+      Instr.i32Const(Number(range.minimum)),
+      Instr.op(unsigned ? 'i32.lt_u' : 'i32.lt_s'),
+      Instr.localGet(layout.scratch),
+      Instr.i32Const(Number(range.maximum)),
+      Instr.op(unsigned ? 'i32.gt_u' : 'i32.gt_s'),
+      Instr.op('i32.or'),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      Instr.localGet(layout.scratch),
+    ]
+  }
+
+  const simple = wrappingOrBitwise(operator, left, right, bits, !unsigned)
+  if (simple !== undefined) return simple
+  const shifted = shiftOrRotate(operator, left, right, bits, !unsigned)
+  if (shifted !== undefined) return shifted
+
+  const shape: OverflowShape | undefined =
+    operator === 'Add' || operator === 'SaturatingAdd'
+      ? 'Add'
+      : operator === 'Subtract' || operator === 'SaturatingSubtract'
+        ? 'Subtract'
+        : operator === 'Multiply' || operator === 'SaturatingMultiply'
+          ? 'Multiply'
+          : undefined
+  if (shape === undefined) throw new RangeError(`Wasm integer operation ${operator} is unavailable`)
+  const saturating = operator.startsWith('Saturating')
+  if (bits < 32) {
+    const range = Scalar.range(integer, pointerBits)
+    return saturating
+      ? saturatingSubwordArithmetic(
+          shape,
+          left,
+          right,
+          layout.scratch,
+          range.minimum,
+          range.maximum,
+          unsigned,
+        )
+      : checkedSubwordArithmetic(
+          shape,
+          left,
+          right,
+          layout.scratch,
+          range.minimum,
+          range.maximum,
+          unsigned,
+        )
+  }
+  const laneBits = bits === 64 ? 64 : 32
+  const scratch = laneBits === 64 ? layout.scratch64 : layout.scratch
+  return saturating
+    ? saturatingWideArithmetic(shape, left, right, scratch, laneBits, unsigned)
+    : (unsigned ? checkedUnsignedArithmetic : checkedArithmetic)(
+        shape,
+        left,
+        right,
+        scratch,
+        laneBits,
+      )
+}
+
+const emitIntegerConversionValue = (
+  source: Scalar.IntegerScalar,
+  target: Scalar.IntegerScalar,
+  input: number,
+  pointerBits: 32 | 64,
+): ReadonlyArray<Instr.Instr> => {
+  const sourceBits = Scalar.bits(source, pointerBits)
+  const targetBits = Scalar.bits(target, pointerBits)
+  const sourceRange = Scalar.range(source, pointerBits)
+  const targetRange = Scalar.range(target, pointerBits)
+  const sourcePrefix = sourceBits === 64 ? 'i64' : 'i32'
+  const sourceConstant = (value: bigint): Instr.Instr =>
+    sourceBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+  const checks: Array<Instr.Instr> = []
+  if (targetRange.minimum > sourceRange.minimum) {
+    checks.push(
+      Instr.localGet(input),
+      sourceConstant(targetRange.minimum),
+      Instr.op(`${sourcePrefix}.lt_${source.signedness === 'Signed' ? 's' : 'u'}`),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    )
+  }
+  if (targetRange.maximum < sourceRange.maximum) {
+    checks.push(
+      Instr.localGet(input),
+      sourceConstant(targetRange.maximum),
+      Instr.op(`${sourcePrefix}.gt_${source.signedness === 'Signed' ? 's' : 'u'}`),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    )
+  }
+  const conversion: ReadonlyArray<Instr.Instr> =
+    sourceBits < 64 && targetBits === 64
+      ? [Instr.op(`i64.extend_i32_${source.signedness === 'Signed' ? 's' : 'u'}`)]
+      : sourceBits === 64 && targetBits < 64
+        ? [Instr.op('i32.wrap_i64')]
+        : []
+  return [
+    ...checks,
+    Instr.localGet(input),
+    ...conversion,
+    ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+  ]
 }
 
 interface MemoryContext {
@@ -382,29 +929,43 @@ const layoutOf = (
   for (const [ordinal] of borrowPointers) {
     const type = fn.localTypes.at(ordinal)
     if (type === undefined) throw new RangeError(`Wasm backend lost borrow %${ordinal}`)
-    const localSlots = logicalLanes(type).map(() => physical++)
+    const logical = logicalLanes(type)
+    const localSlots = logical.map(() => physical++)
     slots[ordinal] = Object.freeze(localSlots)
-    for (const [lane] of localSlots.entries()) declared.push(named(i32, `borrow${ordinal}_${lane}`))
+    for (const [lane, logicalLane] of logical.entries())
+      declared.push(named(laneValueType(plan, logicalLane), `borrow${ordinal}_${lane}`))
   }
   for (let ordinal = fn.parameterCount; ordinal < fn.localTypes.length; ordinal += 1) {
     const type = fn.localTypes.at(ordinal)
     if (type === undefined) throw new RangeError(`Wasm backend lost local %${ordinal}`)
-    const localSlots = logicalLanes(type).map(() => physical++)
+    const logical = logicalLanes(type)
+    const localSlots = logical.map(() => physical++)
     slots.push(Object.freeze(localSlots))
-    for (const [lane] of localSlots.entries()) {
-      declared.push(named(i32, `local${ordinal}_${lane}`))
+    for (const [lane, logicalLane] of logical.entries()) {
+      declared.push(named(laneValueType(plan, logicalLane), `local${ordinal}_${lane}`))
     }
   }
   const scratch = physical
   declared.push(named(i32, 'scratch'))
-  const frameBase = frame.roots.size === 0 ? undefined : physical + 1
-  const frameEnd = frame.roots.size === 0 ? undefined : physical + 2
-  const framePages = frame.roots.size === 0 ? undefined : physical + 3
+  const needsScratch64 = lanes.some((localLanes) =>
+    localLanes.some(
+      (lane) =>
+        typeof lane.type === 'string' &&
+        Scalar.bits(Scalar.find(lane.type) ?? Scalar.defaultInteger, 32) === 64,
+    ),
+  )
+  const scratch64 = needsScratch64 ? physical + 1 : scratch
+  if (needsScratch64) declared.push(named(i64, 'scratch64'))
+  const internalCount = needsScratch64 ? 2 : 1
+  const frameBase = frame.roots.size === 0 ? undefined : physical + internalCount
+  const frameEnd = frame.roots.size === 0 ? undefined : physical + internalCount + 1
+  const framePages = frame.roots.size === 0 ? undefined : physical + internalCount + 2
   if (frameBase !== undefined && frameEnd !== undefined && framePages !== undefined) {
     declared.push(named(i32, 'frame_base'), named(i32, 'frame_end'), named(i32, 'frame_pages'))
   }
   return {
     scratch,
+    scratch64,
     declared: Object.freeze(declared),
     slots: Object.freeze(slots),
     lanes: Object.freeze(lanes),
@@ -1034,15 +1595,16 @@ const emitOperation = (
       }
       return emitDecisions()
     }
-    case 'Literal':
+    case 'Literal': {
+      const lane = layout.lanes.at(operation.destination.ordinal)?.at(0)
+      const exact = BigInt(operation.value)
       return [
-        Instr.i32Const(
-          operation.type._tag === 'Usize'
-            ? Number(BigInt.asIntN(32, BigInt(operation.value)))
-            : Number(operation.value),
-        ),
+        lane !== undefined && laneValueType(plan, lane) === i64
+          ? Instr.i64Const(BigInt.asIntN(64, exact))
+          : Instr.i32Const(Number(BigInt.asIntN(32, exact))),
         Instr.localSet(scalar(operation.destination)),
       ]
+    }
     case 'Move':
       return copy(slots(operation.source), slots(operation.destination))
     case 'BeginLoan':
@@ -1906,6 +2468,21 @@ const emitOperation = (
         ]
         const left = operandSlots.at(0)
         if (left === undefined) throw new RangeError('Wasm callable builtin lost its first operand')
+        const conversionTarget = Scalar.conversionTarget(target.operation)
+        if (conversionTarget !== undefined) {
+          const source = Scalar.find(target.actor)
+          if (source === undefined || source.category !== 'Integer')
+            throw new RangeError('Wasm callable conversion lost its source actor')
+          return [
+            ...emitIntegerConversionValue(
+              source,
+              conversionTarget,
+              left,
+              plan.target.pointerSize === 4 ? 32 : 64,
+            ),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
         if (target.operation === 'Not') {
           return [
             Instr.localGet(left),
@@ -1913,15 +2490,56 @@ const emitOperation = (
             Instr.localSet(scalar(operation.destination)),
           ]
         }
-        if (target.operation === 'Negate') {
+        if (
+          target.operation === 'Negate' ||
+          target.operation === 'WrappingNegate' ||
+          target.operation === 'SaturatingNegate' ||
+          target.operation === 'BitNot'
+        ) {
+          const integer = Scalar.find(target.actor)
+          if (integer === undefined || integer.category !== 'Integer') {
+            throw new RangeError('Wasm callable unary operation lost its integer actor')
+          }
+          const bits = Scalar.bits(integer, plan.target.pointerSize === 4 ? 32 : 64)
+          const range = Scalar.range(integer, plan.target.pointerSize === 4 ? 32 : 64)
+          const constant = (value: bigint): Instr.Instr =>
+            bits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+          const prefix = bits === 64 ? 'i64' : 'i32'
+          if (target.operation === 'BitNot') {
+            return [
+              Instr.localGet(left),
+              constant(-1n),
+              Instr.op(`${prefix}.xor`),
+              ...normalizeSubword(bits, integer.signedness === 'Signed'),
+              Instr.localSet(scalar(operation.destination)),
+            ]
+          }
+          if (target.operation === 'SaturatingNegate') {
+            return [
+              constant(range.maximum),
+              constant(0n),
+              Instr.localGet(left),
+              Instr.op(`${prefix}.sub`),
+              Instr.localGet(left),
+              constant(range.minimum),
+              Instr.op(`${prefix}.eq`),
+              Instr.op('select'),
+              Instr.localSet(scalar(operation.destination)),
+            ]
+          }
           return [
+            ...(target.operation === 'Negate'
+              ? [
+                  Instr.localGet(left),
+                  constant(range.minimum),
+                  Instr.op(`${prefix}.eq`),
+                  Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+                ]
+              : []),
+            constant(0n),
             Instr.localGet(left),
-            Instr.i32Const(-2147483648),
-            Instr.op('i32.eq'),
-            Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-            Instr.i32Const(0),
-            Instr.localGet(left),
-            Instr.op('i32.sub'),
+            Instr.op(`${prefix}.sub`),
+            ...normalizeSubword(bits, true),
             Instr.localSet(scalar(operation.destination)),
           ]
         }
@@ -1938,37 +2556,30 @@ const emitOperation = (
             `Wasm callable builtin ${target.actor}.${target.operation} is unavailable`,
           )
         }
-        const firstType = operation.arguments.at(0)
-        const unsigned =
-          firstType !== undefined && layout.types.at(firstType.ordinal)?._tag === 'Usize'
-        const comparison = (unsigned ? unsignedComparisons : comparisons)[target.operation]
-        if (comparison !== undefined) {
+        const scalarActor = Scalar.find(target.actor)
+        if (
+          scalarActor?.category === 'Boolean' &&
+          (target.operation === 'Equals' || target.operation === 'NotEquals')
+        ) {
           return [
             Instr.localGet(left),
             Instr.localGet(right),
-            Instr.op(comparison),
+            Instr.op(target.operation === 'Equals' ? 'i32.eq' : 'i32.ne'),
             Instr.localSet(scalar(operation.destination)),
           ]
         }
-        const division = (unsigned ? unsignedDivisions : divisions)[target.operation]
-        if (division !== undefined) {
-          return [
-            Instr.localGet(left),
-            Instr.localGet(right),
-            Instr.op(division),
-            Instr.localSet(scalar(operation.destination)),
-          ]
+        const integer = scalarActor
+        if (integer === undefined || integer.category !== 'Integer') {
+          throw new RangeError('Wasm callable binary lost its integer actor')
         }
         return [
-          ...(unsigned ? checkedUnsignedArithmetic : checkedArithmetic)(
-            target.operation === 'Add'
-              ? 'Add'
-              : target.operation === 'Subtract'
-                ? 'Subtract'
-                : 'Multiply',
+          ...emitIntegerBinaryValue(
+            target.operation,
+            integer,
             left,
             right,
-            layout.scratch,
+            layout,
+            plan.target.pointerSize === 4 ? 32 : 64,
           ),
           Instr.localSet(scalar(operation.destination)),
         ]
@@ -1982,37 +2593,192 @@ const emitOperation = (
         ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
       ]
     }
+    case 'ConvertInteger': {
+      const source = Scalar.find(operation.sourceType._tag)
+      const target = Scalar.find(operation.type._tag)
+      if (
+        source === undefined ||
+        source.category !== 'Integer' ||
+        target === undefined ||
+        target.category !== 'Integer'
+      )
+        throw new RangeError('Wasm integer conversion lost its scalar types')
+      return [
+        ...emitIntegerConversionValue(
+          source,
+          target,
+          scalar(operation.source),
+          plan.target.pointerSize === 4 ? 32 : 64,
+        ),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    case 'CheckedInteger': {
+      const destination = slots(operation.destination)
+      const tag = destination.at(0)
+      const payload = destination.at(1)
+      const left = operation.operands.at(0)
+      const right = operation.operands.at(1)
+      const source = Scalar.find(operation.sourceType._tag)
+      const target = Scalar.find(operation.valueType._tag)
+      if (
+        tag === undefined ||
+        payload === undefined ||
+        left === undefined ||
+        source?.category !== 'Integer' ||
+        target?.category !== 'Integer'
+      )
+        throw new RangeError('Wasm checked integer operation lost its Option lanes')
+      const leftSlot = scalar(left)
+      const rightSlot = right === undefined ? undefined : scalar(right)
+      const pointerBits = plan.target.pointerSize === 4 ? 32 : 64
+      const sourceBits = Scalar.bits(source, pointerBits)
+      const targetBits = Scalar.bits(target, pointerBits)
+      const sourcePrefix = sourceBits === 64 ? 'i64' : 'i32'
+      const targetPrefix = targetBits === 64 ? 'i64' : 'i32'
+      const sourceConstant = (value: bigint): Instr.Instr =>
+        sourceBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+      const targetConstant = (value: bigint): Instr.Instr =>
+        targetBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+      const successOrdinal = operation.type.type.members.findIndex((member) =>
+        SilkType.equals(member, operation.success),
+      )
+      const failureOrdinal = operation.type.type.members.findIndex((member) =>
+        SilkType.equals(member, operation.failure),
+      )
+      if (successOrdinal < 0 || failureOrdinal < 0)
+        throw new RangeError('Wasm checked integer operation lost its Option members')
+      const setTag = [
+        Instr.i32Const(failureOrdinal),
+        Instr.i32Const(successOrdinal),
+        Instr.localGet(tag),
+        Instr.op('select'),
+        Instr.localSet(tag),
+      ]
+      if (operation.operation.startsWith('CheckedConvertTo')) {
+        const sourceRange = Scalar.range(source, pointerBits)
+        const targetRange = Scalar.range(target, pointerBits)
+        const invalid: Array<Instr.Instr> = []
+        if (targetRange.minimum > sourceRange.minimum)
+          invalid.push(
+            Instr.localGet(leftSlot),
+            sourceConstant(targetRange.minimum),
+            Instr.op(`${sourcePrefix}.lt_${source.signedness === 'Signed' ? 's' : 'u'}`),
+          )
+        if (targetRange.maximum < sourceRange.maximum) {
+          invalid.push(
+            Instr.localGet(leftSlot),
+            sourceConstant(targetRange.maximum),
+            Instr.op(`${sourcePrefix}.gt_${source.signedness === 'Signed' ? 's' : 'u'}`),
+          )
+          if (targetRange.minimum > sourceRange.minimum) invalid.push(Instr.op('i32.or'))
+        }
+        const conversion: ReadonlyArray<Instr.Instr> =
+          sourceBits < 64 && targetBits === 64
+            ? [Instr.op(`i64.extend_i32_${source.signedness === 'Signed' ? 's' : 'u'}`)]
+            : sourceBits === 64 && targetBits < 64
+              ? [Instr.op('i32.wrap_i64')]
+              : []
+        return [
+          ...(invalid.length === 0 ? [Instr.i32Const(0)] : invalid),
+          Instr.localSet(tag),
+          ...setTag,
+          Instr.localGet(leftSlot),
+          ...conversion,
+          ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+          Instr.localSet(payload),
+        ]
+      }
+      if (rightSlot === undefined)
+        throw new RangeError('Wasm checked arithmetic lost its right operand')
+      if (
+        operation.operation === 'CheckedAdd' ||
+        operation.operation === 'CheckedSubtract' ||
+        operation.operation === 'CheckedMultiply'
+      ) {
+        const shape: OverflowShape =
+          operation.operation === 'CheckedAdd'
+            ? 'Add'
+            : operation.operation === 'CheckedSubtract'
+              ? 'Subtract'
+              : 'Multiply'
+        const resultScratch = targetBits === 64 ? layout.scratch64 : layout.scratch
+        return [
+          ...checkedArithmeticOutcome(
+            shape,
+            target,
+            leftSlot,
+            rightSlot,
+            resultScratch,
+            pointerBits,
+          ),
+          Instr.localSet(tag),
+          ...setTag,
+          Instr.localGet(resultScratch),
+          ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+          Instr.localSet(payload),
+        ]
+      }
+      const minimum = Scalar.range(target, pointerBits).minimum
+      const signedOverflow =
+        target.signedness === 'Signed' && operation.operation === 'CheckedDivide'
+          ? [
+              Instr.localGet(leftSlot),
+              targetConstant(minimum),
+              Instr.op(`${targetPrefix}.eq`),
+              Instr.localGet(rightSlot),
+              targetConstant(-1n),
+              Instr.op(`${targetPrefix}.eq`),
+              Instr.op('i32.and'),
+            ]
+          : [Instr.i32Const(0)]
+      const division: Instr.PlainMnemonic =
+        operation.operation === 'CheckedDivide'
+          ? `${targetPrefix}.div_${target.signedness === 'Signed' ? 's' : 'u'}`
+          : `${targetPrefix}.rem_${target.signedness === 'Signed' ? 's' : 'u'}`
+      return [
+        Instr.localGet(rightSlot),
+        Instr.op(`${targetPrefix}.eqz`),
+        ...signedOverflow,
+        Instr.op('i32.or'),
+        Instr.localSet(tag),
+        Instr.localGet(tag),
+        Instr.ifElse(
+          Instr.valueBlockType(targetBits === 64 ? i64 : i32),
+          [targetConstant(0n)],
+          [Instr.localGet(leftSlot), Instr.localGet(rightSlot), Instr.op(division)],
+        ),
+        ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+        Instr.localSet(payload),
+        ...setTag,
+      ]
+    }
     case 'Binary': {
       const leftType = layout.types.at(operation.left.ordinal)
-      const unsigned = leftType?._tag === 'Usize'
-      const comparison = (unsigned ? unsignedComparisons : comparisons)[operation.operator]
-      if (comparison !== undefined) {
+      const semantic = leftType === undefined ? undefined : Mir.semanticType(leftType)
+      const scalarType = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
+      if (
+        scalarType?.category === 'Boolean' &&
+        (operation.operator === 'Equals' || operation.operator === 'NotEquals')
+      ) {
         return [
           Instr.localGet(scalar(operation.left)),
           Instr.localGet(scalar(operation.right)),
-          Instr.op(comparison),
+          Instr.op(operation.operator === 'Equals' ? 'i32.eq' : 'i32.ne'),
           Instr.localSet(scalar(operation.destination)),
         ]
       }
-      const division = (unsigned ? unsignedDivisions : divisions)[operation.operator]
-      if (division !== undefined) {
-        return [
-          Instr.localGet(scalar(operation.left)),
-          Instr.localGet(scalar(operation.right)),
-          Instr.op(division),
-          Instr.localSet(scalar(operation.destination)),
-        ]
-      }
+      const integer = scalarType
+      if (integer === undefined || integer.category !== 'Integer')
+        throw new RangeError(`Wasm binary operation ${operation.operator} lost its integer type`)
       return [
-        ...(unsigned ? checkedUnsignedArithmetic : checkedArithmetic)(
-          operation.operator === 'Add'
-            ? 'Add'
-            : operation.operator === 'Subtract'
-              ? 'Subtract'
-              : 'Multiply',
+        ...emitIntegerBinaryValue(
+          operation.operator,
+          integer,
           scalar(operation.left),
           scalar(operation.right),
-          layout.scratch,
+          layout,
+          plan.target.pointerSize === 4 ? 32 : 64,
         ),
         Instr.localSet(scalar(operation.destination)),
       ]
@@ -2226,28 +2992,26 @@ const emitBody = (
 
 const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
   Effect.gen(function* () {
-    const i32Layout = LayoutPlan.entry(program.layout, 'I32')
+    const i32Layout = LayoutPlan.entry(program.layout, 'i32')
     if (i32Layout === undefined) {
       return yield* new Backend.BackendError({
         operation: 'Backend.emit',
         backend: 'WebAssembly',
-        message: 'WebAssembly requires the planned I32 representation',
+        message: 'WebAssembly requires the planned i32 representation',
         reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
       })
     }
-    // WebAssembly realizes both canonical scalar entries as its four-byte i32 value type.
+    // Boolean retains the canonical i32 lane; integer entries keep their logical width while
+    // subword values are normalized in i32 lanes and 64-bit values use i64 lanes.
     if (
       program.layout.entries.some(
-        (entry) =>
-          (entry.representation._tag === 'SignedInteger' ||
-            entry.representation._tag === 'Boolean') &&
-          entry.representation.bits !== 32,
+        (entry) => entry.representation._tag === 'Boolean' && entry.representation.bits !== 32,
       )
     ) {
       return yield* new Backend.BackendError({
         operation: 'Backend.emit',
         backend: 'WebAssembly',
-        message: 'WebAssembly requires the canonical 32-bit I32 representation',
+        message: 'WebAssembly requires the canonical 32-bit i32 representation',
         reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
       })
     }
@@ -2337,8 +3101,8 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           ? []
           : fn.localTypes
               .slice(0, fn.parameterCount)
-              .flatMap((type) => lanesFor(type).map(() => i32)),
-        lanesFor(fn.result).map(() => i32),
+              .flatMap((type) => lanesFor(type).map((lane) => laneValueType(program.layout, lane))),
+        lanesFor(fn.result).map((lane) => laneValueType(program.layout, lane)),
       )
       const symbol = symbolFor(fn, Mir.machineEntry(program))
       declared.push({

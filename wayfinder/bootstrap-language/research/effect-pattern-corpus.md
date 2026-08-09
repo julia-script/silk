@@ -1310,8 +1310,8 @@ The callable review resolves a gap in the earlier corpus: pipelines are not argu
 syntax, and Effect combinators do not receive a privileged callback category. Named functions and
 automatic leading-argument sections are ordinary values with compiler-derived environments.
 
-1. **Reusable Copy mapper:** `succeed(2) |> Effect.map(I32.add(40))` snapshots `40`; the section is
-   shared reusable and can also be stored and called as `I32.add(40)(2)`.
+1. **Reusable Copy mapper:** `succeed(2) |> Effect.map(i32.add(40))` snapshots `40`; the section is
+   shared reusable and can also be stored and called as `i32.add(40)(2)`.
 2. **Exclusive stateful mapper:** a section such as `increment(&mut state)` retains one exclusive
    borrow. The mapped Effect requires exclusive execution, sequential runs observe the same state,
    and dropping the composition ends the loan.

@@ -46,8 +46,8 @@ whose type is unavailable SHALL retain an explicit failed projection and exact c
 
 #### Scenario: Read a scalar field
 
-- **WHEN** `pair.left` projects an `I32` field from an available `Pair`
-- **THEN** the projection identifies `Pair.left` canonically and produces an `I32` value without consuming `pair`
+- **WHEN** `pair.left` projects an `i32` field from an available `Pair`
+- **THEN** the projection identifies `Pair.left` canonically and produces an `i32` value without consuming `pair`
 
 #### Scenario: Project through nested structs
 

@@ -17,9 +17,9 @@ capability.
 
 #### Scenario: Keyword scoping
 
-- **WHEN** the grammar tokenizes `pub fn main() -> I32 { return 42 }`
+- **WHEN** the grammar tokenizes `pub fn main() -> i32 { return 42 }`
 - **THEN** `pub` and `fn` receive declaration/storage keyword scopes, `return` receives a control
-  keyword scope, `main` receives a function-name scope, `I32` receives a type scope, and `42`
+  keyword scope, `main` receives a function-name scope, `i32` receives a type scope, and `42`
   receives a numeric scope
 
 #### Scenario: Doc comment scoping

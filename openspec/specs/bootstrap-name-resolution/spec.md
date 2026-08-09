@@ -62,7 +62,7 @@ diagnostic.
 ### Requirement: One flat top-level namespace forbids collisions
 
 Local top-level declarations, namespace imports, selected-member imports, and the bootstrap's
-compiler-known `I32` and `Bool` actor namespaces SHALL occupy one flat module namespace. The
+compiler-known `i32` and `bool` actor namespaces SHALL occupy one flat module namespace. The
 compiler-known actors are intrinsic language bindings rather than an implicit import or prelude. If
 two otherwise valid bindings claim the same local spelling, resolution SHALL report the complete
 collision deterministically and SHALL NOT select a winner using declaration kind, import order, or
@@ -81,7 +81,7 @@ explicitly unavailable with the collision diagnostic as their cause.
 
 #### Scenario: Protect an intrinsic actor name
 
-- **WHEN** a local declaration or import attempts to bind `I32` or `Bool`
+- **WHEN** a local declaration or import attempts to bind `i32` or `bool`
 - **THEN** the module scope reports a collision with the intrinsic actor binding rather than shadowing compiler-known operations
 
 #### Scenario: Repeat collision analysis deterministically

@@ -58,7 +58,7 @@ Every successful driver outcome SHALL retain the canonical backend identifier, t
 
 The fixed corpus SHALL run through both the interpreter and native compilation-and-execution as
 part of the test suite CI enforces. For completing programs the native exit status SHALL equal
-the interpreter's `I32` result; trap-blocked programs SHALL terminate abnormally natively;
+the interpreter's `i32` result; trap-blocked programs SHALL terminate abnormally natively;
 recursion-blocked programs SHALL still compile. A disagreement SHALL fail the build naming the
 program and both sides' outcomes.
 
@@ -107,7 +107,7 @@ downstream work.
 
 #### Scenario: Compile through a public factory
 
-- **WHEN** a root module calls another module's public factory, passes the returned struct through an internal function, and returns a projected `I32`
+- **WHEN** a root module calls another module's public factory, passes the returned struct through an internal function, and returns a projected `i32`
 - **THEN** the driver produces a native executable whose exit result matches MIR evaluation
 
 #### Scenario: Refuse external raw construction
@@ -293,16 +293,16 @@ standalone binding, non-Copy extraction, unrepresentable length, and runtime out
 - **WHEN** each invalid slice fixture is compiled repeatedly in fresh processes
 - **THEN** it yields the same phase-owned diagnostic or runtime trap without producing a successful conflicting artifact
 
-### Requirement: Usize has target-aware differential acceptance
+### Requirement: usize has target-aware differential acceptance
 
-The compiler acceptance surface SHALL compare evaluator, native, and Wasm results for `Usize`
+The compiler acceptance surface SHALL compare evaluator, native, and Wasm results for `usize`
 programs whose values fit 32 bits, compare evaluator and native results above 32 bits, and require
 Wasm target rejection for out-of-range literals before emission. Fresh-process runs SHALL preserve
 identical facts, layouts, MIR, textual artifacts, and binary artifacts for the same target.
 
 #### Scenario: Compare the shared range
 
-- **WHEN** a canonical fixture uses checked `Usize` arithmetic entirely within the 32-bit range
+- **WHEN** a canonical fixture uses checked `usize` arithmetic entirely within the 32-bit range
 - **THEN** evaluator, native execution, and Wasm execution return the same unsigned value
 
 #### Scenario: Compare the native-only range

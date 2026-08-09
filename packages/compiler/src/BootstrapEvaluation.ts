@@ -4,6 +4,7 @@ import type * as Instances from './Instances.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
+import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -23,6 +24,13 @@ export interface I32Value {
 /** An exact target-sized unsigned integer, independent of host number precision. */
 export interface UsizeValue {
   readonly _tag: 'UsizeValue'
+  readonly value: bigint
+}
+
+/** An exact fixed- or target-width integer outside the legacy i32/usize value views. */
+export interface ScalarIntegerValue {
+  readonly _tag: 'ScalarIntegerValue'
+  readonly type: Scalar.IntegerSpelling
   readonly value: bigint
 }
 
@@ -137,6 +145,7 @@ export interface SlotValue {
 export type Value =
   | I32Value
   | UsizeValue
+  | ScalarIntegerValue
   | AggregateValue
   | ArrayValue
   | SliceValue
@@ -407,6 +416,15 @@ type Step =
 const value = (input: number): I32Value => Object.freeze({ _tag: 'I32Value', value: input })
 const usizeValue = (input: bigint): UsizeValue =>
   Object.freeze({ _tag: 'UsizeValue', value: input })
+const scalarIntegerValue = (
+  type: Scalar.IntegerSpelling,
+  input: bigint,
+): I32Value | UsizeValue | ScalarIntegerValue =>
+  type === 'i32'
+    ? value(Number(input))
+    : type === 'usize'
+      ? usizeValue(input)
+      : Object.freeze({ _tag: 'ScalarIntegerValue', type, value: input })
 
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
@@ -507,9 +525,21 @@ function executeFunction(
     return found
   }
 
-  const readInteger = (local: Mir.LocalId): I32Value | UsizeValue => {
+  const readUsize = (local: Mir.LocalId): UsizeValue => {
     const found = read(local).value
-    if (found._tag !== 'I32Value' && found._tag !== 'UsizeValue') {
+    if (found._tag !== 'UsizeValue') {
+      throw new RangeError(`MIR verifier allowed non-usize local %${local.ordinal} as an index`)
+    }
+    return found
+  }
+
+  const readInteger = (local: Mir.LocalId): I32Value | UsizeValue | ScalarIntegerValue => {
+    const found = read(local).value
+    if (
+      found._tag !== 'I32Value' &&
+      found._tag !== 'UsizeValue' &&
+      found._tag !== 'ScalarIntegerValue'
+    ) {
       throw new RangeError(`MIR verifier allowed aggregate local %${local.ordinal} as an integer`)
     }
     return found
@@ -752,17 +782,152 @@ function executeFunction(
     }
 
     const operation = target.operation
-    if (operation === 'Not' || operation === 'Negate') {
+    const conversionTarget = Scalar.conversionTarget(operation)
+    if (Scalar.isCheckedOperation(operation)) {
+      const source = Scalar.find(target.actor)
+      const resultScalar = conversionTarget ?? source
+      const leftValue = arguments_.at(0)
+      const rightValue = arguments_.at(1)
+      if (
+        source?.category !== 'Integer' ||
+        resultScalar?.category !== 'Integer' ||
+        leftValue === undefined ||
+        (leftValue._tag !== 'I32Value' &&
+          leftValue._tag !== 'UsizeValue' &&
+          leftValue._tag !== 'ScalarIntegerValue')
+      )
+        throw new RangeError('MIR verifier allowed an invalid checked callable')
+      const left = BigInt(leftValue.value)
+      const right =
+        rightValue !== undefined &&
+        (rightValue._tag === 'I32Value' ||
+          rightValue._tag === 'UsizeValue' ||
+          rightValue._tag === 'ScalarIntegerValue')
+          ? BigInt(rightValue.value)
+          : undefined
+      const exact = operation.startsWith('CheckedConvertTo')
+        ? left
+        : operation === 'CheckedAdd' && right !== undefined
+          ? left + right
+          : operation === 'CheckedSubtract' && right !== undefined
+            ? left - right
+            : operation === 'CheckedMultiply' && right !== undefined
+              ? left * right
+              : operation === 'CheckedDivide' && right !== undefined && right !== 0n
+                ? left / right
+                : operation === 'CheckedRemainder' && right !== undefined && right !== 0n
+                  ? left % right
+                  : undefined
+      const range = Scalar.range(resultScalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+      const succeeded = exact !== undefined && exact >= range.minimum && exact <= range.maximum
+      const semantic = Type.option(resultScalar.spelling)
+      if (!Type.isUnion(semantic))
+        throw new RangeError('Canonical Option did not normalize to a structural union')
+      const member = succeeded ? Type.some(resultScalar.spelling) : Type.none
+      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
+      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
+        throw new RangeError('Target plan omitted a canonical callable Option member')
+      return Object.freeze({
+        _tag: 'Value',
+        value: Object.freeze({
+          _tag: 'UnionValue',
+          type: semantic,
+          member,
+          payload: Object.freeze({
+            _tag: 'AggregateValue',
+            type: member,
+            fields: Object.freeze(
+              succeeded
+                ? entry.representation.fields.map((field) =>
+                    Object.freeze({
+                      field: field.id,
+                      value: scalarIntegerValue(resultScalar.spelling, exact),
+                    }),
+                  )
+                : [],
+            ),
+          }),
+        }),
+      })
+    }
+    if (conversionTarget !== undefined) {
       const subject = arguments_.at(0)
-      if (subject?._tag !== 'I32Value') {
+      if (
+        subject === undefined ||
+        (subject._tag !== 'I32Value' &&
+          subject._tag !== 'UsizeValue' &&
+          subject._tag !== 'ScalarIntegerValue')
+      )
+        throw new RangeError('MIR verifier allowed a non-integer conversion argument')
+      const exact = BigInt(subject.value)
+      const range = Scalar.range(
+        conversionTarget,
+        program.layout.target.pointerSize === 4 ? 32 : 64,
+      )
+      if (exact < range.minimum || exact > range.maximum)
+        return blockedStep({
+          _tag: 'Trap',
+          function: fn.id,
+          reason: 'integer conversion out of range',
+          span,
+        })
+      return Object.freeze({
+        _tag: 'Value',
+        value: scalarIntegerValue(conversionTarget.spelling, exact),
+      })
+    }
+    if (
+      operation === 'Not' ||
+      operation === 'Negate' ||
+      operation === 'BitNot' ||
+      operation === 'WrappingNegate' ||
+      operation === 'SaturatingNegate'
+    ) {
+      const subject = arguments_.at(0)
+      if (
+        subject === undefined ||
+        (subject._tag !== 'I32Value' &&
+          subject._tag !== 'UsizeValue' &&
+          subject._tag !== 'ScalarIntegerValue')
+      ) {
         throw new RangeError('MIR verifier allowed a non-scalar unary callable argument')
       }
       if (operation === 'Not')
         return Object.freeze({ _tag: 'Value', value: value(subject.value === 0 ? 1 : 0) })
-      if (subject.value === -2147483648) {
+      const scalar = Scalar.find(target.actor)
+      if (scalar === undefined || scalar.category !== 'Integer') {
+        throw new RangeError('MIR verifier allowed a non-integer negate callable')
+      }
+      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+      const width = Scalar.bits(scalar, pointerBits)
+      const raw = BigInt(subject.value)
+      const exact =
+        operation === 'BitNot'
+          ? scalar.signedness === 'Signed'
+            ? BigInt.asIntN(width, ~raw)
+            : BigInt.asUintN(width, ~raw)
+          : -raw
+      const range = Scalar.range(scalar, pointerBits)
+      if (operation === 'Negate' && (exact < range.minimum || exact > range.maximum)) {
         return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'arithmetic overflow', span })
       }
-      return Object.freeze({ _tag: 'Value', value: value(-subject.value) })
+      return Object.freeze({
+        _tag: 'Value',
+        value: scalarIntegerValue(
+          scalar.spelling,
+          operation === 'WrappingNegate'
+            ? scalar.signedness === 'Signed'
+              ? BigInt.asIntN(width, exact)
+              : BigInt.asUintN(width, exact)
+            : operation === 'SaturatingNegate'
+              ? exact > range.maximum
+                ? range.maximum
+                : exact < range.minimum
+                  ? range.minimum
+                  : exact
+              : exact,
+        ),
+      })
     }
     if (
       operation === 'Add' ||
@@ -775,15 +940,38 @@ function executeFunction(
       operation === 'LessThan' ||
       operation === 'LessOrEqual' ||
       operation === 'GreaterThan' ||
-      operation === 'GreaterOrEqual'
+      operation === 'GreaterOrEqual' ||
+      operation === 'BitAnd' ||
+      operation === 'BitOr' ||
+      operation === 'BitXor' ||
+      operation === 'ShiftLeft' ||
+      operation === 'ShiftRight' ||
+      operation === 'RotateLeft' ||
+      operation === 'RotateRight' ||
+      operation === 'WrappingAdd' ||
+      operation === 'WrappingSubtract' ||
+      operation === 'WrappingMultiply' ||
+      operation === 'SaturatingAdd' ||
+      operation === 'SaturatingSubtract' ||
+      operation === 'SaturatingMultiply'
     ) {
       const leftValue = arguments_.at(0)
       const rightValue = arguments_.at(1)
       if (
-        (leftValue?._tag !== 'I32Value' && leftValue?._tag !== 'UsizeValue') ||
-        rightValue?._tag !== leftValue._tag
+        leftValue === undefined ||
+        rightValue === undefined ||
+        (leftValue._tag !== 'I32Value' &&
+          leftValue._tag !== 'UsizeValue' &&
+          leftValue._tag !== 'ScalarIntegerValue') ||
+        (rightValue._tag !== 'I32Value' &&
+          rightValue._tag !== 'UsizeValue' &&
+          rightValue._tag !== 'ScalarIntegerValue')
       ) {
         throw new RangeError('MIR verifier allowed invalid binary callable arguments')
+      }
+      const scalar = Scalar.find(target.actor)
+      if (scalar === undefined || scalar.category !== 'Integer') {
+        throw new RangeError('MIR verifier allowed a non-integer binary callable')
       }
       const left = BigInt(leftValue.value)
       const right = BigInt(rightValue.value)
@@ -812,32 +1000,100 @@ function executeFunction(
       if ((operation === 'Divide' || operation === 'Remainder') && right === 0n) {
         return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'division by zero', span })
       }
-      const exact =
-        operation === 'Add'
-          ? left + right
-          : operation === 'Subtract'
-            ? left - right
-            : operation === 'Multiply'
-              ? left * right
-              : operation === 'Divide'
-                ? left / right
-                : left % right
-      const unsigned = leftValue._tag === 'UsizeValue'
-      const maximum = program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+      const width = Scalar.bits(scalar, pointerBits)
       if (
-        (unsigned && (exact < 0n || exact > maximum)) ||
-        (!unsigned && (exact < -2147483648n || exact > 2147483647n))
+        (operation === 'ShiftLeft' || operation === 'ShiftRight') &&
+        (right < 0n || right >= BigInt(width))
       ) {
         return blockedStep({
           _tag: 'Trap',
           function: fn.id,
-          reason: unsigned && exact < 0n ? 'arithmetic underflow' : 'arithmetic overflow',
+          reason: `invalid ${operation} count ${right}`,
           span,
         })
       }
+      const fromBits = (input: bigint): bigint =>
+        scalar.signedness === 'Signed' ? BigInt.asIntN(width, input) : BigInt.asUintN(width, input)
+      const leftBits = BigInt.asUintN(width, left)
+      const rightBits = BigInt.asUintN(width, right)
+      const rotate = Number(right % BigInt(width))
+      const rotatedLeft =
+        rotate === 0
+          ? leftBits
+          : BigInt.asUintN(
+              width,
+              (leftBits << BigInt(rotate)) | (leftBits >> BigInt(width - rotate)),
+            )
+      const rotatedRight =
+        rotate === 0
+          ? leftBits
+          : BigInt.asUintN(
+              width,
+              (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)),
+            )
+      const exact =
+        operation === 'Add' || operation === 'WrappingAdd' || operation === 'SaturatingAdd'
+          ? left + right
+          : operation === 'Subtract' ||
+              operation === 'WrappingSubtract' ||
+              operation === 'SaturatingSubtract'
+            ? left - right
+            : operation === 'Multiply' ||
+                operation === 'WrappingMultiply' ||
+                operation === 'SaturatingMultiply'
+              ? left * right
+              : operation === 'Divide'
+                ? left / right
+                : operation === 'Remainder'
+                  ? left % right
+                  : operation === 'BitAnd'
+                    ? fromBits(leftBits & rightBits)
+                    : operation === 'BitOr'
+                      ? fromBits(leftBits | rightBits)
+                      : operation === 'BitXor'
+                        ? fromBits(leftBits ^ rightBits)
+                        : operation === 'ShiftLeft'
+                          ? fromBits(leftBits << right)
+                          : operation === 'ShiftRight'
+                            ? scalar.signedness === 'Signed'
+                              ? left >> right
+                              : fromBits(leftBits >> right)
+                            : operation === 'RotateLeft'
+                              ? fromBits(rotatedLeft)
+                              : fromBits(rotatedRight)
+      const range = Scalar.range(scalar, pointerBits)
+      const wrapping =
+        operation === 'WrappingAdd' ||
+        operation === 'WrappingSubtract' ||
+        operation === 'WrappingMultiply'
+      const saturating =
+        operation === 'SaturatingAdd' ||
+        operation === 'SaturatingSubtract' ||
+        operation === 'SaturatingMultiply'
+      if (!wrapping && !saturating && (exact < range.minimum || exact > range.maximum)) {
+        return blockedStep({
+          _tag: 'Trap',
+          function: fn.id,
+          reason:
+            scalar.signedness === 'Unsigned' && exact < 0n
+              ? 'arithmetic underflow'
+              : 'arithmetic overflow',
+          span,
+        })
+      }
+      const result = wrapping
+        ? fromBits(exact)
+        : saturating
+          ? exact < range.minimum
+            ? range.minimum
+            : exact > range.maximum
+              ? range.maximum
+              : exact
+          : exact
       return Object.freeze({
         _tag: 'Value',
-        value: unsigned ? usizeValue(exact) : value(Number(exact)),
+        value: scalarIntegerValue(scalar.spelling, result),
       })
     }
     return blockedStep({
@@ -1019,18 +1275,19 @@ function executeFunction(
         if (selected._tag !== 'SliceValue') {
           throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
         }
-        const index = readI32(selector.index).value
-        if (index < 0 || index >= selected.length) {
+        const exactIndex = readUsize(selector.index).value
+        if (exactIndex >= BigInt(selected.length)) {
           return {
             _tag: 'Blocked',
             step: blockedStep({
               _tag: 'Trap',
               function: fn.id,
-              reason: `slice index ${index} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
+              reason: `slice index ${exactIndex} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
               span: selector.provenance.span,
             }),
           }
         }
+        const index = Number(exactIndex)
         const backing = cell(selected).value
         if (backing._tag !== 'ArrayValue') {
           throw new RangeError('MIR slice cell does not contain an array value')
@@ -1049,8 +1306,8 @@ function executeFunction(
       const index =
         selector.index._tag === 'Proven'
           ? selector.index.value
-          : readI32(selector.index.local).value
-      if (index < 0 || index >= selector.length) {
+          : Number(readUsize(selector.index.local).value)
+      if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
         return {
           _tag: 'Blocked',
           step: blockedStep({
@@ -1320,13 +1577,16 @@ function executeFunction(
             break
           }
           case 'Literal':
-            write(operation.destination, {
-              value:
-                operation.type._tag === 'Usize'
-                  ? usizeValue(BigInt(operation.value))
+            {
+              const semantic = Mir.semanticType(operation.type)
+              const integer = typeof semantic === 'string' && Scalar.isIntegerSpelling(semantic)
+              write(operation.destination, {
+                value: integer
+                  ? scalarIntegerValue(semantic, BigInt(operation.value))
                   : value(Number(operation.value)),
-              fromCall: false,
-            })
+                fromCall: false,
+              })
+            }
             break
           case 'Move':
             write(operation.destination, read(operation.source))
@@ -1379,7 +1639,10 @@ function executeFunction(
             if (slice._tag !== 'SliceValue') {
               throw new RangeError('MIR verifier allowed slice length on a non-slice value')
             }
-            write(operation.destination, { value: value(slice.length), fromCall: false })
+            write(operation.destination, {
+              value: usizeValue(BigInt(slice.length)),
+              fromCall: false,
+            })
             break
           }
           case 'ConvertUnion': {
@@ -1425,7 +1688,7 @@ function executeFunction(
             const bytes = readInteger(operation.bytes)
             const alignment = readInteger(operation.alignment)
             if (bytes._tag !== 'UsizeValue' || alignment._tag !== 'UsizeValue') {
-              throw new RangeError('MIR verifier allowed non-Usize layout construction')
+              throw new RangeError('MIR verifier allowed non-usize layout construction')
             }
             const valid = alignment.value > 0n && (alignment.value & (alignment.value - 1n)) === 0n
             const member = valid ? Type.layout : Type.invalidAlignment
@@ -1800,10 +2063,18 @@ function executeFunction(
           case 'Binary': {
             const leftValue = readInteger(operation.left)
             const rightValue = readInteger(operation.right)
-            if (leftValue._tag !== rightValue._tag) {
+            const leftType = fn.localTypes.at(operation.left.ordinal)
+            const rightType = fn.localTypes.at(operation.right.ordinal)
+            const operand = leftType === undefined ? undefined : Mir.semanticType(leftType)
+            if (
+              rightType === undefined ||
+              operand === undefined ||
+              !Type.equals(Mir.semanticType(rightType), operand) ||
+              !Scalar.isSpelling(operand)
+            ) {
               throw new RangeError('MIR verifier allowed mixed integer operands')
             }
-            const unsigned = leftValue._tag === 'UsizeValue'
+            const scalar = Scalar.find(operand)
             const left = BigInt(leftValue.value)
             const right = BigInt(rightValue.value)
             if (
@@ -1832,6 +2103,9 @@ function executeFunction(
               })
               break
             }
+            if (scalar === undefined || scalar.category !== 'Integer') {
+              throw new RangeError('MIR verifier allowed a non-integer binary operand')
+            }
             if (
               (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
               right === 0n
@@ -1843,32 +2117,186 @@ function executeFunction(
                 span: operation.provenance.span,
               })
             }
-            const exact =
-              operation.operator === 'Add'
-                ? left + right
-                : operation.operator === 'Subtract'
-                  ? left - right
-                  : operation.operator === 'Multiply'
-                    ? left * right
-                    : operation.operator === 'Divide'
-                      ? left / right
-                      : left % right
-            const maximum =
-              program.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+            const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+            const width = Scalar.bits(scalar, pointerBits)
             if (
-              (unsigned && exact < 0n) ||
-              (unsigned && exact > maximum) ||
-              (!unsigned && (exact < -2147483648n || exact > 2147483647n))
+              (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') &&
+              (right < 0n || right >= BigInt(width))
             ) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
-                reason: unsigned && exact < 0n ? 'arithmetic underflow' : 'arithmetic overflow',
+                reason: `invalid ${operation.operator} count ${right}`,
                 span: operation.provenance.span,
               })
             }
+            const fromBits = (input: bigint): bigint =>
+              scalar.signedness === 'Signed'
+                ? BigInt.asIntN(width, input)
+                : BigInt.asUintN(width, input)
+            const leftBits = BigInt.asUintN(width, left)
+            const rightBits = BigInt.asUintN(width, right)
+            const rotate = Number(right % BigInt(width))
+            const rotatedLeft =
+              rotate === 0
+                ? leftBits
+                : BigInt.asUintN(
+                    width,
+                    (leftBits << BigInt(rotate)) | (leftBits >> BigInt(width - rotate)),
+                  )
+            const rotatedRight =
+              rotate === 0
+                ? leftBits
+                : BigInt.asUintN(
+                    width,
+                    (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)),
+                  )
+            const exact =
+              operation.operator === 'Add' ||
+              operation.operator === 'WrappingAdd' ||
+              operation.operator === 'SaturatingAdd'
+                ? left + right
+                : operation.operator === 'Subtract' ||
+                    operation.operator === 'WrappingSubtract' ||
+                    operation.operator === 'SaturatingSubtract'
+                  ? left - right
+                  : operation.operator === 'Multiply' ||
+                      operation.operator === 'WrappingMultiply' ||
+                      operation.operator === 'SaturatingMultiply'
+                    ? left * right
+                    : operation.operator === 'Divide'
+                      ? left / right
+                      : operation.operator === 'Remainder'
+                        ? left % right
+                        : operation.operator === 'BitAnd'
+                          ? fromBits(leftBits & rightBits)
+                          : operation.operator === 'BitOr'
+                            ? fromBits(leftBits | rightBits)
+                            : operation.operator === 'BitXor'
+                              ? fromBits(leftBits ^ rightBits)
+                              : operation.operator === 'ShiftLeft'
+                                ? fromBits(leftBits << right)
+                                : operation.operator === 'ShiftRight'
+                                  ? scalar.signedness === 'Signed'
+                                    ? left >> right
+                                    : fromBits(leftBits >> right)
+                                  : operation.operator === 'RotateLeft'
+                                    ? fromBits(rotatedLeft)
+                                    : fromBits(rotatedRight)
+            const range = Scalar.range(scalar, pointerBits)
+            const wrapping =
+              operation.operator === 'WrappingAdd' ||
+              operation.operator === 'WrappingSubtract' ||
+              operation.operator === 'WrappingMultiply'
+            const saturating =
+              operation.operator === 'SaturatingAdd' ||
+              operation.operator === 'SaturatingSubtract' ||
+              operation.operator === 'SaturatingMultiply'
+            if (!wrapping && !saturating && (exact < range.minimum || exact > range.maximum)) {
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason:
+                  scalar.signedness === 'Unsigned' && exact < 0n
+                    ? 'arithmetic underflow'
+                    : 'arithmetic overflow',
+                span: operation.provenance.span,
+              })
+            }
+            const result = wrapping
+              ? fromBits(exact)
+              : saturating
+                ? exact < range.minimum
+                  ? range.minimum
+                  : exact > range.maximum
+                    ? range.maximum
+                    : exact
+                : exact
             write(operation.destination, {
-              value: unsigned ? usizeValue(exact) : value(Number(exact)),
+              value: scalarIntegerValue(scalar.spelling, result),
+              fromCall: false,
+            })
+            break
+          }
+          case 'ConvertInteger': {
+            const subject = readInteger(operation.source)
+            const target = Scalar.find(operation.type._tag)
+            if (target === undefined || target.category !== 'Integer')
+              throw new RangeError('MIR verifier allowed a non-integer conversion target')
+            const exact = BigInt(subject.value)
+            const range = Scalar.range(target, program.layout.target.pointerSize === 4 ? 32 : 64)
+            if (exact < range.minimum || exact > range.maximum)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'integer conversion out of range',
+                span: operation.provenance.span,
+              })
+            write(operation.destination, {
+              value: scalarIntegerValue(target.spelling, exact),
+              fromCall: false,
+            })
+            break
+          }
+          case 'CheckedInteger': {
+            const operands = operation.operands.map((operand) => BigInt(readInteger(operand).value))
+            const left = operands.at(0)
+            const right = operands.at(1)
+            const source = Scalar.find(operation.sourceType._tag)
+            const target = Scalar.find(operation.valueType._tag)
+            if (
+              left === undefined ||
+              source?.category !== 'Integer' ||
+              target?.category !== 'Integer'
+            )
+              throw new RangeError('MIR verifier allowed an invalid checked integer operation')
+            const arithmetic = operation.operation.startsWith('CheckedConvertTo')
+              ? left
+              : operation.operation === 'CheckedAdd'
+                ? left + (right ?? 0n)
+                : operation.operation === 'CheckedSubtract'
+                  ? left - (right ?? 0n)
+                  : operation.operation === 'CheckedMultiply'
+                    ? left * (right ?? 0n)
+                    : operation.operation === 'CheckedDivide'
+                      ? right === undefined || right === 0n
+                        ? undefined
+                        : left / right
+                      : operation.operation === 'CheckedRemainder'
+                        ? right === undefined || right === 0n
+                          ? undefined
+                          : left % right
+                        : undefined
+            const range = Scalar.range(target, program.layout.target.pointerSize === 4 ? 32 : 64)
+            const success =
+              arithmetic !== undefined && arithmetic >= range.minimum && arithmetic <= range.maximum
+            const member = success ? operation.success : operation.failure
+            const entry = program.layout.entries.find((candidate) =>
+              Type.equals(candidate.type, member),
+            )
+            if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
+              throw new RangeError('Target plan omitted a canonical Option member')
+            const payload: AggregateValue = Object.freeze({
+              _tag: 'AggregateValue',
+              type: member,
+              fields: Object.freeze(
+                success
+                  ? entry.representation.fields.map((field) =>
+                      Object.freeze({
+                        field: field.id,
+                        value: scalarIntegerValue(target.spelling, arithmetic),
+                      }),
+                    )
+                  : [],
+              ),
+            })
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'UnionValue',
+                type: operation.type.type,
+                member,
+                payload,
+              }),
               fromCall: false,
             })
             break
@@ -1972,15 +2400,16 @@ function executeFunction(
                 if (selected._tag !== 'SliceValue') {
                   throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
                 }
-                const index = readI32(selector.index).value
-                if (index < 0 || index >= selected.length) {
+                const exactIndex = readUsize(selector.index).value
+                if (exactIndex >= BigInt(selected.length)) {
                   return blockedStep({
                     _tag: 'Trap',
                     function: fn.id,
-                    reason: `slice index ${index} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
+                    reason: `slice index ${exactIndex} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
                     span: selector.provenance.span,
                   })
                 }
+                const index = Number(exactIndex)
                 const backing = cell(selected).value
                 if (backing._tag !== 'ArrayValue') {
                   throw new RangeError('MIR slice cell does not contain an array value')
@@ -2009,8 +2438,8 @@ function executeFunction(
               const index =
                 selector.index._tag === 'Proven'
                   ? selector.index.value
-                  : readI32(selector.index.local).value
-              if (index < 0 || index >= selector.length) {
+                  : Number(readUsize(selector.index.local).value)
+              if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
                 return blockedStep({
                   _tag: 'Trap',
                   function: fn.id,
@@ -3036,7 +3465,7 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
     })
   }
   if (result.value._tag !== 'I32Value') {
-    throw new RangeError('Bootstrap entry returned a non-I32 value')
+    throw new RangeError('Bootstrap entry returned a non-i32 value')
   }
   const status = result.value
   if (program.entry._tag === 'EffectEntry' && status.value !== 0) {

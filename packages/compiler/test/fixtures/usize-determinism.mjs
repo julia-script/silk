@@ -5,13 +5,13 @@ import * as Hir from '../../dist/Hir.js'
 import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
 
-const nativeSource = `fn exact() -> Usize { return 9007199254740993 }
-pub fn main() -> I32 {
+const nativeSource = `fn exact() -> usize { return 9007199254740993 }
+pub fn main() -> i32 {
   if exact() == 9007199254740993 { return 42 }
   return 0
 }`
-const wasmSource = `fn maximum() -> Usize { return 4294967295 }
-pub fn main() -> I32 {
+const wasmSource = `fn maximum() -> usize { return 4294967295 }
+pub fn main() -> i32 {
   if maximum() > 2147483647 { return 42 }
   return 0
 }`

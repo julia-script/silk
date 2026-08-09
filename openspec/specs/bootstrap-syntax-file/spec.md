@@ -16,7 +16,7 @@ exactly.
 
 #### Scenario: Bundle the accepted fixture
 
-- **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }` and are parsed
+- **WHEN** the source bytes spell `pub fn main() -> i32 { return 42 }` and are parsed
 - **THEN** one `SyntaxFile` exposes that source, its full token stream including trivia, its surface tree, and empty diagnostic collections
 
 #### Scenario: Reconstruct bytes from the artifact

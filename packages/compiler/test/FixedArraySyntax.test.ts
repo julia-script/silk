@@ -22,8 +22,8 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
   )
 
 it('parses recursive array types, complete literals, and mixed postfix chains losslessly', () => {
-  const source = `struct Cell { value: I32 }
-fn read(matrix: [[Cell; 4]; 3], row: I32, column: I32) -> I32 {
+  const source = `struct Cell { value: i32 }
+fn read(matrix: [[Cell; 4]; 3], row: usize, column: usize) -> i32 {
   let values = [[Cell { value: 1 }],]
   return matrix[row][column].value
 }`
@@ -57,8 +57,8 @@ fn read(matrix: [[Cell; 4]; 3], row: I32, column: I32) -> I32 {
 
 it('contains missing array length and closing-bracket recovery', () => {
   const syntax = parse(
-    `struct Broken { values: [I32; ] }
-pub fn main(values: [I32; 2], index: I32) -> I32 { return values[index }`,
+    `struct Broken { values: [i32; ] }
+pub fn main(values: [i32; 2], index: usize) -> i32 { return values[index }`,
   )
   const missing = descendants(syntax.root)
     .flatMap((node) => node.children)
@@ -77,7 +77,7 @@ pub fn main(values: [I32; 2], index: I32) -> I32 { return values[index }`,
 })
 
 it('parses simple and zero-length fixed-array types', () => {
-  const syntax = parse('struct Arrays { values: [I32; 2] empty: [I32; 0] }')
+  const syntax = parse('struct Arrays { values: [i32; 2] empty: [i32; 0] }')
   const fixedArrays = descendants(syntax.root).filter((node) => node.kind === 'FixedArrayType')
 
   assert.strictEqual(fixedArrays.length, 2)
@@ -93,8 +93,8 @@ it('parses simple and zero-length fixed-array types', () => {
 })
 
 it('recovers missing fixed-array separators and closing brackets locally', () => {
-  const missingSeparator = parse('struct Broken { values: [I32 2] }')
-  const missingBracket = parse('struct Broken { values: [I32; 2 }')
+  const missingSeparator = parse('struct Broken { values: [i32 2] }')
+  const missingBracket = parse('struct Broken { values: [i32; 2 }')
 
   assert.include(
     descendants(missingSeparator.root)
@@ -113,7 +113,7 @@ it('recovers missing fixed-array separators and closing brackets locally', () =>
 })
 
 it('rejects the former angle-bracketed array source spelling', () => {
-  const syntax = parse('struct Old { values: Array<I32, 4> }')
+  const syntax = parse('struct Old { values: Array<i32, 4> }')
 
   assert.strictEqual(
     descendants(syntax.root).some((node) => node.kind === 'FixedArrayType'),
@@ -129,13 +129,13 @@ it.effect('resolves a namespace-qualified array element to canonical identity', 
       ascii(
         `import model.Token as Model { Token }
 pub fn keep(values: [Model.Token; 8]) -> [Model.Token; 8] { return values }
-pub fn main() -> I32 { return 0 }`,
+pub fn main() -> i32 { return 0 }`,
       ),
     )
     const snapshot = yield* Analysis.make({ root }).pipe(
       Effect.provide(
         SourceResolver.memory(
-          new Map([['model/Token', ascii('pub struct Token { pub kind: I32 }')]]),
+          new Map([['model/Token', ascii('pub struct Token { pub kind: i32 }')]]),
         ),
       ),
     )

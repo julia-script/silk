@@ -47,7 +47,7 @@ const interpret = Effect.fnUntraced(function* (text: string) {
 
 it.effect('emits an instantiable module whose entry is exported as silk_main', () =>
   Effect.gen(function* () {
-    const artifact = yield* emit('pub fn main() -> I32 { return 42 }')
+    const artifact = yield* emit('pub fn main() -> i32 { return 42 }')
 
     assert.strictEqual(artifact.module, 'wasm/program')
     assert.deepEqual(
@@ -62,21 +62,21 @@ it.effect('emits an instantiable module whose entry is exported as silk_main', (
   }),
 )
 
-const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
 
-const branchSource = 'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'
+const branchSource = 'pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'
 
-const matchSource = `pub struct Left { value: I32 }
-pub struct Right { value: I32 }
-pub fn inspect(input: Left | Right) -> I32 {
+const matchSource = `pub struct Left { value: i32 }
+pub struct Right { value: i32 }
+pub fn inspect(input: Left | Right) -> i32 {
   return match &input {
     Left { value } if false => 0
-    Left { value: answer } => I32.add(answer, 1)
+    Left { value: answer } => i32.add(answer, 1)
     Right { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(Left { value: 41 }) }`
+pub fn main() -> i32 { return inspect(Left { value: 41 }) }`
 
 it.effect('matches the WAT golden and the binary digest golden', () =>
   Effect.gen(function* () {
@@ -102,14 +102,14 @@ it.effect('matches the branch WAT golden and stays deterministic', () =>
 
 it.effect('keeps the deterministic symbol naming the LLVM backend uses', () =>
   Effect.gen(function* () {
-    const artifact = yield* emit(`pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`)
+    const artifact = yield* emit(`pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`)
 
     assert.deepEqual(
       artifact.symbols.map((entry) => entry.symbol),
       [
         'silk_main',
-        'silk_wasm_program_identity__12_7761736d2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a493332_18_726573756c743a6275696c74696e3a493332',
+        'silk_wasm_program_identity__12_7761736d2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a693332_18_726573756c743a6275696c74696e3a693332',
       ],
     )
   }),
@@ -118,7 +118,7 @@ pub fn main() -> I32 { return identity(identity(42)) }`)
 it.effect('emits source conditionals directly as structured if', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }',
+      'pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
     )
 
     assert.match(artifact.wat, /\bif\b/)
@@ -131,7 +131,7 @@ it.effect('emits source conditionals directly as structured if', () =>
 it.effect('emits a bare if when only one arm exists and the join falls through', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'pub fn main() -> I32 { let x = 1 if I32.equals(x, 1) { let a = 5 } return x }',
+      'pub fn main() -> i32 { let x = 1 if i32.equals(x, 1) { let a = 5 } return x }',
     )
 
     assert.match(artifact.wat, /\bif\b/)
@@ -142,7 +142,7 @@ it.effect('emits a bare if when only one arm exists and the join falls through',
 it.effect('nests an if inside an arm for nested source conditionals', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'pub fn main() -> I32 { let x = 1 if I32.equals(x, 1) { if I32.equals(x, 1) { return 42 } return 1 } return 0 }',
+      'pub fn main() -> i32 { let x = 1 if i32.equals(x, 1) { if i32.equals(x, 1) { return 42 } return 1 } return 0 }',
     )
 
     // Two conditionals in the source produce two `if` constructs, one inside the other.
@@ -174,7 +174,7 @@ it.effect('keeps every valid match corpus case in three-engine agreement', () =>
 
 it.effect('rejects a structural MIR cycle before structured emission', () =>
   Effect.gen(function* () {
-    const snapshot = yield* snapshotOf('pub fn main() -> I32 { return 42 }')
+    const snapshot = yield* snapshotOf('pub fn main() -> i32 { return 42 }')
     const program = Analysis.loweredMir(snapshot)
     const main = program.functions[0]
     const entry = main?.regions.at(0)
@@ -219,7 +219,7 @@ it.effect('rejects native-target MIR before constructing a WebAssembly module', 
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'wasm/native-plan',
-      ascii('pub fn main() -> I32 { return 42 }'),
+      ascii('pub fn main() -> i32 { return 42 }'),
       'aarch64-apple-darwin',
     )
     const failure = yield* Effect.flip(
@@ -238,8 +238,8 @@ it.effect('rejects native-target MIR before constructing a WebAssembly module', 
  */
 it.effect('emits the name section only for debug builds', () =>
   Effect.gen(function* () {
-    const source = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(42) }`
+    const source = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(42) }`
     const debug = yield* Analysis.codegenWasm(yield* snapshotOf(source), { mode: 'debug' })
     const release = yield* Analysis.codegenWasm(yield* snapshotOf(source), { mode: 'release' })
 
@@ -258,7 +258,7 @@ pub fn main() -> I32 { return identity(42) }`
 
 it.effect('runs identically whether or not names were stripped', () =>
   Effect.gen(function* () {
-    const source = 'pub fn main() -> I32 { return I32.add(40, 2) }'
+    const source = 'pub fn main() -> i32 { return i32.add(40, 2) }'
     const instantiate = Effect.fnUntraced(function* (mode: 'debug' | 'release') {
       const bytes = (yield* Analysis.codegenWasm(yield* snapshotOf(source), {
         mode,
@@ -274,7 +274,7 @@ it.effect('runs identically whether or not names were stripped', () =>
 
 it.effect('maps divisions onto wasm operators that already trap, with no guard expansion', () =>
   Effect.gen(function* () {
-    const artifact = yield* emit('pub fn main() -> I32 { return I32.divide(84, 2) }')
+    const artifact = yield* emit('pub fn main() -> i32 { return i32.divide(84, 2) }')
 
     assert.match(artifact.wat, /i32\.div_s/)
   }),
@@ -283,7 +283,7 @@ it.effect('maps divisions onto wasm operators that already trap, with no guard e
 const programs: ReadonlyArray<readonly [string, string]> = [
   [
     'nested loops',
-    `pub fn main() -> I32 {
+    `pub fn main() -> i32 {
   let mut outer = 0
   let mut total = 0
   while outer < 6 {
@@ -296,8 +296,8 @@ const programs: ReadonlyArray<readonly [string, string]> = [
   ],
   [
     'mutable struct loop',
-    `struct Pair { left: I32 right: I32 }
-pub fn main() -> I32 {
+    `struct Pair { left: i32 right: i32 }
+pub fn main() -> i32 {
   let mut pair = Pair { left: 0, right: 40 }
   while pair.left < 2 { pair.left = pair.left + 1 }
   return pair.left + pair.right
@@ -305,7 +305,7 @@ pub fn main() -> I32 {
   ],
   [
     'mutable scalar loop',
-    `pub fn main() -> I32 {
+    `pub fn main() -> i32 {
   let mut count = 0
   while count < 42 { count = count + 1 }
   return count
@@ -313,9 +313,9 @@ pub fn main() -> I32 {
   ],
   [
     'mutable array loop',
-    `pub fn main() -> I32 {
+    `pub fn main() -> i32 {
   let mut values = [40, 0]
-  let mut index = 0
+  let mut index = usize.add(0, 0)
   while index < 2 {
     values[index] = values[index] + 1
     index = index + 1
@@ -325,86 +325,81 @@ pub fn main() -> I32 {
   ],
   [
     'loop continue and break',
-    `pub fn main() -> I32 {
-  let mut index = 0
+    `pub fn main() -> i32 {
+  let mut index = usize.add(0, 0)
   while index < 50 {
     index = index + 1
     if index == 2 { continue }
     if index == 42 { break }
   }
-  return index
+  return usize.toI32(index)
 }`,
   ],
-  ['literal', 'pub fn main() -> I32 { return 42 }'],
+  ['literal', 'pub fn main() -> i32 { return 42 }'],
   [
     'direct call',
-    `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer() }`,
+    `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer() }`,
   ],
   [
     'nested calls',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`,
+    `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`,
   ],
   [
     'multiple parameters',
-    `pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(1, 42) }`,
+    `pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { return choose(1, 42) }`,
   ],
-  ['addition', 'pub fn main() -> I32 { return I32.add(40, 2) }'],
-  ['operator precedence', 'pub fn main() -> I32 { return 2 + 3 * 4 }'],
-  ['operator pipeline', 'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }'],
-  ['operator negation', 'pub fn main() -> I32 { return -(40 + 2) }'],
-  ['subtraction', 'pub fn main() -> I32 { return I32.subtract(50, 8) }'],
-  ['multiplication', 'pub fn main() -> I32 { return I32.multiply(6, 7) }'],
-  ['division', 'pub fn main() -> I32 { return I32.divide(84, 2) }'],
-  ['remainder', 'pub fn main() -> I32 { return I32.remainder(85, 43) }'],
-  ['chained arithmetic', 'pub fn main() -> I32 { return I32.divide(I32.add(40, 2), 1) }'],
-  ['negative results', 'pub fn main() -> I32 { return I32.subtract(0, 42) }'],
-  ['branch taken', 'pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'],
-  ['branch not taken', 'pub fn main() -> I32 { if I32.equals(1, 2) { return 0 } return 42 }'],
-  ['ordered comparison', 'pub fn main() -> I32 { if I32.lessThan(1, 2) { return 42 } return 0 }'],
+  ['addition', 'pub fn main() -> i32 { return i32.add(40, 2) }'],
+  ['operator precedence', 'pub fn main() -> i32 { return 2 + 3 * 4 }'],
+  ['operator pipeline', 'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }'],
+  ['operator negation', 'pub fn main() -> i32 { return -(40 + 2) }'],
+  ['subtraction', 'pub fn main() -> i32 { return i32.subtract(50, 8) }'],
+  ['multiplication', 'pub fn main() -> i32 { return i32.multiply(6, 7) }'],
+  ['division', 'pub fn main() -> i32 { return i32.divide(84, 2) }'],
+  ['remainder', 'pub fn main() -> i32 { return i32.remainder(85, 43) }'],
+  ['chained arithmetic', 'pub fn main() -> i32 { return i32.divide(i32.add(40, 2), 1) }'],
+  ['negative results', 'pub fn main() -> i32 { return i32.subtract(0, 42) }'],
+  ['branch taken', 'pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'],
+  ['branch not taken', 'pub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }'],
+  ['ordered comparison', 'pub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }'],
   [
     'let bindings across a branch',
-    'pub fn main() -> I32 { let base = 40 if I32.equals(base, 40) { let bonus = 2 return I32.add(base, bonus) } return 0 }',
+    'pub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
   ],
-  ['inferred fixed array', 'pub fn main() -> I32 { let values = [10, 42] return values[1] }'],
+  ['inferred fixed array', 'pub fn main() -> i32 { let values = [10, 42] return values[1] }'],
   [
     'dynamic fixed array index',
-    `fn choose(values: [I32; 3], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([10, 42, 90], 1) }`,
+    `fn choose(values: [i32; 3], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([10, 42, 90], 1) }`,
   ],
   [
     'nested fixed array index',
-    `fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 { return values[outer][inner] }
-pub fn main() -> I32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
+    `fn choose(values: [[i32; 2]; 2], outer: usize, inner: usize) -> i32 { return values[outer][inner] }
+pub fn main() -> i32 { return choose([[10, 11], [42, 43]], 1, 0) }`,
   ],
   [
     'indexed struct array field',
-    `struct Pair { left: I32 right: I32 }
-fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
-pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
-  ],
-  [
-    'negative array index traps',
-    `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([10, 42], -1) }`,
+    `struct Pair { left: i32 right: i32 }
+fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
+pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
   ],
   [
     'upper array index traps',
-    `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([10, 42], 2) }`,
+    `fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([10, 42], 2) }`,
   ],
   [
     'zero-length array index traps',
-    `fn choose(values: [I32; 0], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([], 0) }`,
+    `fn choose(values: [i32; 0], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([], 0) }`,
   ],
-  ['division by zero traps', 'pub fn main() -> I32 { return I32.divide(1, 0) }'],
-  ['remainder by zero traps', 'pub fn main() -> I32 { return I32.remainder(1, 0) }'],
-  ['addition overflow traps', 'pub fn main() -> I32 { return I32.add(2147483647, 1) }'],
-  ['subtraction overflow traps', 'pub fn main() -> I32 { return I32.subtract(-2147483648, 1) }'],
-  ['multiplication overflow traps', 'pub fn main() -> I32 { return I32.multiply(2147483647, 2) }'],
+  ['division by zero traps', 'pub fn main() -> i32 { return i32.divide(1, 0) }'],
+  ['remainder by zero traps', 'pub fn main() -> i32 { return i32.remainder(1, 0) }'],
+  ['addition overflow traps', 'pub fn main() -> i32 { return i32.add(2147483647, 1) }'],
+  ['subtraction overflow traps', 'pub fn main() -> i32 { return i32.subtract(-2147483648, 1) }'],
+  ['multiplication overflow traps', 'pub fn main() -> i32 { return i32.multiply(2147483647, 2) }'],
 ]
 
 for (const [name, source] of programs) {
@@ -465,11 +460,11 @@ it.effect(
             const exact = reference(left, right)
             const traps = exact === undefined || exact > maximum || exact < minimum
             const actual = yield* run(
-              `pub fn main() -> I32 { return I32.${operator}(${left}, ${right}) }`,
+              `pub fn main() -> i32 { return i32.${operator}(${left}, ${right}) }`,
             )
             if (actual !== (traps ? 'trap' : exact)) {
               mismatches.push(
-                `I32.${operator}(${left}, ${right}) expected ${traps ? 'trap' : exact}, got ${actual}`,
+                `i32.${operator}(${left}, ${right}) expected ${traps ? 'trap' : exact}, got ${actual}`,
               )
             }
           }

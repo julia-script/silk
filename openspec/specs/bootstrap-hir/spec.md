@@ -6,6 +6,20 @@ elaboration phase that resolves names, types expressions, validates contracts, a
 with canonical identities and exact source provenance, published as immutable fact tables with a
 deterministic textual encoder.
 ## Requirements
+
+### Requirement: HIR carries the complete integer vocabulary
+
+HIR SHALL retain canonical lowercase integer identities, unit/bottom control flow, exact literal magnitude, conversion identity, operation mode, evaluation order, and provenance without host-number or backend-lane approximations.
+
+#### Scenario: Encode a wide integer
+
+- **WHEN** accepted `u64` source contains a value above JavaScript's exact integer range
+- **THEN** HIR encodes the exact magnitude and canonical `u64` type
+
+#### Scenario: Encode unit return
+
+- **WHEN** a unit function executes bare `return`
+- **THEN** HIR records unit completion with no scalar payload
 ### Requirement: One integrated elaboration phase constructs HIR
 
 Elaboration SHALL consume the closure-wide declaration index and the containing module's completed
@@ -19,8 +33,8 @@ facts and diagnostics rather than throw for source mistakes.
 
 #### Scenario: Elaborate the accepted fixture
 
-- **WHEN** `pub fn main() -> I32 { return 42 }` is elaborated
-- **THEN** the result contains one HIR function whose body is a typed `I32` integer-literal return with exact source provenance and no diagnostics
+- **WHEN** `pub fn main() -> i32 { return 42 }` is elaborated
+- **THEN** the result contains one HIR function whose body is a typed `i32` integer-literal return with exact source provenance and no diagnostics
 
 #### Scenario: Elaborate against the published module scope
 
@@ -47,7 +61,7 @@ exists, and MUST NOT masquerade as a valid empty contract, resolved reference, o
 #### Scenario: Reference a call target canonically
 
 - **WHEN** `main` returns `answer()` and `answer` is a present unique declaration
-- **THEN** the HIR call references `answer`'s canonical identity and carries the resolved `I32` type
+- **THEN** the HIR call references `answer`'s canonical identity and carries the resolved `i32` type
 
 #### Scenario: Keep unknown facts explicit
 
@@ -56,7 +70,7 @@ exists, and MUST NOT masquerade as a valid empty contract, resolved reference, o
 
 #### Scenario: Normalize function contracts
 
-- **WHEN** a declaration has two resolved `I32` parameters and a resolved `I32` return
+- **WHEN** a declaration has two resolved `i32` parameters and a resolved `i32` return
 - **THEN** its published contract lists both parameter types in order and the result type, while any unresolved header type keeps the whole contract explicitly unavailable
 
 #### Scenario: Elaborate a binding sequence
@@ -89,7 +103,7 @@ identical input SHALL produce byte-identical encodings, gated by committed golde
 
 HIR SHALL represent a resolved built-in actor call as a dedicated builtin-call expression
 carrying the closed operation name (`Add`, `Subtract`, `Multiply`, `Divide`, or `Remainder`), its
-typed argument expressions in order, the resolved `I32` type, and exact source provenance.
+typed argument expressions in order, the resolved `i32` type, and exact source provenance.
 Integer-literal expressions SHALL carry signed exact values. An unresolved actor, operation, or
 argument SHALL keep the enclosing expression an explicit unavailable state carrying the
 originating diagnostic's identity where one exists. The HIR encoder SHALL cover builtin calls and
@@ -97,13 +111,13 @@ signed values, gated by committed golden files.
 
 #### Scenario: Elaborate a built-in call
 
-- **WHEN** `pub fn main() -> I32 { return I32.add(40, 2) }` is elaborated
-- **THEN** the returned expression is a builtin call with operation `Add`, two typed literal arguments, and type `I32`
+- **WHEN** `pub fn main() -> i32 { return i32.add(40, 2) }` is elaborated
+- **THEN** the returned expression is a builtin call with operation `Add`, two typed literal arguments, and type `i32`
 
 #### Scenario: Elaborate a signed literal
 
 - **WHEN** a body returns `-42`
-- **THEN** the HIR literal carries the exact value `-42` typed `I32`
+- **THEN** the HIR literal carries the exact value `-42` typed `i32`
 
 #### Scenario: Keep an unknown actor explicit
 
@@ -112,8 +126,8 @@ signed values, gated by committed golden files.
 
 ### Requirement: Conditionals and booleans are typed HIR structure
 
-The semantic type vocabulary SHALL grow to `I32` and `Bool`. HIR SHALL represent `true`/`false`
-as boolean literal expressions typed `Bool`, and a conditional statement as a dedicated
+The semantic type vocabulary SHALL grow to `i32` and `bool`. HIR SHALL represent `true`/`false`
+as boolean literal expressions typed `bool`, and a conditional statement as a dedicated
 statement carrying its typed condition expression, the taken arm's statement sequence, and the
 otherwise arm's (possibly empty) statement sequence, each with exact provenance. Arm bindings
 SHALL carry function-unique binding identities. An unavailable condition or a damaged arm SHALL
@@ -122,8 +136,8 @@ literals, gated by committed golden files.
 
 #### Scenario: Elaborate a conditional body
 
-- **WHEN** `pub fn main() -> I32 { if I32.equals(1, 1) { return 1 } return 0 }` is elaborated
-- **THEN** the body is one conditional statement whose condition is a typed `Bool` builtin call and whose taken arm returns a literal, followed by the trailing return
+- **WHEN** `pub fn main() -> i32 { if i32.equals(1, 1) { return 1 } return 0 }` is elaborated
+- **THEN** the body is one conditional statement whose condition is a typed `bool` builtin call and whose taken arm returns a literal, followed by the trailing return
 
 #### Scenario: Elaborate an else arm
 
@@ -188,16 +202,16 @@ and unavailable facts SHALL produce unavailable HIR with their originating cause
 #### Scenario: Erase prefix negation
 
 - **WHEN** a body returns `-value`
-- **THEN** HIR contains the canonical trapping `Negate` builtin operation over the resolved `I32` value
+- **THEN** HIR contains the canonical trapping `Negate` builtin operation over the resolved `i32` value
 
 #### Scenario: Erase a direct section pipeline
 
-- **WHEN** a body returns `2 |> I32.add(3)` and the section need not escape
-- **THEN** HIR may contain the same `BuiltinCall Add` arguments as `I32.add(2, 3)` while retaining callable facts and pipeline provenance
+- **WHEN** a body returns `2 |> i32.add(3)` and the section need not escape
+- **THEN** HIR may contain the same `BuiltinCall Add` arguments as `i32.add(2, 3)` while retaining callable facts and pipeline provenance
 
 #### Scenario: Retain a stored callable application
 
-- **WHEN** a body stores `I32.add(3)` and later pipes `2` into that binding
+- **WHEN** a body stores `i32.add(3)` and later pipes `2` into that binding
 - **THEN** HIR retains canonical callable construction and application rather than inventing a surface pipeline operation
 
 #### Scenario: Encode nested operator HIR deterministically
@@ -272,7 +286,7 @@ element expressions in ascending index order and exact source evaluation provena
 
 #### Scenario: Elaborate a complete literal
 
-- **WHEN** semantic facts accept `[first(), second()]` as `Array<I32, 2>`
+- **WHEN** semantic facts accept `[first(), second()]` as `Array<i32, 2>`
 - **THEN** HIR retains left-to-right initializer evaluation and one canonical two-element construction
 
 ### Requirement: Checked indexing is typed HIR place projection
@@ -356,7 +370,7 @@ clone a declaration body per concrete call, and its deterministic encoding SHALL
 from every call to its generic declaration and substitution.
 
 #### Scenario: Keep one generic body
-- **WHEN** one generic function is called with `I32` and `Token`
+- **WHEN** one generic function is called with `i32` and `Token`
 - **THEN** HIR contains one checked declaration body and two calls with distinct concrete substitutions
 
 ### Requirement: HIR retains lexical slice semantics explicitly
@@ -381,15 +395,15 @@ exact spans, and unavailable slice facts MUST NOT become typed HIR operations.
 - **WHEN** borrow analysis lacks a stable source root or compatible slice destination
 - **THEN** HIR preserves the diagnostic cause through surrounding unavailable facts and emits no executable borrow node
 
-### Requirement: HIR retains exact Usize operations
+### Requirement: HIR retains exact usize operations
 
-HIR SHALL retain exact `Usize` literal magnitude, canonical operand and result types, unsigned
+HIR SHALL retain exact `usize` literal magnitude, canonical operand and result types, unsigned
 operator identity, source evaluation order, and provenance. HIR MUST NOT contain a selected LLVM
 integer type, Wasm value type, host-number approximation, or backend instruction.
 
 #### Scenario: Inspect a large literal operation
 
-- **WHEN** an accepted native function adds two `Usize` literals above the 32-bit range
+- **WHEN** an accepted native function adds two `usize` literals above the 32-bit range
 - **THEN** HIR encoding shows both exact values and one canonical checked unsigned addition
 
 ### Requirement: HIR retains explicit flow and typed-failure semantics

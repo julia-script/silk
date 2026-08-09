@@ -69,7 +69,7 @@ remain deferred until Silk has a general non-privileged validity model.
   satisfiable, lowering never emits `Branch` or `Drop`, and the differential harness compares only
   straight-line integer programs.
 - **Outcome & done-when:** Silk programs with `let` bindings and `move`, signed literals with
-  arithmetic, and `Bool`/comparison/`if` compile through every phase — real liveness ranges and
+  arithmetic, and `bool`/comparison/`if` compile through every phase — real liveness ranges and
   cleanup drops in the ownership and MIR labs, real CFG diamonds, interpreter and native agreeing
   across both branch arms — with every artifact encoder and golden extended, not replaced.
 - **Status:** shaped — dependency order pinned by the map: bindings first (the pressure issue 01
@@ -147,7 +147,7 @@ nothing, and owners live at a failing run site release before the failure propag
 
 - **Problem:** Slices can borrow source-dependent input, but a compiler pass still cannot own an
   output whose size emerges at runtime. The general prerequisites are now executable: target-sized
-  `Usize`, typed Effects, capability requirements and provision, target-aware `Layout`, affine
+  `usize`, typed Effects, capability requirements and provision, target-aware `Layout`, affine
   ownership, deterministic cleanup, and first-class callables. What remains is the smallest unsafe
   allocation boundary that composes those mechanisms without privileged allocator kinds.
 - **Outcome & done-when:** Add general `Allocator` capability dispatch, a standard-library
@@ -333,22 +333,22 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   Settled that the compiler is backend-agnostic but target-aware: canonical target and concrete
   layout are computed before MIR lowering and embedded in MIR. Also fixed the bootstrap import,
   nominal construction, union widening, and mode-aware match decisions in Wayfinder.
-- 2026-08-05: Shipped and archived `branch-on-boolean-conditions` — slice 1 complete. `Bool` as
-  the second scalar (literals, declared types, comparisons, `Bool.not`), `if`/`else` statements
+- 2026-08-05: Shipped and archived `branch-on-boolean-conditions` — slice 1 complete. `bool` as
+  the second scalar (literals, declared types, comparisons, `bool.not`), `if`/`else` statements
   with brace arms, condition and argument type checking (`SEM0011`/`SEM0012`), arm-scoped
   ownership with per-return and arm-end exits and conservative conditional moves, MIR branch
   diamonds with join blocks and arm drops, exact interpreter branching, and native `icmp`/`zext`
   emission. Six branching corpus programs hold interpreter/native parity arm by arm. The
   language now binds, computes, and decides through every phase of the spine.
 - 2026-08-05: Shipped and archived `compute-integer-arithmetic` — slice 1's second change.
-  Signed literals with full `I32` range, qualified callees, and the compiler-known `I32` actor
+  Signed literals with full `i32` range, qualified callees, and the compiler-known `i32` actor
   (`add`/`subtract`/`multiply`/`divide`/`remainder`) as HIR builtin calls lowering to a trapping
   MIR `Binary` operation; the interpreter traps exactly on overflow, division by zero, and
   MIN/-1, and the backend expands to overflow intrinsics plus guarded division branching to trap
   blocks. Six new corpus programs hold interpreter/native parity including native trap behavior.
   Two recorded design deviations: built-ins live in an elaboration table (not the declaration
   index), and the checked expansion is visible at the LLVM level (MIR stays compact). Next:
-  `Bool`, comparisons, `if`/`else`.
+  `bool`, comparisons, `if`/`else`.
 - 2026-08-05: Shipped and archived `bind-local-values` — slice 1's first change. `let` bindings
   and `move` now run through the whole spine: statement sequences in grammar and HIR, initializer
   inference, non-shadowing (`SEM0008`), the first real ownership analysis (liveness ranges, moves,
@@ -364,12 +364,12 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   and the first native program shipped inside it. Grammar freeze lifted; promoted language
   widening slice 1 (bindings, arithmetic, branching) to Now and data types (issue 02) to Next.
 - 2026-08-04: Shipped and archived `analyze-first-bootstrap-function` in commit `373c4d8`; direct
-  declaration, `I32`, integer, compatibility, and semantic diagnostic facts held without AST/HIR.
+  declaration, `i32`, integer, compatibility, and semantic diagnostic facts held without AST/HIR.
   Recast Now as a checkable two-function milestone split into four dependency-ordered changes, each
   with a required inspector checkpoint and a sync/reassessment boundary.
 - 2026-08-04: Shipped and archived `parse-first-bootstrap-function` in commit `ba6feaf`; its
   lossless tree, bounded recovery, deterministic diagnostics, and hidden inspector met the recorded
-  outcome. Promoted one-function declaration and `I32` fact analysis to Now, explicitly keeping HIR
+  outcome. Promoted one-function declaration and `i32` fact analysis to Now, explicitly keeping HIR
   behind evidence from a second semantic form.
 - 2026-08-04: Shipped exact source text and lossless lexing, then promoted a one-function concrete
   syntax tree and direct-link inspector to Now; semantic interpretation remains Next.

@@ -9,8 +9,8 @@ generic language inherits, degenerate while the slice has no type or contract-ro
 ### Requirement: Instances are discovered from the entry by a recorded worklist
 
 Instance discovery SHALL start from one of the root module's two valid user entries: a unique
-zero-parameter public ordinary `main() -> I32`, or a unique zero-parameter public
-`effect fn main() -> Unit ! E` whose requirement row is empty and whose failure members all conform
+zero-parameter public ordinary `main() -> i32`, or a unique zero-parameter public
+`effect fn main() -> () ! E` whose requirement row is empty and whose failure members all conform
 to `Report`. Discovery SHALL retain the selected entry kind and normalized failure metadata and
 SHALL follow resolved local and cross-module calls in HIR transitively. The deterministic worklist
 SHALL record an instance before following it, so directly and mutually recursive programs terminate
@@ -62,7 +62,7 @@ the same instance.
 ### Requirement: An unavailable entry stays explicit
 
 When the root module has no unique valid entry — missing, ambiguous, generic, parameterized,
-ordinary with a non-`I32` result, effectful with a non-`Unit` result, effectful with unresolved
+ordinary with a non-`i32` result, effectful with a non-`()` result, effectful with unresolved
 requirements, or effectful with an unreportable failure — discovery SHALL report an explicitly
 unavailable entry with its reason and SHALL record no instances, rather than choosing a declaration
 or failing.
@@ -119,7 +119,7 @@ needed for layout and runtime behavior. Unused array declarations or types MUST 
 
 #### Scenario: Discover a nested array result
 
-- **WHEN** a reachable factory returns `Array<Array<I32, 4>, 3>`
+- **WHEN** a reachable factory returns `Array<Array<i32, 4>, 3>`
 - **THEN** discovery records the exact outer and inner canonical array types in stable worklist order
 
 ### Requirement: Array-bearing instance keys include exact lengths
@@ -174,7 +174,7 @@ following calls, values, cleanup, and runtime helpers reachable through its subs
 ordering and encoding SHALL remain deterministic.
 
 #### Scenario: Distinguish specializations
-- **WHEN** the entry reaches `identity<I32>` and `identity<Bool>`
+- **WHEN** the entry reaches `identity<i32>` and `identity<bool>`
 - **THEN** discovery records two keys differing only in their concrete argument lists
 
 #### Scenario: Exclude an unused specialization
@@ -190,12 +190,12 @@ element arguments under the existing finite monomorphization rules.
 
 #### Scenario: Reuse one function for two source lengths
 
-- **WHEN** one `fold(values: &[I32])` declaration is called with shared borrows of `Array<I32, 3>` and `Array<I32, 6>`
+- **WHEN** one `fold(values: &[i32])` declaration is called with shared borrows of `Array<i32, 3>` and `Array<i32, 6>`
 - **THEN** discovery records one `fold` instance and one emitted function symbol
 
 #### Scenario: Distinguish generic element specializations
 
-- **WHEN** a generic slice function is reached with `&[I32]` and `&[Token]`
+- **WHEN** a generic slice function is reached with `&[i32]` and `&[Token]`
 - **THEN** discovery records distinct concrete element-type instances without adding either source array length to their keys
 
 ### Requirement: Slice reachability follows element behavior
@@ -209,16 +209,16 @@ its fixed length local to the caller.
 - **WHEN** a reachable function accepts `&mut [Token]` and replaces an indexed `Token`
 - **THEN** instance discovery includes the canonical `Token` layout and cleanup behavior without creating a runtime slice owner
 
-### Requirement: Usize participates in ordinary instance identity
+### Requirement: usize participates in ordinary instance identity
 
-Instance discovery SHALL include canonical `Usize` types and operations in signatures and reachable
+Instance discovery SHALL include canonical `usize` types and operations in signatures and reachable
 bodies. Literal magnitude and selected target width MUST NOT create separate generic instances;
 target selection belongs to the layout and lowering inputs for the same canonical instance.
 
-#### Scenario: Reuse a generic Usize instance
+#### Scenario: Reuse a generic usize instance
 
-- **WHEN** one generic identity function is called with several `Usize` magnitudes on one target
-- **THEN** discovery produces one concrete `Usize` instance
+- **WHEN** one generic identity function is called with several `usize` magnitudes on one target
+- **THEN** discovery produces one concrete `usize` instance
 
 ### Requirement: Effect discovery follows static bodies and handlers
 
@@ -274,7 +274,7 @@ witness or hook instance with a canonical normalized key, and the worklist SHALL
 
 #### Scenario: One parametric Drop serves two element types
 
-- **WHEN** a program makes `Vector<Token>` and `Vector<I32>` reachable under one `impl<T> Drop for Vector<T>`
+- **WHEN** a program makes `Vector<Token>` and `Vector<i32>` reachable under one `impl<T> Drop for Vector<T>`
 - **THEN** discovery yields exactly two concrete Drop hook instances whose keys carry the normalized concrete arguments, and no third instance for the unsubstituted form
 
 #### Scenario: Parametric witnesses dispatch like concrete ones

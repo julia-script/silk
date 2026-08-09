@@ -16,7 +16,7 @@ it.effect(
 /// \`\`\`silk
 /// recover(problem)
 /// \`\`\`
-pub fn recover(problem: Problem) -> I32 { return problem.code }
+pub fn recover(problem: Problem) -> i32 { return problem.code }
 `
       const snapshot = yield* Analysis.ofSource('docs/main', encode(source))
       const headers = Analysis.declarationIndex(snapshot).modules.at(0)
@@ -41,7 +41,7 @@ pub fn recover(problem: Problem) -> I32 { return problem.code }
 it.effect('treats incomplete Markdown as documentation instead of a diagnostic', () =>
   Effect.gen(function* () {
     const source = `/// This **never closes and [neither does this
-pub fn recover() -> I32 { return 1 }
+pub fn recover() -> i32 { return 1 }
 `
     const snapshot = yield* Analysis.ofSource('malformed/main', encode(source))
     const declaration = Analysis.declarationIndex(snapshot).modules.at(0)?.declarations.at(0)
@@ -59,9 +59,9 @@ pub fn recover() -> I32 { return 1 }
 it.effect('resolves known intra-doc links and leaves unknown links as inline code', () =>
   Effect.gen(function* () {
     const source = `/// Uses [\`Problem\`] and [\`Missing\`].
-pub fn recover(problem: Problem) -> I32 { return problem.code }
+pub fn recover(problem: Problem) -> i32 { return problem.code }
 
-pub struct Problem { pub code: I32 }
+pub struct Problem { pub code: i32 }
 `
     const snapshot = yield* Analysis.ofSource('links/main', encode(source))
     const project = Project.make(snapshot)

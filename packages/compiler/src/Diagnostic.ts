@@ -41,7 +41,7 @@ export const reservedModuleIdentityCode = 'MOD0004' as const
 /** Stable code for a present return-type name that is not a bootstrap built-in. */
 export const unknownTypeCode = 'SEM0001' as const
 
-/** Stable code for a present decimal literal outside the positive `I32` range. */
+/** Stable code for a present decimal literal outside the positive `i32` range. */
 export const integerOutOfRangeCode = 'SEM0002' as const
 
 /** Stable code for a present declaration name repeated after its first occurrence. */
@@ -68,7 +68,7 @@ export const unknownActorCode = 'SEM0009' as const
 /** Stable code for a known actor called with an unknown operation name. */
 export const unknownActorOperationCode = 'SEM0010' as const
 
-/** Stable code for a conditional whose condition is not `Bool`. */
+/** Stable code for a conditional whose condition is not `bool`. */
 export const conditionNotBoolCode = 'SEM0011' as const
 
 /** Stable code for a call argument whose type mismatches its parameter. */
@@ -93,7 +93,7 @@ export const emptyArrayNeedsContextCode = 'SEM0029' as const
 export const arrayElementTypeMismatchCode = 'SEM0030' as const
 export const arrayLengthMismatchCode = 'SEM0031' as const
 export const indexOnNonArrayCode = 'SEM0032' as const
-export const indexNotI32Code = 'SEM0033' as const
+export const indexNotUsizeCode = 'SEM0033' as const
 export const indexOutOfBoundsCode = 'SEM0034' as const
 export const immutableAssignmentCode = 'SEM0035' as const
 export const invalidAssignmentPlaceCode = 'SEM0036' as const
@@ -121,7 +121,7 @@ export const invalidBorrowOperandCode = 'SEM0056' as const
 export const exclusiveBorrowRequiresMutableCode = 'SEM0057' as const
 export const invalidSliceReborrowCode = 'SEM0058' as const
 export const implicitSliceDecayCode = 'SEM0059' as const
-/** Stable code for a negative decimal literal contextualized as unsigned `Usize`. */
+/** Stable code for a negative decimal literal contextualized as unsigned `usize`. */
 export const usizeNegativeCode = 'SEM0060' as const
 /** Stable code for a non-concrete or non-nominal member of a effect failure row. */
 export const invalidFailureTypeCode = 'SEM0061' as const
@@ -168,7 +168,7 @@ export const conflictingSliceLoanCode = 'OWN0010' as const
 export const ownerAccessDuringLoanCode = 'OWN0011' as const
 export const borrowedMoveCode = 'OWN0012' as const
 
-/** Stable code for an exact `Usize` magnitude outside the selected target word. */
+/** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
 
 /** Every stable diagnostic code any phase can produce. */
@@ -214,7 +214,7 @@ export type Code =
   | typeof arrayElementTypeMismatchCode
   | typeof arrayLengthMismatchCode
   | typeof indexOnNonArrayCode
-  | typeof indexNotI32Code
+  | typeof indexNotUsizeCode
   | typeof indexOutOfBoundsCode
   | typeof immutableAssignmentCode
   | typeof invalidAssignmentPlaceCode
@@ -437,7 +437,7 @@ export type Reason =
       readonly actual: number
     }
   | { readonly _tag: 'IndexOnNonArray'; readonly actual: string }
-  | { readonly _tag: 'IndexNotI32'; readonly actual: string }
+  | { readonly _tag: 'IndexNotUsize'; readonly actual: string }
   | { readonly _tag: 'IndexOutOfBounds'; readonly index: number; readonly length: number }
   | { readonly _tag: 'ImmutableAssignment'; readonly spelling: string }
   | { readonly _tag: 'InvalidAssignmentPlace' }
@@ -1037,14 +1037,14 @@ export const indexOnNonArray = (actual: string, span: SourceSpan.SourceSpan): Di
     span,
   })
 
-export const indexNotI32 = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const indexNotUsize = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: indexNotI32Code,
+    code: indexNotUsizeCode,
     severity: 'error',
-    message: `Array index must be I32, found ${actual}`,
-    reason: Object.freeze({ _tag: 'IndexNotI32', actual }),
+    message: `Array index must be usize, found ${actual}`,
+    reason: Object.freeze({ _tag: 'IndexNotUsize', actual }),
     span,
   })
 
@@ -1075,14 +1075,14 @@ export const unknownType = (spelling: string, span: SourceSpan.SourceSpan): Diag
     span,
   })
 
-/** Creates the diagnostic for one decimal literal outside the signed `I32` range. */
+/** Creates the diagnostic for one decimal literal outside the signed `i32` range. */
 export const integerOutOfRange = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: integerOutOfRangeCode,
     severity: 'error',
-    message: 'Integer literal exceeds the I32 range',
+    message: 'Integer literal exceeds the i32 range',
     reason: Object.freeze({
       _tag: 'IntegerOutOfRange',
       spelling,
@@ -1092,14 +1092,14 @@ export const integerOutOfRange = (spelling: string, span: SourceSpan.SourceSpan)
     span,
   })
 
-/** Creates the target-independent diagnostic for a negative `Usize` literal. */
+/** Creates the target-independent diagnostic for a negative `usize` literal. */
 export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: usizeNegativeCode,
     severity: 'error',
-    message: 'Usize literals cannot be negative',
+    message: 'usize literals cannot be negative',
     reason: Object.freeze({ _tag: 'UsizeNegative', spelling }),
     span,
   })
@@ -1294,7 +1294,7 @@ export const unknownOwnedCallableReturn = (span: SourceSpan.SourceSpan): Diagnos
     span,
   })
 
-/** Creates the target-owned diagnostic for a `Usize` literal outside its selected word. */
+/** Creates the target-owned diagnostic for a `usize` literal outside its selected word. */
 export const usizeTargetOutOfRange = (
   spelling: string,
   target: string,
@@ -1307,7 +1307,7 @@ export const usizeTargetOutOfRange = (
     phase: 'layout',
     code: usizeTargetOutOfRangeCode,
     severity: 'error',
-    message: `Usize literal ${spelling} exceeds the ${bits}-bit range for ${target}`,
+    message: `usize literal ${spelling} exceeds the ${bits}-bit range for ${target}`,
     reason: Object.freeze({
       _tag: 'UsizeTargetOutOfRange',
       spelling,
@@ -1436,14 +1436,14 @@ export const rebindingName = (
     ]),
   })
 
-/** Creates the diagnostic for a conditional whose condition is not `Bool`. */
+/** Creates the diagnostic for a conditional whose condition is not `bool`. */
 export const conditionNotBool = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: conditionNotBoolCode,
     severity: 'error',
-    message: `Condition must be Bool, found ${actual}`,
+    message: `Condition must be bool, found ${actual}`,
     reason: Object.freeze({ _tag: 'ConditionNotBool', actual }),
     span,
   })
@@ -1588,7 +1588,7 @@ export const matchGuardNotBool = (actual: string, span: SourceSpan.SourceSpan): 
     phase: 'semantic',
     code: matchGuardNotBoolCode,
     severity: 'error',
-    message: `Match guard must be Bool, found ${actual}`,
+    message: `Match guard must be bool, found ${actual}`,
     reason: Object.freeze({ _tag: 'MatchGuardNotBool', actual }),
     span,
   })

@@ -16,25 +16,25 @@ it('keeps nominal identity independent of field shape and import spelling', () =
 it('orders built-in and nominal types by canonical keys', () => {
   const values: ReadonlyArray<Type.Type> = [
     Type.nominal('syntax/Tree', 'Node'),
-    'I32',
+    'i32',
     Type.nominal('ast/Tree', 'Node'),
-    'Bool',
+    'bool',
   ]
 
   assert.deepEqual([...values].sort(Type.compare).map(Type.encode), [
-    'Bool',
-    'I32',
+    'bool',
+    'i32',
     'ast/Tree.Node',
     'syntax/Tree.Node',
   ])
-  assert.strictEqual(Type.isBuiltin('I32'), true)
-  assert.strictEqual(Type.isNominal(values[0] ?? 'I32'), true)
+  assert.strictEqual(Type.isBuiltin('i32'), true)
+  assert.strictEqual(Type.isNominal(values[0] ?? 'i32'), true)
 })
 
 it('keeps fixed-array element type and length in recursive structural identity', () => {
-  const three = Type.fixedArray('I32', 3)
-  const repeated = Type.fixedArray('I32', 3)
-  const four = Type.fixedArray('I32', 4)
+  const three = Type.fixedArray('i32', 3)
+  const repeated = Type.fixedArray('i32', 3)
+  const four = Type.fixedArray('i32', 4)
   const nested = Type.fixedArray(Type.fixedArray(Type.nominal('model/Token', 'Token'), 0), 2)
 
   assert.strictEqual(Type.equals(three, repeated), true)
@@ -80,15 +80,15 @@ it('finds generic nominal dependencies nested inside union members', () => {
 
 it('collapses empty and singleton unions and rejects non-nominal leaves', () => {
   const token = Type.nominal('model/Token', 'Token')
-  const empty = Type.union(['Never'])
-  const singleton = Type.union(['Never', token, token])
-  const invalid = Type.union([token, 'I32', Type.fixedArray(token, 2)])
-  assert.deepEqual(empty, { _tag: 'Normalized', type: 'Never' })
+  const empty = Type.union(['never'])
+  const singleton = Type.union(['never', token, token])
+  const invalid = Type.union([token, 'i32', Type.fixedArray(token, 2)])
+  assert.deepEqual(empty, { _tag: 'Normalized', type: 'never' })
   assert.strictEqual(singleton._tag, 'Normalized')
   if (singleton._tag === 'Normalized') assert.strictEqual(Type.equals(singleton.type, token), true)
   assert.strictEqual(invalid._tag, 'InvalidMembers')
   if (invalid._tag === 'InvalidMembers')
-    assert.deepEqual(invalid.members.map(Type.encode), ['I32', 'Array<model/Token.Token, 2>'])
+    assert.deepEqual(invalid.members.map(Type.encode), ['i32', 'Array<model/Token.Token, 2>'])
 })
 
 it('normalizes compiler-private effect contract identity and traverses substitutions', () => {
@@ -105,23 +105,23 @@ it('normalizes compiler-private effect contract identity and traverses substitut
   assert.deepEqual(Type.parameters(contract), [parameter])
   assert.deepEqual(Type.nominals(contract).map(Type.encode), ['errors.First', 'errors.Second'])
 
-  const substituted = Type.substitute(contract, new Map([[Type.key(parameter), 'Usize']]))
-  assert.strictEqual(Type.encode(substituted), 'Effect<Usize ! errors.First | errors.Second>')
+  const substituted = Type.substitute(contract, new Map([[Type.key(parameter), 'usize']]))
+  assert.strictEqual(Type.encode(substituted), 'Effect<usize ! errors.First | errors.Second>')
   assert.strictEqual(Type.isConcrete(substituted), true)
 })
 
 it('canonicalizes callable contracts and orders invocation guarantees', () => {
   const owner = { module: 'work', name: 'apply' }
   const parameter = Type.parameter(owner, 0, 'T')
-  const shared = Type.callable([parameter, 'Bool'], parameter)
-  const exclusive = Type.callable([parameter, 'Bool'], parameter, 'Exclusive')
-  const once = Type.callable([parameter, 'Bool'], parameter, 'Take')
-  const substitution = new Map([[Type.key(parameter), 'I32' as const]])
+  const shared = Type.callable([parameter, 'bool'], parameter)
+  const exclusive = Type.callable([parameter, 'bool'], parameter, 'Exclusive')
+  const once = Type.callable([parameter, 'bool'], parameter, 'Take')
+  const substitution = new Map([[Type.key(parameter), 'i32' as const]])
 
-  assert.strictEqual(Type.encode(shared), 'fn(T, Bool) -> T')
-  assert.strictEqual(Type.encode(exclusive), 'mut fn(T, Bool) -> T')
-  assert.strictEqual(Type.encode(once), 'once fn(T, Bool) -> T')
-  assert.strictEqual(Type.encode(Type.substitute(shared, substitution)), 'fn(I32, Bool) -> I32')
+  assert.strictEqual(Type.encode(shared), 'fn(T, bool) -> T')
+  assert.strictEqual(Type.encode(exclusive), 'mut fn(T, bool) -> T')
+  assert.strictEqual(Type.encode(once), 'once fn(T, bool) -> T')
+  assert.strictEqual(Type.encode(Type.substitute(shared, substitution)), 'fn(i32, bool) -> i32')
   assert.deepEqual(Type.parameters(shared), [parameter])
   assert.strictEqual(
     TypeCompatibility.isCompatible(TypeCompatibility.check(shared, exclusive)),

@@ -53,7 +53,7 @@ their left value first, then their callable right expression, and invoke the cal
 let direct = Math.sum(2, 3)
 let plusThree = Math.sum(3)
 let piped = 2 |> plusThree
-let disabled = flag |> Bool.not
+let disabled = flag |> bool.not
 ```
 
 This is ordinary callable construction and application, not import-dependent method lookup or
@@ -72,7 +72,7 @@ sections through the same callable rule.
 The explicit expression form isolates eager setup from delayed work:
 
 ```silk
-fn risky<T>(value: T, selector: I32) -> Effect<T ! Problem> {
+fn risky<T>(value: T, selector: i32) -> Effect<T ! Problem> {
   let prepared = normalize(selector)
 
   return effect {

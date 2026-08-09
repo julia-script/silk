@@ -37,7 +37,7 @@ frontier evidence for quicksort and FFT where required.
 
 ### Complete the integer foundation
 
-- **Problem:** Only `I32`, `Usize`, and `Bool` are genuine scalars; source spelling is cumbersome,
+- **Problem:** Only `i32`, `usize`, and `bool` are genuine scalars; source spelling is cumbersome,
   bytes are counterfeited by a nominal wrapper, and indices still use mixed conventions.
 - **Outcome & done-when:** Lowercase unit/bottom and the full signed/unsigned integer family have
   exact literals, explicit conversions and operation modes, `usize` indices, and evaluator/LLVM/

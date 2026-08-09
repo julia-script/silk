@@ -29,18 +29,18 @@ const all = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.Expres
 
 it.effect('infers non-empty arrays and contextually types empty and nested literals', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn inferred() -> I32 { let values = [10, 20, 30] return 0 }
-fn empty() -> [I32; 0] { return [] }
-fn nested() -> [[I32; 0]; 2] { return [[], []] }
-fn take(values: [I32; 0]) -> I32 { return 7 }
-pub fn main() -> I32 { return take([]) }`)
+    const self = yield* snapshot(`fn inferred() -> i32 { let values = [10, 20, 30] return 0 }
+fn empty() -> [i32; 0] { return [] }
+fn nested() -> [[i32; 0]; 2] { return [[], []] }
+fn take(values: [i32; 0]) -> i32 { return 7 }
+pub fn main() -> i32 { return take([]) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const functions = Analysis.rootAnalysis(self).functions
     const inferred = functions.at(0)?.bindings.at(0)?.initializer
     assert.strictEqual(inferred?._tag, 'ArrayLiteral')
     if (inferred?._tag === 'ArrayLiteral' && inferred.type._tag === 'Available') {
-      assert.strictEqual(Type.encode(inferred.type.type), 'Array<I32, 3>')
+      assert.strictEqual(Type.encode(inferred.type.type), 'Array<i32, 3>')
       assert.deepEqual(
         inferred.elements.map((element) => element.ordinal),
         [0, 1, 2],
@@ -65,10 +65,10 @@ pub fn main() -> I32 { return take([]) }`)
 
 it.effect('retains every element while diagnosing empty context and exact mismatches', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn empty() -> I32 { let values = [] return 0 }
-fn types() -> I32 { let values = [1, true, 3] return 0 }
-fn length() -> [I32; 3] { return [1, 2] }
-pub fn main() -> I32 { return 0 }`)
+    const self = yield* snapshot(`fn empty() -> i32 { let values = [] return 0 }
+fn types() -> i32 { let values = [1, true, 3] return 0 }
+fn length() -> [i32; 3] { return [1, 2] }
+pub fn main() -> i32 { return 0 }`)
 
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
@@ -90,9 +90,9 @@ pub fn main() -> I32 { return 0 }`)
 it.effect('classifies constant and dynamic checked index places', () =>
   Effect.gen(function* () {
     const valid =
-      yield* snapshot(`fn dynamic(values: [I32; 3], index: I32) -> I32 { return values[index] }
-fn constant(values: [I32; 3]) -> I32 { return values[1] }
-pub fn main() -> I32 { return constant([4, 5, 6]) }`)
+      yield* snapshot(`fn dynamic(values: [i32; 3], index: usize) -> i32 { return values[index] }
+fn constant(values: [i32; 3]) -> i32 { return values[1] }
+pub fn main() -> i32 { return constant([4, 5, 6]) }`)
     assert.deepEqual(Analysis.diagnostics(valid), [])
     const facts = Analysis.rootAnalysis(valid).functions.flatMap((fn) =>
       all(fn.returnedExpression).filter(
@@ -107,30 +107,30 @@ pub fn main() -> I32 { return constant([4, 5, 6]) }`)
     const hir = Analysis.hirOf(valid, 'fixed-arrays/main')?.functions.at(0)
     assert.strictEqual(hir === undefined ? undefined : Hir.returned(hir)._tag, 'IndexPlace')
 
-    const invalid = yield* snapshot(`fn low(values: [I32; 3]) -> I32 { return values[-1] }
-fn high(values: [I32; 3]) -> I32 { return values[3] }
-fn wrong(values: [I32; 3]) -> I32 { return values[true] }
-pub fn main() -> I32 { return 0 }`)
+    const invalid = yield* snapshot(`fn low(values: [i32; 3]) -> i32 { return values[-1] }
+fn high(values: [i32; 3]) -> i32 { return values[3] }
+fn wrong(values: [i32; 3]) -> i32 { return values[true] }
+pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(
       Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
-      ['SEM0034', 'SEM0034', 'SEM0033'],
+      ['SEM0060', 'SEM0034', 'SEM0033'],
     )
   }),
 )
 
 it.effect('derives Copy, whole-move, partial-move, and cleanup behavior from elements', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { kind: I32 }
-fn copy(values: [I32; 2]) -> I32 { let again = values return values[0] }
-fn readThenMove(tokens: [Token; 2], index: I32) -> I32 {
+    const self = yield* snapshot(`struct Token { kind: i32 }
+fn copy(values: [i32; 2]) -> i32 { let again = values return values[0] }
+fn readThenMove(tokens: [Token; 2], index: usize) -> i32 {
   let kind = tokens[index].kind
   let next = move tokens
   return kind
 }
-fn partial(tokens: [Token; 2], index: I32) -> Token { return move tokens[index] }
-fn zero(tokens: [Token; 0]) -> I32 { let next = move tokens return 0 }
-fn cleanup(tokens: [Token; 3]) -> I32 { return 0 }
-pub fn main() -> I32 { return 0 }`)
+fn partial(tokens: [Token; 2], index: usize) -> Token { return move tokens[index] }
+fn zero(tokens: [Token; 0]) -> i32 { let next = move tokens return 0 }
+fn cleanup(tokens: [Token; 3]) -> i32 { return 0 }
+pub fn main() -> i32 { return 0 }`)
 
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),

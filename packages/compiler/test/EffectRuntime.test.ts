@@ -15,34 +15,34 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `struct Problem { code: I32 }
-effect fn risky<T>(value: T, selector: I32) -> T ! Problem {
+const source = `struct Problem { code: i32 }
+effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
   if selector == 0 { fail move Problem { code: 41 } }
   return move value
 }
-effect fn relay(value: I32) -> I32 ! Problem {
-  let pending = risky<I32>(value, value)
+effect fn relay(value: i32) -> i32 ! Problem {
+  let pending = risky<i32>(value, value)
   return run pending
 }
-effect fn recover(problem: Problem) -> I32 { return problem.code |> I32.add(1) }
-pub fn main() -> I32 {
+effect fn recover(problem: Problem) -> i32 { return problem.code |> i32.add(1) }
+pub fn main() -> i32 {
   let recipe = relay(0) |> Effect.catch<Problem>(recover)
   return run recipe
 }`
 const successSource = source.replace('relay(0)', 'relay(42)')
 const trapSource = source.replace(
-  'let pending = risky<I32>(value, value)',
-  'let pending = risky<I32>(42 / value, 1)',
+  'let pending = risky<i32>(value, value)',
+  'let pending = risky<i32>(42 / value, 1)',
 )
-const exclusiveCaptureSource = `pub fn main() -> I32 {
+const exclusiveCaptureSource = `pub fn main() -> i32 {
   let mut counter = 0
   let pending = effect { counter = counter + 1 return counter }
   let first = run pending
   let second = run pending
   return first * 10 + second
 }`
-const retrySource = `struct Problem { code: I32 }
-effect fn retrying() -> I32 ! Problem {
+const retrySource = `struct Problem { code: i32 }
+effect fn retrying() -> i32 ! Problem {
   let mut counter = 0
   let work = effect {
     counter = counter + 1
@@ -52,25 +52,25 @@ effect fn retrying() -> I32 ! Problem {
   let retried = work |> Effect.retry(2)
   return run retried
 }
-effect fn recover(problem: Problem) -> I32 { return 99 }
-pub fn main() -> I32 {
+effect fn recover(problem: Problem) -> i32 { return 99 }
+pub fn main() -> i32 {
   let handled = retrying() |> Effect.catch<Problem>(recover)
   return run handled
 }`
 const providerSource = `struct Clock {}
-effect fn read() -> I32 ? &Clock@Primary { return 42 }
-pub fn main() -> I32 {
+effect fn read() -> i32 ? &Clock@Primary { return 42 }
+pub fn main() -> i32 {
   let clock = Clock {}
   let provided = read() |> Clock.provide(&clock, @Primary)
   return run provided
 }`
-const callableMapSource = `effect fn succeed(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return run succeed(2) |> Effect.map(I32.add(40)) }`
-const outOfMemorySource = `effect fn exhaust() -> I32 ! OutOfMemory {
+const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }`
+const outOfMemorySource = `effect fn exhaust() -> i32 ! OutOfMemory {
   fail OutOfMemory {}
 }
-effect fn recover(error: OutOfMemory) -> I32 { return 42 }
-pub fn main() -> I32 {
+effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+pub fn main() -> i32 {
   return run exhaust() |> Effect.catch<OutOfMemory>(recover)
 }`
 

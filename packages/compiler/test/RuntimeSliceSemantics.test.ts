@@ -25,12 +25,12 @@ const returnedCall = (
 }
 
 it('forms shared and exclusive whole-array borrows without encoding source length', () => {
-  const result = analyze(`fn scan<T>(values: &[T]) -> I32 { return 1 }
-fn edit(values: &mut [I32]) -> I32 { return 2 }
-fn short() -> I32 { let values = [10, 20, 30] return scan(&values) }
-fn longRead() -> I32 { let values = [1, 2, 3, 4, 5, 6] return scan(&values) }
-fn long() -> I32 { let mut values = [1, 2, 3, 4, 5, 6] return edit(&mut values) }
-pub fn main() -> I32 { return short() }`)
+  const result = analyze(`fn scan<T>(values: &[T]) -> i32 { return 1 }
+fn edit(values: &mut [i32]) -> i32 { return 2 }
+fn short() -> i32 { let values = [10, 20, 30] return scan(&values) }
+fn longRead() -> i32 { let values = [1, 2, 3, 4, 5, 6] return scan(&values) }
+fn long() -> i32 { let mut values = [1, 2, 3, 4, 5, 6] return edit(&mut values) }
+pub fn main() -> i32 { return short() }`)
 
   assert.deepEqual(result.diagnostics, [])
   const shared = returnedCall(result, 2).arguments.at(0)?.expression
@@ -69,12 +69,12 @@ pub fn main() -> I32 { return short() }`)
 })
 
 it('retains compatible reborrows and rejects access strengthening', () => {
-  const result = analyze(`fn read(values: &[I32]) -> I32 { return 1 }
-fn edit(values: &mut [I32]) -> I32 { return 2 }
-fn share(values: &mut [I32]) -> I32 { return read(&values) }
-fn forward(values: &mut [I32]) -> I32 { return edit(&mut values) }
-fn strengthen(values: &[I32]) -> I32 { return edit(&mut values) }
-pub fn main() -> I32 { return 0 }`)
+  const result = analyze(`fn read(values: &[i32]) -> i32 { return 1 }
+fn edit(values: &mut [i32]) -> i32 { return 2 }
+fn share(values: &mut [i32]) -> i32 { return read(&values) }
+fn forward(values: &mut [i32]) -> i32 { return edit(&mut values) }
+fn strengthen(values: &[i32]) -> i32 { return edit(&mut values) }
+pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -97,14 +97,14 @@ pub fn main() -> I32 { return 0 }`)
 })
 
 it('rejects decay, immutable exclusive roots, standalone borrows, and subplaces', () => {
-  const result = analyze(`fn read(values: &[I32]) -> I32 { return 1 }
-fn edit(values: &mut [I32]) -> I32 { return 2 }
-fn decay() -> I32 { let values = [1, 2] return read(values) }
-fn immutable() -> I32 { let values = [1, 2] return edit(&mut values) }
-fn local() -> I32 { let values = [1, 2] let view = &values return 0 }
-fn temporary() -> I32 { return read(&[1, 2]) }
-fn subplace() -> I32 { let values = [[1, 2]] return read(&values[0]) }
-pub fn main() -> I32 { return 0 }`)
+  const result = analyze(`fn read(values: &[i32]) -> i32 { return 1 }
+fn edit(values: &mut [i32]) -> i32 { return 2 }
+fn decay() -> i32 { let values = [1, 2] return read(values) }
+fn immutable() -> i32 { let values = [1, 2] return edit(&mut values) }
+fn local() -> i32 { let values = [1, 2] let view = &values return 0 }
+fn temporary() -> i32 { return read(&[1, 2]) }
+fn subplace() -> i32 { let values = [[1, 2]] return read(&values[0]) }
+pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -118,19 +118,20 @@ pub fn main() -> I32 { return 0 }`)
 })
 
 it('types slice length and runtime-bounded borrowed places with preserved access', () => {
-  const result = analyze(`struct Token { pub kind: I32 }
-fn length(values: &[I32]) -> I32 { return values.length }
-fn inspect(values: &[Token], index: I32) -> I32 { return values[index].kind }
-fn replace(values: &mut [I32], index: I32) -> I32 {
+  const result = analyze(`struct Token { pub kind: i32 }
+fn length(values: &[i32]) -> i32 { return usize.toI32(values.length) }
+fn inspect(values: &[Token], index: usize) -> i32 { return values[index].kind }
+fn replace(values: &mut [i32], index: usize) -> i32 {
   values[index] = 42
-  return values.length
+  return usize.toI32(values.length)
 }
-pub fn main() -> I32 { return 0 }`)
+pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(result.diagnostics, [])
   const length = result.functions.at(0)?.returnedExpression
+  const lengthSubject = length?._tag === 'Call' ? length.arguments.at(0)?.expression : undefined
   assert.strictEqual(
-    length?._tag === 'FieldProjection' ? length.state._tag : undefined,
+    lengthSubject?._tag === 'FieldProjection' ? lengthSubject.state._tag : undefined,
     'SliceLength',
   )
 
@@ -153,8 +154,9 @@ pub fn main() -> I32 { return 0 }`)
     assert.strictEqual(write.root?._tag, 'ParameterDeclaration')
   }
   const lengthHir = result.hir.functions.at(0)
+  const lengthReturn = lengthHir === undefined ? undefined : Hir.returned(lengthHir)
   assert.strictEqual(
-    lengthHir === undefined ? undefined : Hir.returned(lengthHir)._tag,
+    lengthReturn?._tag === 'BuiltinCall' ? lengthReturn.arguments.at(0)?._tag : undefined,
     'SliceLength',
   )
   const inspectHir = result.hir.functions.at(1)
@@ -173,8 +175,8 @@ pub fn main() -> I32 { return 0 }`)
 })
 
 it('rejects slices nested through explicit generic type arguments', () => {
-  const result = analyze(`fn make<T>() -> I32 { return 0 }
-pub fn main() -> I32 { return make<&[I32]>() }`)
+  const result = analyze(`fn make<T>() -> i32 { return 0 }
+pub fn main() -> i32 { return make<&[i32]>() }`)
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -184,8 +186,8 @@ pub fn main() -> I32 { return make<&[I32]>() }`)
 })
 
 it('retains an unavailable borrow fact after damaged operand syntax', () => {
-  const result = analyze(`fn read(values: &[I32]) -> I32 { return 0 }
-pub fn main() -> I32 { return read(&) }`)
+  const result = analyze(`fn read(values: &[i32]) -> i32 { return 0 }
+pub fn main() -> i32 { return read(&) }`)
   const argument = returnedCall(result, 1).arguments.at(0)?.expression
 
   assert.strictEqual(argument?._tag, 'Borrow')
@@ -198,8 +200,8 @@ pub fn main() -> I32 { return read(&) }`)
 })
 
 it('verifies mismatched HIR loan endings without introducing graph cycles', () => {
-  const result = analyze(`fn read(values: &[I32]) -> I32 { return 0 }
-pub fn main() -> I32 { let values = [1, 2] return read(&values) }`)
+  const result = analyze(`fn read(values: &[i32]) -> i32 { return 0 }
+pub fn main() -> i32 { let values = [1, 2] return read(&values) }`)
   const fn = result.hir.functions.at(1)
   const statement = fn?.statements.at(-1)
   if (fn === undefined || statement?._tag !== 'Return' || statement.expression._tag !== 'Call') {
@@ -233,17 +235,17 @@ it.effect('discovers one generic slice instance across distinct source lengths',
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'slices/Instances',
-      ascii(`fn scan<T>(values: &[T]) -> I32 { return values.length }
-fn short() -> I32 { let values = [1, 2, 3] return scan(&values) }
-fn long() -> I32 { let values = [1, 2, 3, 4, 5, 6] return scan(&values) }
-pub fn main() -> I32 { let left = short() let right = long() return left + right }`),
+      ascii(`fn scan<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
+fn short() -> i32 { let values = [1, 2, 3] return scan(&values) }
+fn long() -> i32 { let values = [1, 2, 3, 4, 5, 6] return scan(&values) }
+pub fn main() -> i32 { let left = short() let right = long() return left + right }`),
     )
     const scans = Analysis.instancesOf(self).instances.filter(
       (instance) => instance.key.declaration.name === 'scan',
     )
 
     assert.strictEqual(scans.length, 1)
-    assert.deepEqual(scans.at(0)?.key.typeArguments, ['I32'])
+    assert.deepEqual(scans.at(0)?.key.typeArguments, ['i32'])
     assert.strictEqual(
       scans.at(0)?.key.contractRow.some((entry) => entry.includes(';3')),
       false,

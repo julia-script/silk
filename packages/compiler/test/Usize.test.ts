@@ -23,19 +23,19 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const nativeExact = `fn increment(value: Usize) -> Usize { return Usize.add(value, 1) }
-pub fn main() -> I32 {
+const nativeExact = `fn increment(value: usize) -> usize { return usize.add(value, 1) }
+pub fn main() -> i32 {
   if increment(9007199254740993) == 9007199254740994 { return 42 }
   return 0
 }`
 
-const sharedUnsigned = `fn maximum() -> Usize { return 4294967293 |> Usize.add(2) }
-pub fn main() -> I32 {
+const sharedUnsigned = `fn maximum() -> usize { return 4294967293 |> usize.add(2) }
+pub fn main() -> i32 {
   if maximum() > 2147483647 { return 42 }
   return 0
 }`
 
-it.effect('retains exact contextual magnitudes and target-owned Usize layout facts', () =>
+it.effect('retains exact contextual magnitudes and target-owned usize layout facts', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(nativeExact, 'aarch64-apple-darwin')
     assert.deepEqual(snapshot.diagnostics, [])
@@ -52,7 +52,7 @@ it.effect('retains exact contextual magnitudes and target-owned Usize layout fac
     const plan = Analysis.layoutOf(snapshot)
     assert.strictEqual(plan._tag, 'Available')
     if (plan._tag !== 'Available') return
-    const usize = Layout.entry(plan.value, 'Usize')
+    const usize = Layout.entry(plan.value, 'usize')
     assert.deepEqual(usize?.representation, { _tag: 'UnsignedInteger', bits: 64 })
     assert.strictEqual(plan.value.literalVerdicts.length, 3)
     assert.strictEqual(
@@ -75,7 +75,7 @@ it.effect(
         const layout = Analysis.layoutOf(snapshot)
         assert.strictEqual(layout._tag, 'Available')
         if (layout._tag === 'Available') {
-          const usize = Layout.entry(layout.value, 'Usize')
+          const usize = Layout.entry(layout.value, 'usize')
           assert.deepEqual(
             [usize?.size, usize?.alignment, usize?.representation],
             [8, 8, { _tag: 'UnsignedInteger', bits: 64 }],
@@ -83,8 +83,8 @@ it.effect(
         }
       }
 
-      const maximumProgram = `fn maximum() -> Usize { return 18446744073709551615 }
-pub fn main() -> I32 {
+      const maximumProgram = `fn maximum() -> usize { return 18446744073709551615 }
+pub fn main() -> i32 {
   if maximum() == 18446744073709551615 { return 42 }
   return 0
 }`
@@ -97,14 +97,14 @@ pub fn main() -> I32 {
       assert.strictEqual(returned?._tag, 'Return')
       if (returned?._tag === 'Return' && returned.value._tag === 'UsizeValue') {
         assert.strictEqual(returned.value.value.toString(), '18446744073709551615')
-      } else assert.fail('expected an exact Usize return trace')
+      } else assert.fail('expected an exact usize return trace')
     }),
 )
 
-it.effect('rejects an exact Usize magnitude outside the selected target before MIR', () =>
+it.effect('rejects an exact usize magnitude outside the selected target before MIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(
-      'fn wide() -> Usize { return 4294967296 } pub fn main() -> I32 { if wide() == 0 { return 1 } return 0 }',
+      'fn wide() -> usize { return 4294967296 } pub fn main() -> i32 { if wide() == 0 { return 1 } return 0 }',
       'wasm32-unknown-unknown',
     )
 
@@ -123,7 +123,7 @@ it.effect('rejects an exact Usize magnitude outside the selected target before M
   }),
 )
 
-it.effect('evaluates exact native Usize arithmetic without host-number precision loss', () =>
+it.effect('evaluates exact native usize arithmetic without host-number precision loss', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(nativeExact, 'aarch64-apple-darwin')
     const outcome = Analysis.evaluate(snapshot)
@@ -141,7 +141,7 @@ it.effect('evaluates exact native Usize arithmetic without host-number precision
   }),
 )
 
-it.effect('lowers native Usize lanes and operations as unsigned i64', () =>
+it.effect('lowers native usize lanes and operations as unsigned i64', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(nativeExact, 'aarch64-apple-darwin')
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
@@ -174,7 +174,7 @@ it.effect('executes an exact native i64 call and rejects the same source on Wasm
   }),
 )
 
-it.effect('executes Wasm Usize comparisons with unsigned i32 semantics', () =>
+it.effect('executes Wasm usize comparisons with unsigned i32 semantics', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(sharedUnsigned, 'wasm32-unknown-unknown')
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -188,11 +188,11 @@ it.effect('executes Wasm Usize comparisons with unsigned i32 semantics', () =>
   }),
 )
 
-it.effect('preserves Usize through generic aggregates and heterogeneous calling lanes', () =>
+it.effect('preserves usize through generic aggregates and heterogeneous calling lanes', () =>
   Effect.gen(function* () {
-    const program = `struct Pair<T> { first: T second: I32 }
-pub fn main() -> I32 {
-  let pair = Pair<Usize> { first: 4294967295, second: 7 }
+    const program = `struct Pair<T> { first: T second: i32 }
+pub fn main() -> i32 {
+  let pair = Pair<usize> { first: 4294967295, second: 7 }
   if pair.first == 4294967295 { return 42 }
   return 0
 }`
@@ -206,7 +206,7 @@ pub fn main() -> I32 {
     )
     assert.deepEqual(
       pair?.lanes.map((lane) => lane.type),
-      ['Usize', 'I32'],
+      ['usize', 'i32'],
     )
 
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -215,10 +215,10 @@ pub fn main() -> I32 {
   }),
 )
 
-it.effect('preserves Usize through fixed arrays, calls, and indexed returns', () =>
+it.effect('preserves usize through fixed arrays, calls, and indexed returns', () =>
   Effect.gen(function* () {
-    const program = `fn second(values: [Usize; 2]) -> Usize { return values[1] }
-pub fn main() -> I32 {
+    const program = `fn second(values: [usize; 2]) -> usize { return values[1] }
+pub fn main() -> i32 {
   if second([7, 4294967295]) == 4294967295 { return 42 }
   return 0
 }`
@@ -235,22 +235,22 @@ pub fn main() -> I32 {
   }),
 )
 
-it.effect('realizes mixed Usize and I32 union payload lanes in both backends', () =>
+it.effect('realizes mixed usize and i32 union payload lanes in both backends', () =>
   Effect.gen(function* () {
-    const program = `struct Wide { value: Usize }
-struct Narrow { value: I32 }
-fn decode(flag: Bool) -> Wide | Narrow {
+    const program = `struct Wide { value: usize }
+struct Narrow { value: i32 }
+fn decode(flag: bool) -> Wide | Narrow {
   if flag { return Wide { value: 4294967295 } }
   return Narrow { value: 7 }
 }
-fn inspect(input: Wide | Narrow) -> I32 {
+fn inspect(input: Wide | Narrow) -> i32 {
   return match &input {
     Wide { value } if value > 2147483647 => 42
     Wide { value } => 0
     Narrow { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(decode(true)) }`
+pub fn main() -> i32 { return inspect(decode(true)) }`
     const native = yield* source(program, 'aarch64-apple-darwin')
     assert.deepEqual(native.diagnostics, [])
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
@@ -266,12 +266,12 @@ pub fn main() -> I32 { return inspect(decode(true)) }`
   }),
 )
 
-it.effect('discovers one generic Usize instance independently of literal magnitude', () =>
+it.effect('discovers one generic usize instance independently of literal magnitude', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(
       `fn identity<T>(value: T) -> T { return move value }
-pub fn main() -> I32 {
-  if identity<Usize>(1) + identity<Usize>(4294967294) == 4294967295 { return 42 }
+pub fn main() -> i32 {
+  if identity<usize>(1) + identity<usize>(4294967294) == 4294967295 { return 42 }
   return 0
 }`,
       'wasm32-unknown-unknown',
@@ -281,14 +281,14 @@ pub fn main() -> I32 {
       (instance) => instance.key.declaration.name === 'identity',
     )
     assert.strictEqual(identities.length, 1)
-    assert.deepEqual(identities.at(0)?.key.typeArguments, ['Usize'])
+    assert.deepEqual(identities.at(0)?.key.typeArguments, ['usize'])
   }),
 )
 
 it.effect('traps unsigned underflow and rejects unary minus without compiler crashes', () =>
   Effect.gen(function* () {
     const underflow = yield* source(
-      'fn subtract() -> Usize { return 0 - 1 } pub fn main() -> I32 { if subtract() == 0 { return 1 } return 0 }',
+      'fn subtract() -> usize { return 0 - 1 } pub fn main() -> i32 { if subtract() == 0 { return 1 } return 0 }',
       'wasm32-unknown-unknown',
     )
     const outcome = Analysis.evaluate(underflow)
@@ -301,7 +301,7 @@ it.effect('traps unsigned underflow and rejects unary minus without compiler cra
     )
 
     const negative = yield* source(
-      'fn invalid() -> Usize { return -1 } pub fn main() -> I32 { return 0 }',
+      'fn invalid() -> usize { return -1 } pub fn main() -> i32 { return 0 }',
       'aarch64-apple-darwin',
     )
     assert.include(
@@ -310,7 +310,7 @@ it.effect('traps unsigned underflow and rejects unary minus without compiler cra
     )
 
     const mixed = yield* source(
-      'fn invalid(wide: Usize, narrow: I32) -> Bool { return wide == narrow } pub fn main() -> I32 { return 0 }',
+      'fn invalid(wide: usize, narrow: i32) -> bool { return wide == narrow } pub fn main() -> i32 { return 0 }',
       'aarch64-apple-darwin',
     )
     assert.include(
@@ -320,11 +320,11 @@ it.effect('traps unsigned underflow and rejects unary minus without compiler cra
   }),
 )
 
-it.effect('traps Usize overflow and division by zero in both logical and Wasm execution', () =>
+it.effect('traps usize overflow and division by zero in both logical and Wasm execution', () =>
   Effect.gen(function* () {
     for (const expression of ['4294967295 + 1', '1 / 0']) {
-      const program = `fn invalid() -> Usize { return ${expression} }
-pub fn main() -> I32 { if invalid() == 0 { return 1 } return 0 }`
+      const program = `fn invalid() -> usize { return ${expression} }
+pub fn main() -> i32 { if invalid() == 0 { return 1 } return 0 }`
       const snapshot = yield* source(program, 'wasm32-unknown-unknown')
       const logical = Analysis.evaluate(snapshot)
       assert.strictEqual(logical._tag, 'Blocked', expression)
@@ -340,14 +340,14 @@ pub fn main() -> I32 { if invalid() == 0 { return 1 } return 0 }`
   }),
 )
 
-it.effect('rejects malformed Usize target verdicts and MIR literals as verifier data', () =>
+it.effect('rejects malformed usize target verdicts and MIR literals as verifier data', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(sharedUnsigned, 'wasm32-unknown-unknown')
     const layout = Analysis.layoutOf(snapshot)
     assert.strictEqual(layout._tag, 'Available')
     if (layout._tag !== 'Available') return
     const first = layout.value.literalVerdicts.at(0)
-    if (first === undefined) return assert.fail('expected a Usize literal verdict')
+    if (first === undefined) return assert.fail('expected a usize literal verdict')
     const malformedLayout: Layout.Plan = {
       ...layout.value,
       literalVerdicts: [{ ...first, bits: 64 }],
@@ -367,7 +367,7 @@ it.effect('rejects malformed Usize target verdicts and MIR literals as verifier 
             ? {
                 ...region,
                 operations: region.operations.map((operation) =>
-                  operation._tag === 'Literal' && operation.type._tag === 'Usize'
+                  operation._tag === 'Literal' && operation.type._tag === 'usize'
                     ? { ...operation, value: 4294967296n }
                     : operation,
                 ),

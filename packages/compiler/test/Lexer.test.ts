@@ -46,7 +46,7 @@ it('recognizes keywords only as complete identifiers', () => {
   const result = Lexer.lex(
     SourceFile.make(
       'memory://keywords.silk',
-      ascii('pub publicity fn fnx return returning _x x2 I32'),
+      ascii('pub publicity fn fnx return returning _x x2 i32'),
     ),
   )
 
@@ -82,7 +82,7 @@ it('recognizes the effect execution and failure keywords without prefix capture'
   const result = Lexer.lex(
     SourceFile.make(
       'memory://effect-keywords.silk',
-      ascii('effect fn work() -> I32 ! Error { fail move error } run work() flower runner failed'),
+      ascii('effect fn work() -> i32 ! Error { fail move error } run work() flower runner failed'),
     ),
   )
 
@@ -270,7 +270,7 @@ it('distinguishes a type union separator from the pipeline operator', () => {
 it('recognizes typed parameter and argument punctuation with exact spans', () => {
   const source = SourceFile.make(
     'memory://parameter-punctuation.silk',
-    ascii('identity(value: I32, other: I32)'),
+    ascii('identity(value: i32, other: i32)'),
   )
   const result = Lexer.lex(source)
 
@@ -288,7 +288,7 @@ it('recognizes typed parameter and argument punctuation with exact spans', () =>
 })
 
 it('lexes the fixed-array semicolon as punctuation with its exact span', () => {
-  const source = SourceFile.make('memory://fixed-array.silk', ascii('[I32; 4]'))
+  const source = SourceFile.make('memory://fixed-array.silk', ascii('[i32; 4]'))
   const result = Lexer.lex(source)
 
   assert.deepEqual(
@@ -297,7 +297,7 @@ it('lexes the fixed-array semicolon as punctuation with its exact span', () => {
       .map((token) => tokenView(source, token)),
     [
       { kind: 'LeftBracket', start: 0, end: 1, slice: '[' },
-      { kind: 'Identifier', start: 1, end: 4, slice: 'I32' },
+      { kind: 'Identifier', start: 1, end: 4, slice: 'i32' },
       { kind: 'Semicolon', start: 4, end: 5, slice: ';' },
       { kind: 'DecimalInteger', start: 6, end: 7, slice: '4' },
       { kind: 'RightBracket', start: 7, end: 8, slice: ']' },
@@ -359,7 +359,7 @@ it('uses longest match for arrows and groups maximal unsupported byte regions', 
 
 it('reconstructs every input byte exactly once and is deterministic', () => {
   const bytes = Uint8Array.of(
-    ...ascii('pub fn main() -> I32 {\nreturn 42\n}'),
+    ...ascii('pub fn main() -> i32 {\nreturn 42\n}'),
     0x00,
     0xff,
     ...ascii('//tail'),
@@ -433,7 +433,7 @@ it('distinguishes declaration, module, and plain line comments', () => {
 })
 
 it('lexes signed literals and qualified callees with minus and dot tokens', () => {
-  const result = Lexer.lex(SourceFile.make('memory://arith.silk', ascii('-42 I32.add')))
+  const result = Lexer.lex(SourceFile.make('memory://arith.silk', ascii('-42 i32.add')))
 
   assert.deepEqual(
     result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),

@@ -12,8 +12,8 @@ import * as Effect from 'effect/Effect'
 const program = Effect.gen(function* () {
   const snapshot = yield* Analysis.ofSource(
     'memory/example',
-    new TextEncoder().encode(`pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(42) }`),
+    new TextEncoder().encode(`pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(42) }`),
   )
   const result = Analysis.rootAnalysis(snapshot)
 
@@ -63,8 +63,8 @@ intrinsics remain hoverable without inventing virtual definition files.
 `Analysis.hoverSubjectAt` selects an occurrence before considering a cached anonymous-expression
 type. Available occurrences render through `Presentation`, which preserves source concepts such as
 parameter names, mutable bindings, generic parameters, and `effect fn` declarations. This is why a
-reference to `effect fn recover(error: OutOfMemory) -> I32` is not displayed as a lowered anonymous
-`fn(OutOfMemory) -> Effect<I32>` type.
+reference to `effect fn recover(error: OutOfMemory) -> i32` is not displayed as a lowered anonymous
+`fn(OutOfMemory) -> Effect<i32>` type.
 
 `Analysis.completionAt` classifies recovered source positions and returns semantic candidates with
 an exact replacement span. Intrinsic member candidates come from the same `Intrinsic` catalog used
@@ -154,7 +154,7 @@ unresolved, or unavailable declared return type.
 
 Each declaration publishes its ordered parameter facts. A parameter identity nests its concrete
 ordinal under the owning function identity, so same-spelled parameters in different functions stay
-independent. Parameter names and declared types retain exact concrete provenance. The exact `I32`
+independent. Parameter names and declared types retain exact concrete provenance. The exact `i32`
 type resolves through the same type rule as function returns; unknown present types produce
 `SEM0001`, while parser-damaged names and types remain unavailable without duplicate diagnostics.
 
@@ -168,7 +168,7 @@ matches remain available in source order.
 names do not enter lookup, while every present duplicate after the first produces `SEM0003` at the
 later name span and retains the original name span in its reason data.
 
-This slice recognizes only the exact ASCII type spelling `I32` and positive decimal values from
+This slice recognizes only the exact ASCII type spelling `i32` and positive decimal values from
 `0` through `2147483647`. It interprets token bytes without host-number precision loss. A present
 unknown type produces `SEM0001`; a present integer above the boundary produces `SEM0002`. Every
 function is analyzed independently. Missing or damaged syntax remains unavailable and belongs to
@@ -218,7 +218,7 @@ general scope graph, and dependency scheduling remain deferred.
 ## Bootstrap evaluation is not compilation
 
 `BootstrapEvaluation.evaluate` is a pure, direct interpreter over the existing semantic facts. It
-selects one zero-parameter `main: I32`, follows only reachable decimal literals, resolved parameter
+selects one zero-parameter `main: i32`, follows only reachable decimal literals, resolved parameter
 reads, and compatible calls, and returns either an exact `Completed` value or closed `Blocked`
 reason. Its immutable trace records entry, call, positional binding, parameter read, and return
 events with existing semantic provenance. Arguments, including nested calls, are evaluated fully

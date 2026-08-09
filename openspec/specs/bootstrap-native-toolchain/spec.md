@@ -58,7 +58,7 @@ process output, exit status, and command provenance as data.
 #### Scenario: Link a runnable executable
 
 - **WHEN** the `ClangLinker` links the program object with a runtime shim compiled for the same canonical target
-- **THEN** an executable exists at the requested destination and running it exits with the program's `I32` result
+- **THEN** an executable exists at the requested destination and running it exits with the program's `i32` result
 
 #### Scenario: Reject a missing input as data
 
@@ -74,7 +74,7 @@ process output, exit status, and command provenance as data.
 
 The toolchain SHALL generate the slice's minimal C runtime shim and compile it with the pinned
 Clang. Its private, compiler-versioned scalar ABI SHALL call the explicit zero-parameter
-`silk_main -> I32`. For an ordinary entry, the shim SHALL return that result unchanged as the
+`silk_main -> i32`. For an ordinary entry, the shim SHALL return that result unchanged as the
 process exit status. For an effectful entry, `silk_main` SHALL return `0` or a normalized one-based
 failure tag; the shim SHALL map success to status `0`, map a valid failure tag through its
 compiler-provided canonical report table to one standard-error line and status `1`, and map an
@@ -117,7 +117,7 @@ or stable external ABI promise.
 
 ### Requirement: The pinned Clang finalizes LLVM WebAssembly
 
-The external toolchain boundary SHALL finalize LLVM bitcode planned for `wasm32-unknown-unknown` into a standalone WebAssembly module using structured pinned-Clang arguments, no shell command string, no native runtime shim, no implicit host libraries, and an exported zero-argument `silk_main` entry returning `I32`. The resulting module SHALL be atomically committed to the requested `.wasm` destination. Process failure or incompatible output SHALL return typed data retaining the command, arguments, exit status, and process output.
+The external toolchain boundary SHALL finalize LLVM bitcode planned for `wasm32-unknown-unknown` into a standalone WebAssembly module using structured pinned-Clang arguments, no shell command string, no native runtime shim, no implicit host libraries, and an exported zero-argument `silk_main` entry returning `i32`. The resulting module SHALL be atomically committed to the requested `.wasm` destination. Process failure or incompatible output SHALL return typed data retaining the command, arguments, exit status, and process output.
 
 #### Scenario: Finalize a standalone Wasm module
 

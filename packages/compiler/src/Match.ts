@@ -104,7 +104,7 @@ export type Join =
 export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
   const contributing = inputs.filter((type) => !Type.isNever(type))
   const first = contributing.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'Never' })
+  if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'never' })
   if (contributing.every((type) => Type.equals(type, first))) {
     return Object.freeze({ _tag: 'Joined', type: first })
   }

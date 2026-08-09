@@ -222,7 +222,7 @@ const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): 
     if (
       declaration.failureRow.failures.length !== 0 ||
       declaration.requirementRow.requirements.length !== 0 ||
-      declaration.returnType.type !== 'I32'
+      declaration.returnType.type !== 'i32'
     ) {
       return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidOrdinaryEntryResult' })
     }

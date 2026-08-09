@@ -10,20 +10,20 @@ hand-built samples before lowering exists.
 ### Requirement: MIR names and closes the selected entry explicitly
 
 A MIR module SHALL retain an explicit entry descriptor independent of function order. An ordinary
-entry descriptor SHALL identify the selected `I32` function. An effectful entry descriptor SHALL
-identify the selected `Unit` Effect runner, its normalized failures, canonical report identities,
+entry descriptor SHALL identify the selected `i32` function. An effectful entry descriptor SHALL
+identify the selected `()` Effect runner, its normalized failures, canonical report identities,
 payload cleanup plans, and generated closing adapter. The verifier SHALL reject a missing,
 ambiguous, signature-incompatible, open, or internally inconsistent descriptor before evaluation
 or backend emission.
 
 #### Scenario: Encode an ordinary entry explicitly
 
-- **WHEN** lowering receives an ordinary `main() -> I32`
+- **WHEN** lowering receives an ordinary `main() -> i32`
 - **THEN** MIR names its canonical instance as the entry without relying on its function ordinal
 
 #### Scenario: Encode an effectful entry adapter
 
-- **WHEN** lowering receives an effectful `main() -> Unit ! SomeError`
+- **WHEN** lowering receives an effectful `main() -> () ! SomeError`
 - **THEN** MIR contains a generated scalar adapter that runs the effect and closes success and failure outcomes
 
 #### Scenario: Verify failure cleanup metadata
@@ -35,6 +35,29 @@ or backend emission.
 
 - **WHEN** equivalent programs are lowered repeatedly
 - **THEN** their entry descriptors, generated adapter, failure ordering, and MIR text are identical
+
+### Requirement: MIR represents the complete integer family
+
+MIR SHALL carry canonical integer logical types, exact constants, conversions, arithmetic modes, comparisons, bitwise operations, shifts, rotates, and recoverable checked outcomes. Verification SHALL reject mismatched types, widths, constants, modes, or layouts; encoding SHALL remain deterministic and backend-neutral.
+
+#### Scenario: Verify wide addition
+
+- **WHEN** MIR contains valid checked `u64` addition
+- **THEN** verification accepts one exact backend-neutral operation
+
+#### Scenario: Reject a malformed conversion
+
+- **WHEN** a conversion operand disagrees with its declared source type
+- **THEN** verification reports the mismatch before evaluation or emission
+
+### Requirement: MIR represents unit and bottom without payloads
+
+MIR SHALL use zero result lanes for unit and permit `never` only on non-returning paths.
+
+#### Scenario: Lower bare return
+
+- **WHEN** a unit function executes bare `return`
+- **THEN** MIR terminates with no scalar result local
 
 ### Requirement: MIR is a backend-neutral structured control DAG over logical types
 
@@ -53,7 +76,7 @@ structure from flattened control flow.
 #### Scenario: Model a straight-line function
 
 - **WHEN** a hand-built function returns a called constant
-- **THEN** its entry region contains ordered literal and call operations ending in a return outcome over logical `I32`
+- **THEN** its entry region contains ordered literal and call operations ending in a return outcome over logical `i32`
 
 #### Scenario: Model structured repetition without a cycle
 
@@ -118,12 +141,12 @@ plan.
 
 #### Scenario: Lower with the completed plan
 
-- **WHEN** discovered instances using `I32` and `Bool` lower successfully
+- **WHEN** discovered instances using `i32` and `bool` lower successfully
 - **THEN** the resulting MIR program carries the selected target and verified entries for both types
 
 #### Scenario: Reject a missing type layout
 
-- **WHEN** a hand-built MIR program uses `Bool` but omits its layout entry
+- **WHEN** a hand-built MIR program uses `bool` but omits its layout entry
 - **THEN** verification reports the missing layout deterministically as data
 
 ### Requirement: Lowering constructs MIR from elaborated instances
@@ -177,7 +200,7 @@ golden files.
 
 #### Scenario: Lower a built-in call to a binary operation
 
-- **WHEN** `main` returning `I32.add(40, 2)` is lowered
+- **WHEN** `main` returning `i32.add(40, 2)` is lowered
 - **THEN** the block computes both literal operands and one `Add` binary operation into the returned local, verifying clean
 
 #### Scenario: Verify binary operand references
@@ -192,9 +215,9 @@ golden files.
 
 ### Requirement: Comparisons and user branches lower to real control flow
 
-The MIR type vocabulary SHALL grow to `I32` and `Bool`, and the binary operator vocabulary SHALL
+The MIR type vocabulary SHALL grow to `i32` and `bool`, and the binary operator vocabulary SHALL
 grow with the non-trapping comparisons `Equals`, `NotEquals`, `LessThan`, `LessOrEqual`,
-`GreaterThan`, and `GreaterOrEqual`, producing `Bool` from two `I32` operands. `Bool.not` SHALL
+`GreaterThan`, and `GreaterOrEqual`, producing `bool` from two `i32` operands. `bool.not` SHALL
 lower through existing operations rather than a new operation kind. Lowering a conditional
 statement SHALL produce a user-authored `Branch` terminator on the condition local, arm blocks
 in taken-then-otherwise order, and a join block where fall-through control continues; arm-local
@@ -203,7 +226,7 @@ deterministically, gated by committed golden files.
 
 #### Scenario: Lower a conditional to a diamond
 
-- **WHEN** `pub fn main() -> I32 { if I32.equals(1, 1) { return 1 } return 0 }` is lowered
+- **WHEN** `pub fn main() -> i32 { if i32.equals(1, 1) { return 1 } return 0 }` is lowered
 - **THEN** the entry block computes the comparison and ends in a branch whose taken block returns `1` and whose otherwise path reaches the trailing return, verifying clean
 
 #### Scenario: Keep comparisons non-trapping
@@ -288,14 +311,14 @@ and calling shape; MIR MUST NOT replace an array with an untyped scalar bundle.
 
 #### Scenario: Lower an array factory
 
-- **WHEN** a reachable function returns `Array<I32, 3>`
+- **WHEN** a reachable function returns `Array<i32, 3>`
 - **THEN** its MIR result and receiving locals retain that exact logical array type
 
 ### Requirement: Array construction and checked indexing are explicit MIR operations
 
 MIR SHALL represent complete array construction with ascending canonical element operands. It SHALL
 lower each readable Copy place chain to one checked read carrying the root aggregate local, ordered
-field or index selectors, every dynamic `I32` index local and canonical length, the final Copy result
+field or index selectors, every dynamic `i32` index local and canonical length, the final Copy result
 type, and exact trap provenance. Non-Copy intermediate aggregates MUST NOT become independently
 owned locals. Whole moves, calls, returns, and drops SHALL continue to use ordinary operations over
 complete logical values.
@@ -314,7 +337,7 @@ provenance in stable order.
 
 #### Scenario: Reject a malformed construction
 
-- **WHEN** an `Array<I32, 3>` construction carries two operands
+- **WHEN** an `Array<i32, 3>` construction carries two operands
 - **THEN** verification reports the exact completeness violation before evaluation or emission
 
 ### Requirement: MIR writes replace typed places explicitly
@@ -425,7 +448,7 @@ blocks, branch depths, and arbitrary cyclic edges.
 Verification SHALL reject a match whose scrutinee or result local disagrees with its logical type or
 layout, whose member cases are invalid or non-exhaustive, whose source decision order contradicts
 the semantic coverage facts, whose pattern field or binding types disagree, whose guard is not
-`Bool`, whose access mode violates ownership metadata, or whose arm result and cleanup outcomes do
+`bool`, whose access mode violates ownership metadata, or whose arm result and cleanup outcomes do
 not reach the declared join consistently. Violations SHALL be deterministic data produced before
 evaluation or backend emission.
 
@@ -520,7 +543,7 @@ loops later repeat through lexical outcomes, and MUST NOT expose a source-level 
 
 Length, check, read, projection, and write operations for a slice SHALL derive the backing address,
 runtime length, access mode, and element type from the same verified slice local. Runtime indexing
-MUST use unsigned `I32` comparison semantics so negative values and values at or above length trap.
+MUST use unsigned `i32` comparison semantics so negative values and values at or above length trap.
 An exclusive write SHALL validate its destination before evaluating the replacement and SHALL
 commit only after displaced-value cleanup.
 
@@ -546,16 +569,16 @@ though their verified access permissions differ.
 - **WHEN** malformed MIR drops an array root before ending its live slice loan
 - **THEN** verification identifies the owner, loan, and invalid operation without delegating borrow safety to a backend
 
-### Requirement: MIR represents target-selected Usize values in the DAG
+### Requirement: MIR represents target-selected usize values in the DAG
 
-MIR SHALL represent `Usize` literals and operations with the selected compiler-owned unsigned word
+MIR SHALL represent `usize` literals and operations with the selected compiler-owned unsigned word
 lane. Verification SHALL reject out-of-range literals, mismatched operand widths or types, signed
 comparison/division semantics, and arithmetic results lacking the required overflow or underflow
 trap behavior. The structured control representation SHALL remain a DAG.
 
 #### Scenario: Reject a mismatched word lane
 
-- **WHEN** malformed native MIR assigns a 32-bit lane to `Usize`
+- **WHEN** malformed native MIR assigns a 32-bit lane to `usize`
 - **THEN** verification rejects it before evaluation or backend emission
 
 ### Requirement: MIR represents callable environments in the structured DAG
@@ -568,7 +591,7 @@ and cleanup that can occur before a retained dependency is released.
 
 #### Scenario: Lower a reusable arithmetic section
 
-- **WHEN** a stored `I32.add(2)` section reaches runtime
+- **WHEN** a stored `i32.add(2)` section reaches runtime
 - **THEN** MIR contains one concrete callable environment and typed unary application without a surface pipeline operation
 
 #### Scenario: Verify a consuming environment

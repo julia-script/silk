@@ -17,12 +17,12 @@ or more ASCII digits. A `-` immediately followed by `>` SHALL remain one arrow t
 
 #### Scenario: Lex the first parser fixture
 
-- **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
+- **WHEN** the source bytes spell `pub fn main() -> i32 { return 42 }`
 - **THEN** the token stream contains the expected keywords, identifiers, punctuation, integer literal, trivia, and end-of-file in source order
 
 #### Scenario: Lex a typed parameter and call argument
 
-- **WHEN** the source bytes spell `pub fn identity(value: I32) -> I32 { return value }` followed by a call `identity(42)`
+- **WHEN** the source bytes spell `pub fn identity(value: i32) -> i32 { return value }` followed by a call `identity(42)`
 - **THEN** the colon and all list punctuation are distinct supported tokens with exact source spans
 
 #### Scenario: Preserve a keyword prefix
@@ -52,7 +52,7 @@ or more ASCII digits. A `-` immediately followed by `>` SHALL remain one arrow t
 
 #### Scenario: Lex a signed literal and a qualified callee
 
-- **WHEN** the source bytes spell `-42 I32.add`
+- **WHEN** the source bytes spell `-42 i32.add`
 - **THEN** the stream contains one minus token, one integer literal, one identifier, one dot token, and one identifier, each with its exact span
 
 #### Scenario: Distinguish minus from the arrow

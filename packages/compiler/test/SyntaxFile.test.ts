@@ -10,7 +10,7 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const acceptedSource = '/// answers\npub fn main() -> I32 { return 42 }'
+const acceptedSource = '/// answers\npub fn main() -> i32 { return 42 }'
 const malformedBytes = Uint8Array.of(0x40, 0xff, ...ascii(' pub fn main( -> Mystery { return 42 }'))
 
 const parseBytes = (id: string, bytes: Uint8Array): SyntaxFile.SyntaxFile =>

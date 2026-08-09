@@ -12,7 +12,7 @@ tokens:
   9 Whitespace [25, 26) " "
   10 Arrow [26, 28) "->"
   11 Whitespace [28, 29) " "
-  12 Identifier [29, 32) "I32"
+  12 Identifier [29, 32) "i32"
   13 Whitespace [32, 33) " "
   14 LeftBrace [33, 34) "{"
   15 Whitespace [34, 35) " "
@@ -40,7 +40,7 @@ tree:
         token Arrow [26, 28) "->"
         TypePath [28, 32)
           token Whitespace [28, 29) " "
-          token Identifier [29, 32) "I32"
+          token Identifier [29, 32) "i32"
       Block [32, 46)
         token Whitespace [32, 33) " "
         token LeftBrace [33, 34) "{"

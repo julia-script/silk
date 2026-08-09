@@ -16,9 +16,9 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 
 const source = `fn identity<T>(value: T) -> T { return move value }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let flag = identity(true)
-  return identity<I32>(42)
+  return identity<i32>(42)
 }`
 
 const file = SourceFile.make('generics/Main', new TextEncoder().encode(source))
@@ -44,7 +44,7 @@ it('keeps generic angles contextual and recovers damaged lists deterministically
     Lexer.lex(
       SourceFile.make(
         'generics/Comparison',
-        new TextEncoder().encode('pub fn main() -> I32 { if 1 < 2 { return 42 } return 0 }'),
+        new TextEncoder().encode('pub fn main() -> i32 { if 1 < 2 { return 42 } return 0 }'),
       ),
     ),
   )
@@ -59,7 +59,7 @@ it('keeps generic angles contextual and recovers damaged lists deterministically
       SourceFile.make(
         'generics/MissingArgument',
         new TextEncoder().encode(
-          'fn identity<T>(value: T) -> T { return move value }\npub fn main() -> I32 { return identity<>(1) }',
+          'fn identity<T>(value: T) -> T { return move value }\npub fn main() -> i32 { return identity<>(1) }',
         ),
       ),
     ),
@@ -78,7 +78,7 @@ it('keeps generic angles contextual and recovers damaged lists deterministically
       SourceFile.make(
         'generics/MissingClose',
         new TextEncoder().encode(
-          'struct Box<T> { value: T }\nfn broken(value: Box<I32) -> I32 { return 0 }',
+          'struct Box<T> { value: T }\nfn broken(value: Box<i32) -> i32 { return 0 }',
         ),
       ),
     ),
@@ -128,8 +128,8 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
       })),
       [
         { name: 'main', arguments: [] },
-        { name: 'identity', arguments: ['Bool'] },
-        { name: 'identity', arguments: ['I32'] },
+        { name: 'identity', arguments: ['bool'] },
+        { name: 'identity', arguments: ['i32'] },
       ],
     )
     assert.strictEqual(snapshot.mir._tag, 'Available')
@@ -146,7 +146,7 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
             ? [event.targetInstance.typeArguments.map(Type.encode)]
             : [],
         ),
-        [['Bool'], ['I32']],
+        [['bool'], ['i32']],
       )
     }
   }),
@@ -156,11 +156,11 @@ it.effect('uses complete explicit arguments as value-argument context', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/ExplicitContext',
-      new TextEncoder().encode(`struct Left { value: I32 }
-struct Right { value: I32 }
-fn accept<T>(value: T) -> I32 { return 42 }
-pub fn main() -> I32 {
-  let empty = accept<[I32; 0]>([])
+      new TextEncoder().encode(`struct Left { value: i32 }
+struct Right { value: i32 }
+fn accept<T>(value: T) -> i32 { return 42 }
+pub fn main() -> i32 {
+  let empty = accept<[i32; 0]>([])
   return accept<Left | Right>(Left { value: empty })
 }`),
     )
@@ -176,7 +176,7 @@ it.effect('retains unresolved type-argument causes without fabricating arity fai
     const snapshot = yield* Analysis.ofSource(
       'generics/UnresolvedArgument',
       new TextEncoder().encode(
-        'struct Box<T> { value: T }\nfn bad(value: Box<Missing>) -> I32 { return 0 }\npub fn main() -> I32 { return 42 }',
+        'struct Box<T> { value: T }\nfn bad(value: Box<Missing>) -> i32 { return 0 }\npub fn main() -> i32 { return 42 }',
       ),
     )
     const codes = snapshot.diagnostics.map((diagnostic) => diagnostic.code)
@@ -190,7 +190,7 @@ it.effect('does not fabricate a second identity for duplicate type parameters', 
     const snapshot = yield* Analysis.ofSource(
       'generics/DuplicateIdentity',
       new TextEncoder().encode(
-        'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> I32 { return 42 }',
+        'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> i32 { return 42 }',
       ),
     )
     const declaration = Analysis.genericDeclarationsOf(snapshot).at(0)
@@ -207,8 +207,8 @@ it.effect('keeps open cleanup symbolic and specializes it before MIR', () =>
     const snapshot = yield* Analysis.ofSource(
       'generics/Cleanup',
       new TextEncoder().encode(`struct Payload {}
-fn discard<T>(value: T) -> I32 { return 42 }
-pub fn main() -> I32 { return discard<Payload>(Payload {}) }`),
+fn discard<T>(value: T) -> i32 { return 42 }
+pub fn main() -> i32 { return discard<Payload>(Payload {}) }`),
     )
     assert.deepEqual(snapshot.diagnostics, [])
     const ownership = Analysis.ownershipOf(snapshot, 'generics/Cleanup')
@@ -235,8 +235,8 @@ it.effect('lays out and evaluates only the reached applied struct', () =>
     const structFile = SourceFile.make(
       'generics/Box',
       new TextEncoder().encode(`struct Box<T> { value: T }
-pub fn main() -> I32 {
-  let box = Box<I32> { value: 42 }
+pub fn main() -> i32 {
+  let box = Box<i32> { value: 42 }
   return box.value
 }`),
     )
@@ -249,7 +249,7 @@ pub fn main() -> I32 {
     if (snapshot.layout._tag !== 'Available' || snapshot.mir._tag !== 'Available') return
     assert.deepEqual(
       snapshot.layout.value.entries.map((entry) => Type.encode(entry.type)),
-      ['I32', 'generics/Box.Box<I32>'],
+      ['i32', 'generics/Box.Box<i32>'],
     )
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
     assert.strictEqual(outcome._tag, 'Completed')
@@ -262,7 +262,7 @@ it.effect('resolves inferred and explicit generic calls across module namespaces
     const root = SourceFile.make(
       'app/Main',
       new TextEncoder().encode(`import library.Generic
-pub fn main() -> I32 { return Generic.identity<I32>(Generic.identity(42)) }`),
+pub fn main() -> i32 { return Generic.identity<i32>(Generic.identity(42)) }`),
     )
     const snapshot = yield* Analysis.make({ root }).pipe(
       Effect.provide(
@@ -291,10 +291,10 @@ it.effect('cuts off recursive generic calls that change an ancestor specializati
   Effect.gen(function* () {
     const recursive = SourceFile.make(
       'generics/Recursive',
-      new TextEncoder().encode(`fn expand<T>(value: T) -> I32 {
+      new TextEncoder().encode(`fn expand<T>(value: T) -> i32 {
   return expand<[T; 1]>([move value])
 }
-pub fn main() -> I32 { return expand<I32>(1) }`),
+pub fn main() -> i32 { return expand<i32>(1) }`),
     )
     const snapshot = yield* Analysis.make({ root: recursive }).pipe(
       Effect.provide(SourceResolver.memory(new Map())),
@@ -302,7 +302,7 @@ pub fn main() -> I32 { return expand<I32>(1) }`),
 
     assert.strictEqual(snapshot.instances.violations.length, 1)
     assert.deepEqual(snapshot.instances.violations.at(0)?.target.typeArguments.map(Type.encode), [
-      'Array<I32, 1>',
+      'Array<i32, 1>',
     ])
     assert.strictEqual(snapshot.instances.instances.length, 2)
     assert.deepEqual(
@@ -318,12 +318,12 @@ it.effect('keeps same-argument generic recursion finite and omits unused declara
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/SameRecursion',
-      new TextEncoder().encode(`fn recurse<T>(value: T) -> I32 {
+      new TextEncoder().encode(`fn recurse<T>(value: T) -> i32 {
   if false { return recurse<T>(move value) }
   return 42
 }
 fn unused<T>(value: T) -> T { return move value }
-pub fn main() -> I32 { return recurse<I32>(1) }`),
+pub fn main() -> i32 { return recurse<i32>(1) }`),
     )
     assert.deepEqual(snapshot.diagnostics, [])
     assert.deepEqual(
@@ -341,13 +341,13 @@ it.effect('detects parameter-changing recursion across a mutual generic cycle', 
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/MutualRecursion',
-      new TextEncoder().encode(`fn first<T>(value: T) -> I32 {
+      new TextEncoder().encode(`fn first<T>(value: T) -> i32 {
   return second<[T; 1]>([move value])
 }
-fn second<U>(value: U) -> I32 {
+fn second<U>(value: U) -> i32 {
   return first<U>(move value)
 }
-pub fn main() -> I32 { return first<I32>(1) }`),
+pub fn main() -> i32 { return first<i32>(1) }`),
     )
     assert.deepEqual(
       snapshot.diagnostics.map((diagnostic) => diagnostic.code),
@@ -363,15 +363,15 @@ it.effect('checks repeated instances under every recursive ancestor context', ()
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/ContextualRecursion',
-      new TextEncoder().encode(`fn a<T>(value: T) -> I32 { return x<T>(move value) }
-fn x<T>(value: T) -> I32 {
-  if false { return a<Bool>(true) }
+      new TextEncoder().encode(`fn a<T>(value: T) -> i32 { return x<T>(move value) }
+fn x<T>(value: T) -> i32 {
+  if false { return a<bool>(true) }
   return 0
 }
-pub fn main() -> I32 {
-  let first = a<I32>(1)
-  let second = a<Bool>(true)
-  return x<I32>(first + second)
+pub fn main() -> i32 {
+  let first = a<i32>(1)
+  let second = a<bool>(true)
+  return x<i32>(first + second)
 }`),
     )
     assert.include(
@@ -387,47 +387,47 @@ pub fn main() -> I32 {
 const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
   [
     'duplicate parameter',
-    'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> I32 { return 0 }',
+    'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> i32 { return 0 }',
     'SEM0050',
   ],
   [
     'unbound parameter',
-    'fn bad<T>(value: U) -> T { return move value }\npub fn main() -> I32 { return 0 }',
+    'fn bad<T>(value: U) -> T { return move value }\npub fn main() -> i32 { return 0 }',
     'SEM0001',
   ],
   [
     'missing nominal arguments',
-    'struct Box<T> { value: T }\nfn bad(value: Box) -> I32 { return 0 }\npub fn main() -> I32 { return 0 }',
+    'struct Box<T> { value: T }\nfn bad(value: Box) -> i32 { return 0 }\npub fn main() -> i32 { return 0 }',
     'SEM0051',
   ],
   [
     'non-generic nominal application',
-    'struct Plain { value: I32 }\nfn bad(value: Plain<I32>) -> I32 { return 0 }\npub fn main() -> I32 { return 0 }',
+    'struct Plain { value: i32 }\nfn bad(value: Plain<i32>) -> i32 { return 0 }\npub fn main() -> i32 { return 0 }',
     'SEM0051',
   ],
   [
     'excess explicit arguments',
-    'fn id<T>(value: T) -> T { return move value }\npub fn main() -> I32 { return id<I32, Bool>(1) }',
+    'fn id<T>(value: T) -> T { return move value }\npub fn main() -> i32 { return id<i32, bool>(1) }',
     'SEM0051',
   ],
   [
     'non-generic builtin specialization',
-    'pub fn main() -> I32 { return I32.add<I32>(40, 2) }',
+    'pub fn main() -> i32 { return i32.add<i32>(40, 2) }',
     'SEM0051',
   ],
   [
     'conflicting inference',
-    'fn same<T>(left: T, right: T) -> T { return move left }\npub fn main() -> I32 { return same(1, true) }',
+    'fn same<T>(left: T, right: T) -> T { return move left }\npub fn main() -> i32 { return same(1, true) }',
     'SEM0052',
   ],
   [
     'return-only inference',
-    'fn make<T>() -> T {}\npub fn main() -> I32 { return make() }',
+    'fn make<T>() -> T {}\npub fn main() -> i32 { return make() }',
     'SEM0052',
   ],
   [
     'concrete-only operation in an open body',
-    'fn addOne<T>(value: T) -> I32 { return I32.add(move value, 1) }\npub fn main() -> I32 { return addOne<I32>(41) }',
+    'fn addOne<T>(value: T) -> i32 { return i32.add(move value, 1) }\npub fn main() -> i32 { return addOne<i32>(41) }',
     'SEM0012',
   ],
 ]
@@ -460,7 +460,7 @@ it.effect(
 fn take<T>(input: Box<T>) -> T {
   return match move input { Box<T> { value } => move value }
 }
-pub fn main() -> I32 { return take(Box<I32> { value: 42 }) }`),
+pub fn main() -> i32 { return take(Box<i32> { value: 42 }) }`),
       )
       assert.deepEqual(snapshot.diagnostics, [])
       const outcome = Analysis.evaluate(snapshot)
@@ -473,13 +473,13 @@ it.effect('substitutes cleanup through applied pattern paths and omitted fields'
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/PatternCleanup',
-      new TextEncoder().encode(`struct Token { value: I32 }
+      new TextEncoder().encode(`struct Token { value: i32 }
 struct Pair<A, B> { first: A second: B }
-fn take<T>(pair: Pair<I32, T>) -> I32 {
-  return match move pair { Pair<I32, T> { first, .. } => first }
+fn take<T>(pair: Pair<i32, T>) -> i32 {
+  return match move pair { Pair<i32, T> { first, .. } => first }
 }
-pub fn main() -> I32 {
-  return take<Token>(Pair<I32, Token> { first: 42, second: Token { value: 0 } })
+pub fn main() -> i32 {
+  return take<Token>(Pair<i32, Token> { first: 42, second: Token { value: 0 } })
 }`),
     )
     assert.deepEqual(snapshot.diagnostics, [])
@@ -512,12 +512,12 @@ it.effect('classifies generic writes after substituting the concrete element typ
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/Write',
-      new TextEncoder().encode(`fn replace<T>(values: [T; 1], value: T) -> I32 {
+      new TextEncoder().encode(`fn replace<T>(values: [T; 1], value: T) -> i32 {
   let mut result = move values
   result[0] = move value
   return 42
 }
-pub fn main() -> I32 { return replace<I32>([1], 2) }`),
+pub fn main() -> i32 { return replace<i32>([1], 2) }`),
     )
     assert.deepEqual(snapshot.diagnostics, [])
     assert.strictEqual(snapshot.mir._tag, 'Available')
@@ -537,7 +537,7 @@ it.effect('links an open HIR call through every reached caller instance', () =>
       'generics/Facade',
       new TextEncoder().encode(`fn inner<T>(value: T) -> T { return move value }
 fn outer<T>(value: T) -> T { return inner<T>(move value) }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let flag = outer(true)
   if flag { return outer(42) }
   return 0
@@ -552,7 +552,7 @@ pub fn main() -> I32 {
       Analysis.instancesOfCall(snapshot, call).map((link) =>
         link.target.key.typeArguments.map(Type.encode),
       ),
-      [['Bool'], ['I32']],
+      [['bool'], ['i32']],
     )
   }),
 )
@@ -604,11 +604,11 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
 
 it.effect('emits the same concrete specialization set through LLVM and WebAssembly', () =>
   Effect.gen(function* () {
-    const text = `struct Pair { left: I32 right: I32 }
+    const text = `struct Pair { left: i32 right: i32 }
 struct Box<T> { value: T }
 fn identity<T>(value: T) -> T { return move value }
-pub fn main() -> I32 {
-  let scalar = Box<I32> { value: identity(0) }
+pub fn main() -> i32 {
+  let scalar = Box<i32> { value: identity(0) }
   let pair = Box<Pair> { value: identity<Pair>(Pair { left: 40, right: 2 }) }
   return scalar.value + pair.value.left + pair.value.right
 }`
@@ -632,7 +632,7 @@ pub fn main() -> I32 {
     )
     assert.deepEqual(
       wasmArtifact.symbols.map((entry) => entry.instance.typeArguments.map(Type.encode)),
-      [[], ['I32'], ['generics/Backend.Pair']],
+      [[], ['i32'], ['generics/Backend.Pair']],
     )
     assert.deepEqual(
       native.layout._tag === 'Available'
@@ -640,7 +640,7 @@ pub fn main() -> I32 {
             .map((entry) => Type.encode(entry.type))
             .filter((type) => type.includes('Box<'))
         : [],
-      ['generics/Backend.Box<I32>', 'generics/Backend.Box<generics/Backend.Pair>'],
+      ['generics/Backend.Box<i32>', 'generics/Backend.Box<generics/Backend.Pair>'],
     )
     if (native.layout._tag === 'Available') {
       const plan = native.layout.value

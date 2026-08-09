@@ -5,6 +5,15 @@
 Turn the bootstrap lexer result into the smallest source-faithful grammatical structure that can
 recover from ordinary mistakes without introducing semantic or lowering representations.
 ## Requirements
+
+### Requirement: Canonical integer, unit, and bottom syntax is lossless
+
+The parser SHALL preserve every lowercase integer primitive spelling, `()` in type and value positions, `never` in type positions, omitted unit results, bare `return`, and exact signed or unsigned literal tokens under existing bounded recovery rules.
+
+#### Scenario: Parse canonical forms
+
+- **WHEN** source contains lowercase integer declarations plus unit and bottom forms
+- **THEN** syntax retains every token and exact span without deciding target width
 ### Requirement: First function grammar
 The parser SHALL recognize a source file containing zero or more top-level import or function
 declarations followed by end-of-file. Every function SHALL have the form `[pub] fn <name>(<parameters>)
@@ -25,12 +34,12 @@ source order.
 - **THEN** the result contains a source-file root with end-of-file, no recovered declaration, and no parser diagnostic
 
 #### Scenario: Parse the accepted integer fixture
-- **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
+- **WHEN** the source bytes spell `pub fn main() -> i32 { return 42 }`
 - **THEN** the result contains one complete function declaration with an empty parameter list, an integer literal return expression, and end-of-file
 
 #### Scenario: Parse a private function
 
-- **WHEN** the source bytes spell `fn helper() -> I32 { return 42 }`
+- **WHEN** the source bytes spell `fn helper() -> i32 { return 42 }`
 - **THEN** the result contains one complete function declaration with no public-modifier token and exact source provenance
 
 #### Scenario: Parse trivia between grammar elements
@@ -42,11 +51,11 @@ source order.
 - **THEN** the source-file tree contains exactly two complete function declarations in that order before end-of-file
 
 #### Scenario: Parse a typed parameter reference
-- **WHEN** the source spells `pub fn identity(value: I32) -> I32 { return value }`
+- **WHEN** the source spells `pub fn identity(value: i32) -> i32 { return value }`
 - **THEN** the function contains one typed parameter and a bare-identifier return expression with exact concrete provenance
 
 #### Scenario: Parse the first value-carrying call
-- **WHEN** `identity` accepts one `I32` parameter and `main` returns `identity(42)`
+- **WHEN** `identity` accepts one `i32` parameter and `main` returns `identity(42)`
 - **THEN** `main` contains one complete call expression with one decimal-integer argument
 
 #### Scenario: Parse trivia inside a call
@@ -55,7 +64,7 @@ source order.
 
 #### Scenario: Parse a binding sequence
 
-- **WHEN** the source spells `pub fn main() -> I32 { let value = 42 return value }`
+- **WHEN** the source spells `pub fn main() -> i32 { let value = 42 return value }`
 - **THEN** the block contains one binding statement retaining its keyword, name, equals, and initializer expression, followed by one return statement, in source order
 
 #### Scenario: Parse a move operand
@@ -70,7 +79,7 @@ source order.
 
 #### Scenario: Parse a qualified callee
 
-- **WHEN** a body spells `I32.add(1, 2)`
+- **WHEN** a body spells `i32.add(1, 2)`
 - **THEN** the call expression retains the actor identifier, the dot, the operation identifier, and the argument list in concrete order
 
 ### Requirement: First call syntax remains explicit and recoverable
@@ -104,7 +113,7 @@ end-of-file.
 
 #### Scenario: Call a section result
 
-- **WHEN** a body spells `I32.add(2)(3)`
+- **WHEN** a body spells `i32.add(2)(3)`
 - **THEN** the concrete tree retains two ordered postfix calls, with the first producing the callee of the second
 
 ### Requirement: Parse nested call arguments losslessly
@@ -192,7 +201,7 @@ Missing names, colons, types, commas, and closing parentheses SHALL remain expli
 recovery data, and a following return arrow or declaration SHALL bound recovery.
 
 #### Scenario: Parse two typed parameters
-- **WHEN** a function declares `(left: I32, right: I32)`
+- **WHEN** a function declares `(left: i32, right: i32)`
 - **THEN** the parameter list contains two ordered parameter declarations and one concrete comma separator
 
 #### Scenario: Recover a missing parameter type
@@ -211,7 +220,7 @@ unrelated concrete token. Multiple missing elements introduced solely to represe
 construct MAY share one construct-level diagnostic rather than producing one diagnostic per leaf.
 
 #### Scenario: Recover a missing function name
-- **WHEN** the source spells `pub fn () -> I32 { return 42 }`
+- **WHEN** the source spells `pub fn () -> i32 { return 42 }`
 - **THEN** the function contains a missing identifier before `(`, the remaining structure parses, and one parser diagnostic identifies the missing name position
 
 #### Scenario: Recover a missing closing brace
@@ -350,7 +359,7 @@ and the expression recovers at the existing statement and argument boundaries.
 
 #### Scenario: Recover a missing operation name
 
-- **WHEN** a body spells `I32.(1, 2)`
+- **WHEN** a body spells `i32.(1, 2)`
 - **THEN** the callee retains the actor identifier and dot with an explicit missing identifier and one parser diagnostic, and both arguments remain parseable
 
 #### Scenario: Recover a dangling minus
@@ -415,12 +424,12 @@ operator or callable resolves successfully.
 
 #### Scenario: Parse a function-reference pipeline
 
-- **WHEN** a body returns `flag |> Bool.not`
-- **THEN** the pipeline retains `Bool.not` as a callable expression without an invented argument list
+- **WHEN** a body returns `flag |> bool.not`
+- **THEN** the pipeline retains `bool.not` as a callable expression without an invented argument list
 
 #### Scenario: Parse a pipeline chain
 
-- **WHEN** a body returns `2 |> I32.add(3) |> transform`
+- **WHEN** a body returns `2 |> i32.add(3) |> transform`
 - **THEN** the concrete tree associates the two pipeline branches left-to-right in source order
 
 ### Requirement: Operator recovery stays inside the containing expression
@@ -460,7 +469,7 @@ SHALL recover within the containing type boundary.
 
 #### Scenario: Parse all invocation modes
 
-- **WHEN** one declaration accepts `fn(I32) -> I32`, `mut fn(I32) -> I32`, and `once fn(I32) -> I32`
+- **WHEN** one declaration accepts `fn(i32) -> i32`, `mut fn(i32) -> i32`, and `once fn(i32) -> i32`
 - **THEN** the syntax tree retains three distinct callable-type branches with complete tokens and spans
 
 ### Requirement: Run consumes the complete following expression
@@ -477,7 +486,7 @@ and allow the executed success value to participate in a surrounding expression.
 
 #### Scenario: Pipe the executed result with grouping
 
-- **WHEN** source spells `(run attempt) |> I32.add(1)`
+- **WHEN** source spells `(run attempt) |> i32.add(1)`
 - **THEN** the grouped run is the left operand of the outer pipeline
 
 #### Scenario: Stop run at an argument comma
@@ -496,7 +505,7 @@ valid.
 
 #### Scenario: Parse a public struct
 
-- **WHEN** source declares `pub struct Token { pub kind: I32 lexeme: Text }`
+- **WHEN** source declares `pub struct Token { pub kind: i32 lexeme: Text }`
 - **THEN** the tree retains the public struct, both ordered fields, the public first field, and every delimiter and trivia slice
 
 #### Scenario: Parse an empty struct
@@ -528,7 +537,7 @@ error regions, and a damaged struct MUST NOT consume a following top-level decla
 
 #### Scenario: Recover a missing field name
 
-- **WHEN** a struct contains `pub : I32` before its closing brace
+- **WHEN** a struct contains `pub : i32` before its closing brace
 - **THEN** the field retains an explicit missing name and the struct retains its closing brace
 
 
@@ -593,17 +602,17 @@ missing elements, and exact spans. Recovery SHALL remain inside the type constru
 
 #### Scenario: Parse a nested array type
 
-- **WHEN** a field declares `cells: [[I32; 4]; 3]`
+- **WHEN** a field declares `cells: [[i32; 4]; 3]`
 - **THEN** the concrete tree retains both nested constructors and every punctuation token byte-for-byte
 
 #### Scenario: Recover a missing array length
 
-- **WHEN** a declaration contains `[I32; ]`
+- **WHEN** a declaration contains `[i32; ]`
 - **THEN** the tree records missing length syntax without consuming the following declaration
 
 #### Scenario: Reject the former array spelling
 
-- **WHEN** an explicit type position contains `Array<I32, 4>`
+- **WHEN** an explicit type position contains `Array<i32, 4>`
 - **THEN** the parser does not produce a fixed-array type or silently translate the former spelling
 
 ### Requirement: JSX-like template starts are reserved at primary-expression boundaries
@@ -717,15 +726,6 @@ nesting later. Type-level `|` SHALL remain distinct from expression operators.
 - **WHEN** a parameter type contains `Token |` before its closing delimiter
 - **THEN** the union records an explicit missing member without consuming the following parameter or function body
 
-### Requirement: Never type syntax is explicit
-
-The parser SHALL recognize `Never` as a type reference wherever a declared type is accepted and
-SHALL retain its exact token and span. `Never` SHALL have no literal or constructor syntax.
-
-#### Scenario: Parse Never in a return type
-
-- **WHEN** a function declares `Never` as its return type
-- **THEN** the concrete tree retains one complete declared-type node for the built-in type
 
 ### Requirement: Match expressions are lossless in every expression position
 
@@ -771,7 +771,7 @@ starts SHALL remain reserved only at primary-expression boundaries. Missing name
 brackets, and type arguments SHALL remain explicit local syntax nodes and diagnostics.
 
 #### Scenario: Parse a generic declaration and call
-- **WHEN** source contains `pub fn identity<T>(value: T) -> T` and `identity<I32>(1)`
+- **WHEN** source contains `pub fn identity<T>(value: T) -> T` and `identity<i32>(1)`
 - **THEN** syntax records the declaration parameter and call specialization losslessly
 
 #### Scenario: Preserve a comparison
@@ -791,12 +791,12 @@ operand is borrowable or the type is permitted at that source position.
 
 #### Scenario: Parse a shared slice parameter and borrow argument
 
-- **WHEN** source spells `fn fold(values: &[I32]) -> I32 { return use(&values) }`
+- **WHEN** source spells `fn fold(values: &[i32]) -> i32 { return use(&values) }`
 - **THEN** the tree retains one shared slice type and one shared borrow expression with their punctuation and provenance in source order
 
 #### Scenario: Parse an exclusive slice parameter and borrow argument
 
-- **WHEN** source spells `fn edit(values: &mut [I32]) -> I32 { return use(&mut values) }`
+- **WHEN** source spells `fn edit(values: &mut [i32]) -> i32 { return use(&mut values) }`
 - **THEN** the tree retains both `mut` keywords under distinct exclusive slice-type and borrow-expression branches
 
 #### Scenario: Recover a damaged slice type
@@ -804,16 +804,6 @@ operand is borrowable or the type is permitted at that source position.
 - **WHEN** a parameter starts a slice type but omits its element or closing bracket before the parameter boundary
 - **THEN** the parser inserts explicit missing syntax, preserves following parameters and the function body, and emits deterministic parser diagnostics
 
-### Requirement: Usize uses existing type and literal syntax
-
-The syntax layer SHALL preserve `Usize` as an ordinary type path and decimal literals as their exact
-source tokens without introducing a numeric suffix or target-dependent syntax node. Damaged type
-positions and surrounding expressions SHALL retain the existing bounded recovery behavior.
-
-#### Scenario: Parse a Usize parameter
-
-- **WHEN** a function declares a parameter or result type spelled `Usize`
-- **THEN** parsing preserves the type path and every source span using the existing function grammar
 
 ### Requirement: Effect and failure syntax is lossless and locally recoverable
 

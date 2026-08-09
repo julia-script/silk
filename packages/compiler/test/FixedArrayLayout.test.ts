@@ -12,10 +12,10 @@ const snapshot = (source: string) =>
 
 it.effect('plans repeated layouts and canonical mixed selectors once before MIR', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Pair { left: I32 right: Bool }
-struct Bucket { pairs: [Pair; 2] tail: I32 }
-fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
-pub fn main() -> I32 {
+    const self = yield* snapshot(`struct Pair { left: i32 right: bool }
+struct Bucket { pairs: [Pair; 2] tail: i32 }
+fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
+pub fn main() -> i32 {
   let values = [Pair { left: 1, right: true }, Pair { left: 2, right: false }]
   return choose(values, 1)
 }`)
@@ -63,9 +63,9 @@ pub fn main() -> I32 {
 
 it.effect('retains zero-length identity, element alignment, and zero lanes', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { kind: I32 }
+    const self = yield* snapshot(`struct Token { kind: i32 }
 fn empty() -> [Token; 0] { return [] }
-pub fn main() -> I32 { let values = empty() return 0 }`)
+pub fn main() -> i32 { let values = empty() return 0 }`)
     const selected = Analysis.layoutOf(self)
     assert.strictEqual(selected._tag, 'Available')
     if (selected._tag !== 'Available') return
@@ -84,19 +84,19 @@ pub fn main() -> I32 { let values = empty() return 0 }`)
 
 it.effect('keeps unused arrays out of the runtime plan and retains overflow as catalog data', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Huge { values: [[I32; 2147483647]; 2147483647] }
-fn unused(values: [Bool; 8]) -> [Bool; 8] { return values }
-pub fn main() -> I32 { return 0 }`)
+    const self = yield* snapshot(`struct Huge { values: [[i32; 2147483647]; 2147483647] }
+fn unused(values: [bool; 8]) -> [bool; 8] { return values }
+pub fn main() -> i32 { return 0 }`)
     const catalog = Analysis.layoutCatalogOf(self)
     const plan = Analysis.layoutOf(self)
     assert.strictEqual(catalog._tag, 'Available')
     assert.strictEqual(plan._tag, 'Available')
     if (catalog._tag !== 'Available' || plan._tag !== 'Available') return
-    const huge = Type.fixedArray(Type.fixedArray('I32', 2147483647), 2147483647)
+    const huge = Type.fixedArray(Type.fixedArray('i32', 2147483647), 2147483647)
     const unavailable = Layout.catalogEntry(catalog.value, huge)
     assert.strictEqual(unavailable?._tag, 'UnavailableLayoutEntry')
     assert.strictEqual(
-      plan.value.entries.some((entry) => Type.equals(entry.type, Type.fixedArray('Bool', 8))),
+      plan.value.entries.some((entry) => Type.equals(entry.type, Type.fixedArray('bool', 8))),
       false,
     )
     assert.strictEqual(Layout.encodeCatalog(catalog.value), Layout.encodeCatalog(catalog.value))

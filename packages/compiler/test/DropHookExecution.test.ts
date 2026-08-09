@@ -17,40 +17,40 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 /** Fallthrough: the guard leaves scope, its hook runs, then its Allocation field releases. */
 const fallthrough = `struct Guard {
-  tag: I32
+  tag: i32
   storage: Allocation
 }
 
 impl Drop for Guard {
-  fn drop(self: &mut Guard) -> Unit { return Unit.make() }
+  fn drop(self: &mut Guard) -> () { return () }
 }
 
-effect fn build() -> I32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
 
 /** Early drop: explicit drop releases at that statement and block cleanup does not repeat it. */
 const earlyDrop = `struct Guard {
-  tag: I32
+  tag: i32
   storage: Allocation
 }
 
 impl Drop for Guard {
-  fn drop(self: &mut Guard) -> Unit { return Unit.make() }
+  fn drop(self: &mut Guard) -> () { return () }
 }
 
-effect fn build() -> I32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
@@ -58,21 +58,21 @@ effect fn build() -> I32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
 
 /** Typed failure: a guard live at a failing run releases through its hook before propagating. */
 const failurePropagation = `struct Guard {
-  tag: I32
+  tag: i32
   storage: Allocation
 }
 
 impl Drop for Guard {
-  fn drop(self: &mut Guard) -> Unit { return Unit.make() }
+  fn drop(self: &mut Guard) -> () { return () }
 }
 
-struct ExhaustedAllocator { tag: I32 }
+struct ExhaustedAllocator { tag: i32 }
 
 effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemory {
   fail OutOfMemory {}
@@ -80,23 +80,23 @@ effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation 
 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
-effect fn build() -> I32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let mut empty = ExhaustedAllocator { tag: 0 }
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   let guard = Guard { tag: 5, storage: move allocation }
-  let second = Layout.of<[I32; 2]>()
+  let second = Layout.of<[i32; 2]>()
   let refused = Allocator.allocate(move second) |> Allocator.provide(&mut empty)
   let never = run refused
   drop never
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
 
 const hookCallsOf = (run: ReturnType<typeof Analysis.evaluate>) =>
   run._tag === 'Completed'
@@ -157,23 +157,23 @@ const parametric = `struct Guard<T> {
 }
 
 impl<T> Drop for Guard<T> {
-  fn drop(self: &mut Guard<T>) -> Unit { return Unit.make() }
+  fn drop(self: &mut Guard<T>) -> () { return () }
 }
 
-effect fn hold<T>(value: T) -> I32 ! OutOfMemory {
+effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   let guard = Guard<T> { value: move value, storage: move allocation }
   return 21
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 {
-  let first = run Effect.catch<OutOfMemory>(hold<I32>(1), recover)
-  let second = run Effect.catch<OutOfMemory>(hold<Bool>(true), recover)
+pub fn main() -> i32 {
+  let first = run Effect.catch<OutOfMemory>(hold<i32>(1), recover)
+  let second = run Effect.catch<OutOfMemory>(hold<bool>(true), recover)
   return first + second
 }`
 
@@ -183,15 +183,15 @@ const copyInstantiation = `struct Holder<T> {
 }
 
 impl<T> Drop for Holder<T> {
-  fn drop(self: &mut Holder<T>) -> Unit { return Unit.make() }
+  fn drop(self: &mut Holder<T>) -> () { return () }
 }
 
-fn keep<T>(value: T) -> I32 {
+fn keep<T>(value: T) -> i32 {
   let held = Holder<T> { value: move value }
   return 1
 }
 
-pub fn main() -> I32 { return keep<I32>(41) + 1 }`
+pub fn main() -> i32 { return keep<i32>(41) + 1 }`
 
 it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
   Effect.gen(function* () {
@@ -202,7 +202,7 @@ it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
     )
     assert.include(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message),
-      'Invalid Drop hook: Copy type drop-hook/copy-instantiation.Holder<I32> cannot implement Drop',
+      'Invalid Drop hook: Copy type drop-hook/copy-instantiation.Holder<i32> cannot implement Drop',
     )
   }),
 )
@@ -220,8 +220,8 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
     )
     assert.strictEqual(instances.length, 2)
     assert.deepEqual(instances.map((instance) => instance.key.typeArguments).sort(), [
-      ['Bool'],
-      ['I32'],
+      ['bool'],
+      ['i32'],
     ])
 
     const run = Analysis.evaluate(snapshot)

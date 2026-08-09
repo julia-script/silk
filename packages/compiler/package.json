@@ -154,6 +154,10 @@
       "types": "./dist/Presentation.d.ts",
       "import": "./dist/Presentation.js"
     },
+    "./Scalar": {
+      "types": "./dist/Scalar.d.ts",
+      "import": "./dist/Scalar.js"
+    },
     "./SemanticOccurrence": {
       "types": "./dist/SemanticOccurrence.d.ts",
       "import": "./dist/SemanticOccurrence.js"

@@ -47,8 +47,8 @@ its concrete size, alignment, and representation facts for the selected target.
 
 #### Scenario: Plan the scalar bootstrap program
 
-- **WHEN** discovery finds a program whose reachable operations use `I32` and `Bool`
-- **THEN** the plan contains canonical entries for `I32` and `Bool` before either type is lowered to MIR
+- **WHEN** discovery finds a program whose reachable operations use `i32` and `bool`
+- **THEN** the plan contains canonical entries for `i32` and `bool` before either type is lowered to MIR
 
 #### Scenario: Ignore an unreachable concrete type
 
@@ -57,27 +57,17 @@ its concrete size, alignment, and representation facts for the selected target.
 
 ### Requirement: Bootstrap scalar layouts are canonical
 
-For all four supported targets, the layout plan SHALL represent `I32` as a four-byte,
-four-byte-aligned signed integer and `Bool` as a four-byte, four-byte-aligned scalar whose valid
-runtime values are zero and one. Pointer-sized layout facts SHALL be eight bytes with eight-byte
-alignment for the three native profiles and four bytes with four-byte alignment for
-`wasm32-unknown-unknown`. All four profiles are little-endian. These facts are private Silk compiler
-ABI decisions and SHALL NOT be advertised as a stable external ABI.
+The layout plan SHALL retain `bool` as the existing four-byte zero-or-one scalar; fixed-width integers SHALL use their named byte width and natural alignment; `usize`/`isize` SHALL use pointer width and alignment; `()`/`never` SHALL have no runtime lane. All supported targets remain little-endian and these are private ABI facts.
 
-#### Scenario: Plan Bool before LLVM emission
+#### Scenario: Plan the integer family
 
-- **WHEN** a reachable program uses `Bool` on any supported bootstrap target
-- **THEN** the compiler plan fixes its size, alignment, and zero-or-one representation before the backend runs
+- **WHEN** a program reaches every fixed-width integer
+- **THEN** layout fixes width, alignment, signedness, and calling lane before backend emission
 
-#### Scenario: Plan native pointer width consistently
+#### Scenario: Plan unit and bottom
 
-- **WHEN** any required native bootstrap target is selected
-- **THEN** its target facts report eight-byte pointers with eight-byte alignment and little-endian byte order
-
-#### Scenario: Plan WebAssembly pointer width consistently
-
-- **WHEN** `wasm32-unknown-unknown` is selected
-- **THEN** its target facts report four-byte pointers with four-byte alignment and little-endian byte order
+- **WHEN** unit or bottom occurs in control flow
+- **THEN** layout assigns no runtime value lane
 
 ### Requirement: Layout plans are deterministic and backend-neutral
 
@@ -246,7 +236,7 @@ derive or reorder these paths.
 
 #### Scenario: Preserve zero lanes
 
-- **WHEN** `Array<I32, 0>` crosses an internal function boundary
+- **WHEN** `Array<i32, 0>` crosses an internal function boundary
 - **THEN** its calling shape retains the logical array identity with zero scalar lanes
 
 ### Requirement: Union layout is a compiler-owned target fact
@@ -293,7 +283,7 @@ MUST NOT receive speculative physical layouts, and equivalent concrete applicati
 canonical layout entry before MIR and backend selection.
 
 #### Scenario: Plan two concrete boxes
-- **WHEN** runtime discovery reaches `Box<I32>` and `Box<Token>`
+- **WHEN** runtime discovery reaches `Box<i32>` and `Box<Token>`
 - **THEN** the selected target plan contains two canonical entries with independently derived concrete layouts
 
 #### Scenario: Omit an open generic layout
@@ -303,14 +293,14 @@ canonical layout entry before MIR and backend selection.
 ### Requirement: The compiler plans one target-aware slice representation
 
 For every reachable concrete slice element type, target layout SHALL publish one logical slice
-entry containing an internal correctly aligned address lane followed by one `I32` length lane,
+entry containing an internal correctly aligned address lane followed by one `i32` length lane,
 including exact offsets, padding, total size, alignment, and element stride. Shared and exclusive
 slices of the same element type SHALL reuse the same physical representation. The address lane MUST
 remain an internal layout scalar and MUST NOT resolve as a safe Silk type.
 
 #### Scenario: Plan native and Wasm slice layouts
 
-- **WHEN** the same `&[I32]` program is planned for a 64-bit native target and a 32-bit Wasm target
+- **WHEN** the same `&[i32]` program is planned for a 64-bit native target and a 32-bit Wasm target
 - **THEN** both plans retain the same logical slice type while selecting their target address widths and exact resulting layouts before backend emission
 
 #### Scenario: Plan a zero-sized element slice
@@ -321,7 +311,7 @@ remain an internal layout scalar and MUST NOT resolve as a safe Silk type.
 ### Requirement: Slice calling shapes carry heterogeneous typed lanes
 
 The compiler-owned calling shape for a slice SHALL contain one typed address lane and one typed
-`I32` lane in deterministic order. Callers, callees, evaluators, and backends MUST consume that
+`i32` lane in deterministic order. Callers, callees, evaluators, and backends MUST consume that
 shape rather than flattening the source array or reconstructing a backend-private slice ABI.
 
 #### Scenario: Preserve one multi-length calling shape
@@ -331,26 +321,17 @@ shape rather than flattening the source array or reconstructing a backend-privat
 
 #### Scenario: Keep native addresses pointer-typed
 
-- **WHEN** a native target uses a pointer width different from `I32`
+- **WHEN** a native target uses a pointer width different from `i32`
 - **THEN** its slice address lane remains pointer-width and is not narrowed to the source-visible length type
 
-### Requirement: Usize layout and calling lanes are compiler-owned target facts
+### Requirement: usize layout and calling lanes are compiler-owned target facts
 
-The target-aware layout phase SHALL represent `Usize` as size eight, alignment eight, and one
-unsigned 64-bit scalar lane on each native target, and as size four, alignment four, and one unsigned
-32-bit scalar lane on `wasm32-unknown-unknown`. It SHALL validate exact literal magnitudes against
-that width before MIR lowering. Backends MUST consume the selected layout and calling lane rather
-than choosing or narrowing them independently.
+The planner SHALL represent `usize` as unsigned 64-bit on required native targets and unsigned 32-bit on Wasm, validate literals against that width, and require backends to consume the selected lane.
 
-#### Scenario: Plan native Usize
+#### Scenario: Plan native usize
 
-- **WHEN** a reachable native signature contains `Usize`
-- **THEN** the plan publishes one 64-bit unsigned lane and an eight-byte layout before MIR lowering
-
-#### Scenario: Leave unrelated layouts byte-stable
-
-- **WHEN** a reachable program contains no `Usize`
-- **THEN** layout planning does not eagerly add a `Usize` entry or perturb its existing encoding
+- **WHEN** a native signature contains `usize`
+- **THEN** the plan publishes one unsigned 64-bit lane before MIR lowering
 
 ### Requirement: Typed outcomes have one compiler-owned target shape
 
@@ -361,7 +342,7 @@ that shape without independently choosing tags, lanes, or padding.
 
 #### Scenario: Plan mixed success and failure payloads
 
-- **WHEN** a flow returns `Usize` and may fail with differently shaped nominal errors
+- **WHEN** a flow returns `usize` and may fail with differently shaped nominal errors
 - **THEN** the selected target plan fixes one tag and payload-lane mapping before MIR lowering
 
 ### Requirement: Target planning owns allocation and Effect physical facts
@@ -385,7 +366,7 @@ value layouts. Effect values and Effect outcomes are distinct physical facts.
 After concrete instance discovery, target layout SHALL plan validated `Layout` values,
 repeated-element stride and total bytes, affine allocation handles, private reclaim tickets,
 `RawBuffer<T>`, lexical Slot addresses, Drop calling shapes, and typed allocation outcomes using the
-selected target's address and `Usize` width. Zero-sized allocations SHALL retain distinct logical
+selected target's address and `usize` width. Zero-sized allocations SHALL retain distinct logical
 ownership without requiring nonzero physical bytes. Evaluator and backends SHALL consume these
 facts unchanged and MUST NOT choose stride, alignment, ticket shape, failure transport, or cleanup
 representation independently.

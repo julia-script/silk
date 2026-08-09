@@ -7,6 +7,15 @@ intrinsic language operations, recovered programs, and anonymous expression type
 
 ## Requirements
 
+### Requirement: Hover renders canonical integer types
+
+Hover SHALL render lowercase integer spellings, `bool`, `()`, and `never`, never removed uppercase or backend lane names.
+
+#### Scenario: Hover an inferred literal
+
+- **WHEN** an unconstrained integer literal defaults successfully
+- **THEN** hover reports `i32`
+
 ### Requirement: The server advertises semantic hover support
 
 The language server SHALL advertise hover support and SHALL interpret hover positions using the
@@ -38,8 +47,8 @@ is a lowered `Effect<...>` value.
 
 #### Scenario: Hover an effect function reference
 
-- **WHEN** the cursor hovers a resolved use of `recover` declared as `effect fn recover(error: OutOfMemory) -> I32`
-- **THEN** hover renders `effect fn recover(error: OutOfMemory) -> I32` rather than `fn(OutOfMemory) -> Effect<I32>`
+- **WHEN** the cursor hovers a resolved use of `recover` declared as `effect fn recover(error: OutOfMemory) -> i32`
+- **THEN** hover renders `effect fn recover(error: OutOfMemory) -> i32` rather than `fn(OutOfMemory) -> Effect<i32>`
 
 #### Scenario: Hover a function declaration name
 
@@ -84,8 +93,8 @@ produce no hover. Damage elsewhere in the module MUST NOT suppress an available 
 
 #### Scenario: Hover an integer literal
 
-- **WHEN** the cursor hovers an available integer literal with inferred type `I32`
-- **THEN** hover reports `I32` for that literal expression
+- **WHEN** the cursor hovers an available integer literal with inferred type `i32`
+- **THEN** hover reports `i32` for that literal expression
 
 #### Scenario: Hover trivia
 

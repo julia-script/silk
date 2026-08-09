@@ -12,11 +12,11 @@ colors is exactly what the compiler sees — including invalid bytes:
 
 ```silk
 /// Returns the answer to everything.
-pub fn answer() -> I32 {
+pub fn answer() -> i32 {
     return 42
 }
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
     let ok = true
     if ok { return answer() } else { return 0 }
 }

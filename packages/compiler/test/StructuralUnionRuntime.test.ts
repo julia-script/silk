@@ -11,11 +11,11 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const source = `struct A {}
-struct B { value: I32 }
-struct C { left: I32 right: I32 }
-fn accept(value: A | B | C) -> I32 { return 42 }
-fn widen(value: A | B) -> I32 { return accept(move value) }
-pub fn main() -> I32 { return widen(A {}) }`
+struct B { value: i32 }
+struct C { left: i32 right: i32 }
+fn accept(value: A | B | C) -> i32 { return 42 }
+fn widen(value: A | B) -> i32 { return accept(move value) }
+pub fn main() -> i32 { return widen(A {}) }`
 
 const expressions = (expression: Hir.Expression): ReadonlyArray<Hir.Expression> => {
   if (expression._tag === 'UnionConvert') {
@@ -154,11 +154,11 @@ it.effect('emits deterministic native union conversion artifacts', () =>
 it.effect('transports unions through returns, arrays, structs, and replacement', () =>
   Effect.gen(function* () {
     const aggregateSource = `struct A {}
-struct B { value: I32 }
+struct B { value: i32 }
 struct Box { value: A | B }
 fn make() -> A | B { return A {} }
-fn accept(values: [A | B; 2]) -> I32 { return 42 }
-pub fn main() -> I32 {
+fn accept(values: [A | B; 2]) -> i32 { return 42 }
+pub fn main() -> i32 {
   let mut box = Box { value: make() }
   box.value = B { value: 7 }
   return accept([A {}, B { value: 42 }])
@@ -203,8 +203,8 @@ it.effect('diagnoses narrowing and non-containing union targets deterministicall
 struct B {}
 struct C {}
 fn narrow(value: A | B) -> A { return move value }
-fn accept(value: A | B) -> I32 { return 0 }
-pub fn main() -> I32 { return accept(C {}) }`),
+fn accept(value: A | B) -> i32 { return 0 }
+pub fn main() -> i32 { return accept(C {}) }`),
     )
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),

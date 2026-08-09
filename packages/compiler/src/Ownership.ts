@@ -345,7 +345,7 @@ const callableEnvironment = (
             ? cleanupPlan(state.index, type)
             : Object.freeze({
                 _tag: 'NoCleanup' as const,
-                type: type ?? ('I32' as const),
+                type: type ?? ('i32' as const),
               }),
       })
     }),
@@ -1533,7 +1533,7 @@ export const cleanupPlan = (
           cleanup:
             field.declaredType._tag === 'Resolved'
               ? cleanupPlan(index, Type.substitute(field.declaredType.type, substitution), nextSeen)
-              : Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const }),
+              : Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const }),
         }),
       ),
     ),
@@ -2107,7 +2107,7 @@ const checkFunction = (
       cleanup:
         binding.cleanup ??
         (binding.type === undefined
-          ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'I32' as const })
+          ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const })
           : cleanupPlan(index, binding.type)),
       liveFrom: binding.liveFrom,
       liveTo: binding.liveTo,

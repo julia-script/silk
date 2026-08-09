@@ -129,7 +129,7 @@ export const wasmCommand = (
 
 /**
  * The minimal C runtime shim: a private, compiler-versioned scalar ABI reaching a closed native
- * entry. The shim's `main` returns `silk_main`'s `I32` result as the process exit status. Not
+ * entry. The shim's `main` returns `silk_main`'s `i32` result as the process exit status. Not
  * user-facing FFI; issue 07 owns the ABI's growth.
  */
 const ordinaryShimSource = `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */

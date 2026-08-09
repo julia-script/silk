@@ -14,16 +14,16 @@ it.effect('builds public-first project JSON with first-class child documentation
 pub fn recover(
   /// The failure to inspect.
   problem: Problem
-) -> I32 { return problem.code }
+) -> i32 { return problem.code }
 
 /// Not part of public output.
-fn helper() -> I32 { return 0 }
+fn helper() -> i32 { return 0 }
 
 /// A recoverable problem.
 pub struct Problem {
   /// Stable numeric code.
-  pub code: I32
-  privateCode: I32
+  pub code: i32
+  privateCode: i32
 }
 `
     const snapshot = yield* Analysis.ofSource('project/main', encode(source))

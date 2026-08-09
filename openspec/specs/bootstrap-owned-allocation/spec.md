@@ -15,7 +15,7 @@ representational overflow as ordinary validation data before any allocator or ba
 
 #### Scenario: Reject overflowing repeated layout
 
-- **WHEN** an element layout and runtime count exceed the selected target's `Usize` range
+- **WHEN** an element layout and runtime count exceed the selected target's `usize` range
 - **THEN** layout construction returns overflow data and performs no allocation
 
 ### Requirement: Allocation is a self-contained affine owner

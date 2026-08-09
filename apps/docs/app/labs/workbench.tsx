@@ -473,7 +473,7 @@ function WorkbenchInner() {
       name = `lib${index}`
     }
     Atom.batch(() => {
-      setModules({ ...modules, [name]: 'pub fn answer() -> I32 { return 1 }' })
+      setModules({ ...modules, [name]: 'pub fn answer() -> i32 { return 1 }' })
       setActiveModule(name)
     })
   }

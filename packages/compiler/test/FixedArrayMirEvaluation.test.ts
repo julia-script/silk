@@ -11,9 +11,9 @@ const snapshot = (source: string) => Analysis.ofSource('fixed-array-mir/main', a
 
 it.effect('lowers construction and a mixed indexed-field chain to one checked place read', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Pair { left: I32 right: I32 }
-fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
-pub fn main() -> I32 {
+    const self = yield* snapshot(`struct Pair { left: i32 right: i32 }
+fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
+pub fn main() -> i32 {
   let values = [Pair { left: 10, right: 11 }, Pair { left: 20, right: 21 }]
   return choose(move values, 1)
 }`)
@@ -57,13 +57,13 @@ pub fn main() -> I32 {
 
 it.effect('preserves complete nested arrays through calls and returns', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn identity(values: [[I32; 2]; 2]) -> [[I32; 2]; 2] {
+    const self = yield* snapshot(`fn identity(values: [[i32; 2]; 2]) -> [[i32; 2]; 2] {
   return values
 }
-fn choose(values: [[I32; 2]; 2], outer: I32, inner: I32) -> I32 {
+fn choose(values: [[i32; 2]; 2], outer: usize, inner: usize) -> i32 {
   return values[outer][inner]
 }
-pub fn main() -> I32 { return choose(identity([[1, 2], [3, 4]]), 1, 0) }`)
+pub fn main() -> i32 { return choose(identity([[1, 2], [3, 4]]), 1, 0) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -86,17 +86,20 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const negative =
-        yield* snapshot(`fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([10, 20], -1) }`)
+        yield* snapshot(`fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([10, 20], -1) }`)
       const upper =
-        yield* snapshot(`fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([10, 20], 2) }`)
+        yield* snapshot(`fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([10, 20], 2) }`)
       const empty =
-        yield* snapshot(`fn choose(values: [I32; 0], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([], 0) }`)
+        yield* snapshot(`fn choose(values: [i32; 0], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([], 0) }`)
 
+      assert.deepEqual(
+        Analysis.diagnostics(negative).map((diagnostic) => diagnostic.code),
+        ['SEM0060'],
+      )
       for (const [self, index, length] of [
-        [negative, -1, 2],
         [upper, 2, 2],
         [empty, 0, 0],
       ] as const) {
@@ -120,7 +123,7 @@ pub fn main() -> I32 { return choose([], 0) }`)
 
 it.effect('rejects incomplete array construction before evaluation', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot('pub fn main() -> I32 { let values = [1, 2, 3] return values[0] }')
+    const self = yield* snapshot('pub fn main() -> i32 { let values = [1, 2, 3] return values[0] }')
     const mir = Analysis.loweredMir(self)
     const malformed: Mir.Module = {
       ...mir,

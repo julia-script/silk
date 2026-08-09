@@ -8,16 +8,16 @@ import * as Ownership from '../../dist/Ownership.js'
 import * as SyntaxFile from '../../dist/SyntaxFile.js'
 import * as Type from '../../dist/Type.js'
 
-const source = `struct Left { value: I32 }
-struct Right { value: I32 }
-fn inspect(input: Left | Right) -> I32 {
+const source = `struct Left { value: i32 }
+struct Right { value: i32 }
+fn inspect(input: Left | Right) -> i32 {
   return match &input {
     Left { value } if false => 0
     Left { value: answer } => answer + 1
     Right { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(Left { value: 41 }) }`
+pub fn main() -> i32 { return inspect(Left { value: 41 }) }`
 const bytes = new TextEncoder().encode(source)
 const native = await Effect.runPromise(
   Analysis.ofSource('fixture/match-determinism', bytes, 'aarch64-apple-darwin'),

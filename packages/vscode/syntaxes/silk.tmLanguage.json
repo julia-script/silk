@@ -168,7 +168,7 @@
     },
     {
       "name": "support.type.builtin.silk",
-      "match": "\\b(?:I32|Bool|Never)\\b"
+      "match": "\\b(?:i32|bool|never)\\b"
     },
     {
       "name": "entity.name.type.silk",

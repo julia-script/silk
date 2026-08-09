@@ -21,7 +21,7 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
   )
 
 it('parses shared and exclusive slice types and borrow expressions losslessly', () => {
-  const syntax = parse(`fn use(shared: &[I32], exclusive: &mut [I32]) -> I32 {
+  const syntax = parse(`fn use(shared: &[i32], exclusive: &mut [i32]) -> i32 {
   return consume(&shared, &mut exclusive)
 }`)
   const nodes = descendants(syntax.root)
@@ -33,7 +33,7 @@ it('parses shared and exclusive slice types and borrow expressions losslessly', 
 })
 
 it('recovers a missing slice element and closing bracket at parameter boundaries', () => {
-  const syntax = parse('fn broken(left: &[], right: &mut [I32) -> I32 { return 0 }')
+  const syntax = parse('fn broken(left: &[], right: &mut [i32) -> i32 { return 0 }')
   const missing = descendants(syntax.root)
     .flatMap((node) => node.children)
     .filter(SyntaxTree.isMissingToken)
@@ -52,13 +52,13 @@ it('recovers a missing slice element and closing bracket at parameter boundaries
 it.effect('formats slice syntax and borrow expressions idempotently', () =>
   Effect.gen(function* () {
     const syntax = parse(
-      'fn use(values : & mut [ I32 ]) -> I32 { return consume ( & mut values ) }',
+      'fn use(values : & mut [ i32 ]) -> i32 { return consume ( & mut values ) }',
     )
     const formatted = yield* Formatter.format(syntax)
     const text = decoder.decode(FormattedDocument.toUint8Array(formatted))
     assert.strictEqual(
       text,
-      'fn use(values: &mut [I32]) -> I32 {\n  return consume(&mut values)\n}\n',
+      'fn use(values: &mut [i32]) -> i32 {\n  return consume(&mut values)\n}\n',
     )
     const again = yield* Formatter.format(parse(text))
     assert.strictEqual(decoder.decode(FormattedDocument.toUint8Array(again)), text)
@@ -75,7 +75,7 @@ it('keeps slice identity, substitution, inference, and borrow containment canoni
   assert.notStrictEqual(Type.key(shared), Type.key(exclusive))
   assert.strictEqual(Type.containsBorrow(Type.fixedArray(shared, 1)), true)
   assert.strictEqual(Type.containsBorrow(Type.nominal('model/Box', 'Box', [shared])), true)
-  assert.strictEqual(Type.containsBorrow(Type.fixedArray('I32', 2)), false)
+  assert.strictEqual(Type.containsBorrow(Type.fixedArray('i32', 2)), false)
   assert.deepEqual(Type.substitute(shared, substitution), Type.slice('Shared', exclusive.element))
 
   const inferred = new Map<string, Type.Type>()

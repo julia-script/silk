@@ -20,7 +20,7 @@ const runWasm = Effect.fnUntraced(function* (source: string) {
 
 it.effect('mutates a scalar through a structured loop DAG', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> I32 {
+    const self = yield* snapshot(`pub fn main() -> i32 {
   let mut count = 0
   while count < 3 { count = count + 1 }
   return count
@@ -43,9 +43,9 @@ it.effect('mutates a scalar through a structured loop DAG', () =>
 
 it.effect('updates checked array elements and returns the replacement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> I32 {
+    const self = yield* snapshot(`pub fn main() -> i32 {
   let mut values = [1, 2, 3]
-  let mut index = 0
+  let mut index = usize.add(0, 0)
   while index < 3 {
     values[index] = values[index] + 1
     index = index + 1
@@ -64,14 +64,14 @@ it.effect('updates checked array elements and returns the replacement', () =>
 
 it.effect('emits scalar and checked-array loops directly as structured WebAssembly', () =>
   Effect.gen(function* () {
-    const scalar = `pub fn main() -> I32 {
+    const scalar = `pub fn main() -> i32 {
   let mut count = 0
   while count < 3 { count = count + 1 }
   return count
 }`
-    const array = `pub fn main() -> I32 {
+    const array = `pub fn main() -> i32 {
   let mut values = [1, 2, 3]
-  let mut index = 0
+  let mut index = usize.add(0, 0)
   while index < 3 {
     values[index] = values[index] + 1
     index = index + 1
@@ -97,14 +97,14 @@ it.effect('emits scalar and checked-array loops directly as structured WebAssemb
 
 it.effect('resolves continue and break to the innermost loop', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> I32 {
-  let mut index = 0
+    const self = yield* snapshot(`pub fn main() -> i32 {
+  let mut index = usize.add(0, 0)
   while index < 10 {
     index = index + 1
     if index == 2 { continue }
     if index == 4 { break }
   }
-  return index
+  return usize.toI32(index)
 }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -119,7 +119,7 @@ it.effect('resolves continue and break to the innermost loop', () =>
 
 it.effect('diagnoses immutable writes and transfers outside loops', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> I32 {
+    const self = yield* snapshot(`pub fn main() -> i32 {
   let value = 1
   value = 2
   break
@@ -135,7 +135,7 @@ it.effect('diagnoses immutable writes and transfers outside loops', () =>
 it.effect('keeps assignment and equality tokens distinct beside mutable loops', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      'pub fn main() -> I32 { let mut value = 0 while value == 0 { value = 42 } return value }',
+      'pub fn main() -> i32 { let mut value = 0 while value == 0 { value = 42 } return value }',
     )
     const kinds = Analysis.rootAnalysis(self).syntax.tokens.map((token) => token.kind)
     assert.strictEqual(kinds.filter((kind) => kind === 'Equals').length, 2)
@@ -146,12 +146,12 @@ it.effect('keeps assignment and equality tokens distinct beside mutable loops', 
 
 it.effect('recovers damaged mutable statements without losing following declarations', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn damaged() -> I32 {
+    const self = yield* snapshot(`pub fn damaged() -> i32 {
   let mut value = 0
   value = @
   return value
 }
-pub fn main() -> I32 { return 42 }`)
+pub fn main() -> i32 { return 42 }`)
     const analysis = Analysis.rootAnalysis(self)
     assert.isAbove(analysis.syntax.parserDiagnostics.length, 0)
     assert.strictEqual(analysis.functions.length, 2)
@@ -163,7 +163,7 @@ pub fn main() -> I32 { return 42 }`)
 
 it.effect('publishes immutable facade facts for writes, loops, transfers, and DAG edges', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> I32 {
+    const self = yield* snapshot(`pub fn main() -> i32 {
   let mut value = 0
   while value < 2 { value = value + 1 if value == 1 { continue } }
   return value
@@ -190,8 +190,8 @@ it.effect('publishes immutable facade facts for writes, loops, transfers, and DA
 
 it.effect('restores a moved owner with a complete replacement before continue', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: I32 }
-pub fn main() -> I32 {
+    const self = yield* snapshot(`struct Token { value: i32 }
+pub fn main() -> i32 {
   let mut token = Token { value: 1 }
   let mut iteration = 0
   while iteration < 1 {
@@ -222,8 +222,8 @@ pub fn main() -> I32 {
 
 it.effect('rejects incompatible repeating owner states and overlapping replacement', () =>
   Effect.gen(function* () {
-    const incompatible = yield* snapshot(`struct Token { value: I32 }
-pub fn main() -> I32 {
+    const incompatible = yield* snapshot(`struct Token { value: i32 }
+pub fn main() -> i32 {
   let mut token = Token { value: 1 }
   let mut iteration = 0
   while iteration < 1 {
@@ -237,8 +237,8 @@ pub fn main() -> I32 {
       'OWN0005',
     )
 
-    const overlapping = yield* snapshot(`struct Token { value: I32 }
-pub fn main() -> I32 {
+    const overlapping = yield* snapshot(`struct Token { value: i32 }
+pub fn main() -> i32 {
   let mut token = Token { value: 1 }
   token = move token
   return 42
@@ -252,10 +252,10 @@ pub fn main() -> I32 {
 
 it.effect('checks an indexed destination before evaluating its right-hand call', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn replacement() -> I32 { return 42 }
-pub fn main() -> I32 {
+    const self = yield* snapshot(`fn replacement() -> i32 { return 42 }
+pub fn main() -> i32 {
   let mut values = [1, 2]
-  let index = 2
+  let index = usize.add(2, 0)
   values[index] = replacement()
   return 0
 }`)
@@ -275,8 +275,8 @@ pub fn main() -> I32 {
 
 it.effect('plans lexical cleanup for continue and break without releasing outer owners', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: I32 }
-pub fn main() -> I32 {
+    const self = yield* snapshot(`struct Token { value: i32 }
+pub fn main() -> i32 {
   let outer = Token { value: 42 }
   let mut iteration = 0
   while iteration < 1 {
@@ -308,7 +308,7 @@ pub fn main() -> I32 {
 
 it.effect('repeats loop DAG encodings, facade facts, traces, and wasm bytes exactly', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> I32 {
+    const source = `pub fn main() -> i32 {
   let mut outer = 0
   let mut total = 0
   while outer < 2 {

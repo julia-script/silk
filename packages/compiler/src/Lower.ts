@@ -5,6 +5,7 @@ import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
+import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -14,9 +15,9 @@ import * as TypeCompatibility from './TypeCompatibility.js'
  * loop region plus lexical repeat/exit outcomes; backend-private CFGs are derived later.
  */
 
-const i32: Extract<Mir.Type, { readonly _tag: 'I32' }> = Object.freeze({ _tag: 'I32' })
-const usize: Extract<Mir.Type, { readonly _tag: 'Usize' }> = Object.freeze({ _tag: 'Usize' })
-const bool: Extract<Mir.Type, { readonly _tag: 'Bool' }> = Object.freeze({ _tag: 'Bool' })
+const i32: Extract<Mir.Type, { readonly _tag: 'i32' }> = Object.freeze({ _tag: 'i32' })
+const usize: Extract<Mir.Type, { readonly _tag: 'usize' }> = Object.freeze({ _tag: 'usize' })
+const bool: Extract<Mir.Type, { readonly _tag: 'bool' }> = Object.freeze({ _tag: 'bool' })
 
 const mirType = (
   type: Type.Type,
@@ -25,13 +26,11 @@ const mirType = (
   const specialized = Type.substitute(type, substitution)
   if (!Type.isConcrete(specialized)) return undefined
   return typeof specialized === 'string'
-    ? specialized === 'Never'
-      ? undefined
-      : specialized === 'Bool'
-        ? bool
-        : specialized === 'Usize'
-          ? usize
-          : i32
+    ? Type.isBuiltin(specialized)
+      ? Object.freeze({ _tag: specialized })
+      : Type.isNever(specialized)
+        ? Object.freeze({ _tag: 'Bottom', type: specialized })
+        : undefined
     : Type.isNominal(specialized)
       ? Object.freeze({ _tag: 'Nominal', type: specialized })
       : Type.isFixedArray(specialized)
@@ -82,6 +81,10 @@ class FunctionLowering {
   readonly patternLocals = new Map<string, Mir.LocalId>()
   readonly loanLocals = new Map<string, Mir.LocalId>()
   readonly slotLoans = new Map<number, ReadonlyArray<Hir.BorrowId>>()
+  readonly callableDefinitions = new Map<
+    number,
+    Extract<Mir.Operation, { readonly _tag: 'MakeCallable' }>
+  >()
   private operations: Array<Mir.Operation> = []
 
   constructor(
@@ -132,6 +135,13 @@ class FunctionLowering {
 
   emit(operation: Mir.Operation): void {
     this.operations.push(operation)
+    if (operation._tag === 'MakeCallable')
+      this.callableDefinitions.set(operation.destination.ordinal, operation)
+    if (operation._tag === 'Move') {
+      const definition = this.callableDefinitions.get(operation.source.ordinal)
+      if (definition !== undefined)
+        this.callableDefinitions.set(operation.destination.ordinal, definition)
+    }
   }
 
   type(type: Type.Type): Mir.Type | undefined {
@@ -634,7 +644,7 @@ function lowerExpression(
   switch (expression._tag) {
     case 'IntegerLiteral': {
       const type = fn.type(expression.type)
-      if (type === undefined || (type._tag !== 'I32' && type._tag !== 'Usize')) return undefined
+      if (type === undefined || !Type.isBuiltin(Mir.semanticType(type))) return undefined
       const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({
@@ -643,6 +653,21 @@ function lowerExpression(
           type,
           value: expression.value,
           provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      )
+      return { result: destination }
+    }
+    case 'UnitLiteral': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'Construct',
+          destination,
+          type,
+          fields: Object.freeze([]),
+          provenance: authored(expression.span),
         }),
       )
       return { result: destination }
@@ -854,6 +879,59 @@ function lowerExpression(
           : lowerCallee() && lowerArguments()
       const type = fn.type(expression.type)
       if (!lowered || type === undefined || callableType === undefined) return undefined
+      const definition =
+        callable === undefined ? undefined : fn.callableDefinitions.get(callable.ordinal)
+      const realizedTarget = target ?? definition?.target
+      if (
+        realizedTarget?._tag === 'BuiltinCallableTarget' &&
+        Scalar.isCheckedOperation(realizedTarget.operation) &&
+        type._tag === 'Union'
+      ) {
+        const sourceScalar = Scalar.find(realizedTarget.actor)
+        const valueScalar = Scalar.conversionTarget(realizedTarget.operation) ?? sourceScalar
+        const scalarOperation = sourceScalar?.operations.find(
+          (operation) => operation.code === realizedTarget.operation,
+        )
+        const realizedCaptures = definition?.captures ?? captures
+        const ordered: Array<Mir.LocalId | undefined> = Array.from({
+          length: scalarOperation?.arity ?? 0,
+        })
+        for (const capture of realizedCaptures) ordered[capture.parameterOrdinal] = capture.source
+        for (const argument of arguments_) {
+          const empty = ordered.indexOf(undefined)
+          if (empty >= 0) ordered[empty] = argument
+        }
+        const operands = ordered.filter((operand): operand is Mir.LocalId => operand !== undefined)
+        const first = operands.at(0)
+        const sourceType = first === undefined ? undefined : fn.localTypes.at(first.ordinal)
+        if (
+          sourceScalar?.category !== 'Integer' ||
+          valueScalar?.category !== 'Integer' ||
+          scalarOperation === undefined ||
+          operands.length !== scalarOperation.arity ||
+          sourceType?._tag !== sourceScalar.spelling ||
+          operands.some((operand) => fn.localTypes.at(operand.ordinal)?._tag !== sourceType._tag)
+        )
+          return undefined
+        const success = Type.some(valueScalar.spelling)
+        const failure = Type.none
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'CheckedInteger' as const,
+            operation: scalarOperation.code,
+            destination,
+            operands: Object.freeze(operands),
+            sourceType,
+            valueType: Object.freeze({ _tag: valueScalar.spelling }),
+            type,
+            success,
+            failure,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
       const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({
@@ -2145,13 +2223,13 @@ function lowerExpression(
       ) {
         return undefined
       }
-      const destination = fn.alloc(i32)
+      const destination = fn.alloc(usize)
       fn.emit(
         Object.freeze({
           _tag: 'SliceLength',
           destination,
           slice: slice.result,
-          type: i32,
+          type: usize,
           provenance: authored(expression.span),
         }),
       )
@@ -2484,32 +2562,104 @@ function lowerExpression(
         )
         return finishBuiltin(destination)
       }
-      if (expression.operation === 'UnitMake') {
-        const type = fn.type(expression.type)
-        if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
-        const destination = fn.alloc(type)
+      const conversionTarget = Scalar.conversionTarget(expression.operation)
+      if (Scalar.isCheckedOperation(expression.operation)) {
+        const [first] = argumentLocals
+        const sourceType = first === undefined ? undefined : fn.localTypes.at(first.ordinal)
+        const semanticSource = sourceType === undefined ? undefined : Mir.semanticType(sourceType)
+        const sourceScalar =
+          typeof semanticSource === 'string' ? Scalar.find(semanticSource) : undefined
+        const valueScalar = conversionTarget ?? sourceScalar
+        const targetType = fn.type(expression.type)
+        if (
+          first === undefined ||
+          sourceScalar?.category !== 'Integer' ||
+          valueScalar?.category !== 'Integer' ||
+          sourceType?._tag !== sourceScalar.spelling ||
+          targetType?._tag !== 'Union' ||
+          argumentLocals.some((local) => fn.localTypes.at(local.ordinal)?._tag !== sourceType._tag)
+        )
+          return undefined
+        const success = Type.some(valueScalar.spelling)
+        const failure = Type.none
+        if (
+          !targetType.type.members.some((member) => Type.equals(member, success)) ||
+          !targetType.type.members.some((member) => Type.equals(member, failure))
+        )
+          return undefined
+        const destination = fn.alloc(targetType)
         fn.emit(
           Object.freeze({
-            _tag: 'Construct' as const,
+            _tag: 'CheckedInteger' as const,
+            operation: expression.operation,
             destination,
-            type,
-            fields: Object.freeze([]),
+            operands: Object.freeze(argumentLocals),
+            sourceType,
+            valueType: Object.freeze({ _tag: valueScalar.spelling }),
+            type: targetType,
+            success,
+            failure,
             provenance: authored(expression.span),
           }),
         )
-        return { result: destination }
+        return finishBuiltin(destination)
       }
-      if (expression.operation === 'Not' || expression.operation === 'Negate') {
+      if (conversionTarget !== undefined) {
+        const [source] = argumentLocals
+        const sourceType = source === undefined ? undefined : fn.localTypes.at(source.ordinal)
+        const semanticSource = sourceType === undefined ? undefined : Mir.semanticType(sourceType)
+        const sourceScalar =
+          typeof semanticSource === 'string' ? Scalar.find(semanticSource) : undefined
+        const targetType = fn.type(expression.type)
+        if (
+          source === undefined ||
+          sourceScalar?.category !== 'Integer' ||
+          sourceType?._tag !== sourceScalar.spelling ||
+          targetType?._tag !== conversionTarget.spelling
+        )
+          return undefined
+        const destination = fn.alloc(targetType)
+        fn.emit(
+          Object.freeze({
+            _tag: 'ConvertInteger' as const,
+            destination,
+            source,
+            sourceType,
+            type: targetType,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (
+        expression.operation === 'Not' ||
+        expression.operation === 'Negate' ||
+        expression.operation === 'BitNot' ||
+        expression.operation === 'WrappingNegate' ||
+        expression.operation === 'SaturatingNegate'
+      ) {
         const [subject] = argumentLocals
         if (subject === undefined) return undefined
-        const operandType = expression.operation === 'Not' ? bool : i32
+        const operandType = fn.localTypes.at(subject.ordinal)
+        if (operandType === undefined) return undefined
+        const semanticOperand = Mir.semanticType(operandType)
+        const scalar =
+          typeof semanticOperand === 'string' ? Scalar.find(semanticOperand) : undefined
+        if (expression.operation !== 'Not' && scalar?.category !== 'Integer') return undefined
+        const pointerBits = fn.layout.target.pointerSize === 4 ? 32 : 64
+        const constant =
+          expression.operation === 'BitNot' && scalar?.category === 'Integer'
+            ? scalar.signedness === 'Signed'
+              ? -1n
+              : Scalar.range(scalar, pointerBits).maximum
+            : 0n
         const zero = fn.alloc(operandType)
         fn.emit(
           Object.freeze({
             _tag: 'Literal',
             destination: zero,
             type: operandType,
-            value: 0,
+            value: constant,
             provenance: Object.freeze({ span: expression.span, generated: true }),
           }),
         )
@@ -2517,7 +2667,16 @@ function lowerExpression(
         fn.emit(
           Object.freeze({
             _tag: 'Binary',
-            operator: expression.operation === 'Not' ? 'Equals' : 'Subtract',
+            operator:
+              expression.operation === 'Not'
+                ? 'Equals'
+                : expression.operation === 'BitNot'
+                  ? 'BitXor'
+                  : expression.operation === 'WrappingNegate'
+                    ? 'WrappingSubtract'
+                    : expression.operation === 'SaturatingNegate'
+                      ? 'SaturatingSubtract'
+                      : 'Subtract',
             destination,
             left: expression.operation === 'Not' ? subject : zero,
             right: expression.operation === 'Not' ? zero : subject,
