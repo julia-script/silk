@@ -25,6 +25,21 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ## Now
 
+### Exercise Silk with a bounded stack bytecode VM
+
+**Status: complete (2026-08-09).** The ordinary Silk VM differentially matches its TypeScript oracle
+over arithmetic, taken and untaken branches, malformed bytecode, stack bounds, invalid jumps, and
+bounded loops. One owned ordered `Vector<Step | VmDiagnostic>` event stream supplies realistic
+allocation pressure; every growth ordinal preserves typed failure and balanced cleanup across the
+evaluator, native LLVM, and direct Wasm, and fresh processes reproduce the same artifacts.
+
+The VM independently confirms the need for named typed values and shared Vector reads. It also
+exposed nested dynamic reference-place lowering, structural-union `Slot.copy`, and a native
+flattened-ABI defect for composite returns containing two generic vectors. The native ABI defect
+blocked the direct two-vector result shape and is selected as the next focused repair; no parser
+port or continuous self-hosting sequence follows from the exercise.
+- **Links:** [real-programs initiative](real-programs.md)
+
 ### Repair contextual integer literals exposed by the lexer
 
 **Status: complete (2026-08-09).** Focused characterization corrected the initial finding: direct,
@@ -196,9 +211,9 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-No project-level item is preselected. The next change should be another recognizable pressure
-program that tests a different part of the small-language boundary; the remaining lexer findings
-are not sufficient alone to design enums/constants or a read-only Vector surface.
+Characterize and repair native composite returns that carry multiple generic affine fields. Then
+reassess whether typed constants or shared Vector reads are the smallest evidence-backed language
+or library improvement. No neighboring compiler port is preselected.
 
 ## Later
 
@@ -249,6 +264,9 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-09: Selected a bounded stack bytecode VM as the second language-pressure program. It
+  independently tests closed opcode vocabulary, Vector observation, allocation rollback, invalid
+  execution, and cross-engine determinism without implying a production VM or self-hosting step.
 - 2026-08-09: Completed `fix-contextual-integer-call-literals`. Characterization showed ordinary
   and piped calls were already correct; the repaired defect was enclosing `bool` result context
   suppressing `u8` operand-to-literal refinement. The lexer now stays in byte types throughout its

@@ -1,0 +1,16 @@
+{
+  "id": "stack-vm-pressure",
+  "title": "Silk bounded stack VM pressure program",
+  "entry": "main.silk",
+  "kind": "language-pressure",
+  "oracle": "TypeScript reference VM",
+  "features": [
+    "runtime byte slices",
+    "fixed mutable operand stack",
+    "owned Vector event stream",
+    "typed allocation failure",
+    "bounded malformed-program recovery",
+    "cross-engine determinism"
+  ],
+  "nonGoals": ["production VM", "assembler or JIT", "compiler execution engine", "self-hosting"]
+}

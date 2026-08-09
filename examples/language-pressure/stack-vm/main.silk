@@ -1,0 +1,256 @@
+import silk.vector { Vector, make, append }
+
+impl Report for OutOfMemory {}
+
+struct Step {
+  pc: usize
+  opcode: u8
+  depth: usize
+  top: i32
+}
+
+struct VmDiagnostic {
+  pc: usize
+  code: usize
+}
+
+struct Executed {
+  events: Vector<Step | VmDiagnostic>
+  result: i32
+  fingerprint: i32
+}
+
+fn zero() -> usize { return usize.add(0, 0) }
+
+effect fn pushStep(
+  events: &mut Vector<Step | VmDiagnostic>,
+  pc: usize,
+  opcode: u8,
+  depth: usize,
+  top: i32,
+  fingerprint: i32
+) -> i32 ! OutOfMemory ? &mut Allocator {
+  let step = Step { pc: pc, opcode: opcode, depth: depth, top: top }
+  let added = run append<Step | VmDiagnostic>(move events, move step)
+  let observedPc = observeStepPc(pc)
+  let observedOpcode = observeStepOpcode(opcode)
+  let observedDepth = observeStepDepth(depth)
+  let observedTop = observeStepTop(top)
+  return (
+    fingerprint * 17 + usize.toI32(observedPc) * 3 + u8.toI32(observedOpcode) * 5 +
+    usize.toI32(observedDepth) * 7 + observedTop * 11
+  ) % 251
+}
+
+effect fn pushDiagnostic(
+  events: &mut Vector<Step | VmDiagnostic>,
+  pc: usize,
+  code: usize,
+  fingerprint: i32
+) -> i32 ! OutOfMemory ? &mut Allocator {
+  let diagnostic = VmDiagnostic { pc: pc, code: code }
+  let added = run append<Step | VmDiagnostic>(move events, move diagnostic)
+  let observedPc = observeDiagnosticPc(pc)
+  let observedCode = observeDiagnosticCode(code)
+  return (
+    fingerprint * 19 + usize.toI32(observedPc) * 13 + usize.toI32(observedCode) * 17
+  ) % 251
+}
+
+fn finish(result: i32, events: Vector<Step | VmDiagnostic>, fingerprint: i32) -> Executed {
+  let observedResult = observeResult(result)
+  return Executed {
+    events: move events,
+    result: result,
+    fingerprint: (fingerprint * 23 + observedResult) % 251
+  }
+}
+
+effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
+  let mut stack = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let mut depth = zero()
+  let mut pc = zero()
+  let mut attempted = zero()
+  let mut currentTop = 0
+  let mut fingerprint = 0
+  let mut events = make<Step | VmDiagnostic>()
+
+  while pc < bytecode.length {
+    if attempted >= 64 {
+      fingerprint = run pushDiagnostic(&mut events, pc, 5, fingerprint)
+      return finish(currentTop, move events, fingerprint)
+    }
+    attempted = attempted + 1
+    let instructionPc = pc
+    let opcode = bytecode[instructionPc]
+
+    if opcode == 0 {
+      pc = pc + 1
+      fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+      return finish(currentTop, move events, fingerprint)
+    }
+
+    if opcode == 1 {
+      if instructionPc + 1 >= bytecode.length {
+        fingerprint = run pushDiagnostic(&mut events, instructionPc, 2, fingerprint)
+        return finish(currentTop, move events, fingerprint)
+      }
+      let value = bytecode[instructionPc + 1] |> u8.toI32
+      if depth >= 16 {
+        fingerprint = run pushDiagnostic(&mut events, instructionPc, 6, fingerprint)
+        return finish(currentTop, move events, fingerprint)
+      }
+      stack[depth] = value
+      depth = depth + 1
+      currentTop = value
+      pc = pc + 2
+      fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+    } else {
+      if opcode == 2 {
+        if depth < 2 {
+          fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+          pc = pc + 1
+        } else {
+          depth = depth - 1
+          let right = stack[depth]
+          depth = depth - 1
+          let left = stack[depth]
+          let result = left + right
+          stack[depth] = result
+          depth = depth + 1
+          currentTop = result
+          pc = pc + 1
+          fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+        }
+      } else {
+        if opcode == 3 {
+          if depth < 2 {
+            fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+            pc = pc + 1
+          } else {
+            depth = depth - 1
+            let right = stack[depth]
+            depth = depth - 1
+            let left = stack[depth]
+            let result = left - right
+            stack[depth] = result
+            depth = depth + 1
+            currentTop = result
+            pc = pc + 1
+            fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+          }
+        } else {
+          if opcode == 4 {
+            if depth < 2 {
+              fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+              pc = pc + 1
+            } else {
+              depth = depth - 1
+              let right = stack[depth]
+              depth = depth - 1
+              let left = stack[depth]
+              let result = left * right
+              stack[depth] = result
+              depth = depth + 1
+              currentTop = result
+              pc = pc + 1
+              fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+            }
+          } else {
+            if opcode == 5 {
+              if depth == 0 {
+                fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+                pc = pc + 1
+              } else {
+                let value = currentTop
+                if depth >= 16 {
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 6, fingerprint)
+                  return finish(currentTop, move events, fingerprint)
+                }
+                stack[depth] = value
+                depth = depth + 1
+                pc = pc + 1
+                fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+              }
+            } else {
+              if opcode == 6 {
+                if instructionPc + 1 >= bytecode.length {
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 2, fingerprint)
+                  return finish(currentTop, move events, fingerprint)
+                }
+                if depth == 0 {
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 3, fingerprint)
+                  pc = pc + 2
+                } else {
+                  let target = bytecode[instructionPc + 1] |> u8.toUsize
+                  if target >= bytecode.length {
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, 4, fingerprint)
+                    return finish(currentTop, move events, fingerprint)
+                  }
+                  depth = depth - 1
+                  let condition = stack[depth]
+                  if depth == 0 {
+                    currentTop = 0
+                  } else {
+                    currentTop = stack[depth - 1]
+                  }
+                  if condition == 0 {
+                    pc = target
+                  } else {
+                    pc = pc + 2
+                  }
+                  fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+                }
+              } else {
+                if opcode == 7 {
+                  if instructionPc + 1 >= bytecode.length {
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, 2, fingerprint)
+                    return finish(currentTop, move events, fingerprint)
+                  }
+                  let target = bytecode[instructionPc + 1] |> u8.toUsize
+                  if target >= bytecode.length {
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, 4, fingerprint)
+                    return finish(currentTop, move events, fingerprint)
+                  }
+                  pc = target
+                  fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+                } else {
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, 1, fingerprint)
+                  pc = pc + 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return finish(currentTop, move events, fingerprint)
+}
+
+fn observeResult(value: i32) -> i32 { return value }
+fn observeStepPc(value: usize) -> usize { return value }
+fn observeStepOpcode(value: u8) -> u8 { return value }
+fn observeStepDepth(value: usize) -> usize { return value }
+fn observeStepTop(value: i32) -> i32 { return value }
+fn observeDiagnosticPc(value: usize) -> usize { return value }
+fn observeDiagnosticCode(value: usize) -> usize { return value }
+
+fn fingerprint(executed: Executed) -> i32 {
+  return executed.fingerprint
+}
+
+fn verify(value: i32) -> () {
+  // PRESSURE_EXPECTED: the harness replaces this literal only.
+  if value != 0 { let mismatch = 1 / 0 }
+  return ()
+}
+
+pub effect fn main() -> () ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  // PRESSURE_INPUT: the harness replaces this literal only.
+  let bytecode = b"\x01\x00\x06\x06\x01\x63\x01\x06\x01\x07\x04\x00"
+  let pending = execute(bytecode) |> Allocator.provide(&mut allocator)
+  let executed = run pending
+  return fingerprint(move executed) |> verify
+}
