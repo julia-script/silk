@@ -28,6 +28,22 @@ it('keeps stack VM pressure phases and artifacts byte-identical across fresh pro
     }
     readonly nativeBytes: string
     readonly wasmBytes: string
+    readonly separate: {
+      readonly native: {
+        readonly diagnostics: ReadonlyArray<unknown>
+        readonly outcome: string
+        readonly allocations: ReadonlyArray<string>
+      }
+      readonly wasm: {
+        readonly diagnostics: ReadonlyArray<unknown>
+        readonly outcome: string
+        readonly allocations: ReadonlyArray<string>
+      }
+      readonly nativeText: string
+      readonly wasmText: string
+      readonly nativeBytes: string
+      readonly wasmBytes: string
+    }
   }
   assert.deepEqual(encoded.native.diagnostics, [])
   assert.deepEqual(encoded.wasm.diagnostics, [])
@@ -38,4 +54,13 @@ it('keeps stack VM pressure phases and artifacts byte-identical across fresh pro
   assert.deepEqual(encoded.wasm.allocations, encoded.native.allocations)
   assert.strictEqual(encoded.nativeBytes.length, 64)
   assert.strictEqual(encoded.wasmBytes.length, 64)
+  assert.deepEqual(encoded.separate.native.diagnostics, [])
+  assert.deepEqual(encoded.separate.wasm.diagnostics, [])
+  assert.strictEqual(encoded.separate.native.outcome, 'Completed')
+  assert.strictEqual(encoded.separate.wasm.outcome, 'Completed')
+  assert.deepEqual(encoded.separate.wasm.allocations, encoded.separate.native.allocations)
+  assert.strictEqual(encoded.separate.nativeText.length, 64)
+  assert.strictEqual(encoded.separate.wasmText.length, 64)
+  assert.strictEqual(encoded.separate.nativeBytes.length, 64)
+  assert.strictEqual(encoded.separate.wasmBytes.length, 64)
 }, 45_000)

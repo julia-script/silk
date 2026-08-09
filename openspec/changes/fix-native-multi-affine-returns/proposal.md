@@ -1,24 +1,24 @@
 ## Why
 
-The stack-VM pressure program exposed a native correctness defect: returning a composite value with
-two generic affine fields corrupted the second field's union tag and trapped during cleanup, while
-evaluation and direct WebAssembly preserved the same value. This blocks ordinary APIs from
-returning multiple owned values and violates the compiler-owned aggregate calling-shape contract.
+The stack-VM pressure program exposed a native correctness defect: a mutable affine local borrowed
+only on an untaken branch was later reloaded from uninitialized address storage, corrupting its
+union tag and trapping during cleanup. Evaluation and direct WebAssembly preserved the same value;
+LLVM's compile-time "materialized" set incorrectly crossed runtime control-flow paths.
 
 ## What Changes
 
-- Add a minimal reproduction that distinguishes plain nested aggregate returns from composites
-  containing multiple generic affine owners.
-- Preserve every compiler-planned result lane, field path, and union discriminant across LLVM
-  function returns and their call sites.
-- Prove that callers receive and clean up each returned affine field exactly once in declaration
-  order, including empty and allocated Vector values.
+- Add a minimal reproduction that distinguishes sound multi-affine calls and returns from an
+  address-taken mutable affine root whose borrow occurs only on another branch.
+- Make LLVM address-root storage valid on every runtime path before any post-call reload can read it,
+  and synchronize a root's value when its defining operation executes.
+- Prove that untaken exclusive-borrow branches preserve the original affine value and its recursive
+  exactly-once cleanup, including the stack VM's original separate trace and diagnostic vectors.
 - Keep evaluator, native LLVM, and direct WebAssembly execution in exact parity and retain
   deterministic artifacts.
-- Remove the stack VM's compiler-defect disposition once the natural two-vector result shape is
-  independently safe; changing the VM back to two vectors is not required by this repair.
-- Keep a new return convention, public ABI promise, Vector-specific intrinsic, or runtime cleanup
-  registry out of scope.
+- Correct the stack VM finding from a composite-return ABI defect to path-insensitive native
+  address-root materialization; changing the VM back to two vectors is not required by this repair.
+- Keep a new return convention, public ABI promise, Vector-specific intrinsic, runtime cleanup
+  registry, or general control-flow rewrite out of scope.
 
 ## Capabilities
 
@@ -28,15 +28,13 @@ None.
 
 ### Modified Capabilities
 
-- `bootstrap-target-layout`: Require every lane of a composite result containing multiple generic
-  affine fields to retain its canonical path and representation across calls and returns.
-- `bootstrap-backend`: Require native aggregate return lowering to preserve multiple generic
-  affine fields and their exactly-once cleanup in evaluator and WebAssembly parity.
+- `bootstrap-backend`: Require native address-taken mutable roots to remain path-correct when their
+  borrow or mutation occurs on only some control-flow paths.
 
 ## Impact
 
-- Affects focused compiler tests plus the LLVM backend's internal function signature, return, and
-  call-result lowering where the characterization identifies the lane mismatch.
+- Affects focused compiler tests plus the LLVM backend's private address-root materialization and
+  post-call reload bookkeeping.
 - Reuses existing layout, MIR, ownership, Drop, `Vector`, evaluator, native toolchain, and direct
   WebAssembly mechanisms.
 - Does not change Silk syntax, public compiler APIs, standard-library source, dependencies, or the

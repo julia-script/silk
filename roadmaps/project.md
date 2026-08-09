@@ -35,9 +35,9 @@ evaluator, native LLVM, and direct Wasm, and fresh processes reproduce the same 
 
 The VM independently confirms the need for named typed values and shared Vector reads. It also
 exposed nested dynamic reference-place lowering, structural-union `Slot.copy`, and a native
-flattened-ABI defect for composite returns containing two generic vectors. The native ABI defect
-blocked the direct two-vector result shape and is selected as the next focused repair; no parser
-port or continuous self-hosting sequence follows from the exercise.
+path-sensitivity defect for address-taken mutable roots. The native defect blocked the direct
+two-vector result shape and was selected as the next focused repair; no parser port or continuous
+self-hosting sequence follows from the exercise.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Repair contextual integer literals exposed by the lexer
@@ -211,9 +211,11 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-Characterize and repair native composite returns that carry multiple generic affine fields. Then
-reassess whether typed constants or shared Vector reads are the smallest evidence-backed language
-or library improvement. No neighboring compiler port is preselected.
+The native address-root repair is complete: ordinary multi-affine transport was already sound, and
+LLVM now preserves a mutable affine root when its exclusive-borrow branch is untaken while retaining
+callee writeback on taken paths. Reassess whether typed constants or shared Vector reads are the
+smallest evidence-backed language or library improvement. No neighboring compiler port is
+preselected.
 
 ## Later
 

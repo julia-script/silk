@@ -1,22 +1,22 @@
 ## 1. Characterization
 
-- [ ] 1.1 Add Copy-only, empty multi-affine, and allocated multi-affine return fixtures with distinct field observations
-- [ ] 1.2 Assert canonical result-lane paths, MIR verification, evaluator cleanup, LLVM IR shape, and direct Wasm behavior
-- [ ] 1.3 Reproduce the native failure in debug and release and identify the first divergent boundary
+- [x] 1.1 Prove ordinary two-owner aggregate and Effect transport across evaluator, native, and Wasm
+- [x] 1.2 Reproduce the original separate-vector VM trap in native debug and release builds
+- [x] 1.3 Localize the invalid diagnostic tag to path-insensitive address-root reload after an untaken borrow branch
 
-## 2. Native return repair
+## 2. Native address-root repair
 
-- [ ] 2.1 Retain the compiler-selected result lanes and canonical paths in the LLVM declared-function record
-- [ ] 2.2 Drive callee aggregate construction and caller extraction symmetrically from that result shape
-- [ ] 2.3 Reject internal result-lane mismatches without Vector-, generic-owner-, or cleanup-specific lowering
+- [x] 2.1 Initialize every statically selected LLVM address-root slot with complete zero lanes at function entry
+- [x] 2.2 Synchronize an address root when its defining operation establishes the semantic value
+- [x] 2.3 Remove the compile-time materialization guard and reload only from always-valid private storage
 
 ## 3. Regression evidence
 
-- [ ] 3.1 Prove empty and allocated multi-affine returns across evaluator, native LLVM, and direct WebAssembly
-- [ ] 3.2 Assert balanced evaluator acquisition, release, and Drop traces plus unaffected scalar and Copy-aggregate execution
-- [ ] 3.3 Add fresh-process determinism for the repaired calling shape, MIR, LLVM, and Wasm artifacts
+- [x] 3.1 Prove taken and untaken exclusive-borrow paths across evaluator, native LLVM, and direct WebAssembly
+- [x] 3.2 Prove the original separate-vector VM executes natively with valid exactly-once cleanup
+- [x] 3.3 Add fresh-process determinism and retain unaffected scalar, aggregate, slice, and reference-projection gates
 
 ## 4. Documentation and verification
 
-- [ ] 4.1 Update the stack-VM findings disposition and both roadmaps with the completed repair evidence
-- [ ] 4.2 Run focused tests, `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and strict OpenSpec validation
+- [x] 4.1 Correct the stack-VM findings disposition and both roadmaps with the completed repair evidence
+- [x] 4.2 Run focused tests, `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and strict OpenSpec validation

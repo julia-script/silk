@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** repair the native composite-return defect exposed by the completed stack VM,
-measured by an engine-independent minimal reproduction and correct cleanup of multiple generic
-affine fields without changing their public representation.
+**Current objective:** choose between typed named values and a shared Vector read surface after the
+completed stack VM and native address-root repair, using the two pressure programs' combined
+evidence rather than a self-hosting sequence.
 
 ## Column rules
 
@@ -44,9 +44,10 @@ determinism parity.
 
 ## Next
 
-Characterize and repair the native flattened-ABI defect for composite returns containing multiple
-generic affine fields. Reassess typed constants and shared Vector reads after that focused repair;
-do not automatically port another compiler module.
+The apparent composite-return defect is repaired and reclassified: native emission had allowed an
+exclusive borrow emitted on one branch to mark address storage as initialized on every runtime path.
+Select either typed named values or shared Vector reads as the next focused improvement; do not
+automatically port another compiler module.
 
 ## Later
 
@@ -84,6 +85,10 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
+- 2026-08-09: Completed `fix-native-multi-affine-returns` after characterization corrected the
+  initial ABI diagnosis. LLVM now seeds and synchronizes address-root storage independently of
+  runtime branch choice; the original two-vector VM, taken mutation paths, and untaken diagnostic
+  paths agree across evaluator, native, Wasm, and fresh processes.
 - 2026-08-09: Completed `exercise-language-with-stack-vm`. Ten differential corpus cases, exact
   ordered observations, evaluator/native/Wasm parity, allocation-failure sweeps, and fresh-process
   determinism pass. The VM confirmed named-value and shared-read pressure and selected the native

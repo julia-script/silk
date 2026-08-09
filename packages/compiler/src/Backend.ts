@@ -1118,6 +1118,53 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               }),
             )
           }
+          const storeAddressRootValues = Effect.fnUntraced(function* (
+            root: number,
+            values: ReadonlyArray<Value.Input>,
+            name: string,
+          ) {
+            const base = addressStorage.get(root)
+            const logicalType = entry.fn.localTypes.at(root)
+            if (base === undefined || logicalType === undefined) {
+              throw new RangeError(`Backend lost address storage for %${root}`)
+            }
+            for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
+              const offset = Layout.laneOffset(
+                program.layout,
+                Mir.semanticType(logicalType),
+                lane.path,
+              )
+              const stored = values.at(ordinal)
+              if (offset === undefined || stored === undefined) {
+                throw new RangeError(`Backend lost address lane ${ordinal} for %${root}`)
+              }
+              yield* FunctionBody.store(
+                body,
+                stored,
+                yield* FunctionBody.getElementPtr(
+                  body,
+                  i8,
+                  base,
+                  [yield* Constant.integerUnsigned(builder, i32, BigInt(offset))],
+                  `${name}_${ordinal}_ptr`,
+                ),
+              )
+            }
+          })
+          for (const root of [...addressRoots].sort((left, right) => left - right)) {
+            const logicalType = entry.fn.localTypes.at(root)
+            if (logicalType === undefined)
+              throw new RangeError(`Backend lost address root %${root}`)
+            yield* storeAddressRootValues(
+              root,
+              Object.freeze(
+                yield* Effect.forEach(valueLanesFor(logicalType), (lane) =>
+                  Constant.nullValue(builder, laneType(lane)),
+                ),
+              ),
+              `addr${root}_zero`,
+            )
+          }
           let physicalParameter = 0
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
             const logicalType = entry.fn.localTypes.at(ordinal)
@@ -1166,6 +1213,9 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 const stored = values.at(lane)
                 if (stored !== undefined) yield* FunctionBody.store(body, stored, pointer)
               }
+            }
+            if (addressRoots.has(ordinal)) {
+              yield* storeAddressRootValues(ordinal, Object.freeze(values), `addr${ordinal}_param`)
             }
           }
           const readLocal = (local: Mir.LocalId): ReadonlyArray<Value.Input> => {
@@ -1741,7 +1791,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             }
           })
 
-          const materializedAddressRoots = new Set<number>()
           const bytePointer = Effect.fnUntraced(function* (
             base: Value.Input,
             offset: Value.Input,
@@ -1813,30 +1862,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             if (base === undefined || logicalType === undefined) {
               throw new RangeError(`Backend lost address storage for %${root.ordinal}`)
             }
-            const values = readLocal(root)
-            for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
-              const offset = Layout.laneOffset(
-                program.layout,
-                Mir.semanticType(logicalType),
-                lane.path,
-              )
-              const stored = values.at(ordinal)
-              if (offset === undefined || stored === undefined) {
-                throw new RangeError(
-                  `Backend lost address lane ${ordinal} ${JSON.stringify(lane.path)} for %${root.ordinal} (${SilkType.encode(Mir.semanticType(logicalType))})`,
-                )
-              }
-              yield* FunctionBody.store(
-                body,
-                stored,
-                yield* constantBytePointer(
-                  base,
-                  offset,
-                  `addr${root.ordinal}_${ordinal}_${materializeId}`,
-                ),
-              )
-            }
-            materializedAddressRoots.add(root.ordinal)
+            yield* storeAddressRootValues(
+              root.ordinal,
+              readLocal(root),
+              `addr${root.ordinal}_${materializeId}`,
+            )
           })
           const ensureAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
             if (!addressStorage.has(root.ordinal)) {
@@ -1859,7 +1889,6 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           })
           let reloadSequence = 0
           const reloadAddressRoot = Effect.fnUntraced(function* (root: number) {
-            if (!materializedAddressRoots.has(root)) return
             const reloadId = reloadSequence++
             const base = addressStorage.get(root)
             const logicalType = entry.fn.localTypes.at(root)
@@ -6002,6 +6031,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
               const destination = destinationOf(operation)
               if (destination !== undefined && mutableRoots.has(destination.ordinal)) {
                 yield* storeMutable(destination, readLocal(destination))
+              }
+              if (destination !== undefined && addressRoots.has(destination.ordinal)) {
+                yield* storeAddressRootValues(
+                  destination.ordinal,
+                  readLocal(destination),
+                  `addr${destination.ordinal}_defined`,
+                )
               }
             }
             const terminator = block.terminator

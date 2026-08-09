@@ -15,10 +15,47 @@ const source = pressureSource.replace(
   '  if value != 0 { let mismatch = 1 / 0 }',
   '  if value != 184 { let mismatch = 1 / 0 }',
 )
+const separateSource = pressureSource
+  .replace(
+    'events: Vector<Step | VmDiagnostic>\n  result:',
+    'steps: Vector<Step>\n  diagnostics: Vector<VmDiagnostic>\n  result:',
+  )
+  .replace(
+    'events: &mut Vector<Step | VmDiagnostic>,\n  pc: usize,\n  opcode:',
+    'steps: &mut Vector<Step>,\n  pc: usize,\n  opcode:',
+  )
+  .replace(
+    'let added = run append<Step | VmDiagnostic>(move events, move step)',
+    'let added = run append<Step>(move steps, move step)',
+  )
+  .replace(
+    'events: &mut Vector<Step | VmDiagnostic>,\n  pc: usize,\n  code:',
+    'diagnostics: &mut Vector<VmDiagnostic>,\n  pc: usize,\n  code:',
+  )
+  .replace(
+    'let added = run append<Step | VmDiagnostic>(move events, move diagnostic)',
+    'let added = run append<VmDiagnostic>(move diagnostics, move diagnostic)',
+  )
+  .replace(
+    'fn finish(result: i32, events: Vector<Step | VmDiagnostic>, fingerprint: i32) -> Executed {',
+    'fn finish(result: i32, steps: Vector<Step>, diagnostics: Vector<VmDiagnostic>, fingerprint: i32) -> Executed {',
+  )
+  .replace('    events: move events,', '    steps: move steps,\n    diagnostics: move diagnostics,')
+  .replace(
+    '  let mut events = make<Step | VmDiagnostic>()',
+    '  let mut steps = make<Step>()\n  let mut diagnostics = make<VmDiagnostic>()',
+  )
+  .replaceAll('pushStep(&mut events', 'pushStep(&mut steps')
+  .replaceAll('pushDiagnostic(&mut events', 'pushDiagnostic(&mut diagnostics')
+  .replaceAll(
+    'finish(currentTop, move events, fingerprint)',
+    'finish(currentTop, move steps, move diagnostics, fingerprint)',
+  )
+  .replace('if value != 0', 'if value != 184')
 
-const snapshot = (target) =>
+const snapshot = (input, target) =>
   Effect.runPromise(
-    Analysis.ofSource('stack-vm-pressure/determinism', new TextEncoder().encode(source), target),
+    Analysis.ofSource('stack-vm-pressure/determinism', new TextEncoder().encode(input), target),
   )
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const json = (value) =>
@@ -26,10 +63,18 @@ const json = (value) =>
     typeof candidate === 'bigint' ? candidate.toString() : candidate,
   )
 
-const native = await snapshot('aarch64-apple-darwin')
-const wasm = await snapshot('wasm32-unknown-unknown')
+const native = await snapshot(source, 'aarch64-apple-darwin')
+const wasm = await snapshot(source, 'wasm32-unknown-unknown')
+const separateNative = await snapshot(separateSource, 'aarch64-apple-darwin')
+const separateWasm = await snapshot(separateSource, 'wasm32-unknown-unknown')
 const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
 const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
+const separateNativeArtifact = await Effect.runPromise(
+  Analysis.codegen(separateNative, { mode: 'release' }),
+)
+const separateWasmArtifact = await Effect.runPromise(
+  Analysis.codegenWasm(separateWasm, { mode: 'release' }),
+)
 
 const encodeSnapshot = (self) => {
   const evaluated = Analysis.evaluate(self)
@@ -67,5 +112,13 @@ process.stdout.write(
     wasmText: hash(wasmArtifact.wat),
     nativeBytes: hash(nativeArtifact.bitcode),
     wasmBytes: hash(wasmArtifact.bytes),
+    separate: {
+      native: encodeSnapshot(separateNative),
+      wasm: encodeSnapshot(separateWasm),
+      nativeText: hash(separateNativeArtifact.ir),
+      wasmText: hash(separateWasmArtifact.wat),
+      nativeBytes: hash(separateNativeArtifact.bitcode),
+      wasmBytes: hash(separateWasmArtifact.bytes),
+    },
   }),
 )

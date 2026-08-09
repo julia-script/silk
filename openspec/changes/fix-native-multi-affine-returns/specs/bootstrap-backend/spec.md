@@ -1,25 +1,24 @@
 ## ADDED Requirements
 
-### Requirement: Native composite affine returns preserve ownership
+### Requirement: Native address-root materialization is path-correct
 
-LLVM emission SHALL realize every compiler-planned lane of a composite result containing multiple
-generic affine fields at both the callee return and caller extraction sites. Native execution SHALL
-preserve each field's value and active union discriminants, transfer every cleanup obligation to
-the caller exactly once, and agree with MIR evaluation and direct WebAssembly without a
-Vector-specific or generic-owner-specific backend branch.
+LLVM emission SHALL keep private address storage for every address-taken mutable root valid on all
+runtime control-flow paths where a post-call reload can occur. A borrow materialized on one branch
+MUST NOT cause another branch to reload uninitialized or stale storage. Defining and mutating a
+root SHALL preserve its complete compiler-planned lanes, active union discriminants, and cleanup
+obligation without a type- or collection-specific backend branch.
 
-#### Scenario: Return two empty affine owners
+#### Scenario: Skip an exclusive-borrow branch
 
-- **WHEN** a native callee returns a composite containing two empty generic affine owners
-- **THEN** the caller receives both valid empty values and cleans both without a trap or invalid discriminant
+- **WHEN** an affine mutable root is borrowed exclusively on one branch but execution takes another branch and later crosses a call
+- **THEN** native execution reloads the root's original complete value rather than uninitialized address storage
 
-#### Scenario: Return two allocated affine owners
+#### Scenario: Take the exclusive-borrow branch
 
-- **WHEN** a native callee returns a composite containing two independently allocated generic affine owners
-- **THEN** the caller observes both payloads and eventually releases both owners exactly once in declaration order
+- **WHEN** execution takes the branch that passes the root by exclusive reference and the callee mutates it
+- **THEN** native execution reloads the complete callee-updated value and retains exactly one cleanup obligation
 
-#### Scenario: Compare composite affine returns across engines
+#### Scenario: Compare path-sensitive affine roots across engines
 
-- **WHEN** the same multi-owner return programs run through evaluation, native LLVM, and direct WebAssembly
-- **THEN** all three engines produce the same scalar observations and successful cleanup outcome
-
+- **WHEN** taken and untaken borrow cases run through evaluation, native LLVM, and direct WebAssembly
+- **THEN** all three engines produce the same scalar observations and successful exactly-once cleanup outcome
