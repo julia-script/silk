@@ -155,12 +155,18 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
   const semanticResult = checked ? Type.option(concreteResult) : concreteResult
   const parameterNames =
     operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
+  const semanticParameters =
+    operation.parameters ?? Object.freeze(parameterNames.map(() => scalar.spelling))
   return builtin({
     actor: scalar.spelling,
     name: operation.spelling,
     operation: operation.code,
-    parameters: Object.freeze(parameterNames.map((name) => valueParameter(name, scalar.spelling))),
-    semanticParameters: Object.freeze(parameterNames.map(() => scalar.spelling)),
+    parameters: Object.freeze(
+      parameterNames.map((name, ordinal) =>
+        valueParameter(name, semanticParameters.at(ordinal) ?? scalar.spelling),
+      ),
+    ),
+    semanticParameters,
     result,
     semanticResult,
   })

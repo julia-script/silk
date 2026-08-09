@@ -23,6 +23,7 @@ export interface Field {
 export type Representation =
   | { readonly _tag: 'SignedInteger'; readonly bits: Scalar.FixedBits }
   | { readonly _tag: 'UnsignedInteger'; readonly bits: Scalar.FixedBits }
+  | { readonly _tag: 'Floating'; readonly bits: 32 | 64; readonly ieee: true }
   | { readonly _tag: 'Boolean'; readonly bits: 32; readonly falseValue: 0; readonly trueValue: 1 }
   | {
       readonly _tag: 'Aggregate'
@@ -334,9 +335,11 @@ const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
   const representation: Representation =
     scalar.category === 'Boolean'
       ? Object.freeze({ _tag: 'Boolean', bits: 32, falseValue: 0, trueValue: 1 })
-      : scalar.signedness === 'Signed'
-        ? Object.freeze({ _tag: 'SignedInteger', bits })
-        : Object.freeze({ _tag: 'UnsignedInteger', bits })
+      : scalar.category === 'Floating'
+        ? Object.freeze({ _tag: 'Floating', bits: bits as 32 | 64, ieee: true })
+        : scalar.signedness === 'Signed'
+          ? Object.freeze({ _tag: 'SignedInteger', bits })
+          : Object.freeze({ _tag: 'UnsignedInteger', bits })
   return Object.freeze({
     _tag: 'LayoutEntry',
     type,
@@ -1791,6 +1794,8 @@ const representationEquals = (left: Representation, right: Representation): bool
     return right._tag === 'SignedInteger' && left.bits === right.bits
   if (left._tag === 'UnsignedInteger')
     return right._tag === 'UnsignedInteger' && left.bits === right.bits
+  if (left._tag === 'Floating')
+    return right._tag === 'Floating' && left.bits === right.bits && right.ieee
   if (left._tag === 'Boolean') {
     return (
       right._tag === 'Boolean' &&
@@ -2356,17 +2361,19 @@ const representationText = (representation: Representation): string =>
     ? `signed-i${representation.bits}`
     : representation._tag === 'UnsignedInteger'
       ? `unsigned-i${representation.bits}`
-      : representation._tag === 'Boolean'
-        ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
-        : representation._tag === 'Repeated'
-          ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-          : representation._tag === 'Slice'
-            ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-            : representation._tag === 'Reference'
-              ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-              : representation._tag === 'Union'
-                ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                : `aggregate tail-padding=${representation.tailPadding}`
+      : representation._tag === 'Floating'
+        ? `float${representation.bits}`
+        : representation._tag === 'Boolean'
+          ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
+          : representation._tag === 'Repeated'
+            ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+            : representation._tag === 'Slice'
+              ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+              : representation._tag === 'Reference'
+                ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
+                : representation._tag === 'Union'
+                  ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+                  : `aggregate tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}`,

@@ -6,7 +6,6 @@ every backend and the interpreter consume — its data model, structural invaria
 the compiler-owned target/layout plan, and the deterministic textual encoder, stabilized against
 hand-built samples before lowering exists.
 ## Requirements
-
 ### Requirement: MIR names and closes the selected entry explicitly
 
 A MIR module SHALL retain an explicit entry descriptor independent of function order. An ordinary
@@ -238,7 +237,6 @@ deterministically, gated by committed golden files.
 
 - **WHEN** the committed conditional fixture is lowered and encoded
 - **THEN** the encoding equals the committed golden text byte-for-byte
-
 
 ### Requirement: MIR carries canonical nominal logical types
 
@@ -521,6 +519,7 @@ compiler representation SHALL remain a DAG.
 
 - **WHEN** malformed MIR associates a payload with another nominal member's tag
 - **THEN** verification rejects it before evaluator or backend execution
+
 ### Requirement: MIR represents slice loans in the structured control DAG
 
 Concrete monomorphic slice types SHALL remain logical shared or exclusive slice types in MIR. Slice
@@ -635,3 +634,12 @@ invariant rather than a verifier claim.
 
 - **WHEN** malformed MIR attaches a release operation to a different allocation identity or inactive ticket
 - **THEN** verification rejects the program before evaluation or backend emission
+
+### Requirement: MIR represents floating values and operations
+
+MIR SHALL carry canonical float constants, arithmetic, comparisons, classification, total order, reinterpretation, and conversions with explicit width and provenance. Verification SHALL reject mismatched widths/types and deterministic encoding SHALL preserve exact constant bits.
+
+#### Scenario: Verify f64 reinterpretation
+
+- **WHEN** MIR reinterprets `f64` as `u64` with matching layouts
+- **THEN** verification accepts one backend-neutral bit operation

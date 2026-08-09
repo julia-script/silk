@@ -813,6 +813,7 @@ const printNode = (
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'UnitExpression':
     case 'IntegerLiteralExpression':
+    case 'FloatingLiteralExpression':
     case 'BooleanLiteralExpression':
     case 'IdentifierExpression':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)

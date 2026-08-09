@@ -47,6 +47,7 @@ export type NodeKind =
   | 'UnsafeStatement'
   | 'RoleExpression'
   | 'IntegerLiteralExpression'
+  | 'FloatingLiteralExpression'
   | 'UnitExpression'
   | 'BooleanLiteralExpression'
   | 'IdentifierExpression'

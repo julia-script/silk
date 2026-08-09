@@ -113,7 +113,10 @@ const integerCase = (
   operation: Scalar.Operation,
   ordinal: number,
 ): string => {
-  const target = Scalar.conversionTarget(operation.code) ?? scalar
+  const target =
+    Scalar.conversionTarget(operation.code) ??
+    Scalar.floatConversionTarget(operation.code) ??
+    scalar
   const invocation =
     operation.code === 'BitNot'
       ? `${scalar.spelling}.bitNot(${scalar.spelling}.bitNot(42))`

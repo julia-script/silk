@@ -12,6 +12,7 @@ import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as FloatingPoint from './FloatingPoint.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -48,11 +49,14 @@ const planHasHook = (plan: Ownership.CleanupPlan): boolean =>
 /** The wasm value type every MIR `i32` and `bool` local lowers to. */
 const i32 = ValType.i32
 const i64 = ValType.i64
+const f32 = ValType.f32
+const f64 = ValType.f64
 
 const laneValueType = (plan: LayoutPlan.Plan, lane: LayoutPlan.CallingLane): ValType.ValType => {
   if (typeof lane.type !== 'string') return i32
   const scalar = Scalar.find(lane.type)
   if (scalar === undefined) return i32
+  if (scalar.category === 'Floating') return scalar.spelling === 'f32' ? f32 : f64
   return Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64) === 64 ? i64 : i32
 }
 
@@ -1597,6 +1601,17 @@ const emitOperation = (
     }
     case 'Literal': {
       const lane = layout.lanes.at(operation.destination.ordinal)?.at(0)
+      const semantic = Mir.semanticType(operation.type)
+      if (Scalar.isFloatSpelling(semantic)) {
+        const number = FloatingPoint.toNumber({
+          width: semantic === 'f32' ? 32 : 64,
+          bits: BigInt(operation.value),
+        })
+        return [
+          semantic === 'f32' ? Instr.f32Const(number) : Instr.f64Const(number),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      }
       const exact = BigInt(operation.value)
       return [
         lane !== undefined && laneValueType(plan, lane) === i64
@@ -2468,9 +2483,35 @@ const emitOperation = (
         ]
         const left = operandSlots.at(0)
         if (left === undefined) throw new RangeError('Wasm callable builtin lost its first operand')
+        const scalarActor = Scalar.find(target.actor)
         const conversionTarget = Scalar.conversionTarget(target.operation)
         if (conversionTarget !== undefined) {
-          const source = Scalar.find(target.actor)
+          const source = scalarActor
+          if (source?.category === 'Floating') {
+            const bits = Scalar.bits(conversionTarget, plan.target.pointerSize === 4 ? 32 : 64)
+            const mnemonic: Instr.PlainMnemonic =
+              bits === 64
+                ? source.spelling === 'f32'
+                  ? conversionTarget.signedness === 'Signed'
+                    ? 'i64.trunc_f32_s'
+                    : 'i64.trunc_f32_u'
+                  : conversionTarget.signedness === 'Signed'
+                    ? 'i64.trunc_f64_s'
+                    : 'i64.trunc_f64_u'
+                : source.spelling === 'f32'
+                  ? conversionTarget.signedness === 'Signed'
+                    ? 'i32.trunc_f32_s'
+                    : 'i32.trunc_f32_u'
+                  : conversionTarget.signedness === 'Signed'
+                    ? 'i32.trunc_f64_s'
+                    : 'i32.trunc_f64_u'
+            return [
+              Instr.localGet(left),
+              Instr.op(mnemonic),
+              ...normalizeSubword(bits, conversionTarget.signedness === 'Signed'),
+              Instr.localSet(scalar(operation.destination)),
+            ]
+          }
           if (source === undefined || source.category !== 'Integer')
             throw new RangeError('Wasm callable conversion lost its source actor')
           return [
@@ -2483,6 +2524,66 @@ const emitOperation = (
             Instr.localSet(scalar(operation.destination)),
           ]
         }
+        const floatTarget = Scalar.floatConversionTarget(target.operation)
+        if (floatTarget !== undefined && scalarActor?.category === 'Integer') {
+          const bits = Scalar.bits(scalarActor, plan.target.pointerSize === 4 ? 32 : 64)
+          const mnemonic: Instr.PlainMnemonic =
+            floatTarget.spelling === 'f32'
+              ? bits === 64
+                ? scalarActor.signedness === 'Signed'
+                  ? 'f32.convert_i64_s'
+                  : 'f32.convert_i64_u'
+                : scalarActor.signedness === 'Signed'
+                  ? 'f32.convert_i32_s'
+                  : 'f32.convert_i32_u'
+              : bits === 64
+                ? scalarActor.signedness === 'Signed'
+                  ? 'f64.convert_i64_s'
+                  : 'f64.convert_i64_u'
+                : scalarActor.signedness === 'Signed'
+                  ? 'f64.convert_i32_s'
+                  : 'f64.convert_i32_u'
+          return [
+            Instr.localGet(left),
+            Instr.op(mnemonic),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        if (floatTarget !== undefined && scalarActor?.category === 'Floating') {
+          const instruction: Instr.PlainMnemonic | undefined =
+            scalarActor.spelling === floatTarget.spelling
+              ? undefined
+              : scalarActor.spelling === 'f64'
+                ? 'f32.demote_f64'
+                : 'f64.promote_f32'
+          return [
+            Instr.localGet(left),
+            ...(instruction === undefined ? [] : [Instr.op(instruction)]),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        if (target.operation === 'ToBits' && scalarActor?.category === 'Floating')
+          return [
+            Instr.localGet(left),
+            Instr.op(
+              scalarActor.spelling === 'f32' ? 'i32.reinterpret_f32' : 'i64.reinterpret_f64',
+            ),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        if (target.operation === 'FromBits' && scalarActor?.category === 'Floating')
+          return [
+            Instr.localGet(left),
+            Instr.op(
+              scalarActor.spelling === 'f32' ? 'f32.reinterpret_i32' : 'f64.reinterpret_i64',
+            ),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        if (target.operation === 'Negate' && scalarActor?.category === 'Floating')
+          return [
+            Instr.localGet(left),
+            Instr.op(`${scalarActor.spelling}.neg`),
+            Instr.localSet(scalar(operation.destination)),
+          ]
         if (target.operation === 'Not') {
           return [
             Instr.localGet(left),
@@ -2556,7 +2657,6 @@ const emitOperation = (
             `Wasm callable builtin ${target.actor}.${target.operation} is unavailable`,
           )
         }
-        const scalarActor = Scalar.find(target.actor)
         if (
           scalarActor?.category === 'Boolean' &&
           (target.operation === 'Equals' || target.operation === 'NotEquals')
@@ -2567,6 +2667,51 @@ const emitOperation = (
             Instr.op(target.operation === 'Equals' ? 'i32.eq' : 'i32.ne'),
             Instr.localSet(scalar(operation.destination)),
           ]
+        }
+        if (scalarActor?.category === 'Floating') {
+          const prefix = scalarActor.spelling
+          const mnemonic: Instr.PlainMnemonic | undefined =
+            target.operation === 'Add'
+              ? `${prefix}.add`
+              : target.operation === 'Subtract'
+                ? `${prefix}.sub`
+                : target.operation === 'Multiply'
+                  ? `${prefix}.mul`
+                  : target.operation === 'Divide'
+                    ? `${prefix}.div`
+                    : target.operation === 'Equals'
+                      ? `${prefix}.eq`
+                      : target.operation === 'NotEquals'
+                        ? `${prefix}.ne`
+                        : target.operation === 'LessThan'
+                          ? `${prefix}.lt`
+                          : target.operation === 'LessOrEqual'
+                            ? `${prefix}.le`
+                            : target.operation === 'GreaterThan'
+                              ? `${prefix}.gt`
+                              : target.operation === 'GreaterOrEqual'
+                                ? `${prefix}.ge`
+                                : undefined
+          if (mnemonic !== undefined)
+            return [
+              Instr.localGet(left),
+              Instr.localGet(right),
+              Instr.op(mnemonic),
+              Instr.localSet(scalar(operation.destination)),
+            ]
+          if (target.operation === 'Remainder')
+            return [
+              Instr.localGet(left),
+              Instr.localGet(left),
+              Instr.localGet(right),
+              Instr.op(`${prefix}.div`),
+              Instr.op(`${prefix}.trunc`),
+              Instr.localGet(right),
+              Instr.op(`${prefix}.mul`),
+              Instr.op(`${prefix}.sub`),
+              Instr.localSet(scalar(operation.destination)),
+            ]
+          throw new RangeError(`Wasm callable float ${target.operation} is unavailable`)
         }
         const integer = scalarActor
         if (integer === undefined || integer.category !== 'Integer') {
@@ -2611,6 +2756,177 @@ const emitOperation = (
           plan.target.pointerSize === 4 ? 32 : 64,
         ),
         Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    case 'ConvertScalar': {
+      const source = Scalar.find(operation.sourceType._tag)
+      const target = Scalar.find(operation.type._tag)
+      if (
+        source === undefined ||
+        target === undefined ||
+        source.category === 'Boolean' ||
+        target.category === 'Boolean'
+      )
+        throw new RangeError('Wasm scalar conversion lost its types')
+      const sourceSlot = scalar(operation.source)
+      const targetSlot = scalar(operation.destination)
+      if (source.category === 'Floating' && target.category === 'Floating') {
+        if (source.spelling === target.spelling)
+          return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
+        return [
+          Instr.localGet(sourceSlot),
+          Instr.op(source.spelling === 'f64' ? 'f32.demote_f64' : 'f64.promote_f32'),
+          Instr.localSet(targetSlot),
+        ]
+      }
+      if (source.category === 'Integer' && target.category === 'Floating') {
+        const bits = Scalar.bits(source, plan.target.pointerSize === 4 ? 32 : 64)
+        const mnemonic: Instr.PlainMnemonic =
+          target.spelling === 'f32'
+            ? bits === 64
+              ? source.signedness === 'Signed'
+                ? 'f32.convert_i64_s'
+                : 'f32.convert_i64_u'
+              : source.signedness === 'Signed'
+                ? 'f32.convert_i32_s'
+                : 'f32.convert_i32_u'
+            : bits === 64
+              ? source.signedness === 'Signed'
+                ? 'f64.convert_i64_s'
+                : 'f64.convert_i64_u'
+              : source.signedness === 'Signed'
+                ? 'f64.convert_i32_s'
+                : 'f64.convert_i32_u'
+        return [Instr.localGet(sourceSlot), Instr.op(mnemonic), Instr.localSet(targetSlot)]
+      }
+      if (source.category === 'Floating' && target.category === 'Integer') {
+        const bits = Scalar.bits(target, plan.target.pointerSize === 4 ? 32 : 64)
+        const mnemonic: Instr.PlainMnemonic =
+          bits === 64
+            ? source.spelling === 'f32'
+              ? target.signedness === 'Signed'
+                ? 'i64.trunc_f32_s'
+                : 'i64.trunc_f32_u'
+              : target.signedness === 'Signed'
+                ? 'i64.trunc_f64_s'
+                : 'i64.trunc_f64_u'
+            : source.spelling === 'f32'
+              ? target.signedness === 'Signed'
+                ? 'i32.trunc_f32_s'
+                : 'i32.trunc_f32_u'
+              : target.signedness === 'Signed'
+                ? 'i32.trunc_f64_s'
+                : 'i32.trunc_f64_u'
+        return [
+          Instr.localGet(sourceSlot),
+          Instr.op(mnemonic),
+          ...normalizeSubword(bits, target.signedness === 'Signed'),
+          Instr.localSet(targetSlot),
+        ]
+      }
+      throw new RangeError('Wasm scalar conversion was not numeric')
+    }
+    case 'ReinterpretScalar': {
+      const source = Scalar.find(operation.sourceType._tag)
+      const target = Scalar.find(operation.type._tag)
+      if (source === undefined || target === undefined)
+        throw new RangeError('Wasm reinterpretation lost its types')
+      const mnemonic: Instr.PlainMnemonic =
+        source.spelling === 'f32' && target.spelling === 'u32'
+          ? 'i32.reinterpret_f32'
+          : source.spelling === 'f64' && target.spelling === 'u64'
+            ? 'i64.reinterpret_f64'
+            : source.spelling === 'u32' && target.spelling === 'f32'
+              ? 'f32.reinterpret_i32'
+              : source.spelling === 'u64' && target.spelling === 'f64'
+                ? 'f64.reinterpret_i64'
+                : (() => {
+                    throw new RangeError('Wasm reinterpretation widths do not match')
+                  })()
+      return [
+        Instr.localGet(scalar(operation.source)),
+        Instr.op(mnemonic),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    case 'FloatUnary': {
+      const source = Scalar.find(operation.sourceType._tag)
+      if (source?.category !== 'Floating')
+        throw new RangeError('Wasm float unary lost its source type')
+      const input = scalar(operation.source)
+      const destination = scalar(operation.destination)
+      const prefix = source.spelling
+      if (operation.operation === 'Negate')
+        return [Instr.localGet(input), Instr.op(`${prefix}.neg`), Instr.localSet(destination)]
+      if (operation.operation === 'IsSignNegative') {
+        return prefix === 'f32'
+          ? [
+              Instr.localGet(input),
+              Instr.op('i32.reinterpret_f32'),
+              Instr.i32Const(0),
+              Instr.op('i32.lt_s'),
+              Instr.localSet(destination),
+            ]
+          : [
+              Instr.localGet(input),
+              Instr.op('i64.reinterpret_f64'),
+              Instr.i64Const(0n),
+              Instr.op('i64.lt_s'),
+              Instr.localSet(destination),
+            ]
+      }
+      if (operation.operation === 'IsNaN')
+        return [
+          Instr.localGet(input),
+          Instr.localGet(input),
+          Instr.op(`${prefix}.ne`),
+          Instr.localSet(destination),
+        ]
+      const infinity =
+        prefix === 'f32'
+          ? Instr.f32Const(Number.POSITIVE_INFINITY)
+          : Instr.f64Const(Number.POSITIVE_INFINITY)
+      if (operation.operation === 'IsInfinite')
+        return [
+          Instr.localGet(input),
+          Instr.op(`${prefix}.abs`),
+          infinity,
+          Instr.op(`${prefix}.eq`),
+          Instr.localSet(destination),
+        ]
+      if (operation.operation === 'IsFinite')
+        return [
+          Instr.localGet(input),
+          Instr.op(`${prefix}.abs`),
+          infinity,
+          Instr.op(`${prefix}.lt`),
+          Instr.localSet(destination),
+        ]
+      const minimum = prefix === 'f32' ? Instr.f32Const(2 ** -126) : Instr.f64Const(2 ** -1022)
+      if (operation.operation === 'IsNormal')
+        return [
+          Instr.localGet(input),
+          Instr.op(`${prefix}.abs`),
+          minimum,
+          Instr.op(`${prefix}.ge`),
+          Instr.localGet(input),
+          Instr.op(`${prefix}.abs`),
+          infinity,
+          Instr.op(`${prefix}.lt`),
+          Instr.op('i32.and'),
+          Instr.localSet(destination),
+        ]
+      return [
+        Instr.localGet(input),
+        Instr.op(`${prefix}.abs`),
+        prefix === 'f32' ? Instr.f32Const(0) : Instr.f64Const(0),
+        Instr.op(`${prefix}.gt`),
+        Instr.localGet(input),
+        Instr.op(`${prefix}.abs`),
+        minimum,
+        Instr.op(`${prefix}.lt`),
+        Instr.op('i32.and'),
+        Instr.localSet(destination),
       ]
     }
     case 'CheckedInteger': {
@@ -2757,6 +3073,92 @@ const emitOperation = (
       const leftType = layout.types.at(operation.left.ordinal)
       const semantic = leftType === undefined ? undefined : Mir.semanticType(leftType)
       const scalarType = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
+      if (scalarType?.category === 'Floating') {
+        const prefix = scalarType.spelling
+        if (operation.operator === 'TotalOrder') {
+          const temporary = prefix === 'f32' ? layout.scratch : layout.scratch64
+          if (temporary === undefined)
+            throw new RangeError('Wasm total order lost its scratch local')
+          const integer = prefix === 'f32' ? 'i32' : 'i64'
+          const all = prefix === 'f32' ? Instr.i32Const(-1) : Instr.i64Const(-1n)
+          const sign =
+            prefix === 'f32' ? Instr.i32Const(-2147483648) : Instr.i64Const(-9223372036854775808n)
+          const zero = prefix === 'f32' ? Instr.i32Const(0) : Instr.i64Const(0n)
+          const reinterpret: Instr.PlainMnemonic =
+            prefix === 'f32' ? 'i32.reinterpret_f32' : 'i64.reinterpret_f64'
+          const key = (local: number): ReadonlyArray<Instr.Instr> => [
+            Instr.localGet(local),
+            Instr.op(reinterpret),
+            all,
+            sign,
+            Instr.localGet(local),
+            Instr.op(reinterpret),
+            zero,
+            Instr.op(`${integer}.lt_s`),
+            Instr.op('select'),
+            Instr.op(`${integer}.xor`),
+          ]
+          return [
+            ...key(scalar(operation.left)),
+            Instr.localSet(temporary),
+            Instr.localGet(temporary),
+            ...key(scalar(operation.right)),
+            Instr.op(`${integer}.le_u`),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        }
+        const comparison: Instr.PlainMnemonic | undefined =
+          operation.operator === 'Equals'
+            ? `${prefix}.eq`
+            : operation.operator === 'NotEquals'
+              ? `${prefix}.ne`
+              : operation.operator === 'LessThan'
+                ? `${prefix}.lt`
+                : operation.operator === 'LessOrEqual'
+                  ? `${prefix}.le`
+                  : operation.operator === 'GreaterThan'
+                    ? `${prefix}.gt`
+                    : operation.operator === 'GreaterOrEqual'
+                      ? `${prefix}.ge`
+                      : undefined
+        if (comparison !== undefined)
+          return [
+            Instr.localGet(scalar(operation.left)),
+            Instr.localGet(scalar(operation.right)),
+            Instr.op(comparison),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        const arithmetic: Instr.PlainMnemonic | undefined =
+          operation.operator === 'Add'
+            ? `${prefix}.add`
+            : operation.operator === 'Subtract'
+              ? `${prefix}.sub`
+              : operation.operator === 'Multiply'
+                ? `${prefix}.mul`
+                : operation.operator === 'Divide'
+                  ? `${prefix}.div`
+                  : undefined
+        if (arithmetic !== undefined)
+          return [
+            Instr.localGet(scalar(operation.left)),
+            Instr.localGet(scalar(operation.right)),
+            Instr.op(arithmetic),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        if (operation.operator === 'Remainder')
+          return [
+            Instr.localGet(scalar(operation.left)),
+            Instr.localGet(scalar(operation.left)),
+            Instr.localGet(scalar(operation.right)),
+            Instr.op(`${prefix}.div`),
+            Instr.op(`${prefix}.trunc`),
+            Instr.localGet(scalar(operation.right)),
+            Instr.op(`${prefix}.mul`),
+            Instr.op(`${prefix}.sub`),
+            Instr.localSet(scalar(operation.destination)),
+          ]
+        throw new RangeError(`Wasm float operation ${operation.operator} is unavailable`)
+      }
       if (
         scalarType?.category === 'Boolean' &&
         (operation.operator === 'Equals' || operation.operator === 'NotEquals')

@@ -6,7 +6,6 @@ elaboration phase that resolves names, types expressions, validates contracts, a
 with canonical identities and exact source provenance, published as immutable fact tables with a
 deterministic textual encoder.
 ## Requirements
-
 ### Requirement: HIR carries the complete integer vocabulary
 
 HIR SHALL retain canonical lowercase integer identities, unit/bottom control flow, exact literal magnitude, conversion identity, operation mode, evaluation order, and provenance without host-number or backend-lane approximations.
@@ -20,6 +19,7 @@ HIR SHALL retain canonical lowercase integer identities, unit/bottom control flo
 
 - **WHEN** a unit function executes bare `return`
 - **THEN** HIR records unit completion with no scalar payload
+
 ### Requirement: One integrated elaboration phase constructs HIR
 
 Elaboration SHALL consume the closure-wide declaration index and the containing module's completed
@@ -230,7 +230,6 @@ and dependencies.
 
 - **WHEN** a section captures `move token` and crosses a function boundary
 - **THEN** HIR carries one canonical take-once environment with the token's ownership transfer
-
 
 ### Requirement: Struct construction is canonical typed HIR
 
@@ -450,3 +449,12 @@ registries, host addresses, or backend heap policy.
 
 - **WHEN** a call resolves through a `SystemAllocator` conformance witness
 - **THEN** HIR records the general capability dispatch and concrete witness identity without a system-allocator operation tag
+
+### Requirement: HIR carries canonical floats
+
+HIR SHALL retain selected float width, correctly rounded constant bits, operation or conversion identity, evaluation order, and provenance without backend instructions or uncontrolled host coercion.
+
+#### Scenario: Inspect an f32 literal
+
+- **WHEN** a decimal literal is contextually typed `f32`
+- **THEN** HIR encoding carries its canonical binary32 bits and source span

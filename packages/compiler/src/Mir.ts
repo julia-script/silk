@@ -161,6 +161,7 @@ export type BinaryOperator =
   | 'SaturatingAdd'
   | 'SaturatingSubtract'
   | 'SaturatingMultiply'
+  | 'TotalOrder'
 
 export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is BinaryOperator =>
   operation === 'Add' ||
@@ -186,7 +187,8 @@ export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is 
   operation === 'WrappingMultiply' ||
   operation === 'SaturatingAdd' ||
   operation === 'SaturatingSubtract' ||
-  operation === 'SaturatingMultiply'
+  operation === 'SaturatingMultiply' ||
+  operation === 'TotalOrder'
 
 export type PlaceSelector =
   | {
@@ -228,6 +230,38 @@ export type Operation =
     }
   | {
       readonly _tag: 'ConvertInteger'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType: ScalarType
+      readonly type: ScalarType
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ConvertScalar'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType: ScalarType
+      readonly type: ScalarType
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ReinterpretScalar'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType: ScalarType
+      readonly type: ScalarType
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'FloatUnary'
+      readonly operation:
+        | 'Negate'
+        | 'IsNaN'
+        | 'IsInfinite'
+        | 'IsFinite'
+        | 'IsNormal'
+        | 'IsSubnormal'
+        | 'IsSignNegative'
       readonly destination: LocalId
       readonly source: LocalId
       readonly sourceType: ScalarType
@@ -958,6 +992,10 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
     case 'ConvertInteger':
+    case 'ConvertScalar':
+    case 'ReinterpretScalar':
+      return [operation.destination, operation.source]
+    case 'FloatUnary':
       return [operation.destination, operation.source]
     case 'CheckedInteger':
       return [operation.destination, ...operation.operands]
@@ -1230,6 +1268,9 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'CheckPlace':
       return [semanticType(operation.type)]
     case 'ConvertInteger':
+    case 'ConvertScalar':
+    case 'ReinterpretScalar':
+    case 'FloatUnary':
       return [semanticType(operation.sourceType), semanticType(operation.type)]
     case 'CheckedInteger':
       return [
@@ -1353,6 +1394,9 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'Binary':
       return [operation.left, operation.right]
     case 'ConvertInteger':
+    case 'ConvertScalar':
+    case 'ReinterpretScalar':
+    case 'FloatUnary':
       return [operation.source]
     case 'CheckedInteger':
       return operation.operands
@@ -1868,7 +1912,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 })()
               : scalar?.category === 'Boolean'
                 ? value === 0n || value === 1n
-                : false
+                : scalar?.category === 'Floating'
+                  ? value >= 0n && value < 1n << BigInt(Scalar.bits(scalar, pointerBits))
+                  : false
           if (
             destination === undefined ||
             !SilkType.equals(semanticType(destination), semantic) ||
@@ -1896,10 +1942,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.operator === 'LessThan' ||
             operation.operator === 'LessOrEqual' ||
             operation.operator === 'GreaterThan' ||
-            operation.operator === 'GreaterOrEqual'
+            operation.operator === 'GreaterOrEqual' ||
+            operation.operator === 'TotalOrder'
           const scalar = typeof operand === 'string' ? Scalar.find(operand) : undefined
           const supportsOperation =
             scalar?.category === 'Integer' ||
+            (scalar?.category === 'Floating' &&
+              (comparison ||
+                operation.operator === 'Add' ||
+                operation.operator === 'Subtract' ||
+                operation.operator === 'Multiply' ||
+                operation.operator === 'Divide' ||
+                operation.operator === 'Remainder')) ||
             (scalar?.category === 'Boolean' &&
               (operation.operator === 'Equals' || operation.operator === 'NotEquals'))
           const expectedResult = comparison ? 'bool' : operand
@@ -1944,6 +1998,50 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'integer conversion has inconsistent source or destination types',
+              }),
+            )
+        }
+        if (
+          operation._tag === 'ConvertScalar' ||
+          operation._tag === 'ReinterpretScalar' ||
+          operation._tag === 'FloatUnary'
+        ) {
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const sourceScalar = Scalar.find(operation.sourceType._tag)
+          const targetScalar = Scalar.find(operation.type._tag)
+          const pointerBits = self.layout.target.pointerSize === 4 ? 32 : 64
+          const reinterpretable =
+            operation._tag !== 'ReinterpretScalar' ||
+            (sourceScalar !== undefined &&
+              targetScalar !== undefined &&
+              Scalar.bits(sourceScalar, pointerBits) === Scalar.bits(targetScalar, pointerBits) &&
+              sourceScalar.category !== targetScalar.category)
+          const unary =
+            operation._tag !== 'FloatUnary' ||
+            (sourceScalar?.category === 'Floating' &&
+              (operation.operation === 'Negate'
+                ? targetScalar?.spelling === sourceScalar.spelling
+                : targetScalar?.category === 'Boolean'))
+          if (
+            sourceScalar === undefined ||
+            targetScalar === undefined ||
+            sourceScalar.category === 'Boolean' ||
+            (operation._tag !== 'FloatUnary' && targetScalar.category === 'Boolean') ||
+            source === undefined ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(source), operation.sourceType._tag) ||
+            !SilkType.equals(semanticType(destination), operation.type._tag) ||
+            !reinterpretable ||
+            !unary
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidIntegerOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `${operation._tag} has inconsistent source or destination types`,
               }),
             )
         }
@@ -3023,6 +3121,12 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ConvertInteger':
       return `${localText(operation.destination)} = convert ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ConvertScalar':
+      return `${localText(operation.destination)} = convert-scalar ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ReinterpretScalar':
+      return `${localText(operation.destination)} = reinterpret ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'FloatUnary':
+      return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CheckedInteger':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ValidateLayout':

@@ -4,9 +4,7 @@
 
 Define canonical bootstrap targets and one deterministic, backend-neutral compiler layout plan that
 all later phases and consumers share for reachable concrete Silk types.
-
 ## Requirements
-
 ### Requirement: Compilation selects one canonical bootstrap target
 
 Each compilation SHALL select exactly one canonical target before runtime instance discovery. The
@@ -156,7 +154,6 @@ field offsets across fresh processes.
 
 - **WHEN** the same nested nominal types are planned repeatedly for one target
 - **THEN** their canonical entry order, sizes, alignments, field offsets, and encoding are byte-identical
-
 
 ### Requirement: Reachable struct values reuse catalog layouts
 
@@ -380,3 +377,12 @@ representation independently.
 
 - **WHEN** a valid runtime count of a zero-sized element type is allocated
 - **THEN** layout records zero physical bytes with the exact logical count and a distinct affine allocation identity
+
+### Requirement: Float layouts and calling lanes are canonical
+
+The target layout plan SHALL represent `f32` as IEEE binary32 with four-byte size/alignment and `f64` as IEEE binary64 with eight-byte size/alignment on every supported target. Backends MUST consume those planned lanes.
+
+#### Scenario: Plan both float widths
+
+- **WHEN** a reachable signature contains `f32` and `f64`
+- **THEN** layout publishes both canonical lanes before MIR lowering

@@ -67,6 +67,22 @@ it('recognizes keywords only as complete identifiers', () => {
   )
 })
 
+it('retains decimal fractions and exponent spellings as exact float tokens', () => {
+  const source = SourceFile.make('memory://floats.silk', ascii('1.25e-3 2E+4 3.0 4'))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DecimalFloat', start: 0, end: 7, slice: '1.25e-3' },
+      { kind: 'DecimalFloat', start: 8, end: 12, slice: '2E+4' },
+      { kind: 'DecimalFloat', start: 13, end: 16, slice: '3.0' },
+      { kind: 'DecimalInteger', start: 17, end: 18, slice: '4' },
+    ],
+  )
+})
+
 it('recognizes struct only as a complete keyword', () => {
   const result = Lexer.lex(
     SourceFile.make('memory://struct-keyword.silk', ascii('struct structure structs')),

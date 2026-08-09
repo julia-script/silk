@@ -6,7 +6,7 @@ import * as Type from '../src/Type.js'
 it('owns the current scalar vocabulary in stable presentation order', () => {
   assert.deepEqual(
     Scalar.all().map((scalar) => scalar.spelling),
-    ['bool', 'u8', 'u16', 'u32', 'u64', 'usize', 'i8', 'i16', 'i32', 'i64', 'isize'],
+    ['bool', 'u8', 'u16', 'u32', 'u64', 'usize', 'i8', 'i16', 'i32', 'i64', 'isize', 'f32', 'f64'],
   )
   assert.strictEqual(Scalar.isSpelling('i32'), true)
   assert.strictEqual(Scalar.isSpelling('String'), false)
@@ -52,6 +52,8 @@ it('resolves fixed and target-width scalar facts without phase-specific cases', 
       'checkedToI64',
       'toIsize',
       'checkedToIsize',
+      'toF32',
+      'toF64',
       'add',
       'subtract',
       'multiply',

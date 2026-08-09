@@ -26,6 +26,14 @@ const acceptedSources = Object.freeze([
     })
     return `pub fn scalar${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
+  ...Scalar.floats().map((scalar, scalarOrdinal) => {
+    const calls = scalar.operations.map((operation, operationOrdinal) => {
+      const argument = operation.code === 'FromBits' ? '1' : '1.0'
+      const arguments_ = operation.arity === 1 ? argument : `${argument}, ${argument}`
+      return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_})`
+    })
+    return `pub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+  }),
   `pub fn main() -> i32 {
   let i00 = i32.negate(1)
   let i01 = i32.add(1, 2)

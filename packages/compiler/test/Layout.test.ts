@@ -116,6 +116,35 @@ it('orders and encodes canonical scalar entries identically on every target', ()
   }
 })
 
+it('plans canonical IEEE storage and lanes on every target', () => {
+  for (const target of Target.all) {
+    const plan = Layout.make(target, ['f64', 'f32'])
+    assert.deepEqual(
+      plan.entries.map((entry) => ({
+        type: entry.type,
+        size: entry.size,
+        alignment: entry.alignment,
+        representation: entry.representation,
+      })),
+      [
+        {
+          type: 'f32',
+          size: 4,
+          alignment: 4,
+          representation: { _tag: 'Floating', bits: 32, ieee: true },
+        },
+        {
+          type: 'f64',
+          size: 8,
+          alignment: 8,
+          representation: { _tag: 'Floating', bits: 64, ieee: true },
+        },
+      ],
+    )
+    assert.deepEqual(Layout.verify(plan), [])
+  }
+})
+
 it.effect(
   'plans tagged effect outcomes for zero-lane success and target-sized failure payloads',
   () =>

@@ -11,8 +11,10 @@ export type IntegerSpelling =
   | 'i64'
   | 'isize'
 
+export type FloatSpelling = 'f32' | 'f64'
+
 /** Every compiler-known scalar spelling, including the canonical Boolean. */
-export type Spelling = 'bool' | IntegerSpelling
+export type Spelling = 'bool' | IntegerSpelling | FloatSpelling
 
 export type FixedBits = 8 | 16 | 32 | 64
 export type ByteWidth = 1 | 2 | 4 | 8
@@ -66,6 +68,15 @@ export type OperationCode =
   | 'CheckedMultiply'
   | 'CheckedDivide'
   | 'CheckedRemainder'
+  | 'IsNaN'
+  | 'IsInfinite'
+  | 'IsFinite'
+  | 'IsNormal'
+  | 'IsSubnormal'
+  | 'IsSignNegative'
+  | 'TotalOrder'
+  | 'ToBits'
+  | 'FromBits'
   | ConversionOperationCode
   | CheckedConversionOperationCode
   | 'Not'
@@ -81,6 +92,8 @@ export type ConversionOperationCode =
   | 'ConvertToI32'
   | 'ConvertToI64'
   | 'ConvertToIsize'
+  | 'ConvertToF32'
+  | 'ConvertToF64'
 
 export type CheckedConversionOperationCode =
   | 'CheckedConvertToU8'
@@ -100,12 +113,13 @@ export interface Operation {
   readonly code: OperationCode
   readonly arity: 1 | 2
   readonly result: 'Self' | 'Boolean' | 'OptionSelf' | 'OptionTarget' | Spelling
+  readonly parameters?: ReadonlyArray<Spelling>
 }
 
 /** The backend lane selected from a scalar's logical width. */
 export interface BackendLanes {
   readonly llvm: 'LogicalWidth'
-  readonly wasm: 'I32' | 'I64' | 'Pointer'
+  readonly wasm: 'I32' | 'I64' | 'F32' | 'F64' | 'Pointer'
 }
 
 /** One immutable integer entry in the authoritative scalar catalog. */
@@ -130,8 +144,18 @@ export interface BooleanScalar {
   readonly operations: ReadonlyArray<Operation>
 }
 
+export interface FloatScalar {
+  readonly spelling: FloatSpelling
+  readonly category: 'Floating'
+  readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
+  readonly signedness: undefined
+  readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
+  readonly lanes: BackendLanes
+  readonly operations: ReadonlyArray<Operation>
+}
+
 /** One immutable source of truth for a compiler-known scalar. */
-export type Scalar = IntegerScalar | BooleanScalar
+export type Scalar = IntegerScalar | FloatScalar | BooleanScalar
 
 const fixedWidth = (bits: FixedBits): Extract<Width, { readonly _tag: 'FixedWidth' }> =>
   Object.freeze({ _tag: 'FixedWidth', bits })
@@ -152,7 +176,15 @@ const operation = (
   code: OperationCode,
   arity: Operation['arity'],
   result: Operation['result'],
-): Operation => Object.freeze({ spelling, code, arity, result })
+  parameters?: ReadonlyArray<Spelling>,
+): Operation =>
+  Object.freeze({
+    spelling,
+    code,
+    arity,
+    result,
+    ...(parameters === undefined ? {} : { parameters }),
+  })
 
 const equalityOperations = Object.freeze([
   operation('equals', 'Equals', 2, 'Boolean'),
@@ -212,6 +244,11 @@ const conversionOperations = Object.freeze(
   ]),
 )
 
+const integerToFloatOperations = Object.freeze([
+  operation('toF32', 'ConvertToF32', 1, 'f32'),
+  operation('toF64', 'ConvertToF64', 1, 'f64'),
+])
+
 const comparisonOperations = Object.freeze([
   ...equalityOperations,
   operation('lessThan', 'LessThan', 2, 'Boolean'),
@@ -269,9 +306,14 @@ const integer = <const S extends IntegerSpelling>(
             operation('wrappingNegate', 'WrappingNegate', 1, 'Self'),
             operation('saturatingNegate', 'SaturatingNegate', 1, 'Self'),
             ...conversionOperations,
+            ...integerToFloatOperations,
             ...arithmeticOperations,
           ])
-        : Object.freeze([...conversionOperations, ...arithmeticOperations]),
+        : Object.freeze([
+            ...conversionOperations,
+            ...integerToFloatOperations,
+            ...arithmeticOperations,
+          ]),
   })
 
 const u8 = integer('u8', 'Unsigned', fixedWidth(8), fixedLayout(1), 'I32')
@@ -290,6 +332,51 @@ export const defaultInteger = integer('i32', 'Signed', fixedWidth(32), fixedLayo
 
 const i64 = integer('i64', 'Signed', fixedWidth(64), fixedLayout(8), 'I64')
 const isize = integer('isize', 'Signed', pointerWidth, pointerLayout, 'Pointer')
+
+const floatOperations = (self: FloatSpelling, bitsType: 'u32' | 'u64') =>
+  Object.freeze([
+    operation('negate', 'Negate', 1, 'Self'),
+    operation('add', 'Add', 2, 'Self'),
+    operation('subtract', 'Subtract', 2, 'Self'),
+    operation('multiply', 'Multiply', 2, 'Self'),
+    operation('divide', 'Divide', 2, 'Self'),
+    operation('remainder', 'Remainder', 2, 'Self'),
+    ...comparisonOperations,
+    operation('isNaN', 'IsNaN', 1, 'Boolean'),
+    operation('isInfinite', 'IsInfinite', 1, 'Boolean'),
+    operation('isFinite', 'IsFinite', 1, 'Boolean'),
+    operation('isNormal', 'IsNormal', 1, 'Boolean'),
+    operation('isSubnormal', 'IsSubnormal', 1, 'Boolean'),
+    operation('isSignNegative', 'IsSignNegative', 1, 'Boolean'),
+    operation('totalOrder', 'TotalOrder', 2, 'Boolean'),
+    operation('toBits', 'ToBits', 1, bitsType),
+    operation('fromBits', 'FromBits', 1, self, Object.freeze([bitsType])),
+    operation('toF32', 'ConvertToF32', 1, 'f32'),
+    operation('toF64', 'ConvertToF64', 1, 'f64'),
+    ...integerSpellings.map((target) =>
+      operation(conversionName(target), conversionCode(target), 1, target),
+    ),
+  ])
+
+const floating = <const S extends FloatSpelling>(
+  spelling: S,
+  bits: 32 | 64,
+  wasm: 'F32' | 'F64',
+  bitsType: 'u32' | 'u64',
+): FloatScalar & { readonly spelling: S } =>
+  Object.freeze({
+    spelling,
+    category: 'Floating',
+    width: fixedWidth(bits),
+    signedness: undefined,
+    layout: fixedLayout(bits === 32 ? 4 : 8),
+    lanes: Object.freeze({ llvm: 'LogicalWidth', wasm }),
+    operations: floatOperations(spelling, bitsType),
+  })
+
+export const f32 = floating('f32', 32, 'F32', 'u32')
+/** The default float selected for an unconstrained floating expression. */
+export const defaultFloat = floating('f64', 64, 'F64', 'u64')
 
 /** The canonical Boolean scalar. */
 export const boolean: BooleanScalar = Object.freeze({
@@ -314,6 +401,8 @@ const catalog: ReadonlyArray<Scalar> = Object.freeze([
   defaultInteger,
   i64,
   isize,
+  f32,
+  defaultFloat,
 ])
 
 /** Returns every scalar in stable source-presentation order. */
@@ -322,6 +411,9 @@ export const all = (): ReadonlyArray<Scalar> => catalog
 /** Returns every integer in stable source-presentation order. */
 export const integers = (): ReadonlyArray<IntegerScalar> =>
   catalog.filter((candidate): candidate is IntegerScalar => candidate.category === 'Integer')
+
+export const floats = (): ReadonlyArray<FloatScalar> =>
+  catalog.filter((candidate): candidate is FloatScalar => candidate.category === 'Floating')
 
 /** Finds a scalar by its accepted source spelling. */
 export const find = (spelling: string): Scalar | undefined =>
@@ -335,6 +427,9 @@ export const isSpelling = (value: unknown): value is Spelling =>
 export const isIntegerSpelling = (value: unknown): value is IntegerSpelling =>
   typeof value === 'string' && find(value)?.category === 'Integer'
 
+export const isFloatSpelling = (value: unknown): value is FloatSpelling =>
+  typeof value === 'string' && find(value)?.category === 'Floating'
+
 /** Resolves the destination of one explicit integer conversion operation. */
 export const conversionTarget = (operation: string): IntegerScalar | undefined => {
   const prefix = operation.startsWith('CheckedConvertTo')
@@ -347,6 +442,13 @@ export const conversionTarget = (operation: string): IntegerScalar | undefined =
   const spelling = `${suffix[0]?.toLowerCase() ?? ''}${suffix.slice(1)}`
   const target = find(spelling)
   return target?.category === 'Integer' ? target : undefined
+}
+
+export const floatConversionTarget = (operation: string): FloatScalar | undefined => {
+  const spelling =
+    operation === 'ConvertToF32' ? 'f32' : operation === 'ConvertToF64' ? 'f64' : undefined
+  const target = spelling === undefined ? undefined : find(spelling)
+  return target?.category === 'Floating' ? target : undefined
 }
 
 /** Tests whether an integer operation returns the canonical recoverable Option outcome. */

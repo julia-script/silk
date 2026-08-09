@@ -4,9 +4,7 @@
 
 Defines token-specific semantic hover for Silk source, including source-like declarations,
 intrinsic language operations, recovered programs, and anonymous expression type fallback.
-
 ## Requirements
-
 ### Requirement: Hover renders canonical integer types
 
 Hover SHALL render lowercase integer spellings, `bool`, `()`, and `never`, never removed uppercase or backend lane names.
@@ -128,3 +126,12 @@ inline code without a diagnostic. Symbols without documentation SHALL retain sig
 
 - **WHEN** the cursor hovers a semantic symbol with no attached documentation
 - **THEN** hover continues to contain its existing source-like presentation without an empty documentation section
+
+### Requirement: Hover renders exact float width
+
+Hover SHALL render `f32` or `f64` from semantic facts and never substitute a backend lane or generic number label.
+
+#### Scenario: Hover a default float literal
+
+- **WHEN** an unconstrained float literal is accepted
+- **THEN** hover reports `f64`

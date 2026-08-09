@@ -103,6 +103,25 @@ const assertOriginalTokenTraversal = (result: SyntaxFile.SyntaxFile): void => {
   }
 }
 
+it('preserves signed exponent literals and malformed exponent recovery losslessly', () => {
+  for (const source of [
+    'fn value() -> f64 { return -1.25e-3 }',
+    'fn damaged() -> f64 { return 1.25e- }',
+  ]) {
+    const result = parseText('memory://float-parser.silk', source)
+    const literal = descendants(result.root).find(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'FloatingLiteralExpression',
+    )
+    assert.isDefined(literal)
+    assert.strictEqual(
+      literal === undefined ? undefined : directTokenText(result, literal, 'DecimalFloat'),
+      source.includes('-1.25') ? '1.25e-3' : '1.25e-',
+    )
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+})
+
 const reconstructedBytes = (result: SyntaxFile.SyntaxFile): Uint8Array => {
   const bytes = SyntaxTree.tokens(result.root)
     .filter((token) => token.kind !== 'EndOfFile')

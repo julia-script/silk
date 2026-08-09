@@ -4,9 +4,7 @@
 
 Define one closed, deterministic bootstrap expression-operator model that preserves qualified
 data-first behavior while giving source programs conventional precedence and pipeline syntax.
-
 ## Requirements
-
 ### Requirement: Operators resolve homogeneously across integers
 
 Arithmetic and comparison operators SHALL resolve only for compatible operands of the same integer type. They SHALL select that type's signed or unsigned checked semantics without implicit conversion, overload lookup, truthiness, or operand reordering. Prefix negation SHALL support signed integers only; logical negation SHALL support `bool` only.
@@ -50,7 +48,6 @@ grouping SHALL be a parser error rather than an implicit multi-way comparison.
 
 - **WHEN** a body spells `1 < 2 < 3`
 - **THEN** the second relational operator is retained as recovered syntax with a parser diagnostic rather than defining a chained comparison
-
 
 ### Requirement: Pipelines apply one unary callable
 
@@ -99,3 +96,17 @@ encodings.
 
 - **WHEN** equivalent operator and callable-pipeline programs are compiled repeatedly in fresh processes
 - **THEN** syntax, semantic facts, HIR, MIR, diagnostics, symbols, and emitted artifacts are deterministic
+
+### Requirement: Operators resolve homogeneously for floats
+
+Arithmetic, negation, equality, and ordering operators SHALL resolve for two operands of the same float width using conservative IEEE semantics. They MUST NOT mix widths, convert implicitly, or search source overloads.
+
+#### Scenario: Resolve f64 division
+
+- **WHEN** both `/` operands are `f64`
+- **THEN** the operator selects canonical IEEE `f64` division
+
+#### Scenario: Reject mixed float widths
+
+- **WHEN** operands are `f32` and `f64`
+- **THEN** analysis rejects them without conversion
