@@ -4188,10 +4188,10 @@ const analyzeOperatorExpression = (
 
   const firstType = argumentsResult.facts.at(0)?.type
   if (
-    initialExpected.length === 0 &&
     firstType?._tag === 'Available' &&
     typeof firstType.type === 'string' &&
     Scalar.isSpelling(firstType.type) &&
+    (initialExpected.length === 0 || firstType.type !== expected) &&
     operandNodes.length > 1
   ) {
     argumentsResult = analyzeArgumentNodes(

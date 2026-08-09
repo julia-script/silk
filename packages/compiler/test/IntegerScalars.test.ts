@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as Mir from '../src/Mir.js'
 import * as Scalar from '../src/Scalar.js'
 
 const source = `import silk.option { Option, Some, None }
@@ -220,5 +222,88 @@ pub fn main() -> i32 {
       ),
     )
     assert.isAbove(Analysis.diagnostics(overflow).length, 0)
+  }),
+)
+
+const contextualCallSource = `fn selectByte(
+  source: &[u8],
+  index: usize,
+  first: u8,
+  second: u8
+) -> u8 {
+  if source[index] == first { return second }
+  return u8.add(0, 0)
+}
+
+fn identity<T>(value: T) -> T { return move value }
+
+fn acceptByte(value: u8) -> u8 { return value }
+
+fn isCarriageReturn(value: u8) -> bool { return value == 13 }
+
+pub fn main() -> i32 {
+  let direct = selectByte(b"//", 0, 47, 42)
+  let explicit = identity<u8>(42)
+  let piped = 42 |> acceptByte
+  if !isCarriageReturn(13) { return 0 }
+  return u8.toI32(direct) + u8.toI32(explicit) + u8.toI32(piped) - 84
+}`
+
+it.effect('uses concrete call and pipeline parameters as exact integer literal contexts', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'integer/contextual-calls',
+      new TextEncoder().encode(contextualCallSource),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const contextualValues = Analysis.expressionsOf(snapshot, 'integer/contextual-calls').flatMap(
+      (expression) =>
+        expression._tag === 'Integer' &&
+        expression.integer._tag === 'Available' &&
+        expression.integer.value === 42n
+          ? [expression.integer.type]
+          : [],
+    )
+    assert.isAtLeast(contextualValues.filter((type) => type === 'u8').length, 3)
+    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 42 : u8')
+    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 13 : u8')
+    assert.include(Mir.encode(Analysis.loweredMir(snapshot)), 'literal 42 : u8')
+
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
+  }),
+)
+
+it.effect('rejects contextual overflow and already-typed integer mismatches before MIR', () =>
+  Effect.gen(function* () {
+    const overflow = yield* Analysis.ofSource(
+      'integer/contextual-overflow',
+      new TextEncoder().encode(
+        'fn accept(value: u8) -> u8 { return value } pub fn main() -> i32 { let value = accept(256) return 42 }',
+      ),
+    )
+    assert.isAbove(Analysis.diagnostics(overflow).length, 0)
+    assert.isTrue(
+      Analysis.expressionsOf(overflow, 'integer/contextual-overflow').some(
+        (expression) => expression._tag === 'Integer' && expression.integer._tag === 'OutOfRange',
+      ),
+    )
+    assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), 'literal 256')
+
+    const mismatch = yield* Analysis.ofSource(
+      'integer/contextual-mismatch',
+      new TextEncoder().encode(`fn accept(value: u8) -> u8 { return value }
+pub fn main() -> i32 {
+  let wider = i32.add(40, 2)
+  let value = accept(wider)
+  return 42
+}`),
+    )
+    assert.include(
+      Analysis.diagnostics(mismatch).map((diagnostic) => diagnostic.code),
+      'SEM0012',
+    )
   }),
 )
