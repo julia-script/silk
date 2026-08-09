@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** use complete programs to shape a small, coherent language — measured by the
-first real Silk lexer producing owned tokens from runtime-sized borrowed input across all engines
-and leaving categorized, actionable evidence about every wall it encounters.
+**Current objective:** repair the first general defect exposed by a complete pressure program —
+measured by ordinary-call integer literals receiving their declared contextual types and the Silk
+lexer dropping its byte-to-`i32` classifier workaround without losing cross-engine parity.
 
 ## Column rules
 
@@ -24,19 +24,17 @@ and leaving categorized, actionable evidence about every wall it encounters.
 
 ## Now
 
-### Exercise the language with a real lexer
+### Make exact integer context reach ordinary calls
 
-- **Problem:** Small algorithms proved individual capabilities, but they did not sustain a larger
-  stateful transformation from runtime-sized borrowed bytes into an owned, growing result. We need
-  that pressure without turning a compiler-shaped example into a commitment to self-hosting.
-- **Outcome & done-when:** Ordinary Silk source tokenizes representative valid and invalid Silk
-  inputs into owned token records, agrees with the canonical TypeScript lexer on token kinds,
-  spans, and diagnostics, and runs with deterministic allocation and cleanup across evaluator,
-  native, and WebAssembly execution. A checked-in findings report categorizes every discovered gap.
-- **Boundary:** No compiler-known token or lexer primitive, no filesystem dependency, no parser
-  port, and no claim that the Silk lexer replaces the TypeScript implementation.
-- **Status:** active — proposal and implementation loop starting.
-- **Appetite:** one focused change; repair only blockers that are both small and clearly general.
+- **Problem:** `47` in `hasPair(source, index, 47, 47)` defaults to `i32` and reports `SEM0012`
+  instead of using the immediate `u8` parameter context promised by the integer specification.
+- **Outcome & done-when:** Ordinary direct and piped calls contextually type exact literals for all
+  integer parameter types, reject out-of-range values before MIR, and let the lexer compare `u8`
+  values without conversion scaffolding.
+- **Boundary:** No implicit conversion between already-typed integers, overload system, widening
+  rule, or change to unconstrained `i32` defaults.
+- **Status:** selected from the archived lexer findings; proposal next.
+- **Appetite:** one focused semantic-analysis change with integer-family and engine parity.
 
 ## Next
 
@@ -88,6 +86,10 @@ and editor tooling together with the language surface so no second vocabulary su
   FFT are executable across supported engines.
 - 2026-08-09: Started the lexer as a language-pressure exercise. Self-hosting and a parser port are
   explicitly not implied by this step.
+- 2026-08-09: Completed and archived `exercise-language-with-silk-lexer`: exact TypeScript
+  differential parity across all 67 token kinds, invalid diagnostics, owned token/diagnostic
+  vectors, four failure ordinals, evaluator/native/Wasm parity, and deterministic artifacts. The
+  findings selected ordinary-call contextual integer literals as the next repair.
 - 2026-08-09: Completed `ship-stdlib-sources` and moved active implementation to
   `complete-integer-scalars`.
 - 2026-08-09: Created by splitting the oversized `bootstrap-real-programs` proposal into six

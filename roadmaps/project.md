@@ -25,19 +25,18 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ## Now
 
-### Shape the language through recognizable pressure programs
+### Repair contextual integer literals exposed by the lexer
 
-- **Problem:** The first algorithm corpus proved the compiler can run meaningful programs, but it
-  did not yet pressure the language with a larger stateful transformation over runtime-sized input
-  and owned output. Moving directly into self-hosting would confuse that learning exercise with a
-  delivery strategy.
-- **Outcome & done-when:** Implement a real lexer in ordinary Silk, differentially checked against
-  the TypeScript lexer, and record every wall as a language, standard-library, compiler,
-  tooling/ergonomics, or performance/cost finding. Use those findings—not a predetermined compiler
-  port order—to choose the next pressure program or focused repair.
-- **Status:** active — roadmap realigned; the lexer proposal is next.
-- **Appetite:** one focused pressure-program change, then reassess before proposing another. The
-  TypeScript compiler remains canonical; a parser port and continuous self-hosting are non-goals.
+- **Problem:** The completed lexer exercise found that exact integer literal context does not reach
+  ordinary user-function arguments, despite the integer contract promising immediate contextual
+  typing. Byte classifiers therefore convert values to `i32` solely to call helpers with literals.
+- **Outcome & done-when:** Representable literals select the declared integer parameter type in
+  direct and piped ordinary calls; out-of-range and genuinely unconstrained literals retain their
+  current exact diagnostics and defaults; every integer family and engine remains in parity; and
+  the lexer removes the workaround.
+- **Status:** next proposal — selected directly from archived lexer findings.
+- **Appetite:** one focused compiler-correctness change, then reassess the remaining enum/constant,
+  read-only Vector, and cost findings without automatically promoting them.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Validate the language's defining effect execution model
@@ -255,6 +254,10 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   recursive quicksort, and executable FFT all reached cross-engine parity.
 - 2026-08-09: Reframed the next compiler-shaped program as a language-pressure exercise. A Silk
   lexer comes first; parser porting and continuous self-hosting remain later decisions.
+- 2026-08-09: Completed and archived `exercise-language-with-silk-lexer`. The full token surface,
+  invalid recovery, allocation rollback, all three engines, and fresh-process determinism agree;
+  the exercise also repaired an LLVM CFG inlining defect and selected contextual integer literals
+  as the next focused repair.
 
 - 2026-08-09: Recorded a non-binding concurrency and parallelism direction: synchronous programs
   pay no scheduler or fiber cost; suspension, fork, and parallelism add progressively explicit

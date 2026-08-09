@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "silk-lexer",
+  "title": "Silk lexer pressure program",
+  "status": "executable",
+  "source": "main.silk",
+  "canonicalOracle": "packages/compiler/src/Lexer.ts",
+  "input": "The byte literal marked PRESSURE_INPUT in main.silk; tests substitute a systematic corpus.",
+  "capabilities": [
+    "u8",
+    "usize",
+    "runtime byte slices",
+    "owned vectors",
+    "allocator service",
+    "typed allocation failure",
+    "structured loops",
+    "cross-engine cleanup"
+  ],
+  "targets": ["evaluation", "native", "wasm"],
+  "nonGoals": ["compiler replacement", "parser port", "continuous self-hosting"]
+}
