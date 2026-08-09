@@ -1,7 +1,7 @@
-fn crc32(input: [u8; 4]) -> u32 {
+fn crc32(input: &[u8]) -> u32 {
   let mut crc = u32.bitNot(0)
   let mut index = usize.add(0, 0)
-  while index < 4 {
+  while index < input.length {
     crc = u32.bitXor(crc, u8.toU32(input[index]))
     let mut bit = 0
     while bit < 8 {
@@ -18,5 +18,5 @@ fn crc32(input: [u8; 4]) -> u32 {
 }
 
 pub fn main() -> i32 {
-  return u32.toI32(crc32([153, 19, 29, 0]))
+  return u32.toI32(crc32(b"\x99\x13\x1d\x00"))
 }

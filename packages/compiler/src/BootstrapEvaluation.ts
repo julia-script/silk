@@ -265,6 +265,13 @@ export interface PlaceReadTraceEvent {
         readonly bounds: 'Proven' | 'Checked'
         readonly span: SourceSpan.SourceSpan
       }
+    | {
+        readonly _tag: 'StaticElement'
+        readonly data: string
+        readonly index: number
+        readonly bounds: 'Checked'
+        readonly span: SourceSpan.SourceSpan
+      }
   >
   readonly value: Value
   readonly span: SourceSpan.SourceSpan
@@ -1469,7 +1476,7 @@ function executeFunction(
         continue
       }
       if (selector._tag === 'SliceElementSelector') {
-        if (selected._tag !== 'SliceValue') {
+        if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
           throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
         }
         const exactIndex = readUsize(selector.index).value
@@ -1485,6 +1492,15 @@ function executeFunction(
           }
         }
         const index = Number(exactIndex)
+        if (selected._tag === 'StaticViewValue') {
+          const byte = selected.bytes.at(index)
+          if (byte === undefined) {
+            throw new RangeError('MIR static view range exceeds its immutable bytes')
+          }
+          indexes.push(index)
+          selected = scalarIntegerValue('u8', BigInt(byte))
+          continue
+        }
         const backing = cell(selected).value
         if (backing._tag !== 'ArrayValue') {
           throw new RangeError('MIR slice cell does not contain an array value')
@@ -2774,7 +2790,7 @@ function executeFunction(
                 continue
               }
               if (selector._tag === 'SliceElementSelector') {
-                if (selected._tag !== 'SliceValue') {
+                if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
                   throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
                 }
                 const exactIndex = readUsize(selector.index).value
@@ -2787,6 +2803,23 @@ function executeFunction(
                   })
                 }
                 const index = Number(exactIndex)
+                if (selected._tag === 'StaticViewValue') {
+                  const byte = selected.bytes.at(index)
+                  if (byte === undefined) {
+                    throw new RangeError('MIR static view range exceeds its immutable bytes')
+                  }
+                  selectors.push(
+                    Object.freeze({
+                      _tag: 'StaticElement',
+                      data: selected.data,
+                      index,
+                      bounds: 'Checked',
+                      span: selector.provenance.span,
+                    }),
+                  )
+                  selected = scalarIntegerValue('u8', BigInt(byte))
+                  continue
+                }
                 const backing = cell(selected).value
                 if (backing._tag !== 'ArrayValue') {
                   throw new RangeError('MIR slice cell does not contain an array value')

@@ -4,7 +4,7 @@
   "title": "CRC-32",
   "status": "executable",
   "source": "main.silk",
-  "input": "The committed bytes [153, 19, 29, 0].",
+  "input": "The committed static byte literal b\"\\x99\\x13\\x1d\\x00\".",
   "expected": {
     "entryResult": 7,
     "summary": "The full reflected IEEE CRC-32 is 0x00000007."
@@ -14,10 +14,11 @@
     "u32",
     "i32",
     "usize",
-    "fixed byte arrays",
+    "static byte literals",
+    "shared byte views",
     "bit operations",
     "nested while loops",
-    "indexed static byte views (frontier)"
+    "indexed static byte views"
   ],
   "targets": ["evaluation", "native", "wasm"],
   "blockers": []
