@@ -25,6 +25,20 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ## Now
 
+### Exercise Silk with a bounded stack bytecode VM
+
+- **Problem:** The lexer alone is insufficient evidence for a closed named-value feature or a
+  shared Vector read surface. Silk needs another recognizable low-level program that independently
+  pressures those seams while exercising allocated owned output and malformed execution.
+- **Outcome & done-when:** A visible bounded stack VM differentially matches a TypeScript oracle for
+  arithmetic, branching, malformed bytecode, and step limits; returns owned trace/diagnostic
+  vectors; sweeps allocation failures; stays in evaluator/native/Wasm and fresh-process parity; and
+  compares every finding with the lexer before promoting follow-up work.
+- **Status:** proposal in progress — selected after completing the contextual-literal repair.
+- **Appetite:** one pressure-program change using ordinary Silk and no preselected enum, constant,
+  Vector mutation, VM intrinsic, or self-hosting feature.
+- **Links:** [real-programs initiative](real-programs.md)
+
 ### Repair contextual integer literals exposed by the lexer
 
 **Status: complete (2026-08-09).** Focused characterization corrected the initial finding: direct,
@@ -196,9 +210,8 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-No project-level item is preselected. The next change should be another recognizable pressure
-program that tests a different part of the small-language boundary; the remaining lexer findings
-are not sufficient alone to design enums/constants or a read-only Vector surface.
+After the stack VM, compare its findings with the lexer before selecting a focused language or
+stdlib repair. No neighboring compiler port is preselected.
 
 ## Later
 
@@ -249,6 +262,9 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
 
 ## Changelog
 
+- 2026-08-09: Selected a bounded stack bytecode VM as the second language-pressure program. It
+  independently tests closed opcode vocabulary, Vector observation, allocation rollback, invalid
+  execution, and cross-engine determinism without implying a production VM or self-hosting step.
 - 2026-08-09: Completed `fix-contextual-integer-call-literals`. Characterization showed ordinary
   and piped calls were already correct; the repaired defect was enclosing `bool` result context
   suppressing `u8` operand-to-literal refinement. The lexer now stays in byte types throughout its

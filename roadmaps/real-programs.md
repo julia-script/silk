@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** choose the next recognizable pressure program from independent language
-evidence, without promoting the lexer's remaining enum/constant or Vector ergonomics from one
-consumer alone.
+**Current objective:** run a bounded stack bytecode VM as the second recognizable pressure program,
+measured by differential semantics, owned allocated observations, invalid-program recovery, and
+cross-engine determinism without preselecting solutions to the lexer's remaining findings.
 
 ## Column rules
 
@@ -23,6 +23,19 @@ consumer alone.
 - **Later** — problem worth solving, no solution chosen. Options, not a queue.
 
 ## Now
+
+### Exercise a bounded stack bytecode VM
+
+- **Problem:** One lexer does not justify general enums/constants or a shared Vector read API, and
+  the existing algorithms do not combine runtime instruction dispatch with malformed-program
+  recovery and owned dynamic observations.
+- **Outcome & done-when:** An ordinary Silk VM matches a TypeScript oracle over arithmetic,
+  branches, invalid bytecode, and bounded loops; trace/diagnostic vectors allocate and roll back
+  deterministically; all three engines agree; and findings explicitly compare with the lexer.
+- **Boundary:** Fixed operand capacity is honest and visible. No production VM, assembler, JIT,
+  VM intrinsic, preselected enum/constant syntax, or self-hosting sequence.
+- **Status:** proposal in progress.
+- **Appetite:** one complete pressure-program change, then one evidence-based follow-up at most.
 
 ### Make exact integer context survive enclosing result expectations
 
@@ -35,8 +48,8 @@ determinism parity.
 
 ## Next
 
-No follow-up program is preselected. Choose another familiar workload that applies different
-pressure and can independently confirm or falsify the lexer's remaining findings.
+After the stack VM, select at most one focused repair that is justified by combined evidence; do
+not automatically port another compiler module.
 
 ## Later
 
@@ -74,6 +87,9 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
+- 2026-08-09: Selected a bounded stack bytecode VM as the second language-pressure program so
+  closed numeric codes, Vector reads, allocation behavior, and cost findings receive independent
+  evidence before any general feature is proposed.
 - 2026-08-09: Completed `fix-contextual-integer-call-literals`. Focused tests corrected the initial
   call-boundary diagnosis and repaired homogeneous operand refinement under enclosing Boolean
   result context. The lexer now compares `u8` values and literals directly across all engines.
