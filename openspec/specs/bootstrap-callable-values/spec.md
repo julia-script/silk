@@ -7,6 +7,15 @@ ownership-aware capture behavior for ordinary and higher-order Silk programs.
 
 ## Requirements
 
+### Requirement: Integer actor callables use lowercase identities
+
+Compiler-known integer actors SHALL use canonical lowercase source names such as `i32.add` and `u8.wrappingAdd`. Sections SHALL preserve the selected type and operation mode; uppercase actor names MUST NOT resolve as aliases.
+
+#### Scenario: Construct a primitive section
+
+- **WHEN** `i32.add(2)` appears where `fn(i32) -> i32` is required
+- **THEN** it constructs the ordinary leading-argument section
+
 ### Requirement: Named functions are first-class callable values
 
 Every resolved named function SHALL be usable as a callable value without invoking it. A function
@@ -17,8 +26,8 @@ currying. A unary function SHALL be referenced by name rather than by an empty c
 
 #### Scenario: Construct a binary section
 
-- **WHEN** `I32.add(2)` refers to `I32.add(left: I32, right: I32)`
-- **THEN** it produces a unary callable equivalent to applying `I32.add` with `2` as `right`
+- **WHEN** `i32.add(2)` refers to `i32.add(left: i32, right: i32)`
+- **THEN** it produces a unary callable equivalent to applying `i32.add` with `2` as `right`
 
 #### Scenario: Reject deeper under-application
 
@@ -27,8 +36,8 @@ currying. A unary function SHALL be referenced by name rather than by an empty c
 
 #### Scenario: Reference a unary function
 
-- **WHEN** `Bool.not` appears where `fn(Bool) -> Bool` is expected
-- **THEN** the function item satisfies that callable contract without `Bool.not()` or a dual declaration
+- **WHEN** `bool.not` appears where `fn(bool) -> bool` is expected
+- **THEN** the function item satisfies that callable contract without `bool.not()` or a dual declaration
 
 ### Requirement: Callable contracts expose invocation mode
 
@@ -41,12 +50,12 @@ ownership mode of each newly supplied argument.
 
 #### Scenario: Accept a reusable function once
 
-- **WHEN** a plain named function is passed to a parameter of type `once fn(I32) -> I32`
+- **WHEN** a plain named function is passed to a parameter of type `once fn(i32) -> i32`
 - **THEN** the call is valid because invoking a reusable callable once satisfies the weaker contract
 
 #### Scenario: Reject a consuming callback as reusable
 
-- **WHEN** a callable that consumes one captured owner is passed where `fn(I32) -> I32` is required
+- **WHEN** a callable that consumes one captured owner is passed where `fn(i32) -> i32` is required
 - **THEN** analysis rejects it and identifies the incompatible consuming invocation mode
 
 ### Requirement: Sections capture every ownership mode
@@ -60,7 +69,7 @@ transfer each consumed capture exactly once.
 
 #### Scenario: Reuse a Copy section
 
-- **WHEN** `I32.add(2)` captures the Copy value `2` and is invoked twice
+- **WHEN** `i32.add(2)` captures the Copy value `2` and is invoked twice
 - **THEN** both invocations succeed with the same snapshotted captured value
 
 #### Scenario: Hold an exclusive capture
@@ -83,7 +92,7 @@ callable with that value. Pipelines SHALL associate left-to-right.
 
 #### Scenario: Pipe through a stored section
 
-- **WHEN** `increment` holds `I32.add(1)` and source evaluates `2 |> increment`
+- **WHEN** `increment` holds `i32.add(1)` and source evaluates `2 |> increment`
 - **THEN** the stored callable is invoked once with `2` and produces `3`
 
 #### Scenario: Preserve pipeline evaluation order

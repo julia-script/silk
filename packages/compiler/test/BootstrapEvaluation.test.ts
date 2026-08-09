@@ -55,8 +55,8 @@ it.effect('reproduces every pinned corpus outcome', () =>
 
 it.effect('traces the identity program in order with bound and returned values', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(42) }`)
+    const outcome = yield* evaluateSource(`pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(42) }`)
 
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     assert.deepEqual(
@@ -76,11 +76,11 @@ pub fn main() -> I32 { return identity(42) }`)
 
 it.effect('runs a hidden Effect environment returned across an ordinary function boundary', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`fn delayed(value: I32) -> Effect<I32> {
+    const outcome = yield* evaluateSource(`fn delayed(value: i32) -> Effect<i32> {
   let eager = value + 1
   return effect { return eager + 1 }
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let pending = delayed(40)
   return run pending
 }`)
@@ -98,10 +98,10 @@ pub fn main() -> I32 {
 
 it.effect('executes named function values and stored automatic sections', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 {
+    const outcome = yield* evaluateSource(`fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
   let named = identity
-  let plusTwo = I32.add(2)
+  let plusTwo = i32.add(2)
   return named(plusTwo(40))
 }`)
 
@@ -118,11 +118,11 @@ pub fn main() -> I32 {
 
 it.effect('reuses an exclusive callable after each synchronous invocation completes', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`fn write(value: I32, values: &mut [I32]) -> I32 {
+    const outcome = yield* evaluateSource(`fn write(value: i32, values: &mut [i32]) -> i32 {
   values[0] = value
   return values[0]
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [0]
   let mut callback = write(&mut values)
   let first = callback(20)
@@ -142,9 +142,9 @@ it.effect('blocks a second evaluator invocation of a consumed callable identity'
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'memory/consumed-callable',
-      ascii(`struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value + token.value }
-pub fn main() -> I32 {
+      ascii(`struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
   let token = Token { value: 2 }
   let callback = consume(move token)
   return callback(40)
@@ -180,14 +180,14 @@ pub fn main() -> I32 {
 
 it.effect('maps, flatMaps, and taps Effect successes through ordinary callable values', () =>
   Effect.gen(function* () {
-    const mapped = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return run succeed(2) |> Effect.map(I32.add(2)) }`)
-    const flatMapped = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
-effect fn double(value: I32) -> I32 { return value * 2 }
-pub fn main() -> I32 { return run succeed(21) |> Effect.flatMap(double) }`)
-    const tapped = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
-effect fn observe(value: I32) -> I32 { return value + 100 }
-pub fn main() -> I32 { return run succeed(42) |> Effect.tap(observe) }`)
+    const mapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(2)) }`)
+    const flatMapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+effect fn double(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return run succeed(21) |> Effect.flatMap(double) }`)
+    const tapped = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+effect fn observe(value: i32) -> i32 { return value + 100 }
+pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
 
     for (const [outcome, expected] of [
       [mapped, 4],
@@ -202,9 +202,9 @@ pub fn main() -> I32 { return run succeed(42) |> Effect.tap(observe) }`)
 
 it.effect('keeps an Effect returned from map nested until a second run', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`effect fn succeed(value: I32) -> I32 { return value }
-effect fn double(value: I32) -> I32 { return value * 2 }
-pub fn main() -> I32 { return run run succeed(21) |> Effect.map(double) }`)
+    const outcome = yield* evaluateSource(`effect fn succeed(value: i32) -> i32 { return value }
+effect fn double(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return run run succeed(21) |> Effect.map(double) }`)
 
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
@@ -213,12 +213,12 @@ pub fn main() -> I32 { return run run succeed(21) |> Effect.map(double) }`)
 
 it.effect('retains an exclusive mapper environment across repeated mapped Effect runs', () =>
   Effect.gen(function* () {
-    const source = `effect fn succeed(value: I32) -> I32 { return value }
-fn increment(value: I32, state: &mut [I32]) -> I32 {
+    const source = `effect fn succeed(value: i32) -> i32 { return value }
+fn increment(value: i32, state: &mut [i32]) -> i32 {
   state[0] = state[0] + 1
   return value + state[0]
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut state = [0]
   let mapped = succeed(20) |> Effect.map(increment(&mut state))
   let first = run mapped
@@ -242,10 +242,10 @@ pub fn main() -> I32 {
 
 it.effect('drops an unrun mapped Effect owned callback environment exactly once', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Token { value: I32 }
-effect fn succeed(value: I32) -> I32 { return value }
-fn consume(value: I32, token: Token) -> I32 { return value + token.value }
-pub fn main() -> I32 {
+    const outcome = yield* evaluateSource(`struct Token { value: i32 }
+effect fn succeed(value: i32) -> i32 { return value }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
   let token = Token { value: 2 }
   let mapped = succeed(40) |> Effect.map(consume(move token))
   drop mapped
@@ -261,12 +261,12 @@ pub fn main() -> I32 {
 
 it.effect('catches a typed failure through an automatic effect-handler section', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Problem { code: I32 }
-effect fn failNow() -> I32 ! Problem { fail Problem { code: 41 } }
-effect fn recover(problem: Problem, adjustment: I32) -> I32 {
+    const outcome = yield* evaluateSource(`struct Problem { code: i32 }
+effect fn failNow() -> i32 ! Problem { fail Problem { code: 41 } }
+effect fn recover(problem: Problem, adjustment: i32) -> i32 {
   return problem.code + adjustment
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let handled = failNow() |> Effect.catch<Problem>(recover(1))
   return run handled
 }`)
@@ -283,7 +283,7 @@ pub fn main() -> I32 {
 
 it.effect('preserves exclusive capture state across repeated Effect runs', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub fn main() -> I32 {
+    const outcome = yield* evaluateSource(`pub fn main() -> i32 {
   let mut counter = 0
   let pending = effect { counter = counter + 1 return counter }
   let first = run pending
@@ -299,8 +299,8 @@ it.effect('preserves exclusive capture state across repeated Effect runs', () =>
 
 it.effect('constructs effect calls lazily and executes them only at run', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`effect fn delayed(value: I32) -> I32 { return value + 1 }
-pub fn main() -> I32 {
+    const outcome = yield* evaluateSource(`effect fn delayed(value: i32) -> i32 { return value + 1 }
+pub fn main() -> i32 {
   let recipe = delayed(41)
   return run recipe
 }`)
@@ -331,13 +331,13 @@ pub fn main() -> I32 {
 
 it.effect('catches one exact owned effect failure without using traps', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Problem { code: I32 }
-effect fn risky(value: I32) -> I32 ! Problem {
+    const outcome = yield* evaluateSource(`struct Problem { code: i32 }
+effect fn risky(value: i32) -> i32 ! Problem {
   if value == 0 { fail move Problem { code: 41 } }
   return value
 }
-effect fn recover(problem: Problem) -> I32 { return problem.code + 1 }
-pub fn main() -> I32 {
+effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
+pub fn main() -> i32 {
   let recipe = Effect.catch<Problem>(risky(0), recover)
   return run recipe
 }`)
@@ -351,8 +351,8 @@ pub fn main() -> I32 {
 
 it.effect('marks nested-call bindings and orders inner events before outer bindings', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`)
+    const outcome = yield* evaluateSource(`pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
     const tags = outcome.trace.map((event) => event._tag)
@@ -384,9 +384,9 @@ pub fn main() -> I32 { return identity(identity(42)) }`)
 
 it.effect('retains the completed prefix before a trap without fabricated events', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub fn identity(value: I32) -> I32 { return value }
-pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
+    const outcome = yield* evaluateSource(`pub fn identity(value: i32) -> i32 { return value }
+pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { return choose(identity(1), missing(2)) }`)
 
     assert.strictEqual(outcome._tag, 'Blocked')
     if (outcome._tag !== 'Blocked') return
@@ -400,7 +400,7 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
 
 it.effect('blocks recursive cycles with the closing call span', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource('pub fn main() -> I32 { return main() }')
+    const outcome = yield* evaluateSource('pub fn main() -> i32 { return main() }')
 
     assert.strictEqual(outcome._tag, 'Blocked')
     if (outcome._tag !== 'Blocked') return
@@ -412,8 +412,8 @@ it.effect('blocks recursive cycles with the closing call span', () =>
 
 it.effect('evaluates identically across repeated fresh runs', () =>
   Effect.gen(function* () {
-    const source = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+    const source = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
     const first = yield* evaluateSource(source)
     const second = yield* evaluateSource(source)
 
@@ -425,19 +425,19 @@ it.effect('refuses malformed target-aware MIR before executing any operation', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'memory/invalid-layout',
-      ascii('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
+      ascii('pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
     )
     const mir = Analysis.mirOf(snapshot)
     if (mir._tag !== 'Available') return assert.fail('expected target-aware MIR')
-    const bool = mir.value.layout.entries.find((entry) => entry.type === 'Bool')
-    if (bool === undefined) return assert.fail('expected Bool layout')
+    const bool = mir.value.layout.entries.find((entry) => entry.type === 'bool')
+    if (bool === undefined) return assert.fail('expected bool layout')
     const malformed = {
       ...mir.value,
       layout: {
         ...mir.value.layout,
         entries: mir.value.layout.entries.map((entry) =>
-          entry.type === 'Bool' ? { ...bool, size: 1 } : entry,
+          entry.type === 'bool' ? { ...bool, size: 1 } : entry,
         ),
       },
     }
@@ -453,10 +453,10 @@ it.effect('refuses malformed target-aware MIR before executing any operation', (
 it.effect('evaluates operator precedence, prefix operations, and pipeline chains', () =>
   Effect.gen(function* () {
     const arithmetic = yield* evaluateSource(
-      'pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }',
+      'pub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }',
     )
     const boolean = yield* evaluateSource(
-      'pub fn main() -> I32 { if !(2 * 3 == 7) { return 42 } return 0 }',
+      'pub fn main() -> i32 { if !(2 * 3 == 7) { return 42 } return 0 }',
     )
 
     assert.strictEqual(arithmetic._tag, 'Completed')
@@ -468,8 +468,8 @@ it.effect('evaluates operator precedence, prefix operations, and pipeline chains
 
 it.effect('preserves trapping arithmetic through operator sugar', () =>
   Effect.gen(function* () {
-    const division = yield* evaluateSource('pub fn main() -> I32 { return 1 / 0 }')
-    const negation = yield* evaluateSource('pub fn main() -> I32 { return -(-2147483648) }')
+    const division = yield* evaluateSource('pub fn main() -> i32 { return 1 / 0 }')
+    const negation = yield* evaluateSource('pub fn main() -> i32 { return -(-2147483648) }')
 
     assert.strictEqual(division._tag, 'Blocked')
     assert.strictEqual(division._tag === 'Blocked' ? division.reason._tag : undefined, 'Trap')
@@ -480,16 +480,16 @@ it.effect('preserves trapping arithmetic through operator sugar', () =>
 
 it.effect('evaluates logical union matches with source-ordered guarded fallthrough', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub struct Left { value: I32 }
-pub struct Right { value: I32 }
-pub fn inspect(input: Left | Right) -> I32 {
+    const outcome = yield* evaluateSource(`pub struct Left { value: i32 }
+pub struct Right { value: i32 }
+pub fn inspect(input: Left | Right) -> i32 {
   return match &input {
     Left { value } if false => 0
-    Left { value: answer } => I32.add(answer, 1)
+    Left { value: answer } => i32.add(answer, 1)
     Right { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(Left { value: 41 }) }`)
+pub fn main() -> i32 { return inspect(Left { value: 41 }) }`)
 
     assert.strictEqual(outcome._tag, 'Completed')
     assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42)
@@ -510,9 +510,9 @@ pub fn main() -> I32 { return inspect(Left { value: 41 }) }`)
 
 it.effect('evaluates nested move matches and traces selected-path cleanup exactly once', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`pub struct Leaf { value: I32 }
-pub struct Box { answer: I32 leaf: Leaf }
-pub fn main() -> I32 {
+    const outcome = yield* evaluateSource(`pub struct Leaf { value: i32 }
+pub struct Box { answer: i32 leaf: Leaf }
+pub fn main() -> i32 {
   let box = Box { answer: 42, leaf: Leaf { value: 0 } }
   return match move box { Box { answer, .. } => answer }
 }`)
@@ -532,8 +532,8 @@ pub fn main() -> I32 {
 
 it.effect('executes explicit drop exactly once before the following statement', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`struct Token { value: I32 }
-pub fn main() -> I32 {
+    const outcome = yield* evaluateSource(`struct Token { value: i32 }
+pub fn main() -> i32 {
   let token = Token { value: 1 }
   drop token
   return 42
@@ -549,9 +549,9 @@ it.effect('evaluates verified Copy match access without consuming the logical pa
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'memory/copy-match',
-      ascii(`struct Token { value: I32 }
-fn inspect(input: Token) -> I32 { return match &input { Token { value } => value } }
-pub fn main() -> I32 { return inspect(Token { value: 42 }) }`),
+      ascii(`struct Token { value: i32 }
+fn inspect(input: Token) -> i32 { return match &input { Token { value } => value } }
+pub fn main() -> i32 { return inspect(Token { value: 42 }) }`),
     )
     const original = Analysis.loweredMir(self)
     const copied: Mir.Module = {

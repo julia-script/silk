@@ -73,23 +73,23 @@ const analyzeText = (id: string, source: string): Elaboration.Result =>
 it('diagnoses invalid effect origins, runs, mutability, and escape explicitly', () => {
   const ordinaryFail = analyzeText(
     'effect://ordinary-fail',
-    'struct Problem {}\nfn bad() -> I32 { fail move Problem {} }',
+    'struct Problem {}\nfn bad() -> i32 { fail move Problem {} }',
   )
   const undeclared = analyzeText(
     'effect://undeclared',
-    'struct Problem {}\neffect fn bad() -> I32 { fail move Problem {} }',
+    'struct Problem {}\neffect fn bad() -> i32 { fail move Problem {} }',
   )
-  const nonEffect = analyzeText('effect://non-effect', 'fn bad() -> I32 { return run 1 }')
+  const nonEffect = analyzeText('effect://non-effect', 'fn bad() -> i32 { return run 1 }')
   const unhandled = analyzeText(
     'effect://unhandled',
     `struct Problem {}
-effect fn risky() -> I32 ! Problem { fail move Problem {} }
-fn bad() -> I32 { return run risky() }`,
+effect fn risky() -> i32 ! Problem { fail move Problem {} }
+fn bad() -> i32 { return run risky() }`,
   )
   const recipeRules = analyzeText(
     'effect://recipe-rules',
-    `effect fn work() -> I32 { return 1 }
-effect fn bad() -> I32 {
+    `effect fn work() -> i32 { return 1 }
+effect fn bad() -> i32 {
   let mut recipe = work()
   return recipe
 }`,
@@ -123,9 +123,9 @@ it('subtracts the caught failure and unions the handler row canonically', () => 
     `struct First {}
 struct Second {}
 struct HandlerProblem {}
-effect fn risky() -> I32 ! Second | First { fail move First {} }
-effect fn recover(problem: First) -> I32 ! HandlerProblem { fail move HandlerProblem {} }
-effect fn outer() -> I32 ! HandlerProblem | Second {
+effect fn risky() -> i32 ! Second | First { fail move First {} }
+effect fn recover(problem: First) -> i32 ! HandlerProblem { fail move HandlerProblem {} }
+effect fn outer() -> i32 ! HandlerProblem | Second {
   let recipe = risky() |> Effect.catch<First>(recover)
   return run recipe
 }`,
@@ -145,8 +145,8 @@ effect fn outer() -> I32 ! HandlerProblem | Second {
 it('infers lazy effect-block results failures and exclusive captures', () => {
   const result = analyzeText(
     'effect://block-captures',
-    `struct Problem { code: I32 }
-fn build(value: I32) -> I32 {
+    `struct Problem { code: i32 }
+fn build(value: i32) -> i32 {
   let mut counter = value
   let pending = effect {
     counter = counter + 1
@@ -163,7 +163,7 @@ fn build(value: I32) -> I32 {
   if (pending?._tag !== 'EffectBlock' || pending.type._tag !== 'Available') return
   assert.strictEqual(
     Type.encode(pending.type.type),
-    'Effect<I32 ! effect://block-captures.Problem>',
+    'Effect<i32 ! effect://block-captures.Problem>',
   )
   assert.deepEqual(
     pending.captures.map((capture) => [capture.reference.id.ordinal, capture.access]),
@@ -174,10 +174,10 @@ fn build(value: I32) -> I32 {
 it('allows an ordinary function to return a hidden effect instance', () => {
   const result = analyzeText(
     'effect://returned-block',
-    `fn delayed(value: I32) -> Effect<I32> {
+    `fn delayed(value: i32) -> Effect<i32> {
   return effect { return value }
 }
-fn main() -> I32 {
+fn main() -> i32 {
   let pending = delayed(41)
   return run pending
 }`,
@@ -200,7 +200,7 @@ it('rejects implicit erasure when a join merges distinct Effect construction sit
     'effect://identity-erasure',
     `struct First {}
 struct Second {}
-fn choose(input: First | Second) -> Effect<I32> {
+fn choose(input: First | Second) -> Effect<i32> {
   return match move input {
     First {} => effect { return 1 }
     Second {} => effect { return 2 }
@@ -219,26 +219,26 @@ it('rejects heterogeneous callable joins and unknown-sized owned callable return
     'callable://identity-erasure',
     `struct First {}
 struct Second {}
-fn choose(input: First | Second) -> fn(I32) -> I32 {
+fn choose(input: First | Second) -> fn(i32) -> i32 {
   return match move input {
-    First {} => I32.add(1)
-    Second {} => I32.add(2)
+    First {} => i32.add(1)
+    Second {} => i32.add(2)
   }
 }`,
   )
   const erased = analyzeText(
     'callable://unknown-owned-return',
-    `fn passthrough(callback: once fn(I32) -> I32) -> once fn(I32) -> I32 {
+    `fn passthrough(callback: once fn(i32) -> i32) -> once fn(i32) -> i32 {
   return move callback
 }
-fn main() -> I32 { return 0 }`,
+fn main() -> i32 { return 0 }`,
   )
   const concrete = analyzeText(
     'callable://concrete-owned-return',
-    `struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value }
-fn make(token: Token) -> once fn(I32) -> I32 { return consume(move token) }
-fn main() -> I32 { return 0 }`,
+    `struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value }
+fn make(token: Token) -> once fn(i32) -> i32 { return consume(move token) }
+fn main() -> i32 { return 0 }`,
   )
 
   assert.include(
@@ -256,8 +256,8 @@ it('rejects retry for a take-once Effect', () => {
   const result = analyzeText(
     'effect://take-retry',
     `struct Payload {}
-effect fn consume(value: Payload) -> I32 { return 1 }
-fn main() -> I32 {
+effect fn consume(value: Payload) -> i32 { return 1 }
+fn main() -> i32 {
   let payload = Payload {}
   let retried = consume(move payload) |> Effect.retry(2)
   return run retried
@@ -272,10 +272,10 @@ fn main() -> I32 {
 it('derives take-once mapped Effect access from an owned callback capture', () => {
   const result = analyzeText(
     'effect://take-callback-retry',
-    `struct Payload { value: I32 }
-effect fn succeed(value: I32) -> I32 { return value }
-fn consume(value: I32, payload: Payload) -> I32 { return value + payload.value }
-fn main() -> I32 {
+    `struct Payload { value: i32 }
+effect fn succeed(value: i32) -> i32 { return value }
+fn consume(value: i32, payload: Payload) -> i32 { return value + payload.value }
+fn main() -> i32 {
   let payload = Payload { value: 2 }
   let mapped = succeed(40) |> Effect.map(consume(move payload))
   let retried = mapped |> Effect.retry(2)
@@ -302,9 +302,9 @@ it('propagates Logger requirements through effectful tap without an eager log in
   const result = analyzeText(
     'effect://logger-tap',
     `struct Logger {}
-effect fn succeed(value: I32) -> I32 { return value }
-effect fn log(value: I32) -> I32 ? &Logger { return value }
-fn main() -> I32 {
+effect fn succeed(value: i32) -> i32 { return value }
+effect fn log(value: i32) -> i32 ? &Logger { return value }
+fn main() -> i32 {
   let logged = succeed(42) |> Effect.tap(log)
   return 0
 }`,
@@ -319,7 +319,7 @@ fn main() -> I32 {
   assert.strictEqual(type !== undefined && Type.isEffect(type) ? type.requirements.length : 0, 1)
   assert.strictEqual(
     type !== undefined && Type.isEffect(type)
-      ? Type.encode(type.requirements.at(0)?.capability ?? 'Never')
+      ? Type.encode(type.requirements.at(0)?.capability ?? 'never')
       : undefined,
     'effect://logger-tap.Logger',
   )
@@ -328,8 +328,8 @@ fn main() -> I32 {
 it('rejects failure payloads that retain lexical borrows', () => {
   const result = analyzeText(
     'effect://borrowed-failure',
-    `struct BorrowedError { message: &[I32] }
-effect fn risky(error: BorrowedError) -> I32 ! BorrowedError {
+    `struct BorrowedError { message: &[i32] }
+effect fn risky(error: BorrowedError) -> i32 ! BorrowedError {
   fail move error
 }`,
   )
@@ -342,9 +342,9 @@ effect fn risky(error: BorrowedError) -> I32 ! BorrowedError {
 it('accepts detached owned failure payloads', () => {
   const result = analyzeText(
     'effect://owned-failure',
-    `struct Detail { code: I32 }
+    `struct Detail { code: i32 }
 struct OwnedError { detail: Detail }
-effect fn risky(error: OwnedError) -> I32 ! OwnedError {
+effect fn risky(error: OwnedError) -> i32 ! OwnedError {
   fail move error
 }`,
   )
@@ -358,8 +358,8 @@ it('subtracts a provided capability role from an Effect contract', () => {
   const result = analyzeText(
     'effect://provide-role',
     `struct Clock {}
-effect fn work() -> I32 ? &Clock@Left | &Clock@Right { return 42 }
-fn main() -> I32 {
+effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
+fn main() -> i32 {
   let left = Clock {}
   let right = Clock {}
   let recipe = work() |> Clock.provide(&left, @Left) |> Clock.provide(&right, @Right)
@@ -373,8 +373,8 @@ it('requires an explicit role when the same capability has multiple requirements
   const result = analyzeText(
     'effect://ambiguous-provide-role',
     `struct Clock {}
-effect fn work() -> I32 ? &Clock@Left | &Clock@Right { return 42 }
-fn main() -> I32 {
+effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
+fn main() -> i32 {
   let clock = Clock {}
   let recipe = work() |> Clock.provide(&clock)
   return 0
@@ -391,8 +391,8 @@ it('requires an exclusive provider for an exclusive capability requirement', () 
   const result = analyzeText(
     'effect://exclusive-provider',
     `struct Allocator {}
-effect fn allocate() -> I32 ? &mut Allocator { return 42 }
-fn main() -> I32 {
+effect fn allocate() -> i32 ? &mut Allocator { return 42 }
+fn main() -> i32 {
   let allocator = Allocator {}
   let recipe = allocate() |> Allocator.provide(&allocator)
   return 0
@@ -409,8 +409,8 @@ it('owns a moved provider in a take-once Effect wrapper', () => {
   const result = analyzeText(
     'effect://moved-provider',
     `struct Clock {}
-effect fn read() -> I32 ? &mut Clock { return 42 }
-fn main() -> I32 {
+effect fn read() -> i32 ? &mut Clock { return 42 }
+fn main() -> i32 {
   let clock = Clock {}
   let recipe = read() |> Clock.provide(move clock)
   return 0
@@ -430,9 +430,9 @@ it('keeps per-run provider acquisition distinct and composes its contract', () =
     'effect://provide-with',
     `struct Clock {}
 struct OpenError {}
-effect fn read() -> I32 ? &mut Clock { return 42 }
+effect fn read() -> i32 ? &mut Clock { return 42 }
 effect fn acquire() -> Clock ! OpenError { return Clock {} }
-fn main() -> I32 {
+fn main() -> i32 {
   let recipe = read() |> Clock.provideWith(acquire())
   return 0
 }`,
@@ -459,7 +459,7 @@ it('defines allocation as an exclusive capability Effect with an affine result',
     `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
-fn main() -> I32 {
+fn main() -> i32 {
   let allocator = SystemAllocator.make()
   return 42
 }`,
@@ -488,14 +488,14 @@ fn main() -> I32 {
 it('provides Allocator through nominal system and user-authored witnesses', () => {
   const system = analyzeText(
     'allocation://nominal-system-provider',
-    `effect fn use(layout: Layout) -> I32 ! OutOfMemory {
+    `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
 }
-pub fn main() -> I32 { return 0 }`,
+pub fn main() -> i32 { return 0 }`,
   )
   assert.deepEqual(system.diagnostics, [])
   const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
@@ -505,16 +505,16 @@ pub fn main() -> I32 { return 0 }`,
 
   const custom = analyzeText(
     'allocation://custom-provider',
-    `struct TestAllocator { remaining: I32 }
+    `struct TestAllocator { remaining: i32 }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
-effect fn use(layout: Layout) -> I32 ! OutOfMemory {
+effect fn use(layout: Layout) -> i32 ! OutOfMemory {
   let mut allocator = TestAllocator { remaining: 1 }
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   drop allocation
   return 42
 }
-pub fn main() -> I32 { return 0 }`,
+pub fn main() -> i32 { return 0 }`,
   )
   assert.deepEqual(custom.diagnostics, [])
 })
@@ -524,9 +524,9 @@ it('rejects dynamically shaped or type-incompatible catch handlers', () => {
     'effect://bad-handler',
     `struct Problem {}
 struct Other {}
-effect fn risky() -> I32 ! Problem { fail move Problem {} }
-effect fn wrong(problem: Other) -> Bool { return true }
-fn main() -> I32 {
+effect fn risky() -> i32 ! Problem { fail move Problem {} }
+effect fn wrong(problem: Other) -> bool { return true }
+fn main() -> i32 {
   let recipe = Effect.catch<Problem>(risky(), wrong)
   return 0
 }`,
@@ -594,12 +594,12 @@ it('publishes one immutable function fact with exact accepted provenance', () =>
   assert.strictEqual(name.token, directToken(declaration.syntax, 'Identifier'))
   assert.strictEqual(returnType._tag, 'Resolved')
   if (returnType._tag !== 'Resolved') return
-  assert.strictEqual(returnType.type, 'I32')
-  assert.strictEqual(returnType.spelling, 'I32')
+  assert.strictEqual(returnType.type, 'i32')
+  assert.strictEqual(returnType.spelling, 'i32')
   assert.strictEqual(integer._tag, 'Available')
   if (integer._tag !== 'Available') return
-  assert.strictEqual(integer.type, 'I32')
-  assert.strictEqual(integer.value, 42)
+  assert.strictEqual(integer.type, 'i32')
+  assert.strictEqual(integer.value, 42n)
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(result.diagnostics, [])
 
@@ -646,7 +646,7 @@ it('collects two and three declarations with deterministic source-order identiti
       const integer = integerFact(fact)
       return integer._tag === 'Available' ? integer.value : undefined
     }),
-    [1, 2, 3],
+    [1n, 2n, 3n],
   )
   assert.strictEqual(
     functionAt(two, 0).declaration.syntax.span.start <
@@ -666,10 +666,10 @@ it('collects typed parameters and resolves returned identifiers', () => {
   assert.strictEqual(identityFunction.declaration.parameterCount, 1)
   assert.strictEqual(functionAt(multiple, 0).declaration.parameterCount, 2)
   assert.strictEqual(returnedIdentifier.reference._tag, 'Resolved')
-  assert.deepEqual(returnedIdentifier.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(returnedIdentifier.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(identityFunction.returnCompatibility, { _tag: 'Compatible' })
   assert.strictEqual(returnedCall.reference._tag, 'Resolved')
-  assert.deepEqual(returnedCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(returnedCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(identity.diagnostics, [])
   assert.deepEqual(identity.syntax.parserDiagnostics, [])
@@ -715,8 +715,8 @@ it('publishes ordered function-local parameter identities, types, and lookup', (
 it('resolves identifier arguments against the caller parameter collection', () => {
   const result = analyzeText(
     'fixture://identifier-argument.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn forward(value: I32) -> I32 { return identity(value) }`,
+    `pub fn identity(value: i32) -> i32 { return value }
+pub fn forward(value: i32) -> i32 { return identity(value) }`,
   )
   const forward = functionAt(result, 1)
   const call = callFact(forward)
@@ -728,7 +728,7 @@ pub fn forward(value: I32) -> I32 { return identity(value) }`,
   assert.strictEqual(expression.reference._tag, 'Resolved')
   if (expression.reference._tag !== 'Resolved') return
   assert.strictEqual(expression.reference.parameter, forward.declaration.parameters.at(0))
-  assert.deepEqual(expression.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(expression.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(result.diagnostics, [])
 })
 
@@ -749,8 +749,8 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
   if (firstArgument.expression._tag !== 'Integer') return
   assert.strictEqual(firstArgument.expression.integer._tag, 'Available')
   if (firstArgument.expression.integer._tag !== 'Available') return
-  assert.strictEqual(firstArgument.expression.integer.value, 42)
-  assert.deepEqual(firstArgument.type, { _tag: 'Available', type: 'I32' })
+  assert.strictEqual(firstArgument.expression.integer.value, 42n)
+  assert.deepEqual(firstArgument.type, { _tag: 'Available', type: 'i32' })
   assert.strictEqual(firstArgument.syntax, firstArgument.expression.syntax)
   assert.strictEqual(oneCall.mappings.at(0)?.argument, firstArgument)
   assert.strictEqual(
@@ -800,15 +800,15 @@ it('analyzes nested call arguments recursively from their leaves outward', () =>
   const innerArgument = inner.arguments.at(0) ?? raise('expected inner argument')
   assert.strictEqual(argument.syntax, inner.syntax)
   assert.strictEqual(innerArgument.expression._tag, 'Integer')
-  assert.deepEqual(innerArgument.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(innerArgument.type, { _tag: 'Available', type: 'i32' })
   assert.strictEqual(inner.reference._tag, 'Resolved')
   assert.strictEqual(inner.contract._tag, 'Compatible')
   assert.strictEqual(inner.mappings.at(0)?.argument, innerArgument)
   assert.strictEqual(inner.mappings.at(0)?.parameter.id.ordinal, 0)
-  assert.deepEqual(inner.type, { _tag: 'Available', type: 'I32' })
-  assert.deepEqual(argument.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(inner.type, { _tag: 'Available', type: 'i32' })
+  assert.deepEqual(argument.type, { _tag: 'Available', type: 'i32' })
   assert.strictEqual(call.contract._tag, 'Compatible')
-  assert.deepEqual(call.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(call.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.notDeepEqual(inner.syntax.span, call.syntax.span)
   assert.deepEqual(argument.id.callSpan, call.syntax.span)
@@ -865,7 +865,7 @@ it('propagates an unresolved inner target only to dependent outer facts', () => 
   assert.strictEqual(outer.contract._tag, 'Unavailable')
   if (outer.contract._tag !== 'Unavailable') return
   assert.strictEqual(outer.contract.reason._tag, 'UnavailableMappedType')
-  assert.deepEqual(outer.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(outer.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0004'],
@@ -880,7 +880,7 @@ it('diagnoses an incompatible inner call exactly once without inventing an outer
   assert.strictEqual(inner._tag, 'Call')
   if (inner._tag !== 'Call') return
   assert.strictEqual(inner.contract._tag, 'ArityMismatch')
-  assert.deepEqual(inner.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(inner.type, { _tag: 'Available', type: 'i32' })
   assert.strictEqual(outer.contract._tag, 'Compatible')
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -891,8 +891,8 @@ it('diagnoses an incompatible inner call exactly once without inventing an outer
 it('analyzes representative deep nesting deterministically', () => {
   const depth = 64
   const expression = `${'identity('.repeat(depth)}42${')'.repeat(depth)}`
-  const source = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return ${expression} }`
+  const source = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return ${expression} }`
   const first = analyzeText('fixture://deep-nested-semantic.silk', source)
   const second = analyzeText('fixture://deep-nested-semantic.silk', source)
   let current: Elaboration.ExpressionFact = functionAt(first, 1).returnedExpression
@@ -940,7 +940,7 @@ it('keeps flat argument semantics unchanged beside recursive nested facts', () =
 
   assert.strictEqual(flatCall.arguments.at(0)?.expression._tag, 'Integer')
   assert.strictEqual(flatCall.contract._tag, 'Compatible')
-  assert.deepEqual(flatCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(flatCall.type, { _tag: 'Available', type: 'i32' })
   assert.strictEqual(nestedCall.arguments.at(0)?.expression._tag, 'Call')
   assert.strictEqual(nestedCall.contract._tag, 'Compatible')
   assert.deepEqual(nested.diagnostics, [])
@@ -973,7 +973,7 @@ it('forms the one leading section and still diagnoses deeper arity mismatches', 
   assert.strictEqual(fewSection.captures.length, 1)
   assert.strictEqual(
     fewSection.type._tag === 'Available' ? Type.encode(fewSection.type.type) : undefined,
-    'fn(I32) -> I32',
+    'fn(i32) -> i32',
   )
   assert.deepEqual(manyCall.contract, {
     _tag: 'ArityMismatch',
@@ -982,7 +982,7 @@ it('forms the one leading section and still diagnoses deeper arity mismatches', 
   })
   assert.strictEqual(manyCall.mappings.length, 1)
   assert.deepEqual(manyFunction.returnCompatibility, { _tag: 'Compatible' })
-  assert.deepEqual(manyCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(manyCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(tooFew.diagnostics, [])
   assert.deepEqual(
     tooMany.diagnostics.map((diagnostic) => diagnostic.code),
@@ -1091,7 +1091,7 @@ it('diagnoses unknown local names at their exact reference spans', () => {
 it('does not reinterpret an unknown final value as an invalid assignment place', () => {
   const result = analyzeText(
     'fixture://unknown-recovered-return.silk',
-    'pub fn main() -> I32 { missing }',
+    'pub fn main() -> i32 { missing }',
   )
 
   assert.deepEqual(
@@ -1113,7 +1113,7 @@ it('does not reinterpret an unknown final value as an invalid assignment place',
 it('suppresses invalid-place cascades for unknown assignment roots', () => {
   const result = analyzeText(
     'fixture://unknown-assignment-root.silk',
-    'pub fn main() -> I32 { missing = 1 return 0 }',
+    'pub fn main() -> i32 { missing = 1 return 0 }',
   )
 
   assert.deepEqual(
@@ -1213,7 +1213,7 @@ it('resolves a call to an earlier declaration and propagates its type', () => {
     callee === undefined ? undefined : directToken(callee, 'Identifier'),
   )
   assert.strictEqual(returned.reference.declaration, answer.declaration)
-  assert.deepEqual(returned.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(result.diagnostics, [])
   assert.deepEqual(result.syntax.parserDiagnostics, [])
@@ -1232,8 +1232,8 @@ it('resolves forward and self calls without evaluating them', () => {
   if (forwardCall.reference._tag !== 'Resolved' || selfCall.reference._tag !== 'Resolved') return
   assert.strictEqual(forwardCall.reference.declaration, functionAt(forward, 1).declaration)
   assert.strictEqual(selfCall.reference.declaration, functionAt(self, 0).declaration)
-  assert.deepEqual(forwardCall.type, { _tag: 'Available', type: 'I32' })
-  assert.deepEqual(selfCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(forwardCall.type, { _tag: 'Available', type: 'i32' })
+  assert.deepEqual(selfCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(functionAt(forward, 0).returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(functionAt(self, 0).returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(forward.diagnostics, [])
@@ -1301,7 +1301,7 @@ it('keeps target type resolution separate from target body compatibility', () =>
   )
 
   assert.strictEqual(damagedBodyCall.reference._tag, 'Resolved')
-  assert.deepEqual(damagedBodyCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(damagedBodyCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(functionAt(damagedBody, 0).returnCompatibility, { _tag: 'Unavailable' })
   assert.deepEqual(functionAt(damagedBody, 1).returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(
@@ -1310,21 +1310,14 @@ it('keeps target type resolution separate from target body compatibility', () =>
   )
 })
 
-it('keeps a recovered call callee unavailable and parser-owned', () => {
+it('types empty parentheses as unit', () => {
   const result = analyzeText('fixture://missing-call-callee.silk', missingCallCalleeSource)
   const fact = functionAt(result, 0)
   const returned = fact.returnedExpression
 
-  assert.strictEqual(returned._tag, 'Call')
-  if (returned._tag !== 'Call') return
-  assert.strictEqual(returned.reference._tag, 'Unavailable')
-  if (returned.reference._tag !== 'Unavailable') return
-  assert.strictEqual(SyntaxTree.isMissingToken(returned.reference.syntax), true)
+  assert.strictEqual(returned._tag, 'Unit')
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
-  assert.deepEqual(
-    result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0001'],
-  )
+  assert.deepEqual(result.syntax.parserDiagnostics, [])
   assert.deepEqual(result.diagnostics, [])
 })
 
@@ -1348,7 +1341,7 @@ it('resolves present callees, accepts unchecked arguments, and withholds damaged
   const uncheckedFact = functionAt(uncheckedArgument, 1)
   const uncheckedCall = callFact(uncheckedFact)
   assert.strictEqual(uncheckedCall.reference._tag, 'Resolved')
-  assert.deepEqual(uncheckedCall.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(uncheckedCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(uncheckedFact.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(uncheckedArgument.syntax.parserDiagnostics, [])
   assert.deepEqual(uncheckedArgument.diagnostics, [])
@@ -1505,7 +1498,7 @@ it('preserves existing type and integer edge behavior per function', () => {
   const boundaryInteger = integerFact(boundary)
   assert.strictEqual(boundaryInteger._tag, 'Available')
   if (boundaryInteger._tag !== 'Available') return
-  assert.strictEqual(boundaryInteger.value, 2147483647)
+  assert.strictEqual(boundaryInteger.value, 2147483647n)
   assert.deepEqual(boundary.returnCompatibility, { _tag: 'Compatible' })
   assert.strictEqual(integerFact(functionAt(overflow, 0))._tag, 'OutOfRange')
   assert.strictEqual(integerFact(functionAt(beyondSafe, 0))._tag, 'OutOfRange')
@@ -1520,7 +1513,7 @@ it('preserves existing type and integer edge behavior per function', () => {
       },
     ],
   )
-  assert.strictEqual(integerFact(functionAt(missingInteger, 0))._tag, 'Unavailable')
+  assert.strictEqual(functionAt(missingInteger, 0).returnedExpression._tag, 'Unit')
   assert.deepEqual(missingInteger.diagnostics, [])
 })
 
@@ -1627,7 +1620,7 @@ it('links unresolved types and missing parameter references to their diagnostics
 it('canonicalizes operator facts with typed builtin operand mappings', () => {
   const result = analyzeText(
     'fixture://operators.silk',
-    'pub fn main() -> Bool { return !(2 + 3 * 4 == 14) }',
+    'pub fn main() -> bool { return !(2 + 3 * 4 == 14) }',
   )
   const returned = functionAt(result, 0).returnedExpression
 
@@ -1635,10 +1628,10 @@ it('canonicalizes operator facts with typed builtin operand mappings', () => {
   assert.strictEqual(returned._tag, 'Operator')
   if (returned._tag !== 'Operator') return
   assert.strictEqual(returned.operator, 'Not')
-  assert.deepEqual(returned.type, { _tag: 'Available', type: 'Bool' })
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'bool' })
   assert.deepEqual(
     returned.mappings.map((mapping) => [mapping.ordinal, mapping.expected]),
-    [[0, 'Bool']],
+    [[0, 'bool']],
   )
   const grouped = returned.arguments.at(0)?.expression
   assert.strictEqual(grouped?._tag, 'Grouped')
@@ -1651,7 +1644,7 @@ it('canonicalizes operator facts with typed builtin operand mappings', () => {
 it('applies pipeline callables left-to-right without inserted call arguments', () => {
   const result = analyzeText(
     'fixture://pipeline.silk',
-    'pub fn main() -> I32 { return 2 |> I32.add(3) |> I32.multiply(4) }',
+    'pub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }',
   )
   const returned = functionAt(result, 0).returnedExpression
 
@@ -1669,16 +1662,16 @@ it('applies pipeline callables left-to-right without inserted call arguments', (
     callable: returned.callee,
     evaluation: 'LeftThenCallable',
   })
-  assert.deepEqual(returned.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'i32' })
 })
 
 it('resolves named function values, stored sections, and callable bindings', () => {
   const result = analyzeText(
     'fixture://stored-callables.silk',
-    `fn identity(value: I32) -> I32 { return value }
-fn main() -> I32 {
+    `fn identity(value: i32) -> i32 { return value }
+fn main() -> i32 {
   let named = identity
-  let plusTwo = I32.add(2)
+  let plusTwo = i32.add(2)
   return named(plusTwo(40))
 }`,
   )
@@ -1701,18 +1694,18 @@ fn main() -> I32 {
   if (returned._tag !== 'CallableApply') return
   assert.strictEqual(returned.callee._tag, 'Identifier')
   assert.strictEqual(returned.arguments.at(0)?.expression._tag, 'CallableApply')
-  assert.deepEqual(returned.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(returned.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(result.diagnostics, [])
 })
 
 it('infers shared, exclusive, and consuming section modes from captures', () => {
   const result = analyzeText(
     'fixture://callable-capture-modes.silk',
-    `struct Token { value: I32 }
-fn read(value: I32, values: &[I32]) -> I32 { return value }
-fn write(value: I32, values: &mut [I32]) -> I32 { return value }
-fn consume(value: I32, token: Token) -> I32 { return value }
-fn main() -> I32 {
+    `struct Token { value: i32 }
+fn read(value: i32, values: &[i32]) -> i32 { return value }
+fn write(value: i32, values: &mut [i32]) -> i32 { return value }
+fn consume(value: i32, token: Token) -> i32 { return value }
+fn main() -> i32 {
   let values = [1, 2]
   let mut output = [3, 4]
   let token = Token { value: 5 }
@@ -1743,8 +1736,8 @@ fn main() -> I32 {
 it('defers generic evidence owned by the omitted leading argument until application', () => {
   const result = analyzeText(
     'fixture://generic-callable-section.silk',
-    `fn select<T>(value: T, enabled: Bool) -> T { return value }
-fn main() -> I32 {
+    `fn select<T>(value: T, enabled: bool) -> T { return value }
+fn main() -> i32 {
   let whenEnabled = select(true)
   return whenEnabled(42)
 }`,
@@ -1763,15 +1756,15 @@ fn main() -> I32 {
     section?.type._tag === 'Available' ? Type.encode(section.type.type) : undefined,
     'fn(T) -> T',
   )
-  assert.deepEqual(main.returnedExpression.type, { _tag: 'Available', type: 'I32' })
+  assert.deepEqual(main.returnedExpression.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(result.diagnostics, [])
 })
 
 it('rejects generic evidence that exists only in a section result', () => {
   const result = analyzeText(
     'fixture://return-only-section-generic.silk',
-    `fn make<T>(value: I32, enabled: Bool) -> T { return value }
-fn main() -> I32 { let maker = make(true) return 0 }`,
+    `fn make<T>(value: i32, enabled: bool) -> T { return value }
+fn main() -> i32 { let maker = make(true) return 0 }`,
   )
 
   assert.include(
@@ -1784,7 +1777,7 @@ it('rejects partial explicit generic argument lists on callable sections', () =>
   const result = analyzeText(
     'fixture://partial-explicit-section-generics.silk',
     `fn choose<T, U>(value: T, left: U, right: U) -> T { return value }
-fn main() -> I32 { let callback = choose<I32>(1, 2) return 0 }`,
+fn main() -> i32 { let callback = choose<i32>(1, 2) return 0 }`,
   )
 
   assert.deepEqual(
@@ -1796,8 +1789,8 @@ fn main() -> I32 { let callback = choose<I32>(1, 2) return 0 }`,
 it('retains a section identity when one captured dependency is unavailable', () => {
   const result = analyzeText(
     'fixture://unavailable-callable-capture.silk',
-    `fn choose(value: I32, fallback: I32) -> I32 { return value }
-fn main() -> I32 { let callback = choose(missing) return 0 }`,
+    `fn choose(value: i32, fallback: i32) -> i32 { return value }
+fn main() -> i32 { let callback = choose(missing) return 0 }`,
   )
   const binding = functionAt(result, 1).statements.at(0)
   const section = binding?._tag === 'BindStatement' ? binding.binding.initializer : undefined
@@ -1813,19 +1806,19 @@ fn main() -> I32 { let callback = choose(missing) return 0 }`,
 it('runs the complete composed operand and preserves grouped one-layer execution', () => {
   const ungrouped = analyzeText(
     'fixture://ungrouped-run-callable.silk',
-    `effect fn work() -> I32 { return 1 }
-fn main() -> I32 { return run work() |> Effect.retry(2) }`,
+    `effect fn work() -> i32 { return 1 }
+fn main() -> i32 { return run work() |> Effect.retry(2) }`,
   )
   const grouped = analyzeText(
     'fixture://grouped-run-callable.silk',
-    `effect fn work() -> I32 { return 1 }
-fn main() -> I32 { return (run work()) |> I32.add(1) }`,
+    `effect fn work() -> i32 { return 1 }
+fn main() -> i32 { return (run work()) |> i32.add(1) }`,
   )
   const nested = analyzeText(
     'fixture://nested-run-callable.silk',
-    `effect fn inner() -> I32 { return 1 }
-effect fn outer() -> Effect<I32> { return inner() }
-fn main() -> I32 { return run run outer() }`,
+    `effect fn inner() -> i32 { return 1 }
+effect fn outer() -> Effect<i32> { return inner() }
+fn main() -> i32 { return run run outer() }`,
   )
   const ungroupedRun = functionAt(ungrouped, 1).returnedExpression
   const groupedApply = functionAt(grouped, 1).returnedExpression
@@ -1847,27 +1840,27 @@ fn main() -> I32 { return run run outer() }`,
 it('diagnoses each invalid callable application at the callable boundary', () => {
   const nonCallable = analyzeText(
     'fixture://non-callable-application.silk',
-    'fn main() -> I32 { let value = 1 return value(2) }',
+    'fn main() -> i32 { let value = 1 return value(2) }',
   )
   const incompatible = analyzeText(
     'fixture://incompatible-callable.silk',
     `struct Token {}
-fn consume(value: I32, token: Token) -> I32 { return value }
-fn accept(callback: fn(I32) -> I32) -> I32 { return 0 }
-fn main() -> I32 { let token = Token {} let callback = consume(move token) return accept(callback) }`,
+fn consume(value: i32, token: Token) -> i32 { return value }
+fn accept(callback: fn(i32) -> i32) -> i32 { return 0 }
+fn main() -> i32 { let token = Token {} let callback = consume(move token) return accept(callback) }`,
   )
   const exclusive = analyzeText(
     'fixture://exclusive-callable-access.silk',
-    `fn write(value: I32, values: &mut [I32]) -> I32 { return value }
-fn main() -> I32 { let mut values = [1] let callback = write(&mut values) return callback(2) }`,
+    `fn write(value: i32, values: &mut [i32]) -> i32 { return value }
+fn main() -> i32 { let mut values = [1] let callback = write(&mut values) return callback(2) }`,
   )
   const redundant = analyzeText(
     'fixture://redundant-unary-call.silk',
-    'fn identity(value: I32) -> I32 { return value } fn main() -> I32 { return identity() }',
+    'fn identity(value: i32) -> i32 { return value } fn main() -> i32 { return identity() }',
   )
   const deeper = analyzeText(
     'fixture://deeper-under-application.silk',
-    'fn combine(a: I32, b: I32, c: I32) -> I32 { return a } fn main() -> I32 { return combine(1) }',
+    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn main() -> i32 { return combine(1) }',
   )
 
   assert.include(
@@ -1895,7 +1888,7 @@ fn main() -> I32 { let mut values = [1] let callback = write(&mut values) return
 it('withholds mistyped operator results after one local diagnostic', () => {
   const result = analyzeText(
     'fixture://operator-mismatch.silk',
-    'pub fn main() -> I32 { return true + 1 }',
+    'pub fn main() -> i32 { return true + 1 }',
   )
   const returned = functionAt(result, 0).returnedExpression
 
@@ -1910,18 +1903,18 @@ it('withholds mistyped operator results after one local diagnostic', () => {
 it('specializes raw storage operations and requires lexical unsafe authority', () => {
   const accepted = analyzeText(
     'fixture://raw-storage-accepted.silk',
-    `fn build(allocation: Allocation, count: Usize) -> RawBuffer<I32> {
-  unsafe { return RawBuffer.from<I32>(move allocation, count) }
+    `fn build(allocation: Allocation, count: usize) -> RawBuffer<i32> {
+  unsafe { return RawBuffer.from<i32>(move allocation, count) }
 }
-fn destroy(buffer: RawBuffer<I32>) -> Unit {
+fn destroy(buffer: RawBuffer<i32>) -> () {
   let mut owner = move buffer
   unsafe { return Slot.drop(RawBuffer.slot(&mut owner, 0)) }
 }`,
   )
   const rejected = analyzeText(
     'fixture://raw-storage-safe.silk',
-    `fn build(allocation: Allocation, count: Usize) -> RawBuffer<I32> {
-  return RawBuffer.from<I32>(move allocation, count)
+    `fn build(allocation: Allocation, count: usize) -> RawBuffer<i32> {
+  return RawBuffer.from<i32>(move allocation, count)
 }`,
   )
 

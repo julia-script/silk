@@ -15,7 +15,7 @@ remain valid when their element type is valid and their target layout is finite.
 
 #### Scenario: Distinguish lengths
 
-- **WHEN** one contract names `Array<I32, 3>` and another names `Array<I32, 4>`
+- **WHEN** one contract names `Array<i32, 3>` and another names `Array<i32, 4>`
 - **THEN** they resolve to distinct canonical types and are not assignment- or call-compatible
 
 #### Scenario: Retain a zero-length element type
@@ -33,8 +33,8 @@ Invalid elements or length disagreement SHALL preserve each element fact but pro
 
 #### Scenario: Infer a non-empty literal
 
-- **WHEN** `let values = [10, 20, 30]` has three compatible `I32` elements
-- **THEN** `values` has canonical type `Array<I32, 3>` and stores the values at indices zero through two
+- **WHEN** `let values = [10, 20, 30]` has three compatible `i32` elements
+- **THEN** `values` has canonical type `Array<i32, 3>` and stores the values at indices zero through two
 
 #### Scenario: Construct an empty contextual array
 
@@ -43,26 +43,17 @@ Invalid elements or length disagreement SHALL preserve each element fact but pro
 
 #### Scenario: Refuse a contextual length mismatch
 
-- **WHEN** an `Array<I32, 3>` position receives `[1, 2]`
+- **WHEN** an `Array<i32, 3>` position receives `[1, 2]`
 - **THEN** semantic facts retain both elements and report the expected and actual lengths without constructing a value
 
 ### Requirement: Indexing is a checked place projection
 
-`subject[index]` SHALL require an available array subject and an `I32` index and SHALL produce a
-canonical indexed place whose element type comes from the subject type. A statically known negative or
-out-of-range literal SHALL be a semantic failure. Every dynamic index SHALL be checked at runtime and
-trap before projection when it is negative or not less than the canonical length. Index and field
-projections SHALL compose left-to-right without fabricating an intermediate copied aggregate.
+`subject[index]` SHALL require a `usize` index. A known out-of-range literal SHALL fail analysis; a dynamic index SHALL check `index < length` and trap before projection. Place composition and ownership behavior remain unchanged.
 
-#### Scenario: Read a dynamic scalar element
+#### Scenario: Read a dynamic element
 
-- **WHEN** `values[index]` indexes `Array<I32, 4>` with a runtime `I32`
-- **THEN** execution checks `0 <= index < 4` and returns exactly the selected scalar or traps at that projection
-
-#### Scenario: Project a Copy leaf through an aggregate element
-
-- **WHEN** `pairs[index].left` indexes `Array<Pair, 4>` and `left` is `I32`
-- **THEN** the place chain reads the selected Copy field without copying or consuming the `Pair` or array owner
+- **WHEN** `Array<i32, 4>` is indexed by runtime `usize`
+- **THEN** execution checks the canonical length and returns the selected element or traps
 
 ### Requirement: Array ownership and cleanup derive from elements
 
@@ -73,7 +64,7 @@ elements exactly once in ascending index order and recursively use each element'
 
 #### Scenario: Copy a scalar array
 
-- **WHEN** a bound `Array<I32, 3>` is passed to an array parameter
+- **WHEN** a bound `Array<i32, 3>` is passed to an array parameter
 - **THEN** the value is copied and the source remains live
 
 #### Scenario: Reject moving one struct element

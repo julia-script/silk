@@ -48,12 +48,12 @@ before cross-module member binding or body elaboration begins.
 
 #### Scenario: Resolve a complete public signature
 
-- **WHEN** a module declares `pub fn choose(left: I32, right: I32) -> I32`
-- **THEN** its header is public and resolves two ordered `I32` parameters, an `I32` return type, and a parameter count of two
+- **WHEN** a module declares `pub fn choose(left: i32, right: i32) -> i32`
+- **THEN** its header is public and resolves two ordered `i32` parameters, an `i32` return type, and a parameter count of two
 
 #### Scenario: Resolve a complete private signature
 
-- **WHEN** a module declares `fn helper(value: I32) -> I32`
+- **WHEN** a module declares `fn helper(value: i32) -> i32`
 - **THEN** its header is private and resolves its parameter and result without consulting a function body
 
 #### Scenario: Diagnose header-level unknown types
@@ -83,15 +83,15 @@ SHALL produce identical indexes across fresh processes.
 - **WHEN** a module declares one present unique `main`
 - **THEN** looking up `main` in that module resolves its header while an undeclared name reports no match
 
-### Requirement: Bool is a built-in declared type
+### Requirement: bool is a built-in declared type
 
-Declared parameter and return types SHALL resolve `Bool` as a built-in semantic type alongside
-`I32`. Any other spelling SHALL keep the existing `SEM0001` unknown-type diagnostic.
+Declared parameter and return types SHALL resolve `bool` as a built-in semantic type alongside
+`i32`. Any other spelling SHALL keep the existing `SEM0001` unknown-type diagnostic.
 
-#### Scenario: Resolve a Bool parameter and return
+#### Scenario: Resolve a bool parameter and return
 
-- **WHEN** `pub fn negate(flag: Bool) -> Bool { return flag }` is collected
-- **THEN** the parameter and return types resolve to `Bool` with no diagnostics
+- **WHEN** `pub fn negate(flag: bool) -> bool { return flag }` is collected
+- **THEN** the parameter and return types resolve to `bool` with no diagnostics
 
 #### Scenario: Keep unknown types diagnosed
 
@@ -131,7 +131,7 @@ every later declaration as an explicit duplicate with the same stable diagnostic
 
 #### Scenario: Reject a cross-kind duplicate
 
-- **WHEN** a module declares `struct Token {}` and `fn Token() -> I32`
+- **WHEN** a module declares `struct Token {}` and `fn Token() -> i32`
 - **THEN** the struct owns the canonical module-level identity and the function remains an explicit duplicate
 
 #### Scenario: Order mixed declarations canonically
@@ -182,7 +182,7 @@ the Copy prohibition — SHALL be deferred to instantiation rather than rejected
 
 #### Scenario: Index a parametric Drop hook
 
-- **WHEN** the index processes `impl<T> Drop for Vector<T>` whose hook is `fn drop(self: &mut Vector<T>) -> Unit`
+- **WHEN** the index processes `impl<T> Drop for Vector<T>` whose hook is `fn drop(self: &mut Vector<T>) -> ()`
 - **THEN** the hook validates with `T` in scope and the conformance fact records the parameter list and generic target
 
 #### Scenario: Header validation still rejects malformed hooks

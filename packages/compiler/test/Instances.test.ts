@@ -14,16 +14,16 @@ const snapshot = (text: string): Effect.Effect<Analysis.Snapshot> =>
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
-const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
 
 it.effect('discovers reachable call chains once and terminates recursion', () =>
   Effect.gen(function* () {
     const nested = Analysis.instancesOf(yield* snapshot(nestedSource))
-    const direct = Analysis.instancesOf(yield* snapshot('pub fn main() -> I32 { return main() }'))
+    const direct = Analysis.instancesOf(yield* snapshot('pub fn main() -> i32 { return main() }'))
     const mutual = Analysis.instancesOf(
-      yield* snapshot(`pub fn main() -> I32 { return other() }
-pub fn other() -> I32 { return main() }`),
+      yield* snapshot(`pub fn main() -> i32 { return other() }
+pub fn other() -> i32 { return main() }`),
     )
     assert.deepEqual(
       nested.instances.map((instance) => instance.key.declaration.name),
@@ -43,12 +43,12 @@ pub fn other() -> I32 { return main() }`),
 it.effect('discovers concrete stored and deferred-generic callable section identities', () =>
   Effect.gen(function* () {
     const stored = Analysis.instancesOf(
-      yield* snapshot(`fn add(left: I32, right: I32) -> I32 { return left + right }
-pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`),
+      yield* snapshot(`fn add(left: i32, right: i32) -> i32 { return left + right }
+pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`),
     )
     const generic = Analysis.instancesOf(
-      yield* snapshot(`fn select<T>(value: T, enabled: Bool) -> T { return move value }
-pub fn main() -> I32 { let whenEnabled = select(true) return whenEnabled(42) }`),
+      yield* snapshot(`fn select<T>(value: T, enabled: bool) -> T { return move value }
+pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`),
     )
 
     assert.deepEqual(
@@ -56,7 +56,7 @@ pub fn main() -> I32 { let whenEnabled = select(true) return whenEnabled(42) }`)
       ['main', 'add'],
     )
     assert.strictEqual(stored.callables.length, 1)
-    assert.deepEqual(stored.callables.at(0)?.captureTypes.map(Type.encode), ['I32'])
+    assert.deepEqual(stored.callables.at(0)?.captureTypes.map(Type.encode), ['i32'])
     assert.strictEqual(stored.callables.at(0)?.mode, 'Shared')
     assert.deepEqual(
       generic.instances.map((instance) => ({
@@ -65,21 +65,21 @@ pub fn main() -> I32 { let whenEnabled = select(true) return whenEnabled(42) }`)
       })),
       [
         { name: 'main', arguments: [] },
-        { name: 'select', arguments: ['I32'] },
+        { name: 'select', arguments: ['i32'] },
       ],
     )
-    assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encode), ['I32'])
-    assert.strictEqual(Type.encode(generic.callables.at(0)?.type ?? 'I32'), 'fn(I32) -> I32')
+    assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encode), ['i32'])
+    assert.strictEqual(Type.encode(generic.callables.at(0)?.type ?? 'i32'), 'fn(i32) -> i32')
   }),
 )
 
 it.effect('rejects polymorphic recursion reached through a callable section', () =>
   Effect.gen(function* () {
-    const result = yield* snapshot(`fn expand<T>(seed: I32, value: T) -> I32 {
+    const result = yield* snapshot(`fn expand<T>(seed: i32, value: T) -> i32 {
   let next = expand<[T; 1]>([move value])
   return next(seed)
 }
-pub fn main() -> I32 { return expand<I32>(0, 1) }`)
+pub fn main() -> i32 { return expand<i32>(0, 1) }`)
 
     assert.deepEqual(
       Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
@@ -87,7 +87,7 @@ pub fn main() -> I32 { return expand<I32>(0, 1) }`)
     )
     assert.strictEqual(result.instances.violations.length, 1)
     assert.deepEqual(result.instances.violations.at(0)?.target.typeArguments.map(Type.encode), [
-      'Array<I32, 1>',
+      'Array<i32, 1>',
     ])
   }),
 )
@@ -95,14 +95,14 @@ pub fn main() -> I32 { return expand<I32>(0, 1) }`)
 it.effect('excludes unreachable declarations and reports unavailable entries', () =>
   Effect.gen(function* () {
     const reachable = Analysis.instancesOf(
-      yield* snapshot(`pub fn unused() -> I32 { return 1 }
-pub fn main() -> I32 { return 42 }`),
+      yield* snapshot(`pub fn unused() -> i32 { return 1 }
+pub fn main() -> i32 { return 42 }`),
     )
-    const missing = Analysis.instancesOf(yield* snapshot('pub fn answer() -> I32 { return 42 }'))
+    const missing = Analysis.instancesOf(yield* snapshot('pub fn answer() -> i32 { return 42 }'))
     const parameterized = Analysis.instancesOf(
-      yield* snapshot('pub fn main(value: I32) -> I32 { return value }'),
+      yield* snapshot('pub fn main(value: i32) -> i32 { return value }'),
     )
-    const generic = Analysis.instancesOf(yield* snapshot('pub fn main<T>() -> I32 { return 42 }'))
+    const generic = Analysis.instancesOf(yield* snapshot('pub fn main<T>() -> i32 { return 42 }'))
     assert.deepEqual(
       reachable.instances.map((instance) => instance.key.declaration.name),
       ['main'],
@@ -125,12 +125,12 @@ it.effect('lowers discovered instances deterministically to verifier-clean MIR',
 it.effect('lowers callable construction and application into the structured MIR DAG', () =>
   Effect.gen(function* () {
     const stored = Analysis.loweredMir(
-      yield* snapshot(`fn add(left: I32, right: I32) -> I32 { return left + right }
-pub fn main() -> I32 { let plusTwo = add(2) return plusTwo(40) }`),
+      yield* snapshot(`fn add(left: i32, right: i32) -> i32 { return left + right }
+pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`),
     )
     const direct = Analysis.loweredMir(
-      yield* snapshot(`fn add(left: I32, right: I32) -> I32 { return left + right }
-pub fn main() -> I32 { return 40 |> add(2) }`),
+      yield* snapshot(`fn add(left: i32, right: i32) -> i32 { return left + right }
+pub fn main() -> i32 { return 40 |> add(2) }`),
     )
     const storedOperations = stored.functions.at(0)
     const directOperations = direct.functions.at(0)
@@ -199,8 +199,8 @@ pub fn main() -> I32 { return 40 |> add(2) }`),
 it.effect('ends callable capture loans before drop and transfers consuming captures once', () =>
   Effect.gen(function* () {
     const borrowed = Analysis.loweredMir(
-      yield* snapshot(`fn read(value: I32, values: &mut [I32]) -> I32 { return value }
-pub fn main() -> I32 {
+      yield* snapshot(`fn read(value: i32, values: &mut [i32]) -> i32 { return value }
+pub fn main() -> i32 {
   let mut values = [1]
   let callback = read(&mut values)
   drop callback
@@ -209,9 +209,9 @@ pub fn main() -> I32 {
 }`),
     )
     const consumed = Analysis.loweredMir(
-      yield* snapshot(`struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value + token.value }
-pub fn main() -> I32 {
+      yield* snapshot(`struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
   let token = Token { value: 2 }
   let callback = consume(move token)
   return callback(40)
@@ -244,12 +244,12 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const composed = Analysis.loweredMir(
-        yield* snapshot(`effect fn work() -> I32 { return 41 }
-pub fn main() -> I32 { return run work() |> Effect.retry(2) }`),
+        yield* snapshot(`effect fn work() -> i32 { return 41 }
+pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
       )
       const grouped = Analysis.loweredMir(
-        yield* snapshot(`effect fn work() -> I32 { return 41 }
-pub fn main() -> I32 { return (run work()) |> I32.add(1) }`),
+        yield* snapshot(`effect fn work() -> i32 { return 41 }
+pub fn main() -> i32 { return (run work()) |> i32.add(1) }`),
       )
       const composedMain = composed.functions.at(0)
       const groupedMain = grouped.functions.at(0)
@@ -272,17 +272,17 @@ pub fn main() -> I32 { return (run work()) |> I32.add(1) }`),
 it.effect('encodes generic, consuming, and grouped-run callable MIR deterministically', () =>
   Effect.gen(function* () {
     const sources = [
-      `fn select<T>(value: T, enabled: Bool) -> T { return move value }
-pub fn main() -> I32 { let whenEnabled = select(true) return whenEnabled(42) }`,
-      `struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value + token.value }
-pub fn main() -> I32 {
+      `fn select<T>(value: T, enabled: bool) -> T { return move value }
+pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`,
+      `struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
   let token = Token { value: 2 }
   let callback = consume(move token)
   return callback(40)
 }`,
-      `effect fn work() -> I32 { return 41 }
-pub fn main() -> I32 { return (run work()) |> I32.add(1) }`,
+      `effect fn work() -> i32 { return 41 }
+pub fn main() -> i32 { return (run work()) |> i32.add(1) }`,
     ]
     for (const source of sources) {
       const first = Analysis.loweredMir(yield* snapshot(source))
@@ -295,13 +295,13 @@ pub fn main() -> I32 { return (run work()) |> I32.add(1) }`,
   }),
 )
 
-const bindingSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { let value = identity(42) let extra = 1 return value }`
+const bindingSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { let value = identity(42) let extra = 1 return value }`
 
-const nestedMatchSource = `pub struct Token { kind: I32 }
+const nestedMatchSource = `pub struct Token { kind: i32 }
 pub struct Box { token: Token }
-pub fn adjust(value: I32) -> I32 { return I32.add(value, 1) }
-pub fn main() -> I32 {
+pub fn adjust(value: i32) -> i32 { return i32.add(value, 1) }
+pub fn main() -> i32 {
   let boxed = Box { token: Token { kind: 41 } }
   return match move boxed {
     Box { token } => match move token {
@@ -324,8 +324,8 @@ it.effect('lowers bindings and ownership violations with generated cleanup or tr
     )
 
     const violated = Analysis.loweredMir(
-      yield* snapshot(`pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { let value = 42 return choose(move value, value) }`),
+      yield* snapshot(`pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { let value = 42 return choose(move value, value) }`),
     )
     const violatedFunction = violated.functions.at(0)
     const outcome =
@@ -338,7 +338,7 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`),
 it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', () =>
   Effect.gen(function* () {
     const builtins = Analysis.loweredMir(
-      yield* snapshot('pub fn main() -> I32 { return I32.subtract(I32.multiply(6, 7), 0) }'),
+      yield* snapshot('pub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'),
     )
     const builtinFunction = builtins.functions.at(0)
     assert.deepEqual(
@@ -350,7 +350,7 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
       ['Literal', 'Literal', 'Binary:Multiply', 'Literal', 'Binary:Subtract'],
     )
     const unavailable = Analysis.loweredMir(
-      yield* snapshot('pub fn main() -> I32 { return missing() }'),
+      yield* snapshot('pub fn main() -> i32 { return missing() }'),
     )
     const unavailableFunction = unavailable.functions.at(0)
     assert.strictEqual(
@@ -421,7 +421,7 @@ it.effect('rejects hand-built match decisions before evaluation or emission', ()
 )
 
 const branchProgram =
-  'pub fn main() -> I32 { let base = 40 if I32.equals(base, 40) { let bonus = 2 return I32.add(base, bonus) } return 0 }'
+  'pub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }'
 
 it.effect('lowers branch diamonds identically across runs', () =>
   Effect.gen(function* () {
@@ -436,8 +436,8 @@ it.effect('lowers branch diamonds identically across runs', () =>
 it.effect('discovers one generic Effect factory and generates its hidden runner', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`effect fn delayed<T>(value: T) -> T { return move value }
-pub fn main() -> I32 {
-  let recipe = delayed<I32>(42)
+pub fn main() -> i32 {
+  let recipe = delayed<i32>(42)
   return run recipe
 }`)
 
@@ -450,7 +450,7 @@ pub fn main() -> I32 {
       })),
       [
         { name: 'main', arguments: [] },
-        { name: 'delayed', arguments: ['I32'] },
+        { name: 'delayed', arguments: ['i32'] },
       ],
     )
     const lowered = Analysis.loweredMir(result)

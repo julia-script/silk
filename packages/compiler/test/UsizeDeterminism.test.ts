@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 
-it('keeps exact Usize phases byte-identical across fresh processes', () => {
+it('keeps exact usize phases byte-identical across fresh processes', () => {
   const fixture = fileURLToPath(new URL('./fixtures/usize-determinism.mjs', import.meta.url))
   const run = () => spawnSync(process.execPath, [fixture], { encoding: 'utf8' })
   const first = run()

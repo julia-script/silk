@@ -5,7 +5,7 @@ import * as Mir from '../../dist/Mir.js'
 
 const source = `import silk.vector { Vector, length }
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   return 42
 }`
 const bytes = new TextEncoder().encode(source)

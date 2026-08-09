@@ -138,7 +138,7 @@ export const fromExternal = Effect.fn('Llvm.fromExternal')(function* (input: str
 })
 ```
 
-Never throw yieldable errors across a public boundary, use a tagged error as synchronous control
+never throw yieldable errors across a public boundary, use a tagged error as synchronous control
 flow, swallow errors in `catch`, or expose `unknown` as a public Effect error channel. Synchronous
 mutable transitions return a typed `Result`; unexpected JavaScript throws remain
 defects. Public fallible helpers return Effects. Private synchronous encoders may abort with a
@@ -202,11 +202,11 @@ requirement channels through the bracket.
 
 ## Stay type-safe
 
-- Never use non-null assertions (`!`), including in tests.
+- never use non-null assertions (`!`), including in tests.
 - Use `test/support/raise.ts` when a test invariant makes a nullable value impossible:
   `values.at(-1) ?? unreachable('expected a value')`.
 - Use casts only for truths TypeScript cannot express, such as a conditional return type or a
   variance gap inside a generic combinator. Fix signatures instead of casting call sites.
-- Never add lint suppressions to permit a cast or non-null assertion.
+- never add lint suppressions to permit a cast or non-null assertion.
 - Keep public Effect error and requirement channels precise; do not erase them to `unknown` or
   `never` for convenience.

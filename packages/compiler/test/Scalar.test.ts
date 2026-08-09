@@ -6,11 +6,11 @@ import * as Type from '../src/Type.js'
 it('owns the current scalar vocabulary in stable presentation order', () => {
   assert.deepEqual(
     Scalar.all().map((scalar) => scalar.spelling),
-    ['I32', 'Usize', 'Bool'],
+    ['bool', 'u8', 'u16', 'u32', 'u64', 'usize', 'i8', 'i16', 'i32', 'i64', 'isize'],
   )
-  assert.strictEqual(Scalar.isSpelling('I32'), true)
+  assert.strictEqual(Scalar.isSpelling('i32'), true)
   assert.strictEqual(Scalar.isSpelling('String'), false)
-  assert.strictEqual(Type.isBuiltin('Usize'), true)
+  assert.strictEqual(Type.isBuiltin('usize'), true)
   assert.strictEqual(Object.isFrozen(Scalar.all()), true)
   assert.strictEqual(Scalar.all().every(Object.isFrozen), true)
   assert.strictEqual(
@@ -30,11 +30,52 @@ it('resolves fixed and target-width scalar facts without phase-specific cases', 
     Scalar.defaultInteger.operations.map((candidate) => candidate.spelling),
     [
       'negate',
+      'wrappingNegate',
+      'saturatingNegate',
+      'toU8',
+      'checkedToU8',
+      'toU16',
+      'checkedToU16',
+      'toU32',
+      'checkedToU32',
+      'toU64',
+      'checkedToU64',
+      'toUsize',
+      'checkedToUsize',
+      'toI8',
+      'checkedToI8',
+      'toI16',
+      'checkedToI16',
+      'toI32',
+      'checkedToI32',
+      'toI64',
+      'checkedToI64',
+      'toIsize',
+      'checkedToIsize',
       'add',
       'subtract',
       'multiply',
       'divide',
       'remainder',
+      'bitAnd',
+      'bitOr',
+      'bitXor',
+      'bitNot',
+      'shiftLeft',
+      'shiftRight',
+      'rotateLeft',
+      'rotateRight',
+      'wrappingAdd',
+      'wrappingSubtract',
+      'wrappingMultiply',
+      'saturatingAdd',
+      'saturatingSubtract',
+      'saturatingMultiply',
+      'checkedAdd',
+      'checkedSubtract',
+      'checkedMultiply',
+      'checkedDivide',
+      'checkedRemainder',
       'equals',
       'notEquals',
       'lessThan',

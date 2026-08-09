@@ -21,7 +21,7 @@ from `E` aborts that execution and propagates, and unsatisfied service requireme
 The explicit expression form preserves the eager/lazy boundary across function bodies:
 
 ```silk
-fn risky<T>(value: T, selector: I32) -> Effect<T ! Problem> {
+fn risky<T>(value: T, selector: i32) -> Effect<T ! Problem> {
   let prepared = prepare(selector)
 
   return effect {
@@ -46,7 +46,7 @@ contracts mechanically. Bootstrap contracts do not contain retained-provider dep
 bootstrap allocator results and other safe owned results are self-contained.
 
 Typed failures are owned, abortive, and non-resumable. `fail value` transfers an owned nominal value
-into the failure channel and has success type `Never`; Copy values are copied normally and do not
+into the failure channel and has success type `never`; Copy values are copied normally and do not
 require a meaningless `move`. There is no throwable hierarchy, implicit conversion, or general
 exception mechanism. Propagation runs deterministic cleanup for every affine owner exited by the
 typed failure. Traps remain separate process-aborting defects that handlers cannot intercept and for
@@ -63,7 +63,7 @@ protected failure row. An unguarded member branch removes that member; a guarded
 because its guard may reject. A universal branch removes all remaining members. If the protected row
 is `E`, completely handled members are `H`, and handler branches may fail with `B`, the outward row is
 the normalized `(E - H) | B`. The success type is the normalized union of the protected success value
-and reachable recovery values. A branch with type `Never` contributes no success member.
+and reachable recovery values. A branch with type `never` contributes no success member.
 
 The matching branch owns its failure payload. Recovering cleans up an unconsumed payload at branch
 exit; re-failing transfers it again. Unmatched members propagate without copying. An effect may be

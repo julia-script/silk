@@ -16,14 +16,14 @@ generation exists yet.
 - **THEN** the docs site renders the syntax and semantic inspection views without advertising the page in normal navigation
 
 ### Requirement: Inspect the accepted fixture
-The inspector SHALL start with `pub fn main() -> I32 { return 42 }` and SHALL display the concrete
+The inspector SHALL start with `pub fn main() -> i32 { return 42 }` and SHALL display the concrete
 tree hierarchy, every token kind, owner-qualified half-open byte span, exact source slice,
 declaration facts, type facts, integer-value facts, return compatibility, and separate lexical,
 parser, and semantic diagnostic collections produced for the current input.
 
 #### Scenario: Inspect the initial program
 - **WHEN** the inspector first loads
-- **THEN** the accepted fixture has a complete function tree, exact token coverage, a public `main` declaration, resolved `I32` facts, exact value `42`, compatible return, and no diagnostics
+- **THEN** the accepted fixture has a complete function tree, exact token coverage, a public `main` declaration, resolved `i32` facts, exact value `42`, compatible return, and no diagnostics
 
 ### Requirement: Explore nearby malformed text
 The inspector SHALL let a developer edit the source text and recompute lexing, parsing, and semantic
@@ -40,7 +40,7 @@ and valid Unicode text whose UTF-8 bytes are unsupported by the bootstrap vocabu
 - **THEN** the inspector displays its UTF-8 bytes as retained invalid token data and remains interactive
 
 #### Scenario: Enter an unknown return type
-- **WHEN** a developer replaces `I32` with `Mystery`
+- **WHEN** a developer replaces `i32` with `Mystery`
 - **THEN** the semantic view shows an unresolved return type, unavailable return compatibility, and its semantic diagnostic
 
 #### Scenario: Enter an out-of-range integer
@@ -64,7 +64,7 @@ counts, local parameter-resolution states, and positional call-contract facts.
 
 #### Scenario: Inspect the identity syntax slice
 - **WHEN** a developer selects the parameter-and-argument preset
-- **THEN** the concrete view shows `value: I32`, the returned `value`, and the `42` in `identity(42)` while semantic panels show both the local parameter relationship and positional call contract
+- **THEN** the concrete view shows `value: i32`, the returned `value`, and the `42` in `identity(42)` while semantic panels show both the local parameter relationship and positional call contract
 
 #### Scenario: Inspect malformed list recovery
 - **WHEN** a developer selects a preset with a missing parameter type, comma, or call parenthesis
@@ -106,7 +106,7 @@ syntax-unavailable references.
 
 #### Scenario: Inspect a resolved parameter reference
 - **WHEN** a developer selects the identity-function preset
-- **THEN** the semantic view links the returned `value` to parameter zero and shows `I32` expression type and compatible return
+- **THEN** the semantic view links the returned `value` to parameter zero and shows `i32` expression type and compatible return
 
 #### Scenario: Inspect an unknown local name
 - **WHEN** a developer selects the unknown-parameter-reference preset
@@ -138,7 +138,7 @@ phase-separated diagnostic views.
 
 #### Scenario: Inspect a compatible call contract
 - **WHEN** a developer selects the `identity(42)` preset
-- **THEN** the inspector shows argument zero mapped to `identity` parameter zero with available `I32` types and a compatible contract
+- **THEN** the inspector shows argument zero mapped to `identity` parameter zero with available `i32` types and a compatible contract
 
 #### Scenario: Inspect wrong arity
 - **WHEN** a developer selects a too-few or too-many preset
@@ -186,7 +186,7 @@ concrete tree, function facts, and phase-separated diagnostics.
 
 #### Scenario: Inspect a resolved call edge
 - **WHEN** a developer selects the two-function resolved-call preset
-- **THEN** the semantic view shows `main → answer`, the target declaration identity, an `I32` call type, and compatible caller return
+- **THEN** the semantic view shows `main → answer`, the target declaration identity, an `i32` call type, and compatible caller return
 
 #### Scenario: Inspect an unknown call target
 - **WHEN** a developer selects the unknown-call preset
@@ -274,7 +274,7 @@ and SHALL reset to the canonical preset on reload.
 
 ### Requirement: Evaluate the current bootstrap program
 The Syntax Inspector SHALL provide an explicit browser-local evaluation action for the current
-analyzed source. It SHALL display either the completed exact `I32` result or the closed blocked
+analyzed source. It SHALL display either the completed exact `i32` result or the closed blocked
 reason and SHALL render the ordered evaluation trace with links to existing function, call,
 argument, parameter, reference, and source provenance. Evaluation MUST NOT make a network request,
 write files, persist results, or imply native compilation.
@@ -595,10 +595,10 @@ program passed to emission. The lab SHALL keep its state in browser memory only.
 - **WHEN** a developer edits a program with nested calls
 - **THEN** the lab shows one target and layout plan beside IR containing `silk_main`, the symbol table, and lowered MIR blocks from the same snapshot
 
-#### Scenario: Compare planned Bool with emitted Bool
+#### Scenario: Compare planned bool with emitted bool
 
 - **WHEN** a developer edits a branching program
-- **THEN** the lab shows the compiler's four-byte `Bool` plan beside the LLVM instructions that realize it
+- **THEN** the lab shows the compiler's four-byte `bool` plan beside the LLVM instructions that realize it
 
 #### Scenario: Toggle debug metadata
 
@@ -615,7 +615,7 @@ WebAssembly's `i32` choice as an independent backend layout decision.
 #### Scenario: Inspect the WebAssembly scalar plan
 
 - **WHEN** a developer opens a branching program in the WebAssembly lab
-- **THEN** the lab shows the `wasm32-unknown-unknown` target and planned `I32` and `Bool` entries beside the emitted WAT that realizes them
+- **THEN** the lab shows the `wasm32-unknown-unknown` target and planned `i32` and `bool` entries beside the emitted WAT that realizes them
 
 ### Requirement: Inspect toolchain provenance
 
@@ -662,7 +662,7 @@ arithmetic trap outcomes with their provenance.
 
 #### Scenario: Inspect a built-in call end to end
 
-- **WHEN** a developer enters `pub fn main() -> I32 { return I32.add(40, 2) }`
+- **WHEN** a developer enters `pub fn main() -> i32 { return i32.add(40, 2) }`
 - **THEN** the HIR view shows a builtin `Add` call, the MIR lab shows one `Add` binary operation, and the LLVM IR lab's text contains the overflow intrinsic
 
 #### Scenario: Inspect an arithmetic trap
@@ -705,7 +705,7 @@ equivalent.
 
 #### Scenario: Inspect a pipeline mapping
 
-- **WHEN** a developer selects `2 |> I32.add(3)`
+- **WHEN** a developer selects `2 |> i32.add(3)`
 - **THEN** the semantic view links the left expression to parameter zero, the explicit argument to parameter one, and both to one canonical builtin call
 
 #### Scenario: Inspect a damaged operator
@@ -797,7 +797,7 @@ facade queries only. Every visual relationship SHALL have an accessible textual 
 
 #### Scenario: Inspect a dynamic array index
 
-- **WHEN** a preset indexes an array with an `I32` parameter
+- **WHEN** a preset indexes an array with an `i32` parameter
 - **THEN** coordinated panes show the required bounds check and link its syntax, HIR, MIR, trace, and emitted branch provenance
 
 ### Requirement: Fixed-array presets cover the complete slice
@@ -827,7 +827,7 @@ Every graph relationship and state change SHALL have an accessible textual equiv
 
 Browser-local presets SHALL include immutable-write rejection, scalar mutation, field and indexed
 assignment, replacement cleanup, zero and multiple iterations, nested loops, conditional `break`,
-`continue`, early return, out-of-bounds write, non-`Bool` condition, transfer outside a loop, and
+`continue`, early return, out-of-bounds write, non-`bool` condition, transfer outside a loop, and
 incompatible loop-header ownership without adding a standalone legacy inspector.
 
 #### Scenario: Explore a loop ownership failure
@@ -850,7 +850,7 @@ textual equivalent.
 
 ### Requirement: Structural-union presets cover valid and invalid states
 
-Browser-local presets SHALL include order/duplicate/nesting normalization, `Never`, precise binding
+Browser-local presets SHALL include order/duplicate/nesting normalization, `never`, precise binding
 inference, nominal injection, union widening, call/return boundaries, struct and array containment,
 move-only transfer and cleanup, mutable replacement, invalid member types, unresolved members,
 non-containing targets, and unavailable layouts without adding a standalone legacy inspector.
@@ -878,7 +878,7 @@ SHALL have an accessible textual equivalent.
 Browser-local presets SHALL include precise nominal matching, Copy and consuming union matches,
 shared and exclusive modes, nested and renamed bindings, `..`, guarded fallthrough, `_`, nominal and
 union result joins, match inside loops and aggregate flows, incomplete and unreachable coverage,
-unknown members and fields, non-`Bool` guards, incompatible results, borrow escape, and cleanup
+unknown members and fields, non-`bool` guards, incompatible results, borrow escape, and cleanup
 failures without adding a standalone inspector.
 
 #### Scenario: Explore incomplete coverage
@@ -949,16 +949,16 @@ phase where validity stops.
 - **WHEN** one call attempts two exclusive borrows of the same array root
 - **THEN** the workbench shows both source borrow intents, their ownership conflict, and the stopped downstream path without claiming successful execution
 
-### Requirement: The unified inspector exposes Usize across targets
+### Requirement: The unified inspector exposes usize across targets
 
-The `/labs` workbench SHALL include one canonical `Usize` preset and coordinate syntax, semantic
+The `/labs` workbench SHALL include one canonical `usize` preset and coordinate syntax, semantic
 facts, operators, HIR, instances, selected target layout, MIR, evaluator, native, and Wasm
 projections. Switching between native and Wasm targets SHALL visibly change width and availability
 without changing the canonical source type or fabricating downstream results.
 
 #### Scenario: Compare target width in Labs
 
-- **WHEN** a user switches the canonical `Usize` preset between a native target and Wasm
+- **WHEN** a user switches the canonical `usize` preset between a native target and Wasm
 - **THEN** coordinated projections show the selected word width, exact literal verdict, calling lane, and stopped Wasm path for native-only magnitudes
 
 ### Requirement: Unified Labs inspection exposes flow outcomes
@@ -995,7 +995,7 @@ downstream paths without fabrication.
 
 #### Scenario: Inspect a mapped arithmetic section
 
-- **WHEN** a developer opens `succeed(2) |> Effect.map(I32.add(2))`
+- **WHEN** a developer opens `succeed(2) |> Effect.map(i32.add(2))`
 - **THEN** linked panes distinguish section construction, callable capture, Effect composition, run, result `4`, and backend realization
 
 #### Scenario: Inspect a consumed callable

@@ -52,10 +52,10 @@ it('renders a diagnostic with a clickable path, position, code, and message', ()
 
 it('indents diagnostic notes beneath their diagnostic', () => {
   const rendered = Report.diagnostic(
-    diagnostic({ span: span(0, 1), notes: ['try I32'] }),
+    diagnostic({ span: span(0, 1), notes: ['try i32'] }),
     source('pub fn main() -> Nope { return 42 }'),
   )
-  assert.strictEqual(rendered, 'main.silk:1:1: error[SEM0001] Unknown type Nope\n  note: try I32')
+  assert.strictEqual(rendered, 'main.silk:1:1: error[SEM0001] Unknown type Nope\n  note: try i32')
 })
 
 it('renders each diagnostic against the physical file for its source identity', () => {
@@ -88,7 +88,7 @@ it('explains a missing entry in terms of the declaration the user must add', () 
     report: [],
   }
   assert.strictEqual(
-    Report.outcome(outcome, source('pub fn other() -> I32 { return 1 }'), 'main.silk'),
+    Report.outcome(outcome, source('pub fn other() -> i32 { return 1 }'), 'main.silk'),
     'No entry point: the root module declares no `main`',
   )
 })
@@ -116,7 +116,7 @@ it('names the executable, target, and symbol count on success', () => {
     report: [],
   }
   assert.strictEqual(
-    Report.outcome(outcome, source('pub fn main() -> I32 { return 42 }'), 'main.silk'),
+    Report.outcome(outcome, source('pub fn main() -> i32 { return 42 }'), 'main.silk'),
     'Compiled main.silk -> /tmp/a.out (llvm, aarch64-apple-darwin, 1 symbols)',
   )
 })

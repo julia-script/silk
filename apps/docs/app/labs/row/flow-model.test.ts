@@ -12,15 +12,15 @@ const snap = (id: string, text: string): Analysis.Snapshot =>
 const analyze = (id: string, text: string): Elaboration.Result =>
   Analysis.rootAnalysis(snap(id, text))
 
-const identitySource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(42) }`
+const identitySource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(42) }`
 
-const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
 
-const siblingSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
+const siblingSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { return choose(identity(1), identity(2)) }`
 
 describe('projectDataFlow', () => {
   it('projects the canonical flat semantic path without evaluation claims', () => {
@@ -76,9 +76,9 @@ describe('projectDataFlow', () => {
     const flow = projectDataFlow(
       analyze(
         'memory/flow-missing',
-        `pub fn identity(value: I32) -> I32 { return value }
-pub fn uncertain(value: Mystery) -> I32 { return 0 }
-pub fn main() -> I32 { return identity(uncertain(42)) }`,
+        `pub fn identity(value: i32) -> i32 { return value }
+pub fn uncertain(value: Mystery) -> i32 { return 0 }
+pub fn main() -> i32 { return identity(uncertain(42)) }`,
       ),
     )
 
@@ -92,8 +92,8 @@ pub fn main() -> I32 { return identity(uncertain(42)) }`,
     const flow = projectDataFlow(
       analyze(
         'memory/flow-arity',
-        `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity()) }`,
+        `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity()) }`,
       ),
     )
 
@@ -108,9 +108,9 @@ pub fn main() -> I32 { return identity(identity()) }`,
   })
 
   it('overlays only the completed prefix when a later sibling blocks', () => {
-    const snapshot = snap('memory/flow-blocked', `pub fn identity(value: I32) -> I32 { return value }
-pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
+    const snapshot = snap('memory/flow-blocked', `pub fn identity(value: i32) -> i32 { return value }
+pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { return choose(identity(1), missing(2)) }`)
     const analysis = Analysis.rootAnalysis(snapshot)
     const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)
@@ -128,8 +128,8 @@ pub fn main() -> I32 { return choose(identity(1), missing(2)) }`)
   })
 
   it('renders a recursive cycle as one finite trace-backed terminal', () => {
-    const snapshot = snap('memory/flow-cycle', `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(main()) }`)
+    const snapshot = snap('memory/flow-cycle', `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(main()) }`)
     const analysis = Analysis.rootAnalysis(snapshot)
     const outcome = Analysis.evaluate(snapshot)
     const flow = projectDataFlow(analysis, outcome)

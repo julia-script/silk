@@ -105,7 +105,7 @@ evaluation, and codegen unavailable without inventing fallback facts.
 
 #### Scenario: Query one shared layout plan
 
-- **WHEN** a supported snapshot discovers instances using `I32` and `Bool`
+- **WHEN** a supported snapshot discovers instances using `i32` and `bool`
 - **THEN** its target query, layout query, lowered MIR query, evaluation query, and codegen query all identify the same canonical target and scalar layout entries
 
 #### Scenario: Query an unsupported target
@@ -247,7 +247,7 @@ cleanup edges, transfer targets, and encodings without mutable graph identity.
 
 ### Requirement: Structural union facts are facade queries
 
-The analysis facade SHALL expose source union members, canonical normalized types, `Never`, expected
+The analysis facade SHALL expose source union members, canonical normalized types, `never`, expected
 contexts, injection/widening outcomes and mappings, ownership classification, active-member cleanup,
 instance reachability, target layouts, calling shapes, HIR/MIR conversions, evaluation values and
 events, and backend provenance from one immutable snapshot. Tooling MUST NOT normalize members,

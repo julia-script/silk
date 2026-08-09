@@ -1,13 +1,13 @@
 import silk.vector { Vector, make, append, get, length, capacity }
 
-struct U8 { value: I32 }
-struct Token { kind: I32 }
+struct U8 { value: i32 }
+struct Token { kind: i32 }
 
-fn observe(kind: I32) -> I32 { return kind }
+fn observe(kind: i32) -> i32 { return kind }
 
 effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemory ? &mut Allocator {
   let mut tokens = make<Token>()
-  let mut index = 0
+  let mut index = usize.add(0, 0)
   while index < source.length {
     let byte = source[index].value
     let mut kind = 3
@@ -20,7 +20,7 @@ effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemory ? &mut Allocator {
   return move tokens
 }
 
-effect fn build() -> I32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let source = [
     U8 { value: 1 }, U8 { value: 2 }, U8 { value: 3 }, U8 { value: 1 },
@@ -54,6 +54,6 @@ effect fn build() -> I32 ! OutOfMemory {
   return kind0 + kind1 + kind2 + kind3 + kind4 + kind5 + kind6 + kind7 + kind8 + kind9 + 23
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 7 }
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
-pub fn main() -> I32 { return run Effect.catch<OutOfMemory>(build(), recover) }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }

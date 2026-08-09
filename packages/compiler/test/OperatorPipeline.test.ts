@@ -6,7 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 
-const source = 'pub fn main() -> I32 { return 2 + 3 * 4 |> I32.add(1) }'
+const source = 'pub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 const encoder = new TextEncoder()
 
 const golden = (name: string): string =>
@@ -16,13 +16,13 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'golden/negation',
-      encoder.encode('pub fn main() -> I32 { let value = 42 return -value }'),
+      encoder.encode('pub fn main() -> i32 { let value = 42 return -value }'),
       'aarch64-apple-darwin',
     )
     const fn = Analysis.loweredMir(snapshot).functions.at(0)
     const operations = fn === undefined ? [] : Mir.operations(fn)
     const zero = operations.find(
-      (operation) => operation._tag === 'Literal' && operation.value === 0,
+      (operation) => operation._tag === 'Literal' && operation.value === 0n,
     )
     const subtraction = operations.find(
       (operation) => operation._tag === 'Binary' && operation.operator === 'Subtract',

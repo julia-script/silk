@@ -31,11 +31,11 @@ it.effect('rejects legacy flow declarations and Flow actor calls', () =>
   Effect.gen(function* () {
     const declaration = yield* Analysis.ofSource(
       'compat/flow-declaration',
-      ascii('flow fn old() -> I32 { return 1 } pub fn main() -> I32 { return 0 }'),
+      ascii('flow fn old() -> i32 { return 1 } pub fn main() -> i32 { return 0 }'),
     )
     const actor = yield* Analysis.ofSource(
       'compat/flow-actor',
-      ascii('pub fn main() -> I32 { let value = Flow.catch(1, 2) return 0 }'),
+      ascii('pub fn main() -> i32 { let value = Flow.catch(1, 2) return 0 }'),
     )
     assert.isAbove(Analysis.diagnostics(declaration).length, 0)
     assert.isAbove(Analysis.diagnostics(actor).length, 0)

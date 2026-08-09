@@ -75,32 +75,21 @@ SHALL omit debug metadata.
 
 ### Requirement: The backend emits checked native arithmetic
 
-The LLVM backend SHALL lower each MIR binary operation to overflow-checked native code: add,
-subtract, and multiply through the signed with-overflow intrinsics whose overflow flag branches
-to a trapping block, and divide and remainder guarded by explicit zero-divisor and
-minimum-by-minus-one checks branching to a trapping block before the `sdiv`/`srem` instruction.
-The emitted program's behavior SHALL agree with the interpreter across the corpus — matching exit
-values for completing programs and abnormal termination for trapping ones — and emission SHALL
-remain deterministic, gated by the committed bitcode digest and IR goldens.
+LLVM and direct WebAssembly SHALL lower every admitted integer width and mode according to MIR. Ordinary operations trap on pinned overflow/invalid input; named wrapping, saturating, bitwise, shift, rotate, conversion, and checked-Option operations preserve their distinct behavior. Emission SHALL match evaluation and remain deterministic.
 
-#### Scenario: Emit a checked addition
+#### Scenario: Emit checked signed addition
 
-- **WHEN** a program adding two values is emitted
-- **THEN** the textual IR contains the signed add-with-overflow intrinsic and a conditional branch to a trapping block
+- **WHEN** ordinary `i32` addition is emitted
+- **THEN** generated code detects overflow and reaches the trap path
 
-#### Scenario: Guard a division natively
+#### Scenario: Emit wrapping byte addition
 
-- **WHEN** a program dividing two values is emitted and run with a zero divisor
-- **THEN** the native executable terminates abnormally exactly as the interpreter blocked
-
-#### Scenario: Keep arithmetic emission deterministic
-
-- **WHEN** the committed arithmetic fixture is emitted repeatedly in fresh processes
-- **THEN** the bitcode digest and IR text equal the committed goldens byte-for-byte
+- **WHEN** `u8.wrappingAdd` is emitted
+- **THEN** both backends wrap at eight bits without the ordinary overflow trap
 
 ### Requirement: Booleans and comparisons emit natively
 
-The backend SHALL read the `Bool` representation from the MIR layout plan and realize its pinned
+The backend SHALL read the `bool` representation from the MIR layout plan and realize its pinned
 four-byte zero-or-one representation: comparisons emit `icmp` plus a zero-extension into the
 four-byte destination local, and user branches reuse the existing conditional-branch emission on
 the nonzero test. The backend MUST NOT substitute a one-bit stored representation. Emission SHALL
@@ -109,7 +98,7 @@ program.
 
 #### Scenario: Emit a comparison
 
-- **WHEN** a program comparing two integers is emitted with the canonical `Bool` layout entry
+- **WHEN** a program comparing two integers is emitted with the canonical `bool` layout entry
 - **THEN** the textual IR contains an `icmp` and a zero-extension realizing the planned four-byte boolean local
 
 #### Scenario: Branch natively arm by arm
@@ -117,9 +106,9 @@ program.
 - **WHEN** a branching corpus program compiles and runs
 - **THEN** its native exit value equals the interpreter's result for the same condition
 
-#### Scenario: Refuse an inconsistent Bool plan
+#### Scenario: Refuse an inconsistent bool plan
 
-- **WHEN** malformed MIR presents scalar facts that conflict with the selected target's canonical `Bool` profile
+- **WHEN** malformed MIR presents scalar facts that conflict with the selected target's canonical `bool` profile
 - **THEN** MIR verification rejects the program before backend emission rather than allowing the backend to choose a representation
 
 ### Requirement: Backends enforce canonical target compatibility
@@ -228,7 +217,7 @@ checks SHALL have the same success and trap behavior as evaluation and native ex
 
 #### Scenario: Emit a zero-length internal result
 
-- **WHEN** a WebAssembly function returns `Array<I32, 0>` internally
+- **WHEN** a WebAssembly function returns `Array<i32, 0>` internally
 - **THEN** emission preserves the logical call with zero runtime results and no engine-owned array layout
 
 ### Requirement: Array backend parity is exact
@@ -425,21 +414,12 @@ symbols, object artifacts, Wasm text, Wasm bytes, and private frame layouts acro
 
 ### Requirement: Backends realize the selected Usize lane exactly
 
-Native LLVM lowering SHALL realize the compiler-selected native `Usize` lane as an unsigned 64-bit
-integer and direct Wasm lowering SHALL realize the Wasm lane as `i32` with unsigned comparison,
-division, remainder, and overflow behavior. Calls, parameters, returns, locals, aggregates, and
-operators MUST preserve the compiler-owned calling shape. Neither backend may narrow native values
-to `I32` or use signed Wasm instructions for unsigned operations.
+Native LLVM SHALL use the selected unsigned 64-bit `usize` lane; direct WebAssembly SHALL use `i32` with unsigned semantics. Neither backend may narrow native values or choose signed instructions independently.
 
-#### Scenario: Lower unsigned Wasm comparison
+#### Scenario: Compare Wasm usize values
 
-- **WHEN** a Wasm-target function compares `Usize` values above the signed `i32` boundary
-- **THEN** emitted code uses unsigned comparison semantics and matches logical evaluation
-
-#### Scenario: Return a native 64-bit value
-
-- **WHEN** a native function returns a `Usize` value above `2^32 - 1`
-- **THEN** its signature and return operation preserve the selected 64-bit lane without truncation
+- **WHEN** values cross the signed `i32` boundary
+- **THEN** WebAssembly uses unsigned comparison and matches evaluation
 
 ### Requirement: Backends realize explicit typed outcomes without unwinding
 
@@ -519,7 +499,7 @@ and exactly-once release MUST match evaluation.
 `Layout.make` validation and `Layout.repeat` checked repetition SHALL lower in the LLVM and
 direct WebAssembly backends with the evaluator's exact semantics: power-of-two alignment
 validation, aligned stride rounding, and overflow classification against the selected target's
-`Usize` range, producing the same tagged union members on every engine.
+`usize` range, producing the same tagged union members on every engine.
 
 #### Scenario: Repeat a layout at a runtime count
 
@@ -528,7 +508,7 @@ validation, aligned stride rounding, and overflow classification against the sel
 
 #### Scenario: Classify overflow identically
 
-- **WHEN** the repeated size exceeds the target's `Usize` range
+- **WHEN** the repeated size exceeds the target's `usize` range
 - **THEN** every engine produces the overflow member and no allocation occurs
 
 ### Requirement: Owning union fields release conditionally

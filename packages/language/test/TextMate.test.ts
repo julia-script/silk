@@ -83,12 +83,12 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
       .flatMap((part) => part.scopes.map((scope) => scope.scopeName))
   }
 
-  const program = 'pub fn main() -> I32 { return 42 }'
+  const program = 'pub fn main() -> i32 { return 42 }'
   assert.include(scopesAt(program, 'pub'), 'storage.type.silk')
   assert.include(scopesAt(program, 'fn'), 'storage.type.silk')
   assert.include(scopesAt(program, 'main'), 'entity.name.function.silk')
   assert.include(scopesAt(program, 'return'), 'keyword.control.silk')
-  assert.include(scopesAt(program, 'I32'), 'support.type.builtin.silk')
+  assert.include(scopesAt(program, 'i32'), 'support.type.builtin.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'impl'), 'storage.type.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'for'), 'storage.type.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'unsafe'), 'storage.type.silk')
@@ -98,12 +98,12 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   )
   assert.include(scopesAt(program, '42'), 'constant.numeric.integer.silk')
   assert.include(scopesAt('let ok = true', 'true'), 'constant.language.boolean.silk')
-  assert.include(scopesAt('fn stop() -> Never', 'Never'), 'support.type.builtin.silk')
+  assert.include(scopesAt('fn stop() -> never', 'never'), 'support.type.builtin.silk')
   assert.include(scopesAt('fn id(x: Point) -> Point', 'Point'), 'entity.name.type.silk')
   assert.include(scopesAt('/// doc', '/// doc'), 'comment.line.documentation.silk')
   assert.include(scopesAt('// plain', '// plain'), 'comment.line.double-slash.silk')
   assert.notInclude(scopesAt('// plain', '// plain'), 'comment.line.documentation.silk')
-  const control = 'pub fn main() -> I32 { if true { return 1 } else { return 0 } }'
+  const control = 'pub fn main() -> i32 { if true { return 1 } else { return 0 } }'
   assert.include(scopesAt(control, 'if'), 'keyword.control.silk')
   assert.include(scopesAt(control, 'else'), 'keyword.control.silk')
   const match = 'match &mut event { Token { kind, .. } if true => kind _ => 0 }'
@@ -113,15 +113,15 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt(match, '..'), 'punctuation.definition.pattern.rest.silk')
   assert.include(scopesAt(match, 'Token'), 'entity.name.type.silk')
   assert.include(scopesAt(match, '_'), 'variable.language.wildcard.silk')
-  const generic = 'fn keep<T>(value: Box<T>) -> Box<T> { return keep<I32>(value) }'
+  const generic = 'fn keep<T>(value: Box<T>) -> Box<T> { return keep<i32>(value) }'
   assert.include(scopesAt(generic, '<'), 'punctuation.definition.type-arguments.begin.silk')
   assert.include(scopesAt(generic, '>'), 'punctuation.definition.type-arguments.end.silk')
   assert.include(scopesAt(generic, 'Box'), 'entity.name.type.silk')
-  const nested = 'fn keep<value>(input: Box<Box<I32>>) -> Box<Box<I32>> { return input }'
+  const nested = 'fn keep<value>(input: Box<Box<i32>>) -> Box<Box<i32>> { return input }'
   assert.include(scopesAt(nested, '<'), 'punctuation.definition.type-arguments.begin.silk')
   assert.include(scopesAt(nested, '>'), 'punctuation.definition.type-arguments.end.silk')
   assert.notInclude(
-    scopesAt('pub fn main() -> I32 { if left > (right) { return 1 } return 0 }', '>'),
+    scopesAt('pub fn main() -> i32 { if left > (right) { return 1 } return 0 }', '>'),
     'punctuation.definition.type-arguments.end.silk',
   )
   highlighter.dispose()

@@ -9,9 +9,9 @@ import * as Type from '../../dist/Type.js'
 
 const source = `struct Box<T> { value: T }
 fn identity<T>(value: T) -> T { return move value }
-pub fn main() -> I32 {
-  let flag = Box<Bool> { value: identity(true) }
-  let answer = Box<I32> { value: identity<I32>(42) }
+pub fn main() -> i32 {
+  let flag = Box<bool> { value: identity(true) }
+  let answer = Box<i32> { value: identity<i32>(42) }
   if flag.value { return answer.value }
   return 0
 }`

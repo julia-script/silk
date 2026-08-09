@@ -1,4 +1,4 @@
-export const acceptedSource = 'pub fn main() -> I32 { return 42 }'
+export const acceptedSource = 'pub fn main() -> i32 { return 42 }'
 export const emptySource = new Uint8Array()
 
 export const denseTriviaSource = `pub // visibility
@@ -7,7 +7,7 @@ main // name
 ( // open parameters
 ) // close parameters
 -> // return arrow
-I32 // return type
+i32 // return type
 { // block
 return // statement
 42 // value
@@ -70,68 +70,68 @@ export const acceptedShape: ExpectedNodeShape = Object.freeze({
   ]),
 })
 
-export const missingNameSource = 'pub fn () -> I32 { return 42 }'
-export const missingRightBraceSource = 'pub fn main() -> I32 { return 42'
-export const unexpectedPunctuationSource = 'pub fn ^ main() -> I32 { return 42 }'
+export const missingNameSource = 'pub fn () -> i32 { return 42 }'
+export const missingRightBraceSource = 'pub fn main() -> i32 { return 42'
+export const unexpectedPunctuationSource = 'pub fn ^ main() -> i32 { return 42 }'
 export const whollyUnrelatedSource = '^^^'
-export const twoFunctionSource = `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return 0 }`
-export const threeFunctionSource = `pub fn one() -> I32 { return 1 }
-pub fn two() -> I32 { return 2 }
-pub fn three() -> I32 { return 3 }`
-export const missingFirstRightBraceSource = `pub fn answer() -> I32 { return 42
-pub fn main() -> I32 { return 0 }`
-export const interFunctionPunctuationSource = `pub fn answer() -> I32 { return 42 }
+export const twoFunctionSource = `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return 0 }`
+export const threeFunctionSource = `pub fn one() -> i32 { return 1 }
+pub fn two() -> i32 { return 2 }
+pub fn three() -> i32 { return 3 }`
+export const missingFirstRightBraceSource = `pub fn answer() -> i32 { return 42
+pub fn main() -> i32 { return 0 }`
+export const interFunctionPunctuationSource = `pub fn answer() -> i32 { return 42 }
 ^^
-pub fn main() -> I32 { return 0 }`
-export const trailingTriviaSource = `pub fn main() -> I32 { return 42 }
+pub fn main() -> i32 { return 0 }`
+export const trailingTriviaSource = `pub fn main() -> i32 { return 42 }
 // trailing source trivia
 `
-export const validCallSource = `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer() }`
-export const triviaCallSource = `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer // callee
+export const validCallSource = `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer() }`
+export const triviaCallSource = `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer // callee
   ( // open call
   // empty call
   ) }`
-export const missingCallCalleeSource = 'pub fn main() -> I32 { return () }'
-export const missingCallRightParenthesisSource = 'pub fn main() -> I32 { return answer( }'
-export const valueCallArgumentSource = 'pub fn main() -> I32 { return answer(42) }'
+export const missingCallCalleeSource = 'pub fn main() -> i32 { return () }'
+export const missingCallRightParenthesisSource = 'pub fn main() -> i32 { return answer( }'
+export const valueCallArgumentSource = 'pub fn main() -> i32 { return answer(42) }'
 export const identifierCallArgumentSource =
-  'pub fn main(value: I32) -> I32 { return answer(value) }'
-export const identitySource = 'pub fn identity(value: I32) -> I32 { return value }'
-export const twoParameterSource = 'pub fn choose(left: I32, right: I32) -> I32 { return left }'
-export const missingParameterTypeSource = 'pub fn identity(value:) -> I32 { return value }'
+  'pub fn main(value: i32) -> i32 { return answer(value) }'
+export const identitySource = 'pub fn identity(value: i32) -> i32 { return value }'
+export const twoParameterSource = 'pub fn choose(left: i32, right: i32) -> i32 { return left }'
+export const missingParameterTypeSource = 'pub fn identity(value:) -> i32 { return value }'
 export const missingParameterCommaSource =
-  'pub fn choose(left: I32 right: I32) -> I32 { return left }'
-export const malformedArgumentSource = 'pub fn main(value: I32) -> I32 { return answer(:, value) }'
-export const damagedCallBeforeNextFunctionSource = `pub fn main() -> I32 { return answer(
-pub fn after() -> I32 { return 0 }`
-export const nestedCallSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
-export const nestedSiblingCallSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn choose(left: I32, right: I32) -> I32 { return left }
-pub fn main() -> I32 { return choose(identity(1), identity(2)) }`
-export const damagedNestedSiblingSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn choose(left: I32, right: I32) -> I32 { return left }
-pub fn main() -> I32 { return choose(identity(:), identity(2)) }`
-export const missingNestedRightParenthesisSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42) }`
-export const damagedNestedBeforeNextFunctionSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)
-pub fn after() -> I32 { return 0 }`
+  'pub fn choose(left: i32 right: i32) -> i32 { return left }'
+export const malformedArgumentSource = 'pub fn main(value: i32) -> i32 { return answer(:, value) }'
+export const damagedCallBeforeNextFunctionSource = `pub fn main() -> i32 { return answer(
+pub fn after() -> i32 { return 0 }`
+export const nestedCallSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
+export const nestedSiblingCallSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn choose(left: i32, right: i32) -> i32 { return left }
+pub fn main() -> i32 { return choose(identity(1), identity(2)) }`
+export const damagedNestedSiblingSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn choose(left: i32, right: i32) -> i32 { return left }
+pub fn main() -> i32 { return choose(identity(:), identity(2)) }`
+export const missingNestedRightParenthesisSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42) }`
+export const damagedNestedBeforeNextFunctionSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)
+pub fn after() -> i32 { return 0 }`
 export const validStructSource =
-  'pub struct Token { pub kind: I32 lexeme: Text.Node }\n' +
+  'pub struct Token { pub kind: i32 lexeme: Text.Node }\n' +
   'struct Marker {}\n' +
   'pub fn main(value: Text.Node) -> Text.Node { return value }'
 export const damagedStructSource =
-  'pub struct Damaged { pub : I32 missing: next: Bool }\n' +
-  'struct Open { value: I32\n' +
-  'pub fn after() -> I32 { return 1 }'
+  'pub struct Damaged { pub : i32 missing: next: bool }\n' +
+  'struct Open { value: i32\n' +
+  'pub fn after() -> i32 { return 1 }'
 
 export const invalidUtf8Source = Uint8Array.of(
   ...Array.from('pub fn ', (character) => character.charCodeAt(0)),
   0xff,
   0xfe,
-  ...Array.from(' main() -> I32 { return 42 }', (character) => character.charCodeAt(0)),
+  ...Array.from(' main() -> i32 { return 42 }', (character) => character.charCodeAt(0)),
 )

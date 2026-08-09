@@ -5,6 +5,7 @@ import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import type * as Ownership from './Ownership.js'
+import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
@@ -17,10 +18,13 @@ import * as TypeCompatibility from './TypeCompatibility.js'
  * than graph edges; only a backend-private lowering may introduce a cyclic CFG.
  */
 
+export type ScalarType = {
+  readonly [Spelling in SilkType.Builtin]: { readonly _tag: Spelling }
+}[SilkType.Builtin]
+
 export type Type =
-  | { readonly _tag: 'I32' }
-  | { readonly _tag: 'Usize' }
-  | { readonly _tag: 'Bool' }
+  | ScalarType
+  | { readonly _tag: 'Bottom'; readonly type: SilkType.Bottom }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
@@ -54,6 +58,7 @@ export type Type =
 
 export const semanticType = (self: Type): DeclarationIndex.SemanticType =>
   self._tag === 'Nominal' ||
+  self._tag === 'Bottom' ||
   self._tag === 'FixedArray' ||
   self._tag === 'Slice' ||
   self._tag === 'Reference' ||
@@ -76,6 +81,7 @@ const isStructurallyCopyType = (
 ): boolean => {
   if (SilkType.isBuiltin(type) || SilkType.isReference(type) || SilkType.isSlice(type)) return true
   if (SilkType.isFixedArray(type)) return isStructurallyCopyType(layout, type.element, visiting)
+  if (SilkType.equals(type, SilkType.unit)) return true
   if (!SilkType.isNominal(type) || SilkType.isIntrinsicNominal(type)) return false
   const key = SilkType.key(type)
   if (visiting.has(key)) return false
@@ -142,6 +148,19 @@ export type BinaryOperator =
   | 'LessOrEqual'
   | 'GreaterThan'
   | 'GreaterOrEqual'
+  | 'BitAnd'
+  | 'BitOr'
+  | 'BitXor'
+  | 'ShiftLeft'
+  | 'ShiftRight'
+  | 'RotateLeft'
+  | 'RotateRight'
+  | 'WrappingAdd'
+  | 'WrappingSubtract'
+  | 'WrappingMultiply'
+  | 'SaturatingAdd'
+  | 'SaturatingSubtract'
+  | 'SaturatingMultiply'
 
 export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is BinaryOperator =>
   operation === 'Add' ||
@@ -154,7 +173,20 @@ export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is 
   operation === 'LessThan' ||
   operation === 'LessOrEqual' ||
   operation === 'GreaterThan' ||
-  operation === 'GreaterOrEqual'
+  operation === 'GreaterOrEqual' ||
+  operation === 'BitAnd' ||
+  operation === 'BitOr' ||
+  operation === 'BitXor' ||
+  operation === 'ShiftLeft' ||
+  operation === 'ShiftRight' ||
+  operation === 'RotateLeft' ||
+  operation === 'RotateRight' ||
+  operation === 'WrappingAdd' ||
+  operation === 'WrappingSubtract' ||
+  operation === 'WrappingMultiply' ||
+  operation === 'SaturatingAdd' ||
+  operation === 'SaturatingSubtract' ||
+  operation === 'SaturatingMultiply'
 
 export type PlaceSelector =
   | {
@@ -192,6 +224,26 @@ export type Operation =
       readonly left: LocalId
       readonly right: LocalId
       readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ConvertInteger'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly sourceType: ScalarType
+      readonly type: ScalarType
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'CheckedInteger'
+      readonly operation: Scalar.OperationCode
+      readonly destination: LocalId
+      readonly operands: ReadonlyArray<LocalId>
+      readonly sourceType: ScalarType
+      readonly valueType: ScalarType
+      readonly type: Extract<Type, { readonly _tag: 'Union' }>
+      readonly success: SilkType.Nominal
+      readonly failure: SilkType.Nominal
       readonly provenance: Provenance
     }
   | {
@@ -236,7 +288,7 @@ export type Operation =
       readonly _tag: 'RawBufferCount'
       readonly destination: LocalId
       readonly buffer: LocalId
-      readonly type: Extract<Type, { readonly _tag: 'Usize' }>
+      readonly type: Extract<Type, { readonly _tag: 'usize' }>
       readonly provenance: Provenance
     }
   | {
@@ -311,7 +363,7 @@ export type Operation =
       readonly _tag: 'SliceLength'
       readonly destination: LocalId
       readonly slice: LocalId
-      readonly type: Extract<Type, { readonly _tag: 'I32' }>
+      readonly type: Extract<Type, { readonly _tag: 'usize' }>
       readonly provenance: Provenance
     }
   | {
@@ -849,6 +901,10 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination]
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
+    case 'ConvertInteger':
+      return [operation.destination, operation.source]
+    case 'CheckedInteger':
+      return [operation.destination, ...operation.operands]
     case 'ValidateLayout':
       return [operation.destination, operation.bytes, operation.alignment]
     case 'RepeatLayout':
@@ -996,7 +1052,7 @@ const placeType = (
         current === undefined ||
         !SilkType.isSlice(current) ||
         current.access !== selector.access ||
-        fn.localTypes.at(selector.index.ordinal)?._tag !== 'I32'
+        fn.localTypes.at(selector.index.ordinal)?._tag !== 'usize'
       ) {
         return undefined
       }
@@ -1012,7 +1068,7 @@ const placeType = (
     }
     if (selector.index._tag === 'Proven') {
       if (selector.index.value < 0 || selector.index.value >= selector.length) return undefined
-    } else if (fn.localTypes.at(selector.index.local.ordinal)?._tag !== 'I32') return undefined
+    } else if (fn.localTypes.at(selector.index.local.ordinal)?._tag !== 'usize') return undefined
     current = current.element
   }
   return current
@@ -1110,6 +1166,16 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ReadPlace':
     case 'CheckPlace':
       return [semanticType(operation.type)]
+    case 'ConvertInteger':
+      return [semanticType(operation.sourceType), semanticType(operation.type)]
+    case 'CheckedInteger':
+      return [
+        semanticType(operation.sourceType),
+        semanticType(operation.valueType),
+        semanticType(operation.type),
+        operation.success,
+        operation.failure,
+      ]
     case 'RawBufferFrom':
       return [semanticType(operation.type), operation.element]
     case 'RawBufferCount':
@@ -1212,6 +1278,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'Binary':
       return [operation.left, operation.right]
+    case 'ConvertInteger':
+      return [operation.source]
+    case 'CheckedInteger':
+      return operation.operands
     case 'ValidateLayout':
       return [operation.bytes, operation.alignment]
     case 'RepeatLayout':
@@ -1660,16 +1730,17 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const semantic = semanticType(operation.type)
           const value = BigInt(operation.value)
-          const usizeMaximum =
-            self.layout.target.pointerSize === 4 ? 4294967295n : 18446744073709551615n
+          const scalar = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
+          const pointerBits = self.layout.target.pointerSize === 4 ? 32 : 64
           const validValue =
-            semantic === 'I32'
-              ? value >= -2147483648n && value <= 2147483647n
-              : semantic === 'Usize'
-                ? value >= 0n && value <= usizeMaximum
-                : semantic === 'Bool'
-                  ? value === 0n || value === 1n
-                  : false
+            scalar?.category === 'Integer'
+              ? (() => {
+                  const range = Scalar.range(scalar, pointerBits)
+                  return value >= range.minimum && value <= range.maximum
+                })()
+              : scalar?.category === 'Boolean'
+                ? value === 0n || value === 1n
+                : false
           if (
             destination === undefined ||
             !SilkType.equals(semanticType(destination), semantic) ||
@@ -1698,12 +1769,12 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.operator === 'LessOrEqual' ||
             operation.operator === 'GreaterThan' ||
             operation.operator === 'GreaterOrEqual'
+          const scalar = typeof operand === 'string' ? Scalar.find(operand) : undefined
           const supportsOperation =
-            operand === 'I32' ||
-            operand === 'Usize' ||
-            (operand === 'Bool' &&
+            scalar?.category === 'Integer' ||
+            (scalar?.category === 'Boolean' &&
               (operation.operator === 'Equals' || operation.operator === 'NotEquals'))
-          const expectedResult = comparison ? 'Bool' : operand
+          const expectedResult = comparison ? 'bool' : operand
           if (
             operand === undefined ||
             right === undefined ||
@@ -1725,6 +1796,62 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
+        if (operation._tag === 'ConvertInteger') {
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const sourceScalar = Scalar.find(operation.sourceType._tag)
+          const targetScalar = Scalar.find(operation.type._tag)
+          if (
+            sourceScalar?.category !== 'Integer' ||
+            targetScalar?.category !== 'Integer' ||
+            source === undefined ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(source), operation.sourceType._tag) ||
+            !SilkType.equals(semanticType(destination), operation.type._tag)
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidIntegerOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'integer conversion has inconsistent source or destination types',
+              }),
+            )
+        }
+        if (operation._tag === 'CheckedInteger') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const operands = operation.operands.map((operand) => fn.localTypes.at(operand.ordinal))
+          const sourceScalar = Scalar.find(operation.sourceType._tag)
+          const valueScalar = Scalar.find(operation.valueType._tag)
+          if (
+            sourceScalar?.category !== 'Integer' ||
+            valueScalar?.category !== 'Integer' ||
+            destination === undefined ||
+            operands.length < 1 ||
+            operands.some(
+              (operand) =>
+                operand === undefined ||
+                !SilkType.equals(semanticType(operand), operation.sourceType._tag),
+            ) ||
+            !SilkType.equals(semanticType(destination), operation.type.type) ||
+            !operation.type.type.members.some((member) =>
+              SilkType.equals(member, operation.success),
+            ) ||
+            !operation.type.type.members.some((member) =>
+              SilkType.equals(member, operation.failure),
+            )
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidIntegerOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'checked integer operation has inconsistent operands or Option result',
+              }),
+            )
+        }
         if (operation._tag === 'ValidateLayout' || operation._tag === 'RepeatLayout') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const left = fn.localTypes.at(
@@ -1745,11 +1872,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           ].sort(SilkType.compare)
           const validLeft =
             operation._tag === 'ValidateLayout'
-              ? left?._tag === 'Usize'
+              ? left?._tag === 'usize'
               : left?._tag === 'Nominal' && SilkType.equals(left.type, SilkType.layout)
           if (
             !validLeft ||
-            right?._tag !== 'Usize' ||
+            right?._tag !== 'usize' ||
             destination?._tag !== 'Union' ||
             !SilkType.equals(destination.type, operation.type.type) ||
             !sameMembers(operation.type.type.members, expectedMembers)
@@ -1804,7 +1931,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             allocation?._tag !== 'Nominal' ||
             !SilkType.equals(allocation.type, SilkType.allocation) ||
-            count?._tag !== 'Usize' ||
+            count?._tag !== 'usize' ||
             destination?._tag !== 'Nominal' ||
             !SilkType.isRawBuffer(destination.type) ||
             !SilkType.equals(destination.type, operation.type.type) ||
@@ -1831,7 +1958,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             buffer?._tag !== 'Reference' ||
             !SilkType.isRawBuffer(buffer.type.target) ||
-            destination?._tag !== 'Usize'
+            destination?._tag !== 'usize'
           )
             violations.push(
               Object.freeze({
@@ -1839,7 +1966,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidRawStorageOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'RawBuffer.count lost its borrowed buffer or Usize result',
+                detail: 'RawBuffer.count lost its borrowed buffer or usize result',
               }),
             )
         }
@@ -1854,7 +1981,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             buffer?._tag !== 'Reference' ||
             buffer.type.access !== 'Exclusive' ||
-            index?._tag !== 'Usize' ||
+            index?._tag !== 'usize' ||
             destination?._tag !== 'Nominal' ||
             !SilkType.isSlot(destination.type) ||
             bufferElement === undefined ||
@@ -1923,7 +2050,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             slice === undefined ||
             !SilkType.isSlice(semanticType(slice)) ||
-            destination?._tag !== 'I32'
+            destination?._tag !== 'usize'
           ) {
             violations.push(
               Object.freeze({
@@ -1931,7 +2058,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidSliceOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'slice length requires one logical slice local and one I32 destination',
+                detail: 'slice length requires one logical slice local and one usize destination',
               }),
             )
           }
@@ -2047,7 +2174,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             }
             if (
               arm.guard !== undefined &&
-              fn.localTypes.at(arm.guard.result.ordinal)?._tag !== 'Bool'
+              fn.localTypes.at(arm.guard.result.ordinal)?._tag !== 'bool'
             ) {
               violations.push(
                 Object.freeze({
@@ -2055,7 +2182,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   rule: 'InvalidMatchGuard',
                   function: fn.id,
                   region: region.id,
-                  detail: `arm #${arm.id.ordinal} guard does not produce Bool`,
+                  detail: `arm #${arm.id.ordinal} guard does not produce bool`,
                 }),
               )
             }
@@ -2658,7 +2785,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               protectedTarget?.result._tag === 'EffectValue' &&
               !SilkType.equals(protectedTarget.result.type, operation.protectedValueType.type)) ||
             !SilkType.equals(protectedRunner.result.type, operation.protectedType.type) ||
-            retriesType?._tag !== 'I32' ||
+            retriesType?._tag !== 'i32' ||
             (operation.protectedType.type.failures.length > 0 &&
               (operation.propagationType === undefined || !mappingsValid))
           )
@@ -2701,6 +2828,10 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ConvertInteger':
+      return `${localText(operation.destination)} = convert ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'CheckedInteger':
+      return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')} ${typeText(operation.sourceType)} -> ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ValidateLayout':
       return `${localText(operation.destination)} = layout-make bytes=${localText(operation.bytes)} alignment=${localText(operation.alignment)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RepeatLayout':
@@ -2710,7 +2841,7 @@ const operationText = (operation: Operation): string => {
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferCount':
-      return `${localText(operation.destination)} = raw-buffer-count ${localText(operation.buffer)} : Usize ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = raw-buffer-count ${localText(operation.buffer)} : usize ${provenanceText(operation.provenance)}`
     case 'RawBufferSlot':
       return `${localText(operation.destination)} = raw-buffer-slot ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotWrite':
@@ -2728,7 +2859,7 @@ const operationText = (operation: Operation): string => {
     case 'EndLoan':
       return `end-loan l${operation.borrow.ordinal} ${localText(operation.slice)} ${provenanceText(operation.provenance)}`
     case 'SliceLength':
-      return `${localText(operation.destination)} = slice-length ${localText(operation.slice)} : I32 ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = slice-length ${localText(operation.slice)} : i32 ${provenanceText(operation.provenance)}`
     case 'ConvertUnion':
       return `${localText(operation.destination)} = union-${operation.conversion.toLowerCase()} ${localText(operation.source)} ${typeText(operation.sourceType)} -> ${typeText(operation.targetType)} access=${operation.access} mapping=${operation.mappings.map((mapping) => `${SilkType.encode(mapping.source)}#${mapping.sourceOrdinal}->${SilkType.encode(mapping.target)}#${mapping.targetOrdinal}`).join(',')} ${provenanceText(operation.provenance)}`
     case 'Call':
@@ -2876,8 +3007,8 @@ const sampleSpan = (
   )
 const local = (ordinal: number): LocalId => Object.freeze({ _tag: 'Local', ordinal })
 const region = (ordinal: number): RegionId => Object.freeze({ _tag: 'Region', ordinal })
-const i32: Type = Object.freeze({ _tag: 'I32' })
-const bool: Type = Object.freeze({ _tag: 'Bool' })
+const i32: Type = Object.freeze({ _tag: 'i32' })
+const bool: Type = Object.freeze({ _tag: 'bool' })
 const canonical = (module: string, name: string): DeclarationIndex.CanonicalId =>
   Object.freeze({ _tag: 'CanonicalDeclarationId', module, name })
 const instance = (declaration: DeclarationIndex.CanonicalId): Instances.InstanceKey =>
@@ -2891,14 +3022,14 @@ const instance = (declaration: DeclarationIndex.CanonicalId): Instances.Instance
 export const samples = (): ReadonlyArray<Module> => {
   const source = SourceFile.make(
     'sample://regions.silk',
-    Uint8Array.from('pub fn answer() -> I32 { return 42 }', (char) => char.charCodeAt(0)),
+    Uint8Array.from('pub fn answer() -> i32 { return 42 }', (char) => char.charCodeAt(0)),
   )
   const provenance = (start: number, end: number, generated = false): Provenance =>
     Object.freeze({ span: sampleSpan(source, start, end), generated })
   const straight: Module = Object.freeze({
     _tag: 'MirModule',
     module: source.id,
-    layout: Layout.make(Target.aarch64AppleDarwin, ['I32']),
+    layout: Layout.make(Target.aarch64AppleDarwin, ['i32']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,
@@ -2934,7 +3065,7 @@ export const samples = (): ReadonlyArray<Module> => {
   const conditional: Module = Object.freeze({
     _tag: 'MirModule',
     module: source.id,
-    layout: Layout.make(Target.aarch64AppleDarwin, ['I32', 'Bool']),
+    layout: Layout.make(Target.aarch64AppleDarwin, ['i32', 'bool']),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,

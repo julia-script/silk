@@ -1,6 +1,7 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Match from './Match.js'
+import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -82,25 +83,12 @@ export interface LoopId {
 
 /** The closed built-in operation vocabulary of the compiler-known actors. */
 export type BuiltinOperation =
-  | 'Add'
-  | 'Subtract'
-  | 'Multiply'
-  | 'Divide'
-  | 'Remainder'
-  | 'Negate'
-  | 'Equals'
-  | 'NotEquals'
-  | 'LessThan'
-  | 'LessOrEqual'
-  | 'GreaterThan'
-  | 'GreaterOrEqual'
-  | 'Not'
+  | Scalar.OperationCode
   | 'LayoutMake'
   | 'LayoutOf'
   | 'LayoutRepeat'
   | 'SystemAllocatorMake'
   | 'AllocatorAllocate'
-  | 'UnitMake'
   | 'RawBufferFrom'
   | 'RawBufferSlot'
   | 'RawBufferCount'
@@ -172,8 +160,13 @@ export type WritePlace = OwnedWritePlace | BorrowedWritePlace
 export type Expression =
   | {
       readonly _tag: 'IntegerLiteral'
-      readonly value: number | bigint
+      readonly value: bigint
       readonly type: DeclarationIndex.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'UnitLiteral'
+      readonly type: typeof Type.unit
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -217,7 +210,7 @@ export type Expression =
   | {
       readonly _tag: 'UnionConvert'
       readonly source: Expression
-      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Never
+      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Bottom
       readonly target: Type.StructuralUnion
       readonly conversion: 'Inject' | 'Widen'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
@@ -325,7 +318,7 @@ export type Expression =
   | {
       readonly _tag: 'SliceLength'
       readonly slice: Expression
-      readonly type: 'I32'
+      readonly type: 'usize'
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -879,7 +872,11 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       }
     }
     if (expression._tag === 'SliceLength') {
-      if (expression.slice._tag === 'Unavailable' || !Type.isSlice(expression.slice.type)) {
+      if (
+        expression.slice._tag === 'Unavailable' ||
+        !Type.isSlice(expression.slice.type) ||
+        !Type.equals(expression.type, 'usize')
+      ) {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
       }
     }
@@ -888,7 +885,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         expression.slice._tag === 'Unavailable' ||
         !Type.equals(expression.slice.type, expression.sourceType) ||
         expression.index._tag === 'Unavailable' ||
-        !Type.equals(expression.index.type, 'I32') ||
+        !Type.equals(expression.index.type, 'usize') ||
         expression.access !== expression.sourceType.access ||
         !Type.equals(expression.type, expression.sourceType.element)
       ) {
@@ -963,7 +960,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         }
         if (
           arm.guard !== undefined &&
-          (arm.guard._tag === 'Unavailable' || !Type.equals(arm.guard.type, 'Bool'))
+          (arm.guard._tag === 'Unavailable' || !Type.equals(arm.guard.type, 'bool'))
         ) {
           issues.push(Object.freeze({ _tag: 'InvalidMatchGuard', span: arm.guard.span }))
         }
@@ -1085,6 +1082,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   switch (expression._tag) {
     case 'IntegerLiteral':
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'UnitLiteral':
+      return `${indent}unit : () ${spanText(expression.span)}`
     case 'BooleanLiteral':
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'ParameterReference':
@@ -1205,7 +1204,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : `p${expression.root.parameter.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
-        `${indent}slice-length : I32 ${spanText(expression.span)}`,
+        `${indent}slice-length : i32 ${spanText(expression.span)}`,
         encodeExpression(expression.slice, depth + 1),
       ].join('\n')
     case 'SliceIndexPlace':

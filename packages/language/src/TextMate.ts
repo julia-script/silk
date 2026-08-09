@@ -100,7 +100,7 @@ export const grammar: Grammar = {
       match: `\\b(?:${declarationSpellings.join('|')})\\b`,
     },
     { name: 'constant.language.boolean.silk', match: `\\b(?:${booleanSpellings.join('|')})\\b` },
-    { name: 'support.type.builtin.silk', match: '\\b(?:I32|Bool|Never)\\b' },
+    { name: 'support.type.builtin.silk', match: '\\b(?:i32|bool|never)\\b' },
     // PascalCase identifiers are types by Silk convention (patterns, signatures, generics).
     { name: 'entity.name.type.silk', match: '\\b[A-Z][A-Za-z0-9_]*\\b' },
     { name: 'variable.language.wildcard.silk', match: '\\b_\\b' },

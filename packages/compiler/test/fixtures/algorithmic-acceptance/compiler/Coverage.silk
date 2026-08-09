@@ -1,14 +1,14 @@
 import compiler.Member { First, Second, Third, decode }
 
 struct FoldState {
-  remaining: I32
-  score: I32
-  seenFirst: Bool
-  seenSecond: Bool
-  seenThird: Bool
+  remaining: i32
+  score: i32
+  seenFirst: bool
+  seenSecond: bool
+  seenThird: bool
 }
 
-pub fn fold(codes: &[I32]) -> I32 {
+pub fn fold(codes: &[i32]) -> i32 {
   let mut state = FoldState {
     remaining: 3,
     score: 10,
@@ -16,7 +16,7 @@ pub fn fold(codes: &[I32]) -> I32 {
     seenSecond: false,
     seenThird: false,
   }
-  let mut index = 0
+  let mut index = usize.add(0, 0)
 
   while index < codes.length {
     let candidate = decode(codes[index])

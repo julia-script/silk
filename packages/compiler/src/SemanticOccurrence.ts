@@ -285,7 +285,7 @@ const collectResolvedType = (
     )
     return
   }
-  if (typeof fact.type === 'string' && fact.type !== 'Never') {
+  if (typeof fact.type === 'string' && fact.type !== 'never') {
     const actor = Intrinsic.findActor(fact.type)
     push(
       pending,

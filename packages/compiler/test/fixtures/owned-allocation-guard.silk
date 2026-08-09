@@ -4,9 +4,9 @@
 // `build` fills a prefix of the buffer and then reports how many elements it initialized, so the
 // exit paths that matter — fallthrough, explicit early drop, and typed failure — all run over the
 // same storage rather than over a shape invented per test.
-struct Element { value: I32 }
+struct Element { value: i32 }
 
-effect fn build(count: Usize) -> I32 ! OutOfMemory {
+effect fn build(count: usize) -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Element; 4]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
@@ -25,8 +25,8 @@ effect fn build(count: Usize) -> I32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   return run Effect.catch<OutOfMemory>(build(4), recover)
 }

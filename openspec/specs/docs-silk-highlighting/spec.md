@@ -38,7 +38,7 @@ site's light and dark themes.
 
 #### Scenario: A silk fence in a docs page
 
-- **WHEN** a docs page contains a ` ```silk ` fence with `pub fn main() -> I32 { return 0 }`
+- **WHEN** a docs page contains a ` ```silk ` fence with `pub fn main() -> i32 { return 0 }`
 - **THEN** the rendered page highlights `pub`, `fn`, and `return` as keywords in both themes
 
 #### Scenario: Unknown fence languages still fall back

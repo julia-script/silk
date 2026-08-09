@@ -6,11 +6,11 @@ import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
 import * as Ownership from '../../dist/Ownership.js'
 
-const source = `fn write(value: I32, values: &mut [I32]) -> I32 {
+const source = `fn write(value: i32, values: &mut [i32]) -> i32 {
   values[0] = value
   return values[0]
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [0]
   let mut callback = write(&mut values)
   let first = callback(40)

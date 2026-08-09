@@ -24,7 +24,7 @@ export type Compatibility =
     }
   | {
       readonly _tag: 'Widen'
-      readonly source: Type.StructuralUnion | Type.Never
+      readonly source: Type.StructuralUnion | Type.Bottom
       readonly target: Type.StructuralUnion
       readonly mappings: ReadonlyArray<MemberMapping>
     }
@@ -32,6 +32,11 @@ export type Compatibility =
       readonly _tag: 'CallableMode'
       readonly source: Type.Callable
       readonly target: Type.Callable
+    }
+  | {
+      readonly _tag: 'Bottom'
+      readonly source: Type.Bottom
+      readonly target: Type.Type
     }
   | {
       readonly _tag: 'Incompatible'
@@ -50,6 +55,7 @@ const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Nominal> | undefin
 /** Checks exact identity, nominal injection, or monotonic union widening without inference. */
 export const check = (source: Type.Type, target: Type.Type): Compatibility => {
   if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
+  if (Type.isNever(source)) return Object.freeze({ _tag: 'Bottom', source, target })
   if (Type.isCallable(source) && Type.isCallable(target)) {
     const sourceRank = source.mode === 'Shared' ? 0 : source.mode === 'Exclusive' ? 1 : 2
     const targetRank = target.mode === 'Shared' ? 0 : target.mode === 'Exclusive' ? 1 : 2
@@ -57,7 +63,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
       sourceRank <= targetRank &&
       source.parameters.length === target.parameters.length &&
       source.parameters.every((parameter, index) =>
-        Type.equals(parameter, target.parameters.at(index) ?? 'Never'),
+        Type.equals(parameter, target.parameters.at(index) ?? 'never'),
       ) &&
       Type.equals(source.result, target.result)
     ) {

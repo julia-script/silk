@@ -7,13 +7,13 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `struct Token { kind: I32 flag: Bool }
+const source = `struct Token { kind: i32 flag: bool }
 struct Empty {}
-fn scan(values: &[I32]) -> I32 { return values.length }
-fn edit(values: &mut [I32]) -> I32 { return values.length }
-fn tokens(values: &[Token]) -> I32 { return values.length }
-fn empty(values: &[Empty]) -> I32 { return values.length }
-pub fn main() -> I32 {
+fn scan(values: &[i32]) -> i32 { return usize.toI32(values.length) }
+fn edit(values: &mut [i32]) -> i32 { return usize.toI32(values.length) }
+fn tokens(values: &[Token]) -> i32 { return usize.toI32(values.length) }
+fn empty(values: &[Empty]) -> i32 { return usize.toI32(values.length) }
+pub fn main() -> i32 {
   let first = [1, 2, 3]
   let mut second = [1, 2, 3, 4, 5, 6]
   let tokenValues = [Token { kind: 1, flag: true }]
@@ -28,7 +28,7 @@ pub fn main() -> I32 {
 const snapshot = (target: 'wasm32-unknown-unknown' | 'x86_64-unknown-linux-gnu') =>
   Analysis.ofSource('slices/Layout', ascii(source), target)
 
-it.effect('plans target-width address plus I32 slice layouts and heterogeneous lanes', () =>
+it.effect('plans target-width address plus usize slice layouts and heterogeneous lanes', () =>
   Effect.gen(function* () {
     const wasm = yield* snapshot('wasm32-unknown-unknown')
     const native = yield* snapshot('x86_64-unknown-linux-gnu')
@@ -38,8 +38,8 @@ it.effect('plans target-width address plus I32 slice layouts and heterogeneous l
     assert.strictEqual(nativePlan._tag, 'Available')
     if (wasmPlan._tag !== 'Available' || nativePlan._tag !== 'Available') return
 
-    const shared = Type.slice('Shared', 'I32')
-    const exclusive = Type.slice('Exclusive', 'I32')
+    const shared = Type.slice('Shared', 'i32')
+    const exclusive = Type.slice('Exclusive', 'i32')
     const wasmEntry = Layout.entry(wasmPlan.value, shared)
     const nativeEntry = Layout.entry(nativePlan.value, shared)
     assert.strictEqual(wasmEntry?.representation._tag, 'Slice')
@@ -67,7 +67,7 @@ it.effect('plans target-width address plus I32 slice layouts and heterogeneous l
         nativeEntry.representation.length.offset,
         nativeEntry.representation.tailPadding,
       ],
-      [16, 8, 64, 8, 4],
+      [16, 8, 64, 8, 0],
     )
     assert.deepEqual(
       Layout.entry(wasmPlan.value, exclusive)?.representation,
@@ -85,7 +85,7 @@ it.effect('plans target-width address plus I32 slice layouts and heterogeneous l
       })),
       [
         { type: 'Address', bits: 32, selector: 'SliceAddressSelector' },
-        { type: 'I32', bits: undefined, selector: 'SliceLengthSelector' },
+        { type: 'usize', bits: undefined, selector: 'SliceLengthSelector' },
       ],
     )
     assert.deepEqual(Layout.verify(wasmPlan.value), [])
@@ -112,7 +112,7 @@ it.effect('retains aggregate and zero-sized element stride independently of logi
       emptySlice?.representation._tag === 'Slice' ? emptySlice.representation.stride : undefined,
       0,
     )
-    assert.include(Layout.encode(selected.value), 'Address<I32,i32>')
+    assert.include(Layout.encode(selected.value), 'Address<i32,i32>')
   }),
 )
 
@@ -122,7 +122,7 @@ it.effect('rejects a malformed address lane width', () =>
     const selected = Analysis.layoutOf(self)
     assert.strictEqual(selected._tag, 'Available')
     if (selected._tag !== 'Available') return
-    const type = Type.slice('Shared', 'I32')
+    const type = Type.slice('Shared', 'i32')
     const shape = Layout.callingShape(selected.value, type)
     if (shape === undefined) throw new RangeError('missing shared slice shape')
     const malformedShape: Layout.CallingShape = Object.freeze({
@@ -131,7 +131,7 @@ it.effect('rejects a malformed address lane width', () =>
         Object.freeze({
           _tag: 'CallingLane',
           path: shape.lanes.at(0)?.path ?? Object.freeze([]),
-          type: Object.freeze({ _tag: 'Address', element: 'I32', bits: 64 }),
+          type: Object.freeze({ _tag: 'Address', element: 'i32', bits: 64 }),
         }),
         ...shape.lanes.slice(1),
       ]),

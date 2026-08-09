@@ -19,7 +19,7 @@ one match, no match, and multiple matches without discarding any collected decla
 
 #### Scenario: Collect the accepted declaration
 
-- **WHEN** the accepted fixture `pub fn main() -> I32 { return 42 }` is analyzed
+- **WHEN** the accepted fixture `pub fn main() -> i32 { return 42 }` is analyzed
 - **THEN** one public function fact named `main` is available at ordinal zero with zero parameters, a canonical identity naming its module and `main`, and provenance to its original function and name syntax
 
 #### Scenario: Count and collect typed parameters
@@ -49,7 +49,7 @@ its argument contract has the wrong arity, while the caller's return compatibili
 to compare only the returned expression type with the caller's declared return type.
 
 #### Scenario: Retain a result type across wrong arity
-- **WHEN** an `I32` function is called with the wrong number of otherwise available arguments
+- **WHEN** an `i32` function is called with the wrong number of otherwise available arguments
 - **THEN** the call expression type and caller return compatibility remain available while the separate call contract is an arity mismatch
 
 #### Scenario: Withhold a contract without changing name resolution
@@ -60,13 +60,13 @@ to compare only the returned expression type with the caller's declared return t
 Every function fact SHALL publish one ordered parameter declaration fact for every concrete
 parameter declaration. A parameter identity SHALL combine its owning function identity with its
 zero-based concrete parameter ordinal. Each fact SHALL expose its name state, declared-type state,
-and exact syntax provenance. The exact spelling `I32` SHALL resolve to the bootstrap type, an unknown
+and exact syntax provenance. The exact spelling `i32` SHALL resolve to the bootstrap type, an unknown
 present type SHALL produce `SEM0001`, and missing or damaged syntax SHALL remain unavailable without
 duplicating parser diagnostics.
 
 #### Scenario: Collect one typed parameter
-- **WHEN** `identity` declares `value: I32`
-- **THEN** its first parameter has ordinal zero, a present name `value`, a resolved `I32` type, and provenance to the exact parameter, name, and type syntax
+- **WHEN** `identity` declares `value: i32`
+- **THEN** its first parameter has ordinal zero, a present name `value`, a resolved `i32` type, and provenance to the exact parameter, name, and type syntax
 
 #### Scenario: Keep parameter identities function-local
 - **WHEN** two functions each declare a first parameter named `value`
@@ -110,8 +110,8 @@ inferred type; all other reference or type states SHALL keep the expression type
 A binding SHALL NOT be referenced before its own statement completes.
 
 #### Scenario: Resolve a returned parameter
-- **WHEN** `identity(value: I32) -> I32` returns `value`
-- **THEN** the returned expression resolves to parameter zero, has type `I32`, and the function return is compatible
+- **WHEN** `identity(value: i32) -> i32` returns `value`
+- **THEN** the returned expression resolves to parameter zero, has type `i32`, and the function return is compatible
 
 #### Scenario: Resolve a parameter used as an argument
 - **WHEN** a function passes its parameter `value` as a call argument
@@ -128,7 +128,7 @@ A binding SHALL NOT be referenced before its own statement completes.
 #### Scenario: Resolve a returned binding
 
 - **WHEN** a body spells `let value = 42 return value`
-- **THEN** the returned expression resolves to that binding with its inferred `I32` type
+- **THEN** the returned expression resolves to that binding with its inferred `i32` type
 
 #### Scenario: Reject a use before the binding
 
@@ -164,11 +164,11 @@ diagnostics.
 
 #### Scenario: Collect a literal argument
 - **WHEN** `main` returns `identity(42)`
-- **THEN** the call has one argument fact at ordinal zero with exact value `42`, type `I32`, and provenance to the literal syntax
+- **THEN** the call has one argument fact at ordinal zero with exact value `42`, type `i32`, and provenance to the literal syntax
 
 #### Scenario: Collect a parameter-reference argument
 - **WHEN** a function calls `identity(value)` using its resolved local parameter
-- **THEN** the call's first argument retains that parameter reference and its available `I32` type
+- **THEN** the call's first argument retains that parameter reference and its available `i32` type
 
 #### Scenario: Preserve argument source order
 - **WHEN** a call contains two concrete arguments
@@ -215,11 +215,11 @@ syntax-unavailable or when any mapped type is unresolved or unavailable. Every m
 retain the exact argument and target-parameter identities and syntax provenance.
 
 #### Scenario: Bind one compatible argument
-- **WHEN** `identity(value: I32)` is called as `identity(42)`
+- **WHEN** `identity(value: i32)` is called as `identity(42)`
 - **THEN** argument zero maps to parameter zero and the call contract is compatible
 
 #### Scenario: Bind two arguments positionally
-- **WHEN** a uniquely resolved two-parameter function is called with two available `I32` arguments
+- **WHEN** a uniquely resolved two-parameter function is called with two available `i32` arguments
 - **THEN** each argument maps to the parameter with the same ordinal and the call contract is compatible
 
 #### Scenario: Preserve too few arguments
@@ -261,15 +261,15 @@ from this call-contract fact.
 - **WHEN** equivalent calls and declarations are analyzed repeatedly in fresh processes
 - **THEN** argument ordinals, mappings, compatibility states, reason data, and diagnostics are identical
 
-### Requirement: Built-in I32 type fact
-Semantic analysis SHALL resolve the exact return-type spelling `I32` for every function to the
+### Requirement: Built-in i32 type fact
+Semantic analysis SHALL resolve the exact return-type spelling `i32` for every function to the
 bootstrap signed 32-bit integer type. Any other present identifier spelling SHALL remain an explicit
 unresolved type and produce one `SEM0001` semantic diagnostic at that identifier's source span.
 Missing or syntax-damaged return-type syntax SHALL remain unavailable without duplicating its parser
 diagnostic.
 
 #### Scenario: Resolve bootstrap return types independently
-- **WHEN** two functions each declare `I32`
+- **WHEN** two functions each declare `i32`
 - **THEN** each function fact carries its own resolved built-in signed 32-bit return type and syntax provenance
 
 #### Scenario: Diagnose one unknown return type
@@ -280,19 +280,19 @@ diagnostic.
 - **WHEN** parser recovery leaves one function's return-type identifier missing or inside an error region
 - **THEN** that function's return-type fact is unavailable without changing the other function's facts or repeating the syntax diagnostic
 
-### Requirement: Exact decimal I32 value fact
+### Requirement: Exact decimal i32 value fact
 Semantic analysis SHALL interpret each present decimal-integer return expression as an exact
-non-negative integer and publish its `I32` value when it is at most `2147483647`. A larger value
+non-negative integer and publish its `i32` value when it is at most `2147483647`. A larger value
 SHALL remain explicitly unavailable and produce one `SEM0002` diagnostic covering the complete
 literal span. Analysis MUST NOT lose precision because of the host numeric representation.
 
 #### Scenario: Analyze two integer values independently
 - **WHEN** two functions return `42` and `0`
-- **THEN** their ordered function facts contain the exact available `I32` values `42` and `0`
+- **THEN** their ordered function facts contain the exact available `i32` values `42` and `0`
 
-#### Scenario: Accept the positive I32 boundary
+#### Scenario: Accept the positive i32 boundary
 - **WHEN** one returned literal is `2147483647`
-- **THEN** that function's expression has the exact available `I32` value `2147483647`
+- **THEN** that function's expression has the exact available `i32` value `2147483647`
 
 #### Scenario: Diagnose one out-of-range integer
 - **WHEN** one returned literal is `2147483648`
@@ -305,18 +305,18 @@ literal span. Analysis MUST NOT lose precision because of the host numeric repre
 ### Requirement: First return compatibility fact
 Every function fact SHALL publish return compatibility as `Compatible` only when that function's
 declared return type and returned expression type are both available and equal. An integer expression
-uses its existing `I32` type. A uniquely resolved call expression SHALL use its target declaration's
+uses its existing `i32` type. A uniquely resolved call expression SHALL use its target declaration's
 resolved return type even for forward or self references. Compatibility SHALL be `Unavailable` when
 the caller type, expression type, or call target is unresolved, missing, ambiguous, or invalid, and
 one function's compatibility MUST NOT overwrite another function's facts.
 
 #### Scenario: Check an integer return
-- **WHEN** a function declares `I32` and returns an available `I32` integer
+- **WHEN** a function declares `i32` and returns an available `i32` integer
 - **THEN** that function reports `Compatible`
 
 #### Scenario: Check a resolved call return
-- **WHEN** `answer` declares `I32` and `main` declares `I32` and returns a uniquely resolved call to `answer`
-- **THEN** the call expression has type `I32` and `main` reports `Compatible`
+- **WHEN** `answer` declares `i32` and `main` declares `i32` and returns a uniquely resolved call to `answer`
+- **THEN** the call expression has type `i32` and `main` reports `Compatible`
 
 #### Scenario: Withhold compatibility for an unknown call
 - **WHEN** a function returns a call whose reference is missing
@@ -412,15 +412,15 @@ Every complete binding statement SHALL publish one binding fact: its bound name,
 span, ordinal among the function's statements, and inferred type. The inferred type SHALL be its
 initializer expression's type; an unavailable initializer type SHALL keep the binding's type
 explicitly unavailable carrying the originating diagnostic's identity where one exists, and MUST
-NOT default to `I32`. Name resolution SHALL remain flat and non-shadowing: a binding whose name
+NOT default to `i32`. Name resolution SHALL remain flat and non-shadowing: a binding whose name
 repeats an enclosing parameter or an earlier binding in the same function SHALL produce one
 `SEM0008` diagnostic at the rebinding span carrying the original span as a related span, and
 references to that name SHALL keep resolving to the original declaration.
 
 #### Scenario: Infer a binding type from its initializer
 
-- **WHEN** a body spells `let value = identity(42)` and `identity` resolves with an `I32` result
-- **THEN** the binding fact carries inferred type `I32` and its exact declaration span
+- **WHEN** a body spells `let value = identity(42)` and `identity` resolves with an `i32` result
+- **THEN** the binding fact carries inferred type `i32` and its exact declaration span
 
 #### Scenario: Keep a damaged initializer explicit
 
@@ -429,7 +429,7 @@ references to that name SHALL keep resolving to the original declaration.
 
 #### Scenario: Reject shadowing a parameter
 
-- **WHEN** `identity(value: I32)` declares `let value = 42`
+- **WHEN** `identity(value: i32)` declares `let value = 42`
 - **THEN** one `SEM0008` diagnostic marks the rebinding with the parameter's span as a related span, and later `value` references still resolve to the parameter
 
 #### Scenario: Reject rebinding a binding
@@ -448,7 +448,7 @@ diagnostic as a bare identifier.
 #### Scenario: Resolve a moved binding
 
 - **WHEN** a body spells `let value = 42 return move value`
-- **THEN** the returned expression is a move fact resolving to the binding with type `I32`
+- **THEN** the returned expression is a move fact resolving to the binding with type `i32`
 
 #### Scenario: Diagnose an unknown moved name
 
@@ -458,7 +458,7 @@ diagnostic as a bare identifier.
 ### Requirement: Signed integer literal facts
 
 A present integer literal with a directly applied minus sign SHALL produce a signed exact value
-fact typed `I32` in its context. Literals SHALL be range-checked against the full signed `I32`
+fact typed `i32` in its context. Literals SHALL be range-checked against the full signed `i32`
 range: values above `2147483647` or below `-2147483648` SHALL keep the existing `SEM0002`
 out-of-range diagnostic and an explicit out-of-range fact, and `-2147483648` itself SHALL be a
 valid exact value.
@@ -466,7 +466,7 @@ valid exact value.
 #### Scenario: Analyze a negative literal
 
 - **WHEN** a body returns `-42`
-- **THEN** the integer fact carries the exact value `-42` typed `I32` with no diagnostics
+- **THEN** the integer fact carries the exact value `-42` typed `i32` with no diagnostics
 
 #### Scenario: Accept the signed minimum
 
@@ -481,9 +481,9 @@ valid exact value.
 ### Requirement: Compiler-known actor operations resolve without source declarations
 
 Qualified calls SHALL resolve against the compiler-known built-in actor table rather than source
-declarations: the `I32` actor SHALL expose the ordinary trapping arithmetic operations `add`,
-`subtract`, `multiply`, `divide`, and `remainder`, each accepting two `I32` arguments and
-producing `I32`. Built-in operations MUST NOT appear in the declaration index, MUST NOT be
+declarations: the `i32` actor SHALL expose the ordinary trapping arithmetic operations `add`,
+`subtract`, `multiply`, `divide`, and `remainder`, each accepting two `i32` arguments and
+producing `i32`. Built-in operations MUST NOT appear in the declaration index, MUST NOT be
 callable by bare name, and their argument facts SHALL follow the same recursive analysis and
 arity checking as user calls, with a wrong arity keeping the expression unavailable. A qualified
 call naming an unknown actor SHALL produce one `SEM0009` diagnostic, and a known actor with an
@@ -492,8 +492,8 @@ the expression kept explicitly unavailable.
 
 #### Scenario: Resolve a built-in arithmetic call
 
-- **WHEN** a body returns `I32.add(40, 2)`
-- **THEN** the call fact resolves to the built-in operation, both argument facts are exact values, the expression type is `I32`, and no diagnostics are produced
+- **WHEN** a body returns `i32.add(40, 2)`
+- **THEN** the call fact resolves to the built-in operation, both argument facts are exact values, the expression type is `i32`, and no diagnostics are produced
 
 #### Scenario: Diagnose an unknown actor
 
@@ -502,7 +502,7 @@ the expression kept explicitly unavailable.
 
 #### Scenario: Diagnose an unknown operation
 
-- **WHEN** a body returns `I32.frobnicate(1, 2)`
+- **WHEN** a body returns `i32.frobnicate(1, 2)`
 - **THEN** one `SEM0010` diagnostic marks the operation identifier and the expression is explicitly unavailable
 
 #### Scenario: Keep bare built-in names unresolved
@@ -510,29 +510,29 @@ the expression kept explicitly unavailable.
 - **WHEN** a body returns `add(1, 2)` with no such source declaration
 - **THEN** the call keeps the existing unknown-function diagnostic rather than resolving to the built-in actor
 
-### Requirement: Bool values and comparisons elaborate with exact types
+### Requirement: bool values and comparisons elaborate with exact types
 
-`true` and `false` SHALL produce exact boolean value facts typed `Bool`. The built-in `I32`
+`true` and `false` SHALL produce exact boolean value facts typed `bool`. The built-in `i32`
 actor SHALL additionally expose the comparison operations `equals`, `notEquals`, `lessThan`,
-`lessOrEqual`, `greaterThan`, and `greaterOrEqual` — two `I32` arguments producing `Bool` — and
-a built-in `Bool` actor SHALL expose `not` with one `Bool` argument producing `Bool`. Built-in
+`lessOrEqual`, `greaterThan`, and `greaterOrEqual` — two `i32` arguments producing `bool` — and
+a built-in `bool` actor SHALL expose `not` with one `bool` argument producing `bool`. Built-in
 operations SHALL carry per-operation contracts (parameter types, result type, arity) and
 resolution SHALL keep the existing `SEM0009`/`SEM0010` diagnostics for unknown actors and
 operations.
 
 #### Scenario: Elaborate a comparison
 
-- **WHEN** a body returns `I32.lessThan(1, 2)`
-- **THEN** the call resolves to the built-in comparison with expression type `Bool` and no diagnostics
+- **WHEN** a body returns `i32.lessThan(1, 2)`
+- **THEN** the call resolves to the built-in comparison with expression type `bool` and no diagnostics
 
 #### Scenario: Elaborate boolean negation
 
-- **WHEN** a body returns `Bool.not(true)`
-- **THEN** the call resolves with one boolean argument and expression type `Bool`
+- **WHEN** a body returns `bool.not(true)`
+- **THEN** the call resolves with one boolean argument and expression type `bool`
 
 ### Requirement: Conditions and arguments are type-checked
 
-The condition of a conditional statement SHALL elaborate to type `Bool`; a present condition of
+The condition of a conditional statement SHALL elaborate to type `bool`; a present condition of
 any other available type SHALL produce one `SEM0011` diagnostic at the condition's span, with no
 truthiness or coercion, and the conditional's arms still elaborated. A call argument mapped to a
 parameter of a known different type — user or built-in — SHALL produce one `SEM0012` diagnostic
@@ -545,17 +545,17 @@ at the argument's span and keep the call expression explicitly unavailable.
 
 #### Scenario: Reject a boolean argument to arithmetic
 
-- **WHEN** a body returns `I32.add(true, 1)`
+- **WHEN** a body returns `i32.add(true, 1)`
 - **THEN** one `SEM0012` diagnostic marks the first argument and the call expression is explicitly unavailable
 
 #### Scenario: Reject a mistyped user call argument
 
-- **WHEN** `identity(value: Bool)` is called with `identity(42)`
+- **WHEN** `identity(value: bool)` is called with `identity(42)`
 - **THEN** one `SEM0012` diagnostic marks the argument and the call expression is explicitly unavailable
 
-#### Scenario: Check the return statement against a Bool contract
+#### Scenario: Check the return statement against a bool contract
 
-- **WHEN** `pub fn flag() -> Bool { return true }` and `pub fn broken() -> Bool { return 1 }` are elaborated
+- **WHEN** `pub fn flag() -> bool { return true }` and `pub fn broken() -> bool { return 1 }` are elaborated
 - **THEN** `flag`'s return compatibility is compatible and `broken`'s is unavailable
 
 ### Requirement: Operator and pipeline facts expose their canonical resolution
@@ -573,12 +573,12 @@ operator, callable, type, or argument.
 #### Scenario: Inspect a resolved infix operation
 
 - **WHEN** a body returns `40 + 2`
-- **THEN** its fact identifies `I32.add`, two ordered `I32` operands, an available `I32` result, and the complete infix span
+- **THEN** its fact identifies `i32.add`, two ordered `i32` operands, an available `i32` result, and the complete infix span
 
 #### Scenario: Inspect equality selected by operand type
 
 - **WHEN** one function returns `1 == 1` and another returns `true == false`
-- **THEN** their facts resolve to `I32.equals` and `Bool.equals` respectively with `Bool` results
+- **THEN** their facts resolve to `i32.equals` and `bool.equals` respectively with `bool` results
 
 #### Scenario: Keep a mistyped prefix unavailable
 
@@ -587,8 +587,8 @@ operator, callable, type, or argument.
 
 #### Scenario: Inspect a section application pipeline
 
-- **WHEN** a body returns `2 |> I32.add(3)`
-- **THEN** facts distinguish construction of `I32.add(3)` from its unary application to `2`
+- **WHEN** a body returns `2 |> i32.add(3)`
+- **THEN** facts distinguish construction of `i32.add(3)` from its unary application to `2`
 
 #### Scenario: Preserve an unavailable callable
 
@@ -662,7 +662,7 @@ element failures.
 
 #### Scenario: Retain incompatible elements
 
-- **WHEN** a literal contains compatible `I32` elements and one `Bool` element
+- **WHEN** a literal contains compatible `i32` elements and one `bool` element
 - **THEN** every element fact remains queryable and the literal has an explicit incompatible-type outcome
 
 ### Requirement: Index facts expose place and bounds knowledge
@@ -674,12 +674,12 @@ steps causally unavailable without alternate lookup.
 
 #### Scenario: Diagnose a constant out-of-bounds index
 
-- **WHEN** `values[4]` indexes `Array<I32, 4>`
+- **WHEN** `values[4]` indexes `Array<i32, 4>`
 - **THEN** the index fact records the canonical length and literal index and reports a stable semantic diagnostic
 
 #### Scenario: Retain a dynamic bounds check
 
-- **WHEN** an available `I32` parameter indexes an array
+- **WHEN** an available `i32` parameter indexes an array
 - **THEN** the fact records a required runtime check and the canonical element type
 
 ### Requirement: Mutation facts identify one writable place
@@ -695,7 +695,7 @@ diagnostic.
 #### Scenario: Resolve a nested array write
 
 - **WHEN** source assigns to `pairs[index].left`
-- **THEN** facts identify the mutable array root, checked index, canonical field, exact `I32` destination, and assignment compatibility
+- **THEN** facts identify the mutable array root, checked index, canonical field, exact `i32` destination, and assignment compatibility
 
 #### Scenario: Diagnose a non-writable destination
 
@@ -711,17 +711,17 @@ diagnostic.
 
 Each loop SHALL publish a canonical loop identity, typed condition fact, ordered body statements,
 lexical parent, and complete-or-unavailable outcome. Every `break` and `continue` SHALL identify its
-innermost enclosing loop and exact transfer span. A non-`Bool` condition or transfer outside a loop
+innermost enclosing loop and exact transfer span. A non-`bool` condition or transfer outside a loop
 SHALL produce a stable diagnostic without erasing independent nested facts.
 
 #### Scenario: Type a valid while condition
 
-- **WHEN** a `while` condition is a comparison over `I32`
-- **THEN** the loop fact records the canonical `Bool` condition and ordered body facts
+- **WHEN** a `while` condition is a comparison over `i32`
+- **THEN** the loop fact records the canonical `bool` condition and ordered body facts
 
 #### Scenario: Diagnose an invalid loop condition
 
-- **WHEN** a `while` condition has type `I32`
+- **WHEN** a `while` condition has type `i32`
 - **THEN** semantic analysis reports the exact expected and actual types and publishes no executable loop outcome
 
 ### Requirement: Union facts expose canonical and source member structure
@@ -816,7 +816,7 @@ and an explicit unavailable state when any prerequisite is missing.
 
 #### Scenario: Resolve different arrays to one slice type
 
-- **WHEN** `&short` and `&long` borrow `Array<I32, 3>` and `Array<I32, 6>` for `&[I32]`
+- **WHEN** `&short` and `&long` borrow `Array<i32, 3>` and `Array<i32, 6>` for `&[i32]`
 - **THEN** both borrow facts retain their distinct source types and the same canonical resulting slice type
 
 #### Scenario: Preserve an invalid exclusive borrow
@@ -826,8 +826,8 @@ and an explicit unavailable state when any prerequisite is missing.
 
 ### Requirement: Slice operations publish runtime-place facts
 
-The `length` projection of an available slice SHALL have type `I32`. Indexing SHALL publish one
-borrowed place fact whose element type and access derive from the slice, whose index fact is `I32`,
+The `length` projection of an available slice SHALL have type `i32`. Indexing SHALL publish one
+borrowed place fact whose element type and access derive from the slice, whose index fact is `i32`,
 and whose bounds are identified as runtime slice bounds rather than a fabricated fixed length.
 
 #### Scenario: Analyze a shared slice index
@@ -837,19 +837,19 @@ and whose bounds are identified as runtime slice bounds rather than a fabricated
 
 #### Scenario: Keep an unavailable slice index explicit
 
-- **WHEN** a slice index has an unavailable or non-`I32` expression
+- **WHEN** a slice index has an unavailable or non-`i32` expression
 - **THEN** the index and source facts remain inspectable while no valid borrowed element place is fabricated
 
 ### Requirement: Semantic facts retain exact pointer-sized values
 
-Semantic analysis SHALL publish canonical `Usize` types and exact non-negative integer magnitudes
-without narrowing them to `I32` or an imprecise host number. Target-independent facts SHALL remain
+Semantic analysis SHALL publish canonical `usize` types and exact non-negative integer magnitudes
+without narrowing them to `i32` or an imprecise host number. Target-independent facts SHALL remain
 available before selection; target range validation SHALL publish an explicit available or
 unavailable fact with originating diagnostics rather than substituting a truncated value.
 
 #### Scenario: Preserve a 64-bit magnitude
 
-- **WHEN** a contextual `Usize` literal exceeds JavaScript's safe integer range
+- **WHEN** a contextual `usize` literal exceeds JavaScript's safe integer range
 - **THEN** semantic facts retain its exact digits and canonical value for later target validation
 
 ### Requirement: Semantic facts retain Effect construction and residual failure rows

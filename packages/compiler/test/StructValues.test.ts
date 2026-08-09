@@ -10,10 +10,10 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `struct Pair { left: I32 right: I32 }
+const source = `struct Pair { left: i32 right: i32 }
 fn make() -> Pair { return Pair { right: 2, left: 1 } }
 fn pass(value: Pair) -> Pair { return move value }
-pub fn main() -> I32 { let pair = pass(make()) return pair.left + pair.right }`
+pub fn main() -> i32 { let pair = pass(make()) return pair.left + pair.right }`
 
 const snapshot = (target?: string) => Analysis.ofSource('struct-values/main', ascii(source), target)
 
@@ -72,11 +72,11 @@ it.effect('evaluates initializers in source order before constructing in declara
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'struct-values/evaluation-order',
-      ascii(`struct Pair { left: I32 right: I32 }
-fn left() -> I32 { return 1 }
-fn right() -> I32 { return 2 }
+      ascii(`struct Pair { left: i32 right: i32 }
+fn left() -> i32 { return 1 }
+fn right() -> i32 { return 2 }
 fn make() -> Pair { return Pair { right: right(), left: left() } }
-pub fn main() -> I32 { let pair = make() return pair.left }`),
+pub fn main() -> i32 { let pair = make() return pair.left }`),
       'wasm32-unknown-unknown',
     )
     const make = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'make')
@@ -99,7 +99,7 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     assert.strictEqual(layout._tag, 'Available')
     if (layout._tag !== 'Available') return
     const pair = layout.value.entries.find(
-      (entry) => Layout.encode(layout.value).includes('Pair') && entry.type !== 'I32',
+      (entry) => Layout.encode(layout.value).includes('Pair') && entry.type !== 'i32',
     )
     assert.notStrictEqual(pair, undefined)
     const shape = pair === undefined ? undefined : Layout.callingShape(layout.value, pair.type)
@@ -166,8 +166,8 @@ it.effect('preserves empty nominal contracts with zero runtime lanes', () =>
   Effect.gen(function* () {
     const text = `struct End {}
 fn end() -> End { return End {} }
-fn consume(value: End) -> I32 { return 7 }
-pub fn main() -> I32 { return consume(end()) }`
+fn consume(value: End) -> i32 { return 7 }
+pub fn main() -> i32 { return consume(end()) }`
     const self = yield* Analysis.ofSource(
       'struct-values/empty',
       ascii(text),
@@ -195,14 +195,14 @@ it.effect('keeps invalid construction, projection, and partial moves phase-owned
   Effect.gen(function* () {
     const invalid = yield* Analysis.ofSource(
       'struct-values/invalid',
-      ascii(`struct Pair { left: I32 right: I32 }
+      ascii(`struct Pair { left: i32 right: i32 }
 struct Outer { pair: Pair }
 fn missing() -> Pair { return Pair { left: 1 } }
 fn duplicate() -> Pair { return Pair { left: 1, left: 2, right: 3 } }
 fn unknown() -> Pair { return Pair { left: 1, right: 2, extra: 3 } }
 fn mistyped() -> Pair { return Pair { left: true, right: 2 } }
 fn partial(value: Outer) -> Pair { return move value.pair }
-pub fn main() -> I32 { return 0 }`),
+pub fn main() -> i32 { return 0 }`),
     )
 
     assert.deepEqual(
@@ -230,13 +230,13 @@ it.effect('allows external factory construction while refusing external raw lite
     const sources = new Map([
       [
         'model/Token',
-        ascii(`pub struct Token { pub kind: I32 }
-pub fn make(kind: I32) -> Token { return Token { kind: kind } }`),
+        ascii(`pub struct Token { pub kind: i32 }
+pub fn make(kind: i32) -> Token { return Token { kind: kind } }`),
       ],
       [
         'app/Main',
         ascii(`import model.Token as Model { Token, make }
-pub fn main() -> I32 { let token = Model.make(1) return token.kind }`),
+pub fn main() -> i32 { let token = Model.make(1) return token.kind }`),
       ],
     ])
     const valid = yield* multiSnapshot('app/Main', sources)
@@ -252,7 +252,7 @@ pub fn main() -> I32 { let token = Model.make(1) return token.kind }`),
         [
           'app/Main',
           ascii(`import model.Token as Model { Token }
-pub fn main() -> I32 { let token = Model.Token { kind: 1 } return token.kind }`),
+pub fn main() -> i32 { let token = Model.Token { kind: 1 } return token.kind }`),
         ],
       ]),
     )

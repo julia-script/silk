@@ -285,7 +285,7 @@ describe('preset catalog', () => {
 
   // The allocation presets are the workbench's only view of the raw storage substrate, so each
   // one has to keep demonstrating the case its label claims — on both an address width where
-  // Usize is 64 bits and one where it is 32.
+  // usize is 64 bits and one where it is 32.
   it('runs every accepted allocation preset to completion on both target widths', () => {
     for (const label of [
       'ok · Self-contained Allocation contract',

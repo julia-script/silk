@@ -58,7 +58,7 @@ it.effect('parses run arguments after -- and preserves the program exit status',
       `${root}/silk.toml`,
       '[package]\nname = "cli-integration"\nversion = "0.1.0"\nroot = "Main.silk"\n',
     )
-    yield* fileSystem.writeFileString(`${root}/Main.silk`, 'pub fn main() -> I32 { return 42 }')
+    yield* fileSystem.writeFileString(`${root}/Main.silk`, 'pub fn main() -> i32 { return 42 }')
 
     const executed = yield* Effect.result(
       Command.runWith(Cli.command, { version: 'test' })([

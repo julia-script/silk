@@ -1,13 +1,13 @@
 mir-module golden/program
 target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
-layout I32 size=4 align=4 repr=signed-i32
-calling I32 lanes=1 I32[]
-fn golden/program.main params=0 locals=3 -> I32 entry=r0
+layout i32 size=4 align=4 repr=signed-i32
+calling i32 lanes=1 i32[]
+fn golden/program.main params=0 locals=3 -> i32 entry=r0
   r0 operation:
-    %0 = literal 42 : I32 [100, 102)
-    %1 = call golden/program.identity(%0) : I32 [91, 103)
-    %2 = call golden/program.identity(%1) : I32 [81, 104)
+    %0 = literal 42 : i32 [100, 102)
+    %1 = call golden/program.identity(%0) : i32 [91, 103)
+    %2 = call golden/program.identity(%1) : i32 [81, 104)
     return %2 [81, 104)
-fn golden/program.identity params=1 locals=1 -> I32 entry=r0
+fn golden/program.identity params=1 locals=1 -> i32 entry=r0
   r0 operation:
     return %0 [43, 49)

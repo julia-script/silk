@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 
-const source = new TextEncoder().encode(`pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`)
+const source = new TextEncoder().encode(`pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`)
 const snapshot = await Effect.runPromise(
   Analysis.ofSource('fixture/llvm-wasm-determinism', source, 'wasm32-unknown-unknown'),
 )

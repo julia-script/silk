@@ -115,23 +115,21 @@ export const infix = (kind: Token.TokenKind): InfixInfo | undefined => infixByTo
 /** Returns the canonical source spelling of one prefix operator. */
 export const prefixSpelling = (self: Prefix): string => (self === 'Negate' ? '-' : '!')
 
-const fixedTargets: Readonly<Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, Target>> =
-  Object.freeze({
-    Negate: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'negate' }),
-    Not: Object.freeze({ actor: Scalar.boolean.spelling, operation: 'not' }),
-    Multiply: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'multiply' }),
-    Divide: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'divide' }),
-    Remainder: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'remainder' }),
-    Add: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'add' }),
-    Subtract: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'subtract' }),
-    LessThan: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'lessThan' }),
-    LessOrEqual: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'lessOrEqual' }),
-    GreaterThan: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'greaterThan' }),
-    GreaterOrEqual: Object.freeze({
-      actor: Scalar.defaultInteger.spelling,
-      operation: 'greaterOrEqual',
-    }),
-  })
+const operationByOperator: Readonly<
+  Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, string>
+> = Object.freeze({
+  Negate: 'negate',
+  Not: 'not',
+  Multiply: 'multiply',
+  Divide: 'divide',
+  Remainder: 'remainder',
+  Add: 'add',
+  Subtract: 'subtract',
+  LessThan: 'lessThan',
+  LessOrEqual: 'lessOrEqual',
+  GreaterThan: 'greaterThan',
+  GreaterOrEqual: 'greaterOrEqual',
+})
 
 /** Returns the canonical actor operation for an operator and its selected equality actor. */
 export const target = (
@@ -144,12 +142,16 @@ export const target = (
       operation: self === 'Equals' ? 'equals' : 'notEquals',
     })
   }
-  const fixed = fixedTargets[self]
-  return equalityActor === Scalar.pointerInteger.spelling &&
-    fixed.actor === Scalar.defaultInteger.spelling &&
-    self !== 'Negate'
-    ? Object.freeze({ actor: Scalar.pointerInteger.spelling, operation: fixed.operation })
-    : fixed
+  return Object.freeze({
+    actor:
+      self === 'Not'
+        ? Scalar.boolean.spelling
+        : Scalar.find(equalityActor)?.category !== 'Integer' ||
+            (self === 'Negate' && Scalar.find(equalityActor)?.signedness !== 'Signed')
+          ? Scalar.defaultInteger.spelling
+          : equalityActor,
+    operation: operationByOperator[self],
+  })
 }
 
 /** The binding power of prefix operators. */

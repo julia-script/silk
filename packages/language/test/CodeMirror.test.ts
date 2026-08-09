@@ -9,10 +9,10 @@ const spellings = (doc: string, category: string): ReadonlyArray<string> =>
   rangesFor(doc, category).map((range) => doc.slice(range.from, range.to))
 
 it('classifies keywords, identifiers, numbers, and operators', () => {
-  const doc = 'pub fn main() -> I32 { return 42 }'
+  const doc = 'pub fn main() -> i32 { return 42 }'
   assert.deepStrictEqual(spellings(doc, 'keyword'), ['pub', 'fn', 'return'])
   assert.deepStrictEqual(spellings(doc, 'identifier'), ['main'])
-  assert.deepStrictEqual(spellings(doc, 'type'), ['I32'])
+  assert.deepStrictEqual(spellings(doc, 'type'), ['i32'])
   assert.deepStrictEqual(spellings(doc, 'number'), ['42'])
   assert.include(spellings(doc, 'operator'), '->')
   assert.include(spellings(doc, 'punctuation'), '{')
@@ -57,7 +57,7 @@ it('highlights parametric conformance syntax through compiler tokens', () => {
 
 it('highlights callable mode keywords without reserving dual', () => {
   assert.deepStrictEqual(
-    spellings('fn(fn(I32) -> I32, mut fn(I32) -> I32, once fn(I32) -> I32) dual', 'keyword'),
+    spellings('fn(fn(i32) -> i32, mut fn(i32) -> i32, once fn(i32) -> i32) dual', 'keyword'),
     ['fn', 'fn', 'mut', 'fn', 'once', 'fn'],
   )
 })
@@ -77,12 +77,12 @@ it('highlights the complete match surface through compiler tokens', () => {
 })
 
 it('highlights bracketed fixed-array punctuation', () => {
-  assert.deepStrictEqual(spellings('[I32; 4]', 'punctuation'), ['[', ';', ']'])
+  assert.deepStrictEqual(spellings('[i32; 4]', 'punctuation'), ['[', ';', ']'])
 })
 
 it('distinguishes generic angles from comparison operators', () => {
   const doc =
-    'fn keep<T>(value: Box<T>, a: I32, b: I32) -> Box<T> { if a < b { return keep<I32>(value) } return value }'
+    'fn keep<T>(value: Box<T>, a: i32, b: i32) -> Box<T> { if a < b { return keep<i32>(value) } return value }'
   assert.deepStrictEqual(spellings(doc, 'type-punctuation'), [
     '<',
     '>',
@@ -99,8 +99,8 @@ it('distinguishes generic angles from comparison operators', () => {
   )
 })
 
-it('classifies Never and executable scalar names as builtin types', () => {
-  assert.deepStrictEqual(spellings('Never | I32 | Bool', 'type'), ['Never', 'I32', 'Bool'])
+it('classifies never and executable scalar names as builtin types', () => {
+  assert.deepStrictEqual(spellings('never | i32 | bool', 'type'), ['never', 'i32', 'bool'])
 })
 
 it('places highlights correctly after multi-byte characters', () => {

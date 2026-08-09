@@ -34,13 +34,18 @@ it.effect(
       const snapshot = yield* Analysis.ofSource(
         'architecture/artifacts',
         ascii(
-          'fn consume(value: Allocation) -> I32 { return 0 }\npub fn main() -> I32 { return 42 }',
+          'fn consume(value: Allocation) -> i32 { return 0 }\npub fn main() -> i32 { return 42 }',
         ),
         'wasm32-unknown-unknown',
       )
       const violations: Array<string> = []
       visit(snapshot, 'snapshot', violations)
       assert.deepEqual(violations, [])
-      assert.notInclude(JSON.stringify(snapshot), 'Arena')
+      assert.notInclude(
+        JSON.stringify(snapshot, (_key, value) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        ),
+        'Arena',
+      )
     }),
 )

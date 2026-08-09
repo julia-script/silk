@@ -10,7 +10,7 @@ import * as ProjectSession from '../src/ProjectSession.js'
 
 const encoder = new TextEncoder()
 
-const document = (uri: string, version: number, source = 'pub fn main() -> I32 { return 42 }') =>
+const document = (uri: string, version: number, source = 'pub fn main() -> i32 { return 42 }') =>
   Document.make({
     uri,
     version,

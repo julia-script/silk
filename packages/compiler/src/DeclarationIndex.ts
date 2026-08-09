@@ -432,6 +432,7 @@ const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'SliceType' ||
     element.kind === 'ReferenceType' ||
     element.kind === 'CallableType' ||
+    element.kind === 'UnitType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
 
@@ -459,6 +460,24 @@ export const analyzeDeclaredType = (
   syntax: SyntaxTree.Node,
   typeParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
 ): TypeResolution => {
+  if (syntax.kind === 'UnitType') {
+    const token = SyntaxTree.directToken(syntax, 'LeftParenthesis')
+    if (token === undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Resolved',
+        type: Type.unit,
+        spelling: '()',
+        token,
+        syntax,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
   if (syntax.kind === 'CallableType') {
     const token = SyntaxTree.directToken(syntax, 'FnKeyword')
     const typeNodes = syntax.children.filter(isDeclaredTypeNode)
@@ -922,7 +941,7 @@ export const analyzeDeclaredType = (
     segments: Object.freeze(segments),
     syntax,
   })
-  if (segments.length === 1 && (Type.isBuiltin(first.spelling) || first.spelling === 'Never')) {
+  if (segments.length === 1 && (Type.isBuiltin(first.spelling) || first.spelling === 'never')) {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',
@@ -1440,11 +1459,32 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       (parameter, parameterOrdinal) =>
         analyzeParameter(source, parameter, id, parameterOrdinal, typeParameters.environment),
     )
-    const returnType = analyzeDeclaredType(
-      source,
-      declaredTypeNode(childNode(node, 'ReturnType')),
-      typeParameters.environment,
-    )
+    const returnSyntax = SyntaxTree.directNode(node, 'ReturnType')
+    const returnType =
+      returnSyntax === undefined
+        ? (() => {
+            const parameterList = childNode(node, 'ParameterList')
+            const token = SyntaxTree.directToken(parameterList, 'RightParenthesis')
+            if (token === undefined)
+              return Object.freeze({
+                fact: Object.freeze({
+                  _tag: 'Unavailable' as const,
+                  syntax: parameterList,
+                }),
+                diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+              })
+            return Object.freeze({
+              fact: Object.freeze({
+                _tag: 'Resolved' as const,
+                type: Type.unit,
+                spelling: '()',
+                token,
+                syntax: parameterList,
+              }),
+              diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+            })
+          })()
+        : analyzeDeclaredType(source, declaredTypeNode(returnSyntax), typeParameters.environment)
     const functionKind =
       SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect'
     const failureRow = collectFailureRow(source, node, typeParameters.environment)
@@ -1740,11 +1780,15 @@ const resolveDeclaredType = (
         argument.fact._tag === 'Resolved' ? argument.fact.type : undefined,
       )
       if (expected === arguments_.length && available.every((argument) => argument !== undefined)) {
-        const type = Type.nominal(
-          target.fact.type.module,
-          target.fact.type.name,
-          available.filter((argument): argument is Type.Type => argument !== undefined),
+        const concrete = available.filter(
+          (argument): argument is Type.Type => argument !== undefined,
         )
+        const type =
+          target.fact.type.module === 'silk/option' &&
+          target.fact.type.name === 'Option' &&
+          concrete.length === 1
+            ? Type.option(concrete.at(0) ?? 'never')
+            : Type.nominal(target.fact.type.module, target.fact.type.name, concrete)
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',
@@ -2050,7 +2094,7 @@ const resolveRequirementRow = (
         )
     }
   }
-  const normalized = Type.effect('Never', [], 'Shared', requirements).requirements
+  const normalized = Type.effect('never', [], 'Shared', requirements).requirements
   return Object.freeze({
     fact: Object.freeze({
       ...row,
@@ -2285,6 +2329,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
     if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
     if (Type.isFixedArray(type)) return isCopyType(type.element, visiting)
+    if (Type.equals(type, Type.unit)) return true
     if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
     const key = Type.key(type)
     const remembered = copyMemo.get(key)
@@ -2500,7 +2545,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         ) {
           diagnostics.push(
             Diagnostic.invalidDropHook(
-              'the hook must be fn drop(self: &mut Provider) -> Unit with no generics, failures, or requirements',
+              'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
               hook.syntax.span,
             ),
           )
@@ -2899,6 +2944,7 @@ export const copyType = (
 ): boolean => {
   if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
   if (Type.isFixedArray(type)) return copyType(self, type.element, visiting)
+  if (Type.equals(type, Type.unit)) return true
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
   const key = Type.key(type)
   if (visiting.has(key)) return false

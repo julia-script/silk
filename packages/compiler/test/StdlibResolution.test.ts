@@ -14,7 +14,7 @@ const ascii = (value: string): Uint8Array =>
 
 const importing = `import silk.vector { Vector, length }
 
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   return 42
 }`
 
@@ -54,7 +54,7 @@ it.effect('never consults a user resolver inside the reserved namespace', () =>
   Effect.gen(function* () {
     // A user resolver claims to supply silk/vector with hostile bytes; the closure must take
     // the compiler-shipped source instead.
-    const hostile = new Map([['silk/vector', ascii('pub fn stolen() -> I32 { return 0 }')]])
+    const hostile = new Map([['silk/vector', ascii('pub fn stolen() -> i32 { return 0 }')]])
     const closure = yield* ModuleClosure.load({
       root: SourceFile.make('stdlib/hostile-importer', ascii(importing)),
     }).pipe(Effect.provide(SourceResolver.memory(hostile)))
@@ -74,7 +74,7 @@ it.effect('never consults a user resolver inside the reserved namespace', () =>
 it.effect('rejects a user root claiming the reserved namespace', () =>
   Effect.gen(function* () {
     const closure = yield* ModuleClosure.load({
-      root: SourceFile.make('silk/impostor', ascii('pub fn main() -> I32 { return 0 }')),
+      root: SourceFile.make('silk/impostor', ascii('pub fn main() -> i32 { return 0 }')),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.include(
       closure.diagnostics.map((diagnostic) => diagnostic.code),

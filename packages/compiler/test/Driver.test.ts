@@ -88,13 +88,13 @@ it.effect('compiles a three-module call chain to native execution matching the i
     const sources = new Map([
       [
         'app/Main',
-        ascii('import library.Answer { answer }\npub fn main() -> I32 { return answer() }'),
+        ascii('import library.Answer { answer }\npub fn main() -> i32 { return answer() }'),
       ],
       [
         'library/Answer',
-        ascii('import values.Number { two }\npub fn answer() -> I32 { return I32.add(40, two()) }'),
+        ascii('import values.Number { two }\npub fn answer() -> i32 { return i32.add(40, two()) }'),
       ],
-      ['values/Number', ascii('pub fn two() -> I32 { return 2 }')],
+      ['values/Number', ascii('pub fn two() -> i32 { return 2 }')],
     ])
     const root = sources.get('app/Main')
     if (root === undefined) return assert.fail('expected app/Main fixture')
@@ -119,7 +119,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
 
 it.effect('reports every phase in order with counts and totals', () =>
   Effect.gen(function* () {
-    const outcome = yield* compileSource('report', 'pub fn main() -> I32 { return 42 }')
+    const outcome = yield* compileSource('report', 'pub fn main() -> i32 { return 42 }')
 
     assert.strictEqual(outcome._tag, 'Compiled')
     if (outcome._tag !== 'Compiled') return
@@ -142,7 +142,7 @@ it.effect('reports array layouts and keeps array failures in their owning phase'
   Effect.gen(function* () {
     const compiled = yield* compileSource(
       'array-report',
-      'pub fn main() -> I32 { let values = [10, 42] return values[1] }',
+      'pub fn main() -> i32 { let values = [10, 42] return values[1] }',
     )
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
@@ -151,7 +151,7 @@ it.effect('reports array layouts and keeps array failures in their owning phase'
 
     const mismatch = yield* compileSource(
       'array-mismatch',
-      'pub fn main() -> [I32; 2] { return [1] }',
+      'pub fn main() -> [i32; 2] { return [1] }',
     )
     assert.strictEqual(mismatch._tag, 'Rejected')
     assert.strictEqual(
@@ -161,8 +161,8 @@ it.effect('reports array layouts and keeps array failures in their owning phase'
 
     const unavailable = yield* compileSource(
       'array-unavailable-layout',
-      `fn consume(values: [[[I32; 2147483647]; 2147483647]; 0]) -> I32 { return 42 }
-pub fn main() -> I32 { return consume([]) }`,
+      `fn consume(values: [[[i32; 2147483647]; 2147483647]; 0]) -> i32 { return 42 }
+pub fn main() -> i32 { return consume([]) }`,
     )
     assert.strictEqual(unavailable._tag, 'BackendFailed')
     if (unavailable._tag !== 'BackendFailed') return
@@ -187,7 +187,7 @@ it.effect('routes emission through an injected backend service', () =>
         return Backend.LlvmBackend.emit(program, request)
       },
     }
-    const outcome = yield* compileSource('injected-backend', 'pub fn main() -> I32 { return 42 }', {
+    const outcome = yield* compileSource('injected-backend', 'pub fn main() -> i32 { return 42 }', {
       backend: spy,
     })
 
@@ -236,7 +236,7 @@ it.effect('gates source rejection and operational resolution failure before back
         compilation: {
           root: SourceFile.make(
             'memory/driver',
-            ascii('import unreadable\npub fn main() -> I32 { return 42 }'),
+            ascii('import unreadable\npub fn main() -> i32 { return 42 }'),
           ),
         },
         toolchain,
@@ -263,7 +263,7 @@ it.effect('gates source rejection and operational resolution failure before back
 
 it.effect('surfaces a missing entry as a closed outcome without invoking the toolchain', () =>
   Effect.gen(function* () {
-    const outcome = yield* compileSource('no-entry', 'pub fn answer() -> I32 { return 42 }')
+    const outcome = yield* compileSource('no-entry', 'pub fn answer() -> i32 { return 42 }')
 
     assert.strictEqual(outcome._tag, 'NoEntry')
     if (outcome._tag !== 'NoEntry') return
@@ -277,7 +277,7 @@ it.effect('surfaces a missing entry as a closed outcome without invoking the too
 
 it.effect('names the failing native stage with command provenance', () =>
   Effect.gen(function* () {
-    const outcome = yield* compileSource('bad-toolchain', 'pub fn main() -> I32 { return 42 }', {
+    const outcome = yield* compileSource('bad-toolchain', 'pub fn main() -> i32 { return 42 }', {
       toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/nonexistent/clang' }),
     })
 
@@ -366,10 +366,10 @@ it.effect('stops unsupported targets before MIR or native tools', () =>
     for (const target of ['mips-unknown-none']) {
       const outcome = yield* compileSource(
         `target-${target}`,
-        'pub fn main() -> I32 { return 42 }',
+        'pub fn main() -> i32 { return 42 }',
         {
           compilation: {
-            root: SourceFile.make('memory/driver', ascii('pub fn main() -> I32 { return 42 }')),
+            root: SourceFile.make('memory/driver', ascii('pub fn main() -> i32 { return 42 }')),
             target,
           },
         },
@@ -392,7 +392,7 @@ it.effect('rejects an incompatible backend-target pair before MIR and finalizati
   Effect.gen(function* () {
     const outcome = yield* compileSource(
       'incompatible-backend',
-      'pub fn main() -> I32 { return 42 }',
+      'pub fn main() -> i32 { return 42 }',
       {
         backend: WasmBackend.WasmBackend,
       },
@@ -417,7 +417,7 @@ it.effect(
   'commits instantiable LLVM and direct WebAssembly modules with parity',
   () =>
     Effect.gen(function* () {
-      const source = 'pub fn main() -> I32 { return 42 }'
+      const source = 'pub fn main() -> i32 { return 42 }'
       const backends = [Backend.LlvmBackend, WasmBackend.WasmBackend] as const
       for (const backend of backends) {
         const outcome = yield* compileSource(`${backend.id}.wasm`, source, {
@@ -459,7 +459,7 @@ it.effect(
   'keeps evaluator, LLVM Wasm, and direct Wasm trap parity',
   () =>
     Effect.gen(function* () {
-      const source = 'pub fn main() -> I32 { return I32.divide(1, 0) }'
+      const source = 'pub fn main() -> i32 { return i32.divide(1, 0) }'
       const snapshot = yield* Analysis.ofSource(
         'memory/driver',
         ascii(source),

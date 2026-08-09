@@ -14,7 +14,7 @@ General issues and specs live under `.scratch/<feature>/`. Wayfinder maps use th
   user to choose. If none are active, load the sole completed map when it is the only map; present
   completed titles and paths when several exist; report that no map exists only when discovery is
   empty.
-- Never infer the tracker from the Git remote and never rely on a scan that omits hidden paths.
+- never infer the tracker from the Git remote and never rely on a scan that omits hidden paths.
 - A ticket is on the frontier when it is unresolved, unclaimed, and every ticket listed in its
   `Blocked by:` line is resolved. The first ticket by number wins.
 - Claim by setting the child ticket to `Status: claimed` before work.

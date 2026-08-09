@@ -1,5 +1,9 @@
 [
   {
+    "module": "silk/option",
+    "path": "silk/option.silk"
+  },
+  {
     "module": "silk/vector",
     "path": "silk/vector.silk"
   }

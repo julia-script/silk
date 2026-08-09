@@ -19,7 +19,7 @@ and MUST NOT report a satisfied check it could not perform.
 
 #### Scenario: Check a copyable parameter
 
-- **WHEN** `pub fn identity(value: I32) -> I32 { return value }` is checked
+- **WHEN** `pub fn identity(value: i32) -> i32 { return value }` is checked
 - **THEN** its ownership fact lists one copyable binding for `value` live from its declaration span through the function body, with a satisfied verdict
 
 #### Scenario: Keep unavailable bodies explicit
@@ -329,7 +329,7 @@ each concrete instance. A specialization MUST NOT duplicate cleanup or re-check 
 concrete-only behavior.
 
 #### Scenario: Specialize move-only and Copy uses
-- **WHEN** a checked generic whole-value transfer is instantiated once with `I32` and once with a move-only struct
+- **WHEN** a checked generic whole-value transfer is instantiated once with `i32` and once with a move-only struct
 - **THEN** each instance receives the correct concrete copy or cleanup actions from one generic ownership proof
 
 ### Requirement: Slice loans attach to stable owner roots

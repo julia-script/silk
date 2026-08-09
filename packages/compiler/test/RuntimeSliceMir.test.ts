@@ -8,18 +8,18 @@ const ascii = (value: string): Uint8Array =>
 
 const snapshot = (source: string) => Analysis.ofSource('runtime-slice-mir/main', ascii(source))
 
-const source = `fn inspect(values: &[I32], index: I32) -> I32 {
-  return values[index] + values.length
+const source = `fn inspect(values: &[i32], index: usize) -> i32 {
+  return values[index] + usize.toI32(values.length)
 }
-fn replace(values: &mut [I32], index: I32) -> I32 {
+fn replace(values: &mut [i32], index: usize) -> i32 {
   values[index] = values[index] + 1
   return values[index]
 }
-fn shared() -> I32 {
+fn shared() -> i32 {
   let values = [10, 20, 30]
   return inspect(&values, 1)
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [1, 2, 3, 4, 5, 6]
   return shared() + replace(&mut values, 2)
 }`

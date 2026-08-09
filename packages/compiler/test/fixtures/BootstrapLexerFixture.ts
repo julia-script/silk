@@ -1,4 +1,4 @@
-export const source = '// tiny\r\npub fn main() -> I32 {\n\treturn 42\n}\n'
+export const source = '// tiny\r\npub fn main() -> i32 {\n\treturn 42\n}\n'
 
 export interface ExpectedToken {
   readonly kind: string
@@ -20,7 +20,7 @@ export const expectedTokens: ReadonlyArray<ExpectedToken> = Object.freeze([
   { kind: 'Whitespace', start: 22, end: 23, slice: ' ' },
   { kind: 'Arrow', start: 23, end: 25, slice: '->' },
   { kind: 'Whitespace', start: 25, end: 26, slice: ' ' },
-  { kind: 'Identifier', start: 26, end: 29, slice: 'I32' },
+  { kind: 'Identifier', start: 26, end: 29, slice: 'i32' },
   { kind: 'Whitespace', start: 29, end: 30, slice: ' ' },
   { kind: 'LeftBrace', start: 30, end: 31, slice: '{' },
   { kind: 'Whitespace', start: 31, end: 33, slice: '\n\t' },

@@ -20,8 +20,8 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const nestedSource = `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { return identity(identity(42)) }`
+const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(identity(42)) }`
 
 const artifactFor = Effect.fnUntraced(function* (
   target: Target.Target,
@@ -252,7 +252,7 @@ it.effect('rejects target-mismatched bitcode and linker inputs before invoking C
   }),
 )
 
-it.effect('links the shim with the program and the executable exits with the I32 result', () =>
+it.effect('links the shim with the program and the executable exits with the i32 result', () =>
   Effect.gen(function* () {
     const target = yield* Target.host()
     const artifact = yield* artifactFor(target, 'release')

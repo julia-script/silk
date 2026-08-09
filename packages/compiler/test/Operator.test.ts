@@ -36,12 +36,12 @@ it('orders infix operators by immutable precedence metadata', () => {
 })
 
 it('publishes canonical builtin targets including type-selected equality', () => {
-  assert.deepEqual(Operator.target('Add'), { actor: 'I32', operation: 'add' })
-  assert.deepEqual(Operator.target('Not'), { actor: 'Bool', operation: 'not' })
-  assert.deepEqual(Operator.target('Equals'), { actor: 'I32', operation: 'equals' })
-  assert.deepEqual(Operator.target('Equals', 'Bool'), { actor: 'Bool', operation: 'equals' })
-  assert.deepEqual(Operator.target('NotEquals', 'Bool'), {
-    actor: 'Bool',
+  assert.deepEqual(Operator.target('Add'), { actor: 'i32', operation: 'add' })
+  assert.deepEqual(Operator.target('Not'), { actor: 'bool', operation: 'not' })
+  assert.deepEqual(Operator.target('Equals'), { actor: 'i32', operation: 'equals' })
+  assert.deepEqual(Operator.target('Equals', 'bool'), { actor: 'bool', operation: 'equals' })
+  assert.deepEqual(Operator.target('NotEquals', 'bool'), {
+    actor: 'bool',
     operation: 'notEquals',
   })
 })

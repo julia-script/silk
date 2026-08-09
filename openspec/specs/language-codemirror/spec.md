@@ -16,9 +16,9 @@ compiler-reported token kind.
 
 #### Scenario: Keywords are highlighted
 
-- **WHEN** the editor contains `pub fn main() -> I32 { return 42 }`
+- **WHEN** the editor contains `pub fn main() -> i32 { return 42 }`
 - **THEN** `pub`, `fn`, and `return` carry the keyword style, `42` carries the number style, and
-  `main` and `I32` carry the identifier style
+  `main` and `i32` carry the identifier style
 
 #### Scenario: Comments and doc comments are distinct
 
@@ -77,5 +77,5 @@ the accepted syntax while retaining ordinary comparison and reserved-template hi
 their respective contexts.
 
 #### Scenario: Highlight generic call and comparison
-- **WHEN** one source contains `identity<I32>(value)` and `left < right`
+- **WHEN** one source contains `identity<i32>(value)` and `left < right`
 - **THEN** the generic arguments and comparison operator receive their respective canonical styles

@@ -4,7 +4,7 @@ import * as SourceFile from '../dist/SourceFile.js'
 const kibibyte = 1024
 const mebibyte = kibibyte * kibibyte
 const fragment = Uint8Array.from(
-  '// benchmark\npub fn main() -> I32 { return 123456 }\n',
+  '// benchmark\npub fn main() -> i32 { return 123456 }\n',
   (character) => character.charCodeAt(0),
 )
 const bytes = new Uint8Array(mebibyte)

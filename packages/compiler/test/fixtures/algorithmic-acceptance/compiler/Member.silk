@@ -2,7 +2,7 @@ pub struct First {}
 pub struct Second {}
 pub struct Third {}
 
-pub fn decode(code: I32) -> First | Second | Third {
+pub fn decode(code: i32) -> First | Second | Third {
   if code == 1 {
     return First {}
   }

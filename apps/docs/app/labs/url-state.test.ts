@@ -9,7 +9,7 @@ describe('source encoding', () => {
   it('round-trips a program, including newlines and non-ASCII', async () => {
     const state = {
       root: 'main',
-      modules: { main: 'pub fn main() -> I32 { return 42 }\n-- naïve ⇒ ok\n' },
+      modules: { main: 'pub fn main() -> i32 { return 42 }\n-- naïve ⇒ ok\n' },
     }
     expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
   })
@@ -18,8 +18,8 @@ describe('source encoding', () => {
     const state = {
       root: 'root',
       modules: {
-        root: 'import lib\npub fn main() -> I32 { return 42 }',
-        lib: 'pub fn answer() -> I32 { return 1 }',
+        root: 'import lib\npub fn main() -> i32 { return 42 }',
+        lib: 'pub fn answer() -> i32 { return 1 }',
       },
     }
     expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
@@ -28,7 +28,7 @@ describe('source encoding', () => {
   it('produces no characters that a query string would have to escape', async () => {
     const encoded = await encodeSource({
       root: 'main',
-      modules: { main: 'pub fn main() -> I32 { return I32.add(1, 41) }' },
+      modules: { main: 'pub fn main() -> i32 { return i32.add(1, 41) }' },
     })
     expect(encoded).toMatch(/^[A-Za-z0-9\-_]*$/)
   })
@@ -36,7 +36,7 @@ describe('source encoding', () => {
   it('carries the target, since the same program lowers differently for each', async () => {
     const state = {
       root: 'main',
-      modules: { main: 'pub fn main() -> I32 { return 42 }' },
+      modules: { main: 'pub fn main() -> i32 { return 42 }' },
       target: 'wasm32-unknown-unknown',
     }
     expect(await decodeSource((await encodeSource(state)) as string)).toEqual(state)
@@ -47,7 +47,7 @@ describe('source encoding', () => {
     // a better answer than quietly emitting for some other target.
     const encoded = (await encodeSource({
       root: 'main',
-      modules: { main: 'pub fn main() -> I32 { return 42 }' },
+      modules: { main: 'pub fn main() -> i32 { return 42 }' },
       target: 'sparc-unknown-none',
     })) as string
     expect((await decodeSource(encoded))?.target).toBe('sparc-unknown-none')
@@ -56,7 +56,7 @@ describe('source encoding', () => {
   it('rejects a root that names no module, which would not load', async () => {
     const encoded = (await encodeSource({
       root: 'absent',
-      modules: { main: 'pub fn main() -> I32 { return 42 }' },
+      modules: { main: 'pub fn main() -> i32 { return 42 }' },
     })) as string
     expect(await decodeSource(encoded)).toBeUndefined()
   })

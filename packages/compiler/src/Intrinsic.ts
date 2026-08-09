@@ -136,11 +136,23 @@ const rawTypeParameters = Object.freeze([rawElement])
 
 const normalizedUnion = (members: ReadonlyArray<Type.Nominal>): Type.Type => {
   const normalized = Type.union(members)
-  return normalized._tag === 'Normalized' ? normalized.type : 'Never'
+  return normalized._tag === 'Normalized' ? normalized.type : 'never'
 }
 
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
-  const result = operation.result === 'Self' ? scalar.spelling : Scalar.boolean.spelling
+  const concreteResult =
+    operation.result === 'Self'
+      ? scalar.spelling
+      : operation.result === 'Boolean'
+        ? Scalar.boolean.spelling
+        : operation.result === 'OptionSelf'
+          ? scalar.spelling
+          : operation.result === 'OptionTarget'
+            ? (Scalar.conversionTarget(operation.code)?.spelling ?? scalar.spelling)
+            : operation.result
+  const checked = operation.result === 'OptionSelf' || operation.result === 'OptionTarget'
+  const result = checked ? `Option<${concreteResult}>` : concreteResult
+  const semanticResult = checked ? Type.option(concreteResult) : concreteResult
   const parameterNames =
     operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
   return builtin({
@@ -150,7 +162,7 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
     parameters: Object.freeze(parameterNames.map((name) => valueParameter(name, scalar.spelling))),
     semanticParameters: Object.freeze(parameterNames.map(() => scalar.spelling)),
     result,
-    semanticResult: result,
+    semanticResult,
   })
 }
 
@@ -183,10 +195,10 @@ const operations = Object.freeze([
         name: 'make',
         operation: 'LayoutMake',
         parameters: Object.freeze([
-          valueParameter('size', 'Usize'),
-          valueParameter('alignment', 'Usize'),
+          valueParameter('size', 'usize'),
+          valueParameter('alignment', 'usize'),
         ]),
-        semanticParameters: Object.freeze(['Usize', 'Usize']),
+        semanticParameters: Object.freeze(['usize', 'usize']),
         result: 'Layout | InvalidAlignment',
         semanticResult: normalizedUnion([Type.layout, Type.invalidAlignment]),
       }),
@@ -196,9 +208,9 @@ const operations = Object.freeze([
         operation: 'LayoutRepeat',
         parameters: Object.freeze([
           valueParameter('layout', 'Layout'),
-          valueParameter('count', 'Usize'),
+          valueParameter('count', 'usize'),
         ]),
-        semanticParameters: Object.freeze([Type.layout, 'Usize']),
+        semanticParameters: Object.freeze([Type.layout, 'usize']),
         result: 'Layout | LayoutOverflow',
         semanticResult: normalizedUnion([Type.layout, Type.layoutOverflow]),
       }),
@@ -246,21 +258,6 @@ const operations = Object.freeze([
     ]),
   ),
   actor(
-    'Unit',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'Unit',
-        name: 'make',
-        operation: 'UnitMake',
-        parameters: Object.freeze([]),
-        semanticParameters: Object.freeze([]),
-        result: 'Unit',
-        semanticResult: Type.unit,
-      }),
-    ]),
-  ),
-  actor(
     'RawBuffer',
     'Type',
     Object.freeze([
@@ -272,9 +269,9 @@ const operations = Object.freeze([
         semanticTypeParameters: rawTypeParameters,
         parameters: Object.freeze([
           valueParameter('allocation', 'Allocation'),
-          valueParameter('count', 'Usize'),
+          valueParameter('count', 'usize'),
         ]),
-        semanticParameters: Object.freeze([Type.allocation, 'Usize']),
+        semanticParameters: Object.freeze([Type.allocation, 'usize']),
         result: 'RawBuffer<T>',
         semanticResult: Type.rawBuffer(rawElement),
         unsafe: true,
@@ -287,11 +284,11 @@ const operations = Object.freeze([
         semanticTypeParameters: rawTypeParameters,
         parameters: Object.freeze([
           valueParameter('buffer', '&mut RawBuffer<T>'),
-          valueParameter('index', 'Usize'),
+          valueParameter('index', 'usize'),
         ]),
         semanticParameters: Object.freeze([
           Type.reference('Exclusive', Type.rawBuffer(rawElement)),
-          'Usize',
+          'usize',
         ]),
         result: 'Slot<T>',
         semanticResult: Type.slot(rawElement),
@@ -305,8 +302,8 @@ const operations = Object.freeze([
         semanticTypeParameters: rawTypeParameters,
         parameters: Object.freeze([valueParameter('buffer', '&RawBuffer<T>')]),
         semanticParameters: Object.freeze([Type.reference('Shared', Type.rawBuffer(rawElement))]),
-        result: 'Usize',
-        semanticResult: 'Usize',
+        result: 'usize',
+        semanticResult: 'usize',
       }),
     ]),
   ),
@@ -325,7 +322,7 @@ const operations = Object.freeze([
           valueParameter('value', 'T'),
         ]),
         semanticParameters: Object.freeze([Type.slot(rawElement), rawElement]),
-        result: 'Unit',
+        result: '()',
         semanticResult: Type.unit,
         unsafe: true,
       }),
@@ -361,7 +358,7 @@ const operations = Object.freeze([
         semanticTypeParameters: rawTypeParameters,
         parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
         semanticParameters: Object.freeze([Type.slot(rawElement)]),
-        result: 'Unit',
+        result: '()',
         semanticResult: Type.unit,
         unsafe: true,
       }),
@@ -387,7 +384,7 @@ const operations = Object.freeze([
         typeParameters: Object.freeze([]),
         parameters: Object.freeze([
           valueParameter('protected', 'Effect<A ! E>'),
-          valueParameter('retries', 'I32'),
+          valueParameter('retries', 'i32'),
         ]),
         result: 'Effect<A ! E>',
       }),

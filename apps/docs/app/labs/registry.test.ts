@@ -139,9 +139,9 @@ describe('view registry', () => {
 
 describe('struct values view', () => {
   it('reports struct facts, ABI lanes, and aggregate evaluation events', () => {
-    const result = projectStructValues(`struct Pair { left: I32 right: I32 }
+    const result = projectStructValues(`struct Pair { left: i32 right: i32 }
 fn make() -> Pair { return Pair { right: 2, left: 1 } }
-pub fn main() -> I32 { let pair = make() return pair.right }`)
+pub fn main() -> i32 { let pair = make() return pair.right }`)
 
     const rendered = text(result)
     expect(rendered).toContain('struct construction')
@@ -150,7 +150,7 @@ pub fn main() -> I32 { let pair = make() return pair.right }`)
     expect(rendered).toContain('canonical order left, right')
     expect(rendered).toContain('field projection chain')
     expect(rendered).toContain('compiler-owned calling shapes')
-    expect(rendered).toMatch(/I32:#0, I32:#1/)
+    expect(rendered).toMatch(/i32:#0, i32:#1/)
     expect(rendered).toContain('construct')
     expect(rendered).toContain('project')
     expect(result.meta).toContain('1 lit')
@@ -159,9 +159,9 @@ pub fn main() -> I32 { let pair = make() return pair.right }`)
 
 describe('array values view', () => {
   it('links canonical literals, checks, layouts, lanes, and evaluation events', () => {
-    const result = projectArrayValues(`struct Pair { left: I32 right: I32 }
-fn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }
-pub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`)
+    const result = projectArrayValues(`struct Pair { left: i32 right: i32 }
+fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
+pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`)
 
     const rendered = text(result)
     expect(rendered).toContain('canonical array types')
@@ -182,9 +182,9 @@ describe('target layout view', () => {
   it('reports nominal catalog entries with their sizes', () => {
     const result = project(
       'layout',
-      `struct Inner { value: I32 }
-struct Outer { inner: Inner flag: Bool }
-pub fn main() -> I32 { return 42 }`,
+      `struct Inner { value: i32 }
+struct Outer { inner: Inner flag: bool }
+pub fn main() -> i32 { return 42 }`,
     )
 
     const rendered = text(result)
@@ -202,7 +202,7 @@ pub fn main() -> I32 { return 42 }`,
     const result = project(
       'layout',
       `struct Node { next: Node }
-pub fn main() -> I32 { return 42 }`,
+pub fn main() -> i32 { return 42 }`,
     )
 
     const rendered = text(result)
@@ -216,7 +216,7 @@ describe('control DAG view', () => {
   it('shows structured loop regions and lexical repeat outcomes', () => {
     const result = project(
       'mir',
-      `pub fn main() -> I32 {
+      `pub fn main() -> i32 {
   let mut value = 0
   while value < 2 { value = value + 1 }
   return value
@@ -233,7 +233,7 @@ describe('control DAG view', () => {
   })
 
   it('shows ownership fixed points and source-linked backend control conversion', () => {
-    const source = `pub fn main() -> I32 {
+    const source = `pub fn main() -> i32 {
   let mut value = 0
   while value < 2 { value = value + 1 }
   return value
@@ -253,16 +253,16 @@ describe('control DAG view', () => {
   })
 
   it('coordinates match facts through the existing HIR, ownership, and MIR panes', () => {
-    const source = `struct Left { value: I32 }
-struct Right { value: I32 }
-fn inspect(input: Left | Right) -> I32 {
+    const source = `struct Left { value: i32 }
+struct Right { value: i32 }
+fn inspect(input: Left | Right) -> i32 {
   return match &input {
     Left { value } if false => 0
     Left { value: answer } => answer
     Right { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(Left { value: 42 }) }`
+pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
     const hir = project('hir', source)
     const ownership = project('ownership', source)
     const mir = project('mir', source)
@@ -284,7 +284,7 @@ describe('downstream panes state why they are empty', () => {
   it('says why MIR is unavailable for an unresolved target', () => {
     const snapshot = Snapshot.ofSource(
       'memory/docs/unavailable',
-      new TextEncoder().encode('pub fn main() -> I32 { return 42 }'),
+      new TextEncoder().encode('pub fn main() -> i32 { return 42 }'),
       'not-a-real-target',
     )
     const view = viewById('mir')
@@ -292,7 +292,7 @@ describe('downstream panes state why they are empty', () => {
     if (view === undefined) return
     const result = view.project({
       snapshot,
-      modules: { [snapshot.closure.rootModule]: 'pub fn main() -> I32 { return 42 }' },
+      modules: { [snapshot.closure.rootModule]: 'pub fn main() -> i32 { return 42 }' },
       root: snapshot.closure.rootModule,
       mode: 'release',
       profile: 'release',
@@ -312,7 +312,7 @@ describe('downstream panes state why they are empty', () => {
 
 describe('diagnostics view', () => {
   it('reports a clean program as clean rather than as empty', () => {
-    const result = project('diagnostics', 'pub fn main() -> I32 { return 42 }')
+    const result = project('diagnostics', 'pub fn main() -> i32 { return 42 }')
     expect(text(result)).toContain('no diagnostics')
     expect(result.meta).toBe('clean')
   })
@@ -320,8 +320,8 @@ describe('diagnostics view', () => {
   it('carries the error count in its meta and tones the row', () => {
     const result = project(
       'diagnostics',
-      `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer( }`,
+      `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer( }`,
     )
     expect(result.rows.some((row) => row.tone === 'error')).toBe(true)
     expect(result.meta).toMatch(/err/)
@@ -334,8 +334,8 @@ describe('concrete tree view', () => {
     // absent from the tree would make the recovery invisible exactly where it matters.
     const result = project(
       'tree',
-      `pub fn answer() -> I32 { return 42 }
-pub fn main() -> I32 { return answer( }`,
+      `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer( }`,
     )
     const missing = result.rows.filter((row) => row.dot === 'missing')
     expect(missing.length).toBeGreaterThan(0)
@@ -344,7 +344,7 @@ pub fn main() -> I32 { return answer( }`,
   })
 
   it('hides trivia by default and includes it when asked', () => {
-    const source = 'pub fn main() -> I32 { return 42 }'
+    const source = 'pub fn main() -> i32 { return 42 }'
     const view = viewById('tree')
     if (view === undefined) throw new Error('missing tree view')
     const snapshot = Snapshot.ofSource('memory/docs/trivia', new TextEncoder().encode(source))

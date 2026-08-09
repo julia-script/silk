@@ -2,6 +2,6 @@ hir-module golden://damaged.silk
 fn golden://damaged.silk.puzzle contract-unavailable entry=r0 regions=r0
   return r0 [45, 51)
     unavailable [45, 51)
-fn golden://damaged.silk.main () -> I32 entry=r0 regions=r0
+fn golden://damaged.silk.main () -> i32 entry=r0 regions=r0
   return r0 [83, 103)
     unavailable [83, 103)

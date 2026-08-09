@@ -6,13 +6,13 @@ import * as Mir from '../src/Mir.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `effect fn store() -> I32 ! OutOfMemory {
+const source = `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
-  let layout = Layout.of<[I32; 2]>()
+  let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
-    let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+    let mut buffer = RawBuffer.from<i32>(move allocation, 2)
     let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 41)
     let result = Slot.take(RawBuffer.slot(&mut buffer, 0))
     drop buffer
@@ -20,28 +20,28 @@ const source = `effect fn store() -> I32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> I32 { return 0 }
-pub fn main() -> I32 {
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
   let recipe = Effect.catch<OutOfMemory>(store(), recover)
   return run recipe
 }`
 
 const unsafeProgram = (
   body: string,
-  layout = '[I32; 2]',
-): string => `effect fn store() -> I32 ! OutOfMemory {
+  layout = '[i32; 2]',
+): string => `effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
   let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
   let allocation = run recipe
   unsafe {
-    let mut buffer = RawBuffer.from<I32>(move allocation, 2)
+    let mut buffer = RawBuffer.from<i32>(move allocation, 2)
 ${body}
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> I32 { return 0 }
-pub fn main() -> I32 {
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 {
   return run Effect.catch<OutOfMemory>(store(), recover)
 }`
 
@@ -116,7 +116,7 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
 it.effect('traps when RawBuffer provenance does not match its allocation layout', () =>
   expectTrap(
     'owned-allocation/layout-mismatch',
-    unsafeProgram('    return 0', '[I32; 1]'),
+    unsafeProgram('    return 0', '[i32; 1]'),
     'RawBuffer allocation layout does not match its element type and count',
   ),
 )

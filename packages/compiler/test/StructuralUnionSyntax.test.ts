@@ -33,7 +33,7 @@ it('parses nested structural union types losslessly', () => {
 it('contains a missing union member at the declared-type boundary', () => {
   const source = SourceFile.make(
     'union-syntax/recovery',
-    ascii('fn broken(value: Token |) -> Never { return value }\nfn next() -> I32 { return 0 }'),
+    ascii('fn broken(value: Token |) -> never { return value }\nfn next() -> i32 { return 0 }'),
   )
   const syntax = Parser.parse(Lexer.lex(source))
   const missing = descendants(syntax.root)
@@ -57,7 +57,7 @@ it.effect('resolves equivalent union spellings to one canonical type', () =>
       'union-syntax/main',
       ascii(`import model.Types { Token, End }
 fn first(value: Token | (End | Token)) -> End | Token { return value }
-pub fn main() -> I32 { return 0 }`),
+pub fn main() -> i32 { return 0 }`),
     )
     const snapshot = yield* Analysis.make({ root }).pipe(
       Effect.provide(

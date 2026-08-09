@@ -2,11 +2,11 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Type from '../../dist/Type.js'
 
-const source = `fn identity(value: I32) -> I32 { return value }
-fn select<T>(value: T, enabled: Bool) -> T { return value }
-pub fn main() -> I32 {
+const source = `fn identity(value: i32) -> i32 { return value }
+fn select<T>(value: T, enabled: bool) -> T { return value }
+pub fn main() -> i32 {
   let named = identity
-  let plusTwo = I32.add(2)
+  let plusTwo = i32.add(2)
   let whenEnabled = select(true)
   return named(plusTwo(whenEnabled(40)))
 }`

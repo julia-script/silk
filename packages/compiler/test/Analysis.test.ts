@@ -29,8 +29,8 @@ const snapshot = (
 it.effect('answers multi-module queries from one snapshot', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('root', [
-      ['root', 'import lib\npub fn main() -> I32 { return 42 }'],
-      ['lib', 'pub fn answer() -> I32 { return 1 }'],
+      ['root', 'import lib\npub fn main() -> i32 { return 42 }'],
+      ['lib', 'pub fn answer() -> i32 { return 1 }'],
     ])
     assert.deepEqual(
       Analysis.modules(self).map((module) => module.name),
@@ -49,10 +49,10 @@ it.effect('answers multi-module queries from one snapshot', () =>
 it.effect('resolves imported declarations as stored callable values', () =>
   Effect.gen(function* () {
     const source =
-      'import lib as Lib\npub fn main() -> I32 { let callback = Lib.identity return callback(42) }'
+      'import lib as Lib\npub fn main() -> i32 { let callback = Lib.identity return callback(42) }'
     const self = yield* snapshot('root', [
       ['root', source],
-      ['lib', 'pub fn identity(value: I32) -> I32 { return value }'],
+      ['lib', 'pub fn identity(value: i32) -> i32 { return value }'],
     ])
     const root = self.results.get('root')
     const main = root?.functions.at(0)
@@ -77,8 +77,8 @@ it.effect('resolves imported declarations as stored callable values', () =>
 
 it.effect('indexes automatic section targets and piped callable bindings', () =>
   Effect.gen(function* () {
-    const source = `fn add(value: I32, amount: I32) -> I32 { return value + amount }
-pub fn main() -> I32 { let increment = add(2) return 40 |> increment }`
+    const source = `fn add(value: i32, amount: i32) -> i32 { return value + amount }
+pub fn main() -> i32 { let increment = add(2) return 40 |> increment }`
     const self = yield* Analysis.ofSource('main', ascii(source))
 
     assert.strictEqual(
@@ -96,8 +96,8 @@ pub fn main() -> I32 { let increment = add(2) return 40 |> increment }`
 it.effect('retains inaccessible imported callable targets without inventing a value lookup', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('root', [
-      ['root', 'import lib as Lib\npub fn main() -> I32 { let callback = Lib.hidden return 0 }'],
-      ['lib', 'fn hidden(value: I32) -> I32 { return value }'],
+      ['root', 'import lib as Lib\npub fn main() -> i32 { let callback = Lib.hidden return 0 }'],
+      ['lib', 'fn hidden(value: i32) -> i32 { return value }'],
     ])
     const root = self.results.get('root')
     const binding = root?.functions.at(0)?.statements.at(0)
@@ -116,7 +116,7 @@ it.effect('merges diagnostics while keeping unrelated facts queryable', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('root', [
       ['root', 'import lib\nimport missing\npub fn main( -> Mystery { return @ 42 }'],
-      ['lib', 'pub fn answer() -> I32 { return 1 }'],
+      ['lib', 'pub fn answer() -> i32 { return 1 }'],
     ])
     assert.strictEqual(Analysis.declarationByName(self, 'lib', 'answer')._tag, 'Resolved')
     const libFunction = Analysis.hirOf(self, 'lib')?.functions.at(0)
@@ -134,8 +134,8 @@ it.effect('merges diagnostics while keeping unrelated facts queryable', () =>
 it.effect('answers repeated snapshots deterministically', () =>
   Effect.gen(function* () {
     const entries: ReadonlyArray<readonly [string, string]> = [
-      ['root', 'import lib\npub fn main() -> I32 { return 42 }'],
-      ['lib', 'pub fn same() -> I32 { return 1 }\npub fn same() -> I32 { return 2 }'],
+      ['root', 'import lib\npub fn main() -> i32 { return 42 }'],
+      ['lib', 'pub fn same() -> i32 { return 1 }\npub fn same() -> i32 { return 2 }'],
     ]
     const first = yield* snapshot('root', entries)
     const second = yield* snapshot('root', [...entries].reverse())
@@ -149,14 +149,14 @@ it.effect('evaluates and answers ownership through the single-source convenience
   Effect.gen(function* () {
     const evaluated = yield* Analysis.ofSource(
       'memory/facade',
-      ascii('pub fn main() -> I32 { return 42 }'),
+      ascii('pub fn main() -> i32 { return 42 }'),
     )
     const outcome = Analysis.evaluate(evaluated)
     assert.strictEqual(outcome._tag, 'Completed')
 
     const owned = yield* Analysis.ofSource(
       'memory/ownership',
-      ascii('pub fn identity(value: I32) -> I32 { return value }'),
+      ascii('pub fn identity(value: i32) -> i32 { return value }'),
     )
     const facts = Analysis.ownershipOf(owned, 'memory/ownership')
     assert.strictEqual(facts?.functions.at(0)?.verdict._tag, 'Satisfied')
@@ -172,7 +172,7 @@ it.effect('reports only actionable diagnostics for empty and recovered-return so
 
     const recovered = yield* Analysis.ofSource(
       'memory/recovered-return',
-      ascii('pub fn main() -> I32 { foo }'),
+      ascii('pub fn main() -> i32 { foo }'),
     )
     assert.deepEqual(
       Analysis.diagnostics(recovered).map((diagnostic) => ({
@@ -189,16 +189,16 @@ it.effect('reports only actionable diagnostics for empty and recovered-return so
 
 it.effect('answers stable match facts across semantic, HIR, ownership, MIR, and trace phases', () =>
   Effect.gen(function* () {
-    const source = `struct Left { value: I32 }
-struct Right { value: I32 }
-fn inspect(input: Left | Right) -> I32 {
+    const source = `struct Left { value: i32 }
+struct Right { value: i32 }
+fn inspect(input: Left | Right) -> i32 {
   return match &input {
     Left { value } if false => 0
     Left { value: answer } => answer
     Right { value } => value
   }
 }
-pub fn main() -> I32 { return inspect(Left { value: 42 }) }`
+pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
     const first = yield* Analysis.ofSource(
       'memory/match-facade',
       ascii(source),
@@ -230,8 +230,8 @@ pub fn main() -> I32 { return inspect(Left { value: 42 }) }`
 
 it.effect('answers immutable fixed-array facts across semantics, layout, MIR, and evaluation', () =>
   Effect.gen(function* () {
-    const source = `fn choose(values: [I32; 2], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { return choose([10, 42], 1) }`
+    const source = `fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { return choose([10, 42], 1) }`
     const self = yield* Analysis.ofSource(
       'memory/array-facade',
       ascii(source),
@@ -245,7 +245,7 @@ pub fn main() -> I32 { return choose([10, 42], 1) }`
     const outcome = Analysis.evaluate(self)
     const events = Analysis.arrayTraceEventsOf(outcome)
 
-    assert.deepEqual(types.map(Type.encode), ['Array<I32, 2>'])
+    assert.deepEqual(types.map(Type.encode), ['Array<i32, 2>'])
     assert.strictEqual(literals.at(0)?.state._tag, 'Complete')
     assert.strictEqual(literals.at(0)?.elements.length, 2)
     assert.strictEqual(indexes.at(0)?.bounds._tag, 'Runtime')
@@ -270,7 +270,7 @@ it.effect(
     Effect.gen(function* () {
       const self = yield* Analysis.ofSource(
         'memory/nominal-facade',
-        ascii('struct Pair { left: I32 right: Bool }\npub fn main() -> I32 { return 42 }'),
+        ascii('struct Pair { left: i32 right: bool }\npub fn main() -> i32 { return 42 }'),
         'aarch64-apple-darwin',
       )
       const lookup = Analysis.structByName(self, 'memory/nominal-facade', 'Pair')
@@ -294,9 +294,9 @@ it.effect(
       const self = yield* snapshot('app/Main', [
         [
           'app/Main',
-          'import model.Tree { Node }\nstruct Root { node: Node }\nstruct Loop { next: Loop }\npub fn main() -> I32 { return 42 }',
+          'import model.Tree { Node }\nstruct Root { node: Node }\nstruct Loop { next: Loop }\npub fn main() -> i32 { return 42 }',
         ],
-        ['model/Tree', 'pub struct Node { value: I32 }'],
+        ['model/Tree', 'pub struct Node { value: i32 }'],
       ])
       const root = Analysis.structByName(self, 'app/Main', 'Root')
       const loop = Analysis.structByName(self, 'app/Main', 'Loop')
@@ -329,7 +329,7 @@ it.effect('emits clean snapshots and refuses diagnosed snapshots before the back
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'memory/codegen',
-      ascii('pub fn main() -> I32 { return 42 }'),
+      ascii('pub fn main() -> i32 { return 42 }'),
       'aarch64-apple-darwin',
     )
     const release = yield* Analysis.codegen(self, { mode: 'release' })
@@ -351,7 +351,7 @@ it.effect('preserves one exact target and layout plan across facade queries and 
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'memory/plan',
-      ascii('pub fn main() -> I32 { if I32.equals(1, 1) { return 42 } return 0 }'),
+      ascii('pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
     )
     const target = Analysis.targetOf(self)
@@ -376,8 +376,8 @@ it.effect('preserves one exact target and layout plan across facade queries and 
     assert.deepEqual(
       layout.value.entries.map((entry) => [entry.type, entry.size, entry.alignment]),
       [
-        ['Bool', 4, 4],
-        ['I32', 4, 4],
+        ['bool', 4, 4],
+        ['i32', 4, 4],
       ],
     )
   }),
@@ -387,7 +387,7 @@ it.effect('keeps unsupported targets explicit and queryable without manufacturin
   Effect.gen(function* () {
     const unsupported = yield* Analysis.ofSource(
       'memory/unsupported',
-      ascii('pub fn main() -> I32 { return 42 }'),
+      ascii('pub fn main() -> i32 { return 42 }'),
       'mips-unknown-none',
     )
 
@@ -417,13 +417,13 @@ it.effect(
   'answers local, parameter, callable, field, and half-open semantic occurrence queries',
   () =>
     Effect.gen(function* () {
-      const source = `struct Pair { left: I32 right: I32 }
-fn identity(value: I32) -> I32 {
+      const source = `struct Pair { left: i32 right: i32 }
+fn identity(value: i32) -> i32 {
   let local = value
   let pair = Pair { left: local, right: 0 }
   return pair.left
 }
-pub fn main() -> I32 { return identity(42) }`
+pub fn main() -> i32 { return identity(42) }`
       const self = yield* Analysis.ofSource('main', ascii(source))
       const targetAt = (spelling: string, occurrence = 0) => {
         let offset = -1
@@ -454,11 +454,11 @@ it.effect('resolves imported and qualified declarations without spelling lookup'
   Effect.gen(function* () {
     const root = `import lib { answer }
 import other as tools
-pub fn main() -> I32 { return answer() + tools.answer() }`
+pub fn main() -> i32 { return answer() + tools.answer() }`
     const self = yield* snapshot('root', [
       ['root', root],
-      ['lib', 'pub fn answer() -> I32 { return 42 }'],
-      ['other', 'pub fn answer() -> I32 { return 7 }'],
+      ['lib', 'pub fn answer() -> i32 { return 42 }'],
+      ['other', 'pub fn answer() -> i32 { return 7 }'],
     ])
     const selected = [
       Analysis.semanticOccurrenceAt(self, 'root', root.indexOf('answer()')),
@@ -476,7 +476,7 @@ pub fn main() -> I32 { return answer() + tools.answer() }`
 it.effect('keeps unavailable and damaged semantic occurrences isolated and deterministic', () =>
   Effect.gen(function* () {
     const source =
-      'fn valid(value: I32) -> I32 { return value }\nfn damaged( -> I32 { return missing() }'
+      'fn valid(value: i32) -> i32 { return value }\nfn damaged( -> i32 { return missing() }'
     const first = yield* Analysis.ofSource('main', ascii(source))
     const second = yield* Analysis.ofSource('main', ascii(source))
     const availableOffset = source.indexOf('value }')

@@ -58,7 +58,7 @@ process output, exit status, and command provenance as data.
 #### Scenario: Link a runnable executable
 
 - **WHEN** the `ClangLinker` links the program object with a runtime shim compiled for the same canonical target
-- **THEN** an executable exists at the requested destination and running it exits with the program's `I32` result
+- **THEN** an executable exists at the requested destination and running it exits with the program's `i32` result
 
 #### Scenario: Reject a missing input as data
 
@@ -74,7 +74,7 @@ process output, exit status, and command provenance as data.
 
 The toolchain SHALL provide the slice's minimal C runtime shim, compiled by the pinned Clang: a
 private, compiler-versioned scalar ABI in which the shim's `main` calls `silk_main` and returns
-its `I32` result as the process exit status. The shim is not user-facing FFI, and its source is
+its `i32` result as the process exit status. The shim is not user-facing FFI, and its source is
 owned by the compiler.
 
 #### Scenario: Compile and honor the shim ABI
@@ -103,7 +103,7 @@ or stable external ABI promise.
 
 ### Requirement: The pinned Clang finalizes LLVM WebAssembly
 
-The external toolchain boundary SHALL finalize LLVM bitcode planned for `wasm32-unknown-unknown` into a standalone WebAssembly module using structured pinned-Clang arguments, no shell command string, no native runtime shim, no implicit host libraries, and an exported zero-argument `silk_main` entry returning `I32`. The resulting module SHALL be atomically committed to the requested `.wasm` destination. Process failure or incompatible output SHALL return typed data retaining the command, arguments, exit status, and process output.
+The external toolchain boundary SHALL finalize LLVM bitcode planned for `wasm32-unknown-unknown` into a standalone WebAssembly module using structured pinned-Clang arguments, no shell command string, no native runtime shim, no implicit host libraries, and an exported zero-argument `silk_main` entry returning `i32`. The resulting module SHALL be atomically committed to the requested `.wasm` destination. Process failure or incompatible output SHALL return typed data retaining the command, arguments, exit status, and process output.
 
 #### Scenario: Finalize a standalone Wasm module
 

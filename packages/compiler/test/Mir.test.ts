@@ -132,7 +132,7 @@ it('carries and encodes exactly one compiler-owned target layout plan', () => {
 
   assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
   assert.include(Mir.encode(sample), 'target aarch64-apple-darwin')
-  assert.include(Mir.encode(sample), 'layout I32 size=4 align=4 repr=signed-i32')
+  assert.include(Mir.encode(sample), 'layout i32 size=4 align=4 repr=signed-i32')
 })
 
 it('marks generated outcomes and preserves programmer provenance', () => {

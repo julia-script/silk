@@ -2,7 +2,7 @@ import { Atom, AtomRegistry } from 'effect/unstable/reactivity'
 import { expect, it } from 'vitest'
 import { cursorAtom, evaluationAtom, modulesAtom, rootAtom, snapshotAtom } from './state'
 
-const source = 'pub fn silk_main() -> I32 { return 7 }'
+const source = 'pub fn silk_main() -> i32 { return 7 }'
 
 it('a source edit resets the span cursor and evaluation by construction', () => {
   const registry = AtomRegistry.make()

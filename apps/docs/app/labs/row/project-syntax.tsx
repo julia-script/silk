@@ -280,7 +280,7 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
     case 'EffectProvideWith':
       return `provideWith ${hirTypeText(expression.capability)}@${expression.role}`
     case 'BuiltinCall':
-      return `builtin I32.${expression.operation}`
+      return `builtin i32.${expression.operation}`
     default:
       return 'unavailable'
   }

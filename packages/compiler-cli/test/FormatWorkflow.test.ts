@@ -5,8 +5,8 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import * as FormatWorkflow from '../src/FormatWorkflow.js'
 
-const canonical = 'pub fn main() -> I32 {\n  return 42\n}\n'
-const compact = 'pub fn main() -> I32 { return 42 }'
+const canonical = 'pub fn main() -> i32 {\n  return 42\n}\n'
+const compact = 'pub fn main() -> i32 { return 42 }'
 
 const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -123,7 +123,7 @@ it.effect(
       const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped()
       yield* makeProject(root, compact)
-      yield* writeFile(`${root}/src/Broken.silk`, 'pub fn broken() -> I32 { return 1')
+      yield* writeFile(`${root}/src/Broken.silk`, 'pub fn broken() -> i32 { return 1')
       yield* fileSystem.chmod(`${root}/src/Main.silk`, 0o744)
 
       const summary = yield* FormatWorkflow.run({ workingDirectory: root })
@@ -138,7 +138,7 @@ it.effect(
       assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), canonical)
       assert.strictEqual(
         yield* fileSystem.readFileString(`${root}/src/Broken.silk`),
-        'pub fn broken() -> I32 { return 1',
+        'pub fn broken() -> i32 { return 1',
       )
       assert.strictEqual(info.mode & 0o777, 0o744)
       assert.strictEqual(

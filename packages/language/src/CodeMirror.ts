@@ -156,7 +156,7 @@ export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
       (token.kind === 'Less' || token.kind === 'Greater') &&
       genericAngles.has(`${token.span.start}:${token.span.end}`)
         ? typePunctuation
-        : token.kind === 'Identifier' && (text === 'I32' || text === 'Bool' || text === 'Never')
+        : token.kind === 'Identifier' && (text === 'i32' || text === 'bool' || text === 'never')
           ? builtinType
           : categories[token.kind]
     if (category === undefined) continue

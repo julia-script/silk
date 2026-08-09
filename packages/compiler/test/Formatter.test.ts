@@ -121,12 +121,12 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
 it.effect('formats a generic effect catch pipeline canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =
-      'pub fn main()->I32 { let recipe=risky()|>Core.prepare()|>Effect.catch<Problem>(recover) return 0 }'
+      'pub fn main()->i32 { let recipe=risky()|>Core.prepare()|>Effect.catch<Problem>(recover) return 0 }'
     const first = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `pub fn main() -> I32 {
+      `pub fn main() -> i32 {
   let recipe = risky()
     |> Core.prepare()
     |> Effect.catch<Problem>(recover)
@@ -144,16 +144,16 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source =
-        'fn apply(callback:mut fn(I32)->I32,value:I32)->I32{return (callback)(value)} fn main(attempt:Effect<I32>)->I32{return run attempt|>Effect.retry(2)}'
+        'fn apply(callback:mut fn(i32)->i32,value:i32)->i32{return (callback)(value)} fn main(attempt:Effect<i32>)->i32{return run attempt|>Effect.retry(2)}'
       const first = yield* Formatter.format(parse('memory://callable-format.silk', source))
       const text = formattedText(first)
       assert.strictEqual(
         text,
-        `fn apply(callback: mut fn(I32) -> I32, value: I32) -> I32 {
+        `fn apply(callback: mut fn(i32) -> i32, value: i32) -> i32 {
   return (callback)(value)
 }
 
-fn main(attempt: Effect<I32>) -> I32 {
+fn main(attempt: Effect<i32>) -> i32 {
   return run attempt
     |> Effect.retry(2)
 }
@@ -167,13 +167,13 @@ fn main(attempt: Effect<I32>) -> I32 {
 
 it.effect('formats effect contracts, run, and fail canonically and idempotently', () =>
   Effect.gen(function* () {
-    const source = `effect   fn work(problem:Problem)->I32 ! Problem|Other { if true { fail   move problem } return 42 }
-fn main()->I32 { let pending=work(Problem { code:1 }) return run   pending }`
+    const source = `effect   fn work(problem:Problem)->i32 ! Problem|Other { if true { fail   move problem } return 42 }
+fn main()->i32 { let pending=work(Problem { code:1 }) return run   pending }`
     const first = yield* Formatter.format(parse('memory://effect-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `effect fn work(problem: Problem) -> I32
+      `effect fn work(problem: Problem) -> i32
 ! Problem | Other {
   if true {
     fail move problem
@@ -181,7 +181,7 @@ fn main()->I32 { let pending=work(Problem { code:1 }) return run   pending }`
   return 42
 }
 
-fn main() -> I32 {
+fn main() -> i32 {
   let pending = work(Problem {code: 1})
   return run pending
 }
@@ -197,17 +197,17 @@ it.effect('formats explicit drop canonically and idempotently', () =>
     const first = yield* Formatter.format(
       parse(
         'memory://drop-format.silk',
-        'struct Token { value:I32 } fn main()->I32 { let token=Token { value:1 } drop   token return 42 }',
+        'struct Token { value:i32 } fn main()->i32 { let token=Token { value:1 } drop   token return 42 }',
       ),
     )
     const text = formattedText(first)
     assert.strictEqual(
       text,
       `struct Token {
-  value: I32
+  value: i32
 }
 
-fn main() -> I32 {
+fn main() -> i32 {
   let token = Token {value: 1}
   drop token
   return 42
@@ -222,7 +222,7 @@ fn main() -> I32 {
 it.effect('formats unsafe blocks and conformance declarations canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =
-      'impl Allocator for SystemAllocator{allocate:SystemAllocator.allocate} impl Drop for Guard<Token>{fn drop(self:&mut Guard<Token>)->Unit{unsafe{drop self.value} return Unit.make()}}'
+      'impl Allocator for SystemAllocator{allocate:SystemAllocator.allocate} impl Drop for Guard<Token>{fn drop(self:&mut Guard<Token>)->(){unsafe{drop self.value} return ()}}'
     const first = yield* Formatter.format(parse('memory://unsafe-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
@@ -232,11 +232,11 @@ it.effect('formats unsafe blocks and conformance declarations canonically and id
 }
 
 impl Drop for Guard<Token> {
-  fn drop(self: &mut Guard<Token>) -> Unit {
+  fn drop(self: &mut Guard<Token>) -> () {
     unsafe {
       drop self.value
     }
-    return Unit.make()
+    return ()
   }
 }
 `,
@@ -249,12 +249,12 @@ impl Drop for Guard<Token> {
 it.effect('formats whole-member binding patterns canonically and idempotently', () =>
   Effect.gen(function* () {
     const source =
-      'fn take(state: Empty | Full) -> I32 { return match move state { Empty   nothing => 0 Full   full => 1 } }'
+      'fn take(state: Empty | Full) -> i32 { return match move state { Empty   nothing => 0 Full   full => 1 } }'
     const first = yield* Formatter.format(parse('memory://binding-pattern-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `fn take(state: Empty | Full) -> I32 {
+      `fn take(state: Empty | Full) -> i32 {
   return match move state {
     Empty nothing => 0
     Full full => 1
@@ -269,15 +269,14 @@ it.effect('formats whole-member binding patterns canonically and idempotently', 
 
 it.effect('formats parametric conformances canonically and idempotently', () =>
   Effect.gen(function* () {
-    const source =
-      'impl < T >Drop for Vector<T>{fn drop(self:&mut Vector<T>)->Unit{return Unit.make()}}'
+    const source = 'impl < T >Drop for Vector<T>{fn drop(self:&mut Vector<T>)->(){return ()}}'
     const first = yield* Formatter.format(parse('memory://parametric-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
       `impl<T> Drop for Vector<T> {
-  fn drop(self: &mut Vector<T>) -> Unit {
-    return Unit.make()
+  fn drop(self: &mut Vector<T>) -> () {
+    return ()
   }
 }
 `,
@@ -289,19 +288,19 @@ it.effect('formats parametric conformances canonically and idempotently', () =>
 
 it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
-    const source = `fn later()->Effect<I32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
-effect fn work()->I32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
+    const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
+effect fn work()->i32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
     const first = yield* Formatter.format(parse('memory://effect-requirement-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `fn later() -> Effect<I32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+      `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
   return effect {
     return 1
   }
 }
 
-effect fn work() -> I32
+effect fn work() -> i32
 ! Problem
 ? &FileSystem | &mut Allocator@Scratch {
   return 1
@@ -315,7 +314,7 @@ effect fn work() -> I32
 
 it.effect('formats effect blocks and Copy failure transfer canonically', () =>
   Effect.gen(function* () {
-    const source = 'fn later()->I32 { let pending=effect{fail Problem{code:1}} return 0 }'
+    const source = 'fn later()->i32 { let pending=effect{fail Problem{code:1}} return 0 }'
     const first = yield* Formatter.format(parse('memory://effect-expression-format.silk', source))
     const text = formattedText(first)
     assert.include(text, 'let pending = effect {')
@@ -347,7 +346,7 @@ it.effect('rejects lexical and parser damage without producing formatted bytes',
   Effect.gen(function* () {
     const lexical = yield* Effect.result(Formatter.format(parse('memory://lexical.silk', '@@@')))
     const parser = yield* Effect.result(
-      Formatter.format(parse('memory://parser.silk', 'pub fn main() -> I32 { return 42')),
+      Formatter.format(parse('memory://parser.silk', 'pub fn main() -> i32 { return 42')),
     )
 
     assert.strictEqual(Result.isFailure(lexical), true)
@@ -362,9 +361,9 @@ it.effect('rejects lexical and parser damage without producing formatted bytes',
 
 it.effect('formats fixed-array source types with canonical bracketed layout', () =>
   Effect.gen(function* () {
-    const source = 'struct Arrays { values: [ [ I32 ;4 ] ;3 ] }'
+    const source = 'struct Arrays { values: [ [ i32 ;4 ] ;3 ] }'
     const first = yield* Formatter.format(parse('memory://fixed-array-format.silk', source))
-    const canonical = 'struct Arrays {\n  values: [[I32; 4]; 3]\n}\n'
+    const canonical = 'struct Arrays {\n  values: [[i32; 4]; 3]\n}\n'
 
     assert.strictEqual(formattedText(first), canonical)
     const second = yield* Formatter.format(
@@ -379,7 +378,7 @@ it.effect('refuses to repair a missing fixed-array semicolon', () =>
   Effect.gen(function* () {
     const attempted = yield* Effect.result(
       Formatter.format(
-        parse('memory://fixed-array-damage.silk', 'struct Broken { value: [I32 4] }'),
+        parse('memory://fixed-array-damage.silk', 'struct Broken { value: [i32 4] }'),
       ),
     )
 
@@ -429,7 +428,7 @@ it.effect('preserves comment text and bounded blank-line attachment', () =>
   Effect.gen(function* () {
     const source = `/// first line
 /// second line
-pub fn first() -> I32 {
+pub fn first() -> i32 {
   let value = 1
 
 
@@ -441,7 +440,7 @@ pub fn first() -> I32 {
 
 /// unattached
 
-pub fn second() -> I32 { return 2 }
+pub fn second() -> i32 { return 2 }
 `
     const document = yield* Formatter.format(parse('memory://comments.silk', source))
 
@@ -449,7 +448,7 @@ pub fn second() -> I32 { return 2 }
       formattedText(document),
       `/// first line
 /// second line
-pub fn first() -> I32 {
+pub fn first() -> i32 {
   let value = 1
 
   // grouped value
@@ -459,7 +458,7 @@ pub fn first() -> I32 {
 
 /// unattached
 
-pub fn second() -> I32 {
+pub fn second() -> i32 {
   return 2
 }
 `,
@@ -472,12 +471,12 @@ it.effect('keeps nested, delimiter, field-documentation, and end-of-file comment
   Effect.gen(function* () {
     const source = `pub struct Documented {
   /// field documentation
-  value: I32
+  value: i32
 }
 pub fn main(
   /// parameter documentation
-  value: I32
-) -> I32 {
+  value: i32
+) -> i32 {
   return helper(
     value, // trailing argument
     2
@@ -494,13 +493,13 @@ pub fn main(
       formattedText(document),
       `pub struct Documented {
   /// field documentation
-  value: I32
+  value: i32
 }
 
 pub fn main(
   /// parameter documentation
-  value: I32,
-) -> I32 {
+  value: i32,
+) -> i32 {
   return helper(
     value, // trailing argument
     2,
@@ -514,32 +513,32 @@ pub fn main(
 
 it.effect('removes only terminal horizontal whitespace from comment spellings', () =>
   Effect.gen(function* () {
-    const source = '/// documentation  \t\npub fn main() -> I32 { return 1 // value  \t\n}\n'
+    const source = '/// documentation  \t\npub fn main() -> i32 { return 1 // value  \t\n}\n'
     const document = yield* Formatter.format(parse('memory://comment-whitespace.silk', source))
 
     assert.strictEqual(
       formattedText(document),
-      '/// documentation\npub fn main() -> I32 {\n  return 1 // value\n}\n',
+      '/// documentation\npub fn main() -> i32 {\n  return 1 // value\n}\n',
     )
   }),
 )
 
 it.effect('formats match arms, guards, access modes, and nested patterns idempotently', () =>
   Effect.gen(function* () {
-    const source = `pub struct Span { start: I32 end: I32 }
+    const source = `pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
-pub fn inspect(event: Token) -> I32 { return match   & mut event { Token { span: Span { start: offset , .. }, .. } if true=>offset _=>0 } }`
+pub fn inspect(event: Token) -> i32 { return match   & mut event { Token { span: Span { start: offset , .. }, .. } if true=>offset _=>0 } }`
     const first = yield* Formatter.format(parse('memory://match-format.silk', source))
     const expected = `pub struct Span {
-  start: I32
-  end: I32
+  start: i32
+  end: i32
 }
 
 pub struct Token {
   span: Span
 }
 
-pub fn inspect(event: Token) -> I32 {
+pub fn inspect(event: Token) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset
     _ => 0
@@ -558,14 +557,14 @@ it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
     const source = `import Core.Math as Math { add as plus, subtract }
 pub struct Pair {
-  pub left: [I32; 2]
-  right: Bool
+  pub left: [i32; 2]
+  right: bool
   choice: Alpha | (Beta | Alpha)
 }
-pub struct Span { start: I32 end: I32 }
+pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
 pub struct End {}
-fn helper(value: I32, other: I32) -> I32 {
+fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   while moved < other {
     if false { break } else { continue }
@@ -574,32 +573,32 @@ fn helper(value: I32, other: I32) -> I32 {
   if !false { return (moved + other) } else { return Pair { left: [1, 2], right: true }.left[0] }
   return moved
 }
-fn inspect(event: Token | End) -> I32 {
+fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }
-fn scan(values: &[I32], output: &mut [I32]) -> I32 {
-  return helper(values.length, output[0])
+fn scan(values: &[i32], output: &mut [i32]) -> i32 {
+  return helper(usize.toI32(values.length), output[0])
 }
-fn callbacks(shared: fn(I32, Bool) -> I32, exclusive: mut fn(I32) -> Bool, consuming: once fn() -> I32) -> I32 {
+fn callbacks(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 {
   return shared(1, true)
 }
-effect fn delayed(problem: Token) -> I32 ! Token {
+effect fn delayed(problem: Token) -> i32 ! Token {
   if false { fail move problem }
   return 1
 }
-effect fn timed() -> I32 ? &End@Clock { return 1 }
-fn execute(problem: Token) -> I32 {
+effect fn timed() -> i32 ? &End@Clock { return 1 }
+fn execute(problem: Token) -> i32 {
   let local = effect { return 2 }
   drop local
   let pending = delayed(move problem)
   let timed = timed() |> End.provide(&local, @Clock)
   return run pending
 }
-fn borrow(values: [I32; 2], output: [I32; 2]) -> I32 {
+fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output
   return scan(&values, &mut target)
 }
-pub fn main() -> I32 { return helper(-1, 2) |> Core.finish() }
+pub fn main() -> i32 { return helper(-1, 2) |> Core.finish() }
 `
     const original = parse('memory://grammar.silk', source)
     assert.deepEqual(original.lexicalDiagnostics, [])

@@ -35,8 +35,8 @@ const collect = (
 it.effect('assigns distinct canonical identities to same-named declarations across modules', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'import lib\npub fn answer() -> I32 { return 1 }'],
-      ['lib', 'pub fn answer() -> I32 { return 2 }'],
+      ['root', 'import lib\npub fn answer() -> i32 { return 1 }'],
+      ['lib', 'pub fn answer() -> i32 { return 2 }'],
     ])
 
     const canonicals = index.modules.flatMap((module) =>
@@ -53,7 +53,7 @@ it.effect('assigns distinct canonical identities to same-named declarations acro
 it.effect('marks later duplicates as caused duplicates of the first occurrence', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'pub fn same() -> I32 { return 1 }\npub fn same() -> I32 { return 2 }'],
+      ['root', 'pub fn same() -> i32 { return 1 }\npub fn same() -> i32 { return 2 }'],
     ])
     const headers = index.modules.at(0)?.declarations ?? []
 
@@ -76,7 +76,7 @@ it.effect('marks later duplicates as caused duplicates of the first occurrence',
 
 it.effect('keeps unavailable names unidentified without extra diagnostics', () =>
   Effect.gen(function* () {
-    const index = yield* collect('root', [['root', 'pub fn () -> I32 { return 0 }']])
+    const index = yield* collect('root', [['root', 'pub fn () -> i32 { return 0 }']])
     const header = index.modules.at(0)?.declarations.at(0)
 
     assert.strictEqual(header?.canonical._tag, 'Unidentified')
@@ -88,7 +88,7 @@ it.effect('keeps unavailable names unidentified without extra diagnostics', () =
 it.effect('resolves header signatures and diagnoses unknown types at exact spans', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'pub fn choose(left: I32, right: Mystery) -> I32 { return left }'],
+      ['root', 'pub fn choose(left: i32, right: Mystery) -> i32 { return left }'],
     ])
     const header = index.modules.at(0)?.declarations.at(0)
 
@@ -112,7 +112,7 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
     const index = yield* collect('root', [
       [
         'root',
-        'fn apply<T>(shared: fn(T) -> T, exclusive: mut fn(T) -> Bool, consuming: once fn() -> T) -> T { return shared }',
+        'fn apply<T>(shared: fn(T) -> T, exclusive: mut fn(T) -> bool, consuming: once fn() -> T) -> T { return shared }',
       ],
     ])
     const declaration = index.modules.at(0)?.declarations.at(0)
@@ -123,7 +123,7 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
           ? Type.encode(parameter.declaredType.type)
           : parameter.declaredType._tag,
       ),
-      ['fn(T) -> T', 'mut fn(T) -> Bool', 'once fn() -> T'],
+      ['fn(T) -> T', 'mut fn(T) -> bool', 'once fn() -> T'],
     )
     assert.deepEqual(index.diagnostics, [])
   }),
@@ -135,8 +135,8 @@ it.effect('normalizes effect failure rows while retaining source members', () =>
       [
         'root',
         'struct First {}\nstruct Second {}\n' +
-          'effect fn work() -> I32 ! Second | First | Second { return 1 }\n' +
-          'fn plain() -> I32 { return 0 }',
+          'effect fn work() -> i32 ! Second | First | Second { return 1 }\n' +
+          'fn plain() -> i32 { return 0 }',
       ],
     ])
     const effect = index.modules.at(0)?.declarations.at(0)
@@ -161,10 +161,10 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
       [
         'root',
         'import errors.Error\n' +
-          'effect fn imported() -> I32 ! Error.Error { return 1 }\n' +
-          'effect fn generic<T>() -> I32 ! T { return 1 }\n' +
-          'effect fn scalar() -> I32 ! I32 { return 1 }\n' +
-          'effect fn missing() -> I32 ! Mystery { return 1 }',
+          'effect fn imported() -> i32 ! Error.Error { return 1 }\n' +
+          'effect fn generic<T>() -> i32 ! T { return 1 }\n' +
+          'effect fn scalar() -> i32 ! i32 { return 1 }\n' +
+          'effect fn missing() -> i32 ! Mystery { return 1 }',
       ],
       ['errors/Error', 'pub struct Error {}'],
     ])
@@ -195,7 +195,7 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
 it.effect('rejects failure rows on ordinary functions without losing the row', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'struct Problem {}\nfn bad() -> I32 ! Problem { return 0 }'],
+      ['root', 'struct Problem {}\nfn bad() -> i32 ! Problem { return 0 }'],
     ])
     const declaration = index.modules.at(0)?.declarations.at(0)
 
@@ -219,10 +219,10 @@ it.effect('resolves explicit Effect contracts and canonical requirement rows', (
         `struct Problem {}
 struct FileSystem {}
 struct Allocator {}
-fn later() -> Effect<I32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
   return effect { return 1 }
 }
-effect fn work() -> I32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
       ],
     ])
     const [later, work] = index.modules.at(0)?.declarations ?? []
@@ -253,8 +253,8 @@ effect fn work() -> I32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
 it.effect('orders modules canonically and answers per-module lookups', () =>
   Effect.gen(function* () {
     const index = yield* collect('zeta', [
-      ['zeta', 'import alpha\npub fn main() -> I32 { return 42 }'],
-      ['alpha', 'pub fn helper() -> I32 { return 1 }'],
+      ['zeta', 'import alpha\npub fn main() -> i32 { return 42 }'],
+      ['alpha', 'pub fn helper() -> i32 { return 1 }'],
     ])
 
     assert.deepEqual(
@@ -271,7 +271,7 @@ it.effect('collects identical indexes across repeated fresh runs', () =>
   Effect.gen(function* () {
     const entries: ReadonlyArray<readonly [string, string]> = [
       ['root', 'import lib\npub fn main() -> Mystery { return lib }'],
-      ['lib', 'pub fn same() -> I32 { return 1 }\npub fn same() -> I32 { return 2 }'],
+      ['lib', 'pub fn same() -> i32 { return 1 }\npub fn same() -> i32 { return 2 }'],
     ]
     const first = yield* collect('root', entries)
     const second = yield* collect('root', [...entries].reverse())
@@ -285,9 +285,9 @@ it.effect('indexes mixed struct and function declarations in one canonical names
     const index = yield* collect('root', [
       [
         'root',
-        'pub struct Token { pub kind: I32 lexeme: Bool }\n' +
-          'pub fn make(kind: I32) -> I32 { return kind }\n' +
-          'fn Token() -> I32 { return 0 }',
+        'pub struct Token { pub kind: i32 lexeme: bool }\n' +
+          'pub fn make(kind: i32) -> i32 { return kind }\n' +
+          'fn Token() -> i32 { return 0 }',
       ],
     ])
     const module = index.modules.at(0)
@@ -309,7 +309,7 @@ it.effect('indexes mixed struct and function declarations in one canonical names
 it.effect('retains duplicate and damaged struct fields without losing later fields', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'struct Pair { value: I32 value: Bool pub : I32 tail: Bool }'],
+      ['root', 'struct Pair { value: i32 value: bool pub : i32 tail: bool }'],
     ])
     const fields = index.modules.at(0)?.structs.at(0)?.fields ?? []
 
@@ -363,7 +363,7 @@ it.effect('diagnoses private exposure and inline recursive struct components can
     assert.strictEqual(recursive.modules.at(1)?.structs.at(0)?.dependency._tag, 'Unavailable')
 
     const direct = yield* collect('direct', [
-      ['direct', 'struct Node { next: Node }\npub fn main() -> I32 { return 0 }'],
+      ['direct', 'struct Node { next: Node }\npub fn main() -> i32 { return 0 }'],
     ])
     assert.deepEqual(
       direct.diagnostics.map((diagnostic) => diagnostic.code),
@@ -379,8 +379,8 @@ it.effect('resolves forward nominal fields into a canonical acyclic dependency s
       [
         'geometry',
         'struct Span { first: Position second: Position }\n' +
-          'struct Position { x: I32 }\n' +
-          'pub fn main() -> I32 { return 0 }',
+          'struct Position { x: i32 }\n' +
+          'pub fn main() -> i32 { return 0 }',
       ],
     ])
     const span = index.modules.at(0)?.structs.at(0)
@@ -404,10 +404,10 @@ it.effect('resolves forward nominal fields into a canonical acyclic dependency s
 it.effect('resolves direct generic slice parameters and rejects borrowed storage types', () =>
   Effect.gen(function* () {
     const source =
-      'fn scan<T>(shared: &[T], exclusive: &mut [T]) -> I32 { return 0 }\n' +
-      'fn badParameter(values: [&[I32]; 1]) -> I32 { return 0 }\n' +
-      'fn badReturn() -> &[I32] { return 0 }\n' +
-      'struct BadField { values: &[I32] }'
+      'fn scan<T>(shared: &[T], exclusive: &mut [T]) -> i32 { return 0 }\n' +
+      'fn badParameter(values: [&[i32]; 1]) -> i32 { return 0 }\n' +
+      'fn badReturn() -> &[i32] { return 0 }\n' +
+      'struct BadField { values: &[i32] }'
     const index = yield* collect('slices', [['slices', source]])
     const scan = index.modules.at(0)?.declarations.at(0)
 
@@ -439,9 +439,9 @@ it.effect('indexes nominal allocator conformance without erasing the provider ty
     const index = yield* collect('allocator', [
       [
         'allocator',
-        `struct TestAllocator { remaining: I32 }
+        `struct TestAllocator { remaining: i32 }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
-pub fn main() -> I32 { return 0 }`,
+pub fn main() -> i32 { return 0 }`,
       ],
     ])
     const witness = index.modules.at(0)?.conformances.at(0)
@@ -463,7 +463,7 @@ it.effect('validates allocator mappings and rejects duplicate or foreign witness
     const valid = yield* collect('allocator-valid', [
       [
         'allocator-valid',
-        `struct TestAllocator { remaining: I32 }
+        `struct TestAllocator { remaining: i32 }
 effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemory { return 0 }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ],
@@ -480,8 +480,8 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
     const invalid = yield* collect('allocator-invalid', [
       [
         'allocator-invalid',
-        `struct TestAllocator { remaining: I32 }
-fn allocate(self: &TestAllocator) -> I32 { return 0 }
+        `struct TestAllocator { remaining: i32 }
+fn allocate(self: &TestAllocator) -> i32 { return 0 }
 impl Allocator for TestAllocator { allocate: Foreign.allocate }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ],
@@ -508,10 +508,10 @@ it.effect('accepts one affine Drop hook and rejects Copy targets and malformed h
       [
         'drop-hooks',
         `struct Guard { allocation: Allocation }
-struct CopyValue { value: I32 }
-impl Drop for Guard { fn drop(self: &mut Guard) -> Unit { return Unit.make() } }
-impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> Unit { return Unit.make() } }
-impl Drop for Guard { effect fn dispose(value: &Guard) -> I32 { return 0 } }`,
+struct CopyValue { value: i32 }
+impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
+impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> () { return () } }
+impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
       ],
     ])
     assert.deepEqual(
@@ -539,8 +539,8 @@ it.effect('indexes parametric conformances with bound parameters', () =>
       [
         'parametric',
         `struct Vector<T> { storage: Allocation }
-impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }
-pub fn main() -> I32 { return 0 }`,
+impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } }
+pub fn main() -> i32 { return 0 }`,
       ],
     ])
     assert.deepEqual(index.diagnostics, [])
@@ -567,7 +567,7 @@ it.effect('rejects unbound, duplicate, and overlapping parametric conformances',
       [
         'parametric-unbound',
         `struct Vector<T> { storage: Allocation }
-impl<T, U> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }`,
+impl<T, U> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } }`,
       ],
     ])
     assert.deepEqual(details(unbound, 'SEM0083'), [
@@ -578,7 +578,7 @@ impl<T, U> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return U
       [
         'parametric-duplicate',
         `struct Vector<T> { storage: Allocation }
-impl<T, T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }`,
+impl<T, T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } }`,
       ],
     ])
     assert.deepEqual(
@@ -590,8 +590,8 @@ impl<T, T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return U
       [
         'parametric-overlap',
         `struct Vector<T> { storage: Allocation }
-impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> Unit { return Unit.make() } }
-impl<U> Drop for Vector<U> { fn drop(self: &mut Vector<U>) -> Unit { return Unit.make() } }`,
+impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } }
+impl<U> Drop for Vector<U> { fn drop(self: &mut Vector<U>) -> () { return () } }`,
       ],
     ])
     assert.deepEqual(details(overlapping, 'SEM0083'), [

@@ -44,13 +44,13 @@ damaged syntax and SHALL NOT be repaired by formatting.
 
 #### Scenario: Format a fixed-array type
 
-- **WHEN** complete source spells a fixed-array type with noncanonical trivia as `[ I32 ;4 ]`
-- **THEN** formatting emits `[I32; 4]`
+- **WHEN** complete source spells a fixed-array type with noncanonical trivia as `[ i32 ;4 ]`
+- **THEN** formatting emits `[i32; 4]`
 
 #### Scenario: Format a nested fixed-array type
 
-- **WHEN** complete source contains a nested fixed-array type equivalent to `[[I32; 4]; 3]`
-- **THEN** formatting emits `[[I32; 4]; 3]` with the canonical layout at both levels
+- **WHEN** complete source contains a nested fixed-array type equivalent to `[[i32; 4]; 3]`
+- **THEN** formatting emits `[[i32; 4]; 3]` with the canonical layout at both levels
 
 #### Scenario: Refuse to repair a missing separator
 

@@ -77,7 +77,7 @@ it.effect('presents effect function declarations and references identically', ()
         reference === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', reference)
-      assert.strictEqual(declared?.text, 'effect fn recover(error: OutOfMemory) -> I32')
+      assert.strictEqual(declared?.text, 'effect fn recover(error: OutOfMemory) -> i32')
       assert.deepEqual(referenced, declared)
       return undefined
     }),
@@ -88,8 +88,8 @@ it.effect('indexes declaration and nominal type reference locations', () =>
   Analysis.ofSource(
     'main',
     encoder.encode(`struct Problem {}
-fn recover(error: Problem) -> I32 { return 0 }
-pub fn main() -> I32 { return recover(0) }`),
+fn recover(error: Problem) -> i32 { return 0 }
+pub fn main() -> i32 { return recover(0) }`),
   ).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
@@ -138,8 +138,8 @@ it.effect(
   () =>
     Analysis.ofSource(
       'main',
-      encoder.encode(`struct Pair { left: I32 }
-fn pick() -> I32 {
+      encoder.encode(`struct Pair { left: i32 }
+fn pick() -> i32 {
   let pair = Pair { left: 1 }
   let allocator = SystemAllocator.make()
   return pair.left
@@ -177,7 +177,7 @@ it.effect('recursively indexes generic nominal and type-parameter references', (
     encoder.encode(`struct Problem {}
 struct Box<T> { value: T }
 fn unwrap(box: Box<Problem>) -> Problem { return box.value }
-pub fn main() -> I32 { return 0 }`),
+pub fn main() -> i32 { return 0 }`),
   ).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
@@ -233,8 +233,8 @@ it.effect('completes from the innermost lexical scope and excludes later declara
 })
 
 it.effect('includes match pattern bindings only inside their arm scope', () => {
-  const source = `struct Full { value: I32 }
-pub fn main() -> I32 {
+  const source = `struct Full { value: i32 }
+pub fn main() -> i32 {
   let full = Full { value: 1 }
   return match move full {
     Full { value } => val
@@ -256,9 +256,9 @@ pub fn main() -> I32 {
 
 it.effect('retains exact import, alias, qualifier, and unavailable-member tokens', () => {
   const root = `import lib as Library { answer as read, hidden }
-pub fn main() -> I32 { return read() }`
-  const library = `pub fn answer() -> I32 { return 42 }
-fn hidden() -> I32 { return 0 }`
+pub fn main() -> i32 { return read() }`
+  const library = `pub fn answer() -> i32 { return 42 }
+fn hidden() -> i32 { return 0 }`
   return Analysis.make({ root: SourceFile.make('root', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
     Effect.map((snapshot) => {
@@ -290,19 +290,19 @@ it.effect('renders inferred types through unambiguous imports and canonical fall
   const root = `import types.Models as Schema { Box as Selected }
 struct Selected {}
 struct Problem {}
-pub fn main() -> I32 { return 0 }`
+pub fn main() -> i32 { return 0 }`
   const models = `pub struct Box<T> { value: T }
 pub struct Other {}`
   return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['types/Models', encoder.encode(models)]]))),
     Effect.map((snapshot) => {
       const scope = NameResolution.scopeOf(snapshot.resolution, 'main')
-      const box = Type.nominal('types/Models', 'Box', Object.freeze(['I32']))
+      const box = Type.nominal('types/Models', 'Box', Object.freeze(['i32']))
       const other = Type.nominal('types/Models', 'Other')
       const problem = Type.nominal('main', 'Problem')
-      assert.strictEqual(Presentation.type(box, 'main', scope), 'Schema.Box<I32>')
+      assert.strictEqual(Presentation.type(box, 'main', scope), 'Schema.Box<i32>')
       assert.strictEqual(Presentation.type(other, 'main', scope), 'Schema.Other')
-      assert.strictEqual(Presentation.type(box, 'detached'), 'types/Models.Box<I32>')
+      assert.strictEqual(Presentation.type(box, 'detached'), 'types/Models.Box<i32>')
 
       const effect = Type.effect(
         Type.reference('Exclusive', box),
@@ -318,7 +318,7 @@ pub struct Other {}`
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        'Effect<&mut Schema.Box<I32> ! Problem ? &mut Allocator@Heap>',
+        'Effect<&mut Schema.Box<i32> ! Problem ? &mut Allocator@Heap>',
       )
       const union = Type.union(Object.freeze([problem, Type.outOfMemory]))
       assert.strictEqual(
@@ -333,7 +333,7 @@ pub struct Other {}`
 it.effect('keeps recovered Unicode-adjacent occurrence indexes compact and deterministic', () => {
   const source = `// π🙂
 struct Problem {}
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }
@@ -361,8 +361,8 @@ fn damaged( -> {`
 
 it.effect('indexes and completes catalog-backed capability provision operations', () => {
   const source = `struct Clock {}
-effect fn read() -> I32 ? &Clock { return 42 }
-pub fn main() -> I32 {
+effect fn read() -> i32 ? &Clock { return 42 }
+pub fn main() -> i32 {
   let clock = Clock {}
   let recipe = read() |> Clock.provide(&clock)
   return run recipe
@@ -396,7 +396,7 @@ pub fn main() -> I32 {
 it.effect('preserves ambiguous, missing, namespace, and type completion contexts', () =>
   Effect.gen(function* () {
     const ambiguousSource = `struct SystemAllocator {}
-pub fn main() -> I32 { return SystemAllocator. }`
+pub fn main() -> i32 { return SystemAllocator. }`
     const ambiguous = yield* Analysis.ofSource('main', encoder.encode(ambiguousSource))
     const ambiguousResult = Analysis.completionAt(
       ambiguous,
@@ -409,7 +409,7 @@ pub fn main() -> I32 { return SystemAllocator. }`
     })
     assert.deepEqual(ambiguousResult?.candidates, [])
 
-    const missingSource = `pub fn main() -> I32 { return Mystery. }`
+    const missingSource = `pub fn main() -> i32 { return Mystery. }`
     const missing = yield* Analysis.ofSource('main', encoder.encode(missingSource))
     assert.deepEqual(
       Analysis.completionAt(missing, 'main', missingSource.indexOf('Mystery.') + 'Mystery.'.length)
@@ -419,7 +419,7 @@ pub fn main() -> I32 { return SystemAllocator. }`
 
     const namespaceSource = `import lib as Library
 struct Local {}
-pub fn main(value: I32) -> I32 { return Library. }`
+pub fn main(value: i32) -> i32 { return Library. }`
     const namespace = yield* Analysis.make({
       root: SourceFile.make('main', encoder.encode(namespaceSource)),
     }).pipe(
@@ -429,7 +429,7 @@ pub fn main(value: I32) -> I32 { return Library. }`
             [
               'lib',
               encoder.encode(
-                'pub fn visible() -> I32 { return 1 }\nfn hidden() -> I32 { return 0 }',
+                'pub fn visible() -> i32 { return 1 }\nfn hidden() -> i32 { return 0 }',
               ),
             ],
           ]),
@@ -449,7 +449,7 @@ pub fn main(value: I32) -> I32 { return Library. }`
     )
 
     const typeSource = `struct Local {}
-fn identity<T>(value: ) -> I32 { return 0 }`
+fn identity<T>(value: ) -> i32 { return 0 }`
     const typeSnapshot = yield* Analysis.ofSource('main', encoder.encode(typeSource))
     const typeResult = Analysis.completionAt(
       typeSnapshot,

@@ -22,12 +22,12 @@ const execute = (bytes: Uint8Array): (() => number) => {
 
 it.effect('uses a private shadow frame for stride-aware exclusive slice replacement', () =>
   Effect.gen(function* () {
-    const source = `struct Pair { left: I32 right: I32 }
-fn replace(values: &mut [Pair], index: I32) -> I32 {
+    const source = `struct Pair { left: i32 right: i32 }
+fn replace(values: &mut [Pair], index: usize) -> i32 {
   values[index] = Pair { left: 40, right: 2 }
-  return values.length
+  return usize.toI32(values.length)
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [Pair { left: 1, right: 2 }, Pair { left: 3, right: 4 }]
   let length = replace(&mut values, 1)
   return values[1].left + length
@@ -50,14 +50,14 @@ it.effect('isolates recursive address-taken frames and restores on early return'
   Effect.gen(function* () {
     const artifact = yield* emit(
       'recursive',
-      `fn head(values: &[I32]) -> I32 { return values[0] }
-fn depth(value: I32) -> I32 {
+      `fn head(values: &[i32]) -> i32 { return values[0] }
+fn depth(value: i32) -> i32 {
   let values = [value]
   let current = head(&values)
   if value == 0 { return current }
   return current + depth(value - 1)
 }
-pub fn main() -> I32 { return depth(3) }`,
+pub fn main() -> i32 { return depth(3) }`,
     )
 
     assert.strictEqual(execute(artifact.bytes)(), 6)
@@ -67,11 +67,21 @@ pub fn main() -> I32 { return depth(3) }`,
 
 it.effect('traps negative and equal-length Wasm slice indexes', () =>
   Effect.gen(function* () {
-    for (const index of [-1, 2]) {
+    const negative = yield* Analysis.ofSource(
+      'runtime-slice-wasm/bounds-negative',
+      ascii(`fn choose(values: &[i32], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { let values = [10, 20] return choose(&values, -1) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(negative).map((diagnostic) => diagnostic.code),
+      ['SEM0060'],
+    )
+    for (const index of [2]) {
       const artifact = yield* emit(
         `bounds-${index}`,
-        `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { let values = [10, 20] return choose(&values, ${index}) }`,
+        `fn choose(values: &[i32], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { let values = [10, 20] return choose(&values, ${index}) }`,
       )
       assert.throws(() => execute(artifact.bytes)(), WebAssembly.RuntimeError)
     }
@@ -83,11 +93,11 @@ it.effect('passes one typed address-plus-length bundle for multiple and zero-siz
     const artifact = yield* emit(
       'lengths',
       `struct Empty {}
-fn length<T>(values: &[T]) -> I32 { return values.length }
-fn three() -> I32 { let values = [1, 2, 3] return length(&values) }
-fn six() -> I32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }
-fn emptySize() -> I32 { let values = [Empty {}, Empty {}] return length(&values) }
-pub fn main() -> I32 { return three() + six() + emptySize() }`,
+fn length<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
+fn three() -> i32 { let values = [1, 2, 3] return length(&values) }
+fn six() -> i32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }
+fn emptySize() -> i32 { let values = [Empty {}, Empty {}] return length(&values) }
+pub fn main() -> i32 { return three() + six() + emptySize() }`,
     )
 
     assert.strictEqual(execute(artifact.bytes)(), 11)

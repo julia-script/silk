@@ -12,14 +12,14 @@ it.effect('shares authoritative array cells across calls and compatible reborrow
   Effect.gen(function* () {
     const self = yield* snapshot(
       'mutation',
-      `fn inner(values: &mut [I32], index: I32) -> I32 {
+      `fn inner(values: &mut [i32], index: usize) -> i32 {
   values[index] = 42
-  return values.length
+  return usize.toI32(values.length)
 }
-fn outer(values: &mut [I32], index: I32) -> I32 {
+fn outer(values: &mut [i32], index: usize) -> i32 {
   return inner(&mut values, index)
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [1, 2, 3]
   let length = outer(&mut values, 1)
   return values[1] + length
@@ -54,11 +54,11 @@ it.effect('uses runtime lengths for different source arrays and zero-sized eleme
     const self = yield* snapshot(
       'lengths',
       `struct Empty {}
-fn length<T>(values: &[T]) -> I32 { return values.length }
-fn three() -> I32 { let values = [1, 2, 3] return length(&values) }
-fn six() -> I32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }
-fn emptySize() -> I32 { let values = [Empty {}, Empty {}] return length(&values) }
-pub fn main() -> I32 { return three() + six() + emptySize() }`,
+fn length<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
+fn three() -> i32 { let values = [1, 2, 3] return length(&values) }
+fn six() -> i32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }
+fn emptySize() -> i32 { let values = [Empty {}, Empty {}] return length(&values) }
+pub fn main() -> i32 { return three() + six() + emptySize() }`,
     )
 
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -72,16 +72,20 @@ it.effect('traps negative and equal-length slice indexes at the selector', () =>
   Effect.gen(function* () {
     const negative = yield* snapshot(
       'negative',
-      `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { let values = [10, 20] return choose(&values, -1) }`,
+      `fn choose(values: &[i32], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { let values = [10, 20] return choose(&values, -1) }`,
     )
     const upper = yield* snapshot(
       'upper',
-      `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { let values = [10, 20] return choose(&values, 2) }`,
+      `fn choose(values: &[i32], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { let values = [10, 20] return choose(&values, 2) }`,
     )
 
-    for (const self of [negative, upper]) {
+    assert.deepEqual(
+      Analysis.diagnostics(negative).map((diagnostic) => diagnostic.code),
+      ['SEM0060'],
+    )
+    for (const self of [upper]) {
       assert.deepEqual(Analysis.diagnostics(self), [])
       const outcome = Analysis.evaluate(self)
       assert.strictEqual(outcome._tag, 'Blocked')
@@ -97,12 +101,12 @@ it.effect('checks before the RHS and cleans a displaced move-only value before c
   Effect.gen(function* () {
     const self = yield* snapshot(
       'replacement',
-      `struct Token { value: I32 }
-fn replace(values: &mut [Token], index: I32) -> I32 {
+      `struct Token { value: i32 }
+fn replace(values: &mut [Token], index: usize) -> i32 {
   values[index] = Token { value: 42 }
   return values[index].value
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [Token { value: 1 }, Token { value: 2 }]
   return replace(&mut values, 0)
 }`,

@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Project from '../src/Project.js'
 
-const source = 'pub fn main() -> I32 { return 42 }'
+const source = 'pub fn main() -> i32 { return 42 }'
 
 const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
   const fileSystem = yield* FileSystem.FileSystem

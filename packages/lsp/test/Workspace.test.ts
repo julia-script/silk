@@ -24,8 +24,8 @@ const project = (): string => {
     join(root, 'silk.toml'),
     '[package]\nname = "demo"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
   )
-  writeFileSync(join(root, 'src', 'Main.silk'), 'pub fn main() -> I32 { return 42 }\n')
-  writeFileSync(join(root, 'src', 'Util.silk'), 'pub fn answer() -> I32 { return 7 }\n')
+  writeFileSync(join(root, 'src', 'Main.silk'), 'pub fn main() -> i32 { return 42 }\n')
+  writeFileSync(join(root, 'src', 'Util.silk'), 'pub fn answer() -> i32 { return 7 }\n')
   return root
 }
 
@@ -35,7 +35,7 @@ it.effect('derives module identities from the discovered project source root', (
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Util.silk')).href,
       version: 1,
-      bytes: encoder.encode('pub fn answer() -> I32 { return 7 }'),
+      bytes: encoder.encode('pub fn answer() -> i32 { return 7 }'),
     })
     assert.strictEqual(document.module, 'Util')
     assert.strictEqual(document.sourceRoot, join(root, 'src'))
@@ -47,7 +47,7 @@ it.effect('falls back to the document directory without a manifest', () =>
     const document = yield* Workspace.open({
       uri: 'file:///definitely/missing/standalone.silk',
       version: 1,
-      bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
+      bytes: encoder.encode('pub fn main() -> i32 { return 1 }'),
     })
     assert.strictEqual(document.module, 'standalone')
     assert.strictEqual(document.sourceRoot, '/definitely/missing')
@@ -61,12 +61,12 @@ it.effect('keeps same-named modules isolated by discovered project identity', ()
     const leftDocument = yield* Workspace.open({
       uri: pathToFileURL(join(left, 'src', 'Main.silk')).href,
       version: 1,
-      bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
+      bytes: encoder.encode('pub fn main() -> i32 { return 1 }'),
     })
     const rightDocument = yield* Workspace.open({
       uri: pathToFileURL(join(right, 'src', 'Main.silk')).href,
       version: 1,
-      bytes: encoder.encode('pub fn main() -> I32 { return 2 }'),
+      bytes: encoder.encode('pub fn main() -> i32 { return 2 }'),
     })
     assert.strictEqual(leftDocument.module, rightDocument.module)
     assert.notStrictEqual(leftDocument.workspace, rightDocument.workspace)
@@ -78,17 +78,17 @@ it.effect('assigns stable non-colliding identities to virtual documents', () =>
     const first = yield* Workspace.open({
       uri: 'untitled:First.silk',
       version: 1,
-      bytes: encoder.encode('pub fn main() -> I32 { return 1 }'),
+      bytes: encoder.encode('pub fn main() -> i32 { return 1 }'),
     })
     const repeated = yield* Workspace.open({
       uri: 'untitled:First.silk',
       version: 2,
-      bytes: encoder.encode('pub fn main() -> I32 { return 2 }'),
+      bytes: encoder.encode('pub fn main() -> i32 { return 2 }'),
     })
     const second = yield* Workspace.open({
       uri: 'untitled:Second.silk',
       version: 1,
-      bytes: encoder.encode('pub fn main() -> I32 { return 3 }'),
+      bytes: encoder.encode('pub fn main() -> i32 { return 3 }'),
     })
     assert.strictEqual(first.workspace, repeated.workspace)
     assert.strictEqual(first.module, repeated.module)
@@ -104,7 +104,7 @@ it.effect('resolves open-document overlays before rooted files', () =>
       [
         'Util',
         SourceResolver.resolved(
-          encoder.encode('pub fn answer() -> I32 { return 8 }'),
+          encoder.encode('pub fn answer() -> i32 { return 8 }'),
           SourceOrigin.memory('file:///overlay/Util.silk'),
         ),
       ],
@@ -132,7 +132,7 @@ it.effect('resolves open-document overlays before rooted files', () =>
 it.effect('analyzes imports against sibling files on disk', () =>
   Effect.gen(function* () {
     const root = project()
-    const source = 'import Util\npub fn main() -> I32 { return Util.answer() }'
+    const source = 'import Util\npub fn main() -> i32 { return Util.answer() }'
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
       version: 1,
@@ -156,7 +156,7 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
     mkdirSync(join(root, 'src', 'silk'))
     writeFileSync(join(root, 'src', 'silk', 'vector.silk'), 'pub struct Hostile {}')
     const source =
-      'import silk.vector { Vector }\npub fn size(value: &Vector<I32>) -> Usize { return silk.vector.length(value) }'
+      'import silk.vector { Vector }\npub fn size(value: &Vector<i32>) -> usize { return silk.vector.length(value) }'
     const document = yield* Workspace.open({
       uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
       version: 1,

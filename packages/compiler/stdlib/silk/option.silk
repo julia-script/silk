@@ -1,0 +1,12 @@
+// Canonical recoverable outcome members. The compiler's Option<T> is represented transparently by the
+// structural union Some<T> | None; the named declaration is its source-navigation anchor.
+
+pub struct Some<T> {
+  value: T
+}
+
+pub struct None {}
+
+pub struct Option<T> {
+  value: Some<T> | None
+}

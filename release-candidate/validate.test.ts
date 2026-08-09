@@ -293,11 +293,16 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
     expect(JSON.parse(readFileSync(resolve(packedRoot, 'stdlib/manifest.json'), 'utf8'))).toEqual([
+      { module: 'silk/option', path: 'silk/option.silk' },
       { module: 'silk/vector', path: 'silk/vector.silk' },
     ])
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
+      'pub struct Option<T>',
+    )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/vector.silk'), 'utf8')).toContain(
       'pub struct Vector<T>',
     )
@@ -354,7 +359,7 @@ const modules = await Promise.all(
 const source = api.SourceFile.make(
   'memory/packed',
   new TextEncoder().encode(
-    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
+    'pub fn identity(value: i32) -> i32 { return value }\\npub fn main() -> i32 { return identity(42) }',
   ),
 );
 const snapshotOfSource = (id, bytes) => Effect.runSync(api.Analysis.ofSource(id, bytes));
@@ -372,7 +377,7 @@ visit(parse.root);
 const rootSnapshot = snapshotOfSource(
   'memory/packed',
   new TextEncoder().encode(
-    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(42) }',
+    'pub fn identity(value: i32) -> i32 { return value }\\npub fn main() -> i32 { return identity(42) }',
   ),
 );
 const inputOf = (snapshot) => ({
@@ -391,28 +396,28 @@ const deepEvaluation = evaluationModule.evaluate(
 const call = analysis.functions[1]?.returnedExpression;
 const unknownAnalysis = api.Analysis.rootAnalysis(snapshotOfSource(
   'memory/packed-unknown',
-  new TextEncoder().encode('pub fn main() -> I32 { return missing() }'),
+  new TextEncoder().encode('pub fn main() -> i32 { return missing() }'),
 ));
 const unknownLocalAnalysis = api.Analysis.rootAnalysis(snapshotOfSource(
   'memory/packed-unknown-local',
-  new TextEncoder().encode('pub fn main() -> I32 { return missing }'),
+  new TextEncoder().encode('pub fn main() -> i32 { return missing }'),
 ));
 const wrongArityAnalysis = api.Analysis.rootAnalysis(snapshotOfSource(
   'memory/packed-wrong-arity',
   new TextEncoder().encode(
-    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity() }',
+    'pub fn identity(value: i32) -> i32 { return value }\\npub fn main() -> i32 { return identity() }',
   ),
 ));
 const cycleEvaluation = api.Analysis.evaluate(
   snapshotOfSource(
     'memory/packed-cycle',
-    new TextEncoder().encode('pub fn main() -> I32 { return main() }'),
+    new TextEncoder().encode('pub fn main() -> i32 { return main() }'),
   ),
 );
 const nestedSource = api.SourceFile.make(
   'memory/packed-nested',
   new TextEncoder().encode(
-    'pub fn identity(value: I32) -> I32 { return value }\\npub fn main() -> I32 { return identity(identity(42)) }',
+    'pub fn identity(value: i32) -> i32 { return value }\\npub fn main() -> i32 { return identity(identity(42)) }',
   ),
 );
 const nestedParse = parserModule.parse(api.Lexer.lex(nestedSource));
@@ -431,7 +436,7 @@ const nestedAnalysis = semanticModule.elaborateModule(inputOf(nestedSnapshot));
 const nestedOuter = nestedAnalysis.functions[1]?.returnedExpression;
 const nestedInner = nestedOuter?._tag === 'Call' ? nestedOuter.arguments[0]?.expression : null;
 const nestedEvaluation = api.Analysis.evaluate(nestedSnapshot);
-const arrayText = 'struct Pair { left: I32 right: I32 }\\nfn choose(values: [Pair; 2], index: I32) -> I32 { return values[index].left }\\npub fn main() -> I32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }';
+const arrayText = 'struct Pair { left: i32 right: i32 }\\nfn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }\\npub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }';
 const arrayBytes = new TextEncoder().encode(arrayText);
 const nativeArraySnapshot = Effect.runSync(
   api.Analysis.ofSource('memory/packed-array', arrayBytes, 'aarch64-apple-darwin'),
@@ -449,7 +454,7 @@ const wasmArrayInstance = new WebAssembly.Instance(
   new WebAssembly.Module(wasmArrayArtifact.bytes.slice()),
   {},
 );
-const unionText = 'struct A {}\\nstruct B { value: I32 }\\nstruct C { left: I32 right: I32 }\\nfn accept(value: A | B | C) -> I32 { return 42 }\\nfn widen(value: A | B) -> I32 { return accept(move value) }\\npub fn main() -> I32 { return widen(A {}) }';
+const unionText = 'struct A {}\\nstruct B { value: i32 }\\nstruct C { left: i32 right: i32 }\\nfn accept(value: A | B | C) -> i32 { return 42 }\\nfn widen(value: A | B) -> i32 { return accept(move value) }\\npub fn main() -> i32 { return widen(A {}) }';
 const unionBytes = new TextEncoder().encode(unionText);
 const nativeUnionSnapshot = Effect.runSync(
   api.Analysis.ofSource('memory/packed-union', unionBytes, 'aarch64-apple-darwin'),
@@ -610,7 +615,7 @@ console.log(
       wasmResult: wasmUnionInstance.exports.silk_main(),
     },
     parserDiagnostics: parse.parserDiagnostics.map((diagnostic) => diagnostic.code),
-  }),
+  }, (_, value) => typeof value === 'bigint' ? Number(value) : value),
 );`,
         ],
         {
@@ -718,7 +723,7 @@ console.log(
     expect(api.unions.hir).toContain('union-inject')
     expect(api.unions.hir).toContain('union-widen')
     expect(api.unions.layout).toContain('repr=union tag=i32')
-    expect(api.unions.layout).toContain('I32[tag],I32[payload[0]]')
+    expect(api.unions.layout).toContain('i32[tag],i32[payload[0]]')
     expect(api.unions.mir).toContain('union-inject')
     expect(api.unions.mir).toContain('union-widen')
     expect(api.unions.trace.map((event: { _tag: string }) => event._tag)).toEqual(
@@ -735,7 +740,7 @@ console.log(
       parameterOrdinals: [[0], []],
       parameterLookup: 'Resolved',
       identifierReference: 'Resolved',
-      identifierType: { _tag: 'Available', type: 'I32' },
+      identifierType: { _tag: 'Available', type: 'i32' },
       callReference: 'Resolved',
       argumentExpressionTags: ['Integer'],
       argumentOrdinals: [0],
@@ -747,7 +752,7 @@ console.log(
         typeArguments: [],
         substitution: {},
       },
-      callType: { _tag: 'Available', type: 'I32' },
+      callType: { _tag: 'Available', type: 'i32' },
       callTargetOrdinal: 0,
       callCompatibility: 'Compatible',
       unknownDiagnosticCodes: ['SEM0004'],
@@ -779,7 +784,7 @@ console.log(
       innerContract: 'Compatible',
       outerContract: 'Compatible',
       mappingCount: 1,
-      type: { _tag: 'Available', type: 'I32' },
+      type: { _tag: 'Available', type: 'i32' },
       evaluationReason: null,
       evaluationResult: { _tag: 'I32Value', value: 42 },
       evaluationTrace: [
@@ -916,7 +921,7 @@ test('the compiler CLI release candidate installs with its project-first command
     writeFileSync(resolve(consumerRoot, 'silk/vector.silk'), 'pub struct Hostile {}')
     writeFileSync(
       resolve(consumerRoot, 'Main.silk'),
-      'import silk.vector { Vector }\npub fn main() -> I32 { return 42 }',
+      'import silk.vector { Vector }\npub fn main() -> i32 { return 42 }',
     )
     execFileSync(executable, ['check'], { cwd: consumerRoot, stdio: 'pipe' })
     expect(existsSync(resolve(consumerRoot, '.silk'))).toBe(false)

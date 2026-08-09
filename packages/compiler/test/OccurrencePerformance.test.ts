@@ -10,7 +10,7 @@ const moduleSource = (module: number, declarations: number): string =>
   Array.from(
     { length: declarations },
     (_, ordinal) =>
-      `pub fn value${module}_${ordinal}(input: I32) -> I32 { return I32.add(input, ${ordinal}) }`,
+      `pub fn value${module}_${ordinal}(input: i32) -> i32 { return i32.add(input, ${ordinal}) }`,
   ).join('\n')
 
 it.effect('keeps representative multi-module occurrence storage and lookup within budget', () =>
@@ -18,7 +18,7 @@ it.effect('keeps representative multi-module occurrence storage and lookup withi
     const moduleCount = 6
     const declarationsPerModule = 40
     const imports = Array.from({ length: moduleCount }, (_, ordinal) => `import Module${ordinal}`)
-    const root = `${imports.join('\n')}\npub fn main() -> I32 { return Module0.value0_0(1) }`
+    const root = `${imports.join('\n')}\npub fn main() -> i32 { return Module0.value0_0(1) }`
     const sources = new Map(
       Array.from(
         { length: moduleCount },

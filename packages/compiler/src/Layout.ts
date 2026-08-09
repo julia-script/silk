@@ -21,8 +21,8 @@ export interface Field {
 
 /** The initial closed representation vocabulary for concrete runtime types. */
 export type Representation =
-  | { readonly _tag: 'SignedInteger'; readonly bits: 32 }
-  | { readonly _tag: 'UnsignedInteger'; readonly bits: 32 | 64 }
+  | { readonly _tag: 'SignedInteger'; readonly bits: Scalar.FixedBits }
+  | { readonly _tag: 'UnsignedInteger'; readonly bits: Scalar.FixedBits }
   | { readonly _tag: 'Boolean'; readonly bits: 32; readonly falseValue: 0; readonly trueValue: 1 }
   | {
       readonly _tag: 'Aggregate'
@@ -44,7 +44,11 @@ export type Representation =
         readonly size: 4 | 8
         readonly alignment: 4 | 8
       }
-      readonly length: { readonly type: 'I32'; readonly offset: number; readonly size: 4 }
+      readonly length: {
+        readonly type: 'usize'
+        readonly offset: number
+        readonly size: 4 | 8
+      }
       readonly addressPadding: number
       readonly tailPadding: number
       readonly stride: number
@@ -195,7 +199,7 @@ export interface CallableView {
   readonly pointerBits: 32 | 64
 }
 
-/** A target-owned verdict for one reachable exact contextual `Usize` literal. */
+/** A target-owned verdict for one reachable exact contextual `usize` literal. */
 export type UsizeLiteralVerdict =
   | {
       readonly _tag: 'AvailableUsizeLiteral'
@@ -236,7 +240,7 @@ export type Selector =
   | { readonly _tag: 'ReferenceAddressSelector' }
 
 export type CallingShapeNode =
-  | { readonly _tag: 'EmptyShape'; readonly type: Type.Never; readonly laneCount: 0 }
+  | { readonly _tag: 'EmptyShape'; readonly type: Type.Bottom; readonly laneCount: 0 }
   | { readonly _tag: 'ScalarShape'; readonly type: Type.Builtin; readonly laneCount: 1 }
   | {
       readonly _tag: 'ProductShape'
@@ -258,7 +262,7 @@ export type CallingShapeNode =
       readonly _tag: 'SliceShape'
       readonly type: Type.Slice
       readonly address: { readonly type: AddressScalar; readonly lane: 0 }
-      readonly length: { readonly type: 'I32'; readonly lane: 1 }
+      readonly length: { readonly type: 'usize'; readonly lane: 1 }
       readonly laneCount: 2
     }
   | {
@@ -270,7 +274,7 @@ export type CallingShapeNode =
   | {
       readonly _tag: 'SumShape'
       readonly type: Type.StructuralUnion
-      readonly tag: { readonly type: 'I32'; readonly lane: 0 }
+      readonly tag: { readonly type: 'i32'; readonly lane: 0 }
       readonly payloadLaneCount: number
       readonly payloadTypes: ReadonlyArray<Type.Builtin>
       readonly zeroFill: true
@@ -329,9 +333,9 @@ const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
   const bits = Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64)
   const representation: Representation =
     scalar.category === 'Boolean'
-      ? Object.freeze({ _tag: 'Boolean', bits: scalar.width.bits, falseValue: 0, trueValue: 1 })
+      ? Object.freeze({ _tag: 'Boolean', bits: 32, falseValue: 0, trueValue: 1 })
       : scalar.signedness === 'Signed'
-        ? Object.freeze({ _tag: 'SignedInteger', bits: scalar.width.bits })
+        ? Object.freeze({ _tag: 'SignedInteger', bits })
         : Object.freeze({ _tag: 'UnsignedInteger', bits })
   return Object.freeze({
     _tag: 'LayoutEntry',
@@ -365,9 +369,9 @@ const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined
 
 const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): Entry => {
   const addressBits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
-  const lengthOffset = alignUp(target.pointerSize, 4)
-  const alignment = Math.max(target.pointerAlignment, 4)
-  const contentSize = lengthOffset + 4
+  const lengthOffset = alignUp(target.pointerSize, target.pointerAlignment)
+  const alignment = target.pointerAlignment
+  const contentSize = lengthOffset + target.pointerSize
   const size = alignUp(contentSize, alignment)
   return Object.freeze({
     _tag: 'LayoutEntry',
@@ -383,7 +387,7 @@ const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): En
         size: target.pointerSize,
         alignment: target.pointerAlignment,
       }),
-      length: Object.freeze({ type: 'I32', offset: lengthOffset, size: 4 }),
+      length: Object.freeze({ type: 'usize', offset: lengthOffset, size: target.pointerSize }),
       addressPadding: lengthOffset - target.pointerSize,
       tailPadding: size - contentSize,
       stride: alignUp(element.size, element.alignment),
@@ -509,8 +513,10 @@ export const catalog = (
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
-    if (Type.isIntrinsicNominal(type)) {
-      const ordinal = Type.intrinsicNominalOrdinal(type)
+    if (Type.isIntrinsicNominal(type) || Type.equals(type, Type.unit)) {
+      const ordinal = Type.equals(type, Type.unit)
+        ? Type.intrinsicNominals.size
+        : Type.intrinsicNominalOrdinal(type)
       const structId: DeclarationIndex.DeclarationId = Object.freeze({
         _tag: 'DeclarationId',
         sourceId: type.module,
@@ -518,27 +524,27 @@ export const catalog = (
       })
       const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(type, Type.layout)
         ? Object.freeze([
-            Object.freeze(['bytes', 'Usize'] as const),
-            Object.freeze(['alignment', 'Usize'] as const),
+            Object.freeze(['bytes', 'usize'] as const),
+            Object.freeze(['alignment', 'usize'] as const),
           ])
         : Type.equals(type, Type.invalidAlignment)
-          ? Object.freeze([Object.freeze(['alignment', 'Usize'] as const)])
+          ? Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
           : Type.equals(type, Type.allocation)
             ? Object.freeze([
-                Object.freeze(['$base', 'Usize'] as const),
-                Object.freeze(['$bytes', 'Usize'] as const),
-                Object.freeze(['$alignment', 'Usize'] as const),
-                Object.freeze(['$reclaim', 'Usize'] as const),
-                Object.freeze(['$context', 'Usize'] as const),
-                Object.freeze(['$active', 'Usize'] as const),
+                Object.freeze(['$base', 'usize'] as const),
+                Object.freeze(['$bytes', 'usize'] as const),
+                Object.freeze(['$alignment', 'usize'] as const),
+                Object.freeze(['$reclaim', 'usize'] as const),
+                Object.freeze(['$context', 'usize'] as const),
+                Object.freeze(['$active', 'usize'] as const),
               ])
             : Type.isRawBuffer(type)
               ? Object.freeze([
                   Object.freeze(['$allocation', Type.allocation] as const),
-                  Object.freeze(['count', 'Usize'] as const),
+                  Object.freeze(['count', 'usize'] as const),
                 ])
               : Type.isSlot(type)
-                ? Object.freeze([Object.freeze(['$address', 'Usize'] as const)])
+                ? Object.freeze([Object.freeze(['$address', 'usize'] as const)])
                 : Object.freeze([])
       let cursor = 0
       const fields: Array<Field> = []
@@ -717,7 +723,7 @@ export const catalog = (
     if (Type.isNever(type)) {
       return unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
-        detail: 'Never is uninhabited and has no runtime layout',
+        detail: 'never is uninhabited and has no runtime layout',
       })
     }
     if (Type.isParameter(type)) {
@@ -1249,7 +1255,7 @@ const usizeLiteralVerdicts = (
     for (const expression of expressions) {
       if (
         expression._tag !== 'IntegerLiteral' ||
-        Type.substitute(expression.type, instance.substitution) !== 'Usize'
+        Type.substitute(expression.type, instance.substitution) !== 'usize'
       ) {
         continue
       }
@@ -1405,7 +1411,7 @@ const shapeNode = (
         }),
         lane: 0,
       }),
-      length: Object.freeze({ type: 'I32', lane: 1 }),
+      length: Object.freeze({ type: 'usize', lane: 1 }),
       laneCount: 2,
     })
   }
@@ -1461,18 +1467,30 @@ const shapeNode = (
       0,
     )
     const payloadTypes = Object.freeze(
-      Array.from(
-        { length: payloadLaneCount },
-        (_, slot): Type.Builtin =>
-          members.some((member) => materializeLanes(member.shape).at(slot)?.type === 'Usize')
-            ? 'Usize'
-            : 'I32',
-      ),
+      Array.from({ length: payloadLaneCount }, (_, slot): Type.Builtin => {
+        const candidates = members.flatMap((member) => {
+          const lane = materializeLanes(member.shape).at(slot)
+          return lane !== undefined && typeof lane.type === 'string' ? [lane.type] : []
+        })
+        return (
+          candidates
+            .sort((left, right) => {
+              const leftScalar = Scalar.find(left)
+              const rightScalar = Scalar.find(right)
+              const pointerBits = target.pointerSize === 4 ? 32 : 64
+              const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
+              const rightBits =
+                rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
+              return rightBits - leftBits || Type.compare(left, right)
+            })
+            .at(0) ?? 'i32'
+        )
+      }),
     )
     return Object.freeze({
       _tag: 'SumShape',
       type,
-      tag: Object.freeze({ type: 'I32', lane: 0 }),
+      tag: Object.freeze({ type: 'i32', lane: 0 }),
       payloadLaneCount,
       payloadTypes,
       zeroFill: true,
@@ -1495,13 +1513,25 @@ const shapeNode = (
       0,
     )
     const payloadTypes = Object.freeze(
-      Array.from(
-        { length: payloadLaneCount },
-        (_, slot): Type.Builtin =>
-          variants.some((variant) => materializeLanes(variant).at(slot)?.type === 'Usize')
-            ? 'Usize'
-            : 'I32',
-      ),
+      Array.from({ length: payloadLaneCount }, (_, slot): Type.Builtin => {
+        const candidates = variants.flatMap((variant) => {
+          const lane = materializeLanes(variant).at(slot)
+          return lane !== undefined && typeof lane.type === 'string' ? [lane.type] : []
+        })
+        return (
+          candidates
+            .sort((left, right) => {
+              const leftScalar = Scalar.find(left)
+              const rightScalar = Scalar.find(right)
+              const pointerBits = target.pointerSize === 4 ? 32 : 64
+              const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
+              const rightBits =
+                rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
+              return rightBits - leftBits || Type.compare(left, right)
+            })
+            .at(0) ?? 'i32'
+        )
+      }),
     )
     return Object.freeze({
       _tag: 'OutcomeShape',
@@ -1545,7 +1575,7 @@ const materializeLanes = (
       Object.freeze({
         _tag: 'CallingLane',
         path: Object.freeze([...path, Object.freeze({ _tag: 'SliceLengthSelector' })]),
-        type: 'I32',
+        type: 'usize',
       }),
     ])
   }
@@ -1570,7 +1600,7 @@ const materializeLanes = (
       Object.freeze({
         _tag: 'CallingLane' as const,
         path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
-        type: 'I32' as const,
+        type: 'i32' as const,
       }),
       ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
         Object.freeze({
@@ -1579,7 +1609,7 @@ const materializeLanes = (
             ...path,
             Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
           ]),
-          type: node.payloadTypes.at(slot) ?? ('I32' as const),
+          type: node.payloadTypes.at(slot) ?? ('i32' as const),
         }),
       ),
     ])
@@ -1589,7 +1619,7 @@ const materializeLanes = (
       Object.freeze({
         _tag: 'CallingLane' as const,
         path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
-        type: 'I32' as const,
+        type: 'i32' as const,
       }),
       ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
         Object.freeze({
@@ -1598,7 +1628,7 @@ const materializeLanes = (
             ...path,
             Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
           ]),
-          type: node.payloadTypes.at(slot) ?? ('I32' as const),
+          type: node.payloadTypes.at(slot) ?? ('i32' as const),
         }),
       ),
     ])
@@ -1965,7 +1995,7 @@ const verifyEntry = (
   }
   if (Type.isNever(candidate.type)) {
     return Object.freeze([
-      invalid('InvalidAggregate', candidate.type, 'Never cannot have a runtime layout entry'),
+      invalid('InvalidAggregate', candidate.type, 'never cannot have a runtime layout entry'),
     ])
   }
   if (candidate.representation._tag !== 'Aggregate') {
@@ -2249,7 +2279,7 @@ const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
         Object.freeze({
           _tag: 'LayoutViolation',
           rule: 'InvalidLiteralVerdict',
-          type: 'Usize',
+          type: 'usize',
           detail: `${verdict.value.toString()} has a non-canonical ${verdict.bits}-bit verdict`,
         }),
       )
@@ -2275,7 +2305,7 @@ const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
       Object.freeze({
         _tag: 'LayoutViolation',
         rule: 'InvalidLiteralVerdict',
-        type: 'Usize',
+        type: 'usize',
         detail: 'target literal diagnostics do not match unavailable verdicts',
       }),
     )
@@ -2331,7 +2361,7 @@ const representationText = (representation: Representation): string =>
         : representation._tag === 'Repeated'
           ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
           : representation._tag === 'Slice'
-            ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=I32@${representation.length.offset}/4 address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+            ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
             : representation._tag === 'Reference'
               ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
               : representation._tag === 'Union'
@@ -2352,7 +2382,7 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => [
       : candidate.representation._tag === 'Slice'
         ? [
             `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
-            `  length I32 offset=${candidate.representation.length.offset} size=4 stride=${candidate.representation.stride}`,
+            `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
           ]
         : candidate.representation._tag === 'Reference'
           ? [

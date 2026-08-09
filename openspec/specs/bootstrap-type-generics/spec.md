@@ -35,7 +35,7 @@ position, or supplying the wrong arity MUST remain explicit semantic failures.
 - **THEN** both references resolve to the same canonical applied type identity
 
 #### Scenario: Reject the wrong arity
-- **WHEN** `Pair<I32>` refers to a declaration with two type parameters
+- **WHEN** `Pair<i32>` refers to a declaration with two type parameters
 - **THEN** analysis reports the expected and actual argument counts and produces no available applied type
 
 ### Requirement: Calls infer only from supplied arguments
@@ -74,7 +74,7 @@ runtime generic dictionaries, type descriptors, or unbounded polymorphic closure
 
 #### Scenario: Specialize one generic mapper twice
 
-- **WHEN** the same generic mapper section is reached for `I32` and `Token`
+- **WHEN** the same generic mapper section is reached for `i32` and `Token`
 - **THEN** instance discovery records exactly two concrete callable environments and terminates
 
 ### Requirement: Generic bodies are checked once
@@ -101,7 +101,7 @@ MUST receive only concrete monomorphic instances and MUST NOT require runtime ge
 type descriptors.
 
 #### Scenario: Discover two concrete instances
-- **WHEN** the entry reaches `identity<I32>` and `identity<Token>`
+- **WHEN** the entry reaches `identity<i32>` and `identity<Token>`
 - **THEN** discovery records exactly two deterministic instance keys and lowering produces two concrete MIR functions
 
 #### Scenario: Terminate ordinary generic recursion

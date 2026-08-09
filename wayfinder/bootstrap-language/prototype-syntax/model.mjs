@@ -1,7 +1,7 @@
 const imperativeExamples = [
   {
     title: 'Automatic callable sections',
-    source: `pub fn sum(self: I32, that: I32) -> I32 {
+    source: `pub fn sum(self: i32, that: i32) -> i32 {
   return self + that
 }
 
@@ -123,7 +123,7 @@ let artifact = encodeIntoStorage(&syntax)`,
 const pipedExamples = [
   {
     title: 'Automatic callable sections',
-    source: `pub fn sum(self: I32, that: I32) -> I32
+    source: `pub fn sum(self: i32, that: i32) -> i32
   return self + that
 
 let direct = Math.sum(2, 3)

@@ -1,25 +1,25 @@
 mir-module golden/program
 target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
-layout Bool size=4 align=4 repr=bool-i32 false=0 true=1
-layout I32 size=4 align=4 repr=signed-i32
-calling Bool lanes=1 Bool[]
-calling I32 lanes=1 I32[]
-fn golden/program.main params=0 locals=8 -> I32 entry=r0
+layout bool size=4 align=4 repr=bool-i32 false=0 true=1
+layout i32 size=4 align=4 repr=signed-i32
+calling bool lanes=1 bool[]
+calling i32 lanes=1 i32[]
+fn golden/program.main params=0 locals=8 -> i32 entry=r0
   r0 operation:
-    %0 = literal 40 : I32 [33, 36)
+    %0 = literal 40 : i32 [33, 36)
     %1 = move %0 [22, 36)
     forward r1 [22, 36) generated
   r1 operation:
-    %2 = literal 40 : I32 [56, 59)
-    %3 = equals %1, %2 : Bool [39, 60)
+    %2 = literal 40 : i32 [56, 59)
+    %3 = equals %1, %2 : bool [39, 60)
     forward r2 [36, 106) generated
   r2 conditional condition=%3 taken=r3 otherwise=r4 following=r5 [36, 106)
   r3 operation:
-    %4 = literal 2 : I32 [74, 76)
+    %4 = literal 2 : i32 [74, 76)
     %5 = move %4 [62, 76)
     forward r6 [62, 76) generated
   r6 operation:
-    %6 = add %1, %5 : I32 [83, 104)
+    %6 = add %1, %5 : i32 [83, 104)
     forward r7 [83, 104) generated
   r7 cleanup:
     drop %5 [62, 76) generated
@@ -28,7 +28,7 @@ fn golden/program.main params=0 locals=8 -> I32 entry=r0
   r4 operation:
     forward r5 [36, 106) generated
   r5 operation:
-    %7 = literal 0 : I32 [113, 115)
+    %7 = literal 0 : i32 [113, 115)
     forward r8 [113, 115) generated
   r8 cleanup:
     drop %1 [22, 36) generated

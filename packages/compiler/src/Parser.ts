@@ -388,8 +388,7 @@ const primaryKind = (
       return 'Identifier'
     }
     if (token.kind === 'LeftBrace') return allowStructLiteral ? 'StructLiteral' : recoveryKind
-    if (token.kind === 'LeftParenthesis')
-      return significantKindAfter(state, 1) === 'RightParenthesis' ? 'Call' : 'Grouped'
+    if (token.kind === 'LeftParenthesis') return 'Grouped'
     if (
       token.kind === 'Comma' ||
       token.kind === 'RightParenthesis' ||
@@ -654,6 +653,13 @@ function parseStructLiteralExpression(
 
 function parseGroupedExpression(initial: State, reservedForEnclosingCalls: number): NodeResult {
   const left = expect(initial, 'LeftParenthesis', [...expressionStarts, 'RightParenthesis'])
+  if (nextSignificantKind(left.state) === 'RightParenthesis') {
+    const right = expectCallRightParenthesis(left.state, reservedForEnclosingCalls)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'UnitExpression', [...left.elements, ...right.elements]),
+    })
+  }
   const expression = parseExpression(left.state, reservedForEnclosingCalls + 1, 'Identifier')
   const right = expectCallRightParenthesis(expression.state, reservedForEnclosingCalls)
   return Object.freeze({
@@ -1184,10 +1190,25 @@ function parseExpression(
 
 const parseReturnStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ReturnKeyword', [...expressionStarts, 'RightBrace'])
+  if (nextSignificantKind(keyword.state) === 'RightBrace') {
+    const expression = syntaxNode(keyword.state, 'UnitExpression', [])
+    return Object.freeze({
+      state: keyword.state,
+      node: syntaxNode(keyword.state, 'ReturnStatement', [...keyword.elements, expression]),
+    })
+  }
   const expression = parseExpression(keyword.state, 0, 'Integer')
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'ReturnStatement', [...keyword.elements, expression.node]),
+  })
+}
+
+const parseImplicitUnitReturnStatement = (initial: State): NodeResult => {
+  const expression = syntaxNode(initial, 'UnitExpression', [])
+  return Object.freeze({
+    state: initial,
+    node: syntaxNode(initial, 'ReturnStatement', [expression]),
   })
 }
 
@@ -1362,7 +1383,11 @@ const parseTransferStatement = (
   })
 }
 
-function parseBlock(initial: State, requireReturn: boolean): NodeResult {
+function parseBlock(
+  initial: State,
+  requireReturn: boolean,
+  implicitUnitReturn = false,
+): NodeResult {
   const leftBrace = expect(initial, 'LeftBrace', [
     'LetKeyword',
     'IfKeyword',
@@ -1432,6 +1457,10 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
         : parseReturnStatement(state)
     children = Object.freeze([...children, statement.node])
     state = statement.state
+  }
+  if (implicitUnitReturn && !sawReturn) {
+    const statement = parseImplicitUnitReturnStatement(state)
+    children = Object.freeze([...children, statement.node])
   }
 
   const rightBrace = expect(state, 'RightBrace', [
@@ -1665,6 +1694,13 @@ const parseTypePrimary = (
       'RightParenthesis',
       ...following,
     ])
+    if (nextSignificantKind(left.state) === 'RightParenthesis') {
+      const right = expect(left.state, 'RightParenthesis', following)
+      return Object.freeze({
+        state: right.state,
+        node: syntaxNode(right.state, 'UnitType', [...left.elements, ...right.elements]),
+      })
+    }
     const type = parseType(left.state, ['RightParenthesis', ...following])
     const right = expect(type.state, 'RightParenthesis', following)
     return Object.freeze({
@@ -2171,14 +2207,24 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
       ? parseTypeParameterList(name.state, ['LeftParenthesis'])
       : undefined
   const parameters = parseParameterList(typeParameters?.state ?? name.state)
-  const returnType = parseReturnType(parameters.state)
-  const failureRow =
-    nextSignificantKind(returnType.state) === 'Bang' ? parseFailureRow(returnType.state) : undefined
-  const requirementRow =
-    nextSignificantKind(failureRow?.state ?? returnType.state) === 'Question'
-      ? parseRequirementRow(failureRow?.state ?? returnType.state, ['LeftBrace'])
+  const returnType =
+    nextSignificantKind(parameters.state) === 'Arrow'
+      ? parseReturnType(parameters.state)
       : undefined
-  const block = parseBlock(requirementRow?.state ?? failureRow?.state ?? returnType.state, true)
+  const afterReturnType = returnType?.state ?? parameters.state
+  const failureRow =
+    nextSignificantKind(afterReturnType) === 'Bang' ? parseFailureRow(afterReturnType) : undefined
+  const requirementRow =
+    nextSignificantKind(failureRow?.state ?? afterReturnType) === 'Question'
+      ? parseRequirementRow(failureRow?.state ?? afterReturnType, ['LeftBrace'])
+      : undefined
+  const unitResult =
+    returnType === undefined || SyntaxTree.directNode(returnType.node, 'UnitType') !== undefined
+  const block = parseBlock(
+    requirementRow?.state ?? failureRow?.state ?? afterReturnType,
+    !unitResult,
+    unitResult,
+  )
 
   return Object.freeze({
     state: block.state,
@@ -2189,7 +2235,7 @@ const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeRe
       ...name.elements,
       ...(typeParameters === undefined ? [] : [typeParameters.node]),
       parameters.node,
-      returnType.node,
+      ...(returnType === undefined ? [] : [returnType.node]),
       ...(failureRow === undefined ? [] : [failureRow.node]),
       ...(requirementRow === undefined ? [] : [requirementRow.node]),
       block.node,

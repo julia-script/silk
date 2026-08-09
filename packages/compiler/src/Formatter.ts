@@ -604,6 +604,8 @@ const printNode = (
         printNode(context, result, FormatDocument.text(' ')),
       )
     }
+    case 'UnitType':
+      return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
     case 'ParenthesizedType':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'LeftParenthesis'), prefix, preserveBlank),
@@ -795,6 +797,7 @@ const printNode = (
       )
     case 'RoleExpression':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'UnitExpression':
     case 'IntegerLiteralExpression':
     case 'BooleanLiteralExpression':
     case 'IdentifierExpression':

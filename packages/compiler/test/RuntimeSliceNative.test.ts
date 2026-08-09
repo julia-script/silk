@@ -13,12 +13,12 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `struct Pair { left: I32 right: I32 }
-fn replace(values: &mut [Pair], index: I32) -> I32 {
+const source = `struct Pair { left: i32 right: i32 }
+fn replace(values: &mut [Pair], index: usize) -> i32 {
   values[index] = Pair { left: 40, right: 2 }
-  return values.length
+  return usize.toI32(values.length)
 }
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut values = [Pair { left: 1, right: 2 }, Pair { left: 3, right: 4 }]
   let length = replace(&mut values, 1)
   return values[1].left + length
@@ -79,8 +79,8 @@ it.effect(
 
 it.effect('traps an equal-length native slice index before loading memory', () =>
   Effect.gen(function* () {
-    const boundsSource = `fn choose(values: &[I32], index: I32) -> I32 { return values[index] }
-pub fn main() -> I32 { let values = [10, 20] return choose(&values, 2) }`
+    const boundsSource = `fn choose(values: &[i32], index: usize) -> i32 { return values[index] }
+pub fn main() -> i32 { let values = [10, 20] return choose(&values, 2) }`
     const compiled = yield* Driver.compile({
       compilation: {
         root: SourceFile.make('runtime-slice-native/bounds', ascii(boundsSource)),

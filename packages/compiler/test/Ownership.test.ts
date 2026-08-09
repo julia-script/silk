@@ -10,10 +10,10 @@ import { elaborate } from './support/elaborate.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const acceptedSource = `pub fn choose(left: I32, right: I32) -> I32 { return left }
-pub fn main() -> I32 { return choose(1, 2) }`
-const damagedSource = `pub fn puzzle(value: Mystery) -> I32 { return value }
-pub fn main() -> I32 { return missing() }`
+const acceptedSource = `pub fn choose(left: i32, right: i32) -> i32 { return left }
+pub fn main() -> i32 { return choose(1, 2) }`
+const damagedSource = `pub fn puzzle(value: Mystery) -> i32 { return value }
+pub fn main() -> i32 { return missing() }`
 
 const check = (id: string, text: string): Ownership.ModuleOwnership =>
   Ownership.checkModule(elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))))
@@ -82,7 +82,7 @@ it('checks and encodes identically across repeated fresh runs', () => {
   assert.strictEqual(Ownership.encode(first), Ownership.encode(second))
 })
 
-const bindingSource = `pub fn main() -> I32 { let first = 1 let second = 2 return first }`
+const bindingSource = `pub fn main() -> i32 { let first = 1 let second = 2 return first }`
 
 it('ranges let bindings from their statement to the end of the body', () => {
   const facts = check('golden://bindings.silk', bindingSource)
@@ -107,9 +107,9 @@ it('ranges let bindings from their statement to the end of the body', () => {
 it('consumes an owner at explicit drop and rejects later use', () => {
   const facts = check(
     'ownership://explicit-drop.silk',
-    `struct Token { value: I32 }
-fn inspect(token: Token) -> I32 { return token.value }
-fn main() -> I32 {
+    `struct Token { value: i32 }
+fn inspect(token: Token) -> i32 { return token.value }
+fn main() -> i32 {
   let token = Token { value: 1 }
   drop token
   return inspect(token)
@@ -134,8 +134,8 @@ it('releases live let bindings in reverse binding order at the return exit', () 
 it('ends liveness at a consuming move and skips the moved binding at the exit', () => {
   const facts = check(
     'golden://moved.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { let value = 42 return identity(move value) }`,
+    `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { let value = 42 return identity(move value) }`,
   )
   const main = facts.functions.at(1)
   const binding = main?.bindings.at(0)
@@ -150,8 +150,8 @@ pub fn main() -> I32 { let value = 42 return identity(move value) }`,
 it('diagnoses a use after move as an OWN0001 violation with published facts', () => {
   const facts = check(
     'golden://violation.silk',
-    `pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
+    `pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
   )
   const main = facts.functions.at(1)
 
@@ -171,8 +171,8 @@ pub fn main() -> I32 { let value = 42 return choose(move value, value) }`,
 it('accepts an ordinary read before the consuming move', () => {
   const facts = check(
     'golden://read-then-move.silk',
-    `pub fn choose(left: I32, right: I32) -> I32 { return right }
-pub fn main() -> I32 { let value = 42 return choose(value, move value) }`,
+    `pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { let value = 42 return choose(value, move value) }`,
   )
 
   assert.strictEqual(facts.functions.at(1)?.verdict._tag, 'Satisfied')
@@ -186,7 +186,7 @@ it('matches the binding ownership golden encoding byte-for-byte', () => {
   )
 })
 
-const branchSource = `pub fn main() -> I32 { let outer = 2 if I32.equals(outer, 2) { let inner = 1 return inner } return outer }`
+const branchSource = `pub fn main() -> i32 { let outer = 2 if i32.equals(outer, 2) { let inner = 1 return inner } return outer }`
 
 it('scopes arm bindings to their arm with per-return exits', () => {
   const facts = check('golden://arms.silk', branchSource)
@@ -209,7 +209,7 @@ it('scopes arm bindings to their arm with per-return exits', () => {
 it('releases an unmoved arm binding at the arm end when the arm falls through', () => {
   const facts = check(
     'golden://arm-end.silk',
-    'pub fn main() -> I32 { if I32.equals(1, 1) { let side = 5 } return 0 }',
+    'pub fn main() -> i32 { if i32.equals(1, 1) { let side = 5 } return 0 }',
   )
   const main = facts.functions.at(0)
   const armEnd = main?.exits.find((exit) => exit.kind === 'ArmEnd')
@@ -224,8 +224,8 @@ it('releases an unmoved arm binding at the arm end when the arm falls through', 
 it('keeps a value live when the only arm that moves it returns', () => {
   const facts = check(
     'golden://conditional-move.silk',
-    `pub fn identity(value: I32) -> I32 { return value }
-pub fn main() -> I32 { let value = 1 if I32.equals(1, 1) { return identity(move value) } return value }`,
+    `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { let value = 1 if i32.equals(1, 1) { return identity(move value) } return value }`,
   )
   const main = facts.functions.at(1)
 
@@ -236,9 +236,9 @@ pub fn main() -> I32 { let value = 1 if I32.equals(1, 1) { return identity(move 
 it('consumes a take recipe on its first run and rejects a repeated run', () => {
   const facts = check(
     'ownership://take-effect.silk',
-    `struct Payload { value: I32 }
-effect fn inspect(payload: Payload) -> I32 { return payload.value }
-pub fn main() -> I32 {
+    `struct Payload { value: i32 }
+effect fn inspect(payload: Payload) -> i32 { return payload.value }
+pub fn main() -> i32 {
   let payload = Payload { value: 21 }
   let recipe = inspect(move payload)
   let first = run recipe
@@ -256,8 +256,8 @@ pub fn main() -> I32 {
 it('derives take-once execution from an effect-block moved capture', () => {
   const facts = check(
     'ownership://take-effect-block.silk',
-    `struct Payload { value: I32 }
-pub fn main(payload: Payload) -> I32 {
+    `struct Payload { value: i32 }
+pub fn main(payload: Payload) -> i32 {
   let pending = effect { return move payload }
   let first = run pending
   let second = run pending
@@ -275,8 +275,8 @@ pub fn main(payload: Payload) -> I32 {
 it('allows a shared copy-only recipe to run repeatedly', () => {
   const facts = check(
     'ownership://shared-effect.silk',
-    `effect fn inspect(value: I32) -> I32 { return value }
-pub fn main() -> I32 {
+    `effect fn inspect(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
   let recipe = inspect(21)
   return (run recipe) + (run recipe)
 }`,
@@ -289,8 +289,8 @@ pub fn main() -> I32 {
 it('keeps a borrowed effect capture loan live until its last run', () => {
   const facts = check(
     'ownership://borrowed-effect.silk',
-    `effect fn inspect(values: &[I32]) -> I32 { return values[0] }
-pub fn main() -> I32 {
+    `effect fn inspect(values: &[i32]) -> i32 { return values[0] }
+pub fn main() -> i32 {
   let mut values = [1]
   let recipe = inspect(&values)
   values[0] = 2
@@ -312,9 +312,9 @@ pub fn main() -> I32 {
 it('keeps an existing borrowed provider live until its last run', () => {
   const facts = check(
     'ownership://borrowed-provider.silk',
-    `struct Clock { tick: I32 }
-effect fn read() -> I32 ? &Clock { return 42 }
-pub fn main() -> I32 {
+    `struct Clock { tick: i32 }
+effect fn read() -> i32 ? &Clock { return 42 }
+pub fn main() -> i32 {
   let mut clock = Clock { tick: 0 }
   let recipe = read() |> Clock.provide(&clock)
   clock.tick = 1
@@ -332,9 +332,9 @@ pub fn main() -> I32 {
 it('moves an owned provider into a take-once Effect wrapper', () => {
   const facts = check(
     'ownership://moved-provider.silk',
-    `struct Clock { tick: I32 }
-effect fn read() -> I32 ? &mut Clock { return 42 }
-pub fn main() -> I32 {
+    `struct Clock { tick: i32 }
+effect fn read() -> i32 ? &mut Clock { return 42 }
+pub fn main() -> i32 {
   let clock = Clock { tick: 0 }
   let recipe = read() |> Clock.provide(move clock)
   let first = run recipe
@@ -352,8 +352,8 @@ pub fn main() -> I32 {
 it('allows an owner to change after the borrowed recipe has finished its last run', () => {
   const facts = check(
     'ownership://finished-borrowed-effect.silk',
-    `effect fn inspect(values: &[I32]) -> I32 { return values[0] }
-pub fn main() -> I32 {
+    `effect fn inspect(values: &[i32]) -> i32 { return values[0] }
+pub fn main() -> i32 {
   let mut values = [1]
   let recipe = inspect(&values)
   let seen = run recipe
@@ -369,9 +369,9 @@ pub fn main() -> I32 {
 it('plans a stored callable environment and drops moved slots in reverse capture order', () => {
   const facts = check(
     'ownership://callable-environment.silk',
-    `struct Token { value: I32 }
-fn select(value: I32, first: Token, second: Token) -> I32 { return value }
-pub fn main() -> I32 {
+    `struct Token { value: i32 }
+fn select(value: i32, first: Token, second: Token) -> i32 { return value }
+pub fn main() -> i32 {
   let first = Token { value: 1 }
   let second = Token { value: 2 }
   let callback = select(move first, move second)
@@ -396,9 +396,9 @@ pub fn main() -> I32 {
 it('rejects a second invocation of a take-once callable binding', () => {
   const facts = check(
     'ownership://take-callable-reuse.silk',
-    `struct Token { value: I32 }
-fn consume(value: I32, token: Token) -> I32 { return value }
-pub fn main() -> I32 {
+    `struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value }
+pub fn main() -> i32 {
   let token = Token { value: 1 }
   let callback = consume(move token)
   let first = callback(20)
@@ -417,8 +417,8 @@ pub fn main() -> I32 {
 it('retains a callable capture loan until the callable is dropped', () => {
   const blocked = check(
     'ownership://borrowed-callable.silk',
-    `fn read(value: I32, values: &mut [I32]) -> I32 { return value }
-pub fn main() -> I32 {
+    `fn read(value: i32, values: &mut [i32]) -> i32 { return value }
+pub fn main() -> i32 {
   let mut values = [1]
   let callback = read(&mut values)
   values[0] = 2
@@ -427,8 +427,8 @@ pub fn main() -> I32 {
   )
   const released = check(
     'ownership://dropped-borrowed-callable.silk',
-    `fn read(value: I32, values: &mut [I32]) -> I32 { return value }
-pub fn main() -> I32 {
+    `fn read(value: i32, values: &mut [i32]) -> i32 { return value }
+pub fn main() -> i32 {
   let mut values = [1]
   let callback = read(&mut values)
   drop callback
@@ -448,9 +448,9 @@ pub fn main() -> I32 {
 it('checks an affine pipeline input once before its callable section', () => {
   const facts = check(
     'ownership://affine-pipeline.silk',
-    `struct Token { value: I32 }
-fn consume(token: Token, adjustment: I32) -> I32 { return token.value + adjustment }
-pub fn main() -> I32 {
+    `struct Token { value: i32 }
+fn consume(token: Token, adjustment: i32) -> i32 { return token.value + adjustment }
+pub fn main() -> i32 {
   let token = Token { value: 40 }
   let result = move token |> consume(2)
   drop token
@@ -467,8 +467,8 @@ pub fn main() -> I32 {
 it('assigns Allocation one private active reclaim ticket', () => {
   const facts = check(
     'ownership://allocation-ticket.silk',
-    `fn consume(allocation: Allocation) -> I32 { return 42 }
-pub fn main() -> I32 { return 0 }`,
+    `fn consume(allocation: Allocation) -> i32 { return 42 }
+pub fn main() -> i32 { return 0 }`,
   )
   const release = facts.functions.at(0)?.exits.at(0)?.releases.at(0)
 
@@ -485,7 +485,7 @@ pub fn main() -> I32 { return 0 }`,
 it('ends exclusive allocator access when allocation returns, not when Allocation drops', () => {
   const facts = check(
     'ownership://allocation-provider-loan.silk',
-    `effect fn allocateTwice(firstLayout: Layout, secondLayout: Layout, provider: Allocator) -> I32 ! OutOfMemory {
+    `effect fn allocateTwice(firstLayout: Layout, secondLayout: Layout, provider: Allocator) -> i32 ! OutOfMemory {
   let mut allocator = move provider
   let firstRecipe = Allocator.allocate(move firstLayout) |> Allocator.provide(&mut allocator)
   let first = run firstRecipe
@@ -495,7 +495,7 @@ it('ends exclusive allocator access when allocation returns, not when Allocation
   drop first
   return 42
 }
-pub fn main() -> I32 { return 0 }`,
+pub fn main() -> i32 { return 0 }`,
   )
 
   assert.deepEqual(facts.diagnostics, [])
@@ -505,7 +505,7 @@ pub fn main() -> I32 { return 0 }`,
 it('ends unsafe lexical owners at the explicit boundary', () => {
   const facts = check(
     'ownership://unsafe-boundary.silk',
-    'struct Token { value: I32 } pub fn main() -> I32 { unsafe { let token = Token { value: 1 } } return 42 }',
+    'struct Token { value: i32 } pub fn main() -> i32 { unsafe { let token = Token { value: 1 } } return 42 }',
   )
   const scopeExit = facts.functions.at(0)?.exits.find((exit) => exit.kind === 'ScopeEnd')
   assert.deepEqual(facts.diagnostics, [])
@@ -516,7 +516,7 @@ it('ends unsafe lexical owners at the explicit boundary', () => {
 it('keeps a Slot loan active until the lexical Slot is consumed', () => {
   const facts = check(
     'ownership://slot-loan.silk',
-    `fn misuse(buffer: RawBuffer<I32>) -> I32 {
+    `fn misuse(buffer: RawBuffer<i32>) -> i32 {
   let mut owner = move buffer
   unsafe {
     let slot = RawBuffer.slot(&mut owner, 0)
@@ -538,16 +538,16 @@ it('keeps a Slot loan active until the lexical Slot is consumed', () => {
 it('reports moves and double drops inside lazy effect bodies', () => {
   const doubled = check(
     'ownership://effect-body-double-drop.silk',
-    `struct Token { value: I32 }
-struct Problem { code: I32 }
-effect fn store() -> I32 ! Problem {
+    `struct Token { value: i32 }
+struct Problem { code: i32 }
+effect fn store() -> i32 ! Problem {
   let token = Token { value: 1 }
   drop token
   drop token
   return 1
 }
-effect fn recover(error: Problem) -> I32 { return 0 }
-pub fn main() -> I32 { return run Effect.catch<Problem>(store(), recover) }`,
+effect fn recover(error: Problem) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<Problem>(store(), recover) }`,
   )
   assert.deepEqual(
     doubled.diagnostics.map((diagnostic) => diagnostic.code),
@@ -558,15 +558,15 @@ pub fn main() -> I32 { return run Effect.catch<Problem>(store(), recover) }`,
   // exits and bindings belong to its own compiled function, not to the enclosing one.
   const healthy = check(
     'ownership://effect-body-healthy.silk',
-    `struct Token { value: I32 }
-struct Problem { code: I32 }
-effect fn store() -> I32 ! Problem {
+    `struct Token { value: i32 }
+struct Problem { code: i32 }
+effect fn store() -> i32 ! Problem {
   let token = Token { value: 1 }
   drop token
   return 1
 }
-effect fn recover(error: Problem) -> I32 { return 0 }
-pub fn main() -> I32 { return run Effect.catch<Problem>(store(), recover) }`,
+effect fn recover(error: Problem) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<Problem>(store(), recover) }`,
   )
   assert.deepEqual(healthy.diagnostics, [])
   const store = healthy.functions.at(0)

@@ -7,6 +7,20 @@ data-first behavior while giving source programs conventional precedence and pip
 
 ## Requirements
 
+### Requirement: Operators resolve homogeneously across integers
+
+Arithmetic and comparison operators SHALL resolve only for compatible operands of the same integer type. They SHALL select that type's signed or unsigned checked semantics without implicit conversion, overload lookup, truthiness, or operand reordering. Prefix negation SHALL support signed integers only; logical negation SHALL support `bool` only.
+
+#### Scenario: Resolve unsigned multiplication
+
+- **WHEN** both operands of `*` are `u32`
+- **THEN** the operator selects checked unsigned multiplication returning `u32`
+
+#### Scenario: Reject mixed widths
+
+- **WHEN** operands have types `i32` and `i64`
+- **THEN** operator analysis rejects them without conversion
+
 ### Requirement: The bootstrap operator surface is closed and ordered
 
 The language SHALL recognize prefix `-` and `!`; multiplicative `*`, `/`, and `%`; additive `+`
@@ -37,38 +51,6 @@ grouping SHALL be a parser error rather than an implicit multi-way comparison.
 - **WHEN** a body spells `1 < 2 < 3`
 - **THEN** the second relational operator is retained as recovered syntax with a parser diagnostic rather than defining a chained comparison
 
-### Requirement: Operators resolve to compiler-known actor operations
-
-Arithmetic operators and prefix negation SHALL resolve to `I32` actor operations; relational
-operators SHALL resolve to the matching two-argument `I32` comparison; `!` SHALL resolve to
-`Bool.not`; and equality SHALL resolve to `equals` or `notEquals` for two operands of the same
-available scalar type, currently `I32` or `Bool`. Operator resolution SHALL use the same closed
-operation identities, contracts, exact arithmetic, and `SEM0012` operand-type diagnostic as their
-qualified actor-call forms. It MUST NOT search source declarations, imports, methods, conformances,
-or overload candidates, and it MUST NOT perform truthiness, implicit numeric conversion, or
-operand reordering. A directly negated decimal literal SHALL retain the signed-literal behavior
-that admits exact `-2147483648`; any other prefix negation SHALL be the trapping `I32.negate`
-operation.
-
-#### Scenario: Resolve arithmetic syntax
-
-- **WHEN** a body returns `40 + 2`
-- **THEN** the operator resolves to the same `I32.add` operation and `I32` result as `I32.add(40, 2)`
-
-#### Scenario: Resolve boolean equality
-
-- **WHEN** a body returns `true == false`
-- **THEN** equality resolves to the compiler-known `Bool.equals` operation and produces `Bool`
-
-#### Scenario: Reject a mistyped operand
-
-- **WHEN** a body returns `true + 1`
-- **THEN** the left operand receives `SEM0012`, the operator expression remains unavailable, and no alternate operation is searched
-
-#### Scenario: Trap prefix-negation overflow
-
-- **WHEN** runtime evaluation negates an `I32` value equal to `-2147483648`
-- **THEN** the operation traps for arithmetic overflow exactly like subtracting it from zero
 
 ### Requirement: Pipelines apply one unary callable
 
@@ -80,17 +62,17 @@ MUST NOT create method lookup, implicit imports, or runtime namespace objects.
 
 #### Scenario: Pipe into an actor section
 
-- **WHEN** a body returns `2 |> I32.add(3)`
-- **THEN** `I32.add(3)` first denotes a unary callable and the pipeline invokes it with `2`, producing `5`
+- **WHEN** a body returns `2 |> i32.add(3)`
+- **THEN** `i32.add(3)` first denotes a unary callable and the pipeline invokes it with `2`, producing `5`
 
 #### Scenario: Pipe into a callable binding
 
-- **WHEN** `increment` holds `I32.add(1)` and a body returns `2 |> increment`
+- **WHEN** `increment` holds `i32.add(1)` and a body returns `2 |> increment`
 - **THEN** the pipeline invokes the stored callable and produces `3`
 
 #### Scenario: Chain applications left-to-right
 
-- **WHEN** a body returns `2 |> I32.add(3) |> I32.multiply(4)`
+- **WHEN** a body returns `2 |> i32.add(3) |> i32.multiply(4)`
 - **THEN** the first application produces `5` and the second produces `20`
 
 ### Requirement: Operator-authored programs reuse the backend-neutral pipeline
@@ -110,27 +92,10 @@ encodings.
 
 #### Scenario: Keep MIR backend-neutral
 
-- **WHEN** `40 + 2` and `40 |> I32.add(2)` are lowered for native and WebAssembly targets
+- **WHEN** `40 + 2` and `40 |> i32.add(2)` are lowered for native and WebAssembly targets
 - **THEN** both targets consume the same canonical arithmetic and callable plans with target-aware layout
 
 #### Scenario: Repeat operator compilation
 
 - **WHEN** equivalent operator and callable-pipeline programs are compiled repeatedly in fresh processes
 - **THEN** syntax, semantic facts, HIR, MIR, diagnostics, symbols, and emitted artifacts are deterministic
-
-### Requirement: Operators resolve homogeneously for Usize
-
-The established prefix, arithmetic, equality, and ordering pipeline SHALL resolve binary `Usize`
-operators only when both operands are `Usize`. It SHALL select unsigned checked semantics and a
-`Usize` arithmetic or `Bool` comparison result without introducing overload lookup, implicit
-conversion, or backend-specific operator identity. Unary minus on `Usize` SHALL be rejected.
-
-#### Scenario: Resolve checked multiplication
-
-- **WHEN** both operands of `*` have canonical type `Usize`
-- **THEN** operator facts select checked unsigned multiplication returning `Usize`
-
-#### Scenario: Reject unary minus
-
-- **WHEN** unary `-` is applied to a `Usize` expression
-- **THEN** operator analysis reports that the prefix operation is unavailable for that type

@@ -129,13 +129,13 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     client.send({ method: 'initialized', params: {} })
 
     const brokenUri = 'file:///silk-lsp-e2e/broken.silk'
-    didOpen(client, brokenUri, 'pub fn main() -> I32 { return missing() }')
+    didOpen(client, brokenUri, 'pub fn main() -> i32 { return missing() }')
     const diagnostics = await client.waitFor((message) => publishedDiagnostics(message, brokenUri))
     assert.strictEqual(diagnostics.length, 1)
     assert.strictEqual(diagnostics[0]?.code, 'SEM0004')
 
     const hoverUri = 'file:///silk-lsp-e2e/hover.silk'
-    const hoverText = 'pub fn main() -> I32 { return 42 }'
+    const hoverText = 'pub fn main() -> i32 { return 42 }'
     didOpen(client, hoverUri, hoverText)
     await client.waitFor((message) => publishedDiagnostics(message, hoverUri))
     client.send({
@@ -149,10 +149,10 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     const hover = (await client.waitFor((message) => response(message, 2))) as {
       contents: { value: string }
     }
-    assert.include(hover.contents.value, 'I32')
+    assert.include(hover.contents.value, 'i32')
 
     const formatUri = 'file:///silk-lsp-e2e/format.silk'
-    didOpen(client, formatUri, 'pub fn main() -> I32 { return   7 }')
+    didOpen(client, formatUri, 'pub fn main() -> i32 { return   7 }')
     await client.waitFor((message) => publishedDiagnostics(message, formatUri))
     client.send({
       id: 3,
@@ -169,7 +169,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.include(edits[0]?.newText, 'return 7')
 
     const hintUri = 'file:///silk-lsp-e2e/hints.silk'
-    const hintText = `pub fn main() -> I32 {
+    const hintText = `pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }`
@@ -192,7 +192,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     )
 
     const completionUri = 'file:///silk-lsp-e2e/completion.silk'
-    const completionText = `pub fn main() -> I32 {
+    const completionText = `pub fn main() -> i32 {
   return Effect.
 }`
     didOpen(client, completionUri, completionText)
@@ -249,7 +249,7 @@ it('serves exact-version definitions and suppresses superseded diagnostics', {
     client.send({ id: registration.id, result: null })
 
     const uri = 'file:///silk-lsp-e2e/coherent.silk'
-    didOpen(client, uri, 'pub fn main() -> I32 { return missing() }')
+    didOpen(client, uri, 'pub fn main() -> i32 { return missing() }')
     client.send({
       method: 'textDocument/didChange',
       params: {
@@ -257,8 +257,8 @@ it('serves exact-version definitions and suppresses superseded diagnostics', {
         contentChanges: [
           {
             text: `// 🧭
-fn identity(value: I32) -> I32 { return value }
-fn shadow() -> I32 {
+fn identity(value: i32) -> i32 { return value }
+fn shadow() -> i32 {
   let value = 1
   if true {
     let value = 2
@@ -266,7 +266,7 @@ fn shadow() -> I32 {
   }
   return value
 }
-pub fn main() -> I32 { return identity(42) }`,
+pub fn main() -> i32 { return identity(42) }`,
           },
         ],
       },
@@ -282,7 +282,7 @@ pub fn main() -> I32 { return identity(42) }`,
       method: 'textDocument/definition',
       params: {
         textDocument: { uri },
-        position: { line: 10, character: 'pub fn main() -> I32 { return '.length },
+        position: { line: 10, character: 'pub fn main() -> i32 { return '.length },
       },
     })
     const definitions = (await client.waitFor((message) => response(message, 2))) as Array<{
@@ -307,7 +307,7 @@ pub fn main() -> I32 { return identity(42) }`,
     assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 5, character: 8 })
 
     const latest = `// π🙂
-pub fn main() -> I32 {
+pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return Effect.
 }`
@@ -399,12 +399,12 @@ it('refreshes sibling documents when an imported module changes', { timeout: 30_
 
     const mainUri = 'file:///silk-lsp-e2e/multi/Main.silk'
     const utilUri = 'file:///silk-lsp-e2e/multi/Util.silk'
-    didOpen(client, mainUri, 'import Util\npub fn main() -> I32 { return Util.answer() }')
+    didOpen(client, mainUri, 'import Util\npub fn main() -> i32 { return Util.answer() }')
     const alone = await client.waitFor((message) => publishedDiagnostics(message, mainUri))
     assert.strictEqual(alone[0]?.code, 'MOD0001')
 
     // Opening Util resolves the import through the overlay, so Main must republish clean.
-    didOpen(client, utilUri, 'pub fn answer() -> I32 { return 7 }')
+    didOpen(client, utilUri, 'pub fn answer() -> i32 { return 7 }')
     await client.waitFor((message) => {
       const diagnostics = publishedDiagnostics(message, mainUri)
       return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
@@ -415,7 +415,7 @@ it('refreshes sibling documents when an imported module changes', { timeout: 30_
       method: 'textDocument/didChange',
       params: {
         textDocument: { uri: utilUri, version: 2 },
-        contentChanges: [{ text: 'pub fn other() -> I32 { return 7 }' }],
+        contentChanges: [{ text: 'pub fn other() -> i32 { return 7 }' }],
       },
     })
     const broken = await client.waitFor((message) => {
@@ -442,9 +442,9 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
   )
   const mainPath = join(sourceRoot, 'Main.silk')
   const utilPath = join(sourceRoot, 'Util.silk')
-  const mainText = 'import Util\npub fn main() -> I32 { return Util.answer() }'
+  const mainText = 'import Util\npub fn main() -> i32 { return Util.answer() }'
   writeFileSync(mainPath, mainText)
-  writeFileSync(utilPath, 'pub fn answer() -> I32 { return 7 }')
+  writeFileSync(utilPath, 'pub fn answer() -> i32 { return 7 }')
   const mainUri = pathToFileURL(mainPath).href
   const utilUri = pathToFileURL(utilPath).href
   const client = connect()
@@ -481,7 +481,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     assert.strictEqual(closed[0]?.targetUri, utilUri)
     assert.strictEqual(closed[0]?.targetSelectionRange.start.line, 0)
 
-    didOpen(client, utilUri, '\npub fn answer() -> I32 { return 8 }')
+    didOpen(client, utilUri, '\npub fn answer() -> i32 { return 8 }')
     await client.waitFor((message) => {
       const report = publishedDiagnosticReport(message, mainUri)
       return report?.diagnostics.length === 0 ? report : undefined
@@ -490,7 +490,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     assert.strictEqual(unsaved[0]?.targetUri, utilUri)
     assert.strictEqual(unsaved[0]?.targetSelectionRange.start.line, 1)
 
-    writeFileSync(utilPath, 'pub fn other() -> I32 { return 9 }')
+    writeFileSync(utilPath, 'pub fn other() -> i32 { return 9 }')
     client.send({
       method: 'workspace/didChangeWatchedFiles',
       params: { changes: [{ uri: utilUri, type: 2 }] },
@@ -518,7 +518,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
         : undefined
     })
 
-    writeFileSync(utilPath, 'pub fn answer() -> I32 { return 10 }')
+    writeFileSync(utilPath, 'pub fn answer() -> i32 { return 10 }')
     let nextMessage = client.messages.length
     client.send({
       method: 'workspace/didChangeWatchedFiles',
@@ -532,8 +532,8 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
 
     const alternateRoot = join(root, 'alt')
     mkdirSync(alternateRoot)
-    writeFileSync(join(alternateRoot, 'Entry.silk'), 'pub fn entry() -> I32 { return 0 }')
-    writeFileSync(join(alternateRoot, 'Util.silk'), 'pub fn other() -> I32 { return 11 }')
+    writeFileSync(join(alternateRoot, 'Entry.silk'), 'pub fn entry() -> i32 { return 0 }')
+    writeFileSync(join(alternateRoot, 'Util.silk'), 'pub fn other() -> i32 { return 11 }')
     writeFileSync(
       join(root, 'silk.toml'),
       '[package]\nname = "navigation"\nversion = "0.1.0"\nroot = "alt/Entry.silk"\nsource-root = "alt"\n',

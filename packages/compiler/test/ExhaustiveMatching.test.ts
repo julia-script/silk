@@ -22,9 +22,9 @@ const returnedMatch = (
 it('publishes guarded source-order coverage, narrowed bindings, and acyclic HIR', () => {
   const result = analyze(
     'main',
-    `pub struct Token { kind: I32 }
+    `pub struct Token { kind: i32 }
 pub struct End {}
-pub fn inspect(event: Token | End) -> I32 {
+pub fn inspect(event: Token | End) -> i32 {
   return match &event {
     Token { kind } if false => kind
     Token { kind: fallback } => fallback
@@ -77,16 +77,16 @@ pub fn inspect(event: Token | End) -> I32 {
     Hir.expressionTree(hir.expression).filter((item) => item._tag === 'Match').length,
     1,
   )
-  assert.include(Hir.encode(result.hir), 'match shared members=main.End,main.Token : I32')
+  assert.include(Hir.encode(result.hir), 'match shared members=main.End,main.Token : i32')
 })
 
 it('diagnoses incomplete, unreachable, foreign-member, guard, field, and result failures', () => {
   const incomplete = analyze(
     'incomplete',
-    `pub struct Token { kind: I32 other: I32 }
+    `pub struct Token { kind: i32 other: i32 }
 pub struct End {}
 pub struct Other {}
-pub fn inspect(event: Token | End) -> I32 {
+pub fn inspect(event: Token | End) -> i32 {
   return match event {
     Token { kind } if 1 => kind
     Other {} => 0
@@ -102,7 +102,7 @@ pub fn inspect(event: Token | End) -> I32 {
   const unreachable = analyze(
     'unreachable',
     `pub struct Token {}
-pub fn inspect(event: Token) -> I32 {
+pub fn inspect(event: Token) -> i32 {
   return match event { _ => 0 Token {} => 1 }
 }`,
   )
@@ -116,7 +116,7 @@ pub fn inspect(event: Token) -> I32 {
     'incompatible',
     `pub struct Token {}
 pub struct End {}
-pub fn inspect(event: Token | End) -> I32 {
+pub fn inspect(event: Token | End) -> i32 {
   return match event { Token {} => 0 End {} => false }
 }`,
   )
@@ -129,9 +129,9 @@ pub fn inspect(event: Token | End) -> I32 {
 it('retains nested canonical field paths and rejects pattern binding conflicts', () => {
   const result = analyze(
     'nested',
-    `pub struct Span { start: I32 end: I32 }
+    `pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
-pub fn inspect(event: Token, offset: I32) -> I32 {
+pub fn inspect(event: Token, offset: i32) -> i32 {
   return match event { Token { span: Span { start: offset, .. } } => offset }
 }`,
   )
@@ -209,10 +209,10 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
 it('keeps borrowed owners live, consumes move matches, and requires mutable exclusive roots', () => {
   const shared = analyze(
     'shared-owner',
-    `pub struct Token { kind: I32 }
+    `pub struct Token { kind: i32 }
 pub struct End {}
-fn finish(event: Token | End) -> I32 { return 0 }
-pub fn inspect(event: Token | End) -> I32 {
+fn finish(event: Token | End) -> i32 { return 0 }
+pub fn inspect(event: Token | End) -> i32 {
   let code = match &event { Token { kind } => kind End {} => 0 }
   return finish(move event)
 }`,
@@ -221,10 +221,10 @@ pub fn inspect(event: Token | End) -> I32 {
 
   const consumed = analyze(
     'consumed-owner',
-    `pub struct Token { kind: I32 }
+    `pub struct Token { kind: i32 }
 pub struct End {}
-fn finish(event: Token | End) -> I32 { return 0 }
-pub fn inspect(event: Token | End) -> I32 {
+fn finish(event: Token | End) -> i32 { return 0 }
+pub fn inspect(event: Token | End) -> i32 {
   let code = match move event { Token { kind } => kind End {} => 0 }
   return finish(move event)
 }`,
@@ -236,8 +236,8 @@ pub fn inspect(event: Token | End) -> I32 {
 
   const bare = analyze(
     'bare-owner',
-    `pub struct Token { kind: I32 }
-pub fn inspect(event: Token) -> I32 { return match event { Token { kind } => kind } }`,
+    `pub struct Token { kind: i32 }
+pub fn inspect(event: Token) -> i32 { return match event { Token { kind } => kind } }`,
   )
   assert.include(
     Ownership.checkModule(bare).diagnostics.map((diagnostic) => diagnostic.code),
@@ -246,8 +246,8 @@ pub fn inspect(event: Token) -> I32 { return match event { Token { kind } => kin
 
   const exclusive = analyze(
     'exclusive-owner',
-    `pub struct Token { kind: I32 }
-pub fn inspect(event: Token) -> I32 { return match &mut event { Token { kind } => kind } }`,
+    `pub struct Token { kind: i32 }
+pub fn inspect(event: Token) -> i32 { return match &mut event { Token { kind } => kind } }`,
   )
   assert.include(
     Ownership.checkModule(exclusive).diagnostics.map((diagnostic) => diagnostic.code),
@@ -260,8 +260,8 @@ it('keeps guard bindings provisional and rejects borrowed payload escape', () =>
     'guard-owner',
     `pub struct Payload {}
 pub struct Box { value: Payload }
-fn accept(value: Payload) -> Bool { return true }
-pub fn inspect(input: Box) -> I32 {
+fn accept(value: Payload) -> bool { return true }
+pub fn inspect(input: Box) -> i32 {
   return match move input {
     Box { value } if accept(move value) => 1
     Box { value: fallback } => 0
@@ -291,8 +291,8 @@ it('plans selected-arm cleanup for omitted and unreturned moved fields', () => {
   const result = analyze(
     'cleanup-owner',
     `pub struct Payload {}
-pub struct Box { payload: Payload code: I32 }
-pub fn inspect(input: Box) -> I32 {
+pub struct Box { payload: Payload code: i32 }
+pub fn inspect(input: Box) -> i32 {
   return match move input { Box { code, .. } => code }
 }`,
   )

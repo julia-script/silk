@@ -197,7 +197,7 @@ const resolveEntry = (root: Elaboration.Result): Entry => {
     declaration.functionKind !== 'Ordinary' ||
     declaration.failureRow.failures.length !== 0 ||
     declaration.returnType._tag !== 'Resolved' ||
-    declaration.returnType.type !== 'I32' ||
+    declaration.returnType.type !== 'i32' ||
     declaration.canonical._tag !== 'Canonical'
   ) {
     return Object.freeze({ _tag: 'Unavailable', reason: 'UntypedEntry' })
