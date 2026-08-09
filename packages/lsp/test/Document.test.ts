@@ -42,6 +42,39 @@ it.effect('publishes compiler errors as protocol diagnostics', () =>
   }),
 )
 
+it.effect('keeps recovered return diagnostics off leading indentation', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn foo() -> I32 {\n          a\n}'
+    const { document, snapshot } = yield* open(source)
+
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, () => undefined).map(({ code, message, range }) => ({
+        code,
+        message,
+        range,
+      })),
+      [
+        {
+          code: 'PAR0001',
+          message: 'Expected `return`',
+          range: {
+            start: { line: 1, character: 10 },
+            end: { line: 1, character: 10 },
+          },
+        },
+        {
+          code: 'SEM0006',
+          message: 'Unknown value a',
+          range: {
+            start: { line: 1, character: 10 },
+            end: { line: 1, character: 11 },
+          },
+        },
+      ],
+    )
+  }),
+)
+
 it.effect('reports no diagnostics for a valid program', () =>
   Effect.gen(function* () {
     const { document, snapshot } = yield* open('pub fn main() -> I32 { return 42 }')

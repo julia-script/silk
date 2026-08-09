@@ -73,7 +73,7 @@ The parser recognizes exactly this grammatical slice, with whitespace and `//` l
 allowed between its elements:
 
 ```text
-File                → FunctionDeclaration+ EOF
+File                → TopLevelDeclaration* EOF
 FunctionDeclaration → pub fn Identifier(ParameterList?) -> Identifier { return ReturnExpression }
 ParameterList       → Parameter ( , Parameter )*
 Parameter           → Identifier : Identifier
@@ -83,8 +83,8 @@ ArgumentList        → Argument ( , Argument )*
 Argument            → DecimalInteger | Identifier | CallExpression
 ```
 
-The result is a concrete syntax tree (CST), not a semantic AST. Its nodes group the source into one
-or more direct function declarations in source order. Each declaration contains a parameter list,
+The result is a concrete syntax tree (CST), not a semantic AST. An empty module contains only EOF;
+otherwise its nodes group direct declarations in source order. Each function contains a parameter list,
 return type, block, return statement, and an integer, bare-identifier, or call expression. Typed
 parameter declarations and integer, identifier, or recursively nested call arguments retain their
 own ordered concrete nodes, separators, and trivia. Nested calls reserve the closing tokens required
@@ -95,9 +95,13 @@ A following `pub` bounds both block and damaged-call recovery so the next declar
 separate.
 
 Ordinary source mistakes remain data. A required absent token becomes a `MissingToken` leaf with an
-empty span and a `PAR0001` diagnostic. Unexpected concrete input becomes a lossless `Error` node
-and a `PAR0002` diagnostic. Lexical diagnostics remain separate on the retained lexical result;
-`Parser.parse` does not throw or fail an Effect for these mistakes.
+empty span and normally one `PAR0001` diagnostic whose message uses the token's Silk spelling.
+Multiple leaves introduced for one wholly absent return statement share one `PAR0004` diagnostic.
+Unexpected concrete input becomes a lossless `Error` node and a `PAR0002` diagnostic. Identifier-led
+statements become assignments only when their complete place is followed by `=`; a final identifier
+without `return` remains the expression of a recovered return statement. Lexical diagnostics remain
+separate on the retained lexical result; `Parser.parse` does not throw or fail an Effect for these
+mistakes.
 
 ## Bootstrap semantic facts
 
@@ -143,12 +147,12 @@ relationship rather than executing the function. Missing, ambiguous, syntax-dama
 unresolved-target-type calls remain unavailable. Integer returned expressions keep their existing
 exact value and compatibility behavior.
 
-Every usable bare identifier expression resolves only against the complete parameter collection of
-its enclosing function. A unique match retains the exact parameter identity and supplies its
-declared type to the expression; a missing match produces `SEM0006`; duplicate matches stay
-ambiguous and rely on the declaration-owned `SEM0005`. Missing or damaged reference syntax remains
-parser-owned and unavailable. The same rule applies to returned identifiers and identifier call
-arguments.
+Every usable bare identifier expression resolves against the preceding local bindings, in-scope
+pattern bindings, and parameter collection of its enclosing function. A unique match retains its
+exact declaration identity and supplies its type to the expression; a missing match produces
+`SEM0006` with unknown-value terminology; duplicate matches stay ambiguous and rely on the
+declaration-owned diagnostic. Missing or damaged reference syntax remains parser-owned and
+unavailable. The same rule applies to returned identifiers and identifier call arguments.
 
 Each usable call argument has a source-local identity, zero-based concrete ordinal, expression,
 type, and exact syntax provenance. A uniquely resolved call maps argument ordinal `n` to target

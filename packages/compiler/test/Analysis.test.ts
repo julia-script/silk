@@ -164,6 +164,29 @@ it.effect('evaluates and answers ownership through the single-source convenience
   }),
 )
 
+it.effect('reports only actionable diagnostics for empty and recovered-return sources', () =>
+  Effect.gen(function* () {
+    const empty = yield* Analysis.ofSource('memory/empty', new Uint8Array())
+    assert.deepEqual(Analysis.diagnostics(empty), [])
+    assert.deepEqual(Analysis.rootAnalysis(empty).functions, [])
+
+    const recovered = yield* Analysis.ofSource(
+      'memory/recovered-return',
+      ascii('pub fn main() -> I32 { foo }'),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(recovered).map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+      })),
+      [
+        { code: 'PAR0001', message: 'Expected `return`' },
+        { code: 'SEM0006', message: 'Unknown value foo' },
+      ],
+    )
+  }),
+)
+
 it.effect('answers stable match facts across semantic, HIR, ownership, MIR, and trace phases', () =>
   Effect.gen(function* () {
     const source = `struct Left { value: I32 }

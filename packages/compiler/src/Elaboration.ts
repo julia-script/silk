@@ -1159,7 +1159,7 @@ const resolveValueName = (
       diagnostics: Object.freeze([]),
     })
   }
-  const missingDiagnostic = Diagnostic.unknownParameterReference(tokenSpelling, token.span)
+  const missingDiagnostic = Diagnostic.unknownValueReference(tokenSpelling, token.span)
   return Object.freeze({
     reference: Object.freeze({
       _tag: 'Missing' as const,
@@ -3906,7 +3906,9 @@ function analyzePlaceReplace(
   diagnostics.push(...value.diagnostics)
   const root = assignmentRoot(destination.fact)
   if (root === undefined) {
-    diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+    if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
+      diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+    }
   } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
     diagnostics.push(
       Diagnostic.immutableAssignment(
@@ -6069,7 +6071,9 @@ const analyzeStatements = (
       context.diagnostics.push(...value.diagnostics)
       const root = assignmentRoot(destination.fact)
       if (root === undefined) {
-        context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+        if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
+          context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+        }
       } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(

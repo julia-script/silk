@@ -6,7 +6,7 @@ Turn the bootstrap lexer result into the smallest source-faithful grammatical st
 recover from ordinary mistakes without introducing semantic or lowering representations.
 ## Requirements
 ### Requirement: First function grammar
-The parser SHALL recognize a source file containing one or more top-level import or function
+The parser SHALL recognize a source file containing zero or more top-level import or function
 declarations followed by end-of-file. Every function SHALL have the form `[pub] fn <name>(<parameters>)
 -> <return-type> { <statements> }`, where `pub` is optional and `<statements>` is zero or more binding
 statements followed by exactly one return statement. A binding statement SHALL have the form `let
@@ -19,6 +19,10 @@ argument lists SHALL remain valid. Lexer trivia SHALL be permitted between gramm
 statements, and declarations. Names, qualifiers, members, and types SHALL remain uninterpreted
 identifier tokens, and declaration, statement, parameter, and argument order SHALL match concrete
 source order.
+
+#### Scenario: Parse an empty module
+- **WHEN** the source contains only end-of-file
+- **THEN** the result contains a source-file root with end-of-file, no recovered declaration, and no parser diagnostic
 
 #### Scenario: Parse the accepted integer fixture
 - **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
@@ -128,7 +132,12 @@ extension MUST NOT imply that nested calls are already semantically resolved or 
 ### Requirement: Function-boundary recovery remains local
 Recovery inside one function SHALL stop at a following function's `pub` token when that token can
 begin the next declaration. Unexpected concrete input between declarations SHALL remain lossless,
-and parsing SHALL either consume a concrete token or insert missing syntax without looping.
+and parsing SHALL either consume a concrete token or insert missing syntax without looping. An
+empty module SHALL terminate directly at end-of-file without entering declaration recovery. After
+the first diagnostic in one recovery episode, dependent missing or damaged syntax SHALL remain
+explicit in the tree without producing further diagnostics until the parser consumes a concrete
+token expected by the grammar. At that synchronization token, ordinary diagnostic reporting SHALL
+resume for later independent mistakes.
 
 #### Scenario: Preserve a second function after a missing brace
 - **WHEN** the first function omits its closing brace immediately before a valid second function
@@ -138,9 +147,17 @@ and parsing SHALL either consume a concrete token or insert missing syntax witho
 - **WHEN** unsupported punctuation appears after one complete function and before the next `pub`
 - **THEN** the punctuation is retained in an error region with a parser diagnostic and the following function remains parseable
 
-#### Scenario: Preserve empty-input recovery
+#### Scenario: Preserve empty module structure
 - **WHEN** the source is empty
-- **THEN** the parser still returns one recovered missing function structure and end-of-file rather than treating an empty file as a valid program
+- **THEN** the parser returns only the source-file root and end-of-file without missing syntax or parser diagnostics
+
+#### Scenario: Stop an end-of-file declaration cascade
+- **WHEN** the source contains only `pub`
+- **THEN** the parser reports the missing `fn`, retains the remaining recovered function structure, and suppresses its dependent missing-token and missing-return diagnostics through end-of-file
+
+#### Scenario: Report again after a grammar anchor
+- **WHEN** one missing token starts recovery, a later expected concrete token is consumed, and another independent token is missing after that anchor
+- **THEN** the parser reports both independent mistakes without reporting dependent insertions between them
 
 ### Requirement: Lossless concrete syntax tree
 
@@ -189,8 +206,9 @@ recovery data, and a following return arrow or declaration SHALL bound recovery.
 ### Requirement: Missing syntax remains explicit
 When a required grammar element is absent at the current source position, the parser SHALL insert a
 missing element with the expected token kind and an empty source-owned span at that byte boundary.
-The parser SHALL emit a stable diagnostic for the missing element without consuming an unrelated
-concrete token.
+The parser SHALL emit a stable diagnostic for the source-level mistake without consuming an
+unrelated concrete token. Multiple missing elements introduced solely to represent one absent
+construct MAY share one construct-level diagnostic rather than producing one diagnostic per leaf.
 
 #### Scenario: Recover a missing function name
 - **WHEN** the source spells `pub fn () -> I32 { return 42 }`
@@ -199,6 +217,10 @@ concrete token.
 #### Scenario: Recover a missing closing brace
 - **WHEN** the accepted fixture ends after the decimal integer
 - **THEN** the block contains a missing right brace at end-of-file and the parser returns the partial tree with one parser diagnostic
+
+#### Scenario: Aggregate a wholly missing return statement
+- **WHEN** a required-return block reaches its closing brace without a return keyword or expression
+- **THEN** the CST retains the recovered return structure and one parser diagnostic identifies the missing return statement
 
 ### Requirement: Unexpected syntax remains explicit
 When concrete tokens cannot satisfy the next grammar element, the parser SHALL consume a maximal
@@ -295,7 +317,8 @@ diagnostics, and recovery SHALL resume at the next `let`, `return`, closing brac
 declaration, or end-of-file. A `move` operand missing its name SHALL retain the keyword with an
 explicit missing identifier. Statements after the return statement and blocks without a return
 statement SHALL remain recoverable: extra statements stay in the tree as concrete branches, and a
-missing return statement becomes an explicit recovered return structure with parser diagnostics.
+missing return statement becomes an explicit recovered return structure covered by one
+construct-level parser diagnostic.
 
 #### Scenario: Recover a missing initializer
 
@@ -310,7 +333,7 @@ missing return statement becomes an explicit recovered return structure with par
 #### Scenario: Recover a missing return statement
 
 - **WHEN** a block contains only binding statements before its closing brace
-- **THEN** the block retains every binding followed by a recovered return structure whose missing elements carry parser diagnostics
+- **THEN** the block retains every binding followed by a recovered return structure with one parser diagnostic for the missing statement
 
 #### Scenario: Recover a bare move
 
@@ -638,9 +661,11 @@ containing expression.
 ### Requirement: Mutable bindings and assignments parse losslessly
 
 The parser SHALL recognize `let mut name = expression` and statement-form `place = expression`,
-where a place is a binding followed by zero or more field or index projections. The concrete tree
-SHALL retain the `mut` token, assignment token, complete place syntax, expression, trivia, and exact
-spans. Assignment SHALL remain distinct from equality and SHALL NOT be an expression.
+where a place is a binding followed by zero or more field or index projections. An identifier-led
+construct SHALL be classified as an assignment only when the complete place is followed by `=`.
+The concrete tree SHALL retain the `mut` token, assignment token, complete place syntax,
+expression, trivia, and exact spans. Assignment SHALL remain distinct from equality and SHALL NOT
+be an expression.
 
 #### Scenario: Parse an indexed field update
 
@@ -651,6 +676,11 @@ spans. Assignment SHALL remain distinct from equality and SHALL NOT be an expres
 
 - **WHEN** a loop body contains both `current = next` and `current == next`
 - **THEN** the first is an assignment statement and the second remains an equality expression
+
+#### Scenario: Recover a final identifier as a missing-keyword return
+
+- **WHEN** a required-return block ends with `foo` immediately before its closing brace
+- **THEN** `foo` is the recovered return expression, one parser diagnostic identifies the missing `return` keyword, and no assignment syntax is synthesized
 
 ### Requirement: Structured loop syntax is lossless and recoverable
 

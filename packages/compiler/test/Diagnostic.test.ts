@@ -87,6 +87,44 @@ it('describes reserved template syntax with a stable parser diagnostic', () => {
   )
 })
 
+it('describes missing tokens with source-language spelling', () => {
+  const keyword = Diagnostic.missingToken('ReturnKeyword', spanAt(4, 4))
+  const punctuation = Diagnostic.missingToken('Equals', spanAt(8, 8))
+
+  assert.deepEqual(
+    [keyword, punctuation].map((diagnostic) => ({
+      message: diagnostic.message,
+      reason: diagnostic.reason,
+    })),
+    [
+      {
+        message: 'Expected `return`',
+        reason: { _tag: 'MissingToken', expected: 'ReturnKeyword' },
+      },
+      { message: 'Expected `=`', reason: { _tag: 'MissingToken', expected: 'Equals' } },
+    ],
+  )
+})
+
+it('describes one wholly absent return statement with one stable diagnostic', () => {
+  const diagnostic = Diagnostic.missingReturnStatement(spanAt(12, 12))
+
+  assert.deepEqual(
+    {
+      phase: diagnostic.phase,
+      code: diagnostic.code,
+      message: diagnostic.message,
+      reason: diagnostic.reason,
+    },
+    {
+      phase: 'parser',
+      code: 'PAR0004',
+      message: 'Expected return statement',
+      reason: { _tag: 'MissingReturnStatement' },
+    },
+  )
+})
+
 it('assigns identity ordinals among equal phase, code, and span', () => {
   const span = spanAt(0, 1)
   const equal = Diagnostic.unknownFunction('twice', span)

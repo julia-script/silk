@@ -927,7 +927,7 @@ it('keeps damaged nested syntax parser-owned while retaining recursive facts', (
   assert.strictEqual(call.contract.reason._tag, 'UnavailableMappedType')
   assert.deepEqual(
     result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002', 'PAR0001'],
+    ['PAR0002'],
   )
   assert.deepEqual(result.diagnostics, [])
 })
@@ -1037,7 +1037,7 @@ it('withholds contracts without cascading when a prerequisite is unavailable', (
   )
   assert.deepEqual(
     recovered.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002', 'PAR0001'],
+    ['PAR0002'],
   )
   assert.deepEqual(recovered.diagnostics, [])
 })
@@ -1083,9 +1083,43 @@ it('diagnoses unknown local names at their exact reference spans', () => {
       code: 'SEM0006',
       start: reference.token.span.start,
       end: reference.token.span.end,
-      reason: { _tag: 'UnknownParameterReference', spelling: 'missing' },
+      reason: { _tag: 'UnknownValueReference', spelling: 'missing' },
     },
   ])
+})
+
+it('does not reinterpret an unknown final value as an invalid assignment place', () => {
+  const result = analyzeText(
+    'fixture://unknown-recovered-return.silk',
+    'pub fn main() -> I32 { missing }',
+  )
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      message: diagnostic.message,
+      reason: diagnostic.reason,
+    })),
+    [
+      {
+        code: 'SEM0006',
+        message: 'Unknown value missing',
+        reason: { _tag: 'UnknownValueReference', spelling: 'missing' },
+      },
+    ],
+  )
+})
+
+it('suppresses invalid-place cascades for unknown assignment roots', () => {
+  const result = analyzeText(
+    'fixture://unknown-assignment-root.silk',
+    'pub fn main() -> I32 { missing = 1 return 0 }',
+  )
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0006'],
+  )
 })
 
 it('preserves duplicate parameters and reports declaration-owned ambiguity', () => {
@@ -1466,7 +1500,7 @@ it('preserves existing type and integer edge behavior per function', () => {
   assert.deepEqual(damaged.diagnostics, [])
   assert.deepEqual(
     damaged.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002', 'PAR0001'],
+    ['PAR0002'],
   )
   const boundaryInteger = integerFact(boundary)
   assert.strictEqual(boundaryInteger._tag, 'Available')

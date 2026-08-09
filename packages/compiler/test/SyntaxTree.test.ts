@@ -81,7 +81,7 @@ it('models missing and unexpected parser diagnostics as ordered source data', ()
       end: diagnostic.span.end,
     })),
     [
-      { code: 'PAR0001', message: 'Expected Identifier', start: 0, end: 0 },
+      { code: 'PAR0001', message: 'Expected identifier', start: 0, end: 0 },
       { code: 'PAR0002', message: 'Unexpected token sequence', start: 0, end: 1 },
     ],
   )

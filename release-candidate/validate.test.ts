@@ -658,7 +658,7 @@ console.log(
     expect(api.deep['./Diagnostic']).toContain('unknownType')
     expect(api.deep['./Diagnostic']).toContain('unknownFunction')
     expect(api.deep['./Diagnostic']).toContain('duplicateParameterName')
-    expect(api.deep['./Diagnostic']).toContain('unknownParameterReference')
+    expect(api.deep['./Diagnostic']).toContain('unknownValueReference')
     expect(api.deep['./Diagnostic']).toContain('wrongCallArity')
     expect(api.deep['./Diagnostic']).toContain('merge')
     expect(api.deep['./SourceFile']).toContain('make')

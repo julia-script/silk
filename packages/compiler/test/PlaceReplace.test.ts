@@ -118,6 +118,18 @@ pub fn main() -> I32 { return 0 }`),
       'SEM0036',
     )
 
+    const missingRoot = yield* Analysis.ofSource(
+      'place-replace/missing',
+      ascii(`pub fn main() -> I32 {
+  let old = Place.replace(missing, 2)
+  return old
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(missingRoot).map((diagnostic) => diagnostic.code),
+      ['SEM0006'],
+    )
+
     const arity = yield* Analysis.ofSource(
       'place-replace/arity',
       ascii(`pub fn main() -> I32 {

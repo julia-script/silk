@@ -753,7 +753,7 @@ it('keeps a sibling argument after damaged nested syntax', () => {
   )
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002', 'PAR0001'],
+    ['PAR0002'],
   )
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(damagedNestedSiblingSource))
@@ -867,7 +867,7 @@ it('keeps malformed arguments explicit and resumes at the next comma', () => {
   )
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0002', 'PAR0001'],
+    ['PAR0002'],
   )
   assert.strictEqual(
     descendants(call).filter(
@@ -899,7 +899,7 @@ it('bounds damaged call recovery before the following function', () => {
   assert.strictEqual(directTokenText(result, second, 'Identifier'), 'after')
   assert.deepEqual(
     result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0001', 'PAR0001'],
+    ['PAR0001'],
   )
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(damagedCallBeforeNextFunctionSource))
@@ -1049,14 +1049,57 @@ it('groups unexpected punctuation and following trivia before the function name'
   assertOriginalTokenTraversal(result)
 })
 
-it('terminates with explicit missing structure for empty input', () => {
+it('parses empty input as a module containing only end-of-file', () => {
   const result = parseBytes('fixture://empty.silk', emptySource)
 
-  assert.strictEqual(missingLeaves(result.root).length, 10)
-  assert.strictEqual(result.parserDiagnostics.length, 10)
   assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    Array.from({ length: 10 }, () => 'PAR0001'),
+    result.root.children.map((element) => element._tag),
+    ['Token'],
+  )
+  assert.strictEqual(SyntaxTree.directNodes(result.root, 'FunctionDeclaration').length, 0)
+  assert.deepEqual(missingLeaves(result.root), [])
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('reports one diagnostic for an incomplete declaration prefix at end-of-file', () => {
+  const result = parseText('fixture://incomplete-pub.silk', 'pub')
+
+  assert.deepEqual(
+    missingLeaves(result.root).map((leaf) => leaf.expected),
+    [
+      'FnKeyword',
+      'Identifier',
+      'LeftParenthesis',
+      'RightParenthesis',
+      'Arrow',
+      'Identifier',
+      'LeftBrace',
+      'ReturnKeyword',
+      'DecimalInteger',
+      'RightBrace',
+    ],
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map(({ code, message }) => ({ code, message })),
+    [{ code: 'PAR0001', message: 'Expected `fn`' }],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('reports a later independent mistake after consuming a recovery anchor', () => {
+  const result = parseText('fixture://synchronized-recovery.silk', 'pub () -> I32 { return }')
+
+  assert.deepEqual(
+    missingLeaves(result.root).map((leaf) => leaf.expected),
+    ['FnKeyword', 'Identifier', 'DecimalInteger'],
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map(({ code, message }) => ({ code, message })),
+    [
+      { code: 'PAR0001', message: 'Expected `fn`' },
+      { code: 'PAR0001', message: 'Expected decimal integer' },
+    ],
   )
   assertOriginalTokenTraversal(result)
 })
@@ -1323,6 +1366,41 @@ it('recovers a block with only bindings by inserting the missing return', () => 
     ),
     true,
   )
+  assert.deepEqual(
+    missingLeaves(returnStatement ?? block).map((element) => element.expected),
+    ['ReturnKeyword', 'DecimalInteger'],
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      message: diagnostic.message,
+    })),
+    [{ code: 'PAR0004', message: 'Expected return statement' }],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers a final identifier as a return expression instead of an assignment', () => {
+  const result = parseText('fixture://missing-return-keyword.silk', 'pub fn main() -> I32 { foo }')
+  const declaration = directFunctionDeclarations(result.root).at(0)
+  const block = declaration === undefined ? undefined : SyntaxTree.directNode(declaration, 'Block')
+  const returned = block === undefined ? undefined : SyntaxTree.directNode(block, 'ReturnStatement')
+
+  assert.notStrictEqual(returned, undefined)
+  if (returned === undefined) return
+  assert.strictEqual(SyntaxTree.directNode(block ?? result.root, 'AssignmentStatement'), undefined)
+  assert.notStrictEqual(SyntaxTree.directNode(returned, 'IdentifierExpression'), undefined)
+  assert.deepEqual(
+    missingLeaves(returned).map((element) => element.expected),
+    ['ReturnKeyword'],
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      message: diagnostic.message,
+    })),
+    [{ code: 'PAR0001', message: 'Expected `return`' }],
+  )
   assertOriginalTokenTraversal(result)
 })
 
@@ -1483,7 +1561,9 @@ it('recovers an arm missing its closing brace before the trailing return', () =>
   )
 
   assert.strictEqual(
-    result.parserDiagnostics.every((diagnostic) => diagnostic.code === 'PAR0001'),
+    result.parserDiagnostics.every(
+      (diagnostic) => diagnostic.code === 'PAR0001' || diagnostic.code === 'PAR0004',
+    ),
     true,
   )
   assertOriginalTokenTraversal(result)

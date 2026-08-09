@@ -1,5 +1,5 @@
 import type * as SourceSpan from './SourceSpan.js'
-import type * as Token from './Token.js'
+import * as Token from './Token.js'
 
 /** The compiler phase that originated a diagnostic. */
 export type Phase = 'lexical' | 'parser' | 'module' | 'semantic' | 'ownership' | 'layout'
@@ -24,6 +24,9 @@ export const unexpectedTokensCode = 'PAR0002' as const
 
 /** Stable code for a primary-expression template start reserved for future support. */
 export const reservedTemplateSyntaxCode = 'PAR0003' as const
+
+/** Stable code for one wholly absent required return statement. */
+export const missingReturnStatementCode = 'PAR0004' as const
 
 /** Stable code for an import naming a module absent from the supplied sources. */
 export const unknownModuleCode = 'MOD0001' as const
@@ -50,8 +53,8 @@ export const unknownFunctionCode = 'SEM0004' as const
 /** Stable code for a present parameter name repeated after its first occurrence. */
 export const duplicateParameterNameCode = 'SEM0005' as const
 
-/** Stable code for a present value name with no matching local parameter. */
-export const unknownParameterReferenceCode = 'SEM0006' as const
+/** Stable code for a present value name with no matching local declaration. */
+export const unknownValueReferenceCode = 'SEM0006' as const
 
 /** Stable code for a uniquely resolved call with the wrong number of arguments. */
 export const wrongCallArityCode = 'SEM0007' as const
@@ -174,6 +177,7 @@ export type Code =
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
+  | typeof missingReturnStatementCode
   | typeof unknownModuleCode
   | typeof selfImportCode
   | typeof duplicateImportCode
@@ -183,7 +187,7 @@ export type Code =
   | typeof duplicateDeclarationNameCode
   | typeof unknownFunctionCode
   | typeof duplicateParameterNameCode
-  | typeof unknownParameterReferenceCode
+  | typeof unknownValueReferenceCode
   | typeof wrongCallArityCode
   | typeof rebindingNameCode
   | typeof unknownActorCode
@@ -296,6 +300,7 @@ export type Reason =
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | { readonly _tag: 'UnexpectedTokens' }
   | { readonly _tag: 'ReservedTemplateSyntax' }
+  | { readonly _tag: 'MissingReturnStatement' }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -345,7 +350,7 @@ export type Reason =
       readonly spelling: string
       readonly originalSpan: SourceSpan.SourceSpan
     }
-  | { readonly _tag: 'UnknownParameterReference'; readonly spelling: string }
+  | { readonly _tag: 'UnknownValueReference'; readonly spelling: string }
   | {
       readonly _tag: 'WrongCallArity'
       readonly target: DeclarationEntity | BuiltinEntity
@@ -666,7 +671,7 @@ export const missingToken = (expected: Token.TokenKind, span: SourceSpan.SourceS
     phase: 'parser',
     code: missingTokenCode,
     severity: 'error',
-    message: `Expected ${expected}`,
+    message: `Expected ${Token.describe(expected)}`,
     reason: Object.freeze({ _tag: 'MissingToken', expected }),
     span,
   })
@@ -692,6 +697,18 @@ export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic 
     severity: 'error',
     message: 'Template syntax is reserved but not implemented',
     reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' }),
+    span,
+  })
+
+/** Creates the diagnostic for one wholly absent required return statement. */
+export const missingReturnStatement = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'parser',
+    code: missingReturnStatementCode,
+    severity: 'error',
+    message: 'Expected return statement',
+    reason: Object.freeze({ _tag: 'MissingReturnStatement' }),
     span,
   })
 
@@ -1388,18 +1405,15 @@ export const duplicateParameterName = (
     ]),
   })
 
-/** Creates the diagnostic for one present value name with no matching local parameter. */
-export const unknownParameterReference = (
-  spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+/** Creates the diagnostic for one present value name with no matching local declaration. */
+export const unknownValueReference = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: unknownParameterReferenceCode,
+    code: unknownValueReferenceCode,
     severity: 'error',
-    message: `Unknown parameter ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownParameterReference', spelling }),
+    message: `Unknown value ${spelling}`,
+    reason: Object.freeze({ _tag: 'UnknownValueReference', spelling }),
     span,
   })
 

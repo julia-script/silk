@@ -12,6 +12,7 @@ interface State {
   readonly lexical: Lexer.LexicalResult
   readonly index: number
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly recovering: boolean
 }
 
 interface ElementsResult {
@@ -53,10 +54,21 @@ const advance = (state: State): State =>
   })
 
 const addDiagnostic = (state: State, diagnostic: Diagnostic.Diagnostic): State =>
-  Object.freeze({
-    ...state,
-    diagnostics: Object.freeze([...state.diagnostics, diagnostic]),
-  })
+  state.recovering
+    ? state
+    : Object.freeze({
+        ...state,
+        diagnostics: Object.freeze([...state.diagnostics, diagnostic]),
+        recovering: true,
+      })
+
+const synchronize = (state: State): State =>
+  !state.recovering
+    ? state
+    : Object.freeze({
+        ...state,
+        recovering: false,
+      })
 
 const insertionOffset = (state: State): number =>
   currentToken(state)?.span.start ?? state.lexical.source.bytes.length
@@ -109,7 +121,7 @@ const expect = (
 
   if (token?.kind === expected) {
     return Object.freeze({
-      state: advance(state),
+      state: synchronize(advance(state)),
       elements: Object.freeze([...elements, token]),
     })
   }
@@ -129,7 +141,7 @@ const expect = (
 
   if (token?.kind === expected) {
     return Object.freeze({
-      state: advance(state),
+      state: synchronize(advance(state)),
       elements: Object.freeze([...elements, token]),
     })
   }
@@ -1179,6 +1191,17 @@ const parseReturnStatement = (initial: State): NodeResult => {
   })
 }
 
+const parseMissingReturnStatement = (initial: State): NodeResult => {
+  const keyword = missingToken(initial, 'ReturnKeyword')
+  const literal = missingToken(initial, 'DecimalInteger')
+  const expression = syntaxNode(initial, 'IntegerLiteralExpression', [literal])
+  const node = syntaxNode(initial, 'ReturnStatement', [keyword, expression])
+  return Object.freeze({
+    state: addDiagnostic(initial, Diagnostic.missingReturnStatement(node.span)),
+    node,
+  })
+}
+
 const parseFailStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'FailKeyword', ['MoveKeyword', ...expressionStarts])
   const move =
@@ -1276,6 +1299,11 @@ const parseAssignmentStatement = (initial: State): NodeResult => {
   })
 }
 
+const startsAssignmentStatement = (state: State): boolean => {
+  const place = parseProjectionChain(parseIdentifierExpression(state))
+  return nextSignificantKind(place.state) === 'Equals'
+}
+
 function parseConditionalStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'IfKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
   const condition = parseExpression(keyword.state, 0, 'Identifier', false)
@@ -1360,7 +1388,9 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
     kind === 'WhileKeyword' ||
     kind === 'BreakKeyword' ||
     kind === 'ContinueKeyword' ||
-    (kind === 'Identifier' && significantKindAfter(state, 1) !== 'Colon')
+    (kind === 'Identifier' &&
+      significantKindAfter(state, 1) !== 'Colon' &&
+      startsAssignmentStatement(state))
   ) {
     const statement =
       kind === 'LetKeyword'
@@ -1389,7 +1419,17 @@ function parseBlock(initial: State, requireReturn: boolean): NodeResult {
   }
 
   if (requireReturn && !sawReturn) {
-    const statement = parseReturnStatement(state)
+    const boundary = nextSignificantKind(state)
+    const statement =
+      boundary === 'RightBrace' ||
+      boundary === 'PubKeyword' ||
+      boundary === 'StructKeyword' ||
+      boundary === 'FnKeyword' ||
+      boundary === 'EffectKeyword' ||
+      boundary === 'ImportKeyword' ||
+      boundary === 'EndOfFile'
+        ? parseMissingReturnStatement(state)
+        : parseReturnStatement(state)
     children = Object.freeze([...children, statement.node])
     state = statement.state
   }
@@ -2162,16 +2202,16 @@ const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagn
   left.span.end - right.span.end ||
   (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
 
-/** Parses one or more bootstrap functions with lossless local recovery. */
+/** Parses zero or more bootstrap declarations with lossless local recovery. */
 export const parse = (lexical: Lexer.LexicalResult): SyntaxFile.SyntaxFile => {
   const initial: State = Object.freeze({
     lexical,
     index: 0,
     diagnostics: Object.freeze([]),
+    recovering: false,
   })
-  const first = parseTopLevelDeclaration(initial)
-  let state = first.state
-  let declarations: ReadonlyArray<SyntaxTree.Node> = Object.freeze([first.node])
+  let state = initial
+  let declarations: ReadonlyArray<SyntaxTree.Node> = Object.freeze([])
   let significantKind = nextSignificantKind(state)
 
   while (significantKind !== undefined && significantKind !== 'EndOfFile') {
