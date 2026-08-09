@@ -77,6 +77,8 @@ export type OperationCode =
   | 'TotalOrder'
   | 'ToBits'
   | 'FromBits'
+  | 'Sin'
+  | 'Cos'
   | ConversionOperationCode
   | CheckedConversionOperationCode
   | 'Not'
@@ -351,6 +353,8 @@ const floatOperations = (self: FloatSpelling, bitsType: 'u32' | 'u64') =>
     operation('totalOrder', 'TotalOrder', 2, 'Boolean'),
     operation('toBits', 'ToBits', 1, bitsType),
     operation('fromBits', 'FromBits', 1, self, Object.freeze([bitsType])),
+    operation('sin', 'Sin', 1, 'Self'),
+    operation('cos', 'Cos', 1, 'Self'),
     operation('toF32', 'ConvertToF32', 1, 'f32'),
     operation('toF64', 'ConvertToF64', 1, 'f64'),
     ...integerSpellings.map((target) =>

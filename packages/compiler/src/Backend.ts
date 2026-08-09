@@ -25,6 +25,7 @@ import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
+import * as Transcendental from './Transcendental.js'
 import * as SilkType from './Type.js'
 
 /**
@@ -3861,6 +3862,292 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     i32,
                     `fclass${operation.destination.ordinal}`,
                   )
+                  locals.set(operation.destination.ordinal, Object.freeze([result]))
+                  break
+                }
+                case 'FloatTranscendental': {
+                  const source = Scalar.find(operation.sourceType._tag)
+                  if (source?.category !== 'Floating')
+                    throw new RangeError('LLVM transcendental lost its source type')
+                  const width = source.spelling === 'f32' ? 32 : 64
+                  const floatType = source.spelling === 'f32' ? f32 : f64
+                  const format = source.spelling === 'f32' ? 'float' : 'double'
+                  const self = Transcendental.plan(width)
+                  const constant = Effect.fnUntraced(function* (bits: bigint) {
+                    return yield* Constant.floatingRaw(
+                      builder,
+                      floatType,
+                      format,
+                      FloatingPoint.littleEndianBytes({ width, bits }),
+                    )
+                  })
+                  const binary = Effect.fnUntraced(function* (
+                    kind: FunctionBody.FloatingBinaryKind,
+                    left: Value.Input,
+                    right: Value.Input,
+                    name: string,
+                  ) {
+                    return yield* FunctionBody.binary(body, kind, left, right, name)
+                  })
+                  const subject = readScalar(operation.source)
+                  const zero = yield* constant(0n)
+                  const half = yield* constant(self.half)
+                  const negativeHalf = yield* FunctionBody.unary(
+                    body,
+                    'fneg',
+                    half,
+                    `trans_half_neg${operation.destination.ordinal}`,
+                  )
+                  const negative = yield* FunctionBody.floatingCompare(
+                    body,
+                    'olt',
+                    subject,
+                    zero,
+                    `trans_negative${operation.destination.ordinal}`,
+                  )
+                  const offset = yield* FunctionBody.select(
+                    body,
+                    negative,
+                    negativeHalf,
+                    half,
+                    `trans_offset${operation.destination.ordinal}`,
+                  )
+                  const scaled = yield* binary(
+                    'fmul',
+                    subject,
+                    yield* constant(self.inverseHalfPi),
+                    `trans_scaled${operation.destination.ordinal}`,
+                  )
+                  const shifted = yield* binary(
+                    'fadd',
+                    scaled,
+                    offset,
+                    `trans_shifted${operation.destination.ordinal}`,
+                  )
+                  const i64Type = integerTypes.get(64) ?? i32
+                  const quadrantInteger = yield* FunctionBody.cast(
+                    body,
+                    'fptosi',
+                    shifted,
+                    i64Type,
+                    `trans_quadrant_integer${operation.destination.ordinal}`,
+                  )
+                  const quadrantFloat = yield* FunctionBody.cast(
+                    body,
+                    'sitofp',
+                    quadrantInteger,
+                    floatType,
+                    `trans_quadrant_float${operation.destination.ordinal}`,
+                  )
+                  let residual: Value.Input = subject
+                  for (const [index, part] of self.halfPi.entries()) {
+                    const product = yield* binary(
+                      'fmul',
+                      quadrantFloat,
+                      yield* constant(part),
+                      `trans_reduce_product${operation.destination.ordinal}_${index}`,
+                    )
+                    residual = yield* binary(
+                      'fsub',
+                      residual,
+                      product,
+                      `trans_reduce${operation.destination.ordinal}_${index}`,
+                    )
+                  }
+                  const squared = yield* binary(
+                    'fmul',
+                    residual,
+                    residual,
+                    `trans_squared${operation.destination.ordinal}`,
+                  )
+                  const polynomial = Effect.fnUntraced(function* (
+                    coefficients: ReadonlyArray<bigint>,
+                    name: string,
+                  ) {
+                    let result: Value.Input = yield* constant(coefficients.at(-1) ?? 0n)
+                    for (let index = coefficients.length - 2; index >= 0; index -= 1) {
+                      const product: Value.Input = yield* binary(
+                        'fmul',
+                        squared,
+                        result,
+                        `${name}_mul${index}`,
+                      )
+                      result = yield* binary(
+                        'fadd',
+                        yield* constant(coefficients[index] ?? 0n),
+                        product,
+                        `${name}_add${index}`,
+                      )
+                    }
+                    return result
+                  })
+                  const sineTail = yield* polynomial(
+                    self.sine,
+                    `trans_sine_tail${operation.destination.ordinal}`,
+                  )
+                  const residualSquared = yield* binary(
+                    'fmul',
+                    residual,
+                    squared,
+                    `trans_residual_squared${operation.destination.ordinal}`,
+                  )
+                  const sine = yield* binary(
+                    'fadd',
+                    residual,
+                    yield* binary(
+                      'fmul',
+                      residualSquared,
+                      sineTail,
+                      `trans_sine_product${operation.destination.ordinal}`,
+                    ),
+                    `trans_sine${operation.destination.ordinal}`,
+                  )
+                  const cosineTail = yield* polynomial(
+                    self.cosine,
+                    `trans_cosine_tail${operation.destination.ordinal}`,
+                  )
+                  const cosineBase = yield* binary(
+                    'fsub',
+                    yield* constant(self.one),
+                    yield* binary(
+                      'fmul',
+                      half,
+                      squared,
+                      `trans_cosine_half${operation.destination.ordinal}`,
+                    ),
+                    `trans_cosine_base${operation.destination.ordinal}`,
+                  )
+                  const cosine = yield* binary(
+                    'fadd',
+                    cosineBase,
+                    yield* binary(
+                      'fmul',
+                      yield* binary(
+                        'fmul',
+                        squared,
+                        squared,
+                        `trans_fourth${operation.destination.ordinal}`,
+                      ),
+                      cosineTail,
+                      `trans_cosine_product${operation.destination.ordinal}`,
+                    ),
+                    `trans_cosine${operation.destination.ordinal}`,
+                  )
+                  const mask = yield* Constant.integerUnsigned(builder, i64Type, 3n)
+                  const quadrant = yield* FunctionBody.binary(
+                    body,
+                    'and',
+                    quadrantInteger,
+                    mask,
+                    `trans_quadrant${operation.destination.ordinal}`,
+                  )
+                  const quadrantConstant = (value: bigint) =>
+                    Constant.integerUnsigned(builder, i64Type, value)
+                  const isQuadrant = Effect.fnUntraced(function* (value: bigint) {
+                    return yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      quadrant,
+                      yield* quadrantConstant(value),
+                      `trans_quadrant_${value.toString()}_${operation.destination.ordinal}`,
+                    )
+                  })
+                  const negativeSine = yield* FunctionBody.unary(
+                    body,
+                    'fneg',
+                    sine,
+                    `trans_sine_neg${operation.destination.ordinal}`,
+                  )
+                  const negativeCosine = yield* FunctionBody.unary(
+                    body,
+                    'fneg',
+                    cosine,
+                    `trans_cosine_neg${operation.destination.ordinal}`,
+                  )
+                  const q2 = yield* FunctionBody.select(
+                    body,
+                    yield* isQuadrant(2n),
+                    operation.operation === 'Sin' ? negativeSine : negativeCosine,
+                    operation.operation === 'Sin' ? negativeCosine : sine,
+                    `trans_q2${operation.destination.ordinal}`,
+                  )
+                  const q1 = yield* FunctionBody.select(
+                    body,
+                    yield* isQuadrant(1n),
+                    operation.operation === 'Sin' ? cosine : negativeSine,
+                    q2,
+                    `trans_q1${operation.destination.ordinal}`,
+                  )
+                  const finite = yield* FunctionBody.select(
+                    body,
+                    yield* isQuadrant(0n),
+                    operation.operation === 'Sin' ? sine : cosine,
+                    q1,
+                    `trans_finite${operation.destination.ordinal}`,
+                  )
+                  const unordered = yield* FunctionBody.floatingCompare(
+                    body,
+                    'uno',
+                    subject,
+                    subject,
+                    `trans_nan${operation.destination.ordinal}`,
+                  )
+                  const positiveInfinity = yield* constant(
+                    width === 32 ? 0x7f800000n : 0x7ff0000000000000n,
+                  )
+                  const negativeInfinity = yield* constant(
+                    width === 32 ? 0xff800000n : 0xfff0000000000000n,
+                  )
+                  const positiveInfinite = yield* FunctionBody.floatingCompare(
+                    body,
+                    'oeq',
+                    subject,
+                    positiveInfinity,
+                    `trans_positive_infinite${operation.destination.ordinal}`,
+                  )
+                  const negativeInfinite = yield* FunctionBody.floatingCompare(
+                    body,
+                    'oeq',
+                    subject,
+                    negativeInfinity,
+                    `trans_negative_infinite${operation.destination.ordinal}`,
+                  )
+                  const infinite = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    positiveInfinite,
+                    negativeInfinite,
+                    `trans_infinite${operation.destination.ordinal}`,
+                  )
+                  const nonFinite = yield* FunctionBody.binary(
+                    body,
+                    'or',
+                    unordered,
+                    infinite,
+                    `trans_nonfinite${operation.destination.ordinal}`,
+                  )
+                  const isZero = yield* FunctionBody.floatingCompare(
+                    body,
+                    'oeq',
+                    subject,
+                    zero,
+                    `trans_zero${operation.destination.ordinal}`,
+                  )
+                  const finiteWithZero = yield* FunctionBody.select(
+                    body,
+                    isZero,
+                    operation.operation === 'Sin' ? subject : yield* constant(self.one),
+                    finite,
+                    `trans_finite_zero${operation.destination.ordinal}`,
+                  )
+                  const result = yield* FunctionBody.select(
+                    body,
+                    nonFinite,
+                    yield* constant(self.canonicalNaN),
+                    finiteWithZero,
+                    `transcendental${operation.destination.ordinal}`,
+                  )
+                  yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
                   locals.set(operation.destination.ordinal, Object.freeze([result]))
                   break
                 }

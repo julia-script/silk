@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "id": "fft",
   "title": "Eight-sample radix-2 FFT",
-  "status": "frontier",
+  "status": "executable",
   "source": "main.silk",
-  "input": "An eight-sample unit impulse represented as complex f64 values.",
+  "input": "An eight-sample complex f64 signal with a unit impulse shifted to index one.",
   "expected": {
-    "entryResult": 1,
-    "summary": "Every frequency bin of the unit impulse has real value 1 and imaginary value 0."
+    "entryResult": 208,
+    "summary": "Scaled real and imaginary values from every non-DC bin fold to the exact process-safe fingerprint 208."
   },
   "capabilities": [
     "f64",
@@ -16,19 +16,8 @@
     "struct values",
     "fixed arrays",
     "shared slices",
-    "trigonometric operations (missing)"
+    "f64 sine and cosine"
   ],
   "targets": ["evaluation", "native", "wasm"],
-  "blockers": [
-    {
-      "phase": "semantic",
-      "code": "SEM0010",
-      "message": "f64 has no operation cos"
-    },
-    {
-      "phase": "semantic",
-      "code": "SEM0010",
-      "message": "f64 has no operation sin"
-    }
-  ]
+  "blockers": []
 }

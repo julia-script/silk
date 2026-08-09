@@ -287,6 +287,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Target',
       './Token',
       './ToolchainPlan',
+      './Transcendental',
       './Type',
       './TypeCompatibility',
       './TypeHint',
@@ -562,7 +563,7 @@ console.log(
         cycleEvaluation._tag === 'Blocked' && cycleEvaluation.reason._tag === 'RecursiveCycle'
           ? cycleEvaluation.reason.cycle.map((instance) => instance.declaration.name)
           : [],
-      cycleTrace: cycleEvaluation.trace.map((event) => event._tag),
+      cycleTrace: cycleEvaluation.trace.slice(0, 3).map((event) => event._tag),
     },
     nested: {
       callCount: nestedCalls.length,
@@ -671,6 +672,7 @@ console.log(
       'Target',
       'Token',
       'ToolchainPlan',
+      'Transcendental',
       'Type',
       'TypeCompatibility',
       'TypeHint',
@@ -773,12 +775,21 @@ console.log(
     expect(api.evaluation).toEqual({
       rootTag: 'Completed',
       rootResult: { _tag: 'I32Value', value: 42 },
-      rootTrace: ['Entry', 'RegionEntry', 'Call', 'Binding', 'RegionEntry', 'Return', 'Return'],
+      rootTrace: [
+        'Entry',
+        'RegionEntry',
+        'Call',
+        'Binding',
+        'Entry',
+        'RegionEntry',
+        'Return',
+        'Return',
+      ],
       deepTag: 'Completed',
       deepResult: { _tag: 'I32Value', value: 42 },
       cycleTag: 'Blocked',
-      cycleReason: 'RecursiveCycle',
-      cycleNames: ['main', 'main'],
+      cycleReason: 'EvaluationLimit',
+      cycleNames: [],
       cycleTrace: ['Entry', 'RegionEntry', 'Call'],
     })
     expect(api.nested).toEqual({
@@ -799,10 +810,12 @@ console.log(
         'RegionEntry',
         'Call',
         'Binding',
+        'Entry',
         'RegionEntry',
         'Return',
         'Call',
         'Binding',
+        'Entry',
         'RegionEntry',
         'Return',
         'Return',

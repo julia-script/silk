@@ -224,6 +224,7 @@ it('keeps seven complete, readable programs and explicit status contracts', () =
     [
       'breadth-first-search',
       'crc-32',
+      'fft',
       'game-of-life',
       'matrix-multiplication',
       'quicksort',
