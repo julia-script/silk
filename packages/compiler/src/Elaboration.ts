@@ -221,6 +221,10 @@ export type BorrowRootFact =
       readonly _tag: 'ParameterRoot'
       readonly parameter: ParameterFact
     }
+  | {
+      readonly _tag: 'PatternRoot'
+      readonly binding: PatternBindingFact
+    }
 
 export type BorrowFormationFact =
   | {
@@ -1479,6 +1483,9 @@ const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
   }
   if (subject.reference._tag === 'Resolved') {
     return Object.freeze({ _tag: 'ParameterRoot', parameter: subject.reference.parameter })
+  }
+  if (subject.reference._tag === 'ResolvedPattern') {
+    return Object.freeze({ _tag: 'PatternRoot', binding: subject.reference.binding })
   }
   return undefined
 }
@@ -7257,10 +7264,15 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
             _tag: 'BindingSliceRoot',
             binding: fact.formation.root.binding.id,
           })
-        : Object.freeze({
-            _tag: 'ParameterSliceRoot',
-            parameter: fact.formation.root.parameter.id,
-          })
+        : fact.formation.root._tag === 'ParameterRoot'
+          ? Object.freeze({
+              _tag: 'ParameterSliceRoot',
+              parameter: fact.formation.root.parameter.id,
+            })
+          : Object.freeze({
+              _tag: 'PatternSliceRoot',
+              binding: fact.formation.root.binding.id,
+            })
     if (fact.formation._tag === 'ValueBorrow' && Type.isReference(fact.type.type)) {
       return Object.freeze({
         _tag: 'ValueBorrow',

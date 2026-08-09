@@ -1925,3 +1925,20 @@ fn destroy(buffer: RawBuffer<i32>) -> () {
   )
   assert.strictEqual(functionAt(rejected, 0).returnedExpression.type._tag, 'Unavailable')
 })
+
+it('allows a shared value reborrow from a shared pattern field', () => {
+  const result = analyzeText(
+    'fixture://shared-pattern-field.silk',
+    `struct Box { buffer: RawBuffer<i32> }
+fn read(buffer: &RawBuffer<i32>) -> i32 {
+  unsafe { return RawBuffer.read<i32>(buffer, 0) }
+}
+fn inspect(input: Box) -> i32 {
+  return match &input { Box { buffer } => read(&buffer) }
+}`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  const inspect = functionAt(result, 1).returnedExpression
+  assert.strictEqual(inspect._tag, 'Match')
+})

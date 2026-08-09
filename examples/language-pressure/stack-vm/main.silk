@@ -1,4 +1,4 @@
-import silk.vector { Vector, make, append }
+import silk.vector { Vector, make, append, get, length }
 
 impl Report for OutOfMemory {}
 
@@ -74,7 +74,11 @@ effect fn pushDiagnostic(
   ) % 251
 }
 
-fn finish(result: i32, events: Vector<Step | VmDiagnostic>, fingerprint: i32) -> Executed {
+fn finish(
+  result: i32,
+  events: Vector<Step | VmDiagnostic>,
+  fingerprint: i32
+) -> Executed {
   let observedResult = observeResult(result)
   return Executed {
     events: move events,
@@ -253,8 +257,31 @@ fn observeStepTop(value: i32) -> i32 { return value }
 fn observeDiagnosticPc(value: usize) -> usize { return value }
 fn observeDiagnosticCode(value: usize) -> usize { return value }
 
+fn fingerprintEvents(events: &Vector<Step | VmDiagnostic>, result: i32, expected: i32) -> i32 {
+  let mut observed = 0
+  let mut index = zero()
+  while index < length<Step | VmDiagnostic>(events) {
+    let event = get<Step | VmDiagnostic>(events, index)
+    observed = match move event {
+      Step { pc: stepPc, opcode, depth, top } => (
+        observed * 17 + usize.toI32(stepPc) * 3 + u8.toI32(opcode) * 5 +
+        usize.toI32(depth) * 7 + top * 11
+      ) % 251
+      VmDiagnostic { pc: diagnosticPc, code } => (
+        observed * 19 + usize.toI32(diagnosticPc) * 13 + usize.toI32(code) * 17
+      ) % 251
+    }
+    index = index + 1
+  }
+  let combined = (observed * 23 + result) % 251
+  if combined != expected { let mismatch = 1 / 0 }
+  return expected
+}
+
 fn fingerprint(executed: Executed) -> i32 {
-  return executed.fingerprint
+  return match &executed {
+    Executed { events, result, fingerprint } => fingerprintEvents(&events, result, fingerprint)
+  }
 }
 
 fn verify(value: i32) -> () {

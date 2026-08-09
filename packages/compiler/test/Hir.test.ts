@@ -483,3 +483,22 @@ it('retains generic raw-buffer operations and whole-value borrows', () => {
   assert.strictEqual(slot.arguments.at(0)?._tag, 'ValueBorrow')
   assert.deepEqual(Hir.verify(result.hir), [])
 })
+
+it('retains shared pattern-field reborrows and raw-buffer reads', () => {
+  const result = elaborate(
+    'hir://shared-pattern-read.silk',
+    `struct Box { buffer: RawBuffer<i32> }
+fn read(buffer: &RawBuffer<i32>) -> i32 {
+  unsafe { return RawBuffer.read<i32>(buffer, 0) }
+}
+fn inspect(input: Box) -> i32 {
+  return match &input { Box { buffer } => read(&buffer) }
+}`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.include(Hir.encode(result.hir), 'borrow-value')
+  assert.include(Hir.encode(result.hir), 'a0.b0')
+  assert.include(Hir.encode(result.hir), 'RawBufferRead')
+  assert.deepEqual(Hir.verify(result.hir), [])
+})

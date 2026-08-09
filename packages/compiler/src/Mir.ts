@@ -82,6 +82,8 @@ const isStructurallyCopyType = (
 ): boolean => {
   if (SilkType.isBuiltin(type) || SilkType.isReference(type) || SilkType.isSlice(type)) return true
   if (SilkType.isFixedArray(type)) return isStructurallyCopyType(layout, type.element, visiting)
+  if (SilkType.isUnion(type))
+    return type.members.every((member) => isStructurallyCopyType(layout, member, visiting))
   if (SilkType.equals(type, SilkType.unit)) return true
   if (!SilkType.isNominal(type) || SilkType.isIntrinsicNominal(type)) return false
   const key = SilkType.key(type)
@@ -362,6 +364,16 @@ export type Operation =
       readonly index: LocalId
       readonly element: DeclarationIndex.SemanticType
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Bounds-checked non-consuming read through a shared RawBuffer borrow. */
+      readonly _tag: 'RawBufferRead'
+      readonly destination: LocalId
+      readonly buffer: LocalId
+      readonly index: LocalId
+      readonly element: DeclarationIndex.SemanticType
+      readonly type: Type
       readonly provenance: Provenance
     }
   | {
@@ -1048,6 +1060,8 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.buffer]
     case 'RawBufferSlot':
       return [operation.destination, operation.buffer, operation.index]
+    case 'RawBufferRead':
+      return [operation.destination, operation.buffer, operation.index]
     case 'SlotWrite':
       return [operation.destination, operation.slot, operation.value]
     case 'SlotTake':
@@ -1325,6 +1339,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'RawBufferCount':
       return [semanticType(operation.type)]
     case 'RawBufferSlot':
+    case 'RawBufferRead':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
@@ -1454,6 +1469,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RawBufferCount':
       return [operation.buffer]
     case 'RawBufferSlot':
+      return [operation.buffer, operation.index]
+    case 'RawBufferRead':
       return [operation.buffer, operation.index]
     case 'SlotWrite':
       return [operation.slot, operation.value]
@@ -2374,6 +2391,35 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
+        if (operation._tag === 'RawBufferRead') {
+          const buffer = fn.localTypes.at(operation.buffer.ordinal)
+          const index = fn.localTypes.at(operation.index.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const bufferElement =
+            buffer?._tag === 'Reference' && SilkType.isRawBuffer(buffer.type.target)
+              ? buffer.type.target.arguments[0]
+              : undefined
+          if (
+            buffer?._tag !== 'Reference' ||
+            buffer.type.access !== 'Shared' ||
+            index?._tag !== 'usize' ||
+            destination === undefined ||
+            bufferElement === undefined ||
+            !SilkType.equals(bufferElement, operation.element) ||
+            !SilkType.equals(semanticType(destination), operation.element) ||
+            !isStructurallyCopyType(self.layout, operation.element)
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'RawBuffer.read lost its shared buffer, bounds, Copy element, or result provenance',
+              }),
+            )
+        }
         if (
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
@@ -2807,12 +2853,27 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const sliceSelector = operation.selectors.find(
             (selector) => selector._tag === 'SliceElementSelector',
           )
+          const sharedMatchProjection =
+            operation._tag === 'ReadPlace' &&
+            operation.consume !== true &&
+            operations.filter((candidate) =>
+              accessedOwnerLocals(candidate).some(
+                (local) => local.ordinal === operation.destination.ordinal,
+              ),
+            ).length === 1 &&
+            operations.some(
+              (candidate) =>
+                candidate._tag === 'Match' &&
+                candidate.scrutinee.ordinal === operation.destination.ordinal &&
+                (candidate.access === 'Shared' || candidate.access === 'Exclusive'),
+            )
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
             (operation._tag === 'ReadPlace' &&
               !isStructurallyCopyType(self.layout, selected) &&
-              operation.consume !== true)
+              operation.consume !== true &&
+              !sharedMatchProjection)
           ) {
             violations.push(
               Object.freeze({
@@ -3296,6 +3357,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-count ${localText(operation.buffer)} : usize ${provenanceText(operation.provenance)}`
     case 'RawBufferSlot':
       return `${localText(operation.destination)} = raw-buffer-slot ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'RawBufferRead':
+      return `${localText(operation.destination)} = raw-buffer-read ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotWrite':
       return `${localText(operation.destination)} = slot-write ${localText(operation.slot)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotTake':

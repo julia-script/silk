@@ -508,11 +508,14 @@ order and one-layer execution behavior.
 ### Requirement: Evaluation is the deterministic allocation oracle
 
 The evaluator SHALL execute compiler-planned allocation, logical addresses, reclaim tickets,
-RawBuffer storage, Slot operations, initialization events, restricted hooks, explicit drop, and
-automatic cleanup without relying on JavaScript object identity or garbage collection. It SHALL
-support deterministic failure at each requested allocation ordinal, create no owner for a rejected
-request, preserve self-contained owners after provider access ends, and expose bounded deterministic
-events for acquisition, initialization, destruction, and release.
+RawBuffer storage, Slot operations, shared bounds-checked recursively Copy reads including
+structural unions, initialization events, restricted hooks, explicit drop, and automatic cleanup
+without relying on JavaScript object identity or garbage collection. A shared union read SHALL
+return the same canonical active member and complete payload without mutating the buffer, owner,
+initializedness, or cleanup state. Evaluation SHALL support deterministic failure at each requested
+allocation ordinal, create no owner for a rejected request, preserve self-contained owners after
+provider access ends, and expose bounded deterministic events for acquisition, initialization,
+copy, destruction, and release.
 
 #### Scenario: Sweep allocation exhaustion
 
@@ -528,6 +531,11 @@ events for acquisition, initialization, destruction, and release.
 
 - **WHEN** a guard owns initialized move-only elements and its backing allocation
 - **THEN** the trace records element destruction by the hook before recursive field cleanup releases the bytes
+
+#### Scenario: Evaluate a structural-union shared read without mutation
+
+- **WHEN** evaluation reads the same initialized all-Copy union through two shared raw-buffer aliases
+- **THEN** both results retain the stored active member and payload and the later destruction and release trace is identical to a run with no reads
 
 ### Requirement: Evaluation is bit-aware for floats
 

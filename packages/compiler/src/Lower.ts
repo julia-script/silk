@@ -2228,7 +2228,9 @@ function lowerExpression(
       const root =
         expression.root._tag === 'BindingSliceRoot'
           ? fn.bindingLocals.get(expression.root.binding.ordinal)
-          : local(expression.root.parameter.ordinal)
+          : expression.root._tag === 'ParameterSliceRoot'
+            ? local(expression.root.parameter.ordinal)
+            : fn.patternLocals.get(patternKey(expression.root.binding))
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
       if (
@@ -2260,7 +2262,9 @@ function lowerExpression(
       const root =
         expression.root._tag === 'BindingSliceRoot'
           ? fn.bindingLocals.get(expression.root.binding.ordinal)
-          : local(expression.root.parameter.ordinal)
+          : expression.root._tag === 'ParameterSliceRoot'
+            ? local(expression.root.parameter.ordinal)
+            : fn.patternLocals.get(patternKey(expression.root.binding))
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
       if (root === undefined || sourceType?._tag !== 'Nominal' || type?._tag !== 'Reference') {
@@ -2530,6 +2534,24 @@ function lowerExpression(
             destination,
             buffer,
             type: usize,
+            provenance: authored(expression.span),
+          }),
+        )
+        return finishBuiltin(destination)
+      }
+      if (expression.operation === 'RawBufferRead') {
+        const [buffer, index] = argumentLocals
+        const type = fn.type(expression.type)
+        if (buffer === undefined || index === undefined || type === undefined) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'RawBufferRead' as const,
+            destination,
+            buffer,
+            index,
+            element: fn.semantic(expression.type),
+            type,
             provenance: authored(expression.span),
           }),
         )

@@ -17,8 +17,8 @@ effect fn build() -> i32 ! OutOfMemory {
   let appended5 = run pending5
   if length<i32>(&values) == 6 {} else { return 0 }
   if capacity<i32>(&values) == 8 {} else { return 1 }
-  let first = get<i32>(&mut values, 0)
-  let last = get<i32>(&mut values, 5)
+  let first = get<i32>(&values, 0)
+  let last = get<i32>(&values, 5)
   return first + last + 17
 }
 
@@ -67,8 +67,8 @@ effect fn build() -> i32 ! OutOfMemory {
   if marker == 7 {} else { return 0 }
   if length<i32>(&values) == 4 {} else { return 1 }
   if capacity<i32>(&values) == 4 {} else { return 2 }
-  let first = get<i32>(&mut values, 0)
-  let last = get<i32>(&mut values, 3)
+  let first = get<i32>(&values, 0)
+  let last = get<i32>(&values, 3)
   return first + last + 19
 }
 
@@ -181,16 +181,16 @@ effect fn build() -> i32 ! OutOfMemory {
   let mut tokens = run pending
   if length<Token>(&tokens) == 10 {} else { return 0 }
   if capacity<Token>(&tokens) == 16 {} else { return 1 }
-  let token0 = get<Token>(&mut tokens, 0)
-  let token1 = get<Token>(&mut tokens, 1)
-  let token2 = get<Token>(&mut tokens, 2)
-  let token3 = get<Token>(&mut tokens, 3)
-  let token4 = get<Token>(&mut tokens, 4)
-  let token5 = get<Token>(&mut tokens, 5)
-  let token6 = get<Token>(&mut tokens, 6)
-  let token7 = get<Token>(&mut tokens, 7)
-  let token8 = get<Token>(&mut tokens, 8)
-  let token9 = get<Token>(&mut tokens, 9)
+  let token0 = get<Token>(&tokens, 0)
+  let token1 = get<Token>(&tokens, 1)
+  let token2 = get<Token>(&tokens, 2)
+  let token3 = get<Token>(&tokens, 3)
+  let token4 = get<Token>(&tokens, 4)
+  let token5 = get<Token>(&tokens, 5)
+  let token6 = get<Token>(&tokens, 6)
+  let token7 = get<Token>(&tokens, 7)
+  let token8 = get<Token>(&tokens, 8)
+  let token9 = get<Token>(&tokens, 9)
   let kind0 = observe(token0.kind)
   let kind1 = observe(token1.kind)
   let kind2 = observe(token2.kind)

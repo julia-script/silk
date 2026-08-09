@@ -152,39 +152,27 @@ fn writeSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> {
   return absurd<RawBuffer<T>>()
 }
 
-struct Taken<T> {
-  element: T
-  rest: Empty | Full<T>
+struct Read<T> {
+  value: T
 }
 
 // Checked read for Copy element types: out-of-range access traps identically on every engine.
-pub fn get<T>(self: &mut Vector<T>, index: usize) -> T {
+pub fn get<T>(self: &Vector<T>, index: usize) -> T {
   if self.length <= index {
     let boom = 1 / 0
   }
-  let storage = Place.replace(self.storage, Empty {})
-  let mut taken = match move storage {
-    Empty nothing => absurd<Taken<T>>()
-    Full<T> full => copyAt<T>(move full, index)
+  let read = match &self.storage {
+    Empty nothing => absurd<Read<T>>()
+    Full<T> { buffer } => Read<T> { value: readAt<T>(&buffer, index) }
   }
-  let restored = Place.replace(taken.rest, Empty {})
-  self.storage = move restored
-  return match move taken {
-    Taken<T> { element, rest } => move element
+  return match move read {
+    Read<T> { value } => move value
   }
 }
 
-fn copyAt<T>(full: Full<T>, index: usize) -> Taken<T> {
-  return match move full {
-    Full<T> { buffer } => copySlot<T>(move buffer, index)
-  }
-}
-
-fn copySlot<T>(buffer: RawBuffer<T>, index: usize) -> Taken<T> {
+fn readAt<T>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe {
-    let mut owned = move buffer
-    let element = Slot.copy(RawBuffer.slot(&mut owned, index))
-    return Taken<T> { element: move element, rest: Full<T> { buffer: move owned } }
+    return RawBuffer.read<T>(buffer, index)
   }
-  return absurd<Taken<T>>()
+  return absurd<T>()
 }

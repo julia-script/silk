@@ -1136,6 +1136,7 @@ export const allocationTraceEventsOf = (
         event._tag === 'SlotWrite' ||
         event._tag === 'SlotTake' ||
         event._tag === 'SlotCopy' ||
+        event._tag === 'RawBufferRead' ||
         event._tag === 'SlotDrop' ||
         event._tag === 'AllocationRelease',
     ),

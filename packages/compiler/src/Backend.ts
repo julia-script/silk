@@ -331,6 +331,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'RawBufferFrom':
     case 'RawBufferCount':
     case 'RawBufferSlot':
+    case 'RawBufferRead':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
@@ -351,6 +352,7 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'StandardStreamWrite' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'RawBufferSlot' ||
+  operation._tag === 'RawBufferRead' ||
   operation._tag === 'CatchEffect' ||
   operation._tag === 'RetryEffect' ||
   operation._tag === 'RunEffect' ||
@@ -795,6 +797,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             operation._tag === 'RawBufferFrom' ||
             operation._tag === 'RawBufferCount' ||
             operation._tag === 'RawBufferSlot' ||
+            operation._tag === 'RawBufferRead' ||
             operation._tag === 'SlotWrite' ||
             operation._tag === 'SlotTake' ||
             operation._tag === 'SlotCopy' ||
@@ -888,6 +891,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'RawBufferFrom' ||
           operation._tag === 'RawBufferCount' ||
           operation._tag === 'RawBufferSlot' ||
+          operation._tag === 'RawBufferRead' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||
@@ -2548,6 +2552,105 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     `raw_slot${operation.destination.ordinal}_address`,
                   )
                   locals.set(operation.destination.ordinal, Object.freeze([selected]))
+                  break
+                }
+                case 'RawBufferRead': {
+                  const address = readLocal(operation.buffer).at(0)
+                  const index = readLocal(operation.index).at(0)
+                  const element = Layout.entry(program.layout, operation.element)
+                  if (
+                    address === undefined ||
+                    index === undefined ||
+                    element === undefined ||
+                    usizeType === undefined
+                  ) {
+                    throw new RangeError('LLVM RawBuffer.read lost its storage provenance')
+                  }
+                  const bufferType = SilkType.rawBuffer(operation.element)
+                  const count = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      aggregateFieldOffset(bufferType, 'count'),
+                      `raw_read${operation.destination.ordinal}_count_ptr`,
+                    ),
+                    `raw_read${operation.destination.ordinal}_count`,
+                  )
+                  const outOfBounds = yield* FunctionBody.integerCompare(
+                    body,
+                    'uge',
+                    index,
+                    count,
+                    `raw_read${operation.destination.ordinal}_bounds`,
+                  )
+                  if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+                  const accepted = yield* LlvmBlock.make(
+                    body,
+                    `raw_read${operation.destination.ordinal}_accepted`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, outOfBounds, trapBlock, accepted)
+                  yield* LlvmBlock.setInsertionPoint(body, accepted)
+                  const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+                  const baseAddress = yield* FunctionBody.load(
+                    body,
+                    usizeType,
+                    yield* constantBytePointer(
+                      address,
+                      allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+                      `raw_read${operation.destination.ordinal}_base_ptr`,
+                    ),
+                    `raw_read${operation.destination.ordinal}_base`,
+                  )
+                  const stride = Math.ceil(element.size / element.alignment) * element.alignment
+                  const offset = yield* FunctionBody.binary(
+                    body,
+                    'mul',
+                    index,
+                    yield* Constant.integerUnsigned(builder, usizeType, BigInt(stride)),
+                    `raw_read${operation.destination.ordinal}_offset`,
+                  )
+                  const selected = yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    baseAddress,
+                    offset,
+                    `raw_read${operation.destination.ordinal}_address`,
+                  )
+                  const base = yield* FunctionBody.cast(
+                    body,
+                    'inttoptr',
+                    selected,
+                    pointer,
+                    `raw_read${operation.destination.ordinal}_element_ptr`,
+                  )
+                  const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
+                  if (lanes === undefined)
+                    throw new RangeError('LLVM RawBuffer.read lost its shape')
+                  const values: Array<Value.Input> = []
+                  for (const [ordinal, lane] of lanes.entries()) {
+                    const laneOffset = Layout.laneOffset(
+                      program.layout,
+                      operation.element,
+                      lane.path,
+                    )
+                    if (laneOffset === undefined) {
+                      throw new RangeError('LLVM RawBuffer.read lost an element lane')
+                    }
+                    values.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(lane),
+                        yield* constantBytePointer(
+                          base,
+                          laneOffset,
+                          `raw_read${operation.destination.ordinal}_${ordinal}_ptr`,
+                        ),
+                        `raw_read${operation.destination.ordinal}_${ordinal}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
                   break
                 }
                 case 'SlotWrite': {

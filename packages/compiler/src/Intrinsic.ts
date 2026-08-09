@@ -359,6 +359,24 @@ const operations = Object.freeze([
         result: 'usize',
         semanticResult: 'usize',
       }),
+      builtin({
+        actor: 'RawBuffer',
+        name: 'read',
+        operation: 'RawBufferRead',
+        typeParameters: Object.freeze(['T']),
+        semanticTypeParameters: rawTypeParameters,
+        parameters: Object.freeze([
+          valueParameter('buffer', '&RawBuffer<T>'),
+          valueParameter('index', 'usize'),
+        ]),
+        semanticParameters: Object.freeze([
+          Type.reference('Shared', Type.rawBuffer(rawElement)),
+          'usize',
+        ]),
+        result: 'T',
+        semanticResult: rawElement,
+        unsafe: true,
+      }),
     ]),
   ),
   actor(

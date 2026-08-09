@@ -798,6 +798,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = count ${localText(operation.buffer)}`
     case 'RawBufferSlot':
       return `${localText(operation.destination)} = slot ${localText(operation.buffer)}[${localText(operation.index)}]`
+    case 'RawBufferRead':
+      return `${localText(operation.destination)} = read ${localText(operation.buffer)}[${localText(operation.index)}]`
     case 'SlotWrite':
       return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
     case 'SlotTake':
@@ -1133,6 +1135,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `take slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'SlotCopy':
       return `copy slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'RawBufferRead':
+      return `read raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'SlotDrop':
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
@@ -1185,6 +1189,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':
+    case 'RawBufferRead':
     case 'SlotDrop':
     case 'AllocationRelease':
     case 'StandardStreamWrite':

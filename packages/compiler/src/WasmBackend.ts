@@ -1607,6 +1607,43 @@ const emitOperation = (
         Instr.localSet(scalar(operation.destination)),
       ]
     }
+    case 'RawBufferRead': {
+      const address = scalar(operation.buffer)
+      const index = scalar(operation.index)
+      const rawBuffer = SilkType.rawBuffer(operation.element)
+      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+      const elementLayout = LayoutPlan.entry(plan, operation.element)
+      const shape = LayoutPlan.callingShape(plan, operation.element)
+      if (elementLayout === undefined || shape === undefined) {
+        throw new RangeError('Wasm RawBuffer.read lost element layout')
+      }
+      const stride = alignUp(elementLayout.size, elementLayout.alignment)
+      const context = requireMemory()
+      return [
+        Instr.localGet(index),
+        ...loadAt(address, countOffset),
+        Instr.op('i32.ge_u'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...shape.lanes.flatMap((lane, ordinal) => {
+          const destination = slots(operation.destination).at(ordinal)
+          const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+          if (destination === undefined || offset === undefined) {
+            throw new RangeError('Wasm RawBuffer.read lost an element lane')
+          }
+          return [
+            ...loadAt(address, baseOffset),
+            Instr.localGet(index),
+            Instr.i32Const(stride),
+            Instr.op('i32.mul'),
+            Instr.op('i32.add'),
+            Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, { offset }),
+            Instr.localSet(destination),
+          ]
+        }),
+      ]
+    }
     case 'SlotWrite': {
       const address = scalar(operation.slot)
       const shape = LayoutPlan.callingShape(plan, operation.element)
@@ -3704,6 +3741,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'RawBufferFrom' ||
           operation._tag === 'RawBufferCount' ||
           operation._tag === 'RawBufferSlot' ||
+          operation._tag === 'RawBufferRead' ||
           operation._tag === 'SlotWrite' ||
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||
