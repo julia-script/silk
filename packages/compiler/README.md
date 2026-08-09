@@ -58,6 +58,23 @@ const project = yield* ProjectAnalysis.make([
 const main = ProjectAnalysis.view(project, 'app/Main')
 ```
 
+When a project has a prior accepted revision, revise it to reuse byte- and origin-identical module
+syntax while producing a complete new semantic frontend:
+
+```ts
+const revised = yield* ProjectAnalysis.revise(project, nextRoots)
+const shared = revised.syntaxRevisions.get('app/Shared')
+
+if (shared?._tag === 'Changed') {
+  // Canonical SyntaxIds remain revision-local; correspondence relates exact unchanged subtrees.
+  const pairs = shared.correspondence.identities
+}
+```
+
+Changed modules are reparsed normally. Their `SyntaxCorrespondence` is conservative: it relates
+only exact structurally unique sibling subtrees and leaves ambiguous duplicates unmatched. Semantic
+facts are recomputed for the complete current project in either case.
+
 Project analysis is frontend-only. Cross-revision caching and runtime realization remain explicit,
 separate concerns.
 

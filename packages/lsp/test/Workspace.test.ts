@@ -204,6 +204,7 @@ it.effect('shares one project frontend across overlapping open roots', () =>
     assert.isDefined(mainSession)
     assert.isDefined(utilSession)
     if (mainSession === undefined || utilSession === undefined) return
+    assert.strictEqual(mainSession.project, utilSession.project)
     assert.strictEqual(mainSession.snapshot.index, utilSession.snapshot.index)
     assert.strictEqual(mainSession.snapshot.results, utilSession.snapshot.results)
     assert.strictEqual(
@@ -233,6 +234,34 @@ it.effect('shares one project frontend across overlapping open roots', () =>
       Document.diagnostics(util, utilSession.snapshot, () => undefined),
       [],
     )
+
+    const nextMain = Document.make({
+      ...main,
+      version: 2,
+      bytes: encoder.encode(
+        'import Shared\nfn inserted() -> i32 { return 0 }\nfn local() -> i32 { return 1 }\npub fn main() -> i32 { return Shared.answer() + local() }',
+      ),
+    })
+    const revised = yield* Workspace.analyzeProject([nextMain, util], analyzed)
+    const revisedMain = revised.get(nextMain.uri)
+    const revisedUtil = revised.get(util.uri)
+    assert.isDefined(revisedMain)
+    assert.isDefined(revisedUtil)
+    if (revisedMain === undefined || revisedUtil === undefined) return
+    assert.strictEqual(revisedMain.project, revisedUtil.project)
+    assert.notStrictEqual(revisedMain.project, mainSession.project)
+    assert.strictEqual(revisedMain.project.syntaxRevisions.get('Main')?._tag, 'Changed')
+    assert.strictEqual(revisedMain.project.syntaxRevisions.get('Util')?._tag, 'Reused')
+    assert.strictEqual(revisedMain.project.syntaxRevisions.get('Shared')?._tag, 'Reused')
+    const previousSyntax = new Map(
+      mainSession.project.closure.modules.map((module) => [module.name, module.syntax]),
+    )
+    const currentSyntax = new Map(
+      revisedMain.project.closure.modules.map((module) => [module.name, module.syntax]),
+    )
+    assert.notStrictEqual(currentSyntax.get('Main'), previousSyntax.get('Main'))
+    assert.strictEqual(currentSyntax.get('Util'), previousSyntax.get('Util'))
+    assert.strictEqual(currentSyntax.get('Shared'), previousSyntax.get('Shared'))
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 

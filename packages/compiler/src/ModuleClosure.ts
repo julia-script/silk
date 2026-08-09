@@ -21,6 +21,7 @@ export interface CompilationRequest {
 /** One project frontend request with one or more independently queryable roots. */
 export interface ProjectRequest {
   readonly roots: ReadonlyArray<SourceFile.SourceFile>
+  readonly previous?: ProjectClosure
 }
 
 /** The resolved, diagnosed, or syntax-unavailable target of one import declaration. */
@@ -154,8 +155,16 @@ interface ModuleAnalysis {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const parseModule = (name: string, source: SourceResolver.ResolvedSource): ParsedModule => {
-  const syntax = Parser.parse(Lexer.lex(SourceFile.make(name, source.bytes, source.origin)))
+const parseModule = (
+  name: string,
+  source: SourceResolver.ResolvedSource,
+  previous?: Module,
+): ParsedModule => {
+  const currentSource = SourceFile.make(name, source.bytes, source.origin)
+  const syntax =
+    previous !== undefined && SourceFile.equals(previous.syntax.source, currentSource)
+      ? previous.syntax
+      : Parser.parse(Lexer.lex(currentSource))
   const imports = syntax.root.children.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
     const path = SyntaxTree.directNode(element, 'ImportPath')
@@ -354,6 +363,7 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
 ): Effect.fn.Return<ProjectClosure, never, SourceResolver.SourceResolver> {
   const roots = canonicalRoots(request.roots)
   const rootModules = Object.freeze(roots.map((root) => root.id))
+  const previousModules = new Map(request.previous?.modules.map((module) => [module.name, module]))
   const loaded = new Map<string, Module>()
   const diagnostics: Array<ReadonlyArray<Diagnostic.Diagnostic>> = []
   for (const root of roots) {
@@ -407,7 +417,10 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     if (name === undefined || loaded.has(name)) continue
     const resolution = resolutions.get(name)
     if (resolution?._tag !== 'Found') continue
-    const analysis = yield* analyzeModule(parseModule(name, resolution.source), resolve)
+    const analysis = yield* analyzeModule(
+      parseModule(name, resolution.source, previousModules.get(name)),
+      resolve,
+    )
     loaded.set(name, analysis.module)
     diagnostics.push(analysis.diagnostics)
     for (const target of resolvedTargets(analysis.module)) {

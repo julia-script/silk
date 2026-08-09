@@ -144,6 +144,7 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
 /** Analyzes all synchronized project roots through one shared immutable compiler frontend. */
 export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   documents: ReadonlyArray<Document.Document>,
+  previous: ReadonlyMap<string, ProjectSession.AnalyzedDocument> = new Map(),
 ): Effect.fn.Return<
   ReadonlyMap<string, ProjectSession.AnalyzedDocument>,
   never,
@@ -158,10 +159,14 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
       SourceResolver.resolved(document.bytes, SourceOrigin.memory(document.uri)),
     )
   }
-  const project = yield* ProjectAnalysis.make(
-    documents.map((document) =>
-      SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
-    ),
+  const roots = documents.map((document) =>
+    SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
+  )
+  const previousProject = previous.values().next().value?.project
+  const project = yield* (
+    previousProject === undefined
+      ? ProjectAnalysis.make(roots)
+      : ProjectAnalysis.revise(previousProject, roots)
   ).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
   const moduleUris = new Map<string, string>()
   for (const module of project.closure.modules) {
@@ -175,7 +180,7 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
       const snapshot = ProjectAnalysis.view(project, document.module)
       return snapshot === undefined
         ? []
-        : [[document.uri, Object.freeze({ document, snapshot, moduleUris })] as const]
+        : [[document.uri, Object.freeze({ document, project, snapshot, moduleUris })] as const]
     }),
   )
 })
