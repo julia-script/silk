@@ -4,7 +4,7 @@ The lexer produced one instance of closed numeric codes, awkward owned-sequence 
 
 ## What Changes
 
-- Add a visible stack bytecode VM written in ordinary Silk. It consumes a runtime-sized borrowed bytecode slice, executes against a bounded fixed operand stack, and returns an owned growable trace plus diagnostics.
+- Add a visible stack bytecode VM written in ordinary Silk. It consumes a runtime-sized borrowed bytecode slice, executes against a bounded fixed operand stack, and returns one owned growable ordered stream of trace and diagnostic events.
 - Differentially compare valid, branching, and malformed programs with a small canonical TypeScript reference VM.
 - Exercise evaluator, native LLVM, and direct WebAssembly parity; fresh-process determinism; and typed allocation failure at every trace or diagnostic growth ordinal.
 - Require only general language, effect, allocator, and `silk.vector` mechanisms—no VM-, opcode-, or stack-specific compiler primitive.

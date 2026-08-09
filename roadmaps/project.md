@@ -27,16 +27,17 @@ cost-model gaps while preserving evaluator, native, and WebAssembly agreement.
 
 ### Exercise Silk with a bounded stack bytecode VM
 
-- **Problem:** The lexer alone is insufficient evidence for a closed named-value feature or a
-  shared Vector read surface. Silk needs another recognizable low-level program that independently
-  pressures those seams while exercising allocated owned output and malformed execution.
-- **Outcome & done-when:** A visible bounded stack VM differentially matches a TypeScript oracle for
-  arithmetic, branching, malformed bytecode, and step limits; returns owned trace/diagnostic
-  vectors; sweeps allocation failures; stays in evaluator/native/Wasm and fresh-process parity; and
-  compares every finding with the lexer before promoting follow-up work.
-- **Status:** proposal in progress — selected after completing the contextual-literal repair.
-- **Appetite:** one pressure-program change using ordinary Silk and no preselected enum, constant,
-  Vector mutation, VM intrinsic, or self-hosting feature.
+**Status: complete (2026-08-09).** The ordinary Silk VM differentially matches its TypeScript oracle
+over arithmetic, taken and untaken branches, malformed bytecode, stack bounds, invalid jumps, and
+bounded loops. One owned ordered `Vector<Step | VmDiagnostic>` event stream supplies realistic
+allocation pressure; every growth ordinal preserves typed failure and balanced cleanup across the
+evaluator, native LLVM, and direct Wasm, and fresh processes reproduce the same artifacts.
+
+The VM independently confirms the need for named typed values and shared Vector reads. It also
+exposed nested dynamic reference-place lowering, structural-union `Slot.copy`, and a native
+flattened-ABI defect for composite returns containing two generic vectors. The native ABI defect
+blocked the direct two-vector result shape and is selected as the next focused repair; no parser
+port or continuous self-hosting sequence follows from the exercise.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Repair contextual integer literals exposed by the lexer
@@ -210,8 +211,9 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-After the stack VM, compare its findings with the lexer before selecting a focused language or
-stdlib repair. No neighboring compiler port is preselected.
+Characterize and repair native composite returns that carry multiple generic affine fields. Then
+reassess whether typed constants or shared Vector reads are the smallest evidence-backed language
+or library improvement. No neighboring compiler port is preselected.
 
 ## Later
 

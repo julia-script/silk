@@ -24,7 +24,9 @@ Silk currently has runtime byte slices, fixed arrays, mutable indexing, integer 
 
 ### D1: Use a bounded fixed operand stack and allocated owned observations
 
-The operand stack is a fixed `[i32; 16]` with an explicit stack pointer. This exercises ordinary mutable indexed storage and makes overflow a deterministic VM diagnostic. The owned result contains `Vector<Step>` and `Vector<VmDiagnostic>` so realistic execution and recovery still allocate, grow, migrate, and clean up.
+The operand stack is a fixed `[i32; 16]` with an explicit stack pointer. This exercises ordinary mutable indexed storage and makes overflow a deterministic VM diagnostic. The owned result contains one `Vector<Step | VmDiagnostic>` in execution order so realistic execution and recovery still allocate, grow, migrate, and clean up. This is also the more faithful observation model: a diagnostic and a successful step are events in one timeline, not two collections whose relative order must be reconstructed.
+
+The first implementation returned separate trace and diagnostic vectors. Native cleanup received an invalid union tag for the second generic vector after the composite result crossed the flattened ABI, although evaluator and Wasm execution were sound. Keeping one ordered event stream makes the pressure program executable without hiding that general compiler defect; the findings retain it as focused follow-up evidence.
 
 Extending `Vector` with pop/set before the program exists was rejected because it would turn a pressure probe into a preselected stdlib design. An append-only fake operand stack was rejected because it would not implement familiar stack semantics honestly.
 
@@ -38,18 +40,18 @@ Execution stops on halt, end of input, truncated operands, invalid jump targets,
 
 This distinguishes malformed-program semantics from Silk traps: only valid arithmetic overflow remains a language-level trap. An unbounded loop was rejected because tests and compiled executables need deterministic termination.
 
-### D4: Extract exact evaluator observations and use fingerprints for compiled engines
+### D4: Record exact observations as events are appended and use fingerprints for compiled engines
 
-The Silk program calls named observation functions for result, each step field, and each diagnostic field. Tests read those evaluator trace calls for exact differential comparison. The program also computes a bounded deterministic fingerprint consumed by native and Wasm gates. This repeats the lexer's proven bridge without adding a host ABI for dynamic vectors.
+The Silk program calls named observation functions for result, each step field, and each diagnostic field at the point the event is appended. Tests read those evaluator trace calls for exact differential comparison. The program incrementally computes a bounded deterministic fingerprint consumed by native and Wasm gates. Reading the union event stream back through `Vector.get` was rejected after the general `Slot.copy` lowering produced invalid MIR for structural-union elements. Append-time observation preserves exact order and ownership pressure without adding a host ABI for dynamic vectors or pretending the union-copy defect is solved.
 
 ### D5: Sweep successful allocation ordinals and compare findings explicitly
 
-One valid program grows the trace vector through at least two allocations. One malformed program grows the diagnostic vector and recovers past later instructions. Successful baselines establish the exact allocation ordinals; quota providers then fail each ordinal on evaluator, native, and Wasm, requiring typed failure and balanced acquire/release traces. The findings report includes a comparison column pointing back to lexer evidence.
+One program interleaves enough successful and malformed execution events to grow the event vector through multiple allocations. Successful baselines establish the exact allocation ordinals; quota providers then fail each ordinal on evaluator, native, and Wasm, requiring typed failure and balanced acquire/release traces. The findings report includes a comparison column pointing back to lexer evidence.
 
 ## Risks / Trade-offs
 
 - **[Risk] Numeric opcodes make the source needlessly cryptic.** → Centralize their meanings in the reference mapping and record navigation cost as evidence; do not solve it inside the VM.
-- **[Risk] A fixed stack avoids allocating the data structure named by the example.** → State the bound visibly and allocate the semantically useful trace/diagnostic results; the goal is language pressure, not an unbounded production VM.
+- **[Risk] A fixed stack avoids allocating the data structure named by the example.** → State the bound visibly and allocate the semantically useful ordered event result; the goal is language pressure, not an unbounded production VM.
 - **[Risk] Evaluator trace extraction couples tests to observation function names.** → Limit extraction to explicit public observation calls and independently verify compiled fingerprints.
 - **[Risk] Failure sweeps multiply already-expensive cross-engine tests.** → Use two representative programs, derive ordinals from baselines, and keep the broader corpus evaluator-only.
 - **[Risk] The program independently confirms a missing language/library feature.** → Complete with the honest local representation when possible, record both programs' evidence, and make any general solution a subsequent focused proposal.

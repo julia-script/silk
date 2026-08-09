@@ -2,7 +2,7 @@
 
 ### Requirement: A bounded stack VM exercises execution and owned observations
 
-The repository SHALL contain a readable bounded stack bytecode VM written in ordinary Silk source. It SHALL consume a runtime-sized borrowed bytecode slice, execute general arithmetic and control-flow instructions against a fixed-capacity operand stack, and return owned growable execution-trace and diagnostic data. Compiler phases and backends MUST NOT gain VM-specific, opcode-specific, or operand-stack-specific operations, layouts, or branches.
+The repository SHALL contain a readable bounded stack bytecode VM written in ordinary Silk source. It SHALL consume a runtime-sized borrowed bytecode slice, execute general arithmetic and control-flow instructions against a fixed-capacity operand stack, and return one owned growable ordered stream of execution-step and diagnostic events. Compiler phases and backends MUST NOT gain VM-specific, opcode-specific, or operand-stack-specific operations, layouts, or branches.
 
 #### Scenario: Branching bytecode produces an owned trace
 

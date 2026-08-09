@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** run a bounded stack bytecode VM as the second recognizable pressure program,
-measured by differential semantics, owned allocated observations, invalid-program recovery, and
-cross-engine determinism without preselecting solutions to the lexer's remaining findings.
+**Current objective:** repair the native composite-return defect exposed by the completed stack VM,
+measured by an engine-independent minimal reproduction and correct cleanup of multiple generic
+affine fields without changing their public representation.
 
 ## Column rules
 
@@ -26,16 +26,12 @@ cross-engine determinism without preselecting solutions to the lexer's remaining
 
 ### Exercise a bounded stack bytecode VM
 
-- **Problem:** One lexer does not justify general enums/constants or a shared Vector read API, and
-  the existing algorithms do not combine runtime instruction dispatch with malformed-program
-  recovery and owned dynamic observations.
-- **Outcome & done-when:** An ordinary Silk VM matches a TypeScript oracle over arithmetic,
-  branches, invalid bytecode, and bounded loops; trace/diagnostic vectors allocate and roll back
-  deterministically; all three engines agree; and findings explicitly compare with the lexer.
-- **Boundary:** Fixed operand capacity is honest and visible. No production VM, assembler, JIT,
-  VM intrinsic, preselected enum/constant syntax, or self-hosting sequence.
-- **Status:** proposal in progress.
-- **Appetite:** one complete pressure-program change, then one evidence-based follow-up at most.
+**Status: complete (2026-08-09).** An ordinary Silk VM matches a TypeScript oracle over arithmetic,
+branches, invalid bytecode, stack bounds, and bounded loops. A single ordered event vector allocates
+and rolls back deterministically across all three engines. The findings independently confirm named
+typed values and shared Vector reads while exposing three narrower compiler defects. Fixed operand
+capacity remains honest and visible; no production VM, VM intrinsic, or self-hosting sequence was
+introduced.
 
 ### Make exact integer context survive enclosing result expectations
 
@@ -48,8 +44,9 @@ determinism parity.
 
 ## Next
 
-After the stack VM, select at most one focused repair that is justified by combined evidence; do
-not automatically port another compiler module.
+Characterize and repair the native flattened-ABI defect for composite returns containing multiple
+generic affine fields. Reassess typed constants and shared Vector reads after that focused repair;
+do not automatically port another compiler module.
 
 ## Later
 
@@ -87,6 +84,10 @@ and editor tooling together with the language surface so no second vocabulary su
 
 ## Changelog
 
+- 2026-08-09: Completed `exercise-language-with-stack-vm`. Ten differential corpus cases, exact
+  ordered observations, evaluator/native/Wasm parity, allocation-failure sweeps, and fresh-process
+  determinism pass. The VM confirmed named-value and shared-read pressure and selected the native
+  multi-vector aggregate return defect as the next focused repair.
 - 2026-08-09: Selected a bounded stack bytecode VM as the second language-pressure program so
   closed numeric codes, Vector reads, allocation behavior, and cost findings receive independent
   evidence before any general feature is proposed.
