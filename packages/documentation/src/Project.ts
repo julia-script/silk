@@ -63,7 +63,7 @@ const rangeOf = (node: SyntaxTree.Node): Document.SourceRange =>
   })
 
 const parsedDocumentation = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -73,7 +73,7 @@ const parsedDocumentation = (
 }
 
 const targetOf = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   spelling: string,
 ): Document.LinkTarget | undefined => {
@@ -93,7 +93,7 @@ const targetOf = (
 }
 
 const resolveDocumentation = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   documentation: Document.Document | undefined,
 ): Document.Document | undefined =>
@@ -102,7 +102,7 @@ const resolveDocumentation = (
     : Document.resolve(documentation, (spelling) => targetOf(snapshot, module, spelling))
 
 const typeParameterItem = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
@@ -128,7 +128,7 @@ const typeParameterItem = (
 }
 
 const parameterItem = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
@@ -153,7 +153,7 @@ const parameterItem = (
 }
 
 const fieldItem = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
@@ -178,7 +178,7 @@ const fieldItem = (
 }
 
 const memberItem = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
   member: DeclarationIndex.MemberFact,
@@ -219,7 +219,7 @@ const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
 const conformanceItem = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
   conformance: DeclarationIndex.ConformanceFact,
@@ -265,7 +265,7 @@ const conformanceItem = (
 }
 
 const moduleModel = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   headers: DeclarationIndex.ModuleHeaders,
   options: Options,
 ): Module | undefined => {
@@ -292,7 +292,7 @@ const moduleModel = (
 }
 
 /** Builds documentation lazily from one already-created compiler analysis snapshot. */
-export const make = (snapshot: Analysis.Snapshot, options: Options = {}): Project =>
+export const make = (snapshot: Analysis.FrontendSnapshot, options: Options = {}): Project =>
   Object.freeze({
     schema: 'silk-documentation',
     experimental: true,

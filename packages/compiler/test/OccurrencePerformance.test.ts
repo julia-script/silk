@@ -29,7 +29,7 @@ it.effect('keeps representative multi-module occurrence storage and lookup withi
           ] as const,
       ),
     )
-    const snapshot = yield* Analysis.make({
+    const snapshot = yield* Analysis.makeRealized({
       root: SourceFile.make('root', encoder.encode(root)),
     }).pipe(Effect.provide(SourceResolver.memory(sources)))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])

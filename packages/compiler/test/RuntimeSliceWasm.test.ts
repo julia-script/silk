@@ -6,7 +6,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const emit = Effect.fnUntraced(function* (name: string, source: string) {
-  const self = yield* Analysis.ofSource(
+  const self = yield* Analysis.ofSourceRealized(
     `runtime-slice-wasm/${name}`,
     ascii(source),
     'wasm32-unknown-unknown',
@@ -67,7 +67,7 @@ pub fn main() -> i32 { return depth(3) }`,
 
 it.effect('traps negative and equal-length Wasm slice indexes', () =>
   Effect.gen(function* () {
-    const negative = yield* Analysis.ofSource(
+    const negative = yield* Analysis.ofSourceRealized(
       'runtime-slice-wasm/bounds-negative',
       ascii(`fn choose(values: &[i32], index: usize) -> i32 { return values[index] }
 pub fn main() -> i32 { let values = [10, 20] return choose(&values, -1) }`),

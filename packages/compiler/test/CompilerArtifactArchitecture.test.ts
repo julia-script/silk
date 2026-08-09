@@ -31,7 +31,7 @@ it.effect(
   'keeps allocation scopes finalizers provider dependencies and allocator kinds out of artifacts',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'architecture/artifacts',
         ascii(
           'fn consume(value: Allocation) -> i32 { return 0 }\npub fn main() -> i32 { return 42 }',

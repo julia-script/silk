@@ -8,7 +8,7 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshot = (source: string) => Analysis.ofSource('fixed-arrays/main', ascii(source))
+const snapshot = (source: string) => Analysis.ofSourceRealized('fixed-arrays/main', ascii(source))
 
 const nested = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.ExpressionFact> => {
   if (fact._tag === 'Move' || fact._tag === 'FieldProjection') return [fact.subject]

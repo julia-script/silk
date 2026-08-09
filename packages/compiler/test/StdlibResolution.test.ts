@@ -32,7 +32,7 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
 
 it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource('stdlib/importer', ascii(importing))
+    const snapshot = yield* Analysis.ofSourceRealized('stdlib/importer', ascii(importing))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(
       Analysis.modules(snapshot).map((module) => module.name),
@@ -93,7 +93,10 @@ it.effect('compiles library source with ordinary diagnostics and no privilege', 
     if (original === undefined) return
     sources.set('silk/vector', ascii('pub fn broken() -> Missing { return 0 }'))
     try {
-      const snapshot = yield* Analysis.ofSource('stdlib/defective-importer', ascii(importing))
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'stdlib/defective-importer',
+        ascii(importing),
+      )
       const attributed = Analysis.diagnostics(snapshot).filter(
         (diagnostic) => diagnostic.span.sourceId === 'silk/vector',
       )

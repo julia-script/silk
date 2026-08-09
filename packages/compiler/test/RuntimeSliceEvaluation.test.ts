@@ -6,7 +6,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshot = (name: string, source: string) =>
-  Analysis.ofSource(`runtime-slice-evaluation/${name}`, ascii(source))
+  Analysis.ofSourceRealized(`runtime-slice-evaluation/${name}`, ascii(source))
 
 it.effect('shares authoritative array cells across calls and compatible reborrows', () =>
   Effect.gen(function* () {

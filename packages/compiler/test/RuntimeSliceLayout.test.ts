@@ -26,7 +26,7 @@ pub fn main() -> i32 {
 }`
 
 const snapshot = (target: 'wasm32-unknown-unknown' | 'x86_64-unknown-linux-gnu') =>
-  Analysis.ofSource('slices/Layout', ascii(source), target)
+  Analysis.ofSourceRealized('slices/Layout', ascii(source), target)
 
 it.effect('plans target-width address plus usize slice layouts and heterogeneous lanes', () =>
   Effect.gen(function* () {

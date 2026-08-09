@@ -11,7 +11,7 @@ const bytes = new Uint8Array(
   readFileSync(new URL('./scanner-acceptance/Main.silk', import.meta.url)),
 )
 const snapshot = (target) =>
-  Effect.runPromise(Analysis.ofSource('scanner-acceptance/Main', bytes, target))
+  Effect.runPromise(Analysis.ofSourceRealized('scanner-acceptance/Main', bytes, target))
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const json = (value) =>
   JSON.stringify(value, (_key, candidate) =>

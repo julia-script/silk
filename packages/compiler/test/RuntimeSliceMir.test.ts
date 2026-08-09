@@ -6,7 +6,8 @@ import * as Mir from '../src/Mir.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshot = (source: string) => Analysis.ofSource('runtime-slice-mir/main', ascii(source))
+const snapshot = (source: string) =>
+  Analysis.ofSourceRealized('runtime-slice-mir/main', ascii(source))
 
 const source = `fn inspect(values: &[i32], index: usize) -> i32 {
   return values[index] + usize.toI32(values.length)

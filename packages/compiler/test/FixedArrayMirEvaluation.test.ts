@@ -7,7 +7,8 @@ import * as Mir from '../src/Mir.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshot = (source: string) => Analysis.ofSource('fixed-array-mir/main', ascii(source))
+const snapshot = (source: string) =>
+  Analysis.ofSourceRealized('fixed-array-mir/main', ascii(source))
 
 it.effect('lowers construction and a mixed indexed-field chain to one checked place read', () =>
   Effect.gen(function* () {

@@ -74,7 +74,7 @@ it('decodes UTF-8 and exact bytes atomically', () => {
 
 it.effect('recovers malformed escapes before the following declaration', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'static/recovery',
       encoder.encode(`fn broken() -> i32 { let bad = "\\q" return 0 }
 pub fn main() -> i32 { return 42 }`),
@@ -89,7 +89,7 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('keeps static bytes, reuse, lengths, and backend placement in parity', () =>
   Effect.gen(function* () {
-    const native = yield* Analysis.ofSource(
+    const native = yield* Analysis.ofSourceRealized(
       'static/parity',
       encoder.encode(source),
       'aarch64-apple-darwin',
@@ -128,7 +128,7 @@ it.effect('keeps static bytes, reuse, lengths, and backend placement in parity',
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.include(llvm.ir, 'constant [5 x i8] c"life\\0A"')
 
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'static/parity-wasm',
       encoder.encode(source),
       'wasm32-unknown-unknown',

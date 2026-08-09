@@ -75,7 +75,7 @@ it.effect('compiles the nested program to a running executable matching the inte
     assert.strictEqual(existsSync(outcome.path), true)
     const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
     const interpreted = Analysis.evaluate(
-      yield* Analysis.ofSource('memory/driver', ascii(nested.source)),
+      yield* Analysis.ofSourceRealized('memory/driver', ascii(nested.source)),
     )
     assert.strictEqual(interpreted._tag, 'Completed')
     if (interpreted._tag !== 'Completed') return
@@ -107,7 +107,9 @@ it.effect('compiles a three-module call chain to native execution matching the i
       destination: join(destinationRoot, 'cross-module'),
     }).pipe(Effect.provide(layer))
     const interpreted = Analysis.evaluate(
-      yield* Analysis.make({ root: SourceFile.make('app/Main', root) }).pipe(Effect.provide(layer)),
+      yield* Analysis.makeRealized({ root: SourceFile.make('app/Main', root) }).pipe(
+        Effect.provide(layer),
+      ),
     )
     assert.strictEqual(outcome._tag, 'Compiled')
     assert.strictEqual(interpreted._tag, 'Completed')
@@ -119,7 +121,9 @@ it.effect('compiles a three-module call chain to native execution matching the i
 
 it.effect('reports every phase in order with counts and totals', () =>
   Effect.gen(function* () {
-    const outcome = yield* compileSource('report', 'pub fn main() -> i32 { return 42 }')
+    const source = 'pub fn main() -> i32 { return 42 }'
+    const outcome = yield* compileSource('report', source)
+    const analysis = yield* Analysis.ofSourceRealized('memory/driver', ascii(source))
 
     assert.strictEqual(outcome._tag, 'Compiled')
     if (outcome._tag !== 'Compiled') return
@@ -135,6 +139,13 @@ it.effect('reports every phase in order with counts and totals', () =>
     const closure = outcome.report.at(0)
     assert.strictEqual(closure?.inputs, 1)
     assert.strictEqual(closure?.outputs, 1)
+    const compilerPhases = expectedPhases.slice(0, 9)
+    assert.deepEqual(
+      Analysis.phases(analysis)
+        .map((entry) => entry.phase)
+        .filter((phase) => phase !== 'semantic-occurrences' && phase !== 'anonymous-expressions'),
+      compilerPhases,
+    )
   }),
 )
 
@@ -315,7 +326,7 @@ it.effect(
     Effect.gen(function* () {
       for (const program of corpus) {
         const interpreted = Analysis.evaluate(
-          yield* Analysis.ofSource('memory/driver', ascii(program.source)),
+          yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source)),
         )
         const outcome = yield* compileSource(`corpus-${program.name}`, program.source)
 
@@ -370,7 +381,7 @@ it.effect('keeps direct WebAssembly in agreement across recursive corpus fixture
     ])
     for (const program of corpus.filter((candidate) => recursiveNames.has(candidate.name))) {
       if (program.expected._tag !== 'Completes') continue
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `wasm-recursion/${program.name}`,
         ascii(program.source),
         'wasm32-unknown-unknown',
@@ -485,7 +496,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = 'pub fn main() -> i32 { return i32.divide(1, 0) }'
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'memory/driver',
         ascii(source),
         'wasm32-unknown-unknown',

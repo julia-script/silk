@@ -150,6 +150,35 @@ it.effect('analyzes imports against sibling files on disk', () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
+it.effect('keeps editor analysis on frontend phases only', () =>
+  Effect.gen(function* () {
+    const root = project()
+    const document = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode('pub fn main() -> i32 { return 42 }'),
+    })
+    const snapshot = yield* Workspace.analyze(document, [])
+
+    assert.deepEqual(
+      Analysis.phases(snapshot).map(({ phase }) => phase),
+      [
+        'closure',
+        'declaration-collection',
+        'declaration-index',
+        'name-resolution',
+        'elaboration',
+        'ownership',
+        'semantic-occurrences',
+        'anonymous-expressions',
+      ],
+    )
+    assert.isFalse(Object.hasOwn(snapshot, 'instances'))
+    assert.isFalse(Object.hasOwn(snapshot, 'layout'))
+    assert.isFalse(Object.hasOwn(snapshot, 'mir'))
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
 it.effect('navigates standard-library definitions to the analyzed toolchain source', () =>
   Effect.gen(function* () {
     const root = project()

@@ -22,7 +22,7 @@ it.effect('constructs valid zero-sized and over-aligned Layout values', () =>
       ['0', '4096'],
       ['64', '8'],
     ] as const) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `layout-value/valid-${bytes}-${alignment}`,
         ascii(program(bytes, alignment)),
         'wasm32-unknown-unknown',
@@ -38,7 +38,7 @@ it.effect('constructs valid zero-sized and over-aligned Layout values', () =>
 
 it.effect('returns ordinary InvalidAlignment data before allocation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'layout-value/invalid-alignment',
       ascii(program('64', '3')),
       'aarch64-apple-darwin',
@@ -52,7 +52,7 @@ it.effect('returns ordinary InvalidAlignment data before allocation', () =>
 
 it.effect('publishes target-sized Layout and checked repetition contracts', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'layout-value/contracts',
       ascii(`fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
   return Layout.repeat(move layout, count)

@@ -10,7 +10,7 @@ const ascii = (value: string): Uint8Array =>
 
 it.effect('plans only concrete types reached through discovered instances', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'layout/program',
       ascii(`pub fn unused(value: bool) -> bool { return value }
 pub fn main() -> i32 { return 42 }`),
@@ -29,7 +29,7 @@ pub fn main() -> i32 { return 42 }`),
 it.effect('plans hidden Effect capture environments by construction site and target', () =>
   Effect.gen(function* () {
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'layout/effect-environment',
         ascii(`pub fn main() -> i32 {
   let mut counter = 0
@@ -58,7 +58,7 @@ it.effect('plans hidden Effect capture environments by construction site and tar
 it.effect('plans target-aware callable environments and ephemeral code/environment views', () =>
   Effect.gen(function* () {
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'layout/callable-environment',
         ascii(`struct Token { value: i32 }
 fn choose(value: i32, values: &mut [i32], token: Token) -> i32 { return value }
@@ -159,7 +159,11 @@ pub fn main() -> i32 {
   return 42
 }`
       for (const target of Target.all) {
-        const snapshot = yield* Analysis.ofSource('layout/effect-outcome', ascii(source), target.id)
+        const snapshot = yield* Analysis.ofSourceRealized(
+          'layout/effect-outcome',
+          ascii(source),
+          target.id,
+        )
         assert.deepEqual(Analysis.diagnostics(snapshot), [])
         const planned = Analysis.layoutOf(snapshot)
         assert.strictEqual(planned._tag, 'Available')
@@ -205,7 +209,7 @@ it.effect(
   'catalogs empty and nested structs before reachability and reuses their exact entries',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'layout/catalog',
         ascii(`struct Empty {}
 struct Pair { left: i32 right: bool }
@@ -274,7 +278,7 @@ it.effect(
   'retains unavailable fields, cycles, and transitive dependencies without harming peers',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'layout/unavailable',
         ascii(`struct Good { value: i32 }
 struct Broken { value: Missing }
@@ -323,9 +327,21 @@ it.effect(
       const source = ascii(
         'struct Pair { left: i32 right: bool }\npub fn main() -> i32 { return 42 }',
       )
-      const first = yield* Analysis.ofSource('layout/repeat', source, 'aarch64-apple-darwin')
-      const second = yield* Analysis.ofSource('layout/repeat', source, 'aarch64-apple-darwin')
-      const wasm = yield* Analysis.ofSource('layout/repeat', source, 'wasm32-unknown-unknown')
+      const first = yield* Analysis.ofSourceRealized(
+        'layout/repeat',
+        source,
+        'aarch64-apple-darwin',
+      )
+      const second = yield* Analysis.ofSourceRealized(
+        'layout/repeat',
+        source,
+        'aarch64-apple-darwin',
+      )
+      const wasm = yield* Analysis.ofSourceRealized(
+        'layout/repeat',
+        source,
+        'wasm32-unknown-unknown',
+      )
       const firstCatalog = Analysis.layoutCatalogOf(first)
       const secondCatalog = Analysis.layoutCatalogOf(second)
       const wasmCatalog = Analysis.layoutCatalogOf(wasm)
@@ -351,7 +367,7 @@ it.effect(
 
 it.effect('reports malformed aggregate facts and divergence from the catalog', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'layout/verify-aggregate',
       ascii('struct Pair { left: i32 right: bool }\npub fn main() -> Pair { return 42 }'),
       'aarch64-apple-darwin',

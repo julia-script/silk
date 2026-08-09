@@ -12,7 +12,11 @@ const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(identity(42)) }`
 
 const emit = Effect.fnUntraced(function* (text: string, request: Backend.CodegenRequest) {
-  const snapshot = yield* Analysis.ofSource('golden/program', ascii(text), 'aarch64-apple-darwin')
+  const snapshot = yield* Analysis.ofSourceRealized(
+    'golden/program',
+    ascii(text),
+    'aarch64-apple-darwin',
+  )
   return yield* Analysis.codegen(snapshot, request)
 })
 
@@ -59,7 +63,7 @@ it.effect('emits byte-identical bitcode across repeated fresh runs', () =>
 
 it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_main', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'golden/llvm-wasm',
       ascii('pub fn main() -> i32 { return 42 }'),
       'wasm32-unknown-unknown',
@@ -81,12 +85,12 @@ pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
       'pub fn main() -> i32 { let plusTwo = i32.add(2) return plusTwo(40) }',
     ]
     for (const [ordinal, source] of programs.entries()) {
-      const native = yield* Analysis.ofSource(
+      const native = yield* Analysis.ofSourceRealized(
         `callable/native-${ordinal}`,
         ascii(source),
         'aarch64-apple-darwin',
       )
-      const wasm = yield* Analysis.ofSource(
+      const wasm = yield* Analysis.ofSourceRealized(
         `callable/wasm-${ordinal}`,
         ascii(source),
         'wasm32-unknown-unknown',
@@ -140,12 +144,12 @@ pub fn main() -> i32 {
 }`,
       ]
       for (const [ordinal, source] of programs.entries()) {
-        const native = yield* Analysis.ofSource(
+        const native = yield* Analysis.ofSourceRealized(
           `callable-modes/native-${ordinal}`,
           ascii(source),
           'aarch64-apple-darwin',
         )
-        const wasm = yield* Analysis.ofSource(
+        const wasm = yield* Analysis.ofSourceRealized(
           `callable-modes/wasm-${ordinal}`,
           ascii(source),
           'wasm32-unknown-unknown',
@@ -172,22 +176,22 @@ it.effect('emits deterministic callable layouts, MIR, LLVM, and Wasm artifacts',
   Effect.gen(function* () {
     const source = `fn add<T>(value: T, fallback: T) -> T { return move value }
 pub fn main() -> i32 { let callback = add<i32>(2) return callback(42) }`
-    const nativeFirst = yield* Analysis.ofSource(
+    const nativeFirst = yield* Analysis.ofSourceRealized(
       'callable-determinism/native',
       ascii(source),
       'aarch64-apple-darwin',
     )
-    const nativeSecond = yield* Analysis.ofSource(
+    const nativeSecond = yield* Analysis.ofSourceRealized(
       'callable-determinism/native',
       ascii(source),
       'aarch64-apple-darwin',
     )
-    const wasmFirst = yield* Analysis.ofSource(
+    const wasmFirst = yield* Analysis.ofSourceRealized(
       'callable-determinism/wasm',
       ascii(source),
       'wasm32-unknown-unknown',
     )
-    const wasmSecond = yield* Analysis.ofSource(
+    const wasmSecond = yield* Analysis.ofSourceRealized(
       'callable-determinism/wasm',
       ascii(source),
       'wasm32-unknown-unknown',

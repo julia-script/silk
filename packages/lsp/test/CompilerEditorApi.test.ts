@@ -7,19 +7,19 @@ import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
 import * as TypeHint from '@silk-effect/compiler/TypeHint'
 
 const occurrenceQuery: (
-  self: Analysis.Snapshot,
+  self: Analysis.FrontendSnapshot,
   module: string,
   offset: number,
 ) => SemanticOccurrence.SemanticOccurrence | undefined = Analysis.semanticOccurrenceAt
 
 const completionQuery: (
-  self: Analysis.Snapshot,
+  self: Analysis.FrontendSnapshot,
   module: string,
   offset: number,
 ) => Completion.Result | undefined = Analysis.completionAt
 
 const hintQuery: (
-  self: Analysis.Snapshot,
+  self: Analysis.FrontendSnapshot,
   module: string,
   start: number,
   end: number,

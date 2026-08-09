@@ -20,10 +20,10 @@ fn inspect(input: Left | Right) -> i32 {
 pub fn main() -> i32 { return inspect(Left { value: 41 }) }`
 const bytes = new TextEncoder().encode(source)
 const native = await Effect.runPromise(
-  Analysis.ofSource('fixture/match-determinism', bytes, 'aarch64-apple-darwin'),
+  Analysis.ofSourceRealized('fixture/match-determinism', bytes, 'aarch64-apple-darwin'),
 )
 const wasm = await Effect.runPromise(
-  Analysis.ofSource('fixture/match-determinism', bytes, 'wasm32-unknown-unknown'),
+  Analysis.ofSourceRealized('fixture/match-determinism', bytes, 'wasm32-unknown-unknown'),
 )
 const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
 const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))

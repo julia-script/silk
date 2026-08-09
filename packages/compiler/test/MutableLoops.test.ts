@@ -7,7 +7,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshot = (source: string, target = 'wasm32-unknown-unknown') =>
-  Analysis.ofSource('mutable-loops/main', ascii(source), target)
+  Analysis.ofSourceRealized('mutable-loops/main', ascii(source), target)
 
 const runWasm = Effect.fnUntraced(function* (source: string) {
   const self = yield* snapshot(source)

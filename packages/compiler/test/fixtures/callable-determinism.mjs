@@ -19,7 +19,7 @@ pub fn main() -> i32 {
   return second
 }`
 const bytes = new TextEncoder().encode(source)
-const snapshot = (name, target) => Effect.runPromise(Analysis.ofSource(name, bytes, target))
+const snapshot = (name, target) => Effect.runPromise(Analysis.ofSourceRealized(name, bytes, target))
 const native = await snapshot('fixture/callable-native-determinism', 'aarch64-apple-darwin')
 const wasm = await snapshot('fixture/callable-wasm-determinism', 'wasm32-unknown-unknown')
 const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))

@@ -233,7 +233,7 @@ pub fn main() -> i32 { let values = [1, 2] return read(&values) }`)
 
 it.effect('discovers one generic slice instance across distinct source lengths', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'slices/Instances',
       ascii(`fn scan<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
 fn short() -> i32 { let values = [1, 2, 3] return scan(&values) }

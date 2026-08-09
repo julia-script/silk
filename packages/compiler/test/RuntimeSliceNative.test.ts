@@ -31,7 +31,7 @@ it.effect(
   'emits typed pointer lanes, stride-aware storage, and deterministic native artifacts',
   () =>
     Effect.gen(function* () {
-      const self = yield* Analysis.ofSource(
+      const self = yield* Analysis.ofSourceRealized(
         'runtime-slice-native/main',
         ascii(source),
         'aarch64-apple-darwin',

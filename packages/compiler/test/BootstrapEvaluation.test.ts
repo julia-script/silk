@@ -12,7 +12,7 @@ const evaluateSource = (
   text: string,
   options: BootstrapEvaluation.Options = {},
 ): Effect.Effect<BootstrapEvaluation.Outcome> =>
-  Effect.map(Analysis.ofSource('memory/evaluation', ascii(text)), (snapshot) =>
+  Effect.map(Analysis.ofSourceRealized('memory/evaluation', ascii(text)), (snapshot) =>
     Analysis.evaluate(snapshot, options),
   )
 
@@ -143,7 +143,7 @@ pub fn main() -> i32 {
 
 it.effect('blocks a second evaluator invocation of a consumed callable identity', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'memory/consumed-callable',
       ascii(`struct Token { value: i32 }
 fn consume(value: i32, token: Token) -> i32 { return value + token.value }
@@ -229,7 +229,7 @@ pub fn main() -> i32 {
   drop mapped
   return first + second
 }`
-    const self = yield* Analysis.ofSource('memory/mutable-map', ascii(source))
+    const self = yield* Analysis.ofSourceRealized('memory/mutable-map', ascii(source))
     const outcome = Analysis.evaluate(self)
 
     assert.strictEqual(
@@ -461,7 +461,7 @@ it.effect('stops an infinite loop at the exact configured operation count', () =
 
 it.effect('validates resource limits before evaluation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'memory/invalid-limits',
       ascii('pub fn main() -> i32 { return 0 }'),
     )
@@ -483,7 +483,7 @@ pub fn main() -> i32 { return identity(identity(42)) }`
 
 it.effect('refuses malformed target-aware MIR before executing any operation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'memory/invalid-layout',
       ascii('pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
@@ -607,7 +607,7 @@ pub fn main() -> i32 {
 
 it.effect('evaluates verified Copy match access without consuming the logical payload', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'memory/copy-match',
       ascii(`struct Token { value: i32 }
 fn inspect(input: Token) -> i32 { return match &input { Token { value } => value } }

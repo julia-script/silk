@@ -44,7 +44,7 @@ it('publishes canonical float catalog entries', () => {
 
 it.effect('keeps evaluator, LLVM, and direct Wasm float semantics aligned', () =>
   Effect.gen(function* () {
-    const native = yield* Analysis.ofSource(
+    const native = yield* Analysis.ofSourceRealized(
       'float/matrix',
       new TextEncoder().encode(source),
       'aarch64-apple-darwin',
@@ -57,7 +57,7 @@ it.effect('keeps evaluator, LLVM, and direct Wasm float semantics aligned', () =
     assert.isAbove(llvm.bitcode.length, 0)
     assert.notInclude(llvm.ir, 'fast')
 
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       'float/matrix-wasm',
       new TextEncoder().encode(source),
       'wasm32-unknown-unknown',
@@ -145,7 +145,7 @@ it.effect(
   'lowers every catalogued float operation through all engines',
   () =>
     Effect.gen(function* () {
-      const native = yield* Analysis.ofSource(
+      const native = yield* Analysis.ofSourceRealized(
         'float/catalog-matrix',
         new TextEncoder().encode(floatMatrix),
         'aarch64-apple-darwin',
@@ -156,7 +156,7 @@ it.effect(
       if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42)
       assert.isAbove((yield* Analysis.codegen(native, { mode: 'release' })).bitcode.length, 0)
 
-      const wasm = yield* Analysis.ofSource(
+      const wasm = yield* Analysis.ofSourceRealized(
         'float/catalog-matrix-wasm',
         new TextEncoder().encode(floatMatrix),
         'wasm32-unknown-unknown',

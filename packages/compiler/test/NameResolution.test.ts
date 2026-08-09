@@ -21,7 +21,7 @@ const snapshot = (
       .filter(([name]) => name !== root)
       .map(([name, source]) => [name, ascii(source)] as const),
   )
-  return Analysis.make(
+  return Analysis.makeRealized(
     target === undefined
       ? { root: SourceFile.make(root, ascii(rootText)) }
       : { root: SourceFile.make(root, ascii(rootText)), target },

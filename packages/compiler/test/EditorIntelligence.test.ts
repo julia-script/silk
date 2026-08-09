@@ -39,7 +39,7 @@ const occurrenceAt = (
 }
 
 it.effect('indexes allocator tokens as distinct binding, actor, and operation identities', () =>
-  Analysis.ofSource('main', encoder.encode(allocatorSource)).pipe(
+  Analysis.ofSourceRealized('main', encoder.encode(allocatorSource)).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
@@ -71,7 +71,7 @@ it.effect('indexes allocator tokens as distinct binding, actor, and operation id
 )
 
 it.effect('presents effect function declarations and references identically', () =>
-  Analysis.ofSource('main', encoder.encode(effectHandlerSource)).pipe(
+  Analysis.ofSourceRealized('main', encoder.encode(effectHandlerSource)).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
@@ -111,7 +111,7 @@ pub effect fn recover(
 }
 pub fn main() -> i32 { return recover(Problem { code: 41 }) }
 `
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       assert.strictEqual(
         documentationText(snapshot, Analysis.moduleDocumentation(snapshot, 'main')),
@@ -155,7 +155,7 @@ it.effect('answers a canonical declaration document through a cross-module refer
 pub fn main() -> i32 { return recover(1) }`
   const library = `/// Library recovery.
 pub fn recover(value: i32) -> i32 { return value }`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
     Effect.map((snapshot) => {
       assert.strictEqual(
@@ -171,7 +171,7 @@ pub fn recover(value: i32) -> i32 { return value }`
 })
 
 it.effect('indexes declaration and nominal type reference locations', () =>
-  Analysis.ofSource(
+  Analysis.ofSourceRealized(
     'main',
     encoder.encode(`struct Problem {}
 fn recover(error: Problem) -> i32 { return 0 }
@@ -197,7 +197,7 @@ pub fn main() -> i32 { return recover(0) }`),
 )
 
 it.effect('answers deterministic inferred hints and recovered completions', () =>
-  Analysis.ofSource('main', encoder.encode(recoveredMemberSource)).pipe(
+  Analysis.ofSourceRealized('main', encoder.encode(recoveredMemberSource)).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
@@ -222,7 +222,7 @@ it.effect('answers deterministic inferred hints and recovered completions', () =
 it.effect(
   'retains exact semantic tokens for calls, constructors, initializers, and projections',
   () =>
-    Analysis.ofSource(
+    Analysis.ofSourceRealized(
       'main',
       encoder.encode(`struct Pair { left: i32 }
 fn pick() -> i32 {
@@ -258,7 +258,7 @@ fn pick() -> i32 {
 )
 
 it.effect('recursively indexes generic nominal and type-parameter references', () =>
-  Analysis.ofSource(
+  Analysis.ofSourceRealized(
     'main',
     encoder.encode(`struct Problem {}
 struct Box<T> { value: T }
@@ -285,7 +285,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('completes from the innermost lexical scope and excludes later declarations', () => {
   const source = nestedBindingSource
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const analysis = Analysis.rootAnalysis(snapshot)
       const scopes = analysis.lexicalScopes
@@ -326,7 +326,7 @@ pub fn main() -> i32 {
     Full { value } => val
   }
 }`
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const offset = encoder.encode(source.slice(0, source.lastIndexOf('val') + 3)).length
       const completion = Analysis.completionAt(snapshot, 'main', offset)
@@ -345,7 +345,7 @@ it.effect('retains exact import, alias, qualifier, and unavailable-member tokens
 pub fn main() -> i32 { return read() }`
   const library = `pub fn answer() -> i32 { return 42 }
 fn hidden() -> i32 { return 0 }`
-  return Analysis.make({ root: SourceFile.make('root', encoder.encode(root)) }).pipe(
+  return Analysis.makeRealized({ root: SourceFile.make('root', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
     Effect.map((snapshot) => {
       const at = (spelling: string, occurrence = 0) => {
@@ -379,7 +379,7 @@ struct Problem {}
 pub fn main() -> i32 { return 0 }`
   const models = `pub struct Box<T> { value: T }
 pub struct Other {}`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['types/Models', encoder.encode(models)]]))),
     Effect.map((snapshot) => {
       const scope = NameResolution.scopeOf(snapshot.resolution, 'main')
@@ -425,8 +425,8 @@ pub fn main() -> i32 {
 }
 fn damaged( -> {`
   return Effect.gen(function* () {
-    const first = yield* Analysis.ofSource('main', encoder.encode(source))
-    const second = yield* Analysis.ofSource('main', encoder.encode(source))
+    const first = yield* Analysis.ofSourceRealized('main', encoder.encode(source))
+    const second = yield* Analysis.ofSourceRealized('main', encoder.encode(source))
     const firstIndex = first.semanticOccurrences.modules.get('main')
     const secondIndex = second.semanticOccurrences.modules.get('main')
     assert.deepEqual(secondIndex, firstIndex)
@@ -453,7 +453,7 @@ pub fn main() -> i32 {
   let recipe = read() |> Clock.provide(&clock)
   return run recipe
 }`
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const qualifier = occurrenceAt(snapshot, source, 'Clock', 3)
       const operation = occurrenceAt(snapshot, source, 'provide')
@@ -483,7 +483,7 @@ it.effect('preserves ambiguous, missing, namespace, and type completion contexts
   Effect.gen(function* () {
     const ambiguousSource = `struct SystemAllocator {}
 pub fn main() -> i32 { return SystemAllocator. }`
-    const ambiguous = yield* Analysis.ofSource('main', encoder.encode(ambiguousSource))
+    const ambiguous = yield* Analysis.ofSourceRealized('main', encoder.encode(ambiguousSource))
     const ambiguousResult = Analysis.completionAt(
       ambiguous,
       'main',
@@ -496,7 +496,7 @@ pub fn main() -> i32 { return SystemAllocator. }`
     assert.deepEqual(ambiguousResult?.candidates, [])
 
     const missingSource = `pub fn main() -> i32 { return Mystery. }`
-    const missing = yield* Analysis.ofSource('main', encoder.encode(missingSource))
+    const missing = yield* Analysis.ofSourceRealized('main', encoder.encode(missingSource))
     assert.deepEqual(
       Analysis.completionAt(missing, 'main', missingSource.indexOf('Mystery.') + 'Mystery.'.length)
         ?.context,
@@ -506,7 +506,7 @@ pub fn main() -> i32 { return SystemAllocator. }`
     const namespaceSource = `import lib as Library
 struct Local {}
 pub fn main(value: i32) -> i32 { return Library. }`
-    const namespace = yield* Analysis.make({
+    const namespace = yield* Analysis.makeRealized({
       root: SourceFile.make('main', encoder.encode(namespaceSource)),
     }).pipe(
       Effect.provide(
@@ -536,7 +536,7 @@ pub fn main(value: i32) -> i32 { return Library. }`
 
     const typeSource = `struct Local {}
 fn identity<T>(value: ) -> i32 { return 0 }`
-    const typeSnapshot = yield* Analysis.ofSource('main', encoder.encode(typeSource))
+    const typeSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(typeSource))
     const typeResult = Analysis.completionAt(
       typeSnapshot,
       'main',

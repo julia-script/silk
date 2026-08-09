@@ -18,7 +18,7 @@ export const make = (request: {
       ? { root: SourceFile.make(request.rootModule, rootBytes) }
       : { root: SourceFile.make(request.rootModule, rootBytes), target: request.target }
   return Effect.runSync(
-    Analysis.make(compilation).pipe(Effect.provide(SourceResolver.memory(request.sources))),
+    Analysis.makeRealized(compilation).pipe(Effect.provide(SourceResolver.memory(request.sources))),
   )
 }
 
@@ -27,4 +27,4 @@ export const ofSource = (
   sourceId: string,
   bytes: Uint8Array,
   target?: string,
-): Analysis.Snapshot => Effect.runSync(Analysis.ofSource(sourceId, bytes, target))
+): Analysis.Snapshot => Effect.runSync(Analysis.ofSourceRealized(sourceId, bytes, target))

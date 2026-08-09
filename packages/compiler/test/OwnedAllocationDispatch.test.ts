@@ -69,7 +69,7 @@ pub fn main() -> i32 {
 it.effect('dispatches provision through user allocator witnesses on all three engines', () =>
   Effect.gen(function* () {
     // Failure half: the witness runs, its OutOfMemory reaches the catch, and no block exists.
-    const refused = yield* Analysis.ofSource(
+    const refused = yield* Analysis.ofSourceRealized(
       'owned-allocation-dispatch/refusing',
       ascii(refusing),
       'wasm32-unknown-unknown',
@@ -88,7 +88,7 @@ it.effect('dispatches provision through user allocator witnesses on all three en
 
     // Success half: the witness delegates to the system provider and the block still releases
     // exactly once, with the ticket owned independently of either provider.
-    const delegated = yield* Analysis.ofSource(
+    const delegated = yield* Analysis.ofSourceRealized(
       'owned-allocation-dispatch/delegating',
       ascii(delegating),
       'wasm32-unknown-unknown',
@@ -108,7 +108,7 @@ it.effect('dispatches provision through user allocator witnesses on all three en
       ['delegating', delegating, 42],
     ] as const) {
       const wasm = yield* Analysis.codegenWasm(
-        yield* Analysis.ofSource(
+        yield* Analysis.ofSourceRealized(
           `owned-allocation-dispatch/${name}`,
           ascii(source),
           'wasm32-unknown-unknown',
@@ -171,7 +171,7 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
       ['fail-at-1', ['good', 'empty'], 7, 1],
       ['no-failure', ['good', 'good'], 42, 2],
     ] as const) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `owned-allocation-ordinals/${name}`,
         ascii(ordinalProgram(providers)),
         'wasm32-unknown-unknown',
@@ -254,7 +254,7 @@ it.effect('runs a counted quota allocator identically on all three engines', () 
       [1, 7],
       [2, 42],
     ] as const) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `owned-allocation-quota/q${quota}`,
         ascii(countedQuota(quota)),
         'wasm32-unknown-unknown',
@@ -331,7 +331,7 @@ pub fn main() -> i32 {
 
 it.effect('writes forwarded exclusive provider mutations back on all three engines', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'owned-allocation-dispatch/forwarded-provider',
       ascii(forwardedProvider),
       'wasm32-unknown-unknown',

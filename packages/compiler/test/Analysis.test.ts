@@ -21,7 +21,7 @@ const snapshot = (
       .filter(([name]) => name !== rootModule)
       .map(([name, text]) => [name, ascii(text)] as const),
   )
-  return Analysis.make({ root: SourceFile.make(rootModule, ascii(rootText)) }).pipe(
+  return Analysis.makeRealized({ root: SourceFile.make(rootModule, ascii(rootText)) }).pipe(
     Effect.provide(SourceResolver.memory(imports)),
   )
 }
@@ -79,7 +79,7 @@ it.effect('indexes automatic section targets and piped callable bindings', () =>
   Effect.gen(function* () {
     const source = `fn add(value: i32, amount: i32) -> i32 { return value + amount }
 pub fn main() -> i32 { let increment = add(2) return 40 |> increment }`
-    const self = yield* Analysis.ofSource('main', ascii(source))
+    const self = yield* Analysis.ofSourceRealized('main', ascii(source))
 
     assert.strictEqual(
       Analysis.semanticOccurrenceAt(self, 'main', source.lastIndexOf('add'))?.resolution._tag,
@@ -147,14 +147,14 @@ it.effect('answers repeated snapshots deterministically', () =>
 
 it.effect('evaluates and answers ownership through the single-source convenience', () =>
   Effect.gen(function* () {
-    const evaluated = yield* Analysis.ofSource(
+    const evaluated = yield* Analysis.ofSourceRealized(
       'memory/facade',
       ascii('pub fn main() -> i32 { return 42 }'),
     )
     const outcome = Analysis.evaluate(evaluated)
     assert.strictEqual(outcome._tag, 'Completed')
 
-    const owned = yield* Analysis.ofSource(
+    const owned = yield* Analysis.ofSourceRealized(
       'memory/ownership',
       ascii('pub fn identity(value: i32) -> i32 { return value }'),
     )
@@ -166,11 +166,11 @@ it.effect('evaluates and answers ownership through the single-source convenience
 
 it.effect('reports only actionable diagnostics for empty and recovered-return sources', () =>
   Effect.gen(function* () {
-    const empty = yield* Analysis.ofSource('memory/empty', new Uint8Array())
+    const empty = yield* Analysis.ofSourceRealized('memory/empty', new Uint8Array())
     assert.deepEqual(Analysis.diagnostics(empty), [])
     assert.deepEqual(Analysis.rootAnalysis(empty).functions, [])
 
-    const recovered = yield* Analysis.ofSource(
+    const recovered = yield* Analysis.ofSourceRealized(
       'memory/recovered-return',
       ascii('pub fn main() -> i32 { foo }'),
     )
@@ -199,12 +199,12 @@ fn inspect(input: Left | Right) -> i32 {
   }
 }
 pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
-    const first = yield* Analysis.ofSource(
+    const first = yield* Analysis.ofSourceRealized(
       'memory/match-facade',
       ascii(source),
       'wasm32-unknown-unknown',
     )
-    const second = yield* Analysis.ofSource(
+    const second = yield* Analysis.ofSourceRealized(
       'memory/match-facade',
       ascii(source),
       'wasm32-unknown-unknown',
@@ -232,7 +232,7 @@ it.effect('answers immutable fixed-array facts across semantics, layout, MIR, an
   Effect.gen(function* () {
     const source = `fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
 pub fn main() -> i32 { return choose([10, 42], 1) }`
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'memory/array-facade',
       ascii(source),
       'wasm32-unknown-unknown',
@@ -268,7 +268,7 @@ it.effect(
   'answers nominal declaration, field, dependency, and layout facts through the facade',
   () =>
     Effect.gen(function* () {
-      const self = yield* Analysis.ofSource(
+      const self = yield* Analysis.ofSourceRealized(
         'memory/nominal-facade',
         ascii('struct Pair { left: i32 right: bool }\npub fn main() -> i32 { return 42 }'),
         'aarch64-apple-darwin',
@@ -327,7 +327,7 @@ it.effect(
 
 it.effect('emits clean snapshots and refuses diagnosed snapshots before the backend', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'memory/codegen',
       ascii('pub fn main() -> i32 { return 42 }'),
       'aarch64-apple-darwin',
@@ -336,7 +336,7 @@ it.effect('emits clean snapshots and refuses diagnosed snapshots before the back
     assert.strictEqual(release._tag, 'LlvmBitcodeArtifact')
     assert.include(release.ir, 'silk_main')
 
-    const invalid = yield* Analysis.ofSource(
+    const invalid = yield* Analysis.ofSourceRealized(
       'memory/invalid',
       ascii('pub fn main() -> Mystery { return 42 }'),
       'aarch64-apple-darwin',
@@ -349,7 +349,7 @@ it.effect('emits clean snapshots and refuses diagnosed snapshots before the back
 
 it.effect('preserves one exact target and layout plan across facade queries and MIR', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'memory/plan',
       ascii('pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
@@ -385,7 +385,7 @@ it.effect('preserves one exact target and layout plan across facade queries and 
 
 it.effect('keeps unsupported targets explicit and queryable without manufacturing MIR', () =>
   Effect.gen(function* () {
-    const unsupported = yield* Analysis.ofSource(
+    const unsupported = yield* Analysis.ofSourceRealized(
       'memory/unsupported',
       ascii('pub fn main() -> i32 { return 42 }'),
       'mips-unknown-none',
@@ -401,7 +401,7 @@ it.effect('keeps unsupported targets explicit and queryable without manufacturin
 it.effect('keeps invalid match corpus failures phase-owned and downstream facts queryable', () =>
   Effect.gen(function* () {
     for (const program of invalidMatchCorpus) {
-      const self = yield* Analysis.ofSource(
+      const self = yield* Analysis.ofSourceRealized(
         `memory/${program.name}`,
         ascii(program.source),
         'wasm32-unknown-unknown',
@@ -424,7 +424,7 @@ fn identity(value: i32) -> i32 {
   return pair.left
 }
 pub fn main() -> i32 { return identity(42) }`
-      const self = yield* Analysis.ofSource('main', ascii(source))
+      const self = yield* Analysis.ofSourceRealized('main', ascii(source))
       const targetAt = (spelling: string, occurrence = 0) => {
         let offset = -1
         for (let index = 0; index <= occurrence; index += 1)
@@ -477,8 +477,8 @@ it.effect('keeps unavailable and damaged semantic occurrences isolated and deter
   Effect.gen(function* () {
     const source =
       'fn valid(value: i32) -> i32 { return value }\nfn damaged( -> i32 { return missing() }'
-    const first = yield* Analysis.ofSource('main', ascii(source))
-    const second = yield* Analysis.ofSource('main', ascii(source))
+    const first = yield* Analysis.ofSourceRealized('main', ascii(source))
+    const second = yield* Analysis.ofSourceRealized('main', ascii(source))
     const availableOffset = source.indexOf('value }')
     const missingOffset = source.indexOf('missing')
     assert.deepEqual(
@@ -492,6 +492,55 @@ it.effect('keeps unavailable and damaged semantic occurrences isolated and deter
     assert.strictEqual(
       Analysis.semanticOccurrenceAt(first, 'main', missingOffset)?.resolution._tag,
       'Missing',
+    )
+  }),
+)
+
+it.effect('constructs a frontend snapshot without runtime realization', () =>
+  Effect.gen(function* () {
+    const frontend = yield* Analysis.ofSource('main', ascii('pub fn main() -> i32 { return 42 }'))
+
+    assert.deepEqual(
+      Analysis.phases(frontend).map((entry) => entry.phase),
+      [
+        'closure',
+        'declaration-collection',
+        'declaration-index',
+        'name-resolution',
+        'elaboration',
+        'ownership',
+        'semantic-occurrences',
+        'anonymous-expressions',
+      ],
+    )
+    assert.strictEqual(Object.hasOwn(frontend, 'instances'), false)
+    assert.strictEqual(Object.hasOwn(frontend, 'layout'), false)
+    assert.strictEqual(Object.hasOwn(frontend, 'mir'), false)
+    assert.deepEqual(Analysis.diagnostics(frontend), [])
+  }),
+)
+
+it.effect('realizes immutable target snapshots from the same frontend facts', () =>
+  Effect.gen(function* () {
+    const frontend = yield* Analysis.ofSource('main', ascii('pub fn main() -> i32 { return 42 }'))
+    const native = Analysis.realize(frontend)
+    const wasm = Analysis.realize(frontend, 'wasm32-unknown-unknown')
+
+    assert.strictEqual(native.results, frontend.results)
+    assert.strictEqual(wasm.results, frontend.results)
+    assert.strictEqual(native.ownership, frontend.ownership)
+    assert.strictEqual(wasm.ownership, frontend.ownership)
+    assert.strictEqual(Object.hasOwn(frontend, 'instances'), false)
+    assert.strictEqual(native.target._tag, 'Resolved')
+    assert.strictEqual(wasm.target._tag, 'Resolved')
+    if (native.target._tag !== 'Resolved' || wasm.target._tag !== 'Resolved') return
+    assert.strictEqual(native.target.target.kind, 'Native')
+    assert.strictEqual(wasm.target.target.id, 'wasm32-unknown-unknown')
+    assert.deepEqual(
+      Analysis.phases(native)
+        .slice(Analysis.phases(frontend).length)
+        .map((entry) => entry.phase),
+      ['instance-discovery', 'target-layout', 'mir-lowering'],
     )
   }),
 )

@@ -46,7 +46,7 @@ pub fn main() -> i32 {
 }`
 
 const expectTrap = Effect.fnUntraced(function* (name: string, source: string, reason: string) {
-  const snapshot = yield* Analysis.ofSource(name, ascii(source), 'wasm32-unknown-unknown')
+  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const evaluated = Analysis.evaluate(snapshot)
   assert.strictEqual(evaluated._tag, 'Blocked')
@@ -57,7 +57,7 @@ const expectTrap = Effect.fnUntraced(function* (name: string, source: string, re
 
 it.effect('moves one allocation through RawBuffer and lexical Slot operations', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'owned-allocation/raw-buffer',
       ascii(source),
       'wasm32-unknown-unknown',
@@ -101,7 +101,7 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
     assert.strictEqual(main(), 41)
-    const nativeSnapshot = yield* Analysis.ofSource(
+    const nativeSnapshot = yield* Analysis.ofSourceRealized(
       'owned-allocation/raw-buffer-native',
       ascii(source),
       'aarch64-apple-darwin',

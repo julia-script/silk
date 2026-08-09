@@ -29,11 +29,11 @@ it('does not retain flow as an effect-function keyword or semantic type alias', 
 
 it.effect('rejects legacy flow declarations and Flow actor calls', () =>
   Effect.gen(function* () {
-    const declaration = yield* Analysis.ofSource(
+    const declaration = yield* Analysis.ofSourceRealized(
       'compat/flow-declaration',
       ascii('flow fn old() -> i32 { return 1 } pub fn main() -> i32 { return 0 }'),
     )
-    const actor = yield* Analysis.ofSource(
+    const actor = yield* Analysis.ofSourceRealized(
       'compat/flow-actor',
       ascii('pub fn main() -> i32 { let value = Flow.catch(1, 2) return 0 }'),
     )

@@ -67,7 +67,7 @@ it.effect(
   'grows, reads, and releases a Silk-written vector on all three engines',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'vector-acceptance/growth',
         ascii(growth),
         'wasm32-unknown-unknown',
@@ -107,7 +107,7 @@ it.effect(
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
 
-      const nativeSnapshot = yield* Analysis.ofSource(
+      const nativeSnapshot = yield* Analysis.ofSourceRealized(
         'vector-acceptance/growth',
         ascii(growth),
         'aarch64-apple-darwin',
@@ -183,7 +183,7 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), outerRecove
 
 it.effect('preserves the original vector when replacement allocation fails', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/failed-growth',
       ascii(failedGrowth),
       'wasm32-unknown-unknown',
@@ -255,7 +255,7 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
 
 it.effect('drops initialized elements in order before releasing vector storage', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/element-release-order',
       ascii(elementReleaseOrder),
       'wasm32-unknown-unknown',
@@ -343,7 +343,7 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
 
 it.effect('transfers vector ownership and drops it early on all three engines', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'vector-acceptance/transferred-early-drop',
       ascii(transferredEarlyDrop),
       'wasm32-unknown-unknown',

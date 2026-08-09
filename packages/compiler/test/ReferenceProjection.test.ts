@@ -25,7 +25,7 @@ pub fn main() -> i32 {
   return again + peek(&counter) - again
 }`
     for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown']) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         'reference-projection/counter',
         ascii(source),
         target,
@@ -37,7 +37,7 @@ pub fn main() -> i32 {
       assert.strictEqual(evaluated.result.value, 42, target)
     }
     const wasm = yield* Analysis.codegenWasm(
-      yield* Analysis.ofSource(
+      yield* Analysis.ofSourceRealized(
         'reference-projection/counter',
         ascii(source),
         'wasm32-unknown-unknown',
@@ -52,7 +52,7 @@ pub fn main() -> i32 {
 it.effect('keeps reference projection inside the borrow contract', () =>
   Effect.gen(function* () {
     // Writing through a shared reference is not a writable place.
-    const shared = yield* Analysis.ofSource(
+    const shared = yield* Analysis.ofSourceRealized(
       'reference-projection/shared-write',
       ascii(`struct Counter { value: i32 }
 fn bump(self: &Counter) -> i32 {
@@ -67,7 +67,7 @@ fn bump(self: &Counter) -> i32 {
     )
 
     // Consuming a field through a reference stays a partial move.
-    const stolen = yield* Analysis.ofSource(
+    const stolen = yield* Analysis.ofSourceRealized(
       'reference-projection/steal',
       ascii(`struct Token { value: i32 }
 struct Holder { token: Token }

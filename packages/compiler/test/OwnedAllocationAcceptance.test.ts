@@ -25,8 +25,8 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
  */
 it.effect('keeps one owned allocation in parity across all three engines', () =>
   Effect.gen(function* () {
-    const native = yield* Analysis.ofSource(moduleName, bytes, 'aarch64-apple-darwin')
-    const wasm = yield* Analysis.ofSource(moduleName, bytes, 'wasm32-unknown-unknown')
+    const native = yield* Analysis.ofSourceRealized(moduleName, bytes, 'aarch64-apple-darwin')
+    const wasm = yield* Analysis.ofSourceRealized(moduleName, bytes, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(native), [])
     assert.deepEqual(Analysis.diagnostics(wasm), [])
 
@@ -149,7 +149,7 @@ pub fn main() -> i32 { return 0 }`,
     ]
 
     for (const [name, source, code] of cases) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `owned-allocation-negative/${name}`,
         ascii(source),
         'wasm32-unknown-unknown',
@@ -169,8 +169,8 @@ pub fn main() -> i32 { return 0 }`,
  */
 it.effect('produces byte-identical artifacts across repeated analyses', () =>
   Effect.gen(function* () {
-    const first = yield* Analysis.ofSource(moduleName, bytes, 'wasm32-unknown-unknown')
-    const second = yield* Analysis.ofSource(moduleName, bytes, 'wasm32-unknown-unknown')
+    const first = yield* Analysis.ofSourceRealized(moduleName, bytes, 'wasm32-unknown-unknown')
+    const second = yield* Analysis.ofSourceRealized(moduleName, bytes, 'wasm32-unknown-unknown')
 
     assert.strictEqual(
       Mir.encode(Analysis.loweredMir(first)),

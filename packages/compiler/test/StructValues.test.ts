@@ -15,12 +15,13 @@ fn make() -> Pair { return Pair { right: 2, left: 1 } }
 fn pass(value: Pair) -> Pair { return move value }
 pub fn main() -> i32 { let pair = pass(make()) return pair.left + pair.right }`
 
-const snapshot = (target?: string) => Analysis.ofSource('struct-values/main', ascii(source), target)
+const snapshot = (target?: string) =>
+  Analysis.ofSourceRealized('struct-values/main', ascii(source), target)
 
 const multiSnapshot = (rootModule: string, sources: ReadonlyMap<string, Uint8Array>) => {
   const root = sources.get(rootModule)
   if (root === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
-  return Analysis.make({ root: SourceFile.make(rootModule, root) }).pipe(
+  return Analysis.makeRealized({ root: SourceFile.make(rootModule, root) }).pipe(
     Effect.provide(
       SourceResolver.memory(new Map([...sources].filter(([module]) => module !== rootModule))),
     ),
@@ -70,7 +71,7 @@ it.effect(
 
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'struct-values/evaluation-order',
       ascii(`struct Pair { left: i32 right: i32 }
 fn left() -> i32 { return 1 }
@@ -168,7 +169,7 @@ it.effect('preserves empty nominal contracts with zero runtime lanes', () =>
 fn end() -> End { return End {} }
 fn consume(value: End) -> i32 { return 7 }
 pub fn main() -> i32 { return consume(end()) }`
-    const self = yield* Analysis.ofSource(
+    const self = yield* Analysis.ofSourceRealized(
       'struct-values/empty',
       ascii(text),
       'wasm32-unknown-unknown',
@@ -193,7 +194,7 @@ pub fn main() -> i32 { return consume(end()) }`
 
 it.effect('keeps invalid construction, projection, and partial moves phase-owned', () =>
   Effect.gen(function* () {
-    const invalid = yield* Analysis.ofSource(
+    const invalid = yield* Analysis.ofSourceRealized(
       'struct-values/invalid',
       ascii(`struct Pair { left: i32 right: i32 }
 struct Outer { pair: Pair }

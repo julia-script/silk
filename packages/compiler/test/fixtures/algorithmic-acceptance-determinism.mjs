@@ -25,7 +25,7 @@ const imports = new Map([...modules].filter(([name]) => name !== rootModule))
 
 const snapshot = (target) =>
   Effect.runPromise(
-    Analysis.make({ root: SourceFile.make(rootModule, rootBytes), target }).pipe(
+    Analysis.makeRealized({ root: SourceFile.make(rootModule, rootBytes), target }).pipe(
       Effect.provide(SourceResolver.memory(imports)),
     ),
   )

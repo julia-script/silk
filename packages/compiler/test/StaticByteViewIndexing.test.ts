@@ -73,8 +73,8 @@ const rewriteOperations = (
 
 it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, and MIR', () =>
   Effect.gen(function* () {
-    const first = yield* Analysis.ofSource(moduleName, ascii(directSource))
-    const second = yield* Analysis.ofSource(moduleName, ascii(directSource))
+    const first = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
+    const second = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
     assert.deepEqual(Analysis.diagnostics(first), [])
 
     const hir = Analysis.hirOf(first, moduleName)
@@ -112,7 +112,7 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
 
 it.effect('accepts canonical static selectors and rejects malformed roots, indices, and data', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(moduleName, ascii(directSource))
+    const snapshot = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
     const mir = Analysis.loweredMir(snapshot)
     const fnIndex = mir.functions.findIndex((fn) => fn.id.name === 'main')
     const fn = mir.functions.at(fnIndex)
@@ -193,7 +193,7 @@ it.effect(
   'evaluates every byte, repeated reads, empty views, bounds, and provenance without allocation',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSource(moduleName, ascii(bytesSource))
+      const snapshot = yield* Analysis.ofSourceRealized(moduleName, ascii(bytesSource))
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       if (evaluated._tag !== 'Completed') return
@@ -214,7 +214,7 @@ it.effect(
         ),
       )
 
-      const repeated = yield* Analysis.ofSource(
+      const repeated = yield* Analysis.ofSourceRealized(
         `${moduleName}/repeated`,
         ascii(`pub fn main() -> i32 {
   let bytes = b"\\x99"
@@ -226,7 +226,7 @@ it.effect(
       assert.strictEqual(repeatedResult._tag, 'Completed')
       if (repeatedResult._tag === 'Completed') assert.strictEqual(repeatedResult.result.value, 306)
 
-      const empty = yield* Analysis.ofSource(
+      const empty = yield* Analysis.ofSourceRealized(
         `${moduleName}/empty`,
         ascii('pub fn main() -> i32 { let bytes = b"" return usize.toI32(bytes.length) }'),
       )
@@ -239,7 +239,7 @@ it.effect(
   let index = usize.add(0, 4)
   return u8.toI32(bytes[index])
 }`
-      const bounds = yield* Analysis.ofSource(`${moduleName}/bounds`, ascii(boundsSource))
+      const bounds = yield* Analysis.ofSourceRealized(`${moduleName}/bounds`, ascii(boundsSource))
       const blocked = Analysis.evaluate(bounds)
       assert.strictEqual(blocked._tag, 'Blocked')
       if (blocked._tag === 'Blocked') {
@@ -254,13 +254,17 @@ it.effect(
 
 it.effect('loads immutable static storage on LLVM and Wasm and traps before overruns', () =>
   Effect.gen(function* () {
-    const native = yield* Analysis.ofSource(moduleName, ascii(bytesSource), 'aarch64-apple-darwin')
+    const native = yield* Analysis.ofSourceRealized(
+      moduleName,
+      ascii(bytesSource),
+      'aarch64-apple-darwin',
+    )
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.include(llvm.ir, 'constant [4 x i8]')
     assert.include(llvm.ir, 'load i8')
     assert.notInclude(llvm.ir, 'malloc')
 
-    const wasm = yield* Analysis.ofSource(
+    const wasm = yield* Analysis.ofSourceRealized(
       `${moduleName}/wasm`,
       ascii(bytesSource),
       'wasm32-unknown-unknown',
@@ -291,7 +295,7 @@ it.effect('loads immutable static storage on LLVM and Wasm and traps before over
   let index = usize.add(0, 4)
   return u8.toI32(bytes[index])
 }`
-    const wasmBounds = yield* Analysis.ofSource(
+    const wasmBounds = yield* Analysis.ofSourceRealized(
       `${moduleName}/wasm-bounds`,
       ascii(boundsSource),
       'wasm32-unknown-unknown',

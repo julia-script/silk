@@ -38,7 +38,10 @@ pub fn main() -> i32 {
 
 it.effect('returns canonical Some and None outcomes for recoverable integer operations', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource('integer/checked', new TextEncoder().encode(source))
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/checked',
+      new TextEncoder().encode(source),
+    )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(
@@ -53,7 +56,7 @@ it.effect('returns canonical Some and None outcomes for recoverable integer oper
 it.effect('lowers checked integer outcomes through LLVM and direct Wasm', () =>
   Effect.gen(function* () {
     for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown'] as const) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `integer/checked-${target}`,
         new TextEncoder().encode(source),
         target,
@@ -162,7 +165,7 @@ it.effect(
   'keeps every catalogued integer operation in evaluator, LLVM, and Wasm parity',
   () =>
     Effect.gen(function* () {
-      const native = yield* Analysis.ofSource(
+      const native = yield* Analysis.ofSourceRealized(
         'integer/matrix',
         new TextEncoder().encode(matrixSource),
         'aarch64-apple-darwin',
@@ -174,7 +177,7 @@ it.effect(
       const llvm = yield* Analysis.codegen(native, { mode: 'release' })
       assert.isAbove(llvm.bitcode.length, 0)
 
-      const wasm = yield* Analysis.ofSource(
+      const wasm = yield* Analysis.ofSourceRealized(
         'integer/matrix',
         new TextEncoder().encode(matrixSource),
         'wasm32-unknown-unknown',
@@ -201,7 +204,7 @@ pub fn main() -> i32 {
   if false { return diverge() }
   return 42
 }`
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'integer/boundaries',
       new TextEncoder().encode(accepted),
     )
@@ -209,13 +212,13 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
 
-    const removed = yield* Analysis.ofSource(
+    const removed = yield* Analysis.ofSourceRealized(
       'integer/removed-spelling',
       new TextEncoder().encode('pub fn main() -> I32 { return 42 }'),
     )
     assert.isTrue(Analysis.diagnostics(removed).some((diagnostic) => diagnostic.code === 'SEM0001'))
 
-    const overflow = yield* Analysis.ofSource(
+    const overflow = yield* Analysis.ofSourceRealized(
       'integer/wide-overflow',
       new TextEncoder().encode(
         'fn wide(value: u64) -> u64 { return value } pub fn main() -> i32 { let value = wide(18446744073709551616) return 42 }',
@@ -251,7 +254,7 @@ pub fn main() -> i32 {
 
 it.effect('uses concrete call and pipeline parameters as exact integer literal contexts', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'integer/contextual-calls',
       new TextEncoder().encode(contextualCallSource),
     )
@@ -278,7 +281,7 @@ it.effect('uses concrete call and pipeline parameters as exact integer literal c
 
 it.effect('rejects contextual overflow and already-typed integer mismatches before MIR', () =>
   Effect.gen(function* () {
-    const overflow = yield* Analysis.ofSource(
+    const overflow = yield* Analysis.ofSourceRealized(
       'integer/contextual-overflow',
       new TextEncoder().encode(
         'fn accept(value: u8) -> u8 { return value } pub fn main() -> i32 { let value = accept(256) return 42 }',
@@ -292,7 +295,7 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
     )
     assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), 'literal 256')
 
-    const mismatch = yield* Analysis.ofSource(
+    const mismatch = yield* Analysis.ofSourceRealized(
       'integer/contextual-mismatch',
       new TextEncoder().encode(`fn accept(value: u8) -> u8 { return value }
 pub fn main() -> i32 {

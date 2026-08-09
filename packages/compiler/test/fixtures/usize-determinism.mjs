@@ -16,7 +16,7 @@ pub fn main() -> i32 {
   return 0
 }`
 const snapshot = (name, source, target) =>
-  Effect.runPromise(Analysis.ofSource(name, new TextEncoder().encode(source), target))
+  Effect.runPromise(Analysis.ofSourceRealized(name, new TextEncoder().encode(source), target))
 
 const native = await snapshot(
   'fixture/usize-native-determinism',

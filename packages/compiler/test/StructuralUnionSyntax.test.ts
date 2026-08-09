@@ -59,7 +59,7 @@ it.effect('resolves equivalent union spellings to one canonical type', () =>
 fn first(value: Token | (End | Token)) -> End | Token { return value }
 pub fn main() -> i32 { return 0 }`),
     )
-    const snapshot = yield* Analysis.make({ root }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root }).pipe(
       Effect.provide(
         SourceResolver.memory(
           new Map([['model/Types', ascii('pub struct Token {}\npub struct End {}')]]),

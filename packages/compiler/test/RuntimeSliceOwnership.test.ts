@@ -5,7 +5,7 @@ import * as Analysis from '../src/Analysis.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshot = (source: string) => Analysis.ofSource('slices/Ownership', ascii(source))
+const snapshot = (source: string) => Analysis.ofSourceRealized('slices/Ownership', ascii(source))
 
 it.effect('records deterministic call-scoped loans and accepts shared aliases', () =>
   Effect.gen(function* () {

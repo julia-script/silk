@@ -7,7 +7,7 @@ const ascii = (value: string): Uint8Array =>
 
 const run = (label: string, text: string) =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       `probe/${label}`,
       ascii(text),
       'wasm32-unknown-unknown',
@@ -22,7 +22,11 @@ const run = (label: string, text: string) =>
               .silk_main as () => number
           )()
         : String(wasm.cause).slice(0, 260)
-    const native = yield* Analysis.ofSource(`probe/${label}`, ascii(text), 'aarch64-apple-darwin')
+    const native = yield* Analysis.ofSourceRealized(
+      `probe/${label}`,
+      ascii(text),
+      'aarch64-apple-darwin',
+    )
     const llvm = yield* Effect.exit(Analysis.codegen(native, { mode: 'release' }))
     return {
       diagnostics,
