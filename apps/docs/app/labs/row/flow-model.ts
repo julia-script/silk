@@ -676,6 +676,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return `MissingFunction: ${reason.target.name}`
     case 'InvalidCallableReuse':
       return `InvalidCallableReuse: callable #${reason.ticket} is ${reason.state.toLowerCase()}`
+    case 'MissingStandardStreams':
+      return 'MissingStandardStreams: no host provider was supplied'
   }
 }
 
@@ -693,6 +695,8 @@ const blockedSpan = (
       return reason.span
     case 'InvalidCallableReuse':
       return reason.span
+    case 'MissingStandardStreams':
+      return undefined
     case 'RecursiveCycle':
       return reason.closingCallSpan
   }

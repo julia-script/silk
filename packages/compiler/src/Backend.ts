@@ -153,6 +153,10 @@ export interface WebAssemblyModuleArtifact extends ArtifactBase {
   readonly backend: 'wasm'
   readonly bytes: Uint8Array
   readonly wat: string
+  readonly hostImports: ReadonlyArray<{
+    readonly module: string
+    readonly name: string
+  }>
 }
 
 /** The closed family of backend program artifacts. */
@@ -322,6 +326,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
+    case 'StandardStreamWrite':
     case 'RawBufferFrom':
     case 'RawBufferCount':
     case 'RawBufferSlot':
@@ -342,6 +347,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
 
 const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
+  operation._tag === 'StandardStreamWrite' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'CatchEffect' ||
@@ -892,6 +898,17 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           ]),
         )
       : undefined
+    const needsStandardStreams = program.functions.some((fn) =>
+      Mir.operations(fn).some((operation) => operation._tag === 'StandardStreamWrite'),
+    )
+    const standardWrite =
+      needsStandardStreams && usizeType !== undefined
+        ? yield* FunctionActor.declare(
+            builder,
+            'silk_standard_stream_write_v1',
+            yield* LlvmType.functionType(builder, i32, [i32, pointer, usizeType]),
+          )
+        : undefined
 
     const declared: Array<{
       readonly fn: Mir.MirFunction
@@ -1734,8 +1751,11 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             if (field === undefined) throw new RangeError(`LLVM raw storage lost field ${name}`)
             return field.offset
           }
-          const emitAllocationFailure = Effect.fnUntraced(function* (
-            operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' }>,
+          const emitHostFailure = Effect.fnUntraced(function* (
+            operation: Extract<
+              Mir.Operation,
+              { readonly _tag: 'Allocate' | 'StandardStreamWrite' }
+            >,
           ) {
             const lanes = lanesFor(operation.propagationType)
             const values: Array<Value.Input> = []
@@ -1763,7 +1783,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                 body,
                 entry.resultType,
                 Object.freeze(values),
-                `allocation_failure${operation.destination.ordinal}`,
+                `host_failure${operation.destination.ordinal}`,
               ),
             )
           })
@@ -2267,7 +2287,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   yield* LlvmBlock.setInsertionPoint(body, failed)
                   if (free === undefined) throw new RangeError('LLVM allocation lost release shim')
                   yield* FunctionBody.callDirect(body, free, [raw])
-                  yield* emitAllocationFailure(operation)
+                  yield* emitHostFailure(operation)
                   yield* LlvmBlock.setInsertionPoint(body, acquired)
                   const advanced = yield* FunctionBody.binary(
                     body,
@@ -2294,6 +2314,48 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     operation.destination.ordinal,
                     Object.freeze([base, bytes, alignment, one, rawAddress, one]),
                   )
+                  break
+                }
+                case 'StandardStreamWrite': {
+                  const stream = readLocal(operation.stream).at(0)
+                  const [address, length] = readLocal(operation.bytes)
+                  if (
+                    stream === undefined ||
+                    address === undefined ||
+                    length === undefined ||
+                    standardWrite === undefined
+                  ) {
+                    throw new RangeError('LLVM standard-stream write lost its host boundary lanes')
+                  }
+                  const status = yield* FunctionBody.callDirect(
+                    body,
+                    standardWrite,
+                    [stream, address, length],
+                    `standard_stream${operation.destination.ordinal}_status`,
+                  )
+                  if (status === undefined) {
+                    throw new RangeError('LLVM standard-stream host returned no status')
+                  }
+                  const failedStatus = yield* FunctionBody.integerCompare(
+                    body,
+                    'ne',
+                    status,
+                    yield* Constant.integerUnsigned(builder, i32, 0n),
+                    `standard_stream${operation.destination.ordinal}_failed`,
+                  )
+                  const failed = yield* LlvmBlock.make(
+                    body,
+                    `standard_stream${operation.destination.ordinal}_failure`,
+                  )
+                  const written = yield* LlvmBlock.make(
+                    body,
+                    `standard_stream${operation.destination.ordinal}_success`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, failedStatus, failed, written)
+                  yield* LlvmBlock.setInsertionPoint(body, failed)
+                  yield* emitHostFailure(operation)
+                  yield* LlvmBlock.setInsertionPoint(body, written)
+                  locals.set(operation.destination.ordinal, Object.freeze([]))
                   break
                 }
                 case 'RawBufferFrom': {

@@ -118,6 +118,13 @@ pub fn main() -> i32 {
   let mut counter = Counter { value: 1 }
   return replace(&mut counter)
 }`,
+  `pub effect fn main() -> () ! StreamWriteFailure ? &StandardStreams {
+  let stdout = StandardStreams.stdout()
+  let stderr = StandardStreams.stderr()
+  let first = run StandardStreams.writeAll(stdout, "out")
+  let second = run StandardStreams.writeAll(stderr, "error")
+  return ()
+}`,
 ])
 
 it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>

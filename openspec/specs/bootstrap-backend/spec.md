@@ -562,3 +562,12 @@ Native LLVM and direct WebAssembly SHALL realize MIR static bytes, immutable add
 
 - **WHEN** one literal is referenced multiple times
 - **THEN** both backends expose the specified identical byte views whether or not storage is coalesced
+
+### Requirement: Backends realize explicit byte writes
+
+Native lowering SHALL call the supplied process adapter; direct WebAssembly SHALL emit the declared host import. Both SHALL preserve MIR ordering, destinations, complete bytes, and typed failures with no implicit console behavior.
+
+#### Scenario: Emit hosted Wasm output
+
+- **WHEN** a Wasm program writes bytes with a supplied host
+- **THEN** the host receives the same bytes and ordering as evaluation

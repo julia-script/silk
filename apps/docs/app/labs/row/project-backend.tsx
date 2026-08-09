@@ -786,6 +786,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = repeat layout ${localText(operation.layout)} × ${localText(operation.count)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} ! ${operation.failure.name}`
+    case 'StandardStreamWrite':
+      return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw buffer from ${localText(operation.allocation)} × ${localText(operation.count)} · stride ${operation.stride}`
     case 'RawBufferCount':
@@ -1129,6 +1131,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
       return `release allocation #${event.ticket}`
+    case 'StandardStreamWrite':
+      return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
   }
 }
 
@@ -1176,6 +1180,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotCopy':
     case 'SlotDrop':
     case 'AllocationRelease':
+    case 'StandardStreamWrite':
       return 2
   }
 }
@@ -1196,6 +1201,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `recursive cycle · ${reason.cycle.map((instance) => instance.declaration.name).join(' → ')}`
     case 'InvalidCallableReuse':
       return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
+    case 'MissingStandardStreams':
+      return 'missing StandardStreams host provider'
   }
 }
 

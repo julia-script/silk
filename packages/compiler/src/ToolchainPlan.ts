@@ -132,7 +132,25 @@ export const wasmCommand = (
  * entry. The shim's `main` returns `silk_main`'s `i32` result as the process exit status. Not
  * user-facing FFI; issue 07 owns the ABI's growth.
  */
+const standardStreamsShimSource = `#include <errno.h>
+#include <stddef.h>
+#include <unistd.h>
+
+int silk_standard_stream_write_v1(int destination, const unsigned char *bytes, size_t length) {
+  const int descriptor = destination == 0 ? 1 : 2;
+  size_t offset = 0;
+  while (offset < length) {
+    const ssize_t written = write(descriptor, bytes + offset, length - offset);
+    if (written < 0 && errno == EINTR) continue;
+    if (written <= 0) return 1;
+    offset += (size_t)written;
+  }
+  return 0;
+}
+`
+
 const ordinaryShimSource = `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+${standardStreamsShimSource}
 extern int silk_main(void);
 
 int main(void) {
@@ -155,8 +173,7 @@ export const shimSource = (termination: Backend.Termination): string => {
       `    case ${ordinal + 1}:\n      return silk_write_all(silk_report_${ordinal + 1}, sizeof(silk_report_${ordinal + 1})) ? 1 : 2;`,
   )
   return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
-#include <stddef.h>
-#include <unistd.h>
+${standardStreamsShimSource}
 
 extern int silk_main(void);
 ${declarations.join('\n')}

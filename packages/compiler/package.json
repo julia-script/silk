@@ -74,6 +74,10 @@
       "types": "./dist/Stdlib.d.ts",
       "import": "./dist/Stdlib.js"
     },
+    "./StandardStreams": {
+      "types": "./dist/StandardStreams.d.ts",
+      "import": "./dist/StandardStreams.js"
+    },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
       "import": "./dist/SourceSpan.js"

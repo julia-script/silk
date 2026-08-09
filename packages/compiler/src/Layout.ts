@@ -1316,6 +1316,9 @@ const usizeLiteralVerdicts = (
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationIndex.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
+  if (discovery.entry._tag === 'Resolved' && discovery.entry.kind === 'Effect') {
+    reached.set(Type.key('i32'), 'i32')
+  }
   for (const callable of discovery.callables) {
     for (const capture of callable.captures) reached.set(Type.key(capture.type), capture.type)
   }
@@ -1352,6 +1355,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       add(candidate.representation.element)
     } else if (candidate.representation._tag === 'Slice') {
       add(candidate.representation.element)
+      add('usize')
     } else if (candidate.representation._tag === 'Reference') {
       add(candidate.representation.target)
     } else if (candidate.representation._tag === 'Union') {

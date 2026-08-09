@@ -317,6 +317,18 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Commits one immutable byte view to an explicit host-provided process destination. */
+      readonly _tag: 'StandardStreamWrite'
+      readonly destination: LocalId
+      readonly stream: LocalId
+      readonly bytes: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly failure: SilkType.Nominal
+      readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+      readonly failureTag: number
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'RawBufferFrom'
       readonly destination: LocalId
       readonly allocation: LocalId
@@ -796,6 +808,7 @@ export type Entry =
       readonly _tag: 'EffectEntry'
       readonly target: Instances.InstanceKey
       readonly machine: Instances.InstanceKey
+      readonly requirements: ReadonlyArray<SilkType.Requirement>
       readonly failures: ReadonlyArray<{
         readonly tag: number
         readonly type: SilkType.Nominal
@@ -918,6 +931,7 @@ export interface Violation {
     | 'InvalidIntegerOperation'
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
+    | 'InvalidStandardStreamOperation'
     | 'InvalidRawStorageOperation'
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
@@ -1016,6 +1030,8 @@ const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.destination, operation.layout, operation.count]
     case 'Allocate':
       return [operation.destination, operation.layout]
+    case 'StandardStreamWrite':
+      return [operation.destination, operation.stream, operation.bytes]
     case 'RawBufferFrom':
       return [operation.destination, operation.allocation, operation.count]
     case 'RawBufferCount':
@@ -1275,6 +1291,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.Se
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
+    case 'StandardStreamWrite':
     case 'Project':
     case 'ReadPlace':
     case 'CheckPlace':
@@ -1418,6 +1435,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout, operation.count]
     case 'Allocate':
       return [operation.layout]
+    case 'StandardStreamWrite':
+      return [operation.stream, operation.bytes]
     case 'RawBufferFrom':
       return [operation.allocation, operation.count]
     case 'RawBufferCount':
@@ -1702,6 +1721,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       : target.result._tag === 'EffectValue' &&
         target.parameterCount === 0 &&
         machineClosures.length === 1 &&
+        availableEntry.requirements.length === target.result.type.requirements.length &&
+        availableEntry.requirements.every((requirement, ordinal) => {
+          const expected =
+            target.result._tag === 'EffectValue'
+              ? target.result.type.requirements.at(ordinal)
+              : undefined
+          return (
+            expected !== undefined &&
+            requirement.access === expected.access &&
+            requirement.role === expected.role &&
+            SilkType.equals(requirement.capability, expected.capability)
+          )
+        }) &&
         availableEntry.failures.length === target.result.type.failures.length &&
         availableEntry.failures.every((failure, ordinal) => {
           const expected =
@@ -2206,6 +2238,42 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 detail: 'allocation does not preserve Layout, Allocation, or OutOfMemory contracts',
               }),
             )
+        }
+        if (operation._tag === 'StandardStreamWrite') {
+          const stream = fn.localTypes.at(operation.stream.ordinal)
+          const bytes = fn.localTypes.at(operation.bytes.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const expectedFailure = operation.propagationType.type.failures.at(
+            operation.failureTag - 1,
+          )
+          const byteType = bytes === undefined ? undefined : semanticType(bytes)
+          const byteView =
+            byteType !== undefined &&
+            SilkType.isSlice(byteType) &&
+            byteType.access === 'Shared' &&
+            byteType.element === 'u8'
+          if (
+            stream?._tag !== 'bool' ||
+            !byteView ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            !SilkType.equals(operation.type.type, SilkType.unit) ||
+            !SilkType.equals(operation.failure, SilkType.streamWriteFailure) ||
+            expectedFailure === undefined ||
+            !SilkType.equals(expectedFailure, operation.failure) ||
+            !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidStandardStreamOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'standard-stream write does not preserve destination, byte-view, unit, or typed-failure contracts',
+              }),
+            )
+          }
         }
         if (operation._tag === 'RawBufferFrom') {
           const allocation = fn.localTypes.at(operation.allocation.ordinal)
@@ -3199,6 +3267,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = layout-repeat ${localText(operation.layout)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'StandardStreamWrite':
+      return `${localText(operation.destination)} = standard-stream-write destination=${localText(operation.stream)} bytes=${localText(operation.bytes)} failure=${SilkType.encode(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferCount':
@@ -3351,7 +3421,7 @@ export const encode = (self: Module): string =>
       ? `entry unavailable reason=${self.entry.reason}`
       : self.entry._tag === 'OrdinaryEntry'
         ? `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
-        : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.report}`).join(',') || 'none'}`,
+        : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.report}`).join(',') || 'none'} requirements=${self.entry.requirements.map((requirement) => `${requirement.access}:${SilkType.encode(requirement.capability)}@${requirement.role}`).join(',') || 'none'}`,
     ...(self.staticData ?? []).map(
       (data) =>
         `static ${data.id} kind=${data.kind.toLowerCase()} utf8=${data.utf8} bytes=${data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,

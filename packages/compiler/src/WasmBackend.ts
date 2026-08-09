@@ -4,6 +4,7 @@ import * as Data from '@silk-effect/wasm/Data'
 import * as ExportActor from '@silk-effect/wasm/Export'
 import * as FuncActor from '@silk-effect/wasm/Func'
 import * as Global from '@silk-effect/wasm/Global'
+import * as Import from '@silk-effect/wasm/Import'
 import * as Instr from '@silk-effect/wasm/Instr'
 import * as Memory from '@silk-effect/wasm/Memory'
 import * as WasmType from '@silk-effect/wasm/Type'
@@ -19,6 +20,7 @@ import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
+import * as StandardStreams from './StandardStreams.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
 
@@ -883,6 +885,7 @@ interface MemoryContext {
   readonly frame: FramePlan
   readonly plan: LayoutPlan.Plan
   readonly staticOffsets: ReadonlyMap<string, number>
+  readonly standardWrite?: FuncActor.Func
 }
 
 /** Local names reach the `name` custom section, so release builds declare them unnamed. */
@@ -1443,6 +1446,36 @@ const emitOperation = (
         Instr.localSet(rawContext),
         Instr.i32Const(1),
         Instr.localSet(active),
+      ]
+    }
+    case 'StandardStreamWrite': {
+      if (memory?.standardWrite === undefined) {
+        throw new RangeError('Wasm standard-stream write lost its host import or private memory')
+      }
+      const [address, length] = slots(operation.bytes)
+      if (address === undefined || length === undefined) {
+        throw new RangeError('Wasm standard-stream write lost its byte-view lanes')
+      }
+      const propagationShape = LayoutPlan.callingShape(plan, operation.propagationType.type)
+      if (propagationShape === undefined) {
+        throw new RangeError('Wasm standard-stream write lost its failure calling shape')
+      }
+      return [
+        Instr.localGet(scalar(operation.stream)),
+        Instr.localGet(address),
+        Instr.localGet(length),
+        Instr.call(memory.standardWrite),
+        Instr.i32Const(0),
+        Instr.op('i32.ne'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            Instr.i32Const(operation.failureTag),
+            ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
+            Instr.op('return'),
+          ],
+          [],
+        ),
       ]
     }
     case 'RawBufferFrom': {
@@ -3462,9 +3495,13 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'SlotDrop',
       ),
     )
+    const needsStandardStreams = program.functions.some((fn) =>
+      Mir.operations(fn).some((operation) => operation._tag === 'StandardStreamWrite'),
+    )
     const needsMemory =
       staticOffsets.size > 0 ||
       needsHeap ||
+      needsStandardStreams ||
       [...frames.values()].some((frame) => frame.roots.size > 0)
     const privateMemory = needsMemory
       ? yield* Memory.make(
@@ -3473,6 +3510,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           debug ? { name: 'silk_memory' } : {},
         )
       : undefined
+    if (needsStandardStreams && privateMemory !== undefined) {
+      yield* ExportActor.memory(builder, StandardStreams.wasmMemoryExport, privateMemory)
+    }
     const stackPointer = needsMemory
       ? yield* Global.make(
           builder,
@@ -3503,6 +3543,15 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           true,
           [Instr.i32Const(65536)],
           debug ? { name: 'silk_heap_pointer' } : {},
+        )
+      : undefined
+    const standardWrite = needsStandardStreams
+      ? yield* Import.func(
+          builder,
+          StandardStreams.wasmModule,
+          StandardStreams.wasmWriteAll,
+          yield* WasmType.func(builder, [i32, i32, i32], [i32]),
+          debug ? { name: 'silk_standard_stream_write_v1' } : {},
         )
       : undefined
 
@@ -3583,6 +3632,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
               frame,
               plan: program.layout,
               staticOffsets,
+              ...(standardWrite === undefined ? {} : { standardWrite }),
             })
       // A body-less function is a declaration the frontend could not resolve; the LLVM backend
       // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a
@@ -3733,6 +3783,16 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,
+      hostImports: program.functions.some((fn) =>
+        Mir.operations(fn).some((operation) => operation._tag === 'StandardStreamWrite'),
+      )
+        ? Object.freeze([
+            Object.freeze({
+              module: StandardStreams.wasmModule,
+              name: StandardStreams.wasmWriteAll,
+            }),
+          ])
+        : Object.freeze([]),
     })
   }),
 })

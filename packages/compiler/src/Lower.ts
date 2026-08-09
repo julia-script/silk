@@ -1258,6 +1258,46 @@ function lowerExpression(
         )
         return Object.freeze({ result: destination })
       }
+      if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StandardStreamsWriteAll') {
+        const [streamExpression, bytesExpression] = recipe.arguments
+        if (
+          streamExpression === undefined ||
+          bytesExpression === undefined ||
+          fn.effectOutcome === undefined
+        )
+          return undefined
+        const stream = lowerExpression(fn, streamExpression)
+        const bytes = lowerExpression(fn, bytesExpression)
+        const type = fn.type(expression.type)
+        const propagationType = fn.type(fn.effectOutcome)
+        const failureTag = fn.effectOutcome.failures.findIndex((failure) =>
+          Type.equals(failure, Type.streamWriteFailure),
+        )
+        if (
+          stream === undefined ||
+          bytes === undefined ||
+          type?._tag !== 'Nominal' ||
+          !Type.equals(type.type, Type.unit) ||
+          propagationType?._tag !== 'EffectOutcome' ||
+          failureTag < 0
+        )
+          return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'StandardStreamWrite' as const,
+            destination,
+            stream: stream.result,
+            bytes: bytes.result,
+            type,
+            failure: Type.streamWriteFailure,
+            propagationType,
+            failureTag: failureTag + 1,
+            provenance: authored(expression.span),
+          }),
+        )
+        return Object.freeze({ result: destination })
+      }
       if (recipe?._tag === 'EffectProvide') {
         const provider =
           recipe.provider.binding !== undefined
@@ -2427,7 +2467,27 @@ function lowerExpression(
         )
         return { result: destination }
       }
-      if (expression.operation === 'AllocatorAllocate') return undefined
+      if (
+        expression.operation === 'StandardStreamsStdout' ||
+        expression.operation === 'StandardStreamsStderr'
+      ) {
+        const destination = fn.alloc(bool)
+        fn.emit(
+          Object.freeze({
+            _tag: 'Literal' as const,
+            destination,
+            type: bool,
+            value: expression.operation === 'StandardStreamsStdout' ? 0 : 1,
+            provenance: authored(expression.span),
+          }),
+        )
+        return { result: destination }
+      }
+      if (
+        expression.operation === 'AllocatorAllocate' ||
+        expression.operation === 'StandardStreamsWriteAll'
+      )
+        return undefined
       if (expression.operation === 'RawBufferFrom') {
         const [allocation, count] = argumentLocals
         const type = fn.type(expression.type)
@@ -4264,6 +4324,7 @@ export const lowerProgram = (
       _tag: 'EffectEntry',
       target: resolvedEntry.key,
       machine: adapterKey,
+      requirements: resolvedEntry.requirements,
       failures: Object.freeze(
         resolvedEntry.failures.map((failure, ordinal) =>
           Object.freeze({ tag: ordinal + 1, type: failure.type, report: failure.report }),

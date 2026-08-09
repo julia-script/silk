@@ -7,6 +7,7 @@ import * as Mir from './Mir.js'
 import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as StandardStreams from './StandardStreams.js'
 import * as Type from './Type.js'
 
 /**
@@ -347,6 +348,16 @@ export interface AllocationTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+/** One complete attempted host write, including its deterministic typed outcome. */
+export interface StandardStreamTraceEvent {
+  readonly _tag: 'StandardStreamWrite'
+  readonly function: DeclarationIndex.CanonicalId
+  readonly destination: StandardStreams.Destination
+  readonly bytes: ReadonlyArray<number>
+  readonly outcome: 'Written' | 'WriteFailure'
+  readonly span: SourceSpan.SourceSpan
+}
+
 export type TraceEvent =
   | EntryTraceEvent
   | CallTraceEvent
@@ -363,6 +374,7 @@ export type TraceEvent =
   | EffectTraceEvent
   | CallableTraceEvent
   | AllocationTraceEvent
+  | StandardStreamTraceEvent
 
 /** Every expected reason the closed bootstrap interpreter can stop. */
 export type BlockedReason =
@@ -397,6 +409,7 @@ export type BlockedReason =
       readonly state: 'Running' | 'Consumed' | 'Released'
       readonly span: SourceSpan.SourceSpan
     }
+  | { readonly _tag: 'MissingStandardStreams' }
 
 /** A completed exact bootstrap result. */
 export interface Completed {
@@ -551,6 +564,7 @@ interface EvaluationState {
   readonly cells: Map<string, LocalState>
   readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
+  readonly standardStreams?: StandardStreams.Provider
 }
 
 const cellKey = (frame: number, cell: number): string => `${frame}:${cell}`
@@ -2033,6 +2047,79 @@ function executeFunction(
                 span: operation.provenance.span,
               }),
             )
+            break
+          }
+          case 'StandardStreamWrite': {
+            const stream = readI32(operation.stream)
+            const viewed = read(operation.bytes).value
+            const bytes = (() => {
+              if (viewed._tag === 'StaticViewValue') return viewed.bytes
+              if (viewed._tag !== 'SliceValue') return undefined
+              const root = cell(viewed).value
+              if (root._tag !== 'ArrayValue') return undefined
+              const selected = root.elements.slice(viewed.base, viewed.base + viewed.length)
+              if (
+                selected.some(
+                  (element) => element._tag !== 'ScalarIntegerValue' || element.type !== 'u8',
+                )
+              )
+                return undefined
+              return Object.freeze(
+                selected.flatMap((element) =>
+                  element._tag === 'ScalarIntegerValue' ? [Number(element.value)] : [],
+                ),
+              )
+            })()
+            if (bytes === undefined) {
+              throw new RangeError('MIR verifier allowed a non-byte slice standard-stream write')
+            }
+            const destination: StandardStreams.Destination =
+              stream.value === 0 ? 'Stdout' : 'Stderr'
+            const result = (() => {
+              if (state.standardStreams === undefined) return undefined
+              try {
+                return state.standardStreams.writeAll(destination, bytes)
+              } catch {
+                return Object.freeze({
+                  _tag: 'WriteFailure' as const,
+                  message: 'standard stream provider threw',
+                })
+              }
+            })()
+            if (result === undefined) return blockedStep({ _tag: 'MissingStandardStreams' })
+            trace.push(
+              Object.freeze({
+                _tag: 'StandardStreamWrite',
+                function: fn.id,
+                destination,
+                bytes: Object.freeze(Array.from(bytes)),
+                outcome: result._tag,
+                span: operation.provenance.span,
+              }),
+            )
+            if (result._tag === 'WriteFailure') {
+              return {
+                _tag: 'Value',
+                value: Object.freeze({
+                  _tag: 'EffectOutcomeValue',
+                  type: operation.propagationType.type,
+                  tag: operation.failureTag,
+                  payload: Object.freeze({
+                    _tag: 'AggregateValue',
+                    type: operation.failure,
+                    fields: Object.freeze([]),
+                  }),
+                }),
+              }
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
+              fromCall: false,
+            })
             break
           }
           case 'RawBufferFrom': {
@@ -3694,8 +3781,17 @@ const firstFunctionSpan = (program: Mir.Module): SourceSpan.SourceSpan => {
   return first === undefined ? raiseNoSpan() : argumentSpanFallback(first)
 }
 
+/** Explicit host services available to one deterministic evaluation. */
+export interface Options {
+  readonly standardStreams?: StandardStreams.Provider
+}
+
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
-export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): Outcome => {
+export const evaluate = (
+  discovery: Instances.Discovery,
+  program: Mir.Module,
+  options: Options = {},
+): Outcome => {
   if (discovery.entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'Blocked',
@@ -3710,6 +3806,20 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
       _tag: 'Blocked',
       entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
       reason: Object.freeze({ _tag: 'InvalidMir', violations }),
+      trace: Object.freeze([]),
+    })
+  }
+  if (
+    program.entry._tag === 'EffectEntry' &&
+    program.entry.requirements.some((requirement) =>
+      Type.equals(requirement.capability, Type.standardStreams),
+    ) &&
+    options.standardStreams === undefined
+  ) {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry.key.declaration,
+      reason: Object.freeze({ _tag: 'MissingStandardStreams' }),
       trace: Object.freeze([]),
     })
   }
@@ -3745,6 +3855,7 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
     cells: new Map(),
     allocations: new Map(),
     callables: new Map(),
+    ...(options.standardStreams === undefined ? {} : { standardStreams: options.standardStreams }),
   })
   if (result._tag === 'Blocked') {
     return Object.freeze({
