@@ -58,6 +58,10 @@
       "types": "./dist/PhaseReport.d.ts",
       "import": "./dist/PhaseReport.js"
     },
+    "./ProjectAnalysis": {
+      "types": "./dist/ProjectAnalysis.d.ts",
+      "import": "./dist/ProjectAnalysis.js"
+    },
     "./NativeToolchain": {
       "types": "./dist/NativeToolchain.d.ts",
       "import": "./dist/NativeToolchain.js"
@@ -141,6 +145,10 @@
     "./SyntaxFile": {
       "types": "./dist/SyntaxFile.d.ts",
       "import": "./dist/SyntaxFile.js"
+    },
+    "./SyntaxCorrespondence": {
+      "types": "./dist/SyntaxCorrespondence.d.ts",
+      "import": "./dist/SyntaxCorrespondence.js"
     },
     "./SyntaxTree": {
       "types": "./dist/SyntaxTree.d.ts",

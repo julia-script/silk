@@ -179,6 +179,92 @@ it.effect('keeps editor analysis on frontend phases only', () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
+it.effect('shares one project frontend across overlapping open roots', () =>
+  Effect.gen(function* () {
+    const root = project()
+    writeFileSync(join(root, 'src', 'Shared.silk'), 'pub fn answer() -> i32 { return 40 }\n')
+    const main = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode(
+        'import Shared\nfn local() -> i32 { return 1 }\npub fn main() -> i32 { return Shared.answer() + local() }',
+      ),
+    })
+    const util = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Util.silk')).href,
+      version: 3,
+      bytes: encoder.encode(
+        'import Shared\nfn local() -> i32 { return 2 }\npub fn utility() -> i32 { return Shared.answer() + local() }',
+      ),
+    })
+    const analyzed = yield* Workspace.analyzeProject([util, main])
+    const mainSession = analyzed.get(main.uri)
+    const utilSession = analyzed.get(util.uri)
+
+    assert.isDefined(mainSession)
+    assert.isDefined(utilSession)
+    if (mainSession === undefined || utilSession === undefined) return
+    assert.strictEqual(mainSession.project, utilSession.project)
+    assert.strictEqual(mainSession.snapshot.index, utilSession.snapshot.index)
+    assert.strictEqual(mainSession.snapshot.results, utilSession.snapshot.results)
+    assert.strictEqual(
+      mainSession.snapshot.semanticOccurrences,
+      utilSession.snapshot.semanticOccurrences,
+    )
+    assert.strictEqual(Analysis.phases(mainSession.snapshot), Analysis.phases(utilSession.snapshot))
+    assert.strictEqual(mainSession.moduleUris, utilSession.moduleUris)
+    assert.strictEqual(mainSession.snapshot.closure.rootModule, 'Main')
+    assert.strictEqual(utilSession.snapshot.closure.rootModule, 'Util')
+    assert.deepEqual(
+      Analysis.modules(mainSession.snapshot).map(({ name }) => name),
+      ['Main', 'Shared', 'Util'],
+    )
+    const closure = Analysis.phases(mainSession.snapshot).at(0)
+    assert.deepEqual(
+      closure === undefined
+        ? undefined
+        : { phase: closure.phase, inputs: closure.inputs, outputs: closure.outputs },
+      { phase: 'closure', inputs: 2, outputs: 3 },
+    )
+    assert.deepEqual(
+      Document.diagnostics(main, mainSession.snapshot, () => undefined),
+      [],
+    )
+    assert.deepEqual(
+      Document.diagnostics(util, utilSession.snapshot, () => undefined),
+      [],
+    )
+
+    const nextMain = Document.make({
+      ...main,
+      version: 2,
+      bytes: encoder.encode(
+        'import Shared\nfn inserted() -> i32 { return 0 }\nfn local() -> i32 { return 1 }\npub fn main() -> i32 { return Shared.answer() + local() }',
+      ),
+    })
+    const revised = yield* Workspace.analyzeProject([nextMain, util], analyzed)
+    const revisedMain = revised.get(nextMain.uri)
+    const revisedUtil = revised.get(util.uri)
+    assert.isDefined(revisedMain)
+    assert.isDefined(revisedUtil)
+    if (revisedMain === undefined || revisedUtil === undefined) return
+    assert.strictEqual(revisedMain.project, revisedUtil.project)
+    assert.notStrictEqual(revisedMain.project, mainSession.project)
+    assert.strictEqual(revisedMain.project.syntaxRevisions.get('Main')?._tag, 'Changed')
+    assert.strictEqual(revisedMain.project.syntaxRevisions.get('Util')?._tag, 'Reused')
+    assert.strictEqual(revisedMain.project.syntaxRevisions.get('Shared')?._tag, 'Reused')
+    const previousSyntax = new Map(
+      mainSession.project.closure.modules.map((module) => [module.name, module.syntax]),
+    )
+    const currentSyntax = new Map(
+      revisedMain.project.closure.modules.map((module) => [module.name, module.syntax]),
+    )
+    assert.notStrictEqual(currentSyntax.get('Main'), previousSyntax.get('Main'))
+    assert.strictEqual(currentSyntax.get('Util'), previousSyntax.get('Util'))
+    assert.strictEqual(currentSyntax.get('Shared'), previousSyntax.get('Shared'))
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
 it.effect('navigates standard-library definitions to the analyzed toolchain source', () =>
   Effect.gen(function* () {
     const root = project()

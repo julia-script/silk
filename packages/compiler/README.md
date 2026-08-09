@@ -41,6 +41,43 @@ derives a new immutable snapshot without changing the frontend input. `Analysis.
 `Driver.compile` are strict boundaries: they refuse any snapshot containing
 an error diagnostic or resolver failure before invoking a backend or toolchain.
 
+## Shared project analysis
+
+Editor hosts with several synchronized roots can analyze their union closure once through
+`ProjectAnalysis`. Each requested root receives an immutable `Analysis.FrontendSnapshot` view with
+its own root identity while source, syntax, declaration, resolution, elaboration, ownership,
+tooling-index, diagnostic, and phase-report values remain structurally shared.
+
+```ts
+import { ProjectAnalysis, SourceFile } from '@silk-effect/compiler'
+
+const project = yield* ProjectAnalysis.make([
+  SourceFile.make('app/Main', mainBytes),
+  SourceFile.make('app/Tool', toolBytes),
+])
+const main = ProjectAnalysis.view(project, 'app/Main')
+```
+
+When a project has a prior accepted revision, revise it to reuse byte- and origin-identical module
+syntax while producing a complete new semantic frontend:
+
+```ts
+const revised = yield* ProjectAnalysis.revise(project, nextRoots)
+const shared = revised.syntaxRevisions.get('app/Shared')
+
+if (shared?._tag === 'Changed') {
+  // Canonical SyntaxIds remain revision-local; correspondence relates exact unchanged subtrees.
+  const pairs = shared.correspondence.identities
+}
+```
+
+Changed modules are reparsed normally. Their `SyntaxCorrespondence` is conservative: it relates
+only exact structurally unique sibling subtrees and leaves ambiguous duplicates unmatched. Semantic
+facts are recomputed for the complete current project in either case.
+
+Project analysis is frontend-only. Cross-revision caching and runtime realization remain explicit,
+separate concerns.
+
 ## The facade is the supported consumer surface
 
 Tooling consumes compiler phases exclusively through `Analysis`: build a frontend snapshot from a

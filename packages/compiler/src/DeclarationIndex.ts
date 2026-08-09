@@ -1684,7 +1684,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
 }
 
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
-export const collect = (closure: ModuleClosure.Closure): Index => {
+export const collect = (closure: ModuleClosure.Facts): Index => {
   const modules = Object.freeze(closure.modules.map((module) => collectModule(module.syntax)))
   return Object.freeze({
     _tag: 'DeclarationIndex',

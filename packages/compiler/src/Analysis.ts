@@ -11,6 +11,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
 import * as Elaboration from './Elaboration.js'
+import * as FrontendTooling from './FrontendTooling.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -19,7 +20,7 @@ import * as Mir from './Mir.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
-import * as PhaseReport from './PhaseReport.js'
+import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as Presentation from './Presentation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
@@ -27,7 +28,7 @@ import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import type * as SyntaxTree from './SyntaxTree.js'
 import type * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
@@ -75,8 +76,8 @@ export interface Snapshot extends FrontendSnapshot {
 
 /** One available anonymous expression type cached for position fallback. */
 export interface AnonymousExpression {
-  readonly span: SourceSpan.SourceSpan
-  readonly type: Type.Type
+  readonly span: FrontendTooling.AnonymousExpression['span']
+  readonly type: FrontendTooling.AnonymousExpression['type']
 }
 
 /** The occurrence-first semantic subject selected for a hover request. */
@@ -105,28 +106,11 @@ export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<FrontendSnapshot, never, SourceResolver.SourceResolver> {
   const frontend = yield* Pipeline.frontend(request)
-  const report = [...frontend.report]
-  const occurrences = PhaseReport.measure(
-    'semantic-occurrences',
-    frontend.results.size,
-    () => SemanticOccurrence.make(frontend.results, frontend.index, frontend.resolution),
-    (value) =>
-      [...value.modules.values()].reduce((sum, module) => sum + module.occurrences.length, 0),
-  )
-  report.push(occurrences.report)
-  const expressions = PhaseReport.measure(
-    'anonymous-expressions',
-    frontend.results.size,
-    () => makeAnonymousExpressionIndex(frontend.results),
-    (value) => [...value.values()].reduce((sum, entries) => sum + entries.length, 0),
-  )
-  report.push(expressions.report)
+  const tooling = FrontendTooling.make(frontend)
   return Object.freeze({
     _tag: 'AnalysisSnapshot',
     ...frontend,
-    semanticOccurrences: occurrences.value,
-    anonymousExpressions: expressions.value,
-    report: Object.freeze(report),
+    ...tooling,
   })
 })
 
@@ -420,7 +404,7 @@ const presentationOfIdentity = (
     for (const result of self.results.values())
       for (const fn of result.functions)
         for (const statement of fn.statements)
-          for (const expression of statementExpressionFacts(statement))
+          for (const expression of FrontendTooling.statementExpressions(statement))
             if (expression._tag === 'Match')
               for (const arm of expression.arms)
                 for (const binding of arm.bindings)
@@ -528,97 +512,6 @@ export const completionAt = (
       })
 }
 
-const nestedExpressionFacts = (
-  expression: Elaboration.ExpressionFact,
-): ReadonlyArray<Elaboration.ExpressionFact> => {
-  const nested: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
-    switch (expression._tag) {
-      case 'Move':
-      case 'Borrow':
-      case 'FieldProjection':
-        return [expression.subject]
-      case 'PlaceReplace':
-        return [expression.destination, expression.value]
-      case 'IndexProjection':
-        return [expression.subject, expression.index]
-      case 'ArrayLiteral':
-        return expression.elements.map((element) => element.expression)
-      case 'StructLiteral':
-        return expression.initializers.map((initializer) => initializer.expression)
-      case 'Grouped':
-        return [expression.expression]
-      case 'Run':
-        return [expression.subject]
-      case 'EffectCatch':
-        return [expression.protected, expression.handler]
-      case 'EffectRetry':
-        return [expression.protected, expression.retries]
-      case 'EffectProvide':
-        return [expression.protected]
-      case 'EffectProvideWith':
-        return [expression.protected, expression.acquisition]
-      case 'EffectTransform':
-        return [expression.protected, expression.callback]
-      case 'CallableSection':
-        return expression.captures.map((capture) => capture.expression)
-      case 'CallableApply':
-        return [expression.callee, ...expression.arguments.map((argument) => argument.expression)]
-      case 'Operator':
-      case 'Call':
-        return expression.arguments.map((argument) => argument.expression)
-      case 'Match':
-        return [
-          expression.scrutinee,
-          ...expression.arms.flatMap((arm) => [
-            ...(arm.guard === undefined ? [] : [arm.guard]),
-            arm.result,
-          ]),
-        ]
-      default:
-        return []
-    }
-  })()
-  return Object.freeze([
-    expression,
-    ...nested.flatMap((candidate) => nestedExpressionFacts(candidate)),
-  ])
-}
-
-const statementExpressionFacts = (
-  statement: Elaboration.StatementFact,
-): ReadonlyArray<Elaboration.ExpressionFact> => {
-  switch (statement._tag) {
-    case 'UnsafeStatement':
-      return Object.freeze(statement.statements.flatMap(statementExpressionFacts))
-    case 'BindStatement':
-      return nestedExpressionFacts(statement.binding.initializer)
-    case 'ReturnStatement':
-      return nestedExpressionFacts(statement.expression)
-    case 'FailStatement':
-    case 'DropStatement':
-      return nestedExpressionFacts(statement.expression)
-    case 'IfStatement':
-      return Object.freeze([
-        ...nestedExpressionFacts(statement.condition),
-        ...statement.taken.flatMap(statementExpressionFacts),
-        ...statement.otherwise.flatMap(statementExpressionFacts),
-      ])
-    case 'WriteStatement':
-      return Object.freeze([
-        ...nestedExpressionFacts(statement.destination),
-        ...nestedExpressionFacts(statement.value),
-      ])
-    case 'WhileStatement':
-      return Object.freeze([
-        ...nestedExpressionFacts(statement.condition),
-        ...statement.body.flatMap(statementExpressionFacts),
-      ])
-    case 'BreakStatement':
-    case 'ContinueStatement':
-      return Object.freeze([])
-  }
-}
-
 const nestedStatementFacts = (
   statement: Elaboration.StatementFact,
 ): ReadonlyArray<Elaboration.StatementFact> => {
@@ -710,38 +603,9 @@ export const expressionsOf = (
   Object.freeze(
     self.results
       .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(statementExpressionFacts)) ?? [],
+      ?.functions.flatMap((fn) => fn.statements.flatMap(FrontendTooling.statementExpressions)) ??
+      [],
   )
-
-const makeAnonymousExpressionIndex = (
-  results: ReadonlyMap<string, Elaboration.Result>,
-): ReadonlyMap<string, ReadonlyArray<AnonymousExpression>> => {
-  const modules = new Map<string, ReadonlyArray<AnonymousExpression>>()
-  for (const [module, result] of results) {
-    const found = new Map<string, AnonymousExpression>()
-    for (const fn of result.functions)
-      for (const statement of fn.statements)
-        for (const expression of statementExpressionFacts(statement)) {
-          if (expression.type._tag !== 'Available') continue
-          const span = SyntaxTree.span(expression.syntax)
-          found.set(
-            `${span.start}:${span.end}`,
-            Object.freeze({ span, type: expression.type.type }),
-          )
-        }
-    modules.set(
-      module,
-      Object.freeze(
-        [...found.values()].sort(
-          (left, right) =>
-            left.span.start - right.span.start ||
-            left.span.end - left.span.start - (right.span.end - right.span.start),
-        ),
-      ),
-    )
-  }
-  return modules
-}
 
 /** Returns every retained semantic match with source patterns and canonical coverage facts. */
 export const matchesOf = (
@@ -1095,14 +959,14 @@ export const loweredMir = (self: Snapshot): Mir.Module => {
 
 /** Looks up one declaration name within one module. */
 export const declarationByName = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   spelling: string,
 ): DeclarationIndex.DeclarationLookup => DeclarationIndex.lookup(self.index, module, spelling)
 
 /** Looks up a function or struct in the shared module-level namespace. */
 export const memberByName = (
-  self: Snapshot,
+  self: FrontendSnapshot,
   module: string,
   spelling: string,
 ): DeclarationIndex.MemberLookup => DeclarationIndex.member(self.index, module, spelling)

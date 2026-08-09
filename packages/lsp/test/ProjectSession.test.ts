@@ -1,5 +1,7 @@
 import { assert, it } from '@effect/vitest'
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -20,26 +22,38 @@ const document = (uri: string, version: number, source = 'pub fn main() -> i32 {
     bytes: encoder.encode(source),
   })
 
-const analyzed = Effect.fnUntraced(function* (self: Document.Document) {
-  const snapshot = yield* Analysis.ofSource(self.module, self.bytes)
-  return Object.freeze({
-    document: self,
-    snapshot,
-    moduleUris: new Map([[self.module, self.uri]]),
-  })
+const analyzed = Effect.fnUntraced(function* (
+  documents: ReadonlyArray<Document.Document>,
+  previous: ReadonlyMap<string, ProjectSession.AnalyzedDocument> = new Map(),
+) {
+  const roots = documents.map((self) => SourceFile.make(self.module, self.bytes))
+  const previousProject = previous.values().next().value?.project
+  const project = yield* (
+    previousProject === undefined
+      ? ProjectAnalysis.make(roots)
+      : ProjectAnalysis.revise(previousProject, roots)
+  ).pipe(Effect.provide(SourceResolver.empty))
+  const moduleUris = new Map(documents.map((self) => [self.module, self.uri]))
+  const entries: Array<readonly [string, ProjectSession.AnalyzedDocument]> = []
+  for (const self of documents) {
+    const snapshot = ProjectAnalysis.view(project, self.module)
+    if (snapshot !== undefined)
+      entries.push([self.uri, Object.freeze({ document: self, project, snapshot, moduleUris })])
+  }
+  return new Map(entries)
 })
 
 it.effect('coalesces a burst into the latest pending project revision', () =>
   Effect.gen(function* () {
-    const analyzedDocuments: Array<string> = []
+    const analyzedRevisions: Array<ReadonlyArray<string>> = []
     const publishedVersions: Array<number> = []
     const project = ProjectSession.make({
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
-      analyze: Effect.fnUntraced(function* (self) {
-        analyzedDocuments.push(`${self.module}@${self.version}`)
-        return yield* analyzed(self)
+      analyze: Effect.fnUntraced(function* (documents) {
+        analyzedRevisions.push(documents.map((self) => `${self.module}@${self.version}`))
+        return yield* analyzed(documents)
       }),
       publish: Effect.fnUntraced(function* (session) {
         yield* Effect.sync(() => {
@@ -67,7 +81,7 @@ it.effect('coalesces a burst into the latest pending project revision', () =>
     yield* Fiber.join(second)
     yield* Fiber.join(latest)
 
-    assert.deepEqual(analyzedDocuments, ['Main@2', 'Util@1'])
+    assert.deepEqual(analyzedRevisions, [['Main@2', 'Util@1']])
     assert.deepEqual(publishedVersions, [2, 1])
   }),
 )
@@ -77,6 +91,7 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     const started = yield* Deferred.make<void>()
     const release = yield* Deferred.make<void>()
     const analyzedVersions: Array<number> = []
+    const priorVersions: Array<ReadonlyArray<number>> = []
     const publishedVersions: Array<number> = []
     let active = 0
     let maximumActive = 0
@@ -84,15 +99,18 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
       workspace: 'project:/workspace/silk.toml',
       sourceRoot: '/workspace',
       debounce: 10,
-      analyze: Effect.fnUntraced(function* (self) {
+      analyze: Effect.fnUntraced(function* (documents, previous) {
+        const self = documents.at(0)
+        if (self === undefined) return new Map()
         active += 1
         maximumActive = Math.max(maximumActive, active)
         analyzedVersions.push(self.version)
+        priorVersions.push([...previous.values()].map((session) => session.document.version))
         if (self.version === 1) {
           yield* Deferred.succeed(started, undefined)
           yield* Deferred.await(release)
         }
-        const result = yield* analyzed(self)
+        const result = yield* analyzed(documents, previous)
         active -= 1
         return result
       }),
@@ -118,9 +136,17 @@ it.effect('runs one worker and prevents a stale revision from committing', () =>
     yield* Fiber.join(first)
     yield* Fiber.join(second)
 
+    const third = yield* Effect.forkChild(
+      project.open(document('file:///workspace/Main.silk', 3)),
+      { startImmediately: true },
+    )
+    yield* TestClock.adjust(10)
+    yield* Fiber.join(third)
+
     assert.strictEqual(maximumActive, 1)
-    assert.deepEqual(analyzedVersions, [1, 2])
-    assert.deepEqual(publishedVersions, [2])
+    assert.deepEqual(analyzedVersions, [1, 2, 3])
+    assert.deepEqual(priorVersions, [[], [], [2]])
+    assert.deepEqual(publishedVersions, [2, 3])
   }),
 )
 
@@ -177,12 +203,12 @@ it.effect('allows independent projects to analyze concurrently', () =>
         workspace,
         sourceRoot: `/${workspace}`,
         debounce: 10,
-        analyze: Effect.fnUntraced(function* (self) {
+        analyze: Effect.fnUntraced(function* (documents) {
           active += 1
           maximumActive = Math.max(maximumActive, active)
           if (active === 2) yield* Deferred.succeed(started, undefined)
           yield* Deferred.await(release)
-          const result = yield* analyzed(self)
+          const result = yield* analyzed(documents)
           active -= 1
           return result
         }),

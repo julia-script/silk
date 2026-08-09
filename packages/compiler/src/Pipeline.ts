@@ -29,16 +29,24 @@ export type Targeted<A> =
       readonly error: Target.TargetError | AnalysisUnavailable
     }
 
-/** Immutable compiler frontend facts shared by Analysis and Driver. */
-export interface Frontend {
-  readonly closure: ModuleClosure.Closure
+interface FrontendFacts {
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
+}
+
+/** Immutable compiler frontend facts shared by Analysis and Driver. */
+export interface Frontend extends FrontendFacts {
+  readonly closure: ModuleClosure.Closure
   readonly requestedTarget?: string
+}
+
+/** Immutable multi-root frontend facts computed once for one project revision. */
+export interface ProjectFrontend extends FrontendFacts {
+  readonly closure: ModuleClosure.ProjectClosure
 }
 
 /** Immutable target/runtime facts derived from exactly one Frontend value. */
@@ -116,25 +124,11 @@ const hasInvalidGenericBody = (
     ),
   )
 
-/** Constructs the complete recoverable compiler frontend for one compilation request. */
-export const frontend = Effect.fn('Pipeline.frontend')(function* (
-  request: ModuleClosure.CompilationRequest,
-  options: Options = {},
-): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
-  const report: Array<PhaseReport.PhaseReport> = []
-  const closureStartedAt = performance.now()
-  const closure = yield* ModuleClosure.load(request)
-  const closureHeap = options.heapBytes?.()
-  report.push(
-    PhaseReport.make({
-      phase: 'closure',
-      elapsedMs: performance.now() - closureStartedAt,
-      inputs: 1,
-      outputs: closure.modules.length,
-      diagnostics: closure.diagnostics.length,
-      ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
-    }),
-  )
+const analyzeFrontend = (
+  closure: ModuleClosure.Facts,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+): FrontendFacts => {
   const collected = measured(
     report,
     'declaration-collection',
@@ -209,15 +203,62 @@ export const frontend = Effect.fn('Pipeline.frontend')(function* (
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
   return Object.freeze({
-    closure,
     index,
     resolution,
     results,
     ownership,
     diagnostics,
     report: Object.freeze([...report]),
+  })
+}
+
+/** Constructs the complete recoverable compiler frontend for one compilation request. */
+export const frontend = Effect.fn('Pipeline.frontend')(function* (
+  request: ModuleClosure.CompilationRequest,
+  options: Options = {},
+): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
+  const report: Array<PhaseReport.PhaseReport> = []
+  const closureStartedAt = performance.now()
+  const closure = yield* ModuleClosure.load(request)
+  const closureHeap = options.heapBytes?.()
+  report.push(
+    PhaseReport.make({
+      phase: 'closure',
+      elapsedMs: performance.now() - closureStartedAt,
+      inputs: 1,
+      outputs: closure.modules.length,
+      diagnostics: closure.diagnostics.length,
+      ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
+    }),
+  )
+  const facts = analyzeFrontend(closure, report, options)
+  return Object.freeze({
+    closure,
+    ...facts,
     ...(request.target === undefined ? {} : { requestedTarget: request.target }),
   })
+})
+
+/** Constructs one complete compiler frontend for the union closure of project roots. */
+export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
+  request: ModuleClosure.ProjectRequest,
+  options: Options = {},
+): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
+  const report: Array<PhaseReport.PhaseReport> = []
+  const closureStartedAt = performance.now()
+  const closure = yield* ModuleClosure.loadProject(request)
+  const closureHeap = options.heapBytes?.()
+  report.push(
+    PhaseReport.make({
+      phase: 'closure',
+      elapsedMs: performance.now() - closureStartedAt,
+      inputs: closure.rootModules.length,
+      outputs: closure.modules.length,
+      diagnostics: closure.diagnostics.length,
+      ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
+    }),
+  )
+  return Object.freeze({ closure, ...analyzeFrontend(closure, report, options) })
 })
 
 /** Derives immutable target/runtime facts from one completed frontend. */
