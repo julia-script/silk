@@ -746,6 +746,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run ${localText(operation.effect)} with ${operation.runner.name}`
+    case 'CloseEffectEntry':
+      return `${localText(operation.destination)} = close ${operation.target.name} with ${operation.runner.name}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
@@ -1216,14 +1218,23 @@ export const evaluationRows = (
           head: true,
           tone: 'ok',
         }
-      : {
-          key: 'outcome',
-          dot: 'warning',
-          label: 'Blocked',
-          detail: blockedReasonText(outcome.reason),
-          head: true,
-          tone: 'warning',
-        },
+      : outcome._tag === 'UnhandledFailure'
+        ? {
+            key: 'outcome',
+            dot: 'warning',
+            label: 'Unhandled failure',
+            detail: `${outcome.report} · tag ${outcome.tag}`,
+            head: true,
+            tone: 'warning',
+          }
+        : {
+            key: 'outcome',
+            dot: 'warning',
+            label: 'Blocked',
+            detail: blockedReasonText(outcome.reason),
+            head: true,
+            tone: 'warning',
+          },
   )
 
   return rows

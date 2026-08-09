@@ -533,6 +533,52 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> I32 { return 0 } }`,
   }),
 )
 
+it.effect('accepts operation-free Report markers and rejects marker bodies', () =>
+  Effect.gen(function* () {
+    const valid = yield* collect('report-valid', [
+      [
+        'report-valid',
+        `struct SomeError { code: I32 }
+impl Report for SomeError {}
+pub fn main() -> I32 { return 0 }`,
+      ],
+    ])
+    assert.deepEqual(valid.diagnostics, [])
+    assert.isTrue(
+      DeclarationIndex.conforms(
+        valid,
+        Type.nominal('report-valid', 'SomeError'),
+        Type.reportCapability,
+      ),
+    )
+
+    const malformed = yield* collect('report-malformed', [
+      [
+        'report-malformed',
+        `struct SomeError { code: I32 }
+fn describe(error: &SomeError) -> I32 { return error.code }
+impl Report for SomeError { report: SomeError.describe }
+pub fn main() -> I32 { return 0 }`,
+      ],
+    ])
+    assert.include(
+      malformed.diagnostics
+        .filter((diagnostic) => diagnostic.code === 'SEM0083')
+        .map((diagnostic) =>
+          diagnostic.reason._tag === 'InvalidConformance' ? diagnostic.reason.detail : undefined,
+        ),
+      'Report is an operation-free marker capability',
+    )
+    assert.isFalse(
+      DeclarationIndex.conforms(
+        malformed,
+        Type.nominal('report-malformed', 'SomeError'),
+        Type.reportCapability,
+      ),
+    )
+  }),
+)
+
 it.effect('indexes parametric conformances with bound parameters', () =>
   Effect.gen(function* () {
     const index = yield* collect('parametric', [

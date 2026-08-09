@@ -2523,6 +2523,18 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
         continue
       }
 
+      if (Type.equals(capability, Type.reportCapability)) {
+        if (conformance.operations.length !== 0 || conformance.hook !== undefined) {
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              'Report is an operation-free marker capability',
+              conformance.syntax.span,
+            ),
+          )
+        }
+        continue
+      }
+
       diagnostics.push(
         Diagnostic.invalidConformance(
           `unsupported compiler-sealed capability ${Type.encode(capability)}`,
@@ -2753,7 +2765,10 @@ export const witness = (
   if (selected === undefined) return undefined
   const conformance = selected.conformance
   if (!Type.equals(capability, Type.allocator)) {
-    return Type.equals(capability, Type.dropCapability)
+    return Type.equals(capability, Type.dropCapability) ||
+      (Type.equals(capability, Type.reportCapability) &&
+        conformance.operations.length === 0 &&
+        conformance.hook === undefined)
       ? Object.freeze({
           _tag: 'SourceConformanceWitness',
           module: conformance.module,

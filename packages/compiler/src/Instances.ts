@@ -47,9 +47,21 @@ export interface CallableInstance {
   readonly mode: Type.CallableMode
 }
 
+/** One normalized reportable failure retained by an effectful user entry. */
+export interface EntryFailure {
+  readonly type: Type.Nominal
+  readonly report: string
+}
+
 /** The resolved or explicitly unavailable user entry. */
 export type Entry =
-  | { readonly _tag: 'Resolved'; readonly key: InstanceKey }
+  | { readonly _tag: 'Resolved'; readonly kind: 'Ordinary'; readonly key: InstanceKey }
+  | {
+      readonly _tag: 'Resolved'
+      readonly kind: 'Effect'
+      readonly key: InstanceKey
+      readonly failures: ReadonlyArray<EntryFailure>
+    }
   | {
       readonly _tag: 'Unavailable'
       readonly reason:
@@ -58,6 +70,10 @@ export type Entry =
         | 'GenericEntry'
         | 'ParameterizedEntry'
         | 'UntypedEntry'
+        | 'InvalidOrdinaryEntryResult'
+        | 'InvalidEffectEntryResult'
+        | 'EffectEntryRequirements'
+        | 'UnreportableEntryFailure'
         | 'InvalidSource'
     }
 
@@ -179,7 +195,7 @@ const keyText = (key: InstanceKey): string =>
     .map(Type.key)
     .join('\u0000')}`
 
-const resolveEntry = (root: Elaboration.Result): Entry => {
+const resolveEntry = (root: Elaboration.Result, index: DeclarationIndex.Index): Entry => {
   const lookup = Elaboration.declarationByName(root, 'main')
   if (lookup._tag === 'Missing')
     return Object.freeze({ _tag: 'Unavailable', reason: 'MissingEntry' })
@@ -194,17 +210,50 @@ const resolveEntry = (root: Elaboration.Result): Entry => {
     return Object.freeze({ _tag: 'Unavailable', reason: 'ParameterizedEntry' })
   }
   if (
-    declaration.functionKind !== 'Ordinary' ||
-    declaration.failureRow.failures.length !== 0 ||
+    declaration.visibility !== 'Public' ||
     declaration.returnType._tag !== 'Resolved' ||
-    declaration.returnType.type !== 'I32' ||
-    declaration.canonical._tag !== 'Canonical'
+    declaration.canonical._tag !== 'Canonical' ||
+    !declaration.failureRow.available ||
+    !declaration.requirementRow.available
   ) {
     return Object.freeze({ _tag: 'Unavailable', reason: 'UntypedEntry' })
   }
+  if (declaration.functionKind === 'Ordinary') {
+    if (
+      declaration.failureRow.failures.length !== 0 ||
+      declaration.requirementRow.requirements.length !== 0 ||
+      declaration.returnType.type !== 'I32'
+    ) {
+      return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidOrdinaryEntryResult' })
+    }
+    return Object.freeze({
+      _tag: 'Resolved',
+      kind: 'Ordinary',
+      key: keyOf(declaration.canonical.id, Hir.contractOf(declaration)),
+    })
+  }
+  if (!Type.equals(declaration.returnType.type, Type.unit)) {
+    return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidEffectEntryResult' })
+  }
+  if (declaration.requirementRow.requirements.length !== 0) {
+    return Object.freeze({ _tag: 'Unavailable', reason: 'EffectEntryRequirements' })
+  }
+  if (
+    declaration.failureRow.failures.some(
+      (failure) => !DeclarationIndex.conforms(index, failure, Type.reportCapability),
+    )
+  ) {
+    return Object.freeze({ _tag: 'Unavailable', reason: 'UnreportableEntryFailure' })
+  }
   return Object.freeze({
     _tag: 'Resolved',
+    kind: 'Effect',
     key: keyOf(declaration.canonical.id, Hir.contractOf(declaration)),
+    failures: Object.freeze(
+      declaration.failureRow.failures.map((failure) =>
+        Object.freeze({ type: failure, report: Type.encode(failure) }),
+      ),
+    ),
   })
 }
 
@@ -572,7 +621,7 @@ export const discover = (
   if (root === undefined) {
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
-  const entry = resolveEntry(root)
+  const entry = resolveEntry(root, index)
   if (entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'InstanceDiscovery',
@@ -658,6 +707,9 @@ export const discover = (
       ...slotDropHookTargets(fn, index, substitution),
       ...callableCallTargets(fn, results),
       ...cleanupHooks,
+      ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
+        ? entry.failures.flatMap((failure) => hookCalls(Ownership.cleanupPlan(index, failure.type)))
+        : []),
     ]) {
       const identity = `${call.declaration.module}\u0000${call.declaration.name}\u0000${call.typeArguments.map(Type.key).join('\u0000')}`
       if (!calls.has(identity)) calls.set(identity, call)

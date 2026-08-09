@@ -15,6 +15,7 @@ import * as Value from '@silk-effect/llvm/Value'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -108,13 +109,32 @@ export interface ControlProvenance {
 /** Stable public backend identifiers used by manifests and command-line selection. */
 export type Id = 'llvm' | 'wasm'
 
+/** Process-facing interpretation of the scalar `silk_main` result. */
+export type Termination =
+  | { readonly _tag: 'PassThrough' }
+  | { readonly _tag: 'EffectReports'; readonly reports: ReadonlyArray<string> }
+
 interface ArtifactBase {
   readonly module: string
   readonly backend: Id
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<SymbolEntry>
+  readonly termination: Termination
   readonly control: ReadonlyArray<ControlProvenance>
 }
+
+/** Retains the ordered report identities paired with normalized one-based failure tags. */
+export const terminationOf = (program: Mir.Module): Termination =>
+  program.entry._tag === 'UnavailableEntry'
+    ? (() => {
+        throw new RangeError(`Cannot emit unavailable entry: ${program.entry.reason}`)
+      })()
+    : program.entry._tag === 'OrdinaryEntry'
+      ? Object.freeze({ _tag: 'PassThrough' })
+      : Object.freeze({
+          _tag: 'EffectReports',
+          reports: Object.freeze(program.entry.failures.map((failure) => failure.report)),
+        })
 
 /** Deterministic LLVM bitcode requiring target-specific durable finalization. */
 export interface LlvmBitcodeArtifact extends ArtifactBase {
@@ -189,9 +209,9 @@ const injectivePart = (value: string): string => {
   return `${bytes.length}_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
-/** The entry is stable and every other symbol injectively encodes its canonical instance key. */
-export const symbolFor = (fn: Mir.MirFunction, ordinal: number): string =>
-  ordinal === 0
+/** The explicit machine entry is stable; every other symbol encodes its concrete instance key. */
+export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey): string =>
+  Mir.matchesInstanceKey(fn, entry)
     ? 'silk_main'
     : `silk_${sanitize(fn.id.module)}_${sanitize(fn.id.name)}__${[
         fn.instance.declaration.module,
@@ -289,6 +309,7 @@ const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
     case 'RetryEffect':
     case 'RunEffect':
     case 'RunEffectValue':
+    case 'CloseEffectEntry':
     case 'Construct':
     case 'ConstructArray':
     case 'Project':
@@ -322,6 +343,7 @@ const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RetryEffect' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
+  operation._tag === 'CloseEffectEntry' ||
   (operation._tag === 'Binary' &&
     operation.operator !== 'Equals' &&
     operation.operator !== 'NotEquals' &&
@@ -804,6 +826,8 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
           operation._tag === 'SlotTake' ||
           operation._tag === 'SlotCopy' ||
           operation._tag === 'SlotDrop' ||
+          (operation._tag === 'CloseEffectEntry' &&
+            operation.failures.some((failure) => planReclaims(failure.cleanup))) ||
           // A witness-dispatched allocation can arrive without any local Allocate operation,
           // and its cleanup still calls the release shim — at any nesting depth of the plan.
           (operation._tag === 'Drop' && planReclaims(operation.cleanup)),
@@ -835,7 +859,7 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       readonly resultLaneCount: number
       readonly linear: ReadonlyArray<LinearBlock>
     }> = []
-    for (const [ordinal, fn] of program.functions.entries()) {
+    for (const fn of program.functions) {
       const resultLaneCount = lanesFor(fn.result).length
       let resultType: LlvmType.Type
       if (resultLaneCount === 0) {
@@ -858,8 +882,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
       const signature = yield* LlvmType.functionType(builder, resultType, parameters)
       declared.push({
         fn,
-        symbol: symbolFor(fn, ordinal),
-        handle: yield* FunctionActor.declare(builder, symbolFor(fn, ordinal), signature),
+        symbol: symbolFor(fn, Mir.machineEntry(program)),
+        handle: yield* FunctionActor.declare(
+          builder,
+          symbolFor(fn, Mir.machineEntry(program)),
+          signature,
+        ),
         resultType,
         resultLaneCount,
         linear: linearize(fn),
@@ -3630,6 +3658,112 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(loaded))
                   break
                 }
+                case 'CloseEffectEntry': {
+                  const target = declared.find((candidate) =>
+                    Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
+                  )
+                  const runner = declared.find((candidate) =>
+                    Mir.matchesInstance(candidate.fn, operation.runner, operation.typeArguments),
+                  )
+                  if (target === undefined || runner === undefined)
+                    throw new RangeError(
+                      'Backend cannot resolve effect entry constructor or runner',
+                    )
+                  const effectValues = yield* callValues(target, [], 'effect_entry_make')
+                  locals.set(operation.effect.ordinal, effectValues)
+                  const outcomeValues = yield* callValues(runner, effectValues, 'effect_entry_run')
+                  locals.set(operation.outcome.ordinal, outcomeValues)
+                  const tag = outcomeValues.at(0)
+                  if (tag === undefined) throw new RangeError('Effect entry outcome lost its tag')
+                  const following = yield* LlvmBlock.make(body, 'effect_entry_following')
+                  const success = yield* LlvmBlock.make(body, 'effect_entry_success')
+                  const failureDispatch = yield* LlvmBlock.make(body, 'effect_entry_failure')
+                  yield* FunctionBody.conditionalBranch(
+                    body,
+                    yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      tag,
+                      yield* Constant.integerSigned(builder, i32, 0n),
+                      'effect_entry_succeeded',
+                    ),
+                    success,
+                    failureDispatch,
+                  )
+                  yield* LlvmBlock.setInsertionPoint(body, success)
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze([yield* Constant.integerSigned(builder, i32, 0n)]),
+                  )
+                  yield* FunctionBody.branch(body, following)
+                  yield* LlvmBlock.setInsertionPoint(body, failureDispatch)
+                  for (const [ordinal, failure] of operation.failures.entries()) {
+                    const selected = yield* LlvmBlock.make(body, `effect_entry_tag${failure.tag}`)
+                    const otherwise = yield* LlvmBlock.make(
+                      body,
+                      `effect_entry_tag${failure.tag}_otherwise`,
+                    )
+                    yield* FunctionBody.conditionalBranch(
+                      body,
+                      yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        tag,
+                        yield* Constant.integerSigned(builder, i32, BigInt(failure.tag)),
+                        `effect_entry_is_tag${failure.tag}`,
+                      ),
+                      selected,
+                      otherwise,
+                    )
+                    yield* LlvmBlock.setInsertionPoint(body, selected)
+                    const payloadLaneCount = lanesFor({
+                      _tag: 'Nominal',
+                      type: failure.type,
+                    }).length
+                    const payload = outcomeValues.slice(1, 1 + payloadLaneCount)
+                    if (payload.length !== payloadLaneCount) {
+                      throw new RangeError('Effect entry failure lost its typed payload lanes')
+                    }
+                    locals.set(failure.payload.ordinal, Object.freeze(payload))
+                    if (planReclaims(failure.cleanup) || failure.cleanup._tag === 'HookCleanup') {
+                      yield* dropThroughPlan(
+                        failure.cleanup,
+                        Object.freeze(payload),
+                        `effect_entry_cleanup${failure.tag}`,
+                      )
+                    }
+                    yield* storeMutable(
+                      operation.destination,
+                      Object.freeze([
+                        yield* Constant.integerSigned(builder, i32, BigInt(failure.tag)),
+                      ]),
+                    )
+                    yield* FunctionBody.branch(body, following)
+                    yield* LlvmBlock.setInsertionPoint(body, otherwise)
+                    if (ordinal === operation.failures.length - 1) {
+                      if (trapBlock === undefined)
+                        trapBlock = yield* LlvmBlock.make(body, 'effect_entry_invalid_tag')
+                      yield* FunctionBody.branch(body, trapBlock)
+                    }
+                  }
+                  if (operation.failures.length === 0) {
+                    if (trapBlock === undefined)
+                      trapBlock = yield* LlvmBlock.make(body, 'effect_entry_invalid_tag')
+                    yield* FunctionBody.branch(body, trapBlock)
+                  }
+                  yield* LlvmBlock.setInsertionPoint(body, following)
+                  const storage = mutableStorage.get(operation.destination.ordinal)
+                  const pointer = storage?.at(0)
+                  if (pointer === undefined)
+                    throw new RangeError('Effect entry status is not materialized')
+                  locals.set(
+                    operation.destination.ordinal,
+                    Object.freeze([
+                      yield* FunctionBody.load(body, i32, pointer, 'effect_entry_status'),
+                    ]),
+                  )
+                  break
+                }
                 case 'RetryEffect': {
                   const protectedTargetId = operation.protectedTarget
                   const protectedTarget =
@@ -4299,6 +4433,7 @@ export const LlvmBackend: Backend<LlvmBitcodeArtifact> = Object.freeze({
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
+      termination: terminationOf(program),
       control: llvmControl(program),
       bitcode: output.bitcode,
       ir: output.ir,

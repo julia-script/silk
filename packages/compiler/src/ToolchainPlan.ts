@@ -3,6 +3,8 @@
  * structured commands the orchestration issues (never a shell string), and the minimal C runtime
  * shim source. Browser-safe by construction — execution lives in `NativeToolchain`.
  */
+
+import type * as Backend from './Backend.js'
 import type * as Target from './Target.js'
 
 /** The fixed optimization profiles. There is no configurable pass pipeline. */
@@ -130,10 +132,53 @@ export const wasmCommand = (
  * entry. The shim's `main` returns `silk_main`'s `I32` result as the process exit status. Not
  * user-facing FFI; issue 07 owns the ABI's growth.
  */
-export const shimSource = `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+const ordinaryShimSource = `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
 extern int silk_main(void);
 
 int main(void) {
   return silk_main();
 }
 `
+
+const reportBytes = (identity: string): ReadonlyArray<number> =>
+  Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
+
+/** Generates the private native adapter for the artifact's exact termination contract. */
+export const shimSource = (termination: Backend.Termination): string => {
+  if (termination._tag === 'PassThrough') return ordinaryShimSource
+  const declarations = termination.reports.map(
+    (report, ordinal) =>
+      `static const unsigned char silk_report_${ordinal + 1}[] = { ${reportBytes(report).join(', ')} };`,
+  )
+  const cases = termination.reports.map(
+    (_, ordinal) =>
+      `    case ${ordinal + 1}:\n      return silk_write_all(silk_report_${ordinal + 1}, sizeof(silk_report_${ordinal + 1})) ? 1 : 2;`,
+  )
+  return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+#include <stddef.h>
+#include <unistd.h>
+
+extern int silk_main(void);
+${declarations.join('\n')}
+
+static int silk_write_all(const unsigned char *bytes, size_t length) {
+  size_t offset = 0;
+  while (offset < length) {
+    const ssize_t written = write(2, bytes + offset, length - offset);
+    if (written <= 0) return 0;
+    offset += (size_t)written;
+  }
+  return 1;
+}
+
+int main(void) {
+  const int tag = silk_main();
+  if (tag == 0) return 0;
+  switch (tag) {
+${cases.join('\n')}
+    default:
+      return 2;
+  }
+}
+`
+}

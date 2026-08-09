@@ -446,7 +446,13 @@ export const compile = Effect.fn('Driver.compile')(function* (
       const shim = phase(
         'shim',
         1,
-        () => NativeToolchain.compileShim(request.toolchain, scope, targetAndLayout.target),
+        () =>
+          NativeToolchain.compileShim(
+            request.toolchain,
+            scope,
+            targetAndLayout.target,
+            artifact.termination,
+          ),
         (result) => (result._tag === 'ObjectArtifact' ? 1 : 0),
       )
       if (shim._tag === 'ToolchainFailure') {

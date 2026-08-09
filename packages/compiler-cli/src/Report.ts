@@ -143,6 +143,14 @@ const entryReason = (reason: Extract<Driver.NoEntry, { _tag: 'NoEntry' }>['reaso
       return '`main` must take no parameters'
     case 'UntypedEntry':
       return '`main` must declare a resolved return type'
+    case 'InvalidOrdinaryEntryResult':
+      return 'ordinary `main` must return `I32`'
+    case 'InvalidEffectEntryResult':
+      return 'effectful `main` must succeed with `Unit`'
+    case 'EffectEntryRequirements':
+      return 'effectful `main` must have no unresolved capability requirements'
+    case 'UnreportableEntryFailure':
+      return 'every effectful `main` failure must conform to `Report`'
     case 'InvalidSource':
       return 'source diagnostics prevented entry discovery'
   }

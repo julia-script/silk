@@ -346,13 +346,7 @@ export type BlockedReason =
     }
   | {
       readonly _tag: 'UnavailableEntry'
-      readonly reason:
-        | 'MissingEntry'
-        | 'AmbiguousEntry'
-        | 'GenericEntry'
-        | 'ParameterizedEntry'
-        | 'UntypedEntry'
-        | 'InvalidSource'
+      readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
     }
   | {
       readonly _tag: 'Trap'
@@ -386,6 +380,15 @@ export interface Completed {
   readonly trace: ReadonlyArray<TraceEvent>
 }
 
+/** A reportable application failure closed by the generated effect-entry adapter. */
+export interface UnhandledFailure {
+  readonly _tag: 'UnhandledFailure'
+  readonly entry: DeclarationIndex.CanonicalId
+  readonly tag: number
+  readonly report: string
+  readonly trace: ReadonlyArray<TraceEvent>
+}
+
 /** A normal, inspectable reason bootstrap evaluation could not complete. */
 export interface Blocked {
   readonly _tag: 'Blocked'
@@ -395,7 +398,7 @@ export interface Blocked {
 }
 
 /** The closed outcome of executing one lowered program. */
-export type Outcome = Completed | Blocked
+export type Outcome = Completed | UnhandledFailure | Blocked
 
 type Step =
   | { readonly _tag: 'Value'; readonly value: Value }
@@ -2726,6 +2729,94 @@ function executeFunction(
             })
             return Object.freeze({ _tag: 'Value', value: propagated })
           }
+          case 'CloseEffectEntry': {
+            const target = functionFor(program, operation.target, operation.typeArguments)
+            const runner = functionFor(program, operation.runner, operation.typeArguments)
+            if (target === undefined || runner === undefined)
+              return blockedStep({
+                _tag: 'MissingFunction',
+                target: target === undefined ? operation.target : operation.runner,
+                span: operation.provenance.span,
+              })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                caller: fn.id,
+                target: operation.target,
+                callerInstance: fn.instance,
+                targetInstance: target.instance,
+                span: operation.provenance.span,
+              }),
+            )
+            const result = executeFunction(
+              program,
+              target,
+              [],
+              Object.freeze([...active, target.instance]),
+              trace,
+              state,
+            )
+            if (result._tag === 'Blocked') return result
+            if (result.value._tag !== 'EffectValue')
+              throw new RangeError('MIR effect entry constructor returned a non-Effect value')
+            const effect = result.value
+            write(operation.effect, { value: effect, fromCall: true })
+            trace.push(
+              Object.freeze({
+                _tag: 'Call',
+                caller: fn.id,
+                target: operation.runner,
+                callerInstance: fn.instance,
+                targetInstance: runner.instance,
+                span: operation.provenance.span,
+              }),
+            )
+            const execution = executeFunction(
+              program,
+              runner,
+              effect.captures,
+              Object.freeze([...active, runner.instance]),
+              trace,
+              state,
+            )
+            if (execution._tag === 'Blocked') return execution
+            if (execution.value._tag !== 'EffectOutcomeValue')
+              throw new RangeError('MIR effect entry runner returned a non-outcome value')
+            const effectOutcome = execution.value
+            write(operation.outcome, { value: effectOutcome, fromCall: true })
+            if (effectOutcome.tag === 0) {
+              write(operation.destination, { value: value(0), fromCall: true })
+              break
+            }
+            const failure = operation.failures.find(
+              (candidate) => candidate.tag === effectOutcome.tag,
+            )
+            if (failure === undefined)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: `effect entry returned invalid failure tag ${effectOutcome.tag}`,
+                span: operation.provenance.span,
+              })
+            write(failure.payload, { value: effectOutcome.payload, fromCall: true })
+            const released = releaseThroughPlan(
+              failure.cleanup,
+              effectOutcome.payload,
+              operation.provenance,
+              failure.payload.ordinal,
+            )
+            if (released !== undefined) return released
+            trace.push(
+              Object.freeze({
+                _tag: 'EffectFailure',
+                function: fn.id,
+                tag: failure.tag,
+                span: operation.provenance.span,
+              }),
+            )
+            write(operation.destination, { value: value(failure.tag), fromCall: true })
+            break
+          }
           case 'Call': {
             const target = functionFor(program, operation.target, operation.typeArguments)
             if (target === undefined) {
@@ -2886,6 +2977,14 @@ const firstFunctionSpan = (program: Mir.Module): SourceSpan.SourceSpan => {
 
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
 export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): Outcome => {
+  if (discovery.entry._tag !== 'Resolved') {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: undefined,
+      reason: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
+      trace: Object.freeze([]),
+    })
+  }
   const violations = Mir.verify(program)
   if (violations.length > 0) {
     return Object.freeze({
@@ -2895,17 +2994,9 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
       trace: Object.freeze([]),
     })
   }
-  if (discovery.entry._tag !== 'Resolved') {
-    return Object.freeze({
-      _tag: 'Blocked',
-      entry: undefined,
-      reason: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
-      trace: Object.freeze([]),
-    })
-  }
-
-  const entry = discovery.entry.key.declaration
-  const fn = functionFor(program, entry, discovery.entry.key.typeArguments)
+  const machine = Mir.machineEntry(program)
+  const entry = machine.declaration
+  const fn = functionFor(program, entry, machine.typeArguments)
   if (fn === undefined) {
     return Object.freeze({
       _tag: 'Blocked',
@@ -2946,6 +3037,30 @@ export const evaluate = (discovery: Instances.Discovery, program: Mir.Module): O
   }
   if (result.value._tag !== 'I32Value') {
     throw new RangeError('Bootstrap entry returned a non-I32 value')
+  }
+  const status = result.value
+  if (program.entry._tag === 'EffectEntry' && status.value !== 0) {
+    const failure = program.entry.failures.find((candidate) => candidate.tag === status.value)
+    if (failure === undefined) {
+      return Object.freeze({
+        _tag: 'Blocked',
+        entry,
+        reason: Object.freeze({
+          _tag: 'Trap',
+          function: entry,
+          reason: `effect entry returned invalid failure tag ${status.value}`,
+          span: argumentSpanFallback(fn),
+        }),
+        trace: Object.freeze([...trace]),
+      })
+    }
+    return Object.freeze({
+      _tag: 'UnhandledFailure',
+      entry,
+      tag: failure.tag,
+      report: failure.report,
+      trace: Object.freeze([...trace]),
+    })
   }
   return Object.freeze({
     _tag: 'Completed',

@@ -223,8 +223,9 @@ export const compileShim = (
   toolchain: Toolchain,
   scope: BuildScope,
   target: Target.Target,
+  termination: Backend.Termination,
 ): ObjectArtifact | ToolchainFailure => {
-  const source = writeArtifact(scope, target, 'silk_shim.c', ToolchainPlan.shimSource)
+  const source = writeArtifact(scope, target, 'silk_shim.c', ToolchainPlan.shimSource(termination))
   const objectPath = join(scope.root, 'silk_shim.o')
   const planned = ToolchainPlan.shimCommand(toolchain.clang, target, source.path, objectPath)
   const result = runPlanned(planned)
