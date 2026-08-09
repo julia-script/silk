@@ -20,6 +20,7 @@ import * as Mir from './Mir.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
+import type * as ModuleTooling from './ModuleTooling.js'
 import * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
@@ -62,6 +63,7 @@ export interface FrontendSnapshot {
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
+  readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly semanticOccurrences: SemanticOccurrence.Index
   readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>

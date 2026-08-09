@@ -64,6 +64,9 @@ it.effect('keeps unrelated modules and body-only importers reusable', () =>
     assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
     assert.notStrictEqual(current.semantics.get('app/B'), previous.semantics.get('app/B'))
     assert.notStrictEqual(current.semantics.get('app/C'), previous.semantics.get('app/C'))
+    assert.strictEqual(current.toolingModules.get('app/A'), previous.toolingModules.get('app/A'))
+    assert.notStrictEqual(current.toolingModules.get('app/B'), previous.toolingModules.get('app/B'))
+    assert.notStrictEqual(current.toolingModules.get('app/C'), previous.toolingModules.get('app/C'))
     const view = ProjectAnalysis.view(current, 'app/A') ?? assert.fail('missing app/A view')
     const call = Analysis.semanticOccurrenceAt(view, 'app/A', importer.lastIndexOf('answer'))
     assert.strictEqual(call?.declaration?.module, 'app/B')
@@ -122,6 +125,10 @@ it.effect('invalidates importers for signatures, visibility, and nominal struct 
       assert.notStrictEqual(
         current.semantics.get('app/Importer'),
         previous.semantics.get('app/Importer'),
+      )
+      assert.notStrictEqual(
+        current.toolingModules.get('app/Importer'),
+        previous.toolingModules.get('app/Importer'),
       )
     }
   }),

@@ -146,6 +146,10 @@
       "types": "./dist/ModuleSemantics.d.ts",
       "import": "./dist/ModuleSemantics.js"
     },
+    "./ModuleTooling": {
+      "types": "./dist/ModuleTooling.d.ts",
+      "import": "./dist/ModuleTooling.js"
+    },
     "./NameResolution": {
       "types": "./dist/NameResolution.d.ts",
       "import": "./dist/NameResolution.js"
