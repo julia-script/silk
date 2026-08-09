@@ -8,12 +8,16 @@ Defines how the Silk CLI safely creates a minimal executable project in a new or
 
 ### Requirement: Initialize a minimal executable project
 
-`silk init [path]` SHALL create a sparse `silk.toml`, a `src/main.silk` executable entry, and a `/build/` ignore rule at the selected project directory. An omitted path SHALL select the current directory, and a missing selected directory SHALL be created. The generated project SHALL load, check, build, and run using manifest defaults without further configuration.
+`silk init [path]` SHALL create a sparse `silk.toml`, a `src/main.silk` executable entry declared as
+a public zero-argument `effect fn main() -> ()`, and a `/build/` ignore rule at the selected project
+directory. An omitted path SHALL select the current directory, and a missing selected directory
+SHALL be created. The generated project SHALL load, check, build, and run using manifest defaults
+without further configuration.
 
 #### Scenario: Initialize a named child directory
 
 - **WHEN** a user runs `silk init hello` and `hello` does not exist
-- **THEN** the CLI creates `hello/silk.toml`, `hello/.gitignore`, and `hello/src/main.silk` as a valid executable project
+- **THEN** the CLI creates `hello/silk.toml`, `hello/.gitignore`, and `hello/src/main.silk` as a valid effectful executable project
 
 #### Scenario: Initialize the current directory
 
@@ -23,7 +27,7 @@ Defines how the Silk CLI safely creates a minimal executable project in a new or
 #### Scenario: Run the generated entry
 
 - **WHEN** the generated `src/main.silk` is built and run for the host
-- **THEN** its public zero-argument `main` returns `0`
+- **THEN** its public zero-argument effectful `main` is run once and the process exits with status `0`
 
 ### Requirement: Derive or explicitly select the package name
 

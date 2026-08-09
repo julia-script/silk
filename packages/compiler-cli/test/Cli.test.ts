@@ -25,6 +25,10 @@ it.effect('initializes a project that loads, checks, builds, and runs with defau
     const projectRoot = `${root}/hello`
     const initialized = yield* execute(['init', projectRoot])
     assert.strictEqual(Result.isSuccess(initialized), true)
+    assert.strictEqual(
+      yield* fileSystem.readFileString(`${projectRoot}/src/main.silk`),
+      'pub effect fn main() -> () {\n  return ()\n}\n',
+    )
     const loaded = yield* execute(['check', '--manifest-path', `${projectRoot}/silk.toml`])
     assert.strictEqual(Result.isSuccess(loaded), true)
     const built = yield* execute(['build', '--manifest-path', `${projectRoot}/silk.toml`])
