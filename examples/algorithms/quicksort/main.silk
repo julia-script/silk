@@ -1,0 +1,42 @@
+fn exchange(values: &mut [i32], left: usize, right: usize) {
+  let temporary = values[left]
+  values[left] = values[right]
+  values[right] = temporary
+}
+
+fn partition(values: &mut [i32], low: usize, high: usize) -> usize {
+  let pivot = values[high]
+  let mut boundary = low
+  let mut scan = low
+  while scan < high {
+    if values[scan] <= pivot {
+      let exchanged = exchange(&mut values, boundary, scan)
+      boundary = boundary + 1
+    }
+    scan = scan + 1
+  }
+  let pivotPlaced = exchange(&mut values, boundary, high)
+  return boundary
+}
+
+fn quicksort(values: &mut [i32], low: usize, high: usize) {
+  if low < high {
+    let pivot = partition(&mut values, low, high)
+    if pivot > 0 {
+      let sortedLeft = quicksort(&mut values, low, pivot - 1)
+    }
+    let sortedRight = quicksort(&mut values, pivot + 1, high)
+  }
+}
+
+pub fn main() -> i32 {
+  let mut values = [9, -3, 5, 1, 0, -8, 7, 2]
+  let sorted = quicksort(&mut values, 0, 7)
+  let mut index = usize.add(0, 0)
+  let mut fingerprint = 1
+  while index < 8 {
+    fingerprint = (fingerprint * 17 + values[index]) % 251
+    index = index + 1
+  }
+  return fingerprint
+}

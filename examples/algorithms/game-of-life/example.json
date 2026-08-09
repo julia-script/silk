@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "game-of-life",
+  "title": "Conway's Game of Life",
+  "status": "executable",
+  "source": "main.silk",
+  "input": "A centered horizontal three-cell oscillator on a toroidal 5x5 board, advanced once.",
+  "expected": {
+    "entryResult": 7,
+    "summary": "The only live cells in the final 5x5 board are the centered vertical oscillator."
+  },
+  "capabilities": [
+    "bool",
+    "i32",
+    "usize",
+    "fixed arrays",
+    "shared slices",
+    "mutable indexing",
+    "nested while loops"
+  ],
+  "targets": ["evaluation", "native", "wasm"],
+  "blockers": []
+}

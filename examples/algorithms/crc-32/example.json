@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "crc-32",
+  "title": "CRC-32",
+  "status": "executable",
+  "source": "main.silk",
+  "input": "The committed bytes [153, 19, 29, 0].",
+  "expected": {
+    "entryResult": 7,
+    "summary": "The full reflected IEEE CRC-32 is 0x00000007."
+  },
+  "capabilities": [
+    "u8",
+    "u32",
+    "i32",
+    "usize",
+    "fixed byte arrays",
+    "bit operations",
+    "nested while loops",
+    "indexed static byte views (frontier)"
+  ],
+  "targets": ["evaluation", "native", "wasm"],
+  "blockers": []
+}
