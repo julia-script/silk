@@ -67,7 +67,7 @@ describe('projectDataFlow', () => {
 
     expect(children.map((group) => group.ordinal)).toEqual([0, 1])
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
-    expect(children.map((group) => group.evaluation?.order)).toEqual([3, 7])
+    expect(children.map((group) => group.evaluation?.order)).toEqual([3, 8])
     expect(flow.mode).toBe('Evaluated')
     expect(flow.nodes.some((item) => item.evaluation?.value === 2)).toBe(true)
   })
@@ -127,11 +127,11 @@ pub fn main() -> i32 { return choose(identity(1), missing(2)) }`)
     expect(flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined)).toBe(false)
   })
 
-  it('renders a recursive cycle as one finite trace-backed terminal', () => {
+  it('renders a call-depth limit as one finite trace-backed terminal', () => {
     const snapshot = snap('memory/flow-cycle', `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(main()) }`)
     const analysis = Analysis.rootAnalysis(snapshot)
-    const outcome = Analysis.evaluate(snapshot)
+    const outcome = Analysis.evaluate(snapshot, { maxCallDepth: 4 })
     const flow = projectDataFlow(analysis, outcome)
     const terminals = flow.nodes.filter(
       (item) => item.layer === 'Evaluated' && item.kind === 'Terminal',
@@ -139,7 +139,8 @@ pub fn main() -> i32 { return identity(main()) }`)
 
     expect(outcome._tag).toBe('Blocked')
     expect(terminals).toHaveLength(1)
-    expect(terminals.at(0)?.detail).toContain('main → main')
+    expect(terminals.at(0)?.detail).toContain('EvaluationLimit(CallDepth): 4/4')
+    expect(terminals.at(0)?.detail).toContain('f3:d4 main')
     expect(flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined)).toBe(false)
   })
 

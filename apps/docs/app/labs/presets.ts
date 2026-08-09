@@ -22,6 +22,7 @@ import {
   vectorFailedGrowthSource,
   vectorGrowthSource,
 } from './owned-sequence-presets'
+import type { BootstrapEvaluation } from '@silk-effect/compiler'
 
 export interface Preset {
   readonly label: string
@@ -29,6 +30,7 @@ export interface Preset {
   readonly group: string
   readonly root: string
   readonly modules: Readonly<Record<string, string>>
+  readonly evaluation?: BootstrapEvaluation.Options
 }
 
 /** Single-module presets are the common case; this keeps the table readable. */
@@ -44,6 +46,25 @@ const mainFn = 'pub fn main() -> i32 { return 42 }'
 const identity = 'pub fn identity(value: i32) -> i32 { return value }'
 
 export const presets: ReadonlyArray<Preset> = [
+  {
+    label: 'ok · Completed runtime recursion',
+    group: 'evaluation',
+    root: 'main',
+    modules: {
+      main: `fn countdown(value: i32) -> i32 {
+  if value == 0 { return 42 }
+  return countdown(value - 1)
+}
+pub fn main() -> i32 { return countdown(4) }`,
+    },
+  },
+  {
+    label: 'trap · Call-depth evaluation limit',
+    group: 'evaluation',
+    root: 'main',
+    modules: { main: 'pub fn main() -> i32 { return main() }' },
+    evaluation: { maxCallDepth: 4 },
+  },
   one(
     'generics',
     'ok · Inferred and explicit specializations',

@@ -8,8 +8,13 @@ import { corpus } from './support/corpus.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const evaluateSource = (text: string): Effect.Effect<BootstrapEvaluation.Outcome> =>
-  Effect.map(Analysis.ofSource('memory/evaluation', ascii(text)), Analysis.evaluate)
+const evaluateSource = (
+  text: string,
+  options: BootstrapEvaluation.Options = {},
+): Effect.Effect<BootstrapEvaluation.Outcome> =>
+  Effect.map(Analysis.ofSource('memory/evaluation', ascii(text)), (snapshot) =>
+    Analysis.evaluate(snapshot, options),
+  )
 
 it.effect('reproduces every pinned corpus outcome', () =>
   Effect.gen(function* () {
@@ -26,18 +31,6 @@ it.effect('reproduces every pinned corpus outcome', () =>
           assert.strictEqual(outcome._tag, 'Blocked', program.name)
           if (outcome._tag === 'Blocked') {
             assert.strictEqual(outcome.reason._tag, 'Trap', program.name)
-          }
-          break
-        case 'RecursiveCycle':
-          assert.strictEqual(outcome._tag, 'Blocked', program.name)
-          if (outcome._tag === 'Blocked' && outcome.reason._tag === 'RecursiveCycle') {
-            assert.deepEqual(
-              outcome.reason.cycle.map((instance) => instance.declaration.name),
-              program.expected.cycle,
-              program.name,
-            )
-          } else {
-            assert.fail(`${program.name} expected a recursive cycle`)
           }
           break
         case 'UnavailableEntry':
@@ -61,7 +54,7 @@ pub fn main() -> i32 { return identity(42) }`)
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, undefined, 2))
     assert.deepEqual(
       outcome.trace.map((event) => event._tag),
-      ['Entry', 'RegionEntry', 'Call', 'Binding', 'RegionEntry', 'Return', 'Return'],
+      ['Entry', 'RegionEntry', 'Call', 'Binding', 'Entry', 'RegionEntry', 'Return', 'Return'],
     )
     const binding = outcome.trace.at(3)
     assert.strictEqual(binding?._tag, 'Binding')
@@ -71,6 +64,16 @@ pub fn main() -> i32 { return identity(42) }`)
     assert.strictEqual(binding.value.value, 42)
     assert.strictEqual(binding.parameterOrdinal, 0)
     assert.strictEqual(binding.fromCall, false)
+    assert.strictEqual(binding.frame, 1)
+    assert.strictEqual(binding.depth, 2)
+    const entries = outcome.trace.filter((event) => event._tag === 'Entry')
+    assert.deepEqual(
+      entries.map(({ frame, depth }) => [frame, depth]),
+      [
+        [0, 1],
+        [1, 2],
+      ],
+    )
   }),
 )
 
@@ -314,10 +317,12 @@ pub fn main() -> i32 {
         'RegionEntry',
         'Call',
         'Binding',
+        'Entry',
         'RegionEntry',
         'Return',
         'RegionEntry',
         'Call',
+        'Entry',
         'RegionEntry',
         'EffectSuccess',
         'Return',
@@ -361,20 +366,22 @@ pub fn main() -> i32 { return identity(identity(42)) }`)
       'RegionEntry',
       'Call',
       'Binding',
+      'Entry',
       'RegionEntry',
       'Return',
       'Call',
       'Binding',
+      'Entry',
       'RegionEntry',
       'Return',
       'Return',
     ])
-    const outerBinding = outcome.trace.at(7)
+    const outerBinding = outcome.trace.at(8)
     assert.strictEqual(outerBinding?._tag, 'Binding')
     if (outerBinding?._tag !== 'Binding') return
     assert.strictEqual(outerBinding.fromCall, true)
     const innerCall = outcome.trace.at(2)
-    const outerCall = outcome.trace.at(6)
+    const outerCall = outcome.trace.at(7)
     assert.strictEqual(innerCall?._tag, 'Call')
     assert.strictEqual(outerCall?._tag, 'Call')
     if (innerCall?._tag !== 'Call' || outerCall?._tag !== 'Call') return
@@ -398,15 +405,68 @@ pub fn main() -> i32 { return choose(identity(1), missing(2)) }`)
   }),
 )
 
-it.effect('blocks recursive cycles with the closing call span', () =>
+it.effect('bounds direct and mutual recursion by active call depth', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource('pub fn main() -> i32 { return main() }')
+    for (const source of [
+      'pub fn main() -> i32 { return main() }',
+      `pub fn main() -> i32 { return other() }
+fn other() -> i32 { return main() }`,
+    ]) {
+      const outcome = yield* evaluateSource(source, { maxCallDepth: 4 })
+      assert.strictEqual(outcome._tag, 'Blocked')
+      if (outcome._tag !== 'Blocked') continue
+      assert.strictEqual(outcome.reason._tag, 'EvaluationLimit')
+      if (outcome.reason._tag !== 'EvaluationLimit') continue
+      assert.strictEqual(outcome.reason.kind, 'CallDepth')
+      assert.strictEqual(outcome.reason.limit, 4)
+      assert.strictEqual(outcome.reason.count, 4)
+      assert.lengthOf(outcome.reason.activeFrames, 4)
+      assert.isAbove(outcome.reason.span.end, outcome.reason.span.start)
+    }
+  }),
+)
 
+it.effect('unwinds a typed failure through recursive effect activations', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`struct Problem { code: i32 }
+effect fn countdown(value: i32) -> i32 ! Problem {
+  if value == 0 { fail Problem { code: 41 } }
+  return run countdown(value - 1)
+}
+effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
+pub fn main() -> i32 { return run Effect.catch<Problem>(countdown(4), recover) }`)
+
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42)
+    assert.isAtLeast(outcome.trace.filter((event) => event._tag === 'EffectFailure').length, 1)
+  }),
+)
+
+it.effect('stops an infinite loop at the exact configured operation count', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource('pub fn main() -> i32 { while true {} return 0 }', {
+      maxSteps: 8,
+    })
     assert.strictEqual(outcome._tag, 'Blocked')
     if (outcome._tag !== 'Blocked') return
-    assert.strictEqual(outcome.reason._tag, 'RecursiveCycle')
-    if (outcome.reason._tag !== 'RecursiveCycle') return
-    assert.isAbove(outcome.reason.closingCallSpan.end, outcome.reason.closingCallSpan.start)
+    assert.strictEqual(outcome.reason._tag, 'EvaluationLimit')
+    if (outcome.reason._tag !== 'EvaluationLimit') return
+    assert.strictEqual(outcome.reason.kind, 'Steps')
+    assert.strictEqual(outcome.reason.limit, 8)
+    assert.strictEqual(outcome.reason.count, 8)
+    assert.isAbove(outcome.reason.span.end, outcome.reason.span.start)
+  }),
+)
+
+it.effect('validates resource limits before evaluation', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'memory/invalid-limits',
+      ascii('pub fn main() -> i32 { return 0 }'),
+    )
+    assert.throws(() => Analysis.evaluate(snapshot, { maxSteps: 0 }), RangeError)
+    assert.throws(() => Analysis.evaluate(snapshot, { maxCallDepth: 1.5 }), RangeError)
   }),
 )
 

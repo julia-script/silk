@@ -1044,13 +1044,13 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
     case 'Entry':
-      return `enter ${event.function.module}.${event.function.name}`
+      return `enter ${event.function.module}.${event.function.name} · frame ${event.frame} · depth ${event.depth}`
     case 'Call':
-      return `call ${event.target.module}.${event.target.name}`
+      return `call ${event.target.module}.${event.target.name} · frame ${event.frame} · depth ${event.depth}`
     case 'Binding':
-      return `bind p${event.parameterOrdinal} = ${valueText(event.value)}`
+      return `bind p${event.parameterOrdinal} = ${valueText(event.value)} · frame ${event.frame} · depth ${event.depth}`
     case 'Return':
-      return `return ${valueText(event.value)}`
+      return `return ${valueText(event.value)} · frame ${event.frame} · depth ${event.depth}`
     case 'Construct':
       return `construct ${typeText(event.type)} · ${event.fieldCount} field${
         event.fieldCount === 1 ? '' : 's'
@@ -1074,7 +1074,7 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
         )
         .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':
-      return `cleanup _${event.local}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`}`
+      return `cleanup _${event.local}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`} · frame ${event.frame} · depth ${event.depth}`
     case 'MatchDispatch':
       return `match ${event.access.toLowerCase()} · active ${typeText(event.member)}`
     case 'MatchCandidate':
@@ -1141,19 +1141,20 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
 const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
   switch (event._tag) {
     case 'Entry':
-      return 0
+      return event.depth - 1
     case 'Call':
-      return 1
+      return event.depth
     case 'Binding':
-      return 2
+      return event.depth
     case 'Return':
-      return 1
+      return event.depth - 1
+    case 'Cleanup':
+      return event.depth
     case 'Construct':
     case 'ArrayConstruct':
     case 'UnionConversion':
     case 'Project':
     case 'PlaceRead':
-    case 'Cleanup':
     case 'MatchDispatch':
     case 'MatchCandidate':
     case 'MatchSelected':
@@ -1199,8 +1200,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `trap · ${reason.reason}`
     case 'MissingFunction':
       return `missing function · ${reason.target.module}.${reason.target.name}`
-    case 'RecursiveCycle':
-      return `recursive cycle · ${reason.cycle.map((instance) => instance.declaration.name).join(' → ')}`
+    case 'EvaluationLimit':
+      return `${reason.kind === 'Steps' ? 'step' : 'call-depth'} limit · ${reason.count}/${reason.limit} · stopped in ${reason.function.module}.${reason.function.name} · active ${reason.activeFrames.map((frame) => `f${frame.frame}:d${frame.depth} ${frame.function.name}`).join(' → ')}`
     case 'InvalidCallableReuse':
       return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
     case 'MissingStandardStreams':

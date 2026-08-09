@@ -666,8 +666,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
   switch (reason._tag) {
     case 'InvalidMir':
       return `InvalidMir: ${reason.violations.length} violations`
-    case 'RecursiveCycle':
-      return `RecursiveCycle: ${reason.cycle.map((instance) => instance.declaration.name).join(' → ')}`
+    case 'EvaluationLimit':
+      return `EvaluationLimit(${reason.kind}): ${reason.count}/${reason.limit} in ${reason.function.name}; active ${reason.activeFrames.map((frame) => `f${frame.frame}:d${frame.depth} ${frame.function.name}`).join(' → ')}`
     case 'Trap':
       return `Trap: ${reason.reason}`
     case 'UnavailableEntry':
@@ -697,8 +697,8 @@ const blockedSpan = (
       return reason.span
     case 'MissingStandardStreams':
       return undefined
-    case 'RecursiveCycle':
-      return reason.closingCallSpan
+    case 'EvaluationLimit':
+      return reason.span
   }
 }
 

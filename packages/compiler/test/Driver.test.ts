@@ -354,11 +354,36 @@ it.effect(
             `differential divergence on ${program.name}: interpreter trapped, native exited ${run.status}`,
           )
         }
-
-        // RecursiveCycle: the program must compile; native unbounded recursion is not executed.
       }
     }),
   60000,
+)
+
+it.effect('keeps direct WebAssembly in agreement across recursive corpus fixtures', () =>
+  Effect.gen(function* () {
+    const recursiveNames = new Set([
+      'direct-recursion',
+      'mutual-recursion',
+      'same-specialization-recursion',
+      'recursive-aggregate-return',
+      'recursive-mutable-slice',
+    ])
+    for (const program of corpus.filter((candidate) => recursiveNames.has(candidate.name))) {
+      if (program.expected._tag !== 'Completes') continue
+      const snapshot = yield* Analysis.ofSource(
+        `wasm-recursion/${program.name}`,
+        ascii(program.source),
+        'wasm32-unknown-unknown',
+      )
+      const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.strictEqual(
+        (instance.exports.silk_main as () => number)(),
+        program.expected.result,
+        program.name,
+      )
+    }
+  }),
 )
 
 it.effect('stops unsupported targets before MIR or native tools', () =>

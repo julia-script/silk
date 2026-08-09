@@ -152,12 +152,12 @@ const evidence = (self: Analysis.Snapshot) => {
   }
   const outcome = Analysis.evaluate(self)
   if (outcome._tag !== 'Blocked') return []
-  if (outcome.reason._tag === 'RecursiveCycle') {
+  if (outcome.reason._tag === 'EvaluationLimit') {
     return [
       Object.freeze({
-        phase: 'evaluation',
+        phase: 'evaluation' as const,
         code: outcome.reason._tag,
-        message: outcome.reason.cycle.map((instance) => instance.declaration.name).join(' -> '),
+        message: `${outcome.reason.kind} ${outcome.reason.count}/${outcome.reason.limit}`,
       }),
     ]
   }
@@ -221,7 +221,14 @@ it('keeps seven complete, readable programs and explicit status contracts', () =
     examples
       .filter(({ manifest }) => manifest.status === 'executable')
       .map(({ manifest }) => manifest.id),
-    ['breadth-first-search', 'crc-32', 'game-of-life', 'matrix-multiplication', 'sieve'],
+    [
+      'breadth-first-search',
+      'crc-32',
+      'game-of-life',
+      'matrix-multiplication',
+      'quicksort',
+      'sieve',
+    ],
   )
   for (const { root, manifest, source, bytes, readme } of examples) {
     assert.strictEqual(manifest.id, root.slice(root.lastIndexOf('/') + 1))

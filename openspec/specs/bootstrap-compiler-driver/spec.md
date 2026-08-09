@@ -59,8 +59,8 @@ Every successful driver outcome SHALL retain the canonical backend identifier, t
 The fixed corpus SHALL run through both the interpreter and native compilation-and-execution as
 part of the test suite CI enforces. For completing programs the native exit status SHALL equal
 the interpreter's `i32` result; trap-blocked programs SHALL terminate abnormally natively;
-recursion-blocked programs SHALL still compile. A disagreement SHALL fail the build naming the
-program and both sides' outcomes.
+terminating recursive programs SHALL execute normally. A disagreement SHALL fail the build naming
+the program and both sides' outcomes.
 
 #### Scenario: Agree on completing programs
 
@@ -71,6 +71,23 @@ program and both sides' outcomes.
 
 - **WHEN** a corpus program's native outcome differs from the interpreter's
 - **THEN** the harness fails naming the program and the diverging outcomes
+
+### Requirement: Differential gates execute terminating recursion
+
+The compiler driver corpus SHALL execute representative direct recursion, mutual recursion, generic
+same-argument recursion, and recursion over a mutable slice through evaluation, native LLVM, and
+direct WebAssembly. Completing programs SHALL agree on results and caller-visible mutations, while
+fresh-process compiler artifacts remain deterministic.
+
+#### Scenario: Compare recursive quicksort engines
+
+- **WHEN** the committed in-place quicksort recursively partitions its mutable slice
+- **THEN** evaluation, native execution, and direct WebAssembly produce the same sorted fingerprint
+
+#### Scenario: Preserve monomorphic recursive identity
+
+- **WHEN** a generic recursive function calls itself with its current concrete type arguments
+- **THEN** one monomorphic instance is reused while each runtime invocation receives a distinct activation frame
 
 ### Requirement: Determinism gates are enforced continuously
 

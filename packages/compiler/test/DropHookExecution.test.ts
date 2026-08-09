@@ -98,6 +98,30 @@ effect fn recover(error: OutOfMemory) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
 
+/** Recursive return: every suspended activation releases its own guard exactly once. */
+const recursiveReturn = `struct Guard {
+  tag: i32
+  storage: Allocation
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+
+effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  let guard = Guard { tag: remaining, storage: move allocation }
+  if remaining == 0 { return 42 }
+  return run recurse(remaining - 1)
+}
+
+effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(recurse(2), recover) }`
+
 const hookCallsOf = (run: ReturnType<typeof Analysis.evaluate>) =>
   run._tag === 'Completed'
     ? run.trace.filter(
@@ -111,6 +135,7 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
       ['fallthrough', fallthrough, 42, 1, 1],
       ['early-drop', earlyDrop, 42, 1, 1],
       ['failure-propagation', failurePropagation, 7, 1, 1],
+      ['recursive-return', recursiveReturn, 42, 3, 3],
     ] as const) {
       const snapshot = yield* Analysis.ofSource(
         `drop-hook/${name}`,

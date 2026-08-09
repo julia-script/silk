@@ -29,6 +29,9 @@ export const activeModuleAtom = Atom.make(initialPreset.root)
 export const programNameAtom = Atom.make(initialPreset.label)
 export const profileAtom = Atom.make<ToolchainPlan.OptimizationProfile>('release')
 export const targetAtom = Atom.make<Target.Id>('aarch64-apple-darwin')
+export const evaluationOptionsAtom = Atom.make<BootstrapEvaluation.Options>(
+  initialPreset.evaluation ?? {},
+)
 
 /**
  * Codegen's debug-info mode is derived from the profile rather than being its own control: the
