@@ -32,8 +32,7 @@ struct VmDiagnostic {
 }
 
 struct Executed {
-  steps: Vector<Step>
-  diagnostics: Vector<VmDiagnostic>
+  events: Vector<Step | VmDiagnostic>
   result: i32
   fingerprint: i32
 }
@@ -41,7 +40,7 @@ struct Executed {
 fn zero() -> usize { return usize.add(0, 0) }
 
 effect fn pushStep(
-  steps: &mut Vector<Step>,
+  events: &mut Vector<Step | VmDiagnostic>,
   pc: usize,
   opcode: u8,
   depth: usize,
@@ -49,7 +48,7 @@ effect fn pushStep(
   fingerprint: i32
 ) -> i32 ! OutOfMemory ? &mut Allocator {
   let step = Step { pc: pc, opcode: opcode, depth: depth, top: top }
-  let added = run append<Step>(move steps, move step)
+  let added = run append<Step | VmDiagnostic>(move events, move step)
   let observedPc = observeStepPc(pc)
   let observedOpcode = observeStepOpcode(opcode)
   let observedDepth = observeStepDepth(depth)
@@ -61,13 +60,13 @@ effect fn pushStep(
 }
 
 effect fn pushDiagnostic(
-  diagnostics: &mut Vector<VmDiagnostic>,
+  events: &mut Vector<Step | VmDiagnostic>,
   pc: usize,
   code: usize,
   fingerprint: i32
 ) -> i32 ! OutOfMemory ? &mut Allocator {
   let diagnostic = VmDiagnostic { pc: pc, code: code }
-  let added = run append<VmDiagnostic>(move diagnostics, move diagnostic)
+  let added = run append<Step | VmDiagnostic>(move events, move diagnostic)
   let observedPc = observeDiagnosticPc(pc)
   let observedCode = observeDiagnosticCode(code)
   return (
@@ -77,14 +76,12 @@ effect fn pushDiagnostic(
 
 fn finish(
   result: i32,
-  steps: Vector<Step>,
-  diagnostics: Vector<VmDiagnostic>,
+  events: Vector<Step | VmDiagnostic>,
   fingerprint: i32
 ) -> Executed {
   let observedResult = observeResult(result)
   return Executed {
-    steps: move steps,
-    diagnostics: move diagnostics,
+    events: move events,
     result: result,
     fingerprint: (fingerprint * 23 + observedResult) % 251
   }
@@ -97,13 +94,12 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
   let mut attempted = zero()
   let mut currentTop = 0
   let mut fingerprint = 0
-  let mut steps = make<Step>()
-  let mut diagnostics = make<VmDiagnostic>()
+  let mut events = make<Step | VmDiagnostic>()
 
   while pc < bytecode.length {
     if attempted >= stepLimit {
-      fingerprint = run pushDiagnostic(&mut diagnostics, pc, diagnosticStepLimit, fingerprint)
-      return finish(currentTop, move steps, move diagnostics, fingerprint)
+      fingerprint = run pushDiagnostic(&mut events, pc, diagnosticStepLimit, fingerprint)
+      return finish(currentTop, move events, fingerprint)
     }
     attempted = attempted + 1
     let instructionPc = pc
@@ -111,29 +107,29 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
 
     if opcode == opcodeHalt {
       pc = pc + 1
-      fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
-      return finish(currentTop, move steps, move diagnostics, fingerprint)
+      fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
+      return finish(currentTop, move events, fingerprint)
     }
 
     if opcode == opcodePush {
       if instructionPc + 1 >= bytecode.length {
-        fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticTruncatedOperand, fingerprint)
-        return finish(currentTop, move steps, move diagnostics, fingerprint)
+        fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticTruncatedOperand, fingerprint)
+        return finish(currentTop, move events, fingerprint)
       }
       let value = bytecode[instructionPc + 1] |> u8.toI32
       if depth >= stackLimit {
-        fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackOverflow, fingerprint)
-        return finish(currentTop, move steps, move diagnostics, fingerprint)
+        fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackOverflow, fingerprint)
+        return finish(currentTop, move events, fingerprint)
       }
       stack[depth] = value
       depth = depth + 1
       currentTop = value
       pc = pc + 2
-      fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+      fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
     } else {
       if opcode == opcodeAdd {
         if depth < 2 {
-          fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackUnderflow, fingerprint)
+          fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
           pc = pc + 1
         } else {
           depth = depth - 1
@@ -145,12 +141,12 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
           depth = depth + 1
           currentTop = result
           pc = pc + 1
-          fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+          fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
         }
       } else {
         if opcode == opcodeSubtract {
           if depth < 2 {
-            fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackUnderflow, fingerprint)
+            fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
             pc = pc + 1
           } else {
             depth = depth - 1
@@ -162,12 +158,12 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
             depth = depth + 1
             currentTop = result
             pc = pc + 1
-            fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+            fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
           }
         } else {
           if opcode == opcodeMultiply {
             if depth < 2 {
-              fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackUnderflow, fingerprint)
+              fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
               pc = pc + 1
             } else {
               depth = depth - 1
@@ -179,38 +175,38 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
               depth = depth + 1
               currentTop = result
               pc = pc + 1
-              fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+              fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
             }
           } else {
             if opcode == opcodeDuplicate {
               if depth == 0 {
-                fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackUnderflow, fingerprint)
+                fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
                 pc = pc + 1
               } else {
                 let value = currentTop
                 if depth >= stackLimit {
-                  fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackOverflow, fingerprint)
-                  return finish(currentTop, move steps, move diagnostics, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackOverflow, fingerprint)
+                  return finish(currentTop, move events, fingerprint)
                 }
                 stack[depth] = value
                 depth = depth + 1
                 pc = pc + 1
-                fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+                fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
               }
             } else {
               if opcode == opcodeJumpIfNonZero {
                 if instructionPc + 1 >= bytecode.length {
-                  fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticTruncatedOperand, fingerprint)
-                  return finish(currentTop, move steps, move diagnostics, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticTruncatedOperand, fingerprint)
+                  return finish(currentTop, move events, fingerprint)
                 }
                 if depth == 0 {
-                  fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticStackUnderflow, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticStackUnderflow, fingerprint)
                   pc = pc + 2
                 } else {
                   let target = bytecode[instructionPc + 1] |> u8.toUsize
                   if target >= bytecode.length {
-                    fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticInvalidJump, fingerprint)
-                    return finish(currentTop, move steps, move diagnostics, fingerprint)
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticInvalidJump, fingerprint)
+                    return finish(currentTop, move events, fingerprint)
                   }
                   depth = depth - 1
                   let condition = stack[depth]
@@ -224,23 +220,23 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
                   } else {
                     pc = pc + 2
                   }
-                  fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+                  fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
                 }
               } else {
                 if opcode == opcodeJump {
                   if instructionPc + 1 >= bytecode.length {
-                    fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticTruncatedOperand, fingerprint)
-                    return finish(currentTop, move steps, move diagnostics, fingerprint)
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticTruncatedOperand, fingerprint)
+                    return finish(currentTop, move events, fingerprint)
                   }
                   let target = bytecode[instructionPc + 1] |> u8.toUsize
                   if target >= bytecode.length {
-                    fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticInvalidJump, fingerprint)
-                    return finish(currentTop, move steps, move diagnostics, fingerprint)
+                    fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticInvalidJump, fingerprint)
+                    return finish(currentTop, move events, fingerprint)
                   }
                   pc = target
-                  fingerprint = run pushStep(&mut steps, instructionPc, opcode, depth, currentTop, fingerprint)
+                  fingerprint = run pushStep(&mut events, instructionPc, opcode, depth, currentTop, fingerprint)
                 } else {
-                  fingerprint = run pushDiagnostic(&mut diagnostics, instructionPc, diagnosticUnknownOpcode, fingerprint)
+                  fingerprint = run pushDiagnostic(&mut events, instructionPc, diagnosticUnknownOpcode, fingerprint)
                   pc = pc + 1
                 }
               }
@@ -250,7 +246,7 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemory ? &mut Allocator {
       }
     }
   }
-  return finish(currentTop, move steps, move diagnostics, fingerprint)
+  return finish(currentTop, move events, fingerprint)
 }
 
 fn observeResult(value: i32) -> i32 { return value }
@@ -261,36 +257,30 @@ fn observeStepTop(value: i32) -> i32 { return value }
 fn observeDiagnosticPc(value: usize) -> usize { return value }
 fn observeDiagnosticCode(value: usize) -> usize { return value }
 
-fn fingerprintVectors(
-  steps: &Vector<Step>,
-  diagnostics: &Vector<VmDiagnostic>,
-  expected: i32
-) -> i32 {
+fn fingerprintEvents(events: &Vector<Step | VmDiagnostic>, result: i32, expected: i32) -> i32 {
   let mut observed = 0
   let mut index = zero()
-  while index < length<Step>(steps) {
-    let step = get<Step>(steps, index)
-    observed = (
-      observed * 17 + usize.toI32(step.pc) * 3 + u8.toI32(step.opcode) * 5 +
-      usize.toI32(step.depth) * 7 + step.top * 11
-    ) % 251
+  while index < length<Step | VmDiagnostic>(events) {
+    let event = get<Step | VmDiagnostic>(events, index)
+    observed = match move event {
+      Step { pc: stepPc, opcode, depth, top } => (
+        observed * 17 + usize.toI32(stepPc) * 3 + u8.toI32(opcode) * 5 +
+        usize.toI32(depth) * 7 + top * 11
+      ) % 251
+      VmDiagnostic { pc: diagnosticPc, code } => (
+        observed * 19 + usize.toI32(diagnosticPc) * 13 + usize.toI32(code) * 17
+      ) % 251
+    }
     index = index + 1
   }
-  index = zero()
-  while index < length<VmDiagnostic>(diagnostics) {
-    let diagnostic = get<VmDiagnostic>(diagnostics, index)
-    observed = (
-      observed * 19 + usize.toI32(diagnostic.pc) * 13 + usize.toI32(diagnostic.code) * 17
-    ) % 251
-    index = index + 1
-  }
-  return expected + observed - observed
+  let combined = (observed * 23 + result) % 251
+  if combined != expected { let mismatch = 1 / 0 }
+  return expected
 }
 
 fn fingerprint(executed: Executed) -> i32 {
   return match &executed {
-    Executed { steps, diagnostics, fingerprint, .. } =>
-      fingerprintVectors(&steps, &diagnostics, fingerprint)
+    Executed { events, result, fingerprint } => fingerprintEvents(&events, result, fingerprint)
   }
 }
 

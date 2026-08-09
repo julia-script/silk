@@ -2439,6 +2439,7 @@ export const complete = (self: Index, resolver: TypeResolver): Index => {
   const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
     if (Type.isBuiltin(type) || Type.isReference(type) || Type.isSlice(type)) return true
     if (Type.isFixedArray(type)) return isCopyType(type.element, visiting)
+    if (Type.isUnion(type)) return type.members.every((member) => isCopyType(member, visiting))
     if (Type.equals(type, Type.unit)) return true
     if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
     const key = Type.key(type)

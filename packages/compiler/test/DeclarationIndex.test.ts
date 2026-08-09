@@ -509,8 +509,12 @@ it.effect('accepts one affine Drop hook and rejects Copy targets and malformed h
         'drop-hooks',
         `struct Guard { allocation: Allocation }
 struct CopyValue { value: i32 }
+struct Left { value: i32 }
+struct Right { value: i32 }
+struct UnionHolder { value: Left | Right }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
 impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> () { return () } }
+impl Drop for UnionHolder { fn drop(self: &mut UnionHolder) -> () { return () } }
 impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
       ],
     ])
@@ -520,7 +524,10 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
         .map((diagnostic) =>
           diagnostic.reason._tag === 'InvalidDropHook' ? diagnostic.reason.detail : undefined,
         ),
-      ['Copy type drop-hooks.CopyValue cannot implement Drop'],
+      [
+        'Copy type drop-hooks.CopyValue cannot implement Drop',
+        'Copy type drop-hooks.UnionHolder cannot implement Drop',
+      ],
     )
     assert.include(
       index.diagnostics

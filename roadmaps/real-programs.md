@@ -12,9 +12,9 @@ snippets alone. This initiative fills the smallest foundational gaps—scalar va
 source, static text, and output—then uses familiar algorithms to reveal the next real constraints
 without pretending the bootstrap language is already complete.
 
-**Current objective:** shape a shared read surface for `Vector<T>` from the lexer and stack VM's
-combined evidence, keeping ordinary Copy reads separate from the unresolved structural-union copy
-repair and from any self-hosting sequence.
+**Current objective:** use the next recognizable, allocation-bearing program to discover a repeated
+language or cost wall. Shared Vector reads now cover nominal Copy records and all-Copy structural
+unions without selecting a self-hosting sequence.
 
 ## Column rules
 
@@ -37,11 +37,11 @@ outside this feature.
 ### Exercise a bounded stack bytecode VM
 
 **Status: complete (2026-08-09).** An ordinary Silk VM matches a TypeScript oracle over arithmetic,
-branches, invalid bytecode, stack bounds, and bounded loops. A single ordered event vector allocates
-and rolls back deterministically across all three engines. The findings independently confirm named
-typed values and shared Vector reads while exposing three narrower compiler defects. Fixed operand
-capacity remains honest and visible; no production VM, VM intrinsic, or self-hosting sequence was
-introduced.
+branches, invalid bytecode, stack bounds, and bounded loops. A single ordered structural-union event
+vector allocates, reads back through shared borrows, and rolls back deterministically across all
+three engines. The findings independently confirmed named typed values and shared Vector reads and
+led to focused native-root and union-copy repairs. Fixed operand capacity remains honest and
+visible; no production VM, VM intrinsic, or self-hosting sequence was introduced.
 
 ### Make exact integer context survive enclosing result expectations
 
@@ -54,9 +54,9 @@ determinism parity.
 
 ## Next
 
-Add a shared Vector read surface for ordinary Copy elements. Preserve the existing exclusive path
-where mutation or move-out requires it, and keep structural-union reads explicitly blocked until
-their independent `Slot.copy` provenance defect is repaired. Do not automatically port another
+No language feature is committed next. Choose the next change from repeated evidence in another
+recognizable allocation-bearing program, while preserving the existing evaluator/native/Wasm,
+failure-ordinal, determinism, and transparent-cost gates. Do not automatically port another
 compiler module.
 
 ## Later
@@ -94,6 +94,11 @@ and editor tooling together with the language surface so no second vocabulary su
   than remaining local ergonomics?
 
 ## Changelog
+
+- 2026-08-09: Completed shared Vector reads and `fix-structural-union-copy-provenance`. The lexer
+  retains independent nominal-record coverage, and the VM again stores one ordered
+  `Step | VmDiagnostic` vector whose shared read-back validates each active member and payload
+  across all engines. The temporary two-vector workaround and deferred union finding are retired.
 
 - 2026-08-09: Completed `add-typed-constants`. Explicit scalar declarations resolve locally and
   across both import forms, integrate with editor semantics, and inline into existing HIR/MIR

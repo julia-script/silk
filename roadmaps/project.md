@@ -47,11 +47,12 @@ bounded loops. One owned ordered `Vector<Step | VmDiagnostic>` event stream supp
 allocation pressure; every growth ordinal preserves typed failure and balanced cleanup across the
 evaluator, native LLVM, and direct Wasm, and fresh processes reproduce the same artifacts.
 
-The VM independently confirms the need for named typed values and shared Vector reads. It also
-exposed nested dynamic reference-place lowering, structural-union `Slot.copy`, and a native
-path-sensitivity defect for address-taken mutable roots. The native defect blocked the direct
-two-vector result shape and was selected as the next focused repair; no parser port or continuous
-self-hosting sequence follows from the exercise.
+The VM independently confirmed the need for named typed values and shared Vector reads. It also
+exposed nested dynamic reference-place lowering, structural-union Copy provenance, and a native
+path-sensitivity defect for address-taken mutable roots. The native and union-copy defects are now
+repaired; the VM again uses one ordered union event vector and verifies every event after execution.
+The nested-place observation remains single-program evidence, not a committed compiler queue or
+self-hosting sequence.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Repair contextual integer literals exposed by the lexer
@@ -64,8 +65,8 @@ refine the remaining exact literals even when an enclosing result expectation ex
 uses `u8` classifiers without the `i32` workaround, and semantic/HIR/MIR facts, diagnostics,
 evaluator, native LLVM, direct Wasm, and fresh-process artifacts agree.
 
-Enum/exhaustiveness and cost findings remain unpromoted. Shared Vector reads now have independent
-evidence from both pressure programs and follow typed constants as the next focused boundary.
+Enum/exhaustiveness and cost findings remain unpromoted. Shared Vector reads and structural-union
+Copy provenance now have complete focused repairs with independent pressure-program evidence.
 - **Links:** [real-programs initiative](real-programs.md)
 
 ### Validate the language's defining effect execution model
@@ -225,9 +226,10 @@ elements drop before storage release; and move-out plus early drop retain exactl
 
 ## Next
 
-Typed scalar constants and the native address-root repair are complete. Shape shared `Vector<T>`
-reads for ordinary Copy elements while keeping the structural-union `Slot.copy` provenance repair
-as an explicit prerequisite for union elements. No neighboring compiler port is preselected.
+Typed scalar constants, native address-root materialization, shared `Vector<T>` reads, and
+structural-union Copy provenance are complete. Select the next language change only after another
+recognizable program repeats a concrete wall or cost problem. No parser port, neighboring compiler
+module, async runtime, or self-hosting sequence is preselected.
 
 ## Later
 
@@ -277,6 +279,11 @@ Reserve approximately 20% of project capacity for keeping the foundation trustwo
   `@silk-effect/compiler`?
 
 ## Changelog
+
+- 2026-08-09: Completed shared Vector observation and structural-union Copy provenance. The lexer
+  reads nominal Copy records, while the stack VM again uses and verifies one ordered
+  `Vector<Step | VmDiagnostic>` after execution. Slot and raw-buffer copies preserve canonical
+  union tag/payload lanes across evaluator, native, and Wasm without runtime dispatch or allocation.
 
 - 2026-08-09: Completed `add-typed-constants`. Literal-only explicit scalar names participate in
   module visibility, import resolution, tooling, and direct immediate lowering with no runtime

@@ -37,8 +37,17 @@ const separateSource = pressureSource
     'let added = run append<VmDiagnostic>(move diagnostics, move diagnostic)',
   )
   .replace(
-    'fn finish(result: i32, events: Vector<Step | VmDiagnostic>, fingerprint: i32) -> Executed {',
-    'fn finish(result: i32, steps: Vector<Step>, diagnostics: Vector<VmDiagnostic>, fingerprint: i32) -> Executed {',
+    `fn finish(
+  result: i32,
+  events: Vector<Step | VmDiagnostic>,
+  fingerprint: i32
+) -> Executed {`,
+    `fn finish(
+  result: i32,
+  steps: Vector<Step>,
+  diagnostics: Vector<VmDiagnostic>,
+  fingerprint: i32
+) -> Executed {`,
   )
   .replace('    events: move events,', '    steps: move steps,\n    diagnostics: move diagnostics,')
   .replace(
@@ -50,6 +59,13 @@ const separateSource = pressureSource
   .replaceAll(
     'finish(currentTop, move events, fingerprint)',
     'finish(currentTop, move steps, move diagnostics, fingerprint)',
+  )
+  .replace(
+    /fn fingerprintEvents\([\s\S]*?\n}\n\nfn fingerprint\([\s\S]*?\n}\n/,
+    `fn fingerprint(executed: Executed) -> i32 {
+  return executed.fingerprint
+}
+`,
   )
   .replace('if value != 0', 'if value != 184')
 

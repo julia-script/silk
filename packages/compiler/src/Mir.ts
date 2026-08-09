@@ -82,6 +82,8 @@ const isStructurallyCopyType = (
 ): boolean => {
   if (SilkType.isBuiltin(type) || SilkType.isReference(type) || SilkType.isSlice(type)) return true
   if (SilkType.isFixedArray(type)) return isStructurallyCopyType(layout, type.element, visiting)
+  if (SilkType.isUnion(type))
+    return type.members.every((member) => isStructurallyCopyType(layout, member, visiting))
   if (SilkType.equals(type, SilkType.unit)) return true
   if (!SilkType.isNominal(type) || SilkType.isIntrinsicNominal(type)) return false
   const key = SilkType.key(type)

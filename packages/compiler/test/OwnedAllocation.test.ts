@@ -72,6 +72,7 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
 
 const unionReadSource = `struct Left { value: i32 }
 struct Right { value: i32 }
+fn left(value: i32) -> Left | Right { return Left { value: value } }
 effect fn store() -> i32 ! OutOfMemory {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Left | Right; 1]>()
@@ -79,13 +80,44 @@ effect fn store() -> i32 ! OutOfMemory {
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Left | Right>(move allocation, 1)
-    let element = Left { value: 42 }
+    let element = left(42)
     let written = Slot.write<Left | Right>(RawBuffer.slot(&mut buffer, 0), move element)
     let copied = RawBuffer.read<Left | Right>(&buffer, 0)
     let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
     drop taken
     drop buffer
     return match move copied { Left { value } => value Right { value } => value }
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(store(), recover) }`
+
+const moveOnlyUnionReadSource = `struct Guard { storage: Allocation }
+struct Marker { value: i32 }
+
+fn guarded(storage: Allocation) -> Guard | Marker {
+  return Guard { storage: move storage }
+}
+
+effect fn store() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[Guard | Marker; 1]>()
+  let recipe = Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let allocation = run recipe
+  let innerLayout = Layout.of<[i32; 1]>()
+  let innerRecipe = Allocator.allocate(move innerLayout) |> Allocator.provide(&mut allocator)
+  let payload = run innerRecipe
+  unsafe {
+    let mut buffer = RawBuffer.from<Guard | Marker>(move allocation, 1)
+    let event = guarded(move payload)
+    let written = Slot.write<Guard | Marker>(RawBuffer.slot(&mut buffer, 0), move event)
+    let copied = RawBuffer.read<Guard | Marker>(&buffer, 0)
+    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    drop copied
+    drop taken
+    drop buffer
+    return 42
   }
   return 0
 }
@@ -225,11 +257,30 @@ it.effect('reads initialized Copy storage repeatedly through shared RawBuffer bo
   }),
 )
 
-it.effect('rejects shared RawBuffer reads of move-only and structural-union elements', () =>
+it.effect('reads an all-Copy structural union through a shared RawBuffer borrow', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'owned-allocation/read-structural-union',
+      ascii(unionReadSource),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42)
+    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length, 1)
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('rejects shared RawBuffer reads of move-only nominal and union elements', () =>
   Effect.gen(function* () {
     for (const [name, source] of [
       ['move-only', nonCopyReadSource],
-      ['structural-union', unionReadSource],
+      ['move-only-union', moveOnlyUnionReadSource],
     ] as const) {
       const snapshot = yield* Analysis.ofSourceRealized(
         `owned-allocation/read-${name}`,

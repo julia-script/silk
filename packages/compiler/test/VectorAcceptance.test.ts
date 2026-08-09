@@ -434,3 +434,110 @@ pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
     assert.strictEqual(run.status, 42, run.stderr)
   }),
 )
+
+it.effect(
+  'reads all-Copy structural-union elements through a shared vector on all three engines',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.vector { Vector, make, append, get }
+struct Step { value: i32 }
+struct Diagnostic {
+  marker: u8
+  value: i32
+}
+fn observe(event: Step | Diagnostic) -> i32 {
+  return match move event {
+    Step { value: stepValue } => stepValue
+    Diagnostic { marker, value: diagnosticValue } => u8.toI32(marker) + diagnosticValue
+  }
+}
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let mut events = make<Step | Diagnostic>()
+  let step = Step { value: 7 }
+  let diagnostic = Diagnostic { marker: 3, value: 11 }
+  let firstAppend = run append<Step | Diagnostic>(&mut events, move step) |>
+    Allocator.provide(&mut allocator)
+  let secondAppend = run append<Step | Diagnostic>(&mut events, move diagnostic) |>
+    Allocator.provide(&mut allocator)
+  let first = get<Step | Diagnostic>(&events, 0)
+  let second = get<Step | Diagnostic>(&events, 1)
+  let firstAgain = get<Step | Diagnostic>(&events, 0)
+  let secondAgain = get<Step | Diagnostic>(&events, 1)
+  return observe(move first) + observe(move second) + observe(move firstAgain) +
+    observe(move secondAgain)
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'vector-acceptance/structural-union-read',
+        ascii(source),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42)
+      assert.strictEqual(
+        evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length,
+        4,
+      )
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+      const compiled = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('vector-acceptance/structural-union-read', ascii(source)),
+        },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, 'structural-union-read'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled')
+      if (compiled._tag !== 'Compiled') return
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42, run.stderr)
+    }),
+)
+
+it.effect('rejects a shared vector read when one union member is move-only', () =>
+  Effect.gen(function* () {
+    const source = `import silk.vector { Vector, make, append, get }
+struct Guard { storage: Allocation }
+struct Marker { value: i32 }
+fn guarded(storage: Allocation) -> Guard | Marker { return Guard { storage: move storage } }
+effect fn build() -> i32 ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let layout = Layout.of<[i32; 1]>()
+  let allocation = run Allocator.allocate(move layout) |> Allocator.provide(&mut allocator)
+  let mut events = make<Guard | Marker>()
+  let event = guarded(move allocation)
+  let appended = run append<Guard | Marker>(&mut events, move event) |>
+    Allocator.provide(&mut allocator)
+  let observed = get<Guard | Marker>(&events, 0)
+  drop observed
+  return 42
+}
+effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'vector-acceptance/move-only-union-read',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Blocked')
+    if (evaluated._tag !== 'Blocked') return
+    assert.strictEqual(evaluated.reason._tag, 'InvalidMir')
+    if (evaluated.reason._tag !== 'InvalidMir') return
+    assert.isTrue(
+      evaluated.reason.violations.some(
+        (violation) =>
+          violation.rule === 'InvalidRawStorageOperation' &&
+          violation.detail.includes('RawBuffer.read'),
+      ),
+    )
+  }),
+)
