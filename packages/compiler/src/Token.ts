@@ -5,6 +5,7 @@ export type TokenKind =
   | 'Whitespace'
   | 'LineComment'
   | 'DocComment'
+  | 'ModuleDocComment'
   | 'Identifier'
   | 'DecimalInteger'
   | 'PubKeyword'
@@ -70,6 +71,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   Whitespace: 'whitespace',
   LineComment: 'line comment',
   DocComment: 'documentation comment',
+  ModuleDocComment: 'module documentation comment',
   Identifier: 'identifier',
   DecimalInteger: 'decimal integer',
   PubKeyword: '`pub`',

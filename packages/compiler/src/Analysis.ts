@@ -5,6 +5,7 @@ import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as DocBlock from './DocBlock.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -293,6 +294,25 @@ export const lookupQualifiedName = (
 export const syntaxOf = (self: Snapshot, module: string): SyntaxFile.SyntaxFile | undefined =>
   self.results.get(module)?.syntax
 
+/** Returns one module's raw leading `//!` documentation without interpreting Markdown. */
+export const moduleDocumentation = (
+  self: Snapshot,
+  module: string,
+): DocBlock.DocBlock | undefined => {
+  const syntax = syntaxOf(self, module)
+  return syntax === undefined ? undefined : DocBlock.ofModule(syntax)
+}
+
+/** Returns raw documentation for a source-owned declaration-like syntax node. */
+export const documentationOfSyntax = (
+  self: Snapshot,
+  module: string,
+  node: SyntaxTree.Node,
+): DocBlock.DocBlock | undefined => {
+  const syntax = syntaxOf(self, module)
+  return syntax === undefined ? undefined : DocBlock.ofNode(syntax, node)
+}
+
 /** Returns one module's elaborated analysis, or `undefined` for an unknown identity. */
 export const moduleAnalysis = (self: Snapshot, module: string): Elaboration.Result | undefined =>
   self.results.get(module)
@@ -316,6 +336,70 @@ const declarationForIdentity = (
   return self.index.modules
     .flatMap((module) => module.members)
     .find((member) => member.id.sourceId === local.sourceId && member.id.ordinal === local.ordinal)
+}
+
+const syntaxForIdentity = (
+  self: Snapshot,
+  identity: SemanticOccurrence.Identity,
+): SyntaxTree.Node | undefined => {
+  if (identity._tag === 'DeclarationIdentity') return declarationForIdentity(self, identity)?.syntax
+  if (identity._tag === 'TypeParameterIdentity') {
+    for (const headers of self.index.modules)
+      for (const member of headers.members) {
+        const parameter = member.typeParameters.find((candidate) =>
+          Type.equals(candidate.type, identity.id),
+        )
+        if (parameter !== undefined) return parameter.syntax
+      }
+    return undefined
+  }
+  if (identity._tag === 'ParameterIdentity') {
+    for (const headers of self.index.modules)
+      for (const declaration of headers.declarations) {
+        const parameter = declaration.parameters.find(
+          (candidate) =>
+            candidate.id.function.sourceId === identity.id.function.sourceId &&
+            candidate.id.function.ordinal === identity.id.function.ordinal &&
+            candidate.id.ordinal === identity.id.ordinal,
+        )
+        if (parameter !== undefined) return parameter.syntax
+      }
+    return undefined
+  }
+  if (identity._tag === 'FieldIdentity') {
+    for (const headers of self.index.modules)
+      for (const declaration of headers.structs) {
+        const field = declaration.fields.find(
+          (candidate) =>
+            candidate.id.struct.sourceId === identity.id.struct.sourceId &&
+            candidate.id.struct.ordinal === identity.id.struct.ordinal &&
+            candidate.id.ordinal === identity.id.ordinal,
+        )
+        if (field !== undefined) return field.syntax
+      }
+  }
+  return undefined
+}
+
+/** Returns raw documentation for one source-backed semantic identity. */
+export const documentationOfIdentity = (
+  self: Snapshot,
+  identity: SemanticOccurrence.Identity,
+): DocBlock.DocBlock | undefined => {
+  const node = syntaxForIdentity(self, identity)
+  return node === undefined ? undefined : documentationOfSyntax(self, node.span.sourceId, node)
+}
+
+/** Resolves one source position and returns the selected declaration's raw documentation. */
+export const documentationAt = (
+  self: Snapshot,
+  module: string,
+  byteOffset: number,
+): DocBlock.DocBlock | undefined => {
+  const occurrence = semanticOccurrenceAt(self, module, byteOffset)
+  return occurrence?.resolution._tag === 'Available'
+    ? documentationOfIdentity(self, occurrence.resolution.identity)
+    : undefined
 }
 
 const presentationOfIdentity = (

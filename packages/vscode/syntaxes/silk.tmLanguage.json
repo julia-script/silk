@@ -4,8 +4,140 @@
   "fileTypes": ["silk"],
   "patterns": [
     {
+      "name": "comment.block.documentation.silk",
+      "begin": "^\\s*(///)\\s*(```)(silk)\\s*$",
+      "end": "^\\s*(///)\\s*(```)\\s*$",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.comment.documentation.silk"
+        },
+        "2": {
+          "name": "punctuation.definition.raw.code-fence.silk"
+        },
+        "3": {
+          "name": "fenced_code.block.language.silk"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.comment.documentation.silk"
+        },
+        "2": {
+          "name": "punctuation.definition.raw.code-fence.silk"
+        }
+      },
+      "patterns": [
+        {
+          "begin": "^\\s*(///)\\s?",
+          "end": "$",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.comment.documentation.silk"
+            }
+          },
+          "patterns": [
+            {
+              "include": "$self"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "comment.line.documentation.module.silk",
+      "begin": "(//!)",
+      "end": "$",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.comment.documentation.module.silk"
+        }
+      },
+      "patterns": [
+        {
+          "match": "(\\[)(`)([^`\\]\\r\\n]+)(`)(\\])",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.link.begin.silk"
+            },
+            "2": {
+              "name": "punctuation.definition.raw.silk"
+            },
+            "3": {
+              "name": "markup.underline.link.silk"
+            },
+            "4": {
+              "name": "punctuation.definition.raw.silk"
+            },
+            "5": {
+              "name": "punctuation.definition.link.end.silk"
+            }
+          }
+        },
+        {
+          "name": "markup.heading.silk",
+          "match": "#{1,6}(?=\\s)"
+        },
+        {
+          "name": "markup.bold.silk",
+          "match": "\\*\\*[^*\\n]+\\*\\*"
+        },
+        {
+          "name": "markup.italic.silk",
+          "match": "(?<!\\*)\\*[^*\\n]+\\*"
+        },
+        {
+          "name": "markup.inline.raw.silk",
+          "match": "`[^`\\n]+`"
+        }
+      ]
+    },
+    {
       "name": "comment.line.documentation.silk",
-      "match": "///[^\\n]*"
+      "begin": "(///)",
+      "end": "$",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.comment.documentation.silk"
+        }
+      },
+      "patterns": [
+        {
+          "match": "(\\[)(`)([^`\\]\\r\\n]+)(`)(\\])",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.link.begin.silk"
+            },
+            "2": {
+              "name": "punctuation.definition.raw.silk"
+            },
+            "3": {
+              "name": "markup.underline.link.silk"
+            },
+            "4": {
+              "name": "punctuation.definition.raw.silk"
+            },
+            "5": {
+              "name": "punctuation.definition.link.end.silk"
+            }
+          }
+        },
+        {
+          "name": "markup.heading.silk",
+          "match": "#{1,6}(?=\\s)"
+        },
+        {
+          "name": "markup.bold.silk",
+          "match": "\\*\\*[^*\\n]+\\*\\*"
+        },
+        {
+          "name": "markup.italic.silk",
+          "match": "(?<!\\*)\\*[^*\\n]+\\*"
+        },
+        {
+          "name": "markup.inline.raw.silk",
+          "match": "`[^`\\n]+`"
+        }
+      ]
     },
     {
       "name": "comment.line.double-slash.silk",

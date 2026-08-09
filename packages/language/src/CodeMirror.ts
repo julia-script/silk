@@ -10,6 +10,7 @@ import * as Parser from '@silk-effect/compiler/Parser'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import type * as Token from '@silk-effect/compiler/Token'
+import * as DocumentationHighlight from '@silk-effect/documentation/Highlight'
 
 /** A style bucket: the stable class suffix and the highlight tags themes color it with. */
 interface Category {
@@ -29,6 +30,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   Whitespace: undefined,
   LineComment: { name: 'line-comment', tags: [tags.lineComment] },
   DocComment: { name: 'doc-comment', tags: [tags.docComment] },
+  ModuleDocComment: { name: 'module-doc-comment', tags: [tags.docComment] },
   Identifier: { name: 'identifier', tags: [tags.variableName] },
   DecimalInteger: { name: 'number', tags: [tags.integer] },
   PubKeyword: keyword,
@@ -152,6 +154,7 @@ export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
     const from = map === undefined ? token.span.start : (map[token.span.start] ?? 0)
     const to = map === undefined ? token.span.end : (map[token.span.end] ?? 0)
     const text = doc.slice(from, to)
+    if (token.kind === 'DocComment' || token.kind === 'ModuleDocComment') continue
     const category =
       (token.kind === 'Less' || token.kind === 'Greater') &&
       genericAngles.has(`${token.span.start}:${token.span.end}`)
@@ -162,7 +165,8 @@ export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
     if (category === undefined) continue
     if (to > from) ranges.push({ from, to, category: category.name })
   }
-  return ranges
+  ranges.push(...DocumentationHighlight.ranges(doc))
+  return ranges.sort((left, right) => left.from - right.from || left.to - right.to)
 }
 
 /** Translates a UTF-16 editor offset into the UTF-8 byte offset used by compiler spans. */

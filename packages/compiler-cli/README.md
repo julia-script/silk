@@ -121,6 +121,24 @@ The canonical representation uses a 100-column target, two-space indentation, LF
 trailing whitespace, and one final newline. Damaged syntax is reported and left unchanged while
 other selected files continue.
 
+## Generate documentation
+
+`silk doc` analyzes the reachable project source closure without invoking a backend, linker, or
+program. It writes deterministic, formatter-neutral JSON to `build/documentation.json` by default:
+
+```bash
+silk doc
+silk doc --output artifacts/api.json
+silk doc --include-private
+```
+
+Public declarations and public struct fields are included by default. `--include-private` retains
+private items with their visibility. The complete model includes module and declaration documents,
+first-class parameter/field documentation, compiler-derived signatures, examples, best-effort
+semantic links, and logical source provenance. Output is marked experimental and is intentionally
+not yet a versioned compatibility contract. Source damage or resolution failures are reported
+before the atomic destination write, so no partial JSON is committed.
+
 ## Direct-file compilation
 
 `silk build-exe` is the low-level, native-only escape hatch for compiling a rooted source without a
@@ -142,6 +160,7 @@ It supports `--source-root`, `--output`/`-o`, native `--target`, `--profile`, `-
   precedence over exit `1` in a mixed batch.
 - `silk format` uses `1` for drift/damaged syntax and `2` for project, selection, storage, or write
   failures.
+- `silk doc` uses `1` for source rejection and `2` for project, resolution, or destination failure.
 - `silk run` returns the program's exit status after a successful build.
 
 Each target commits atomically. A failed target leaves no partial destination and does not remove a

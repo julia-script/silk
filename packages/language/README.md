@@ -4,9 +4,12 @@ Editor language support for Silk Effect.
 
 - `@silk-effect/language/CodeMirror` — a CodeMirror 6 extension that highlights Silk by running the
   compiler's bootstrap lexer over the document. No separate grammar; the lexer is the single source
-  of truth, and invalid bytes are marked the way the compiler will reject them.
+  of truth, and invalid bytes are marked the way the compiler will reject them. Documentation
+  markers, CommonMark markup, intra-document links, and fenced Silk examples are layered lazily by
+  `@silk-effect/documentation/Highlight`.
 - `@silk-effect/language/TextMate` — the Silk TextMate grammar (`source.silk`) and VS Code language
-  configuration, consumed by Shiki for docs code fences and by VS Code-compatible editors.
+  configuration, including distinct `///` / `//!` scopes, documentation markup, and nested Silk
+  fenced-code scopes. It is consumed by Shiki and VS Code-compatible editors.
 
 ```ts
 import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'

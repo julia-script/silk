@@ -1,0 +1,69 @@
+{
+  "name": "@silk-effect/documentation",
+  "version": "0.0.0",
+  "description": "Lazy, formatter-neutral documentation tooling for Silk Effect source.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "directory": "packages/documentation"
+  },
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
+  "keywords": [
+    "silk",
+    "documentation",
+    "markdown"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./Document": {
+      "types": "./dist/Document.d.ts",
+      "import": "./dist/Document.js"
+    },
+    "./Json": {
+      "types": "./dist/Json.d.ts",
+      "import": "./dist/Json.js"
+    },
+    "./Highlight": {
+      "types": "./dist/Highlight.d.ts",
+      "import": "./dist/Highlight.js"
+    },
+    "./Project": {
+      "types": "./dist/Project.d.ts",
+      "import": "./dist/Project.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@silk-effect/compiler": "workspace:*",
+    "mdast-util-from-markdown": "^2.0.3"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^24.10.1",
+    "effect": "catalog:"
+  }
+}

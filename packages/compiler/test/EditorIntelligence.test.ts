@@ -15,6 +15,17 @@ import {
 } from './support/editorCorpus.js'
 
 const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+const documentationText = (
+  snapshot: Analysis.Snapshot,
+  block: ReturnType<typeof Analysis.documentationAt>,
+) => {
+  if (block === undefined) return undefined
+  const source = Analysis.syntaxOf(snapshot, block.span.sourceId)?.source
+  if (source === undefined) return undefined
+  return decoder.decode(SourceFile.toUint8Array(source).slice(block.span.start, block.span.end))
+}
 
 const occurrenceAt = (
   snapshot: Analysis.Snapshot,
@@ -83,6 +94,81 @@ it.effect('presents effect function declarations and references identically', ()
     }),
   ),
 )
+
+it.effect('answers raw documentation for modules, declarations, children, and references', () => {
+  const source = `//! Recovery module.
+/// A recoverable problem.
+pub struct Problem {
+  /// Numeric problem code.
+  pub code: I32
+}
+/// Recovers one problem.
+pub effect fn recover(
+  /// Problem to inspect.
+  problem: Problem,
+) -> I32 {
+  return problem.code
+}
+pub fn main() -> I32 { return recover(Problem { code: 41 }) }
+`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      assert.strictEqual(
+        documentationText(snapshot, Analysis.moduleDocumentation(snapshot, 'main')),
+        '//! Recovery module.',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('recover(')),
+        ),
+        '/// Recovers one problem.',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.lastIndexOf('recover')),
+        ),
+        '/// Recovers one problem.',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('problem:')),
+        ),
+        '/// Problem to inspect.',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('code:')),
+        ),
+        '/// Numeric problem code.',
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('answers a canonical declaration document through a cross-module reference', () => {
+  const root = `import lib { recover }
+pub fn main() -> I32 { return recover(1) }`
+  const library = `/// Library recovery.
+pub fn recover(value: I32) -> I32 { return value }`
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+    Effect.map((snapshot) => {
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', root.lastIndexOf('recover')),
+        ),
+        '/// Library recovery.',
+      )
+      return undefined
+    }),
+  )
+})
 
 it.effect('indexes declaration and nominal type reference locations', () =>
   Analysis.ofSource(

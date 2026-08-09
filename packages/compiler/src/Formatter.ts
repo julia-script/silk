@@ -21,7 +21,10 @@ export class FormatterError extends Data.TaggedError('FormatterError')<{
 class FormatterImplementationError extends Error {}
 
 const isTrivia = (kind: Token.TokenKind): boolean =>
-  kind === 'Whitespace' || kind === 'LineComment' || kind === 'DocComment'
+  kind === 'Whitespace' ||
+  kind === 'LineComment' ||
+  kind === 'DocComment' ||
+  kind === 'ModuleDocComment'
 
 interface Gap {
   readonly previous: Token.Token | undefined
@@ -76,7 +79,12 @@ const gapOf = (context: Context, token: Token.Token): Gap =>
   context.gaps.get(token) ?? { previous: undefined, trivia: Object.freeze([]) }
 
 const commentCount = (gap: Gap): number =>
-  gap.trivia.filter((token) => token.kind === 'LineComment' || token.kind === 'DocComment').length
+  gap.trivia.filter(
+    (token) =>
+      token.kind === 'LineComment' ||
+      token.kind === 'DocComment' ||
+      token.kind === 'ModuleDocComment',
+  ).length
 
 const hasComments = (context: Context, token: Token.Token): boolean =>
   commentCount(gapOf(context, token)) > 0
@@ -89,7 +97,10 @@ const commentLeading = (
 ): FormatDocument.Document => {
   const gap = gapOf(context, token)
   const comments = gap.trivia.filter(
-    (trivia) => trivia.kind === 'LineComment' || trivia.kind === 'DocComment',
+    (trivia) =>
+      trivia.kind === 'LineComment' ||
+      trivia.kind === 'DocComment' ||
+      trivia.kind === 'ModuleDocComment',
   )
   if (comments.length === 0) {
     return preserveBlank && lineBreaks(context, gap.trivia) >= 2
@@ -178,7 +189,10 @@ const beginsWithTrailingComment = (context: Context, node: SyntaxTree.Node): boo
   if (first === undefined) return false
   const gap = gapOf(context, first)
   const commentIndex = gap.trivia.findIndex(
-    (token) => token.kind === 'LineComment' || token.kind === 'DocComment',
+    (token) =>
+      token.kind === 'LineComment' ||
+      token.kind === 'DocComment' ||
+      token.kind === 'ModuleDocComment',
   )
   return (
     gap.previous?.kind === 'Comma' &&

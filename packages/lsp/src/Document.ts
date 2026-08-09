@@ -4,6 +4,7 @@ import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
+import * as Documentation from '@silk-effect/documentation/Document'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import {
@@ -122,8 +123,24 @@ export const hover = (
   if (subject === undefined) return undefined
   const span =
     subject._tag === 'OccurrenceHoverSubject' ? subject.occurrence.span : subject.expression.span
+  const raw =
+    subject._tag === 'OccurrenceHoverSubject'
+      ? Analysis.documentationAt(snapshot, self.module, LineIndex.offsetOf(self.index, position))
+      : undefined
+  const source = raw === undefined ? undefined : Analysis.sources(snapshot).get(raw.span.sourceId)
+  const documentation =
+    raw === undefined || source === undefined
+      ? undefined
+      : Documentation.toMarkdown(Documentation.parse(source, raw))
+  const signature = `\`\`\`silk\n${subject.presentation.text}\n\`\`\``
   return {
-    contents: { kind: 'markdown', value: `\`\`\`silk\n${subject.presentation.text}\n\`\`\`` },
+    contents: {
+      kind: 'markdown',
+      value:
+        documentation === undefined || documentation.length === 0
+          ? signature
+          : `${signature}\n\n${documentation}`,
+    },
     range: LineIndex.rangeOf(self.index, span),
   }
 }

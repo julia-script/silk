@@ -11,7 +11,7 @@ it('exposes the project-first command surface without a compile alias', () => {
     group.commands.map((command) => command.name),
   )
 
-  assert.deepStrictEqual(names, ['init', 'build', 'check', 'format', 'run', 'build-exe'])
+  assert.deepStrictEqual(names, ['init', 'build', 'check', 'doc', 'format', 'run', 'build-exe'])
   assert.strictEqual(names.includes('compile'), false)
 })
 

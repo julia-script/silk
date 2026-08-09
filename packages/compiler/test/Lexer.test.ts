@@ -393,19 +393,38 @@ it('terminates on empty and wholly invalid input', () => {
   assert.strictEqual(invalid.diagnostics.length, 1)
 })
 
-it('distinguishes documentation comments from plain line comments', () => {
+it('distinguishes declaration, module, and plain line comments', () => {
   const result = Lexer.lex(
-    SourceFile.make('memory://doc-comments.silk', ascii('/// doc\n// note\nfn')),
+    SourceFile.make(
+      'memory://doc-comments.silk',
+      ascii('/// item\n//! module\n// note\n//// plain\nfn'),
+    ),
   )
   const final = Lexer.lex(SourceFile.make('memory://final-doc.silk', ascii('/// tail')))
 
   assert.deepEqual(
     result.tokens.map((token) => token.kind),
-    ['DocComment', 'Whitespace', 'LineComment', 'Whitespace', 'FnKeyword', 'EndOfFile'],
+    [
+      'DocComment',
+      'Whitespace',
+      'ModuleDocComment',
+      'Whitespace',
+      'LineComment',
+      'Whitespace',
+      'LineComment',
+      'Whitespace',
+      'FnKeyword',
+      'EndOfFile',
+    ],
   )
   assert.deepEqual(
-    result.tokens.slice(0, 1).map((token) => tokenView(result.source, token)),
-    [{ kind: 'DocComment', start: 0, end: 7, slice: '/// doc' }],
+    result.tokens
+      .filter((token) => token.kind === 'DocComment' || token.kind === 'ModuleDocComment')
+      .map((token) => tokenView(result.source, token)),
+    [
+      { kind: 'DocComment', start: 0, end: 8, slice: '/// item' },
+      { kind: 'ModuleDocComment', start: 9, end: 19, slice: '//! module' },
+    ],
   )
   assert.deepEqual(
     final.tokens.map((token) => token.kind),

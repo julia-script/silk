@@ -264,7 +264,12 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     }
 
     if (isLineCommentStart(bytes, index)) {
-      const kind = bytes[index + 2] === 0x2f ? 'DocComment' : 'LineComment'
+      const kind =
+        bytes[index + 2] === 0x21
+          ? 'ModuleDocComment'
+          : bytes[index + 2] === 0x2f && bytes[index + 3] !== 0x2f
+            ? 'DocComment'
+            : 'LineComment'
       index += 2
       while (index < bytes.length && bytes[index] !== 0x0a && bytes[index] !== 0x0d) index += 1
       pushToken(kind, start, index)

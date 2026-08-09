@@ -65,6 +65,7 @@
     "@effect/platform-node": "4.0.0-beta.103",
     "@silk-effect/compiler": "workspace:*",
     "@silk-effect/compiler-cli": "workspace:*",
+    "@silk-effect/documentation": "workspace:*",
     "effect": "catalog:",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
