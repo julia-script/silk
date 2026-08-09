@@ -8,6 +8,7 @@ import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
+import type * as StaticText from './StaticText.js'
 import * as Target from './Target.js'
 import * as SilkType from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -217,6 +218,14 @@ export type Operation =
       readonly destination: LocalId
       readonly type: Type
       readonly value: number | bigint
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'StaticView'
+      readonly destination: LocalId
+      readonly data: string
+      readonly length: number
+      readonly type: Extract<Type, { readonly _tag: 'Slice' }>
       readonly provenance: Provenance
     }
   | {
@@ -799,6 +808,7 @@ export interface Module {
   readonly module: string
   readonly entry: Entry
   readonly layout: Layout.Plan
+  readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
 }
 
@@ -988,6 +998,7 @@ const outcomeOf = (region: Region): Outcome | undefined =>
 const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'Literal':
+    case 'StaticView':
       return [operation.destination]
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
@@ -1259,6 +1270,7 @@ const cleanupTypes = (cleanup: Ownership.CleanupPlan): ReadonlyArray<SilkType.Ty
 const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.SemanticType> => {
   switch (operation._tag) {
     case 'Literal':
+    case 'StaticView':
     case 'Binary':
     case 'ValidateLayout':
     case 'RepeatLayout':
@@ -1462,6 +1474,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'Match':
       return [operation.scrutinee]
     case 'Literal':
+    case 'StaticView':
     case 'BeginLoan':
     case 'EndLoan':
     case 'SliceLength':
@@ -1634,6 +1647,32 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       detail: `${violation.rule}: ${violation.detail}`,
     }),
   )
+  const staticData = self.staticData ?? []
+  const staticTableValid = staticData.every((data, ordinal) => {
+    const previous = ordinal === 0 ? undefined : staticData.at(ordinal - 1)
+    const expectedId = `${data.kind === 'Text' ? 'text' : 'bytes'}:${data.bytes
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')}`
+    return (
+      (previous === undefined || previous.id < data.id) &&
+      data.id === expectedId &&
+      data.utf8 === (data.kind === 'Text') &&
+      data.bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+    )
+  })
+  const placements = self.layout.staticData ?? []
+  const placementMatches =
+    placements.length === staticData.length &&
+    placements.every((placement, ordinal) => placement.data.id === staticData.at(ordinal)?.id)
+  if (!staticTableValid || !placementMatches) {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidSliceOperation',
+        detail: 'static-data table is non-canonical or disagrees with target placement',
+      }),
+    )
+  }
   const availableEntry = self.entry._tag === 'UnavailableEntry' ? undefined : self.entry
   const target = self.functions.find(
     (fn) =>
@@ -1898,6 +1937,29 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
       const operations = operationsOf(region).flatMap(operationTree)
       for (const [index, operation] of operations.entries()) {
+        if (operation._tag === 'StaticView') {
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const data = self.staticData?.find((candidate) => candidate.id === operation.data)
+          if (
+            destination === undefined ||
+            destination._tag !== 'Slice' ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            operation.type.type.access !== 'Shared' ||
+            operation.type.type.element !== 'u8' ||
+            data === undefined ||
+            data.bytes.length !== operation.length
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidSliceOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'static view disagrees with its immutable bytes, length, or destination',
+              }),
+            )
+          }
+        }
         if (operation._tag === 'Literal') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const semantic = semanticType(operation.type)
@@ -3117,6 +3179,8 @@ const operationText = (operation: Operation): string => {
   switch (operation._tag) {
     case 'Literal':
       return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'StaticView':
+      return `${localText(operation.destination)} = static-view ${operation.data} length=${operation.length} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ConvertInteger':
@@ -3288,6 +3352,10 @@ export const encode = (self: Module): string =>
       : self.entry._tag === 'OrdinaryEntry'
         ? `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
         : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.report}`).join(',') || 'none'}`,
+    ...(self.staticData ?? []).map(
+      (data) =>
+        `static ${data.id} kind=${data.kind.toLowerCase()} utf8=${data.utf8} bytes=${data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,
+    ),
     ...Layout.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
       `fn ${targetText(fn.id)}${

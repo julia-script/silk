@@ -29,6 +29,9 @@ const isIdentifierContinue = (byte: number | undefined): boolean =>
 const isLineCommentStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2f && bytes[index + 1] === 0x2f
 
+const isLiteralStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
+  bytes[index] === 0x22 || (bytes[index] === 0x62 && bytes[index + 1] === 0x22)
+
 const isPunctuation = (byte: number | undefined): boolean =>
   byte === 0x28 ||
   byte === 0x29 ||
@@ -77,6 +80,7 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
     isWhitespace(byte) ||
     isIdentifierStart(byte) ||
     isDecimalDigit(byte) ||
+    isLiteralStart(bytes, index) ||
     isLineCommentStart(bytes, index) ||
     compoundPunctuationKind(bytes, index) !== undefined ||
     isPunctuation(byte)
@@ -273,6 +277,21 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       index += 2
       while (index < bytes.length && bytes[index] !== 0x0a && bytes[index] !== 0x0d) index += 1
       pushToken(kind, start, index)
+      continue
+    }
+
+    if (isLiteralStart(bytes, index)) {
+      const byteString = byte === 0x62
+      index += byteString ? 2 : 1
+      while (index < bytes.length && bytes[index] !== 0x0a && bytes[index] !== 0x0d) {
+        if (bytes[index] === 0x22) {
+          index += 1
+          break
+        }
+        if (bytes[index] === 0x5c && index + 1 < bytes.length) index += 2
+        else index += 1
+      }
+      pushToken(byteString ? 'ByteStringLiteral' : 'TextLiteral', start, index)
       continue
     }
 

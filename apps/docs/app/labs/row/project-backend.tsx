@@ -704,6 +704,8 @@ const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
     case 'Literal':
       return `${localText(operation.destination)} = const ${operation.value}`
+    case 'StaticView':
+      return `${localText(operation.destination)} = static ${operation.data} · ${operation.length} bytes`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(
         operation.left,
@@ -1013,6 +1015,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
       ? `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
       : value._tag === 'SliceValue'
         ? `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
+        : value._tag === 'StaticViewValue'
+          ? `static ${value.data} · ${value.length} bytes`
       : value._tag === 'UnionValue'
         ? `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
       : value._tag === 'EffectOutcomeValue'

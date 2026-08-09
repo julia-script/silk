@@ -3,6 +3,7 @@ import type * as Diagnostic from './Diagnostic.js'
 import * as Match from './Match.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as StaticText from './StaticText.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -169,6 +170,12 @@ export type Expression =
       readonly bits: bigint
       readonly spelling: string
       readonly type: Scalar.FloatSpelling
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'StaticTextLiteral'
+      readonly data: StaticText.Data
+      readonly type: Type.Slice
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -1091,6 +1098,8 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'FloatingLiteral':
       return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
+    case 'StaticTextLiteral':
+      return `${indent}static-${expression.data.kind.toLowerCase()} ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'UnitLiteral':
       return `${indent}unit : () ${spanText(expression.span)}`
     case 'BooleanLiteral':

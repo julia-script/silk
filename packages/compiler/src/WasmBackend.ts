@@ -1,5 +1,6 @@
 import * as Binary from '@silk-effect/wasm/Binary'
 import * as Builder from '@silk-effect/wasm/Builder'
+import * as Data from '@silk-effect/wasm/Data'
 import * as ExportActor from '@silk-effect/wasm/Export'
 import * as FuncActor from '@silk-effect/wasm/Func'
 import * as Global from '@silk-effect/wasm/Global'
@@ -881,6 +882,7 @@ interface MemoryContext {
   readonly heapPointer: Global.Global
   readonly frame: FramePlan
   readonly plan: LayoutPlan.Plan
+  readonly staticOffsets: ReadonlyMap<string, number>
 }
 
 /** Local names reach the `name` custom section, so release builds declare them unnamed. */
@@ -1618,6 +1620,20 @@ const emitOperation = (
           ? Instr.i64Const(BigInt.asIntN(64, exact))
           : Instr.i32Const(Number(BigInt.asIntN(32, exact))),
         Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    case 'StaticView': {
+      const context = requireMemory()
+      const offset = context.staticOffsets.get(operation.data)
+      const [address, length] = slots(operation.destination)
+      if (offset === undefined || address === undefined || length === undefined) {
+        throw new RangeError('Wasm static view lost its data placement or logical lanes')
+      }
+      return [
+        Instr.i32Const(offset),
+        Instr.localSet(address),
+        Instr.i32Const(operation.length),
+        Instr.localSet(length),
       ]
     }
     case 'Move':
@@ -3426,6 +3442,13 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     const frames = new Map(
       program.functions.map((fn) => [fn, framePlan(fn, program.layout)] as const),
     )
+    const staticOffsets = new Map<string, number>()
+    let staticEnd = 16
+    for (const data of program.staticData ?? []) {
+      staticOffsets.set(data.id, staticEnd)
+      staticEnd += data.bytes.length
+    }
+    staticEnd = alignUp(staticEnd, 16)
     const needsHeap = program.functions.some((fn) =>
       Mir.operations(fn).some(
         (operation) =>
@@ -3439,7 +3462,10 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           operation._tag === 'SlotDrop',
       ),
     )
-    const needsMemory = needsHeap || [...frames.values()].some((frame) => frame.roots.size > 0)
+    const needsMemory =
+      staticOffsets.size > 0 ||
+      needsHeap ||
+      [...frames.values()].some((frame) => frame.roots.size > 0)
     const privateMemory = needsMemory
       ? yield* Memory.make(
           builder,
@@ -3452,10 +3478,24 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           builder,
           i32,
           true,
-          [Instr.i32Const(16)],
+          [Instr.i32Const(staticEnd)],
           debug ? { name: 'silk_stack_pointer' } : {},
         )
       : undefined
+    if (privateMemory !== undefined) {
+      for (const data of program.staticData ?? []) {
+        const offset = staticOffsets.get(data.id)
+        if (offset === undefined) throw new RangeError('Wasm static data lost its offset')
+        if (data.bytes.length > 0)
+          yield* Data.active(
+            builder,
+            privateMemory,
+            [Instr.i32Const(offset)],
+            Uint8Array.from(data.bytes),
+            debug ? { name: `static_${offset}` } : {},
+          )
+      }
+    }
     const heapPointer = needsMemory
       ? yield* Global.make(
           builder,
@@ -3542,6 +3582,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
               heapPointer,
               frame,
               plan: program.layout,
+              staticOffsets,
             })
       // A body-less function is a declaration the frontend could not resolve; the LLVM backend
       // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a

@@ -4,6 +4,7 @@ import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as StaticText from './StaticText.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -125,8 +126,18 @@ export interface Plan {
   readonly effectEnvironments: ReadonlyArray<EffectEnvironment>
   readonly callableEnvironments: ReadonlyArray<CallableEnvironment>
   readonly callingShapes: ReadonlyArray<CallingShape>
+  readonly staticData?: ReadonlyArray<StaticDataPlacement>
   readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+/** Target placement facts for compiler-owned immutable literal bytes. */
+export interface StaticDataPlacement {
+  readonly _tag: 'StaticDataPlacement'
+  readonly data: StaticText.Data
+  readonly alignment: 1
+  readonly addressBits: 32 | 64
+  readonly lengthBits: 32 | 64
 }
 
 /** Target-owned storage for one monomorphized hidden Effect closure environment. */
@@ -1358,6 +1369,30 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
       shaped.set(Type.key(type), type)
   }
   const shapeTypes = Object.freeze([...shaped.values()].sort(Type.compare))
+  const staticDataById = new Map<string, StaticText.Data>()
+  for (const instance of discovery.instances) {
+    const expressions = instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+    for (const expression of expressions) {
+      if (expression._tag === 'StaticTextLiteral')
+        staticDataById.set(expression.data.id, expression.data)
+    }
+  }
+  const addressBits: 32 | 64 = self.target.pointerSize === 4 ? 32 : 64
+  const staticData = Object.freeze(
+    [...staticDataById.values()]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((data) =>
+        Object.freeze({
+          _tag: 'StaticDataPlacement' as const,
+          data,
+          alignment: 1 as const,
+          addressBits,
+          lengthBits: addressBits,
+        }),
+      ),
+  )
   return Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
@@ -1365,6 +1400,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     effectEnvironments: effectEnvironments(self.target, orderedEntries, discovery),
     callableEnvironments: callableEnvironments(self.target, orderedEntries, discovery),
     callingShapes: callingShapes(self.target, orderedEntries, shapeTypes),
+    staticData,
     literalVerdicts: literals.verdicts,
     diagnostics: literals.diagnostics,
   })
@@ -1383,6 +1419,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     effectEnvironments: Object.freeze([]),
     callableEnvironments: Object.freeze([]),
     callingShapes: callingShapes(target, orderedEntries),
+    staticData: Object.freeze([]),
     literalVerdicts: Object.freeze([]),
     diagnostics: Object.freeze([]),
   })
@@ -2318,12 +2355,36 @@ const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
   return Object.freeze(violations)
 }
 
+const verifyStaticData = (self: Plan): ReadonlyArray<Violation> => {
+  const expectedBits = self.target.pointerSize === 4 ? 32 : 64
+  const valid = (self.staticData ?? []).every((placement, ordinal, all) => {
+    const previous = ordinal === 0 ? undefined : all.at(ordinal - 1)
+    return (
+      (previous === undefined || previous.data.id < placement.data.id) &&
+      placement.alignment === 1 &&
+      placement.addressBits === expectedBits &&
+      placement.lengthBits === expectedBits &&
+      placement.data.bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+    )
+  })
+  return valid
+    ? Object.freeze([])
+    : Object.freeze([
+        Object.freeze({
+          _tag: 'LayoutViolation' as const,
+          rule: 'InvalidCallingShape' as const,
+          detail: 'static data placements are not canonical immutable target data',
+        }),
+      ])
+}
+
 /** Verifies canonical target, ordering, uniqueness, representation, and ABI facts. */
 export const verify = (self: Plan): ReadonlyArray<Violation> =>
   Object.freeze([
     ...commonViolations(self.target, self.entries),
     ...verifyCallingShapes(self),
     ...verifyLiteralVerdicts(self),
+    ...verifyStaticData(self),
   ])
 
 /** Verifies all available entries and deterministic ordering within a nominal catalog. */
@@ -2451,6 +2512,10 @@ export const encode = (self: Plan): string =>
                 )
                 .join(',')}`
         }`,
+    ),
+    ...(self.staticData ?? []).map(
+      (placement) =>
+        `static-data ${placement.data.id} bytes=${placement.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} align=${placement.alignment} address=i${placement.addressBits} length=usize:i${placement.lengthBits}`,
     ),
     ...self.literalVerdicts.map(
       (verdict) =>

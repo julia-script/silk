@@ -184,6 +184,8 @@ const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
 const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'DecimalInteger',
   'DecimalFloat',
+  'TextLiteral',
+  'ByteStringLiteral',
   'Identifier',
   'LeftBrace',
   'MoveKeyword',
@@ -355,6 +357,16 @@ const parseBooleanLiteralExpression = (initial: State): NodeResult => {
   })
 }
 
+const parseStaticTextLiteralExpression = (initial: State): NodeResult => {
+  const kind =
+    nextSignificantKind(initial) === 'ByteStringLiteral' ? 'ByteStringLiteral' : 'TextLiteral'
+  const literal = expect(initial, kind, expressionFollowing)
+  return Object.freeze({
+    state: literal.state,
+    node: syntaxNode(literal.state, 'StaticTextLiteralExpression', literal.elements),
+  })
+}
+
 const primaryKind = (
   state: State,
   recoveryKind: 'Integer' | 'Identifier',
@@ -362,6 +374,7 @@ const primaryKind = (
 ):
   | 'Integer'
   | 'Floating'
+  | 'StaticText'
   | 'Boolean'
   | 'Identifier'
   | 'Move'
@@ -382,6 +395,7 @@ const primaryKind = (
   while (token !== undefined) {
     if (token.kind === 'DecimalInteger') return 'Integer'
     if (token.kind === 'DecimalFloat') return 'Floating'
+    if (token.kind === 'TextLiteral' || token.kind === 'ByteStringLiteral') return 'StaticText'
     if (token.kind === 'Minus')
       return significantKindAfter(state, 1) === 'DecimalInteger'
         ? 'Integer'
@@ -1055,6 +1069,7 @@ function parsePrimaryExpression(
     })
   }
   if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
+  if (kind === 'StaticText') return parseStaticTextLiteralExpression(initial)
   if (kind === 'Floating') return parseFloatingLiteralExpression(initial)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   if (kind === 'Grouped') return parseGroupedExpression(initial, reservedForEnclosingCalls)

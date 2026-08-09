@@ -65,6 +65,14 @@ export interface SliceValue {
   readonly length: number
 }
 
+/** Allocation-free immutable view of one compiler-owned static-data entry. */
+export interface StaticViewValue {
+  readonly _tag: 'StaticViewValue'
+  readonly data: string
+  readonly bytes: ReadonlyArray<number>
+  readonly length: number
+}
+
 export interface ReferenceValue {
   readonly _tag: 'ReferenceValue'
   readonly frame: number
@@ -157,6 +165,7 @@ export type Value =
   | AggregateValue
   | ArrayValue
   | SliceValue
+  | StaticViewValue
   | ReferenceValue
   | UnionValue
   | EffectBorrowValue
@@ -1765,6 +1774,22 @@ function executeFunction(
               })
             }
             break
+          case 'StaticView': {
+            const data = program.staticData?.find((candidate) => candidate.id === operation.data)
+            if (data === undefined || data.bytes.length !== operation.length) {
+              throw new RangeError('MIR verifier allowed a missing or mismatched static-data view')
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'StaticViewValue',
+                data: data.id,
+                bytes: data.bytes,
+                length: data.bytes.length,
+              }),
+              fromCall: false,
+            })
+            break
+          }
           case 'Move':
             write(operation.destination, read(operation.source))
             break
@@ -1813,7 +1838,7 @@ function executeFunction(
             break
           case 'SliceLength': {
             const slice = read(operation.slice).value
-            if (slice._tag !== 'SliceValue') {
+            if (slice._tag !== 'SliceValue' && slice._tag !== 'StaticViewValue') {
               throw new RangeError('MIR verifier allowed slice length on a non-slice value')
             }
             write(operation.destination, {

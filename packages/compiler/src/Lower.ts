@@ -672,6 +672,22 @@ function lowerExpression(
       )
       return { result: destination }
     }
+    case 'StaticTextLiteral': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== 'Slice') return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'StaticView',
+          destination,
+          data: expression.data.id,
+          length: expression.data.bytes.length,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
     case 'UnitLiteral': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
@@ -4074,6 +4090,21 @@ export const lowerProgram = (
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
 ): Mir.Module => {
+  const staticDataById = new Map<
+    string,
+    Extract<Hir.Expression, { readonly _tag: 'StaticTextLiteral' }>['data']
+  >()
+  for (const instance of discovery.instances) {
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag === 'StaticTextLiteral')
+        staticDataById.set(expression.data.id, expression.data)
+    }
+  }
+  const staticData = Object.freeze(
+    [...staticDataById.values()].sort((left, right) => left.id.localeCompare(right.id)),
+  )
   const effectResults = new Map<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>()
   const generatedRunners: Array<GeneratedEffectRunner> = []
   for (const instance of discovery.instances) {
@@ -4123,6 +4154,7 @@ export const lowerProgram = (
       module: discovery.rootModule,
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
+      staticData,
       functions: Object.freeze(functions),
     })
   }
@@ -4244,6 +4276,7 @@ export const lowerProgram = (
     module: discovery.rootModule,
     entry,
     layout,
+    staticData,
     functions: Object.freeze(functions),
   })
 }
