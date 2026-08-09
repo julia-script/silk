@@ -1,28 +1,4 @@
-# language-server-navigation Specification
-
-## Purpose
-
-Defines semantic target lookup and go-to-definition behavior for Silk source positions, including
-recovered programs and references whose declarations reside in other project modules.
-
-## Requirements
-
-### Requirement: The server advertises semantic definition support
-
-The language server SHALL advertise go-to-definition support to compatible clients and SHALL
-interpret request positions using the negotiated position encoding. Definition responses SHALL
-identify both the source reference range and the declaration-name range when the protocol response
-form supports them.
-
-#### Scenario: Client initializes the server
-
-- **WHEN** a compatible client initializes a Silk language-server session
-- **THEN** the returned capabilities advertise definition support and the selected position encoding
-
-#### Scenario: Unicode before a reference
-
-- **WHEN** a definition request uses a UTF-16 position after non-ASCII source text
-- **THEN** the server resolves the reference at the corresponding Silk source byte span
+## MODIFIED Requirements
 
 ### Requirement: Definition follows resolved semantic identity
 
@@ -67,23 +43,6 @@ facts.
 
 - **WHEN** the cursor is on a source declaration's own available name
 - **THEN** definition returns that declaration as the selected location
-
-### Requirement: Cross-file definitions use exact analyzed sources
-
-For a target in another module, the language server SHALL return that module's document URI and
-the declaration-name range calculated from the exact source bytes in the snapshot that resolved the
-reference. An open target document SHALL use its synchronized URI and contents; a closed target
-module SHALL use its project file URI.
-
-#### Scenario: Definition in an open unsaved module
-
-- **WHEN** a reference resolves to a declaration in an open imported module with unsaved changes
-- **THEN** definition returns the open document URI and declaration range from the synchronized contents
-
-#### Scenario: Definition in a closed module
-
-- **WHEN** a reference resolves to a declaration loaded from a closed project file
-- **THEN** definition returns the file URI and declaration range from the analyzed on-disk source
 
 ### Requirement: Recovery and ambiguity do not invent navigation
 

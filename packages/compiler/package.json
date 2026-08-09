@@ -45,6 +45,10 @@
       "types": "./dist/BootstrapEvaluation.d.ts",
       "import": "./dist/BootstrapEvaluation.js"
     },
+    "./Completion": {
+      "types": "./dist/Completion.d.ts",
+      "import": "./dist/Completion.js"
+    },
     "./NativeToolchain": {
       "types": "./dist/NativeToolchain.d.ts",
       "import": "./dist/NativeToolchain.js"
@@ -80,6 +84,10 @@
     "./Instances": {
       "types": "./dist/Instances.d.ts",
       "import": "./dist/Instances.js"
+    },
+    "./Intrinsic": {
+      "types": "./dist/Intrinsic.d.ts",
+      "import": "./dist/Intrinsic.js"
     },
     "./Layout": {
       "types": "./dist/Layout.d.ts",
@@ -125,9 +133,13 @@
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
     },
-    "./SemanticTarget": {
-      "types": "./dist/SemanticTarget.d.ts",
-      "import": "./dist/SemanticTarget.js"
+    "./Presentation": {
+      "types": "./dist/Presentation.d.ts",
+      "import": "./dist/Presentation.js"
+    },
+    "./SemanticOccurrence": {
+      "types": "./dist/SemanticOccurrence.d.ts",
+      "import": "./dist/SemanticOccurrence.js"
     },
     "./Elaboration": {
       "types": "./dist/Elaboration.d.ts",
@@ -152,6 +164,10 @@
     "./Type": {
       "types": "./dist/Type.d.ts",
       "import": "./dist/Type.js"
+    },
+    "./TypeHint": {
+      "types": "./dist/TypeHint.d.ts",
+      "import": "./dist/TypeHint.js"
     },
     "./TypeCompatibility": {
       "types": "./dist/TypeCompatibility.d.ts",

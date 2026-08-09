@@ -3,6 +3,7 @@ import * as Option from 'effect/Option'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Operator from './Operator.js'
@@ -142,6 +143,33 @@ export type CallReferenceFact =
       readonly syntax: SyntaxTree.Element
     }
 
+/** Exact qualifier and member tokens retained beside semantic reference resolution. */
+export type ReferencePathFact =
+  | {
+      readonly _tag: 'ReferencePath'
+      readonly qualifier?: Token.Token
+      readonly member: Token.Token
+    }
+  | { readonly _tag: 'UnavailableReferencePath'; readonly syntax: SyntaxTree.Element }
+
+/** Exact source tokens and catalog identity for one recognized intrinsic member path. */
+export type IntrinsicReferenceFact =
+  | {
+      readonly _tag: 'ResolvedIntrinsicReference'
+      readonly actor: Intrinsic.Actor
+      readonly operation: Intrinsic.Operation
+      readonly actorToken: Token.Token
+      readonly operationToken: Token.Token
+    }
+  | {
+      readonly _tag: 'ResolvedCapabilityOperationReference'
+      readonly actor: DeclarationIndex.StructFact | Intrinsic.Actor
+      readonly operation: Intrinsic.Operation
+      readonly actorToken: Token.Token
+      readonly operationToken: Token.Token
+    }
+  | { readonly _tag: 'UnavailableIntrinsicReference'; readonly syntax: SyntaxTree.Element }
+
 /** The available or unavailable type of one returned expression. */
 export type ExpressionTypeFact =
   | { readonly _tag: 'Available'; readonly type: SemanticType }
@@ -228,6 +256,7 @@ export type PatternFieldState =
 export interface PatternFieldFact {
   readonly _tag: 'PatternField'
   readonly name: string | undefined
+  readonly token?: Token.Token
   readonly state: PatternFieldState
   readonly binding?: PatternBindingFact
   readonly nested?: PatternFact
@@ -285,6 +314,7 @@ export type StructTargetFact =
       readonly _tag: 'Resolved'
       readonly struct: DeclarationIndex.StructFact
       readonly type: Type.Nominal
+      readonly token: Token.Token
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
@@ -306,6 +336,7 @@ export type StructInitializerState =
 export interface StructInitializerFact {
   readonly _tag: 'StructInitializer'
   readonly name: string | undefined
+  readonly token?: Token.Token
   readonly expression: ExpressionFact
   readonly state: StructInitializerState
   readonly syntax: SyntaxTree.Node
@@ -335,6 +366,7 @@ export interface FieldProjectionExpressionFact {
   readonly nominal?: Type.Nominal
   readonly borrowAccess?: Type.Slice['access']
   readonly fieldName: string | undefined
+  readonly fieldToken?: Token.Token
   readonly state: ProjectionState
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
@@ -443,6 +475,7 @@ export interface OperatorExpressionFact {
 export interface FunctionItemExpressionFact {
   readonly _tag: 'FunctionItem'
   readonly reference: CallReferenceFact
+  readonly path: ReferencePathFact
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -465,6 +498,7 @@ export interface CallableSectionExpressionFact {
     readonly span: SourceSpan.SourceSpan
   }
   readonly reference: CallReferenceFact
+  readonly path: ReferencePathFact
   readonly omittedParameter: 0
   readonly captures: ReadonlyArray<CallableCaptureFact>
   readonly retainedDependencies: ReadonlyArray<number>
@@ -560,6 +594,7 @@ export type ExpressionFact =
   | {
       /** `Place.replace(place, value)`: swap one writable place, yielding its old value. */
       readonly _tag: 'PlaceReplace'
+      readonly reference: IntrinsicReferenceFact
       readonly destination: ExpressionFact
       readonly root?: AssignmentRootFact
       readonly value: ExpressionFact
@@ -569,6 +604,8 @@ export type ExpressionFact =
     }
   | {
       readonly _tag: 'EffectCatch'
+      readonly reference: IntrinsicReferenceFact
+      readonly typeArguments: ReadonlyArray<TypeArgumentFact>
       readonly protected: ExpressionFact
       readonly handled?: Type.Nominal
       readonly handler: ExpressionFact
@@ -578,6 +615,7 @@ export type ExpressionFact =
     }
   | {
       readonly _tag: 'EffectRetry'
+      readonly reference: IntrinsicReferenceFact
       readonly protected: ExpressionFact
       readonly retries: ExpressionFact
       readonly type: ExpressionTypeFact
@@ -585,6 +623,7 @@ export type ExpressionFact =
     }
   | {
       readonly _tag: 'EffectTransform'
+      readonly reference: IntrinsicReferenceFact
       readonly operation: 'Map' | 'FlatMap' | 'Tap'
       readonly protected: ExpressionFact
       readonly callback: ExpressionFact
@@ -593,6 +632,7 @@ export type ExpressionFact =
     }
   | {
       readonly _tag: 'EffectProvide'
+      readonly reference: IntrinsicReferenceFact
       readonly protected: ExpressionFact
       readonly provider?: EffectProviderCaptureFact
       readonly type: ExpressionTypeFact
@@ -600,6 +640,7 @@ export type ExpressionFact =
     }
   | {
       readonly _tag: 'EffectProvideWith'
+      readonly reference: IntrinsicReferenceFact
       readonly protected: ExpressionFact
       readonly acquisition: ExpressionFact
       readonly capability?: Type.Nominal
@@ -610,6 +651,7 @@ export type ExpressionFact =
   | {
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
+      readonly path: ReferencePathFact
       readonly typeArguments: ReadonlyArray<TypeArgumentFact>
       readonly arguments: ReadonlyArray<ArgumentFact>
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
@@ -788,6 +830,24 @@ export interface FunctionFact {
   readonly returnCompatibility: ReturnCompatibility
 }
 
+/** Stable identity of one parent-linked lexical scope in an elaborated function. */
+export interface LexicalScopeId {
+  readonly _tag: 'LexicalScopeId'
+  readonly function: DeclarationId
+  readonly ordinal: number
+}
+
+/** Names introduced directly by one lexical scope, before parent traversal and shadowing. */
+export interface LexicalScopeFact {
+  readonly _tag: 'LexicalScope'
+  readonly id: LexicalScopeId
+  readonly parent?: LexicalScopeId
+  readonly span: SourceSpan.SourceSpan
+  readonly parameters: ReadonlyArray<ParameterFact>
+  readonly bindings: ReadonlyArray<BindingDeclarationFact>
+  readonly patternBindings: ReadonlyArray<PatternBindingFact>
+}
+
 /** The closed result of looking up one declaration spelling. */
 export type DeclarationLookup = DeclarationIndex.DeclarationLookup
 
@@ -797,6 +857,7 @@ export interface Result {
   readonly syntax: SyntaxFile.SyntaxFile
   readonly index: DeclarationIndex.Index
   readonly functions: ReadonlyArray<FunctionFact>
+  readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly hir: Hir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -917,6 +978,19 @@ const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> 
   return qualifier === undefined || member === undefined
     ? Object.freeze([])
     : Object.freeze([qualifier, member])
+}
+
+const referencePath = (node: SyntaxTree.Node): ReferencePathFact => {
+  const identifiers = callReferenceTokens(node)
+  const member = identifiers.at(-1)
+  const qualifier = identifiers.length > 1 ? identifiers.at(0) : undefined
+  return member === undefined
+    ? Object.freeze({ _tag: 'UnavailableReferencePath', syntax: node })
+    : Object.freeze({
+        _tag: 'ReferencePath',
+        ...(qualifier === undefined ? {} : { qualifier }),
+        member,
+      })
 }
 
 const pipelineInput = (node: SyntaxTree.Node): SyntaxTree.Node | undefined =>
@@ -1536,6 +1610,7 @@ const resolveStructTarget = (
             _tag: 'Resolved',
             struct: intrinsicStruct(resolved.fact.type, syntax, token),
             type: resolved.fact.type,
+            token,
           }),
           diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
         })
@@ -1546,8 +1621,19 @@ const resolveStructTarget = (
       name: resolved.fact.type.name,
     })
     if (declaration?._tag === 'StructDeclaration') {
+      const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
+      if (token === undefined)
+        return Object.freeze({
+          fact: Object.freeze({ _tag: 'Unavailable' }),
+          diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
+        })
       return Object.freeze({
-        fact: Object.freeze({ _tag: 'Resolved', struct: declaration, type: resolved.fact.type }),
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          struct: declaration,
+          type: resolved.fact.type,
+          token,
+        }),
         diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
       })
     }
@@ -1814,6 +1900,7 @@ const analyzePattern = (
     const fact: PatternFieldFact = Object.freeze({
       _tag: 'PatternField',
       name,
+      ...(nameToken === undefined ? {} : { token: nameToken }),
       state,
       ...(binding === undefined ? {} : { binding }),
       ...(nested === undefined ? {} : { nested }),
@@ -2203,6 +2290,7 @@ const analyzeStructLiteral = (
       const fact: StructInitializerFact = Object.freeze({
         _tag: 'StructInitializer',
         name,
+        ...(nameToken === undefined ? {} : { token: nameToken }),
         expression: expression.fact,
         state,
         syntax: initializer,
@@ -2561,6 +2649,7 @@ const analyzeProjection = (
       ...(nominal === undefined ? {} : { nominal }),
       ...(projectionAccess === undefined ? {} : { borrowAccess: projectionAccess }),
       fieldName,
+      ...(fieldToken === undefined ? {} : { fieldToken }),
       state,
       type: typeFact,
       syntax: node,
@@ -2635,7 +2724,7 @@ function analyzeArguments(
     const memberSpelling = spelling(source, second)
     const qualifier = NameResolution.lookup(resolution.scope, resolution.index, qualifierSpelling)
     if (qualifier._tag === 'Intrinsic') {
-      const builtin = builtinActors[qualifierSpelling]?.[memberSpelling]
+      const builtin = builtinSignature(qualifierSpelling, memberSpelling)
       builtinParameters = builtin?.parameters ?? Object.freeze([])
       builtinTypeParameters = builtin?.typeParameters ?? Object.freeze([])
     } else if (qualifier._tag === 'Namespace') {
@@ -3136,217 +3225,17 @@ interface BuiltinSignature {
   readonly unsafe?: boolean
 }
 
-const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
-const rawTypeParameters = Object.freeze([rawElement])
-
-const binaryI32 = (operation: Hir.BuiltinOperation): BuiltinSignature =>
-  Object.freeze({ operation, parameters: Object.freeze(['I32', 'I32'] as const), result: 'I32' })
-
-const comparisonI32 = (operation: Hir.BuiltinOperation): BuiltinSignature =>
-  Object.freeze({ operation, parameters: Object.freeze(['I32', 'I32'] as const), result: 'Bool' })
-
-const comparisonBool = (operation: Hir.BuiltinOperation): BuiltinSignature =>
-  Object.freeze({ operation, parameters: Object.freeze(['Bool', 'Bool'] as const), result: 'Bool' })
-
-const intrinsicUnion = (members: ReadonlyArray<Type.Nominal>): SemanticType => {
-  const normalized = Type.union(members)
-  return normalized._tag === 'Normalized' ? normalized.type : 'Never'
+const builtinSignature = (actor: string, operation: string): BuiltinSignature | undefined => {
+  const catalog = Intrinsic.findOperation(actor, operation)
+  if (catalog?.rule._tag !== 'BuiltinRule') return undefined
+  return Object.freeze({
+    operation: catalog.rule.operation,
+    typeParameters: catalog.rule.typeParameters,
+    parameters: catalog.rule.parameters,
+    result: catalog.rule.result,
+    unsafe: catalog.unsafe,
+  })
 }
-
-/** The compiler-known built-in actor table. Issue 07's runtime actors extend this shape. */
-const builtinActors: Readonly<
-  Record<string, Readonly<Record<string, BuiltinSignature>> | undefined>
-> = Object.freeze({
-  I32: Object.freeze({
-    negate: Object.freeze({
-      operation: 'Negate' as const,
-      parameters: Object.freeze(['I32'] as const),
-      result: 'I32' as const,
-    }),
-    add: binaryI32('Add'),
-    subtract: binaryI32('Subtract'),
-    multiply: binaryI32('Multiply'),
-    divide: binaryI32('Divide'),
-    remainder: binaryI32('Remainder'),
-    equals: comparisonI32('Equals'),
-    notEquals: comparisonI32('NotEquals'),
-    lessThan: comparisonI32('LessThan'),
-    lessOrEqual: comparisonI32('LessOrEqual'),
-    greaterThan: comparisonI32('GreaterThan'),
-    greaterOrEqual: comparisonI32('GreaterOrEqual'),
-  }),
-  Usize: Object.freeze({
-    add: Object.freeze({
-      operation: 'Add' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Usize' as const,
-    }),
-    subtract: Object.freeze({
-      operation: 'Subtract' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Usize' as const,
-    }),
-    multiply: Object.freeze({
-      operation: 'Multiply' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Usize' as const,
-    }),
-    divide: Object.freeze({
-      operation: 'Divide' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Usize' as const,
-    }),
-    remainder: Object.freeze({
-      operation: 'Remainder' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Usize' as const,
-    }),
-    equals: Object.freeze({
-      operation: 'Equals' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Bool' as const,
-    }),
-    notEquals: Object.freeze({
-      operation: 'NotEquals' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Bool' as const,
-    }),
-    lessThan: Object.freeze({
-      operation: 'LessThan' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Bool' as const,
-    }),
-    lessOrEqual: Object.freeze({
-      operation: 'LessOrEqual' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Bool' as const,
-    }),
-    greaterThan: Object.freeze({
-      operation: 'GreaterThan' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Bool' as const,
-    }),
-    greaterOrEqual: Object.freeze({
-      operation: 'GreaterOrEqual' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: 'Bool' as const,
-    }),
-  }),
-  Bool: Object.freeze({
-    equals: comparisonBool('Equals'),
-    notEquals: comparisonBool('NotEquals'),
-    not: Object.freeze({
-      operation: 'Not' as const,
-      parameters: Object.freeze(['Bool'] as const),
-      result: 'Bool' as const,
-    }),
-  }),
-  Layout: Object.freeze({
-    of: Object.freeze({
-      operation: 'LayoutOf' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([]),
-      result: Type.layout,
-    }),
-    make: Object.freeze({
-      operation: 'LayoutMake' as const,
-      parameters: Object.freeze(['Usize', 'Usize'] as const),
-      result: intrinsicUnion([Type.layout, Type.invalidAlignment]),
-    }),
-    repeat: Object.freeze({
-      operation: 'LayoutRepeat' as const,
-      parameters: Object.freeze([Type.layout, 'Usize'] as const),
-      result: intrinsicUnion([Type.layout, Type.layoutOverflow]),
-    }),
-  }),
-  SystemAllocator: Object.freeze({
-    make: Object.freeze({
-      operation: 'SystemAllocatorMake' as const,
-      parameters: Object.freeze([]),
-      result: Type.systemAllocator,
-    }),
-  }),
-  Allocator: Object.freeze({
-    allocate: Object.freeze({
-      operation: 'AllocatorAllocate' as const,
-      parameters: Object.freeze([Type.layout]),
-      result: Type.effect(
-        Type.allocation,
-        Object.freeze([Type.outOfMemory]),
-        'Exclusive',
-        Object.freeze([
-          Object.freeze({
-            capability: Type.allocator,
-            role: 'DefaultRole',
-            access: 'Exclusive' as const,
-          }),
-        ]),
-      ),
-    }),
-  }),
-  Unit: Object.freeze({
-    make: Object.freeze({
-      operation: 'UnitMake' as const,
-      parameters: Object.freeze([]),
-      result: Type.unit,
-    }),
-  }),
-  RawBuffer: Object.freeze({
-    from: Object.freeze({
-      operation: 'RawBufferFrom' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([Type.allocation, 'Usize'] as const),
-      result: Type.rawBuffer(rawElement),
-      unsafe: true,
-    }),
-    slot: Object.freeze({
-      operation: 'RawBufferSlot' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
-        'Usize' as const,
-      ]),
-      result: Type.slot(rawElement),
-      unsafe: true,
-    }),
-    count: Object.freeze({
-      operation: 'RawBufferCount' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([Type.reference('Shared', Type.rawBuffer(rawElement))]),
-      result: 'Usize' as const,
-    }),
-  }),
-  Slot: Object.freeze({
-    write: Object.freeze({
-      operation: 'SlotWrite' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([Type.slot(rawElement), rawElement]),
-      result: Type.unit,
-      unsafe: true,
-    }),
-    take: Object.freeze({
-      operation: 'SlotTake' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([Type.slot(rawElement)]),
-      result: rawElement,
-      unsafe: true,
-    }),
-    copy: Object.freeze({
-      operation: 'SlotCopy' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([Type.slot(rawElement)]),
-      result: rawElement,
-      unsafe: true,
-    }),
-    drop: Object.freeze({
-      operation: 'SlotDrop' as const,
-      typeParameters: rawTypeParameters,
-      parameters: Object.freeze([Type.slot(rawElement)]),
-      result: Type.unit,
-      unsafe: true,
-    }),
-  }),
-})
 
 const callableResultType = (declaration: DeclarationFact): SemanticType | undefined => {
   if (declaration.returnType._tag !== 'Resolved') return undefined
@@ -3405,7 +3294,7 @@ const resolvedFunctionReference = (
   const member = spelling(source, second)
   const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
   if (qualifierLookup._tag === 'Intrinsic') {
-    const signature = builtinActors[qualifier]?.[member]
+    const signature = builtinSignature(qualifier, member)
     return signature === undefined
       ? undefined
       : Object.freeze({
@@ -3468,6 +3357,7 @@ const analyzeFunctionItem = (
       fact: Object.freeze({
         _tag: 'FunctionItem',
         reference: missing,
+        path: referencePath(node),
         type: unavailableExpressionType,
         syntax: node,
       }),
@@ -3479,7 +3369,13 @@ const analyzeFunctionItem = (
   const type =
     callable === undefined ? unavailableExpressionType : availableExpressionType(callable)
   return Object.freeze({
-    fact: Object.freeze({ _tag: 'FunctionItem', reference, type, syntax: node }),
+    fact: Object.freeze({
+      _tag: 'FunctionItem',
+      reference,
+      path: referencePath(node),
+      type,
+      syntax: node,
+    }),
     diagnostics: Object.freeze([]),
     type: callable,
   })
@@ -3688,6 +3584,7 @@ const finishCallableSection = (
         span: node.span,
       }),
       reference,
+      path: referencePath(node),
       omittedParameter: 0,
       captures,
       retainedDependencies: Object.freeze(
@@ -3862,6 +3759,7 @@ function analyzePlaceReplace(
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'PlaceReplace' as const,
+        reference: intrinsicReference(source, call),
         destination: unavailableIdentifierFact(call),
         value: unavailableIdentifierFact(call),
         compatible: false,
@@ -3942,6 +3840,7 @@ function analyzePlaceReplace(
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'PlaceReplace' as const,
+      reference: intrinsicReference(source, call),
       destination: destination.fact,
       ...(root === undefined ? {} : { root }),
       value: value.fact,
@@ -3976,6 +3875,7 @@ function analyzeBuiltinCall(
           _tag: 'Unavailable',
           syntax: unavailableSyntax(call, 'Identifier'),
         }),
+        path: referencePath(call),
         typeArguments: typeArguments.facts,
         arguments: argumentsResult.facts,
         mappings: Object.freeze([]),
@@ -3993,8 +3893,8 @@ function analyzeBuiltinCall(
 
   const actorSpelling = spelling(source, actorToken)
   const operationSpelling = spelling(source, operationToken)
-  const actor = builtinActors[actorSpelling]
-  const signature = actor?.[operationSpelling]
+  const actor = Intrinsic.findActor(actorSpelling)
+  const signature = builtinSignature(actorSpelling, operationSpelling)
   const declaredTypeParameters = signature?.typeParameters ?? Object.freeze([])
   const specializationDiagnostic =
     typeArguments.explicit &&
@@ -4103,6 +4003,7 @@ function analyzeBuiltinCall(
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      path: referencePath(call),
       typeArguments: typeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
@@ -4270,7 +4171,7 @@ const analyzeOperatorExpression = (
         ? 'Usize'
         : 'I32'
   const target = Operator.target(operator, equalityActor)
-  const signature = builtinActors[target.actor]?.[target.operation]
+  const signature = builtinSignature(target.actor, target.operation)
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
   const reference: CallReferenceFact = Object.freeze({
     _tag: 'ResolvedBuiltin',
@@ -4382,47 +4283,91 @@ const effectCaptureAccess = (arguments_: ReadonlyArray<ArgumentFact>): Type.Effe
       : 'Shared'
 }
 
-const isEffectCatchTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
+const intrinsicOperationTarget = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): Intrinsic.Operation | undefined => {
   const identifiers = callReferenceTokens(node)
   const qualifier = identifiers.at(0)
   const member = identifiers.at(1)
-  return (
-    qualifier !== undefined &&
-    member !== undefined &&
-    spelling(source, qualifier) === 'Effect' &&
-    spelling(source, member) === 'catch'
-  )
+  return qualifier === undefined || member === undefined
+    ? undefined
+    : Intrinsic.findOperation(spelling(source, qualifier), spelling(source, member))
 }
 
-const isEffectRetryTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
+const intrinsicReference = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): IntrinsicReferenceFact => {
   const identifiers = callReferenceTokens(node)
-  const qualifier = identifiers.at(0)
-  const member = identifiers.at(1)
-  return (
-    qualifier !== undefined &&
-    member !== undefined &&
-    spelling(source, qualifier) === 'Effect' &&
-    spelling(source, member) === 'retry'
-  )
+  const actorToken = identifiers.at(0)
+  const operationToken = identifiers.at(1)
+  const actor =
+    actorToken === undefined ? undefined : Intrinsic.findActor(spelling(source, actorToken))
+  const operation =
+    actor === undefined || operationToken === undefined
+      ? undefined
+      : Intrinsic.findOperation(actor.spelling, spelling(source, operationToken))
+  return actorToken === undefined ||
+    operationToken === undefined ||
+    actor === undefined ||
+    operation === undefined
+    ? Object.freeze({ _tag: 'UnavailableIntrinsicReference', syntax: node })
+    : Object.freeze({
+        _tag: 'ResolvedIntrinsicReference',
+        actor,
+        operation,
+        actorToken,
+        operationToken,
+      })
 }
+
+const capabilityOperationReference = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  actor: DeclarationIndex.StructFact | Intrinsic.Actor | undefined,
+): IntrinsicReferenceFact => {
+  const identifiers = callReferenceTokens(node)
+  const actorToken = identifiers.at(0)
+  const operationToken = identifiers.at(1)
+  const operation =
+    operationToken === undefined
+      ? undefined
+      : Intrinsic.findOperation('Effect', spelling(source, operationToken))
+  return actor === undefined ||
+    actorToken === undefined ||
+    operationToken === undefined ||
+    operation?.rule._tag !== 'EffectRule' ||
+    (operation.rule.operation !== 'Provide' && operation.rule.operation !== 'ProvideWith')
+    ? Object.freeze({ _tag: 'UnavailableIntrinsicReference', syntax: node })
+    : Object.freeze({
+        _tag: 'ResolvedCapabilityOperationReference',
+        actor,
+        operation,
+        actorToken,
+        operationToken,
+      })
+}
+
+const isEffectCatchTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean =>
+  intrinsicOperationTarget(source, node)?.rule._tag === 'EffectRule' &&
+  intrinsicOperationTarget(source, node)?.rule.operation === 'Catch'
+
+const isEffectRetryTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean =>
+  intrinsicOperationTarget(source, node)?.rule._tag === 'EffectRule' &&
+  intrinsicOperationTarget(source, node)?.rule.operation === 'Retry'
 
 const effectTransformTarget = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
 ): 'Map' | 'FlatMap' | 'Tap' | undefined => {
-  const identifiers = callReferenceTokens(node)
-  const qualifier = identifiers.at(0)
-  const member = identifiers.at(1)
-  if (qualifier === undefined || member === undefined || spelling(source, qualifier) !== 'Effect')
-    return undefined
-  const name = spelling(source, member)
-  return name === 'map'
-    ? 'Map'
-    : name === 'flatMap'
-      ? 'FlatMap'
-      : name === 'tap'
-        ? 'Tap'
-        : undefined
+  const target = intrinsicOperationTarget(source, node)
+  if (target?.rule._tag !== 'EffectRule') return undefined
+  return target.rule.operation === 'Map' ||
+    target.rule.operation === 'FlatMap' ||
+    target.rule.operation === 'Tap'
+    ? target.rule.operation
+    : undefined
 }
 
 const combineEffectAccess = (
@@ -4520,6 +4465,7 @@ const analyzeEffectTransform = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'EffectTransform',
+      reference: intrinsicReference(source, target),
       operation,
       protected: protectedResult?.fact ?? unavailableExpression(node),
       callback: callbackResult?.fact ?? unavailableExpression(node),
@@ -4531,24 +4477,26 @@ const analyzeEffectTransform = (
   })
 }
 
-const isEffectProvideTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
-  const identifiers = callReferenceTokens(node)
-  const qualifier = identifiers.at(0)
-  const member = identifiers.at(1)
-  return qualifier !== undefined && member !== undefined && spelling(source, member) === 'provide'
-}
-
-const isEffectProvideWithTarget = (
+const capabilityEffectOperationTarget = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
-): boolean => {
-  const identifiers = callReferenceTokens(node)
-  const qualifier = identifiers.at(0)
-  const member = identifiers.at(1)
-  return (
-    qualifier !== undefined && member !== undefined && spelling(source, member) === 'provideWith'
-  )
+): Intrinsic.Operation | undefined => {
+  const token = callReferenceTokens(node).at(1)
+  if (token === undefined) return undefined
+  const operation = Intrinsic.findOperation('Effect', spelling(source, token))
+  return operation?.rule._tag === 'EffectRule' &&
+    (operation.rule.operation === 'Provide' || operation.rule.operation === 'ProvideWith')
+    ? operation
+    : undefined
 }
+
+const isEffectProvideTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean =>
+  capabilityEffectOperationTarget(source, node)?.rule._tag === 'EffectRule' &&
+  capabilityEffectOperationTarget(source, node)?.rule.operation === 'Provide'
+
+const isEffectProvideWithTarget = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean =>
+  capabilityEffectOperationTarget(source, node)?.rule._tag === 'EffectRule' &&
+  capabilityEffectOperationTarget(source, node)?.rule.operation === 'ProvideWith'
 
 const analyzeEffectProvide = (
   source: SourceFile.SourceFile,
@@ -4705,6 +4653,14 @@ const analyzeEffectProvide = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'EffectProvide',
+      reference: capabilityOperationReference(
+        source,
+        target,
+        capabilityDeclaration ??
+          (capabilityLookup?._tag === 'Intrinsic'
+            ? Intrinsic.findActor(capabilityLookup.actor)
+            : undefined),
+      ),
       protected: protectedResult?.fact ?? unavailableExpression(node),
       ...(providerReference === undefined ||
       capability === undefined ||
@@ -4863,6 +4819,14 @@ const analyzeEffectProvideWith = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'EffectProvideWith',
+      reference: capabilityOperationReference(
+        source,
+        target,
+        capabilityDeclaration ??
+          (capabilityLookup?._tag === 'Intrinsic'
+            ? Intrinsic.findActor(capabilityLookup.actor)
+            : undefined),
+      ),
       protected: protectedResult?.fact ?? unavailableExpression(node),
       acquisition: acquisitionResult?.fact ?? unavailableExpression(node),
       ...(capability === undefined ? {} : { capability }),
@@ -4973,6 +4937,8 @@ const analyzeEffectCatch = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'EffectCatch',
+      reference: intrinsicReference(source, target),
+      typeArguments: typeArguments.facts,
       protected: protectedResult?.fact ?? unavailableExpression(node),
       ...(handled === undefined ? {} : { handled }),
       handler: handlerResult?.fact ?? unavailableExpression(node),
@@ -5033,6 +4999,7 @@ const analyzeEffectRetry = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'EffectRetry',
+      reference: intrinsicReference(source, target),
       protected: protectedResult?.fact ?? unavailableExpression(node),
       retries: retriesResult?.fact ?? unavailableExpression(node),
       type,
@@ -5596,6 +5563,7 @@ function analyzeExpression(
           _tag: 'Unavailable',
           syntax: unavailableSyntax(callCallee(node), 'Identifier'),
         }),
+        path: referencePath(node),
         typeArguments: callTypeArguments.facts,
         arguments: argumentsResult.facts,
         mappings: Object.freeze([]),
@@ -5724,6 +5692,7 @@ function analyzeExpression(
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      path: referencePath(node),
       typeArguments: callTypeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
@@ -5801,6 +5770,7 @@ const finishDeclarationCall = (
     fact: Object.freeze({
       _tag: 'Call',
       reference,
+      path: referencePath(node),
       typeArguments: callTypeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
@@ -7437,6 +7407,178 @@ const hirBorrowedWritePlace = (
   })
 }
 
+const statementSpan = (statement: StatementFact): SourceSpan.SourceSpan =>
+  statement._tag === 'BindStatement' ? statement.binding.syntax.span : statement.syntax.span
+
+const directStatementExpressions = (statement: StatementFact): ReadonlyArray<ExpressionFact> => {
+  switch (statement._tag) {
+    case 'BindStatement':
+      return Object.freeze([statement.binding.initializer])
+    case 'ReturnStatement':
+    case 'FailStatement':
+    case 'DropStatement':
+      return Object.freeze([statement.expression])
+    case 'IfStatement':
+    case 'WhileStatement':
+      return Object.freeze([statement.condition])
+    case 'WriteStatement':
+      return Object.freeze([statement.destination, statement.value])
+    case 'UnsafeStatement':
+    case 'BreakStatement':
+    case 'ContinueStatement':
+      return Object.freeze([])
+  }
+}
+
+const directExpressionChildren = (expression: ExpressionFact): ReadonlyArray<ExpressionFact> => {
+  switch (expression._tag) {
+    case 'Move':
+    case 'Borrow':
+    case 'FieldProjection':
+    case 'Run':
+      return Object.freeze([expression.subject])
+    case 'PlaceReplace':
+      return Object.freeze([expression.destination, expression.value])
+    case 'IndexProjection':
+      return Object.freeze([expression.subject, expression.index])
+    case 'ArrayLiteral':
+      return Object.freeze(expression.elements.map((element) => element.expression))
+    case 'StructLiteral':
+      return Object.freeze(expression.initializers.map((initializer) => initializer.expression))
+    case 'Grouped':
+      return Object.freeze([expression.expression])
+    case 'EffectCatch':
+      return Object.freeze([expression.protected, expression.handler])
+    case 'EffectRetry':
+      return Object.freeze([expression.protected, expression.retries])
+    case 'EffectProvide':
+      return Object.freeze([expression.protected])
+    case 'EffectProvideWith':
+      return Object.freeze([expression.protected, expression.acquisition])
+    case 'EffectTransform':
+      return Object.freeze([expression.protected, expression.callback])
+    case 'CallableSection':
+      return Object.freeze(expression.captures.map((capture) => capture.expression))
+    case 'CallableApply':
+      return Object.freeze([
+        expression.callee,
+        ...expression.arguments.map((argument) => argument.expression),
+      ])
+    case 'Operator':
+    case 'Call':
+      return Object.freeze(expression.arguments.map((argument) => argument.expression))
+    case 'EffectBlock':
+    case 'Match':
+    case 'Integer':
+    case 'Boolean':
+    case 'Identifier':
+    case 'FunctionItem':
+      return Object.freeze([])
+  }
+}
+
+const lexicalScopesOf = (
+  source: SourceFile.SourceFile,
+  functions: ReadonlyArray<FunctionFact>,
+): ReadonlyArray<LexicalScopeFact> => {
+  const scopes: Array<LexicalScopeFact> = []
+  for (const fn of functions) {
+    let ordinal = 0
+    const add = (options: {
+      readonly parent?: LexicalScopeId
+      readonly span: SourceSpan.SourceSpan
+      readonly parameters?: ReadonlyArray<ParameterFact>
+      readonly bindings?: ReadonlyArray<BindingDeclarationFact>
+      readonly patternBindings?: ReadonlyArray<PatternBindingFact>
+    }): LexicalScopeId => {
+      const id = Object.freeze({
+        _tag: 'LexicalScopeId' as const,
+        function: fn.declaration.id,
+        ordinal,
+      })
+      ordinal += 1
+      scopes.push(
+        Object.freeze({
+          _tag: 'LexicalScope',
+          id,
+          ...(options.parent === undefined ? {} : { parent: options.parent }),
+          span: options.span,
+          parameters: Object.freeze(Array.from(options.parameters ?? [])),
+          bindings: Object.freeze(Array.from(options.bindings ?? [])),
+          patternBindings: Object.freeze(Array.from(options.patternBindings ?? [])),
+        }),
+      )
+      return id
+    }
+    const spanOf = (
+      statements: ReadonlyArray<StatementFact>,
+      fallback: SourceSpan.SourceSpan,
+    ): SourceSpan.SourceSpan => {
+      const first = statements.at(0)
+      const last = statements.at(-1)
+      return first === undefined || last === undefined
+        ? fallback
+        : Option.getOrElse(
+            SourceSpan.make(source, statementSpan(first).start, statementSpan(last).end),
+            () => fallback,
+          )
+    }
+    let visitStatements: (
+      statements: ReadonlyArray<StatementFact>,
+      parent: LexicalScopeId | undefined,
+      fallback: SourceSpan.SourceSpan,
+    ) => LexicalScopeId
+    const visitExpression = (expression: ExpressionFact, parent: LexicalScopeId): void => {
+      if (expression._tag === 'Match') {
+        visitExpression(expression.scrutinee, parent)
+        for (const arm of expression.arms) {
+          const armScope = add({
+            parent,
+            span: arm.syntax.span,
+            patternBindings: arm.bindings,
+          })
+          if (arm.guard !== undefined) visitExpression(arm.guard, armScope)
+          visitExpression(arm.result, armScope)
+        }
+        return
+      }
+      if (expression._tag === 'EffectBlock') {
+        visitStatements(expression.statements, parent, expression.syntax.span)
+        return
+      }
+      for (const child of directExpressionChildren(expression)) visitExpression(child, parent)
+    }
+    visitStatements = (
+      statements: ReadonlyArray<StatementFact>,
+      parent: LexicalScopeId | undefined,
+      fallback: SourceSpan.SourceSpan,
+    ): LexicalScopeId => {
+      const current = add({
+        ...(parent === undefined ? {} : { parent }),
+        span: spanOf(statements, fallback),
+        ...(parent === undefined ? { parameters: fn.declaration.parameters } : {}),
+        bindings: statements.flatMap((statement) =>
+          statement._tag === 'BindStatement' ? [statement.binding] : [],
+        ),
+      })
+      for (const statement of statements) {
+        for (const expression of directStatementExpressions(statement))
+          visitExpression(expression, current)
+        if (statement._tag === 'UnsafeStatement')
+          visitStatements(statement.statements, current, statement.syntax.span)
+        else if (statement._tag === 'IfStatement') {
+          visitStatements(statement.taken, current, statement.syntax.span)
+          visitStatements(statement.otherwise, current, statement.syntax.span)
+        } else if (statement._tag === 'WhileStatement')
+          visitStatements(statement.body, current, statement.syntax.span)
+      }
+      return current
+    }
+    visitStatements(fn.statements, undefined, fn.declaration.syntax.span)
+  }
+  return Object.freeze(scopes)
+}
+
 /** Elaborates every declaration body into immutable facts and the module's HIR. */
 export interface Input {
   readonly syntax: SyntaxFile.SyntaxFile
@@ -7721,6 +7863,7 @@ export const elaborateModule = (input: Input): Result => {
     syntax,
     index,
     functions,
+    lexicalScopes: lexicalScopesOf(syntax.source, functions),
     hir,
     diagnostics: Object.freeze(diagnostics),
   })

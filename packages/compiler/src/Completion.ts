@@ -1,0 +1,626 @@
+import * as Option from 'effect/Option'
+import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Elaboration from './Elaboration.js'
+import * as Intrinsic from './Intrinsic.js'
+import * as NameResolution from './NameResolution.js'
+import type * as Presentation from './Presentation.js'
+import * as PresentationRenderer from './Presentation.js'
+import type * as SemanticOccurrence from './SemanticOccurrence.js'
+import * as SourceFile from './SourceFile.js'
+import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpanFactory from './SourceSpan.js'
+import * as Type from './Type.js'
+
+export type Context =
+  | { readonly _tag: 'ExpressionContext' }
+  | { readonly _tag: 'DeclaredTypeContext' }
+  | { readonly _tag: 'TypeArgumentContext' }
+  | { readonly _tag: 'ActorMemberContext'; readonly actor: string }
+  | {
+      readonly _tag: 'ValueMemberContext'
+      readonly state: 'Available' | 'Missing' | 'Ambiguous' | 'Unavailable'
+    }
+  | { readonly _tag: 'UnavailableContext' }
+
+export type Kind =
+  | 'Binding'
+  | 'Parameter'
+  | 'Function'
+  | 'Constructor'
+  | 'Type'
+  | 'Field'
+  | 'Actor'
+  | 'Operation'
+  | 'Keyword'
+
+export type CandidateIdentity =
+  | { readonly _tag: 'SemanticCandidate'; readonly identity: SemanticOccurrence.Identity }
+  | { readonly _tag: 'SyntaxCandidate'; readonly spelling: string }
+
+export interface Candidate {
+  readonly _tag: 'CompletionCandidate'
+  readonly identity: CandidateIdentity
+  readonly kind: Kind
+  readonly label: string
+  readonly insertText: string
+  readonly detail?: Presentation.Presentation
+  readonly sortGroup: number
+}
+
+/** One deterministic completion answer with an exact byte replacement span. */
+export interface Result {
+  readonly _tag: 'CompletionResult'
+  readonly context: Context
+  readonly replacement: SourceSpan.SourceSpan
+  readonly candidates: ReadonlyArray<Candidate>
+}
+
+const decoder = new TextDecoder()
+
+const isIdentifierByte = (byte: number | undefined): boolean =>
+  byte !== undefined &&
+  ((byte >= 0x41 && byte <= 0x5a) ||
+    (byte >= 0x61 && byte <= 0x7a) ||
+    (byte >= 0x30 && byte <= 0x39) ||
+    byte === 0x5f)
+
+const replacementSpan = (
+  source: SourceFile.SourceFile,
+  offset: number,
+): { readonly span: SourceSpan.SourceSpan; readonly start: number } => {
+  const bytes = SourceFile.toUint8Array(source)
+  const end = Math.max(0, Math.min(offset, bytes.length))
+  let start = end
+  while (start > 0 && isIdentifierByte(bytes.at(start - 1))) start -= 1
+  return {
+    span: Option.getOrThrowWith(
+      SourceSpanFactory.make(source, start, end),
+      () => new RangeError('Completion replacement escaped its source snapshot'),
+    ),
+    start,
+  }
+}
+
+const declarationIdentity = (
+  declaration: DeclarationIndex.MemberFact,
+): SemanticOccurrence.Identity =>
+  Object.freeze({
+    _tag: 'DeclarationIdentity',
+    id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
+  })
+
+const semantic = (identity: SemanticOccurrence.Identity): CandidateIdentity =>
+  Object.freeze({ _tag: 'SemanticCandidate', identity })
+
+const syntax = (spelling: string): CandidateIdentity =>
+  Object.freeze({ _tag: 'SyntaxCandidate', spelling })
+
+const candidate = (options: {
+  readonly identity: CandidateIdentity
+  readonly kind: Kind
+  readonly label: string
+  readonly detail?: Presentation.Presentation
+  readonly sortGroup: number
+}): Candidate =>
+  Object.freeze({
+    _tag: 'CompletionCandidate',
+    identity: options.identity,
+    kind: options.kind,
+    label: options.label,
+    insertText: options.label,
+    ...(options.detail === undefined ? {} : { detail: options.detail }),
+    sortGroup: options.sortGroup,
+  })
+
+const enclosingFunction = (
+  result: Elaboration.Result,
+  offset: number,
+): Elaboration.FunctionFact | undefined =>
+  result.functions.find(
+    (fn) => fn.declaration.syntax.span.start <= offset && offset <= fn.declaration.syntax.span.end,
+  )
+
+const sameDeclaration = (
+  left: Elaboration.DeclarationId,
+  right: Elaboration.DeclarationId,
+): boolean => left.sourceId === right.sourceId && left.ordinal === right.ordinal
+
+const scopeChain = (
+  result: Elaboration.Result,
+  fn: Elaboration.FunctionFact | undefined,
+  offset: number,
+): ReadonlyArray<Elaboration.LexicalScopeFact> => {
+  if (fn === undefined) return Object.freeze([])
+  const candidates = result.lexicalScopes
+    .filter(
+      (scope) =>
+        sameDeclaration(scope.id.function, fn.declaration.id) &&
+        scope.span.start <= offset &&
+        offset <= scope.span.end,
+    )
+    .sort(
+      (left, right) =>
+        left.span.end - left.span.start - (right.span.end - right.span.start) ||
+        right.id.ordinal - left.id.ordinal,
+    )
+  const byOrdinal = new Map(
+    result.lexicalScopes
+      .filter((scope) => sameDeclaration(scope.id.function, fn.declaration.id))
+      .map((scope) => [scope.id.ordinal, scope] as const),
+  )
+  const chain: Array<Elaboration.LexicalScopeFact> = []
+  let current = candidates.at(0)
+  while (current !== undefined) {
+    chain.push(current)
+    current = current.parent === undefined ? undefined : byOrdinal.get(current.parent.ordinal)
+  }
+  return Object.freeze(chain)
+}
+
+const visibleBindings = (
+  result: Elaboration.Result,
+  fn: Elaboration.FunctionFact | undefined,
+  offset: number,
+): ReadonlyArray<Elaboration.BindingDeclarationFact> => {
+  const selected = new Map<string, Elaboration.BindingDeclarationFact>()
+  for (const scope of scopeChain(result, fn, offset))
+    for (const binding of scope.bindings.toReversed())
+      if (
+        binding.name._tag === 'Present' &&
+        binding.name.token.span.start < offset &&
+        !selected.has(binding.name.spelling)
+      )
+        selected.set(binding.name.spelling, binding)
+  return Object.freeze(
+    [...selected.values()].sort((left, right) => left.syntax.span.start - right.syntax.span.start),
+  )
+}
+
+const visiblePatternBindings = (
+  result: Elaboration.Result,
+  fn: Elaboration.FunctionFact | undefined,
+  offset: number,
+): ReadonlyArray<Elaboration.PatternBindingFact> => {
+  const selected = new Map<string, Elaboration.PatternBindingFact>()
+  for (const scope of scopeChain(result, fn, offset))
+    for (const binding of scope.patternBindings.toReversed())
+      if (
+        binding.name._tag === 'Present' &&
+        binding.name.token.span.start <= offset &&
+        !selected.has(binding.name.spelling)
+      )
+        selected.set(binding.name.spelling, binding)
+  return Object.freeze([...selected.values()])
+}
+
+const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
+  actor.operations.map((operation) =>
+    candidate({
+      identity: semantic(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
+      kind: 'Operation',
+      label: operation.spelling,
+      detail: PresentationRenderer.intrinsicOperation(operation),
+      sortGroup: 0,
+    }),
+  )
+
+const capabilityCandidates = (): ReadonlyArray<Candidate> =>
+  (Intrinsic.findActor('Effect')?.operations ?? []).flatMap((operation) =>
+    operation.rule._tag === 'EffectRule' &&
+    (operation.rule.operation === 'Provide' || operation.rule.operation === 'ProvideWith')
+      ? [
+          candidate({
+            identity: semantic(
+              Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id }),
+            ),
+            kind: 'Operation',
+            label: operation.spelling,
+            detail: PresentationRenderer.intrinsicOperation(operation),
+            sortGroup: 0,
+          }),
+        ]
+      : [],
+  )
+
+const namespaceCandidates = (
+  index: DeclarationIndex.Index,
+  module: string,
+): ReadonlyArray<Candidate> =>
+  (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
+    (declaration) =>
+      declaration.visibility !== 'Public' || declaration.name._tag !== 'Present'
+        ? []
+        : [
+            candidate({
+              identity: semantic(declarationIdentity(declaration)),
+              kind: declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Type',
+              label: declaration.name.spelling,
+              detail:
+                declaration._tag === 'FunctionDeclaration'
+                  ? PresentationRenderer.functionDeclaration(declaration)
+                  : PresentationRenderer.structDeclaration(declaration),
+              sortGroup: 0,
+            }),
+          ],
+  )
+
+interface ValueLookup {
+  readonly found: boolean
+  readonly type?: Type.Type
+}
+
+const valueLookup = (
+  spelling: string,
+  result: Elaboration.Result,
+  fn: Elaboration.FunctionFact | undefined,
+  offset: number,
+): ValueLookup => {
+  const binding = visibleBindings(result, fn, offset).find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
+  )
+  if (binding !== undefined)
+    return Object.freeze({
+      found: true,
+      ...(binding.inferredType._tag === 'Available' ? { type: binding.inferredType.type } : {}),
+    })
+  const patternBinding = visiblePatternBindings(result, fn, offset).find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
+  )
+  if (patternBinding !== undefined)
+    return Object.freeze({
+      found: true,
+      ...(patternBinding.type._tag === 'Available' ? { type: patternBinding.type.type } : {}),
+    })
+  const parameter = fn?.declaration.parameters.find(
+    (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
+  )
+  if (parameter !== undefined)
+    return Object.freeze({
+      found: true,
+      ...(parameter.declaredType._tag === 'Resolved' ? { type: parameter.declaredType.type } : {}),
+    })
+  return Object.freeze({ found: false })
+}
+
+const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined => {
+  if (type === undefined) return undefined
+  if (Type.isNominal(type)) return type
+  if (Type.isReference(type)) return nominalSubject(type.target)
+  return undefined
+}
+
+const fieldCandidates = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal | undefined,
+): ReadonlyArray<Candidate> => {
+  if (type === undefined) return Object.freeze([])
+  const declaration = index.modules
+    .find((headers) => headers.module === type.module)
+    ?.structs.find(
+      (struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === type.name,
+    )
+  return Object.freeze(
+    (declaration?.fields ?? []).flatMap((field) =>
+      field.name._tag !== 'Present'
+        ? []
+        : [
+            candidate({
+              identity: semantic(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
+              kind: 'Field',
+              label: field.name.spelling,
+              detail: PresentationRenderer.field(field),
+              sortGroup: 0,
+            }),
+          ],
+    ),
+  )
+}
+
+const typeCandidates = (
+  module: string,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  fn: Elaboration.FunctionFact | undefined,
+): ReadonlyArray<Candidate> => {
+  const candidates: Array<Candidate> = []
+  for (const actor of Intrinsic.all())
+    if (actor.kind === 'Type')
+      candidates.push(
+        candidate({
+          identity: semantic(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+          kind: 'Type',
+          label: actor.spelling,
+          detail: PresentationRenderer.intrinsicActor(actor),
+          sortGroup: 1,
+        }),
+      )
+  for (const declaration of index.modules.find((headers) => headers.module === module)?.structs ??
+    [])
+    if (declaration.name._tag === 'Present')
+      candidates.push(
+        candidate({
+          identity: semantic(declarationIdentity(declaration)),
+          kind: 'Type',
+          label: declaration.name.spelling,
+          detail: PresentationRenderer.structDeclaration(declaration),
+          sortGroup: 0,
+        }),
+      )
+  for (const parameter of fn?.declaration.typeParameters ?? [])
+    if (parameter.name._tag === 'Present')
+      candidates.push(
+        candidate({
+          identity: semantic(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter.type })),
+          kind: 'Type',
+          label: parameter.name.spelling,
+          detail: PresentationRenderer.typeParameter(parameter),
+          sortGroup: 0,
+        }),
+      )
+  for (const binding of scope?.bindings ?? []) {
+    if (binding._tag !== 'ImportedMember') continue
+    const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
+    if (declaration?._tag !== 'StructDeclaration') continue
+    candidates.push(
+      candidate({
+        identity: semantic(declarationIdentity(declaration)),
+        kind: 'Type',
+        label: binding.spelling,
+        detail: PresentationRenderer.structDeclaration(declaration),
+        sortGroup: 2,
+      }),
+    )
+  }
+  return Object.freeze(candidates)
+}
+
+const expressionCandidates = (
+  module: string,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  result: Elaboration.Result,
+  fn: Elaboration.FunctionFact | undefined,
+  offset: number,
+): ReadonlyArray<Candidate> => {
+  const candidates: Array<Candidate> = []
+  for (const binding of visibleBindings(result, fn, offset))
+    if (binding.name._tag === 'Present')
+      candidates.push(
+        candidate(
+          (() => {
+            const detail = PresentationRenderer.binding(binding, module, scope)
+            return {
+              identity: semantic(Object.freeze({ _tag: 'BindingIdentity', id: binding.id })),
+              kind: 'Binding',
+              label: binding.name.spelling,
+              ...(detail === undefined ? {} : { detail }),
+              sortGroup: 0,
+            }
+          })(),
+        ),
+      )
+  for (const binding of visiblePatternBindings(result, fn, offset))
+    if (binding.name._tag === 'Present') {
+      const detail = PresentationRenderer.patternBinding(binding, module, scope)
+      candidates.push(
+        candidate({
+          identity: semantic(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
+          kind: 'Binding',
+          label: binding.name.spelling,
+          ...(detail === undefined ? {} : { detail }),
+          sortGroup: 0,
+        }),
+      )
+    }
+  for (const parameter of fn?.declaration.parameters ?? [])
+    if (parameter.name._tag === 'Present')
+      candidates.push(
+        candidate({
+          identity: semantic(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+          kind: 'Parameter',
+          label: parameter.name.spelling,
+          detail: PresentationRenderer.parameter(parameter),
+          sortGroup: 1,
+        }),
+      )
+  for (const declaration of index.modules.find((headers) => headers.module === module)?.members ??
+    [])
+    if (declaration.name._tag === 'Present')
+      candidates.push(
+        candidate({
+          identity: semantic(declarationIdentity(declaration)),
+          kind: declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Constructor',
+          label: declaration.name.spelling,
+          detail:
+            declaration._tag === 'FunctionDeclaration'
+              ? PresentationRenderer.functionDeclaration(declaration)
+              : PresentationRenderer.structDeclaration(declaration),
+          sortGroup: 2,
+        }),
+      )
+  for (const binding of scope?.bindings ?? []) {
+    if (binding._tag === 'ImportedMember') {
+      const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
+      if (declaration === undefined) continue
+      candidates.push(
+        candidate({
+          identity: semantic(declarationIdentity(declaration)),
+          kind: declaration._tag === 'FunctionDeclaration' ? 'Function' : 'Constructor',
+          label: binding.spelling,
+          detail:
+            declaration._tag === 'FunctionDeclaration'
+              ? PresentationRenderer.functionDeclaration(declaration)
+              : PresentationRenderer.structDeclaration(declaration),
+          sortGroup: 3,
+        }),
+      )
+    } else if (binding._tag === 'ModuleNamespace')
+      candidates.push(
+        candidate({
+          identity: semantic(
+            Object.freeze({
+              _tag: 'ImportNamespaceIdentity',
+              module: binding.module,
+              spelling: binding.spelling,
+            }),
+          ),
+          kind: 'Actor',
+          label: binding.spelling,
+          detail: PresentationRenderer.importBinding(binding.spelling, binding.module),
+          sortGroup: 3,
+        }),
+      )
+  }
+  for (const actor of Intrinsic.all())
+    candidates.push(
+      candidate({
+        identity: semantic(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+        kind: actor.kind === 'Type' ? 'Constructor' : 'Actor',
+        label: actor.spelling,
+        detail: PresentationRenderer.intrinsicActor(actor),
+        sortGroup: 4,
+      }),
+    )
+  for (const keyword of ['true', 'false', 'effect', 'move', 'run', 'match'])
+    candidates.push(
+      candidate({ identity: syntax(keyword), kind: 'Keyword', label: keyword, sortGroup: 5 }),
+    )
+  return Object.freeze(candidates)
+}
+
+const candidateKey = (self: Candidate): string =>
+  self.identity._tag === 'SyntaxCandidate'
+    ? `syntax:${self.identity.spelling}`
+    : (() => {
+        const identity = self.identity.identity
+        if (identity._tag === 'DeclarationIdentity')
+          return identity.id._tag === 'CanonicalDeclarationId'
+            ? `declaration:${identity.id.module}.${identity.id.name}`
+            : `declaration:${identity.id.sourceId}:${identity.id.ordinal}`
+        if (identity._tag === 'IntrinsicActorIdentity') return `actor:${identity.id.name}`
+        if (identity._tag === 'IntrinsicOperationIdentity')
+          return `operation:${identity.id.actor}.${identity.id.name}`
+        return `${identity._tag}:${self.label}`
+      })()
+
+const stable = (inputs: ReadonlyArray<Candidate>): ReadonlyArray<Candidate> => {
+  const unique = new Map<string, Candidate>()
+  for (const input of inputs)
+    if (!unique.has(candidateKey(input))) unique.set(candidateKey(input), input)
+  return Object.freeze(
+    [...unique.values()].sort(
+      (left, right) =>
+        left.sortGroup - right.sortGroup ||
+        (left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0) ||
+        (left.label < right.label ? -1 : left.label > right.label ? 1 : 0),
+    ),
+  )
+}
+
+/** Computes recovery-aware semantic completion from one exact source snapshot and byte offset. */
+export const complete = (options: {
+  readonly source: SourceFile.SourceFile
+  readonly module: string
+  readonly offset: number
+  readonly index: DeclarationIndex.Index
+  readonly resolution: NameResolution.Resolution
+  readonly result: Elaboration.Result
+}): Result => {
+  const replacement = replacementSpan(options.source, options.offset)
+  const bytes = SourceFile.toUint8Array(options.source)
+  const before = decoder.decode(bytes.subarray(0, replacement.start))
+  const scope = NameResolution.scopeOf(options.resolution, options.module)
+  const fn = enclosingFunction(options.result, options.offset)
+  const memberMatch = before.match(/([A-Za-z_][A-Za-z0-9_]*)\.\s*$/)
+  if (memberMatch !== null) {
+    const qualifier = memberMatch[1]
+    const value =
+      qualifier === undefined
+        ? Object.freeze({ found: false })
+        : valueLookup(qualifier, options.result, fn, options.offset)
+    if (value.found) {
+      const subject = nominalSubject(value.type)
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({
+          _tag: 'ValueMemberContext',
+          state: subject === undefined ? 'Unavailable' : 'Available',
+        }),
+        replacement: replacement.span,
+        candidates: stable(fieldCandidates(options.index, subject)),
+      })
+    }
+    const lookup =
+      qualifier === undefined || scope === undefined
+        ? undefined
+        : NameResolution.lookup(scope, options.index, qualifier)
+    if (lookup?._tag === 'Intrinsic') {
+      const intrinsic = Intrinsic.findActor(lookup.actor)
+      if (intrinsic !== undefined)
+        return Object.freeze({
+          _tag: 'CompletionResult',
+          context: Object.freeze({ _tag: 'ActorMemberContext', actor: intrinsic.spelling }),
+          replacement: replacement.span,
+          candidates: stable([
+            ...actorCandidates(intrinsic),
+            ...(intrinsic.spelling === 'Allocator' ? capabilityCandidates() : []),
+          ]),
+        })
+    }
+    if (lookup?._tag === 'Namespace')
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
+        replacement: replacement.span,
+        candidates: stable(namespaceCandidates(options.index, lookup.module)),
+      })
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'StructDeclaration')
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.spelling }),
+        replacement: replacement.span,
+        candidates: stable(capabilityCandidates()),
+      })
+    return Object.freeze({
+      _tag: 'CompletionResult',
+      context: Object.freeze({
+        _tag: 'ValueMemberContext',
+        state:
+          lookup?._tag === 'Conflict'
+            ? 'Ambiguous'
+            : lookup?._tag === 'Missing' || lookup === undefined
+              ? 'Missing'
+              : 'Unavailable',
+      }),
+      replacement: replacement.span,
+      candidates: Object.freeze([]),
+    })
+  }
+  const tail = before.slice(Math.max(0, before.lastIndexOf('\n')))
+  const typeArgument = /<[^>]*$/.test(tail)
+  const declaredType = /(?::|->)\s*[A-Za-z0-9_.]*$/.test(tail)
+  if (typeArgument || declaredType)
+    return Object.freeze({
+      _tag: 'CompletionResult',
+      context: Object.freeze({
+        _tag: typeArgument ? 'TypeArgumentContext' : 'DeclaredTypeContext',
+      }),
+      replacement: replacement.span,
+      candidates: stable(typeCandidates(options.module, options.index, scope, fn)),
+    })
+  return Object.freeze({
+    _tag: 'CompletionResult',
+    context: Object.freeze({ _tag: 'ExpressionContext' }),
+    replacement: replacement.span,
+    candidates: stable(
+      expressionCandidates(
+        options.module,
+        options.index,
+        scope,
+        options.result,
+        fn,
+        options.offset,
+      ),
+    ),
+  })
+}

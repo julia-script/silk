@@ -95,6 +95,8 @@ export type DeclaredTypeFact =
       readonly spelling: string
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Element
+      readonly path?: TypePathFact
+      readonly components?: ReadonlyArray<DeclaredTypeFact>
       readonly exposureCause?: Diagnostic.Identity
       readonly unionSource?: UnionSourceFact
     }
@@ -493,6 +495,10 @@ export const analyzeDeclaredType = (
           spelling: Type.encode(type),
           token,
           syntax,
+          components: Object.freeze([
+            ...parameters.map((parameter) => parameter.fact),
+            result.fact,
+          ]),
         }),
         diagnostics,
       })
@@ -623,6 +629,7 @@ export const analyzeDeclaredType = (
           spelling: Type.encode(type),
           token,
           syntax,
+          components: Object.freeze([element.fact]),
         }),
         diagnostics: element.diagnostics,
       })
@@ -720,6 +727,7 @@ export const analyzeDeclaredType = (
           spelling: Type.encode(type),
           token: arrayToken,
           syntax,
+          components: Object.freeze([element.fact]),
         }),
         diagnostics: Object.freeze(diagnostics),
       })
@@ -841,6 +849,12 @@ export const analyzeDeclaredType = (
             spelling: Type.encode(type),
             token: firstToken,
             syntax,
+            components: Object.freeze([
+              target.fact,
+              ...arguments_.map((argument) => argument.fact),
+              ...failures.map((failure) => failure.fact),
+              ...requirements.map((requirement) => requirement.capability.fact),
+            ]),
           }),
           diagnostics: Object.freeze(diagnostics),
         })
@@ -922,6 +936,7 @@ export const analyzeDeclaredType = (
         spelling: first.spelling,
         token: first.token,
         syntax,
+        path,
       }),
       diagnostics: Object.freeze([]),
     })
@@ -936,6 +951,7 @@ export const analyzeDeclaredType = (
         spelling: first.spelling,
         token: first.token,
         syntax,
+        path,
       }),
       diagnostics: Object.freeze([]),
     })
@@ -949,6 +965,7 @@ export const analyzeDeclaredType = (
         spelling: first.spelling,
         token: first.token,
         syntax,
+        path,
       }),
       diagnostics: Object.freeze([]),
     })
@@ -1596,6 +1613,10 @@ const resolveDeclaredType = (
           spelling: Type.encode(type),
           token: fact.token,
           syntax: fact.syntax,
+          components: Object.freeze([
+            ...parameters.map((parameter) => parameter.fact),
+            result.fact,
+          ]),
         }),
         diagnostics,
       })
@@ -1680,6 +1701,11 @@ const resolveDeclaredType = (
           spelling: Type.encode(type),
           token: fact.token,
           syntax: fact.syntax,
+          components: Object.freeze([
+            success.fact,
+            ...failures.map((failure) => failure.fact),
+            ...requirements.map((requirement) => requirement.capability.fact),
+          ]),
         }),
         diagnostics: Object.freeze(diagnostics),
       })
@@ -1732,6 +1758,10 @@ const resolveDeclaredType = (
             spelling: Type.encode(type),
             token: fact.token,
             syntax: fact.syntax,
+            components: Object.freeze([
+              target.fact,
+              ...arguments_.map((argument) => argument.fact),
+            ]),
           }),
           diagnostics: Object.freeze(diagnostics),
         })
@@ -1824,6 +1854,7 @@ const resolveDeclaredType = (
           spelling: Type.encode(type),
           token: fact.token,
           syntax: fact.syntax,
+          components: Object.freeze([element.fact]),
           ...(element.fact.exposureCause === undefined
             ? {}
             : { exposureCause: element.fact.exposureCause }),
@@ -1852,6 +1883,7 @@ const resolveDeclaredType = (
           spelling: Type.encode(type),
           token: fact.token,
           syntax: fact.syntax,
+          components: Object.freeze([target.fact]),
         }),
         diagnostics: target.diagnostics,
       })
@@ -1889,6 +1921,7 @@ const resolveDeclaredType = (
           spelling: Type.encode(type),
           token: fact.token,
           syntax: fact.syntax,
+          components: Object.freeze([element.fact]),
           ...(element.fact.exposureCause === undefined
             ? {}
             : { exposureCause: element.fact.exposureCause }),

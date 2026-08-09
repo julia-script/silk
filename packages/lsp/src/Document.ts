@@ -1,21 +1,24 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
-import type * as Elaboration from '@silk-effect/compiler/Elaboration'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import type * as SourceSpan from '@silk-effect/compiler/SourceSpan'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
-import * as Type from '@silk-effect/compiler/Type'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import {
+  type CompletionItem,
+  CompletionItemKind,
+  type CompletionList,
   DiagnosticSeverity,
   type DocumentSymbol,
   type Hover,
+  type InlayHint,
+  InlayHintKind,
   type LocationLink,
   type Diagnostic as LspDiagnostic,
   type Position,
+  type Range,
   SymbolKind,
   type TextEdit,
 } from 'vscode-languageserver-types'
@@ -105,60 +108,23 @@ export const diagnostics = (
     })
 }
 
-/** One inferred type anchored to the byte span of the fact that carries it. */
-export interface TypedSpan {
-  readonly type: Type.Type
-  readonly span: SourceSpan.SourceSpan
-}
-
-const factType = (fact: {
-  readonly type: Elaboration.ExpressionTypeFact
-  readonly syntax: SyntaxTree.Element
-}): TypedSpan | undefined =>
-  fact.type._tag === 'Available'
-    ? { type: fact.type.type, span: SyntaxTree.span(fact.syntax) }
-    : undefined
-
-/** Returns the smallest typed expression or binding fact under one position. */
-export const typeAt = (
-  self: Document,
-  snapshot: Analysis.Snapshot,
-  position: Position,
-): TypedSpan | undefined => {
-  const offset = LineIndex.offsetOf(self.index, position)
-  const candidates = [
-    ...Analysis.expressionsOf(snapshot, self.module).flatMap((fact) => {
-      const typed = factType(fact)
-      return typed === undefined ? [] : [typed]
-    }),
-    ...Analysis.bindingsOf(snapshot, self.module).flatMap((binding) =>
-      binding.name._tag === 'Present' && binding.inferredType._tag === 'Available'
-        ? [{ type: binding.inferredType.type, span: binding.name.token.span }]
-        : [],
-    ),
-  ].filter(
-    (candidate) =>
-      candidate.span.sourceId === self.module &&
-      candidate.span.start <= offset &&
-      offset < candidate.span.end,
-  )
-  if (candidates.length === 0) return undefined
-  return candidates.reduce((best, candidate) =>
-    candidate.span.end - candidate.span.start < best.span.end - best.span.start ? candidate : best,
-  )
-}
-
-/** Returns the type of the smallest typed expression or binding under one position. */
+/** Returns the source-like semantic presentation under one position. */
 export const hover = (
   self: Document,
   snapshot: Analysis.Snapshot,
   position: Position,
 ): Hover | undefined => {
-  const typed = typeAt(self, snapshot, position)
-  if (typed === undefined) return undefined
+  const subject = Analysis.hoverSubjectAt(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, position),
+  )
+  if (subject === undefined) return undefined
+  const span =
+    subject._tag === 'OccurrenceHoverSubject' ? subject.occurrence.span : subject.expression.span
   return {
-    contents: { kind: 'markdown', value: `\`\`\`silk\n${Type.encode(typed.type)}\n\`\`\`` },
-    range: LineIndex.rangeOf(self.index, typed.span),
+    contents: { kind: 'markdown', value: `\`\`\`silk\n${subject.presentation.text}\n\`\`\`` },
+    range: LineIndex.rangeOf(self.index, span),
   }
 }
 
@@ -170,9 +136,10 @@ export const definition = (
   uriOf: (module: string) => string | undefined,
 ): LocationLink | undefined => {
   const offset = LineIndex.offsetOf(self.index, position)
-  const target = Analysis.semanticTargetAt(snapshot, self.module, offset)
-  if (target?.resolution._tag !== 'Available') return undefined
-  const location = target.resolution.declaration
+  const occurrence = Analysis.semanticOccurrenceAt(snapshot, self.module, offset)
+  if (occurrence?.resolution._tag !== 'Available' || occurrence.declaration === undefined)
+    return undefined
+  const location = occurrence.declaration
   const uri = location.module === self.module ? self.uri : uriOf(location.module)
   if (uri === undefined) return undefined
   const targetIndex =
@@ -184,11 +151,75 @@ export const definition = (
         })()
   if (targetIndex === undefined) return undefined
   return {
-    originSelectionRange: LineIndex.rangeOf(self.index, target.origin),
+    originSelectionRange: LineIndex.rangeOf(self.index, occurrence.span),
     targetUri: uri,
     targetRange: LineIndex.rangeOf(targetIndex, location.span),
     targetSelectionRange: LineIndex.rangeOf(targetIndex, location.selectionSpan),
   }
+}
+
+/** Converts compiler-owned inferred local types into standard protocol inlay hints. */
+export const inlayHints = (
+  self: Document,
+  snapshot: Analysis.Snapshot,
+  range: Range,
+): ReadonlyArray<InlayHint> => {
+  const start = LineIndex.offsetOf(self.index, range.start)
+  const end = LineIndex.offsetOf(self.index, range.end)
+  return Analysis.typeHints(snapshot, self.module, start, end).map((hint) => ({
+    position: LineIndex.positionOf(self.index, hint.span.end),
+    label: `: ${hint.presentation.text}`,
+    kind: InlayHintKind.Type,
+    paddingLeft: false,
+    paddingRight: false,
+  }))
+}
+
+const completionKind = (kind: string): CompletionItemKind => {
+  switch (kind) {
+    case 'Binding':
+    case 'Parameter':
+      return CompletionItemKind.Variable
+    case 'Function':
+    case 'Operation':
+      return CompletionItemKind.Function
+    case 'Constructor':
+      return CompletionItemKind.Constructor
+    case 'Type':
+      return CompletionItemKind.Struct
+    case 'Field':
+      return CompletionItemKind.Field
+    case 'Actor':
+      return CompletionItemKind.Module
+    case 'Keyword':
+      return CompletionItemKind.Keyword
+    default:
+      return CompletionItemKind.Text
+  }
+}
+
+/** Converts compiler-owned semantic candidates into deterministic protocol completion items. */
+export const completion = (
+  self: Document,
+  snapshot: Analysis.Snapshot,
+  position: Position,
+): CompletionList => {
+  const result = Analysis.completionAt(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, position),
+  )
+  if (result === undefined) return { isIncomplete: false, items: [] }
+  const range = LineIndex.rangeOf(self.index, result.replacement)
+  const items: ReadonlyArray<CompletionItem> = result.candidates.map((candidate, ordinal) => ({
+    label: candidate.label,
+    kind: completionKind(candidate.kind),
+    insertText: candidate.insertText,
+    textEdit: { range, newText: candidate.insertText },
+    sortText: `${String(candidate.sortGroup).padStart(2, '0')}-${String(ordinal).padStart(4, '0')}-${candidate.label}`,
+    ...(candidate.detail === undefined ? {} : { detail: candidate.detail.text }),
+  }))
+  return { isIncomplete: false, items: [...items] }
 }
 
 /** Returns the document's top-level function and struct declarations as symbols. */

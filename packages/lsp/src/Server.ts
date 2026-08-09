@@ -57,6 +57,8 @@ export const start = (): void => {
         textDocumentSync: TextDocumentSyncKind.Incremental,
         hoverProvider: true,
         definitionProvider: true,
+        completionProvider: { triggerCharacters: ['.'] },
+        inlayHintProvider: true,
         documentSymbolProvider: true,
         documentFormattingProvider: true,
       },
@@ -202,6 +204,20 @@ export const start = (): void => {
       (module) => session.value.moduleUris.get(module),
     )
     return definition === undefined ? null : [definition]
+  })
+
+  connection.languages.inlayHint.on(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return []
+    return [
+      ...Document.inlayHints(session.value.document, session.value.snapshot, parameters.range),
+    ]
+  })
+
+  connection.onCompletion(async (parameters) => {
+    const session = await acquire(parameters.textDocument.uri)
+    if (Option.isNone(session)) return { isIncomplete: false, items: [] }
+    return Document.completion(session.value.document, session.value.snapshot, parameters.position)
   })
 
   connection.onDocumentSymbol(async (parameters) => {

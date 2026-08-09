@@ -122,6 +122,8 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     }
     assert.strictEqual(initialized.capabilities.hoverProvider, true)
     assert.strictEqual(initialized.capabilities.definitionProvider, true)
+    assert.strictEqual(initialized.capabilities.inlayHintProvider, true)
+    assert.deepEqual(initialized.capabilities.completionProvider, { triggerCharacters: ['.'] })
     assert.strictEqual(initialized.capabilities.positionEncoding, 'utf-16')
     assert.strictEqual(initialized.capabilities.documentFormattingProvider, true)
     client.send({ method: 'initialized', params: {} })
@@ -165,6 +167,55 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     }>
     assert.strictEqual(edits.length, 1)
     assert.include(edits[0]?.newText, 'return 7')
+
+    const hintUri = 'file:///silk-lsp-e2e/hints.silk'
+    const hintText = `pub fn main() -> I32 {
+  let mut allocator = SystemAllocator.make()
+  return 0
+}`
+    didOpen(client, hintUri, hintText)
+    await client.waitFor((message) => publishedDiagnostics(message, hintUri))
+    client.send({
+      id: 4,
+      method: 'textDocument/inlayHint',
+      params: {
+        textDocument: { uri: hintUri },
+        range: { start: { line: 0, character: 0 }, end: { line: 3, character: 1 } },
+      },
+    })
+    const hints = (await client.waitFor((message) => response(message, 4))) as Array<{
+      label: string
+    }>
+    assert.deepEqual(
+      hints.map((hint) => hint.label),
+      [': SystemAllocator'],
+    )
+
+    const completionUri = 'file:///silk-lsp-e2e/completion.silk'
+    const completionText = `pub fn main() -> I32 {
+  return Effect.
+}`
+    didOpen(client, completionUri, completionText)
+    await client.waitFor((message) => publishedDiagnostics(message, completionUri))
+    client.send({
+      id: 5,
+      method: 'textDocument/completion',
+      params: {
+        textDocument: { uri: completionUri },
+        position: { line: 1, character: '  return Effect.'.length },
+      },
+    })
+    const completion = (await client.waitFor((message) => response(message, 5))) as {
+      items: Array<{ label: string; detail?: string }>
+    }
+    assert.include(
+      completion.items.map((item) => item.label),
+      'catch',
+    )
+    assert.include(
+      completion.items.find((item) => item.label === 'catch')?.detail ?? '',
+      'fn Effect.catch<E>',
+    )
   } finally {
     await client.close()
   }
@@ -254,6 +305,68 @@ pub fn main() -> I32 { return identity(42) }`,
       targetSelectionRange: { start: { line: number; character: number } }
     }>
     assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 5, character: 8 })
+
+    const latest = `// π🙂
+pub fn main() -> I32 {
+  let mut allocator = SystemAllocator.make()
+  return Effect.
+}`
+    client.send({
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 3 },
+        contentChanges: [{ text: latest }],
+      },
+    })
+    await client.waitFor((message) => {
+      const candidate = publishedDiagnosticReport(message, uri)
+      return candidate?.version === 3 ? candidate : undefined
+    })
+
+    client.send({
+      id: 4,
+      method: 'textDocument/inlayHint',
+      params: {
+        textDocument: { uri },
+        range: { start: { line: 0, character: 0 }, end: { line: 4, character: 1 } },
+      },
+    })
+    const latestHints = (await client.waitFor((message) => response(message, 4))) as Array<{
+      label: string
+    }>
+    assert.deepEqual(
+      latestHints.map((hint) => hint.label),
+      [': SystemAllocator'],
+    )
+
+    client.send({
+      id: 5,
+      method: 'textDocument/completion',
+      params: {
+        textDocument: { uri },
+        position: { line: 3, character: '  return Effect.'.length },
+      },
+    })
+    const latestCompletion = (await client.waitFor((message) => response(message, 5))) as {
+      items: Array<{ label: string }>
+    }
+    assert.include(
+      latestCompletion.items.map((item) => item.label),
+      'catch',
+    )
+
+    client.send({
+      id: 6,
+      method: 'textDocument/hover',
+      params: {
+        textDocument: { uri },
+        position: { line: 2, character: '  let mut allocator = '.length },
+      },
+    })
+    const latestHover = (await client.waitFor((message) => response(message, 6))) as {
+      contents: { value: string }
+    }
+    assert.include(latestHover.contents.value, 'intrinsic type SystemAllocator')
 
     client.send({
       method: 'textDocument/didClose',

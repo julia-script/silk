@@ -1,20 +1,14 @@
 import * as Option from 'effect/Option'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as SourceFile from './SourceFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
-export type IntrinsicActor =
-  | Type.Builtin
-  | 'Layout'
-  | 'Allocator'
-  | 'SystemAllocator'
-  | 'RawBuffer'
-  | 'Slot'
-  | 'Unit'
+export type IntrinsicActor = Intrinsic.Actor['spelling']
 
 export type Binding =
   | {
@@ -28,6 +22,7 @@ export type Binding =
       readonly spelling: string
       readonly module: string
       readonly syntax: SyntaxTree.Node
+      readonly token: Token.Token
     }
   | {
       readonly _tag: 'ImportedMember'
@@ -36,11 +31,14 @@ export type Binding =
       readonly module: string
       readonly declaration: DeclarationIndex.CanonicalId
       readonly syntax: SyntaxTree.Node
+      readonly sourceToken: Token.Token
+      readonly localToken: Token.Token
     }
   | {
       readonly _tag: 'Unavailable'
       readonly spelling: string
       readonly syntax: SyntaxTree.Element
+      readonly tokens: ReadonlyArray<Token.Token>
       readonly cause?: Diagnostic.Identity
       readonly declaration?: DeclarationIndex.CanonicalId
     }
@@ -141,17 +139,9 @@ export const resolve = (
   const scopes: Array<ModuleScope> = []
   for (const module of closure.modules) {
     const diagnostics: Array<Diagnostic.Diagnostic> = []
-    const candidates: Array<Binding> = [
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'I32' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Usize' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Bool' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Layout' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Allocator' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'SystemAllocator' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'RawBuffer' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Slot' }),
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: 'Unit' }),
-    ]
+    const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) =>
+      Object.freeze({ _tag: 'IntrinsicActor', spelling: intrinsic.spelling }),
+    )
     const headers = index.modules.find((value) => value.module === module.name)
     for (const declaration of headers?.members ?? [])
       if (declaration.canonical._tag === 'Canonical')
@@ -204,6 +194,7 @@ export const resolve = (
         const local =
           explicitAlias?.spelling ??
           (defaultName === undefined ? undefined : text(source, defaultName))
+        const localToken = explicitAlias?.token ?? defaultName
         if (
           explicitAlias !== undefined &&
           defaultName !== undefined &&
@@ -219,16 +210,18 @@ export const resolve = (
               _tag: 'Unavailable',
               spelling: explicitAlias.spelling,
               syntax: aliasSyntax ?? imported.syntax,
+              tokens: Object.freeze([explicitAlias.token]),
               cause: Diagnostic.identity(diagnostic),
             }),
           )
-        } else if (local !== undefined)
+        } else if (local !== undefined && localToken !== undefined)
           created.push(
             Object.freeze({
               _tag: 'ModuleNamespace',
               spelling: local,
               module: target,
               syntax: imported.syntax,
+              token: localToken,
             }),
           )
       }
@@ -245,6 +238,7 @@ export const resolve = (
               _tag: 'Unavailable',
               spelling: alias.spelling,
               syntax: member,
+              tokens: Object.freeze([sourceToken, alias.token]),
               cause: Diagnostic.identity(diagnostic),
             }),
           )
@@ -259,6 +253,7 @@ export const resolve = (
               _tag: 'Unavailable',
               spelling: alias?.spelling ?? sourceName,
               syntax: member,
+              tokens: Object.freeze([sourceToken, ...(alias === undefined ? [] : [alias.token])]),
               cause: Diagnostic.identity(diagnostic),
             }),
           )
@@ -276,6 +271,7 @@ export const resolve = (
               _tag: 'Unavailable',
               spelling: alias?.spelling ?? sourceName,
               syntax: member,
+              tokens: Object.freeze([sourceToken, ...(alias === undefined ? [] : [alias.token])]),
               cause: Diagnostic.identity(diagnostic),
               declaration: declaration.canonical.id,
             }),
@@ -290,6 +286,8 @@ export const resolve = (
             module: target,
             declaration: declaration.canonical.id,
             syntax: member,
+            sourceToken,
+            localToken: alias?.token ?? sourceToken,
           }),
         )
       }
@@ -487,6 +485,7 @@ const resolvedType = (
           spelling: path.spelling,
           token,
           syntax: path.syntax,
+          path,
         }),
         diagnostics: Object.freeze([]),
       })
@@ -528,7 +527,9 @@ export const resolveType = (
       return resolvedType(path, Type.nominal('silk/core', 'RawBuffer'))
     if (result.actor === 'Slot') return resolvedType(path, Type.nominal('silk/core', 'Slot'))
     if (result.actor === 'Unit') return resolvedType(path, Type.unit)
-    return resolvedType(path, result.actor)
+    if (result.actor === 'I32' || result.actor === 'Usize' || result.actor === 'Bool')
+      return resolvedType(path, result.actor)
+    return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   }
   if (result._tag === 'Resolved') {
     const nominal = nominalOf(result.declaration)

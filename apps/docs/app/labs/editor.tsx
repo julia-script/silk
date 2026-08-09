@@ -15,7 +15,6 @@ import { Annotation, EditorState, StateEffect, StateField } from '@codemirror/st
 import type { DecorationSet } from '@codemirror/view'
 import { Decoration, EditorView, hoverTooltip, keymap } from '@codemirror/view'
 import type * as Analysis from '@silk-effect/compiler/Analysis'
-import * as Type from '@silk-effect/compiler/Type'
 import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'
 import * as LspDocument from '@silk-effect/lsp/Document'
 import * as Effect from 'effect/Effect'
@@ -169,24 +168,29 @@ export function SilkEditor(props: {
         })
       }
     })
-    // Hover asks the language server's Document actor for the smallest typed fact.
+    // Hover asks the language server's Document actor for its structured compiler presentation.
     const typeHover = hoverTooltip((view, position) => {
       const { document: lspDocument, snapshot } = sessionRef.current
       const line = view.state.doc.lineAt(position)
-      const typed = LspDocument.typeAt(lspDocument, snapshot, {
+      const hover = LspDocument.hover(lspDocument, snapshot, {
         line: line.number - 1,
         character: position - line.from,
       })
-      if (typed === undefined) return null
-      const doc = view.state.doc.toString()
+      if (
+        hover?.range === undefined ||
+        typeof hover.contents !== 'object' ||
+        !('value' in hover.contents)
+      )
+        return null
+      const hoverText = hover.contents.value
       return {
-        pos: SilkCodeMirror.byteOffsetToCharOffset(doc, typed.span.start),
-        end: SilkCodeMirror.byteOffsetToCharOffset(doc, typed.span.end),
+        pos: lspOffset(view.state, hover.range.start),
+        end: lspOffset(view.state, hover.range.end),
         above: true,
         create: () => {
           const dom = document.createElement('div')
           dom.className = 'cm-silk-type-tooltip'
-          dom.textContent = Type.encode(typed.type)
+          dom.textContent = hoverText.replace(/^```silk\n/, '').replace(/\n```$/, '')
           return { dom }
         },
       }

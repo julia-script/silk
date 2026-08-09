@@ -278,6 +278,8 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} · active reclaim ticket`
     case 'RawBufferCleanup':
       return `${typeText(cleanup.type)} · ${cleanupText(cleanup.allocation)}`
+    case 'HookCleanup':
+      return `${typeText(cleanup.type)} · hook ${cleanup.hook.name} → ${cleanupText(cleanup.inner)}`
     case 'StructCleanup':
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
@@ -727,6 +729,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
     case 'SlotTake':
       return `${localText(operation.destination)} = take ${localText(operation.slot)}`
+    case 'SlotCopy':
+      return `${localText(operation.destination)} = copy ${localText(operation.slot)}`
     case 'SlotDrop':
       return `${localText(operation.destination)} = drop in place ${localText(operation.slot)} · ${cleanupText(operation.cleanup)}`
   }
@@ -1046,6 +1050,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `write slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'SlotTake':
       return `take slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
+    case 'SlotCopy':
+      return `copy slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'SlotDrop':
       return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
     case 'AllocationRelease':
@@ -1094,6 +1100,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotProject':
     case 'SlotWrite':
     case 'SlotTake':
+    case 'SlotCopy':
     case 'SlotDrop':
     case 'AllocationRelease':
       return 2
