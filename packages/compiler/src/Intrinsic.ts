@@ -1,4 +1,5 @@
 import type * as Hir from './Hir.js'
+import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
 
 /** Stable identity of one compiler-provided actor with no source declaration. */
@@ -138,126 +139,30 @@ const normalizedUnion = (members: ReadonlyArray<Type.Nominal>): Type.Type => {
   return normalized._tag === 'Normalized' ? normalized.type : 'Never'
 }
 
-const binaryI32 = (name: string, operation: Hir.BuiltinOperation): Operation =>
-  builtin({
-    actor: 'I32',
-    name,
-    operation,
-    parameters: Object.freeze([valueParameter('left', 'I32'), valueParameter('right', 'I32')]),
-    semanticParameters: Object.freeze(['I32', 'I32']),
-    result: 'I32',
-    semanticResult: 'I32',
-  })
-
-const compareI32 = (name: string, operation: Hir.BuiltinOperation): Operation =>
-  builtin({
-    actor: 'I32',
-    name,
-    operation,
-    parameters: Object.freeze([valueParameter('left', 'I32'), valueParameter('right', 'I32')]),
-    semanticParameters: Object.freeze(['I32', 'I32']),
-    result: 'Bool',
-    semanticResult: 'Bool',
-  })
-
-const binaryUsize = (
-  name: string,
-  operation: Hir.BuiltinOperation,
-  result: 'Usize' | 'Bool',
-): Operation =>
-  builtin({
-    actor: 'Usize',
-    name,
-    operation,
-    parameters: Object.freeze([valueParameter('left', 'Usize'), valueParameter('right', 'Usize')]),
-    semanticParameters: Object.freeze(['Usize', 'Usize']),
+const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
+  const result = operation.result === 'Self' ? scalar.spelling : Scalar.boolean.spelling
+  const parameterNames =
+    operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
+  return builtin({
+    actor: scalar.spelling,
+    name: operation.spelling,
+    operation: operation.code,
+    parameters: Object.freeze(parameterNames.map((name) => valueParameter(name, scalar.spelling))),
+    semanticParameters: Object.freeze(parameterNames.map(() => scalar.spelling)),
     result,
     semanticResult: result,
   })
+}
+
+const scalarActor = (scalar: Scalar.Scalar): Actor =>
+  actor(
+    scalar.spelling,
+    'Type',
+    scalar.operations.map((operation) => scalarOperation(scalar, operation)),
+  )
 
 const operations = Object.freeze([
-  actor(
-    'I32',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'I32',
-        name: 'negate',
-        operation: 'Negate',
-        parameters: Object.freeze([valueParameter('value', 'I32')]),
-        semanticParameters: Object.freeze(['I32']),
-        result: 'I32',
-        semanticResult: 'I32',
-      }),
-      binaryI32('add', 'Add'),
-      binaryI32('subtract', 'Subtract'),
-      binaryI32('multiply', 'Multiply'),
-      binaryI32('divide', 'Divide'),
-      binaryI32('remainder', 'Remainder'),
-      compareI32('equals', 'Equals'),
-      compareI32('notEquals', 'NotEquals'),
-      compareI32('lessThan', 'LessThan'),
-      compareI32('lessOrEqual', 'LessOrEqual'),
-      compareI32('greaterThan', 'GreaterThan'),
-      compareI32('greaterOrEqual', 'GreaterOrEqual'),
-    ]),
-  ),
-  actor(
-    'Usize',
-    'Type',
-    Object.freeze([
-      binaryUsize('add', 'Add', 'Usize'),
-      binaryUsize('subtract', 'Subtract', 'Usize'),
-      binaryUsize('multiply', 'Multiply', 'Usize'),
-      binaryUsize('divide', 'Divide', 'Usize'),
-      binaryUsize('remainder', 'Remainder', 'Usize'),
-      binaryUsize('equals', 'Equals', 'Bool'),
-      binaryUsize('notEquals', 'NotEquals', 'Bool'),
-      binaryUsize('lessThan', 'LessThan', 'Bool'),
-      binaryUsize('lessOrEqual', 'LessOrEqual', 'Bool'),
-      binaryUsize('greaterThan', 'GreaterThan', 'Bool'),
-      binaryUsize('greaterOrEqual', 'GreaterOrEqual', 'Bool'),
-    ]),
-  ),
-  actor(
-    'Bool',
-    'Type',
-    Object.freeze([
-      builtin({
-        actor: 'Bool',
-        name: 'equals',
-        operation: 'Equals',
-        parameters: Object.freeze([
-          valueParameter('left', 'Bool'),
-          valueParameter('right', 'Bool'),
-        ]),
-        semanticParameters: Object.freeze(['Bool', 'Bool']),
-        result: 'Bool',
-        semanticResult: 'Bool',
-      }),
-      builtin({
-        actor: 'Bool',
-        name: 'notEquals',
-        operation: 'NotEquals',
-        parameters: Object.freeze([
-          valueParameter('left', 'Bool'),
-          valueParameter('right', 'Bool'),
-        ]),
-        semanticParameters: Object.freeze(['Bool', 'Bool']),
-        result: 'Bool',
-        semanticResult: 'Bool',
-      }),
-      builtin({
-        actor: 'Bool',
-        name: 'not',
-        operation: 'Not',
-        parameters: Object.freeze([valueParameter('value', 'Bool')]),
-        semanticParameters: Object.freeze(['Bool']),
-        result: 'Bool',
-        semanticResult: 'Bool',
-      }),
-    ]),
-  ),
+  ...Scalar.all().map(scalarActor),
   actor(
     'Layout',
     'Type',

@@ -1,6 +1,6 @@
 ## 1. Catalog and Source Migration
 
-- [ ] 1.1 Add the integer scalar catalog and refactor current built-in consumers to query it.
+- [x] 1.1 Add the integer scalar catalog and refactor current built-in consumers to query it.
 - [ ] 1.2 Add lowercase integer identities, `()`, and `never`; remove uppercase aliases and migrate parser/semantic tests.
 - [ ] 1.3 Implement unit fallthrough/bare return and payload-free unit/bottom through HIR, MIR, layout, evaluation, and encoders.
 - [ ] 1.4 Migrate fixtures, examples, docs, editor expectations, and goldens to lowercase spellings.
@@ -31,4 +31,3 @@
 
 - [ ] 5.1 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`.
 - [ ] 5.2 Run `pnpm release:candidate` if stdlib/package artifacts change and record any pre-existing failure precisely.
-

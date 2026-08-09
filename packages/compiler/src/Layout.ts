@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
+import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
@@ -321,43 +322,25 @@ export interface Violation {
   readonly detail: string
 }
 
-const i32 = (): Entry =>
-  Object.freeze({
+const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
+  const scalar = Scalar.find(type)
+  if (scalar === undefined) throw new RangeError(`Layout lost scalar catalog entry for ${type}`)
+  const layout = Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
+  const bits = Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64)
+  const representation: Representation =
+    scalar.category === 'Boolean'
+      ? Object.freeze({ _tag: 'Boolean', bits: scalar.width.bits, falseValue: 0, trueValue: 1 })
+      : scalar.signedness === 'Signed'
+        ? Object.freeze({ _tag: 'SignedInteger', bits: scalar.width.bits })
+        : Object.freeze({ _tag: 'UnsignedInteger', bits })
+  return Object.freeze({
     _tag: 'LayoutEntry',
-    type: 'I32',
-    size: 4,
-    alignment: 4,
-    representation: Object.freeze({ _tag: 'SignedInteger', bits: 32 }),
+    type,
+    size: layout.size,
+    alignment: layout.alignment,
+    representation,
   })
-
-const bool = (): Entry =>
-  Object.freeze({
-    _tag: 'LayoutEntry',
-    type: 'Bool',
-    size: 4,
-    alignment: 4,
-    representation: Object.freeze({
-      _tag: 'Boolean',
-      bits: 32,
-      falseValue: 0,
-      trueValue: 1,
-    }),
-  })
-
-const usize = (target: Target.Target): Entry =>
-  Object.freeze({
-    _tag: 'LayoutEntry',
-    type: 'Usize',
-    size: target.pointerSize,
-    alignment: target.pointerAlignment,
-    representation: Object.freeze({
-      _tag: 'UnsignedInteger',
-      bits: target.pointerSize === 4 ? 32 : 64,
-    }),
-  })
-
-const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry =>
-  type === 'Bool' ? bool() : type === 'Usize' ? usize(target) : i32()
+}
 
 const alignUp = (offset: number, alignment: number): number =>
   Math.ceil(offset / alignment) * alignment

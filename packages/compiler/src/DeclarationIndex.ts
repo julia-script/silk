@@ -922,13 +922,7 @@ export const analyzeDeclaredType = (
     segments: Object.freeze(segments),
     syntax,
   })
-  if (
-    segments.length === 1 &&
-    (first.spelling === 'I32' ||
-      first.spelling === 'Usize' ||
-      first.spelling === 'Bool' ||
-      first.spelling === 'Never')
-  ) {
+  if (segments.length === 1 && (Type.isBuiltin(first.spelling) || first.spelling === 'Never')) {
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',

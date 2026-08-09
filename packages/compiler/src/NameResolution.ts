@@ -527,8 +527,7 @@ export const resolveType = (
       return resolvedType(path, Type.nominal('silk/core', 'RawBuffer'))
     if (result.actor === 'Slot') return resolvedType(path, Type.nominal('silk/core', 'Slot'))
     if (result.actor === 'Unit') return resolvedType(path, Type.unit)
-    if (result.actor === 'I32' || result.actor === 'Usize' || result.actor === 'Bool')
-      return resolvedType(path, result.actor)
+    if (Type.isBuiltin(result.actor)) return resolvedType(path, result.actor)
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   }
   if (result._tag === 'Resolved') {

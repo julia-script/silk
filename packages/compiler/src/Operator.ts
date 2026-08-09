@@ -1,3 +1,4 @@
+import * as Scalar from './Scalar.js'
 import type * as Token from './Token.js'
 
 /** Prefix operators supported by the bootstrap expression grammar. */
@@ -29,7 +30,7 @@ export interface InfixInfo {
 }
 
 /** A compiler-known actor selected by operator elaboration. */
-export type Actor = 'I32' | 'Usize' | 'Bool'
+export type Actor = Scalar.Spelling
 
 /** The canonical actor operation represented by one surface operator. */
 export interface Target {
@@ -116,21 +117,27 @@ export const prefixSpelling = (self: Prefix): string => (self === 'Negate' ? '-'
 
 const fixedTargets: Readonly<Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals'>, Target>> =
   Object.freeze({
-    Negate: Object.freeze({ actor: 'I32', operation: 'negate' }),
-    Not: Object.freeze({ actor: 'Bool', operation: 'not' }),
-    Multiply: Object.freeze({ actor: 'I32', operation: 'multiply' }),
-    Divide: Object.freeze({ actor: 'I32', operation: 'divide' }),
-    Remainder: Object.freeze({ actor: 'I32', operation: 'remainder' }),
-    Add: Object.freeze({ actor: 'I32', operation: 'add' }),
-    Subtract: Object.freeze({ actor: 'I32', operation: 'subtract' }),
-    LessThan: Object.freeze({ actor: 'I32', operation: 'lessThan' }),
-    LessOrEqual: Object.freeze({ actor: 'I32', operation: 'lessOrEqual' }),
-    GreaterThan: Object.freeze({ actor: 'I32', operation: 'greaterThan' }),
-    GreaterOrEqual: Object.freeze({ actor: 'I32', operation: 'greaterOrEqual' }),
+    Negate: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'negate' }),
+    Not: Object.freeze({ actor: Scalar.boolean.spelling, operation: 'not' }),
+    Multiply: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'multiply' }),
+    Divide: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'divide' }),
+    Remainder: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'remainder' }),
+    Add: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'add' }),
+    Subtract: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'subtract' }),
+    LessThan: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'lessThan' }),
+    LessOrEqual: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'lessOrEqual' }),
+    GreaterThan: Object.freeze({ actor: Scalar.defaultInteger.spelling, operation: 'greaterThan' }),
+    GreaterOrEqual: Object.freeze({
+      actor: Scalar.defaultInteger.spelling,
+      operation: 'greaterOrEqual',
+    }),
   })
 
 /** Returns the canonical actor operation for an operator and its selected equality actor. */
-export const target = (self: Prefix | Infix, equalityActor: Actor = 'I32'): Target => {
+export const target = (
+  self: Prefix | Infix,
+  equalityActor: Actor = Scalar.defaultInteger.spelling,
+): Target => {
   if (self === 'Equals' || self === 'NotEquals') {
     return Object.freeze({
       actor: equalityActor,
@@ -138,8 +145,10 @@ export const target = (self: Prefix | Infix, equalityActor: Actor = 'I32'): Targ
     })
   }
   const fixed = fixedTargets[self]
-  return equalityActor === 'Usize' && fixed.actor === 'I32' && self !== 'Negate'
-    ? Object.freeze({ actor: 'Usize', operation: fixed.operation })
+  return equalityActor === Scalar.pointerInteger.spelling &&
+    fixed.actor === Scalar.defaultInteger.spelling &&
+    self !== 'Negate'
+    ? Object.freeze({ actor: Scalar.pointerInteger.spelling, operation: fixed.operation })
     : fixed
 }
 
