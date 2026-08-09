@@ -1,0 +1,81 @@
+fn previous(index: usize) -> usize {
+  if index == 0 {
+    return 4
+  }
+  return index - 1
+}
+
+fn following(index: usize) -> usize {
+  if index == 4 {
+    return 0
+  }
+  return index + 1
+}
+
+fn alive(board: &[bool], row: usize, column: usize) -> i32 {
+  if board[row * 5 + column] {
+    return 1
+  }
+  return 0
+}
+
+fn step(board: &[bool]) -> [bool; 25] {
+  let mut next = [
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, false, false, false, false
+  ]
+  let mut row = usize.add(0, 0)
+  while row < 5 {
+    let mut column = usize.add(0, 0)
+    while column < 5 {
+      let up = previous(row)
+      let down = following(row)
+      let left = previous(column)
+      let right = following(column)
+      let neighbors = alive(board, up, left) + alive(board, up, column) +
+        alive(board, up, right) + alive(board, row, left) + alive(board, row, right) +
+        alive(board, down, left) + alive(board, down, column) + alive(board, down, right)
+      let index = row * 5 + column
+      if neighbors == 3 {
+        next[index] = true
+      }
+      if neighbors == 2 {
+        if board[index] {
+          next[index] = true
+        }
+      }
+      column = column + 1
+    }
+    row = row + 1
+  }
+  return next
+}
+
+fn fingerprint(board: &[bool]) -> i32 {
+  let mut index = usize.add(0, 0)
+  let mut packed = 0
+  while index < board.length {
+    packed = packed * 2
+    if board[index] {
+      packed = packed + 1
+    }
+    packed = packed % 251
+    index = index + 1
+  }
+  return packed
+}
+
+pub fn main() -> i32 {
+  let initial = [
+    false, false, false, false, false,
+    false, false, false, false, false,
+    false, true, true, true, false,
+    false, false, false, false, false,
+    false, false, false, false, false
+  ]
+  let final = step(&initial)
+  return fingerprint(&final)
+}

@@ -1,0 +1,29 @@
+pub fn main() -> i32 {
+  let mut composite = [
+    false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false
+  ]
+  let mut candidate = usize.add(2, 0)
+  while candidate * candidate < 20 {
+    if !composite[candidate] {
+      let mut multiple = candidate * candidate
+      while multiple < 20 {
+        composite[multiple] = true
+        multiple = multiple + candidate
+      }
+    }
+    candidate = candidate + 1
+  }
+
+  let mut index = usize.add(2, 0)
+  let mut number = 2
+  let mut sum = 0
+  while index < 20 {
+    if !composite[index] {
+      sum = sum + number
+    }
+    index = index + 1
+    number = number + 1
+  }
+  return sum
+}

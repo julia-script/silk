@@ -1,0 +1,65 @@
+struct Spectrum {
+  real: [f64; 8]
+  imaginary: [f64; 8]
+}
+
+fn reverseThreeBits(index: usize) -> usize {
+  let low = usize.shiftLeft(usize.bitAnd(index, 1), 2)
+  let middle = usize.bitAnd(index, 2)
+  let high = usize.shiftRight(usize.bitAnd(index, 4), 2)
+  return usize.bitOr(usize.bitOr(low, middle), high)
+}
+
+fn fft(real: &[f64], imaginary: &[f64]) -> Spectrum {
+  let mut outputReal = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  let mut outputImaginary = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  let mut index = usize.add(0, 0)
+  while index < 8 {
+    let reversed = reverseThreeBits(index)
+    outputReal[reversed] = real[index]
+    outputImaginary[reversed] = imaginary[index]
+    index = index + 1
+  }
+
+  let mut size = usize.add(2, 0)
+  while size <= 8 {
+    let half = size / 2
+    let angle = -6.283185307179586 / usize.toF64(size)
+    let stepReal = f64.cos(angle)
+    let stepImaginary = f64.sin(angle)
+    let mut start = usize.add(0, 0)
+    while start < 8 {
+      let mut offset = usize.add(0, 0)
+      let mut twiddleReal = 1.0
+      let mut twiddleImaginary = 0.0
+      while offset < half {
+        let even = start + offset
+        let odd = even + half
+        let oddReal = outputReal[odd]
+        let oddImaginary = outputImaginary[odd]
+        let rotatedReal = oddReal * twiddleReal - oddImaginary * twiddleImaginary
+        let rotatedImaginary = oddReal * twiddleImaginary + oddImaginary * twiddleReal
+        let evenReal = outputReal[even]
+        let evenImaginary = outputImaginary[even]
+        outputReal[even] = evenReal + rotatedReal
+        outputImaginary[even] = evenImaginary + rotatedImaginary
+        outputReal[odd] = evenReal - rotatedReal
+        outputImaginary[odd] = evenImaginary - rotatedImaginary
+        let nextTwiddleReal = twiddleReal * stepReal - twiddleImaginary * stepImaginary
+        twiddleImaginary = twiddleReal * stepImaginary + twiddleImaginary * stepReal
+        twiddleReal = nextTwiddleReal
+        offset = offset + 1
+      }
+      start = start + size
+    }
+    size = size * 2
+  }
+  return Spectrum { real: move outputReal, imaginary: move outputImaginary }
+}
+
+pub fn main() -> i32 {
+  let real = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  let imaginary = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  let spectrum = fft(&real, &imaginary)
+  return f64.toI32(spectrum.real[0])
+}
