@@ -8,11 +8,20 @@ translation.
 
 - **Diagnostics** — every compiler phase (lexical, parser, module, semantic, ownership) with stable
   codes, notes, and cross-file related information.
-- **Hover** — the inferred type of the smallest typed expression or binding under the cursor.
+- **Hover** — token-specific source-like declarations for functions, types, locals, fields, imports,
+  and intrinsic operations, with anonymous expression types as a fallback.
 - **Document symbols** — top-level functions and structs, with struct fields as children.
 - **Formatting** — whole-document canonical formatting via the compiler's formatter.
 - **Go to definition** — precise local, parameter, declaration, imported, qualified, and field
-  navigation, including declarations in open unsaved or closed project modules.
+  navigation from both declaration and reference sites, including nominal types and declarations
+  in open unsaved or closed project modules.
+- **Completion** — recovery-aware values, types, intrinsic and imported actor operations, and typed
+  fields, including empty or partially typed identifiers.
+- **Inlay hints** — inferred local-binding types rendered after binding names.
+
+Inferred local types use the standard LSP inlay-hint capability. They are intentionally not code
+lenses: hints annotate source-level types inline, while code lenses represent executable commands
+or reference counts above source regions and are outside this server's scope.
 
 Open documents are analyzed as compilation roots against their discovered `silk.toml` project, so
 imports resolve to sibling open documents first and rooted `.silk` files second. Documents outside

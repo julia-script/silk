@@ -52,6 +52,33 @@ Bootstrap does not implement every future editor query, but its identities, reco
 provenance, and phase boundaries let the facade grow without reimplementing Silk semantics in a
 separate tool.
 
+## Editor intelligence
+
+`Analysis.Snapshot` owns editor semantics as immutable compiler data. `SemanticOccurrence` indexes
+each meaningful identifier token separately: declarations, values, types, fields, imported
+namespaces, intrinsic actors, and intrinsic operations. An occurrence carries an explicit
+resolution state and an exact source declaration only when one exists. Compiler-provided
+intrinsics remain hoverable without inventing virtual definition files.
+
+`Analysis.hoverSubjectAt` selects an occurrence before considering a cached anonymous-expression
+type. Available occurrences render through `Presentation`, which preserves source concepts such as
+parameter names, mutable bindings, generic parameters, and `effect fn` declarations. This is why a
+reference to `effect fn recover(error: OutOfMemory) -> I32` is not displayed as a lowered anonymous
+`fn(OutOfMemory) -> Effect<I32>` type.
+
+`Analysis.completionAt` classifies recovered source positions and returns semantic candidates with
+an exact replacement span. Intrinsic member candidates come from the same `Intrinsic` catalog used
+by elaboration and hover. `Analysis.typeHints` projects available inferred local-binding types over
+a byte range. These actors contain no LSP protocol types; clients translate their structured data
+at the boundary.
+
+The occurrence index has an explicit interactive budget: one numeric prefix-maximum entry per
+semantic occurrence, no retained syntax nodes, tokens, or source text, and under 512 serialized
+bytes per occurrence on the representative multi-module fixture. The same fixture must complete
+five full passes of exact-token lookups in under one second. These are regression ceilings rather
+than performance targets; lookup uses a binary search followed only by the locally overlapping
+spans.
+
 ## Byte and span conventions
 
 - Source input is an arbitrary byte sequence, not assumed to be valid UTF-8.

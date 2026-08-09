@@ -2,24 +2,30 @@ import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
+import * as Completion from './Completion.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
 import * as Mir from './Mir.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
-import * as SemanticTarget from './SemanticTarget.js'
+import * as Presentation from './Presentation.js'
+import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
+import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
+import * as SyntaxTree from './SyntaxTree.js'
 import * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
+import * as TypeHint from './TypeHint.js'
 import * as WasmBackend from './WasmBackend.js'
 
 /**
@@ -50,7 +56,8 @@ export interface Snapshot {
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly results: ReadonlyMap<string, Elaboration.Result>
-  readonly semanticTargets: SemanticTarget.Index
+  readonly semanticOccurrences: SemanticOccurrence.Index
+  readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
@@ -59,6 +66,25 @@ export interface Snapshot {
   readonly mir: Targeted<Mir.Module>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
+
+/** One available anonymous expression type cached for position fallback. */
+export interface AnonymousExpression {
+  readonly span: SourceSpan.SourceSpan
+  readonly type: Type.Type
+}
+
+/** The occurrence-first semantic subject selected for a hover request. */
+export type HoverSubject =
+  | {
+      readonly _tag: 'OccurrenceHoverSubject'
+      readonly occurrence: SemanticOccurrence.SemanticOccurrence
+      readonly presentation: Presentation.Presentation
+    }
+  | {
+      readonly _tag: 'ExpressionHoverSubject'
+      readonly expression: AnonymousExpression
+      readonly presentation: Presentation.Presentation
+    }
 
 /** Source facts that make backend emission unavailable while keeping analysis queryable. */
 export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
@@ -105,7 +131,8 @@ export const make = Effect.fn('Analysis.make')(function* (
       ]
     }),
   )
-  const semanticTargets = SemanticTarget.make(results, index, resolution)
+  const semanticOccurrences = SemanticOccurrence.make(results, index, resolution)
+  const anonymousExpressions = makeAnonymousExpressionIndex(results)
   const ownership = new Map(
     [...results.entries()].map(([name, result]) => [name, Ownership.checkModule(result)]),
   )
@@ -175,7 +202,8 @@ export const make = Effect.fn('Analysis.make')(function* (
     index,
     resolution,
     results,
-    semanticTargets,
+    semanticOccurrences,
+    anonymousExpressions,
     ownership,
     instances,
     target,
@@ -209,20 +237,21 @@ export const cycles = (self: Snapshot): ReadonlyArray<ReadonlyArray<string>> => 
 export const sources = (self: Snapshot): ReadonlyMap<string, SourceFile.SourceFile> =>
   self.closure.sources
 
-/** Returns the smallest reference-bearing semantic target containing one byte offset. */
-export const semanticTargetAt = (
+/** Returns the smallest exact-token semantic occurrence containing one byte offset. */
+export const semanticOccurrenceAt = (
   self: Snapshot,
   module: string,
   byteOffset: number,
-): SemanticTarget.SemanticTarget | undefined =>
-  SemanticTarget.at(self.semanticTargets, module, byteOffset)
+): SemanticOccurrence.SemanticOccurrence | undefined =>
+  SemanticOccurrence.at(self.semanticOccurrences, module, byteOffset)
 
-/** Resolves one semantic identity to its exact declaration and name spans. */
-export const declarationLocation = (
+/** Returns exact-token semantic occurrences overlapping one source range. */
+export const semanticOccurrencesInRange = (
   self: Snapshot,
-  identity: SemanticTarget.Identity,
-): SemanticTarget.DeclarationLocation | undefined =>
-  SemanticTarget.declarationLocation(self.semanticTargets, identity)
+  module: string,
+  range: SourceSpan.SourceSpan,
+): ReadonlyArray<SemanticOccurrence.SemanticOccurrence> =>
+  SemanticOccurrence.inRange(self.semanticOccurrences, module, range)
 
 /** Returns operational source-resolution failures in canonical module order. */
 export const resolutionFailures = (
@@ -277,14 +306,205 @@ export const rootAnalysis = (self: Snapshot): Elaboration.Result => {
   return result
 }
 
+const declarationForIdentity = (
+  self: Snapshot,
+  identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'DeclarationIdentity' }>,
+): DeclarationIndex.MemberFact | undefined => {
+  if (identity.id._tag === 'CanonicalDeclarationId')
+    return DeclarationIndex.byCanonical(self.index, identity.id)
+  const local = identity.id
+  return self.index.modules
+    .flatMap((module) => module.members)
+    .find((member) => member.id.sourceId === local.sourceId && member.id.ordinal === local.ordinal)
+}
+
+const presentationOfIdentity = (
+  self: Snapshot,
+  module: string,
+  identity: SemanticOccurrence.Identity,
+): Presentation.Presentation | undefined => {
+  const scope = NameResolution.scopeOf(self.resolution, module)
+  if (identity._tag === 'DeclarationIdentity') {
+    const declaration = declarationForIdentity(self, identity)
+    return declaration?._tag === 'FunctionDeclaration'
+      ? Presentation.functionDeclaration(declaration)
+      : declaration === undefined
+        ? undefined
+        : Presentation.structDeclaration(declaration)
+  }
+  if (identity._tag === 'TypeParameterIdentity') {
+    for (const headers of self.index.modules)
+      for (const member of headers.members) {
+        const parameter = member.typeParameters.find((candidate) =>
+          Type.equals(candidate.type, identity.id),
+        )
+        if (parameter !== undefined) return Presentation.typeParameter(parameter)
+      }
+    return undefined
+  }
+  if (identity._tag === 'ParameterIdentity') {
+    for (const headers of self.index.modules)
+      for (const declaration of headers.declarations) {
+        const parameter = declaration.parameters.find(
+          (candidate) =>
+            candidate.id.function.sourceId === identity.id.function.sourceId &&
+            candidate.id.function.ordinal === identity.id.function.ordinal &&
+            candidate.id.ordinal === identity.id.ordinal,
+        )
+        if (parameter !== undefined) return Presentation.parameter(parameter)
+      }
+    return undefined
+  }
+  if (identity._tag === 'FieldIdentity') {
+    for (const headers of self.index.modules)
+      for (const declaration of headers.structs) {
+        const field = declaration.fields.find(
+          (candidate) =>
+            candidate.id.struct.sourceId === identity.id.struct.sourceId &&
+            candidate.id.struct.ordinal === identity.id.struct.ordinal &&
+            candidate.id.ordinal === identity.id.ordinal,
+        )
+        if (field !== undefined) return Presentation.field(field)
+      }
+    return undefined
+  }
+  if (identity._tag === 'BindingIdentity') {
+    for (const result of self.results.values())
+      for (const fn of result.functions) {
+        const binding = fn.bindings.find(
+          (candidate) =>
+            candidate.id.function.sourceId === identity.id.function.sourceId &&
+            candidate.id.function.ordinal === identity.id.function.ordinal &&
+            candidate.id.ordinal === identity.id.ordinal,
+        )
+        if (binding !== undefined) return Presentation.binding(binding, module, scope)
+      }
+    return undefined
+  }
+  if (identity._tag === 'PatternBindingIdentity') {
+    const key = SemanticOccurrence.identityKey(identity)
+    for (const result of self.results.values())
+      for (const fn of result.functions)
+        for (const statement of fn.statements)
+          for (const expression of statementExpressionFacts(statement))
+            if (expression._tag === 'Match')
+              for (const arm of expression.arms)
+                for (const binding of arm.bindings)
+                  if (
+                    SemanticOccurrence.identityKey(
+                      Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
+                    ) === key
+                  )
+                    return Presentation.patternBinding(binding, module, scope)
+    return undefined
+  }
+  if (identity._tag === 'ImportNamespaceIdentity')
+    return Presentation.importBinding(identity.spelling, identity.module)
+  if (identity._tag === 'IntrinsicActorIdentity') {
+    const intrinsic = Intrinsic.findActor(identity.id.name)
+    return intrinsic === undefined ? undefined : Presentation.intrinsicActor(intrinsic)
+  }
+  const intrinsic = Intrinsic.findOperation(identity.id.actor, identity.id.name)
+  return intrinsic === undefined ? undefined : Presentation.intrinsicOperation(intrinsic)
+}
+
+/** Lazily presents one available occurrence through declaration and scope facts. */
+export const occurrencePresentation = (
+  self: Snapshot,
+  module: string,
+  occurrence: SemanticOccurrence.SemanticOccurrence,
+): Presentation.Presentation | undefined =>
+  occurrence.resolution._tag === 'Available'
+    ? presentationOfIdentity(self, module, occurrence.resolution.identity)
+    : undefined
+
+/** Returns the smallest cached available anonymous expression containing one byte offset. */
+export const anonymousExpressionAt = (
+  self: Snapshot,
+  module: string,
+  offset: number,
+): AnonymousExpression | undefined =>
+  (self.anonymousExpressions.get(module) ?? [])
+    .filter((candidate) => candidate.span.start <= offset && offset < candidate.span.end)
+    .reduce<AnonymousExpression | undefined>((selected, candidate) => {
+      if (selected === undefined) return candidate
+      return candidate.span.end - candidate.span.start < selected.span.end - selected.span.start
+        ? candidate
+        : selected
+    }, undefined)
+
+/** Selects an occurrence presentation first, with anonymous expression type as a strict fallback. */
+export const hoverSubjectAt = (
+  self: Snapshot,
+  module: string,
+  offset: number,
+): HoverSubject | undefined => {
+  const occurrence = semanticOccurrenceAt(self, module, offset)
+  if (occurrence !== undefined) {
+    const presentation = occurrencePresentation(self, module, occurrence)
+    return presentation === undefined
+      ? undefined
+      : Object.freeze({ _tag: 'OccurrenceHoverSubject', occurrence, presentation })
+  }
+  const expression = anonymousExpressionAt(self, module, offset)
+  if (expression === undefined) return undefined
+  return Object.freeze({
+    _tag: 'ExpressionHoverSubject',
+    expression,
+    presentation: Presentation.expressionType(
+      expression.type,
+      module,
+      NameResolution.scopeOf(self.resolution, module),
+    ),
+  })
+}
+
+/** Returns source-ordered inferred local type hints clipped to one byte range. */
+export const typeHints = (
+  self: Snapshot,
+  module: string,
+  start: number,
+  end: number,
+): ReadonlyArray<TypeHint.TypeHint> =>
+  TypeHint.make(
+    bindingsOf(self, module),
+    module,
+    NameResolution.scopeOf(self.resolution, module),
+    start,
+    end,
+  )
+
+/** Returns deterministic recovery-aware completion for one module byte offset. */
+export const completionAt = (
+  self: Snapshot,
+  module: string,
+  offset: number,
+): Completion.Result | undefined => {
+  const source = self.closure.sources.get(module)
+  const result = self.results.get(module)
+  return source === undefined || result === undefined
+    ? undefined
+    : Completion.complete({
+        source,
+        module,
+        offset,
+        index: self.index,
+        resolution: self.resolution,
+        result,
+      })
+}
+
 const nestedExpressionFacts = (
   expression: Elaboration.ExpressionFact,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
   const nested: ReadonlyArray<Elaboration.ExpressionFact> = (() => {
     switch (expression._tag) {
       case 'Move':
+      case 'Borrow':
       case 'FieldProjection':
         return [expression.subject]
+      case 'PlaceReplace':
+        return [expression.destination, expression.value]
       case 'IndexProjection':
         return [expression.subject, expression.index]
       case 'ArrayLiteral':
@@ -458,6 +678,36 @@ export const expressionsOf = (
       .get(module)
       ?.functions.flatMap((fn) => fn.statements.flatMap(statementExpressionFacts)) ?? [],
   )
+
+const makeAnonymousExpressionIndex = (
+  results: ReadonlyMap<string, Elaboration.Result>,
+): ReadonlyMap<string, ReadonlyArray<AnonymousExpression>> => {
+  const modules = new Map<string, ReadonlyArray<AnonymousExpression>>()
+  for (const [module, result] of results) {
+    const found = new Map<string, AnonymousExpression>()
+    for (const fn of result.functions)
+      for (const statement of fn.statements)
+        for (const expression of statementExpressionFacts(statement)) {
+          if (expression.type._tag !== 'Available') continue
+          const span = SyntaxTree.span(expression.syntax)
+          found.set(
+            `${span.start}:${span.end}`,
+            Object.freeze({ span, type: expression.type.type }),
+          )
+        }
+    modules.set(
+      module,
+      Object.freeze(
+        [...found.values()].sort(
+          (left, right) =>
+            left.span.start - right.span.start ||
+            left.span.end - left.span.start - (right.span.end - right.span.start),
+        ),
+      ),
+    )
+  }
+  return modules
+}
 
 /** Returns every retained semantic match with source patterns and canonical coverage facts. */
 export const matchesOf = (

@@ -28,6 +28,14 @@ const open = (
     return { document, snapshot }
   })
 
+const positionOf = (source: string, spelling: string, occurrence = 0) => {
+  let offset = -1
+  for (let index = 0; index <= occurrence; index += 1) offset = source.indexOf(spelling, offset + 1)
+  const before = source.slice(0, offset)
+  const lineStart = before.lastIndexOf('\n') + 1
+  return { line: before.split('\n').length - 1, character: offset - lineStart }
+}
+
 it.effect('publishes compiler errors as protocol diagnostics', () =>
   Effect.gen(function* () {
     const source = 'pub fn main() -> I32 { return missing() }'
@@ -105,6 +113,280 @@ it.effect('hovers nothing outside typed expressions', () =>
   }),
 )
 
+it.effect('maps hover and definition positions after non-ASCII recovery bytes', () =>
+  Effect.gen(function* () {
+    const source = `🙂 pub fn main() -> I32 { return 42 }`
+    const { document, snapshot } = yield* open(source)
+    const position = positionOf(source, 'main')
+    const hover = Document.hover(document, snapshot, position)
+    const definition = Document.definition(document, snapshot, position, () => undefined)
+    assert.include(
+      typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : '',
+      'fn main()',
+    )
+    assert.deepEqual(definition?.targetSelectionRange.start, position)
+  }),
+)
+
+it.effect('distinguishes a binding, intrinsic actor, and operation hover', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> I32 {
+  let mut allocator = SystemAllocator.make()
+  return 0
+}`
+    const { document, snapshot } = yield* open(source)
+    const hoverText = (spelling: string) => {
+      const hover = Document.hover(document, snapshot, positionOf(source, spelling))
+      return typeof hover?.contents === 'object' && 'value' in hover.contents
+        ? hover.contents.value
+        : undefined
+    }
+    assert.strictEqual(hoverText('allocator'), '```silk\nlet mut allocator: SystemAllocator\n```')
+    assert.strictEqual(hoverText('SystemAllocator'), '```silk\nintrinsic type SystemAllocator\n```')
+    assert.strictEqual(
+      hoverText('make'),
+      '```silk\nfn SystemAllocator.make() -> SystemAllocator\n```',
+    )
+  }),
+)
+
+it.effect('uses one source-like effect function hover at declarations and references', () =>
+  Effect.gen(function* () {
+    const source = `effect fn recover(error: OutOfMemory) -> I32 { return 0 }
+pub fn main() -> I32 {
+  return run Effect.catch<OutOfMemory>(store(), recover)
+}`
+    const { document, snapshot } = yield* open(source)
+    const declaration = Document.hover(document, snapshot, positionOf(source, 'recover', 0))
+    const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
+    assert.deepEqual(declaration?.contents, {
+      kind: 'markdown',
+      value: '```silk\neffect fn recover(error: OutOfMemory) -> I32\n```',
+    })
+    assert.deepEqual(reference?.contents, declaration?.contents)
+  }),
+)
+
+it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
+  Effect.gen(function* () {
+    const source = `struct Problem {}
+effect fn recover(error: Problem) -> I32 { return 0 }
+pub fn main() -> I32 {
+  let recipe = relay(0)
+    |> Effect.catch<Problem>(recover)
+  return run recipe
+}`
+    const { document, snapshot } = yield* open(source)
+    const text = (spelling: string, occurrence = 0) => {
+      const hover = Document.hover(document, snapshot, positionOf(source, spelling, occurrence))
+      return typeof hover?.contents === 'object' && 'value' in hover.contents
+        ? hover.contents.value
+        : undefined
+    }
+    assert.strictEqual(text('Effect'), '```silk\nintrinsic namespace Effect\n```')
+    assert.include(text('catch') ?? '', 'fn Effect.catch<E>')
+    assert.strictEqual(text('Problem', 2), '```silk\nstruct Problem\n```')
+  }),
+)
+
+it.effect('returns inferred local type inlay hints in the requested range', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> I32 {
+  let mut allocator = SystemAllocator.make()
+  return 0
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: { line: 3, character: 1 },
+      }),
+      [
+        {
+          position: { line: 1, character: 19 },
+          label: ': SystemAllocator',
+          kind: 1,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+      ],
+    )
+  }),
+)
+
+it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode snapshots', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> I32 {
+  let broken = missing()
+  // π🙂
+  let mut allocator = SystemAllocator.make()
+  return 0
+}`
+    const { document, snapshot } = yield* open(source)
+    const range = {
+      start: { line: 3, character: 0 },
+      end: { line: 3, character: 50 },
+    }
+    const first = Document.inlayHints(document, snapshot, range)
+    assert.deepEqual(Document.inlayHints(document, snapshot, range), first)
+    assert.deepEqual(first, [
+      {
+        position: { line: 3, character: 19 },
+        label: ': SystemAllocator',
+        kind: 1,
+        paddingLeft: false,
+        paddingRight: false,
+      },
+    ])
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: { line: 2, character: 0 },
+      }),
+      [],
+    )
+  }),
+)
+
+it.effect('completes intrinsic operations after actor member access', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> I32 {
+  return Effect.
+}`
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(document, snapshot, {
+      line: 1,
+      character: '  return Effect.'.length,
+    })
+    assert.include(
+      completion.items.map((item) => item.label),
+      'catch',
+    )
+    assert.include(
+      completion.items.find((item) => item.label === 'catch')?.detail ?? '',
+      'fn Effect.catch<E>',
+    )
+
+    const allocatorSource = `pub fn main() -> I32 {
+  return SystemAllocator.
+}`
+    const allocator = yield* open(allocatorSource)
+    const allocatorCompletion = Document.completion(allocator.document, allocator.snapshot, {
+      line: 1,
+      character: '  return SystemAllocator.'.length,
+    })
+    assert.include(
+      allocatorCompletion.items.map((item) => item.label),
+      'make',
+    )
+    assert.include(
+      allocatorCompletion.items.find((item) => item.label === 'make')?.detail ?? '',
+      'fn SystemAllocator.make()',
+    )
+  }),
+)
+
+it.effect('completes visible values through a partial identifier replacement', () =>
+  Effect.gen(function* () {
+    const source = `fn recover(value: I32) -> I32 { return value }
+pub fn main() -> I32 {
+  return rec
+}`
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(document, snapshot, {
+      line: 2,
+      character: '  return rec'.length,
+    })
+    const recover = completion.items.find((item) => item.label === 'recover')
+    assert.isDefined(recover)
+    assert.deepEqual(recover?.textEdit, {
+      range: {
+        start: { line: 2, character: '  return '.length },
+        end: { line: 2, character: '  return rec'.length },
+      },
+      newText: 'recover',
+    })
+  }),
+)
+
+it.effect('completes fields from an inferred local subject type', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair { left: I32 }
+pub fn main() -> I32 {
+  let pair = Pair { left: 1 }
+  return pair.
+}`
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(document, snapshot, {
+      line: 3,
+      character: '  return pair.'.length,
+    })
+    assert.include(
+      completion.items.map((item) => item.label),
+      'left',
+    )
+  }),
+)
+
+it.effect('uses semantic qualifier lookup and lets a local shadow an intrinsic actor', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair { left: I32 }
+pub fn main() -> I32 {
+  let Effect = Pair { left: 1 }
+  return Effect.
+}`
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(document, snapshot, {
+      line: 3,
+      character: '  return Effect.'.length,
+    })
+    assert.include(
+      completion.items.map((item) => item.label),
+      'left',
+    )
+    assert.notInclude(
+      completion.items.map((item) => item.label),
+      'catch',
+    )
+  }),
+)
+
+it.effect('completes types in damaged parameter and generic-argument positions', () =>
+  Effect.gen(function* () {
+    const parameterSource = `struct Problem {}
+fn identity<T>(value: ) -> I32 { return 0 }`
+    const parameter = yield* open(parameterSource)
+    const parameterCompletion = Document.completion(parameter.document, parameter.snapshot, {
+      line: 1,
+      character: 'fn identity<T>(value: '.length,
+    })
+    assert.include(
+      parameterCompletion.items.map((item) => item.label),
+      'Problem',
+    )
+    assert.notInclude(
+      parameterCompletion.items.map((item) => item.label),
+      'true',
+    )
+
+    const argumentSource = `struct Problem {}
+pub fn main() -> I32 { return Effect.catch< }`
+    const argument = yield* open(argumentSource)
+    const argumentCompletion = Document.completion(argument.document, argument.snapshot, {
+      line: 1,
+      character: 'pub fn main() -> I32 { return Effect.catch<'.length,
+    })
+    assert.include(
+      argumentCompletion.items.map((item) => item.label),
+      'Problem',
+    )
+    assert.notInclude(
+      argumentCompletion.items.map((item) => item.label),
+      'false',
+    )
+  }),
+)
+
 it.effect('lists functions and structs with fields as document symbols', () =>
   Effect.gen(function* () {
     const source = `pub struct Box { answer: I32 }
@@ -172,6 +454,45 @@ pub fn main() -> I32 { return identity(42) }`
   }),
 )
 
+it.effect('navigates declaration names and nominal/generic types but not intrinsics', () =>
+  Effect.gen(function* () {
+    const source = `struct Problem {}
+fn recover<T>(error: Problem, value: T) -> T { return value }
+pub fn main() -> I32 {
+  let allocator = SystemAllocator.make()
+  return recover<I32>(0, 0)
+}`
+    const { document, snapshot } = yield* open(source)
+    const definitionAt = (spelling: string, occurrence = 0) =>
+      Document.definition(
+        document,
+        snapshot,
+        positionOf(source, spelling, occurrence),
+        () => undefined,
+      )
+
+    assert.deepEqual(definitionAt('Problem')?.targetSelectionRange.start, {
+      line: 0,
+      character: 7,
+    })
+    assert.deepEqual(definitionAt('Problem', 1)?.targetSelectionRange.start, {
+      line: 0,
+      character: 7,
+    })
+    assert.deepEqual(definitionAt('T', 1)?.targetSelectionRange.start, {
+      line: 1,
+      character: 11,
+    })
+    assert.deepEqual(definitionAt('recover', 1)?.targetSelectionRange.start, {
+      line: 1,
+      character: 3,
+    })
+    assert.isUndefined(definitionAt('SystemAllocator'))
+    assert.isUndefined(definitionAt('make'))
+    assert.isUndefined(definitionAt('I32', 1))
+  }),
+)
+
 it.effect('uses exact cross-module snapshot sources for qualified definition links', () =>
   Effect.gen(function* () {
     const root = 'import lib\npub fn main() -> I32 { return lib.answer() }'
@@ -197,6 +518,16 @@ it.effect('uses exact cross-module snapshot sources for qualified definition lin
     assert.deepEqual(link?.targetSelectionRange, {
       start: { line: 0, character: 7 },
       end: { line: 0, character: 13 },
+    })
+    const qualifier = Document.definition(
+      document,
+      snapshot,
+      positionOf(root, 'lib', 1),
+      () => undefined,
+    )
+    assert.deepEqual(qualifier?.targetSelectionRange, {
+      start: { line: 0, character: 7 },
+      end: { line: 0, character: 10 },
     })
   }),
 )
