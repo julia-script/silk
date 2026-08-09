@@ -18,6 +18,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
@@ -54,11 +55,13 @@ export type Targeted<A> =
 
 /** One immutable frontend analysis snapshot of one compilation request. */
 export interface FrontendSnapshot {
-  readonly _tag: 'AnalysisSnapshot'
+  readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
+  readonly realization: 'SingleRoot' | 'ProjectView'
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
+  readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly semanticOccurrences: SemanticOccurrence.Index
   readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
@@ -69,8 +72,14 @@ export interface FrontendSnapshot {
   readonly requestedTarget?: string
 }
 
+/** One true single-root frontend accepted by explicit runtime realization. */
+export interface SingleRootFrontendSnapshot extends FrontendSnapshot {
+  readonly _tag: 'AnalysisSnapshot'
+  readonly realization: 'SingleRoot'
+}
+
 /** One immutable runtime realization derived from a completed frontend snapshot. */
-export interface Snapshot extends FrontendSnapshot {
+export interface Snapshot extends SingleRootFrontendSnapshot {
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
   readonly layoutCatalog: Targeted<Layout.Catalog>
@@ -108,11 +117,12 @@ export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
 /** Builds the frontend snapshot of one compilation request. */
 export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
-): Effect.fn.Return<FrontendSnapshot, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<SingleRootFrontendSnapshot, never, SourceResolver.SourceResolver> {
   const frontend = yield* Pipeline.frontend(request)
   const tooling = FrontendTooling.make(frontend)
   return Object.freeze({
     _tag: 'AnalysisSnapshot',
+    realization: 'SingleRoot',
     ...frontend,
     ...tooling,
   })
@@ -120,7 +130,7 @@ export const make = Effect.fn('Analysis.make')(function* (
 
 /** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
 export const realize = (
-  self: FrontendSnapshot,
+  self: SingleRootFrontendSnapshot,
   target: string | undefined = self.requestedTarget,
 ): Snapshot => {
   const realization = Pipeline.realize(self, target)
@@ -128,6 +138,7 @@ export const realize = (
     ...self,
     ...realization,
     _tag: 'AnalysisSnapshot',
+    realization: 'SingleRoot',
   })
 }
 
@@ -143,7 +154,7 @@ export const ofSource = (
   sourceId: string,
   bytes: Uint8Array,
   target?: string,
-): Effect.Effect<FrontendSnapshot> =>
+): Effect.Effect<SingleRootFrontendSnapshot> =>
   Effect.provide(
     target === undefined
       ? make({ root: SourceFile.make(sourceId, bytes) })

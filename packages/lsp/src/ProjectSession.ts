@@ -1,4 +1,3 @@
-import type * as Analysis from '@silk-effect/compiler/Analysis'
 import type * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
@@ -10,7 +9,7 @@ import type * as Document from './Document.js'
 export interface AnalyzedDocument {
   readonly document: Document.Document
   readonly project: ProjectAnalysis.ProjectAnalysis
-  readonly snapshot: Analysis.FrontendSnapshot
+  readonly snapshot: ProjectAnalysis.View
   readonly moduleUris: ReadonlyMap<string, string>
 }
 

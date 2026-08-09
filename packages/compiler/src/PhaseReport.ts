@@ -11,7 +11,14 @@ export interface SemanticInvalidationCounters {
   readonly surfaceChange: number
 }
 
-export type Counters = SemanticInvalidationCounters
+/** Deterministic module-work counts attached to incrementally reusable semantic phases. */
+export interface ModuleReuseCounters {
+  readonly _tag: 'ModuleReuseCounters'
+  readonly reused: number
+  readonly recomputed: number
+}
+
+export type Counters = SemanticInvalidationCounters | ModuleReuseCounters
 
 /** One compiler or artifact-production phase's operational observation. */
 export interface PhaseReport {

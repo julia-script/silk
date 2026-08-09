@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SemanticInvalidation from '../src/SemanticInvalidation.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -42,15 +43,17 @@ const expectReasons = (
 
 it.effect('keeps unrelated modules and body-only importers reusable', () =>
   Effect.gen(function* () {
+    const importer = 'import app.B { answer } pub fn use() -> i32 { return answer() }'
+    const dependencyAfter = '\n\npub fn answer() -> i32 { return 99 }'
     const before = sources({
-      'app/A': 'import app.B { answer } pub fn use() -> i32 { return answer() }',
+      'app/A': importer,
       'app/B': 'pub fn answer() -> i32 { return 1 }',
       'app/C': 'pub fn other() -> i32 { return 2 }',
     })
     const previous = yield* analyze(before, ['app/A', 'app/C'])
     const after = sources({
-      'app/A': 'import app.B { answer } pub fn use() -> i32 { return answer() }',
-      'app/B': 'pub fn answer() -> i32 { return 99 }',
+      'app/A': importer,
+      'app/B': dependencyAfter,
       'app/C': 'pub fn other() -> i32 { return 200 }',
     })
     const current = yield* analyze(after, ['app/A', 'app/C'], previous)
@@ -58,6 +61,13 @@ it.effect('keeps unrelated modules and body-only importers reusable', () =>
     expectReusable(current, 'app/A')
     expectReasons(current, 'app/B', ['LocalChange'])
     expectReasons(current, 'app/C', ['LocalChange'])
+    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+    assert.notStrictEqual(current.semantics.get('app/B'), previous.semantics.get('app/B'))
+    assert.notStrictEqual(current.semantics.get('app/C'), previous.semantics.get('app/C'))
+    const view = ProjectAnalysis.view(current, 'app/A') ?? assert.fail('missing app/A view')
+    const call = Analysis.semanticOccurrenceAt(view, 'app/A', importer.lastIndexOf('answer'))
+    assert.strictEqual(call?.declaration?.module, 'app/B')
+    assert.strictEqual(call?.declaration?.selectionSpan.start, dependencyAfter.indexOf('answer'))
     assert.deepEqual(current.semanticInvalidation.totals, {
       modules: 3,
       reusable: 1,
@@ -109,6 +119,10 @@ it.effect('invalidates importers for signatures, visibility, and nominal struct 
       assert.strictEqual(importerObservation._tag, 'Recomputed')
       if (importerObservation._tag === 'Recomputed')
         assert.include(importerObservation.reasons, 'DependencySurfaceChange')
+      assert.notStrictEqual(
+        current.semantics.get('app/Importer'),
+        previous.semantics.get('app/Importer'),
+      )
     }
   }),
 )
@@ -133,6 +147,9 @@ it.effect('stops public-surface propagation when an intermediate module stabiliz
     expectReasons(bodyOnly, 'chain/C', ['LocalChange'])
     expectReusable(bodyOnly, 'chain/B')
     expectReusable(bodyOnly, 'chain/A')
+    assert.notStrictEqual(bodyOnly.semantics.get('chain/C'), previous.semantics.get('chain/C'))
+    assert.strictEqual(bodyOnly.semantics.get('chain/B'), previous.semantics.get('chain/B'))
+    assert.strictEqual(bodyOnly.semantics.get('chain/A'), previous.semantics.get('chain/A'))
 
     const signatureChange = yield* analyze(
       sources({
@@ -146,6 +163,11 @@ it.effect('stops public-surface propagation when an intermediate module stabiliz
     expectReasons(signatureChange, 'chain/C', ['LocalChange'])
     expectReasons(signatureChange, 'chain/B', ['DependencySurfaceChange'])
     expectReusable(signatureChange, 'chain/A')
+    assert.notStrictEqual(
+      signatureChange.semantics.get('chain/B'),
+      previous.semantics.get('chain/B'),
+    )
+    assert.strictEqual(signatureChange.semantics.get('chain/A'), previous.semantics.get('chain/A'))
   }),
 )
 
@@ -185,6 +207,7 @@ it.effect('classifies fresh, removed, changed import, and malformed revisions co
       assert.include(malformedObservation.reasons, 'LocalChange')
       assert.strictEqual(malformedObservation.surfaceChanged, true)
     }
+    assert.notStrictEqual(malformed.semantics.get('app/Main'), previous.semantics.get('app/Main'))
   }),
 )
 
@@ -211,6 +234,9 @@ it.effect(
       expectReasons(current, 'cycle/B', ['LocalChange'])
       expectReasons(current, 'cycle/A', ['CyclicPeerChange'])
       expectReusable(current, 'cycle/C')
+      assert.notStrictEqual(current.semantics.get('cycle/A'), previous.semantics.get('cycle/A'))
+      assert.notStrictEqual(current.semantics.get('cycle/B'), previous.semantics.get('cycle/B'))
+      assert.strictEqual(current.semantics.get('cycle/C'), previous.semantics.get('cycle/C'))
     }),
 )
 

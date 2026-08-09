@@ -1,6 +1,7 @@
 import * as Elaboration from '../../src/Elaboration.js'
 import type * as ModuleClosure from '../../src/ModuleClosure.js'
 import * as NameResolution from '../../src/NameResolution.js'
+import * as Ownership from '../../src/Ownership.js'
 import type * as SyntaxFile from '../../src/SyntaxFile.js'
 
 export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => {
@@ -26,4 +27,23 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
   return Elaboration.elaborateModule({ syntax, headers, scope, index })
+}
+
+export const ownership = (result: Elaboration.Result): Ownership.ModuleOwnership => {
+  const module = Object.freeze({
+    _tag: 'Module' as const,
+    name: result.syntax.source.id,
+    syntax: result.syntax,
+    imports: Object.freeze([]),
+  })
+  const closure: ModuleClosure.Closure = Object.freeze({
+    _tag: 'ModuleClosure',
+    rootModule: result.syntax.source.id,
+    modules: Object.freeze([module]),
+    cycles: Object.freeze([]),
+    diagnostics: Object.freeze([]),
+    sources: new Map([[result.syntax.source.id, result.syntax.source]]),
+    resolutionFailures: Object.freeze([]),
+  })
+  return Ownership.checkModule(result, NameResolution.analyze(closure).index)
 }
