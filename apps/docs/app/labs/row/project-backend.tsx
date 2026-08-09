@@ -1068,7 +1068,9 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
         .map((selector) =>
           selector._tag === 'Field'
             ? `#${selector.field.ordinal}`
-            : `${typeText(selector.array)}[${selector.index}] ${selector.bounds.toLowerCase()}`,
+            : selector._tag === 'StaticElement'
+              ? `${selector.data}[${selector.index}] ${selector.bounds.toLowerCase()}`
+              : `${typeText(selector.array)}[${selector.index}] ${selector.bounds.toLowerCase()}`,
         )
         .join(' → ')} = ${valueText(event.value)}`
     case 'Cleanup':

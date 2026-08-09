@@ -63,6 +63,21 @@ const laneValueType = (plan: LayoutPlan.Plan, lane: LayoutPlan.CallingLane): Val
   return Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64) === 64 ? i64 : i32
 }
 
+const laneLoadMnemonic = (
+  plan: LayoutPlan.Plan,
+  lane: LayoutPlan.CallingLane,
+): Instr.MemoryAccessMnemonic => {
+  if (typeof lane.type !== 'string') return 'i32.load'
+  const scalar = Scalar.find(lane.type)
+  if (scalar?.category === 'Floating') return scalar.spelling === 'f32' ? 'f32.load' : 'f64.load'
+  if (scalar?.category !== 'Integer') return 'i32.load'
+  const bits = Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64)
+  if (bits === 64) return 'i64.load'
+  if (bits === 16) return scalar.signedness === 'Signed' ? 'i32.load16_s' : 'i32.load16_u'
+  if (bits === 8) return scalar.signedness === 'Signed' ? 'i32.load8_s' : 'i32.load8_u'
+  return 'i32.load'
+}
+
 const alignUp = (value: number, alignment: number): number =>
   Math.ceil(value / alignment) * alignment
 
@@ -1855,7 +1870,7 @@ const emitOperation = (
             Instr.op('i32.mul'),
             Instr.op('i32.add'),
             ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
-            Instr.memoryAccess('i32.load', memory.memory),
+            Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
             Instr.localSet(destination),
           )
         }
