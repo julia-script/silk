@@ -1,5 +1,7 @@
 import silk.vector { Vector, make, append, get, length }
 
+impl Report for OutOfMemory {}
+
 struct QueueEntry {
   cell: usize
   distance: usize
@@ -65,12 +67,15 @@ effect fn search() -> usize ! OutOfMemory ? &mut Allocator {
   return usize.add(0, 0)
 }
 
-effect fn build() -> i32 ! OutOfMemory {
-  let mut allocator = SystemAllocator.make()
-  let pending = search() |> Allocator.provide(&mut allocator)
-  return usize.toI32(run pending)
+fn verifyShortestDistance(distance: usize) -> () {
+  if distance != 8 {
+    let invalid = 1 / 0
+  }
+  return ()
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
-
-pub fn main() -> i32 { return run Effect.catch<OutOfMemory>(build(), recover) }
+pub effect fn main() -> () ! OutOfMemory {
+  let mut allocator = SystemAllocator.make()
+  let pending = search() |> Allocator.provide(&mut allocator)
+  return (run pending) |> verifyShortestDistance
+}

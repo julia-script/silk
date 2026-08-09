@@ -24,7 +24,8 @@ fn fft(real: &[f64], imaginary: &[f64]) -> Spectrum {
   let mut size = usize.add(2, 0)
   while size <= 8 {
     let half = size / 2
-    let angle = -6.283185307179586 / usize.toF64(size)
+    let width = size |> usize.toF64
+    let angle = -6.283185307179586 / width
     let stepReal = f64.cos(angle)
     let stepImaginary = f64.sin(angle)
     let mut start = usize.add(0, 0)
