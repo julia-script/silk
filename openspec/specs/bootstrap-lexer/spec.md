@@ -202,3 +202,14 @@ and SHALL carry no semantic attachment.
 
 - **WHEN** source contains `// note`, `/// declaration`, and `//! module` on separate lines
 - **THEN** the lexer emits distinct line-comment, declaration-documentation, and module-documentation token kinds with exact spans
+
+### Requirement: const is a complete-identifier keyword
+
+The lexer SHALL classify the exact lowercase spelling `const` as a distinct keyword token under the
+same longest complete-identifier rule as every other keyword.
+
+#### Scenario: Lex const without consuming prefixes
+
+- **WHEN** source contains `const constant constable`
+- **THEN** only `const` is a const-keyword token and the longer spellings remain identifiers
+

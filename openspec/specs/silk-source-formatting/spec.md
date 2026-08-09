@@ -4,9 +4,7 @@
 
 Defines Silk's single canonical source representation and the strict formatting workflows shared by
 the command line today and in-memory language tooling in the future.
-
 ## Requirements
-
 ### Requirement: Formatting accepts only complete syntax
 
 The system SHALL format one lossless syntax artifact without requiring name resolution, type
@@ -320,3 +318,15 @@ idempotent for valid and recovered generic syntax.
 #### Scenario: Preserve damaged generic syntax
 - **WHEN** a generic list is missing a closing bracket
 - **THEN** formatting retains the explicit recovery boundary without consuming the following declaration
+
+### Requirement: Constant declarations have one canonical layout
+
+The formatter SHALL render a complete constant declaration as `[pub] const name: type = literal`,
+preserving comments through the existing attachment policy and separating adjacent top-level
+declarations with the canonical module spacing.
+
+#### Scenario: Format a constant idempotently
+
+- **WHEN** a complete constant declaration contains irregular spaces and attached comments
+- **THEN** two formatting passes produce identical canonical source without changing tokens or comment content
+
