@@ -18,11 +18,13 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import type * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as Presentation from './Presentation.js'
+import type * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
@@ -56,12 +58,14 @@ export interface FrontendSnapshot {
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly semanticOccurrences: SemanticOccurrence.Index
   readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
   readonly ownership: ReadonlyMap<string, Ownership.ModuleOwnership>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
+  readonly semanticInvalidation?: SemanticInvalidation.SemanticInvalidation
   readonly requestedTarget?: string
 }
 
