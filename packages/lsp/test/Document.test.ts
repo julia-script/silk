@@ -167,6 +167,37 @@ pub fn main() -> I32 {
   }),
 )
 
+it.effect('appends full declaration documentation to definition and reference hovers', () =>
+  Effect.gen(function* () {
+    const source = `/// Recovers a problem.
+///
+/// # Examples
+/// \`\`\`silk
+/// recover(problem)
+/// \`\`\`
+effect fn recover(problem: Problem) -> I32 { return problem.code }
+pub fn main() -> I32 { return recover(Problem { code: 1 }) }
+pub struct Problem { pub code: I32 }
+`
+    const { document, snapshot } = yield* open(source)
+    const definition = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
+    const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 2))
+    const expected = `\`\`\`silk
+effect fn recover(problem: Problem) -> I32
+\`\`\`
+
+Recovers a problem.
+
+# Examples
+
+\`\`\`silk
+recover(problem)
+\`\`\``
+    assert.deepEqual(definition?.contents, { kind: 'markdown', value: expected })
+    assert.deepEqual(reference?.contents, definition?.contents)
+  }),
+)
+
 it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
   Effect.gen(function* () {
     const source = `struct Problem {}

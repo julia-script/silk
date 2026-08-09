@@ -106,14 +106,15 @@ comma. Identical syntax and starting column SHALL make the same break decision i
 
 ### Requirement: Comments retain content and stable attachment
 
-Formatting SHALL preserve every line-comment and documentation-comment token in source order and
-SHALL preserve the token's spelling byte-for-byte except for terminal spaces or tabs, which SHALL be
-removed to satisfy the canonical no-trailing-whitespace policy. A trailing line comment SHALL remain
-attached to the preceding grammatical element and force the following element onto a new line. A
-standalone comment SHALL be indented to its surrounding grammatical context. One or more
-consecutive `///` comments with no intervening blank line immediately before a declaration or struct
-field SHALL form that element's documentation block and SHALL remain immediately before it after
-formatting.
+Formatting SHALL preserve every line-comment, declaration-documentation, and module-documentation
+token in source order and SHALL preserve the token's spelling byte-for-byte except for terminal
+spaces or tabs, which SHALL be removed to satisfy the canonical no-trailing-whitespace policy. A
+trailing line comment SHALL remain attached to the preceding grammatical element and force the
+following element onto a new line. A standalone comment SHALL be indented to its surrounding
+grammatical context. One or more consecutive `///` comments with no intervening blank line
+immediately before a function, struct, field, parameter, or implementation operation SHALL form
+that element's documentation block and SHALL remain immediately before it after formatting. Leading
+`//!` comments SHALL remain the module documentation block before module declarations.
 
 #### Scenario: Preserve a trailing comment
 
@@ -127,8 +128,13 @@ formatting.
 
 #### Scenario: Retain a documentation block
 
-- **WHEN** consecutive `///` comments immediately precede a declaration or struct field
+- **WHEN** consecutive `///` comments immediately precede a function, struct, field, parameter, or implementation operation
 - **THEN** they remain consecutive and immediately precede that same element in the formatted source
+
+#### Scenario: Retain module documentation
+
+- **WHEN** leading `//!` comments document a module
+- **THEN** they remain consecutive at the module boundary before declarations
 
 #### Scenario: Keep an unattached comment unattached
 

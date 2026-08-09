@@ -19,9 +19,27 @@ it('classifies keywords, identifiers, numbers, and operators', () => {
 })
 
 it('distinguishes doc comments from line comments', () => {
-  const doc = '// plain\n/// documented'
+  const doc = '// plain\n/// documented\n//! module docs'
   assert.deepStrictEqual(spellings(doc, 'line-comment'), ['// plain'])
-  assert.deepStrictEqual(spellings(doc, 'doc-comment'), ['/// documented'])
+  assert.deepStrictEqual(spellings(doc, 'doc-comment-marker'), ['///'])
+  assert.deepStrictEqual(spellings(doc, 'doc-comment'), [' documented'])
+  assert.deepStrictEqual(spellings(doc, 'module-doc-comment-marker'), ['//!'])
+  assert.deepStrictEqual(spellings(doc, 'module-doc-comment'), [' module docs'])
+})
+
+it('highlights Markdown links and nested Silk examples inside documentation', () => {
+  const doc = `/// # Recovery
+/// Uses [\`Problem\`] with **care**.
+/// \`\`\`silk
+/// effect fn recover(problem: Problem) -> I32
+/// \`\`\``
+  assert.deepStrictEqual(spellings(doc, 'doc-heading-marker'), ['#'])
+  assert.deepStrictEqual(spellings(doc, 'doc-link-target'), ['Problem'])
+  assert.deepStrictEqual(spellings(doc, 'doc-strong-marker'), ['**', '**'])
+  assert.deepStrictEqual(spellings(doc, 'doc-code-fence'), ['```', '```'])
+  assert.deepStrictEqual(spellings(doc, 'doc-code-language'), ['silk'])
+  assert.deepStrictEqual(spellings(doc, 'doc-code-keyword'), ['effect', 'fn'])
+  assert.deepStrictEqual(spellings(doc, 'doc-code-type'), ['Problem', 'I32'])
 })
 
 it('marks invalid bytes', () => {

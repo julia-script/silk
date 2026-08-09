@@ -72,6 +72,18 @@ by elaboration and hover. `Analysis.typeHints` projects available inferred local
 a byte range. These actors contain no LSP protocol types; clients translate their structured data
 at the boundary.
 
+## Documentation source facts
+
+The lexer distinguishes declaration documentation (`///`) and leading module documentation (`//!`)
+from ordinary `//` comments; `////` remains ordinary. `DocBlock` and the `Analysis` facade expose
+attached raw comment tokens and exact byte spans for modules, declarations, type parameters,
+parameters, struct fields, implementations, and implementation operations. A blank line or an
+ordinary comment breaks declaration attachment.
+
+The compiler deliberately does not parse Markdown. Ordinary compilation pays only for lossless
+comment retention and cheap attachment queries. `@silk-effect/documentation` owns lazy CommonMark
+interpretation, examples, semantic links, hover rendering, and generated documentation models.
+
 The occurrence index has an explicit interactive budget: one numeric prefix-maximum entry per
 semantic occurrence, no retained syntax nodes, tokens, or source text, and under 512 serialized
 bytes per occurrence on the representative multi-module fixture. The same fixture must complete
@@ -89,8 +101,9 @@ spans.
 
 ## Bootstrap lexer vocabulary
 
-The lexer recognizes ASCII identifiers, the `pub`, `fn`, and `return` keywords, decimal integers,
-parentheses, braces, colons, commas, `->`, whitespace, and `//` line comments. Trivia is retained as tokens.
+The lexer recognizes ASCII identifiers, the Silk keyword and punctuation vocabulary, decimal
+integers, whitespace, ordinary `//` line comments, `///` declaration documentation, and `//!`
+module documentation. Trivia is retained as tokens.
 Unsupported bytes form maximal `Invalid` tokens and ordered `LEX0001` diagnostics, so lexing always
 makes progress and every input byte can be reconstructed from the non-EOF token spans.
 

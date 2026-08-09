@@ -51,7 +51,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-effect/compiler": "workspace:*"
+    "@silk-effect/compiler": "workspace:*",
+    "@silk-effect/documentation": "workspace:*"
   },
   "peerDependencies": {
     "@codemirror/language": "^6.12.0",

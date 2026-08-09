@@ -94,6 +94,10 @@
       "types": "./dist/Diagnostic.d.ts",
       "import": "./dist/Diagnostic.js"
     },
+    "./DocBlock": {
+      "types": "./dist/DocBlock.d.ts",
+      "import": "./dist/DocBlock.js"
+    },
     "./Instances": {
       "types": "./dist/Instances.d.ts",
       "import": "./dist/Instances.js"

@@ -29,6 +29,7 @@ const triviaKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Whitespace',
   'LineComment',
   'DocComment',
+  'ModuleDocComment',
 ])
 
 const isTrivia = (kind: Token.TokenKind): boolean => triviaKinds.includes(kind)

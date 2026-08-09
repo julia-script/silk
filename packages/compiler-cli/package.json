@@ -60,6 +60,14 @@
       "types": "./dist/CheckCommand.d.ts",
       "import": "./dist/CheckCommand.js"
     },
+    "./DocCommand": {
+      "types": "./dist/DocCommand.d.ts",
+      "import": "./dist/DocCommand.js"
+    },
+    "./DocumentationWorkflow": {
+      "types": "./dist/DocumentationWorkflow.d.ts",
+      "import": "./dist/DocumentationWorkflow.js"
+    },
     "./FileSourceResolver": {
       "types": "./dist/FileSourceResolver.d.ts",
       "import": "./dist/FileSourceResolver.js"
@@ -123,6 +131,7 @@
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.103",
     "@silk-effect/compiler": "workspace:*",
+    "@silk-effect/documentation": "workspace:*",
     "effect": "catalog:",
     "smol-toml": "^1.7.1"
   },

@@ -34,6 +34,7 @@ const normalized = (syntax: SyntaxFile.SyntaxFile, node: SyntaxTree.Node): Norma
       child.kind === 'Whitespace' ||
       child.kind === 'LineComment' ||
       child.kind === 'DocComment' ||
+      child.kind === 'ModuleDocComment' ||
       child.kind === 'Comma' ||
       child.kind === 'EndOfFile'
     ) {
@@ -47,7 +48,12 @@ const normalized = (syntax: SyntaxFile.SyntaxFile, node: SyntaxTree.Node): Norma
 
 const comments = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<string> =>
   syntax.tokens
-    .filter((token) => token.kind === 'LineComment' || token.kind === 'DocComment')
+    .filter(
+      (token) =>
+        token.kind === 'LineComment' ||
+        token.kind === 'DocComment' ||
+        token.kind === 'ModuleDocComment',
+    )
     .map((token) => decoder.decode(Option.getOrThrow(SourceFile.slice(syntax.source, token.span))))
 
 const nodeKinds = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.NodeKind> => [
@@ -507,6 +513,34 @@ pub fn main(
   ) // trailing call
 }
 // end of file
+`,
+    )
+  }),
+)
+
+it.effect('preserves module and implementation-operation documentation attachment', () =>
+  Effect.gen(function* () {
+    const source = `//! Allocation module.
+//! Owns allocation implementations.
+impl Allocator for SystemAllocator {
+/// Allocation operation.
+allocate: SystemAllocator.allocate
+}
+`
+    const original = parse('memory://module-comments.silk', source)
+    const document = yield* Formatter.format(original)
+    const formatted = formattedText(document)
+    const reparsed = parse('memory://module-comments.silk', formatted)
+
+    assert.deepEqual(comments(reparsed), comments(original))
+    assert.strictEqual(
+      formatted,
+      `//! Allocation module.
+//! Owns allocation implementations.
+impl Allocator for SystemAllocator {
+  /// Allocation operation.
+  allocate: SystemAllocator.allocate
+}
 `,
     )
   }),

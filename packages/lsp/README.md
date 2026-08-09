@@ -9,7 +9,9 @@ translation.
 - **Diagnostics** — every compiler phase (lexical, parser, module, semantic, ownership) with stable
   codes, notes, and cross-file related information.
 - **Hover** — token-specific source-like declarations for functions, types, locals, fields, imports,
-  and intrinsic operations, with anonymous expression types as a fallback.
+  and intrinsic operations. Source declarations append their full CommonMark documentation and
+  examples at both definition and reference sites; intrinsics and anonymous expressions retain the
+  signature/type-only fallback.
 - **Document symbols** — top-level functions and structs, with struct fields as children.
 - **Formatting** — whole-document canonical formatting via the compiler's formatter.
 - **Go to definition** — precise local, parameter, declaration, imported, qualified, and field

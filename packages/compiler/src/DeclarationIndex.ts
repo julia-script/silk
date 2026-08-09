@@ -887,7 +887,10 @@ export const analyzeDeclaredType = (
         target: target.fact,
         arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
         spelling: SyntaxTree.tokens(syntax)
-          .filter((token) => !['Whitespace', 'LineComment', 'DocComment'].includes(token.kind))
+          .filter(
+            (token) =>
+              !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(token.kind),
+          )
           .map((token) => spelling(source, token))
           .join(''),
         token: firstToken,

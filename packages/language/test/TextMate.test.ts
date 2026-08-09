@@ -30,8 +30,10 @@ const grammarKeywordSpellings = (): ReadonlyArray<string> =>
       if (pattern.captures?.['1']?.name === 'storage.type.silk') {
         return ['fn']
       }
-      const alternation = pattern.match.match(/\(\?:([^)]*)\)/)
-      assert.isNotNull(alternation, `keyword pattern has no alternation: ${pattern.match}`)
+      const match = pattern.match
+      assert.isDefined(match, `keyword pattern has no match expression: ${pattern.name}`)
+      const alternation = match.match(/\(\?:([^)]*)\)/)
+      assert.isNotNull(alternation, `keyword pattern has no alternation: ${match}`)
       return (alternation?.[1] ?? '').split('|')
     })
 
@@ -100,7 +102,19 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt('let ok = true', 'true'), 'constant.language.boolean.silk')
   assert.include(scopesAt('fn stop() -> Never', 'Never'), 'support.type.builtin.silk')
   assert.include(scopesAt('fn id(x: Point) -> Point', 'Point'), 'entity.name.type.silk')
-  assert.include(scopesAt('/// doc', '/// doc'), 'comment.line.documentation.silk')
+  assert.include(scopesAt('/// doc', '///'), 'punctuation.definition.comment.documentation.silk')
+  assert.include(scopesAt('/// doc', 'doc'), 'comment.line.documentation.silk')
+  assert.include(
+    scopesAt('//! module', '//!'),
+    'punctuation.definition.comment.documentation.module.silk',
+  )
+  assert.include(scopesAt('//! module', 'module'), 'comment.line.documentation.module.silk')
+  assert.include(scopesAt('/// # Examples', '#'), 'markup.heading.silk')
+  assert.include(scopesAt('/// Uses [`Problem`].', 'Problem'), 'markup.underline.link.silk')
+  assert.include(scopesAt('/// Uses **care**.', '**care**'), 'markup.bold.silk')
+  const fenced = '/// ```silk\n/// effect fn recover(problem: Problem) -> I32\n/// ```'
+  assert.include(scopesAt(fenced, 'effect'), 'storage.type.silk')
+  assert.include(scopesAt(fenced, 'Problem'), 'entity.name.type.silk')
   assert.include(scopesAt('// plain', '// plain'), 'comment.line.double-slash.silk')
   assert.notInclude(scopesAt('// plain', '// plain'), 'comment.line.documentation.silk')
   const control = 'pub fn main() -> I32 { if true { return 1 } else { return 0 } }'

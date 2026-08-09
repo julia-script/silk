@@ -157,6 +157,9 @@ importers:
       '@silk-effect/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@silk-effect/documentation':
+        specifier: workspace:*
+        version: link:../documentation
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
@@ -171,11 +174,36 @@ importers:
         specifier: ^24.10.1
         version: 24.13.3
 
+  packages/documentation:
+    dependencies:
+      '@silk-effect/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      mdast-util-from-markdown:
+        specifier: ^2.0.3
+        version: 2.0.3
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
+
   packages/language:
     dependencies:
       '@silk-effect/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@silk-effect/documentation':
+        specifier: workspace:*
+        version: link:../documentation
     devDependencies:
       '@codemirror/language':
         specifier: ^6.12.4
@@ -217,6 +245,9 @@ importers:
       '@silk-effect/compiler-cli':
         specifier: workspace:*
         version: link:../compiler-cli
+      '@silk-effect/documentation':
+        specifier: workspace:*
+        version: link:../documentation
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
