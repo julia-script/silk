@@ -1,4 +1,5 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceOrigin from '@silk-effect/compiler/SourceOrigin'
 import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
@@ -11,6 +12,7 @@ import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
 import * as Document from './Document.js'
+import type * as ProjectSession from './ProjectSession.js'
 
 export interface Identity {
   readonly workspace: string
@@ -137,6 +139,45 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
   return yield* Analysis.make({
     root: SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
   }).pipe(Effect.provide(resolver(document.sourceRoot, overlays)))
+})
+
+/** Analyzes all synchronized project roots through one shared immutable compiler frontend. */
+export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
+  documents: ReadonlyArray<Document.Document>,
+): Effect.fn.Return<
+  ReadonlyMap<string, ProjectSession.AnalyzedDocument>,
+  never,
+  FileSystem.FileSystem | Path.Path
+> {
+  const first = documents.at(0)
+  if (first === undefined) return new Map()
+  const overlays = new Map<string, SourceResolver.ResolvedSource>()
+  for (const document of documents) {
+    overlays.set(
+      document.module,
+      SourceResolver.resolved(document.bytes, SourceOrigin.memory(document.uri)),
+    )
+  }
+  const project = yield* ProjectAnalysis.make(
+    documents.map((document) =>
+      SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
+    ),
+  ).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
+  const moduleUris = new Map<string, string>()
+  for (const module of project.closure.modules) {
+    const source = project.closure.sources.get(module.name)
+    if (source === undefined) continue
+    const uri = yield* uriOf(source, documents)
+    if (uri !== undefined) moduleUris.set(module.name, uri)
+  }
+  return new Map(
+    documents.flatMap((document) => {
+      const snapshot = ProjectAnalysis.view(project, document.module)
+      return snapshot === undefined
+        ? []
+        : [[document.uri, Object.freeze({ document, snapshot, moduleUris })] as const]
+    }),
+  )
 })
 
 /** Maps one module identity back to a document URI for cross-file references. */

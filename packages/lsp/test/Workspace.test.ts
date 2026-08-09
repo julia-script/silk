@@ -179,6 +179,63 @@ it.effect('keeps editor analysis on frontend phases only', () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
+it.effect('shares one project frontend across overlapping open roots', () =>
+  Effect.gen(function* () {
+    const root = project()
+    writeFileSync(join(root, 'src', 'Shared.silk'), 'pub fn answer() -> i32 { return 40 }\n')
+    const main = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+      version: 1,
+      bytes: encoder.encode(
+        'import Shared\nfn local() -> i32 { return 1 }\npub fn main() -> i32 { return Shared.answer() + local() }',
+      ),
+    })
+    const util = yield* Workspace.open({
+      uri: pathToFileURL(join(root, 'src', 'Util.silk')).href,
+      version: 3,
+      bytes: encoder.encode(
+        'import Shared\nfn local() -> i32 { return 2 }\npub fn utility() -> i32 { return Shared.answer() + local() }',
+      ),
+    })
+    const analyzed = yield* Workspace.analyzeProject([util, main])
+    const mainSession = analyzed.get(main.uri)
+    const utilSession = analyzed.get(util.uri)
+
+    assert.isDefined(mainSession)
+    assert.isDefined(utilSession)
+    if (mainSession === undefined || utilSession === undefined) return
+    assert.strictEqual(mainSession.snapshot.index, utilSession.snapshot.index)
+    assert.strictEqual(mainSession.snapshot.results, utilSession.snapshot.results)
+    assert.strictEqual(
+      mainSession.snapshot.semanticOccurrences,
+      utilSession.snapshot.semanticOccurrences,
+    )
+    assert.strictEqual(Analysis.phases(mainSession.snapshot), Analysis.phases(utilSession.snapshot))
+    assert.strictEqual(mainSession.moduleUris, utilSession.moduleUris)
+    assert.strictEqual(mainSession.snapshot.closure.rootModule, 'Main')
+    assert.strictEqual(utilSession.snapshot.closure.rootModule, 'Util')
+    assert.deepEqual(
+      Analysis.modules(mainSession.snapshot).map(({ name }) => name),
+      ['Main', 'Shared', 'Util'],
+    )
+    const closure = Analysis.phases(mainSession.snapshot).at(0)
+    assert.deepEqual(
+      closure === undefined
+        ? undefined
+        : { phase: closure.phase, inputs: closure.inputs, outputs: closure.outputs },
+      { phase: 'closure', inputs: 2, outputs: 3 },
+    )
+    assert.deepEqual(
+      Document.diagnostics(main, mainSession.snapshot, () => undefined),
+      [],
+    )
+    assert.deepEqual(
+      Document.diagnostics(util, utilSession.snapshot, () => undefined),
+      [],
+    )
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
 it.effect('navigates standard-library definitions to the analyzed toolchain source', () =>
   Effect.gen(function* () {
     const root = project()

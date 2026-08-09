@@ -298,7 +298,7 @@ it.effect('matches the canonical VM over valid and malformed bytecode', () =>
   Effect.gen(function* () {
     for (const entry of corpus) {
       const generated = sourceFor(entry.bytecode)
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* Analysis.ofSourceRealized(
         `stack-vm-pressure/${entry.id}`,
         ascii(generated.source),
         'wasm32-unknown-unknown',
@@ -325,7 +325,7 @@ it.effect('matches the canonical VM over valid and malformed bytecode', () =>
 it.effect('publishes only general MIR operations for the pressure VM', () =>
   Effect.gen(function* () {
     const generated = sourceFor(corpus[1].bytecode)
-    const snapshot = yield* Analysis.ofSource(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'stack-vm-pressure/general-mir',
       ascii(generated.source),
       'wasm32-unknown-unknown',
@@ -355,7 +355,7 @@ for (const representative of [corpus[1], corpus[3]]) {
       Effect.gen(function* () {
         const generated = sourceFor(representative.bytecode)
         const id = `stack-vm-pressure/representative/${representative.id}`
-        const snapshot = yield* Analysis.ofSource(
+        const snapshot = yield* Analysis.ofSourceRealized(
           id,
           ascii(generated.source),
           'wasm32-unknown-unknown',
@@ -408,7 +408,7 @@ it.effect(
     Effect.gen(function* () {
       const representative = corpus[9]
       const baseline = sourceFor(representative.bytecode)
-      const baselineSnapshot = yield* Analysis.ofSource(
+      const baselineSnapshot = yield* Analysis.ofSourceRealized(
         'stack-vm-pressure/quota/baseline',
         ascii(baseline.source),
         'wasm32-unknown-unknown',
@@ -425,7 +425,11 @@ it.effect(
       for (let quota = 0; quota <= allocationCount; quota += 1) {
         const id = `stack-vm-pressure/quota/q${quota}`
         const source = quotaSourceFor(representative.bytecode, quota)
-        const snapshot = yield* Analysis.ofSource(id, ascii(source), 'wasm32-unknown-unknown')
+        const snapshot = yield* Analysis.ofSourceRealized(
+          id,
+          ascii(source),
+          'wasm32-unknown-unknown',
+        )
         assert.deepEqual(Analysis.diagnostics(snapshot), [], id)
         const expectedTag = quota === allocationCount ? 'Completed' : 'UnhandledFailure'
         const evaluated = Analysis.evaluate(snapshot)

@@ -1,5 +1,4 @@
 import { NodeServices } from '@effect/platform-node'
-import * as Analysis from '@silk-effect/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import type * as FileSystem from 'effect/FileSystem'
 import * as ManagedRuntime from 'effect/ManagedRuntime'
@@ -86,17 +85,7 @@ export const start = (): void => {
     const project = ProjectSession.make({
       workspace,
       sourceRoot,
-      analyze: Effect.fnUntraced(function* (document, openDocuments) {
-        const snapshot = yield* Workspace.analyze(document, openDocuments)
-        const moduleUris = new Map<string, string>()
-        for (const module of Analysis.modules(snapshot)) {
-          const source = Analysis.sources(snapshot).get(module.name)
-          if (source === undefined) continue
-          const uri = yield* Workspace.uriOf(source, openDocuments)
-          if (uri !== undefined) moduleUris.set(module.name, uri)
-        }
-        return Object.freeze({ document, snapshot, moduleUris })
-      }),
+      analyze: Workspace.analyzeProject,
       publish: Effect.fnUntraced(function* (session) {
         yield* Effect.promise(() =>
           connection.sendDiagnostics({
