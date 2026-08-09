@@ -199,6 +199,43 @@ fn main() -> i32 {
   }),
 )
 
+it.effect('formats adjacent expression statements with comments idempotently', () =>
+  Effect.gen(function* () {
+    const source = `effect fn pulse()->(){return ()}
+pub effect fn main()->(){run pulse() // first pulse
+// before the second pulse
+run pulse() return ()}`
+    const original = parse('memory://expression-statements.silk', source)
+    const first = yield* Formatter.format(original)
+    const text = formattedText(first)
+
+    assert.strictEqual(
+      text,
+      `effect fn pulse() -> () {
+  return ()
+}
+
+pub effect fn main() -> () {
+  run pulse() // first pulse
+  // before the second pulse
+  run pulse()
+  return ()
+}
+`,
+    )
+
+    const reparsed = parse('memory://expression-statements.silk', text)
+    assert.deepEqual(reparsed.lexicalDiagnostics, [])
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+    assert.deepEqual(comments(reparsed), comments(original))
+
+    const second = yield* Formatter.format(reparsed)
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('formats explicit drop canonically and idempotently', () =>
   Effect.gen(function* () {
     const first = yield* Formatter.format(

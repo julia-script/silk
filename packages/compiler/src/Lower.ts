@@ -3364,6 +3364,28 @@ const lowerSequence = (
       : id
   }
 
+  if (statement._tag === 'Evaluate') {
+    const [evaluated, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
+    if (evaluated === undefined) return undefined
+    const following = fn.reserve()
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+      ? undefined
+      : id
+  }
+
   if (statement._tag === 'Write') {
     const place = statement.place
     const root =

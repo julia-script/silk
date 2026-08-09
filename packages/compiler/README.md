@@ -178,11 +178,15 @@ separate.
 Ordinary source mistakes remain data. A required absent token becomes a `MissingToken` leaf with an
 empty span and normally one `PAR0001` diagnostic whose message uses the token's Silk spelling.
 Multiple leaves introduced for one wholly absent return statement share one `PAR0004` diagnostic.
-Unexpected concrete input becomes a lossless `Error` node and a `PAR0002` diagnostic. Identifier-led
-statements become assignments only when their complete place is followed by `=`; a final identifier
-without `return` remains the expression of a recovered return statement. Lexical diagnostics remain
-separate on the retained lexical result; `Parser.parse` does not throw or fail an Effect for these
-mistakes.
+Unexpected concrete input becomes a lossless block-owned `ErrorStatement` and a `PAR0002`
+diagnostic whose structured reason records the encountered token kinds, parser context, and
+source-language expectations. Identifier-led statements become assignments only when their
+complete place is followed by `=`; every other expression start becomes an `ExpressionStatement`.
+Semantic analysis permits its result to be ignored only when it is `()` or `never`, and reports a
+non-unit result with guidance to bind, return, or explicitly consume it. A missing terminal return
+is recovered separately instead of reinterpreting the preceding expression. Lexical diagnostics
+remain separate on the retained lexical result; `Parser.parse` does not throw or fail an Effect for
+these mistakes.
 
 ## Bootstrap semantic facts
 

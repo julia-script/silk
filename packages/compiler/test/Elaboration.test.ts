@@ -1925,3 +1925,59 @@ fn destroy(buffer: RawBuffer<i32>) -> () {
   )
   assert.strictEqual(functionAt(rejected, 0).returnedExpression.type._tag, 'Unavailable')
 })
+
+it('accepts only unit and never expression statements without duplicating unavailable errors', () => {
+  const unit = analyzeText(
+    'fixture://unit-expression-statement.silk',
+    `effect fn pulse() -> () { return () }
+effect fn main() -> () { run pulse() return () }`,
+  )
+  const never = analyzeText(
+    'fixture://never-expression-statement.silk',
+    `struct Problem {}
+effect fn stop() -> never ! Problem { fail move Problem {} }
+effect fn main() -> () ! Problem { run stop() return () }`,
+  )
+  const scalar = analyzeText(
+    'fixture://scalar-expression-statement.silk',
+    `fn value() -> i32 { return 1 }
+fn main() -> () { value() return () }`,
+  )
+  const owned = analyzeText(
+    'fixture://owned-expression-statement.silk',
+    `struct Token {}
+fn make() -> Token { return Token {} }
+fn main() -> () { make() return () }`,
+  )
+  const unavailable = analyzeText(
+    'fixture://unavailable-expression-statement.silk',
+    'fn main() -> () { missing() return () }',
+  )
+
+  assert.deepEqual(unit.diagnostics, [])
+  assert.deepEqual(never.diagnostics, [])
+  assert.strictEqual(functionAt(unit, 1).statements.at(0)?._tag, 'ExpressionStatement')
+  assert.strictEqual(functionAt(never, 1).statements.at(0)?._tag, 'ExpressionStatement')
+  assert.deepEqual(
+    scalar.diagnostics.map((diagnostic) => ({ code: diagnostic.code, reason: diagnostic.reason })),
+    [
+      {
+        code: 'SEM0087',
+        reason: { _tag: 'ExpressionStatementResult', actual: 'i32' },
+      },
+    ],
+  )
+  assert.deepEqual(
+    owned.diagnostics.map((diagnostic) => ({ code: diagnostic.code, reason: diagnostic.reason })),
+    [
+      {
+        code: 'SEM0087',
+        reason: { _tag: 'ExpressionStatementResult', actual: 'Token' },
+      },
+    ],
+  )
+  assert.deepEqual(
+    unavailable.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0004'],
+  )
+})

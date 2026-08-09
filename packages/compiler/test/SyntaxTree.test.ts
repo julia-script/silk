@@ -71,7 +71,7 @@ it('models missing and unexpected parser diagnostics as ordered source data', ()
 
   const diagnostics = [
     Diagnostic.missingToken(missing.expected, missing.span),
-    Diagnostic.unexpectedTokens(error.span),
+    Diagnostic.unexpectedTokens(['Invalid'], 'syntax', ['identifier'], error.span),
   ]
   assert.deepEqual(
     diagnostics.map((diagnostic) => ({
@@ -82,7 +82,12 @@ it('models missing and unexpected parser diagnostics as ordered source data', ()
     })),
     [
       { code: 'PAR0001', message: 'Expected identifier', start: 0, end: 0 },
-      { code: 'PAR0002', message: 'Unexpected token sequence', start: 0, end: 1 },
+      {
+        code: 'PAR0002',
+        message: 'Unexpected invalid token; expected identifier',
+        start: 0,
+        end: 1,
+      },
     ],
   )
 })

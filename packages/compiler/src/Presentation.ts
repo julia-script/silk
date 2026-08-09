@@ -155,6 +155,7 @@ export const type = (
   module: string,
   scope?: NameResolution.ModuleScope,
 ): string => {
+  if (Type.equals(self, Type.unit)) return '()'
   if (typeof self === 'string') return self
   if (Type.isNominal(self)) {
     const base =

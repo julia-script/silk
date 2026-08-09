@@ -8,6 +8,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Operator from './Operator.js'
+import * as Presentation from './Presentation.js'
 import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -811,6 +812,12 @@ export type StatementFact =
       readonly _tag: 'BindStatement'
       readonly binding: BindingDeclarationFact
       readonly region: Hir.RegionId
+    }
+  | {
+      readonly _tag: 'ExpressionStatement'
+      readonly expression: ExpressionFact
+      readonly region: Hir.RegionId
+      readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'IfStatement'
@@ -5291,6 +5298,9 @@ const effectCaptureFacts = (
         case 'BindStatement':
           expression(statement.binding.initializer)
           break
+        case 'ExpressionStatement':
+          expression(statement.expression)
+          break
         case 'IfStatement':
           expression(statement.condition)
           visit(statement.taken)
@@ -6173,6 +6183,44 @@ const analyzeStatements = (
       continue
     }
 
+    if (element.kind === 'ExpressionStatement') {
+      const region = nextRegion()
+      const expressionNode = statementExpressionNode(element)
+      const expression = analyzeExpression(
+        context.source,
+        expressionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+      )
+      if (expression === undefined) {
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+      }
+      context.diagnostics.push(...expression.diagnostics)
+      if (
+        expression.type !== undefined &&
+        !Type.equals(expression.type, Type.unit) &&
+        !Type.isNever(expression.type)
+      ) {
+        context.diagnostics.push(
+          Diagnostic.expressionStatementResult(
+            Presentation.type(expression.type, context.source.id, context.resolution.scope),
+            expressionNode.span,
+          ),
+        )
+      }
+      facts.push(
+        Object.freeze({
+          _tag: 'ExpressionStatement',
+          expression: expression.fact,
+          region,
+          syntax: element,
+        }),
+      )
+      continue
+    }
+
     if (element.kind === 'ConditionalStatement') {
       const region = nextRegion()
       const conditionNode = statementExpressionNode(element)
@@ -6646,6 +6694,13 @@ const hirEffectStatements = (
           initializer: hirExpression(statement.binding.initializer),
           region: statement.region,
           span: statement.binding.syntax.span,
+        })
+      if (statement._tag === 'ExpressionStatement')
+        return Object.freeze({
+          _tag: 'Evaluate',
+          expression: hirExpression(statement.expression),
+          region: statement.region,
+          span: statement.syntax.span,
         })
       if (statement._tag === 'IfStatement')
         return Object.freeze({
@@ -7690,6 +7745,8 @@ const directStatementExpressions = (statement: StatementFact): ReadonlyArray<Exp
   switch (statement._tag) {
     case 'BindStatement':
       return Object.freeze([statement.binding.initializer])
+    case 'ExpressionStatement':
+      return Object.freeze([statement.expression])
     case 'ReturnStatement':
     case 'FailStatement':
     case 'DropStatement':
@@ -7911,6 +7968,14 @@ export const elaborateModule = (input: Input): Result => {
             initializer: hirExpression(statement.binding.initializer),
             region: statement.region,
             span: statement.binding.syntax.span,
+          })
+        }
+        if (statement._tag === 'ExpressionStatement') {
+          return Object.freeze({
+            _tag: 'Evaluate' as const,
+            expression: hirExpression(statement.expression),
+            region: statement.region,
+            span: statement.syntax.span,
           })
         }
         if (statement._tag === 'IfStatement') {

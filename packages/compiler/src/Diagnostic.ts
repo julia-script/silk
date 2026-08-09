@@ -157,6 +157,8 @@ export const invalidDropHookCode = 'SEM0084' as const
 export const invalidStaticLiteralCode = 'SEM0085' as const
 /** Stable code for a typed constant whose type or literal is outside the constant contract. */
 export const invalidConstantCode = 'SEM0086' as const
+/** Stable code for an expression statement whose result cannot be intentionally ignored. */
+export const expressionStatementResultCode = 'SEM0087' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -272,6 +274,7 @@ export type Code =
   | typeof invalidDropHookCode
   | typeof invalidStaticLiteralCode
   | typeof invalidConstantCode
+  | typeof expressionStatementResultCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -300,11 +303,18 @@ export interface BuiltinEntity {
   readonly operation: string
 }
 
+export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' | 'delimiter'
+
 /** Structured per-code data explaining why the originating phase diagnosed. */
 export type Reason =
   | { readonly _tag: 'UnsupportedBytes' }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
-  | { readonly _tag: 'UnexpectedTokens' }
+  | {
+      readonly _tag: 'UnexpectedTokens'
+      readonly unexpected: ReadonlyArray<Token.TokenKind>
+      readonly context: ParserContext
+      readonly expected: ReadonlyArray<string>
+    }
   | { readonly _tag: 'ReservedTemplateSyntax' }
   | { readonly _tag: 'MissingReturnStatement' }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
@@ -335,6 +345,7 @@ export type Reason =
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
+  | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectRetry'; readonly detail: string }
@@ -696,6 +707,24 @@ export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Di
     span,
   })
 
+/** Creates the semantic diagnostic for an unused non-unit expression-statement result. */
+export const expressionStatementResult = (
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: expressionStatementResultCode,
+    severity: 'error',
+    message: `Expression statement produces ${actual}, but only () or never may be ignored`,
+    reason: Object.freeze({ _tag: 'ExpressionStatementResult', actual }),
+    span,
+    notes: Object.freeze([
+      'Bind the value with `let`, return it, or consume it explicitly with `drop`.',
+    ]),
+  })
+
 /** Creates the diagnostic associated with one missing token leaf. */
 export const missingToken = (expected: Token.TokenKind, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
@@ -709,16 +738,40 @@ export const missingToken = (expected: Token.TokenKind, span: SourceSpan.SourceS
   })
 
 /** Creates the diagnostic associated with one unexpected-token error node. */
-export const unexpectedTokens = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
+export const unexpectedTokens = (
+  unexpected: ReadonlyArray<Token.TokenKind>,
+  context: ParserContext,
+  expected: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const firstUnexpected = unexpected[0]
+  const encountered =
+    firstUnexpected === undefined || firstUnexpected === 'Invalid'
+      ? 'invalid token'
+      : Token.describe(firstUnexpected)
+  const expectations = Object.freeze([...expected])
+  const message =
+    context === 'syntax'
+      ? `Unexpected ${encountered}; expected ${expectations[0] ?? 'valid syntax'}`
+      : `Unexpected ${encountered} while parsing ${context === 'statement' ? 'a statement' : `a ${context}`}`
+  return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'parser',
     code: unexpectedTokensCode,
     severity: 'error',
-    message: 'Unexpected token sequence',
-    reason: Object.freeze({ _tag: 'UnexpectedTokens' }),
+    message,
+    reason: Object.freeze({
+      _tag: 'UnexpectedTokens',
+      unexpected: Object.freeze([...unexpected]),
+      context,
+      expected: expectations,
+    }),
     span,
+    ...(context === 'syntax' || expectations.length === 0
+      ? {}
+      : { notes: Object.freeze([`Expected one of: ${expectations.join(', ')}`]) }),
   })
+}
 
 /** Creates the diagnostic for a future template expression start in primary position. */
 export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic =>

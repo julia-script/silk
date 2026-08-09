@@ -777,6 +777,8 @@ const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.E
   switch (statement._tag) {
     case 'Bind':
       return [statement.initializer]
+    case 'Evaluate':
+      return [statement.expression]
     case 'Return':
     case 'Fail':
     case 'Drop':
@@ -971,6 +973,9 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           break
         case 'BindStatement':
           scanRunEnds(statement.binding.initializer, statement.region)
+          break
+        case 'ExpressionStatement':
+          scanRunEnds(statement.expression, statement.region)
           break
         case 'IfStatement':
           scanRunEnds(statement.condition, statement.region)
@@ -1382,6 +1387,9 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           )
           break
         }
+        case 'ExpressionStatement':
+          inspect(statement.expression, statement.region, [], naturalAccess(statement.expression))
+          break
         case 'IfStatement':
           inspect(statement.condition, statement.region, [])
           statements(statement.taken)
@@ -1914,6 +1922,10 @@ const checkFunction = (
         state.order.push(binding)
         frames.at(-1)?.push(key)
         live.add(key)
+        continue
+      }
+      if (statement._tag === 'Evaluate') {
+        checkExpression(state, live, statement.expression, true)
         continue
       }
       if (statement._tag === 'If') {
